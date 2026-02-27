@@ -63,7 +63,7 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError }) {
 
 /** List conversations */
 export async function listConversations(limit = 50, skip = 0) {
-  const res = await fetch(`${BASE}/conversations?limit=${limit}&offset=${skip}`);
+  const res = await fetch(`${BASE}/conversations?limit=${limit}&skip=${skip}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to list conversations');
   return data.conversations;
