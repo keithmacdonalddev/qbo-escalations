@@ -338,7 +338,9 @@ function ToolEventsBlock({ events }) {
 /** Single tool event line */
 function ToolEventLine({ event }) {
   const [showDetails, setShowDetails] = useState(false);
-  const icon = getToolIcon(event.tool);
+  const toolName = event.tool || event.name || 'tool';
+  const filePath = event.file || event.input?.file_path || event.input?.path || '';
+  const icon = getToolIcon(toolName);
 
   return (
     <div className="dev-tool-line">
@@ -348,8 +350,8 @@ function ToolEventLine({ event }) {
         type="button"
       >
         <span className="dev-tool-icon">{icon}</span>
-        <span className="dev-tool-name">{event.tool || 'tool'}</span>
-        {event.file && <span className="dev-tool-file">{event.file}</span>}
+        <span className="dev-tool-name">{toolName}</span>
+        {filePath && <span className="dev-tool-file">{filePath}</span>}
         {event.status === 'success' && <span className="dev-tool-status-ok">OK</span>}
         {event.status === 'error' && <span className="dev-tool-status-err">ERR</span>}
       </button>
@@ -405,11 +407,21 @@ function DevInlineBlock({ text }) {
     <>
       {lines.map((line, i) => {
         if (!line.trim()) return <br key={i} />;
-        // Bold
-        let formatted = line.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-        // Inline code
-        formatted = formatted.replace(/`([^`]+)`/g, '<code class="dev-inline-code">$1</code>');
-        return <div key={i} dangerouslySetInnerHTML={{ __html: formatted }} />;
+        // Split on bold and inline code patterns, return safe React elements
+        const parts = line.split(/(\*\*.+?\*\*|`[^`]+`)/g);
+        return (
+          <div key={i}>
+            {parts.map((part, j) => {
+              if (part.startsWith('**') && part.endsWith('**')) {
+                return <b key={j}>{part.slice(2, -2)}</b>;
+              }
+              if (part.startsWith('`') && part.endsWith('`')) {
+                return <code key={j} className="dev-inline-code">{part.slice(1, -1)}</code>;
+              }
+              return <span key={j}>{part}</span>;
+            })}
+          </div>
+        );
       })}
     </>
   );

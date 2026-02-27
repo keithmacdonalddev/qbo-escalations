@@ -217,6 +217,29 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
                       {conv.messageCount} msg{conv.messageCount !== 1 ? 's' : ''}
                     </span>
                   )}
+                  {conv.escalationId && (
+                    <span
+                      title="Linked to escalation"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 2,
+                        fontSize: '10px',
+                        color: 'var(--accent)',
+                        background: 'var(--accent-subtle)',
+                        padding: '0 4px',
+                        borderRadius: 'var(--radius-sm)',
+                        lineHeight: '16px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      ESC
+                    </span>
+                  )}
                 </div>
               </div>
             )}

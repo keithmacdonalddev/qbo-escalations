@@ -73,8 +73,9 @@ export function useDevChat() {
       { message: text.trim(), conversationId: conversationIdRef.current },
       {
         onInit: (data) => {
-          setConversationId(data.conversationId);
-          conversationIdRef.current = data.conversationId;
+          const id = data.conversationId || data.sessionKey;
+          setConversationId(id);
+          conversationIdRef.current = id;
         },
         onChunk: (data) => {
           streamingTextRef.current += data.text;

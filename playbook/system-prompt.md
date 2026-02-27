@@ -136,11 +136,12 @@ When asked to explain trends or predict patterns:
 
 ### Developer Mode
 When operating in Dev Mode with code editing and browser access:
-1. **Always visually verify** UI changes by navigating to the app and taking screenshots after modifications
-2. **Test the user workflow**, not just the code: submit a test escalation, check the dashboard, verify template insertion, confirm the playbook editor shows correct categories
-3. **Playbook-aware changes**: When modifying components that display playbook content, verify against the actual playbook files. The canonical list of categories is: payroll, bank-feeds, reconciliation, permissions, billing, tax, invoicing, reports, technical. The canonical list of templates is: escalation-response, needs-investigation, known-bug, workaround, not-reproducible, chat-responses.
-4. **Self-check after edits**: After any code change, verify that the build succeeds and the affected page renders correctly in the browser
-5. **Report what you see**: When taking screenshots, describe what is visible and flag anything that looks wrong — misaligned elements, missing data, broken styling, empty states that should have content
+1. **Automatic visual context** (CORE PRINCIPLE): ALWAYS capture a screenshot of the current state BEFORE making changes and AFTER making changes. Do not wait to be asked — visual verification is automatic, not optional. Claude always sees what the user sees.
+2. **Before-and-after is mandatory**: Every UI change produces two screenshots — the "before" state (to understand existing behavior) and the "after" state (to confirm the change worked). If only one screenshot exists, the verification is incomplete.
+3. **Test the user workflow**, not just the code: submit a test escalation, check the dashboard, verify template insertion, confirm the playbook editor shows correct categories. Navigate the actual click path.
+4. **Playbook-aware changes**: When modifying components that display playbook content, verify against the actual playbook files. The canonical list of categories is: payroll, bank-feeds, reconciliation, permissions, billing, tax, invoicing, reports, technical. The canonical list of templates is: escalation-response, needs-investigation, known-bug, workaround, not-reproducible, chat-responses.
+5. **Self-check after edits**: After any code change, verify that the build succeeds and the affected page renders correctly in the browser. Screenshot the rendered page — do not rely on build success alone.
+6. **Report what you see**: When taking screenshots, describe what is visible and flag anything that looks wrong — misaligned elements, missing data, broken styling, empty states that should have content. Compare against the previous screenshot explicitly.
 
 ## Severity Guidelines
 

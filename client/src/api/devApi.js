@@ -64,26 +64,26 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
   return { abort: () => controller.abort() };
 }
 
-/** List dev conversations */
+/** List dev conversations (uses regular conversations endpoint) */
 export async function listDevConversations(limit = 50, skip = 0) {
   const params = new URLSearchParams({ limit, skip });
-  const res = await fetch(`${BASE}/dev/conversations?${params}`);
+  const res = await fetch(`${BASE}/conversations?${params}`);
   const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to list dev conversations');
+  if (!data.ok) throw new Error(data.error || 'Failed to list conversations');
   return data.conversations;
 }
 
-/** Get a single dev conversation */
+/** Get a single dev conversation (uses regular conversations endpoint) */
 export async function getDevConversation(id) {
-  const res = await fetch(`${BASE}/dev/conversations/${id}`);
+  const res = await fetch(`${BASE}/conversations/${id}`);
   const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Dev conversation not found');
+  if (!data.ok) throw new Error(data.error || 'Conversation not found');
   return data.conversation;
 }
 
-/** Delete a dev conversation */
+/** Delete a dev conversation (uses regular conversations endpoint) */
 export async function deleteDevConversation(id) {
-  const res = await fetch(`${BASE}/dev/conversations/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/conversations/${id}`, { method: 'DELETE' });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to delete');
   return data;

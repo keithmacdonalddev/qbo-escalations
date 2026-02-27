@@ -23,10 +23,19 @@ function detectEscalationFields(text) {
   if (caseMatch) fields.caseNumber = caseMatch[1];
   const agentMatch = text.match(/\bagent(?:\s+name)?[:\s]*([A-Z][a-z]+ [A-Z][a-z]+)/);
   if (agentMatch) fields.agentName = agentMatch[1];
-  const categoryKeywords = ['payroll', 'bank.?feed', 'reconciliation', 'permission', 'billing', 'tax', 'invoic', 'report'];
-  for (const kw of categoryKeywords) {
-    if (new RegExp(kw, 'i').test(text)) {
-      fields.category = kw.replace('.?', '-').replace(/ing$/, '').replace(/s$/, '');
+  const categoryMap = [
+    { pattern: /payroll/i, category: 'payroll' },
+    { pattern: /bank.?feed/i, category: 'bank-feeds' },
+    { pattern: /reconciliation/i, category: 'reconciliation' },
+    { pattern: /permission/i, category: 'permissions' },
+    { pattern: /billing/i, category: 'billing' },
+    { pattern: /\btax\b/i, category: 'tax' },
+    { pattern: /invoic/i, category: 'invoicing' },
+    { pattern: /report/i, category: 'reporting' },
+  ];
+  for (const { pattern, category } of categoryMap) {
+    if (pattern.test(text)) {
+      fields.category = category;
       break;
     }
   }
@@ -281,7 +290,7 @@ export default function Chat({ conversationIdFromRoute }) {
           )}
           <button
             className="btn btn-sm btn-ghost"
-            onClick={() => { window.location.hash = '#/escalations'; }}
+            onClick={() => { window.location.hash = '#/dashboard'; }}
             type="button"
           >
             View
@@ -432,10 +441,10 @@ export default function Chat({ conversationIdFromRoute }) {
             </span>
             <button
               className="btn btn-sm btn-ghost"
-              onClick={() => { window.location.hash = '#/escalations'; }}
+              onClick={() => { window.location.hash = `#/escalations/${savedEscalationId}`; }}
               type="button"
             >
-              View Dashboard
+              View Escalation
             </button>
           </div>
         )}
