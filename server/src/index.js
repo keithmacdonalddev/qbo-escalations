@@ -25,8 +25,10 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
 
-// Placeholder route mounts — will be added as routes are built
-// app.use('/api/chat', require('./routes/chat'));
+// Route mounts
+const chatRouter = require('./routes/chat');
+app.use('/api/chat', chatRouter);
+app.use('/api', chatRouter);  // Mounts /api/conversations/* from the same router
 // app.use('/api/escalations', require('./routes/escalations'));
 // app.use('/api/playbook', require('./routes/playbook'));
 // app.use('/api/templates', require('./routes/templates'));
@@ -50,6 +52,10 @@ async function start() {
 
   app.listen(PORT, () => {
     console.log(`QBO Escalation API listening on :${PORT}`);
+
+    // Warm up Claude CLI in background (non-blocking)
+    const { warmUp } = require('./services/claude');
+    warmUp().catch(() => { /* non-fatal */ });
   });
 }
 

@@ -1,174 +1,295 @@
 const { spawn } = require('child_process');
-const { EventEmitter } = require('events');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 /**
- * Spawn Claude CLI as a child process with streaming JSON output.
+ * Chat with Claude via CLI subprocess.
  *
  * @param {Object} opts
- * @param {string} opts.prompt - User message
- * @param {string} [opts.systemPrompt] - System prompt (playbook context)
- * @param {string[]} [opts.images] - File paths to images
- * @param {string} [opts.sessionId] - Resume a previous session
- * @param {boolean} [opts.continueSession] - Continue most recent session
- * @param {string} [opts.model] - Model override (default: sonnet)
- * @returns {{ emitter: EventEmitter, proc: ChildProcess, abort: () => void }}
- *
- * Emitter events:
- *   'delta'  - { text: string }         Partial text chunk
- *   'result' - { text: string, sessionId: string }  Final result
- *   'error'  - { message: string }      Error
- *   'done'   - {}                        Process exited
+ * @param {Array<{role: string, content: string}>} opts.messages - Conversation history
+ * @param {string} [opts.systemPrompt] - System prompt (playbook content)
+ * @param {string[]} [opts.images] - Base64-encoded images
+ * @param {function} opts.onChunk - Called with each text delta
+ * @param {function} opts.onDone - Called with full response text
+ * @param {function} opts.onError - Called on failure
+ * @returns {function} cleanup - Call to kill the subprocess
  */
-function queryClaudeCLI(opts) {
-  const { prompt, systemPrompt, images = [], sessionId, continueSession, model } = opts;
-
-  const args = [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--verbose',
-    '--include-partial-messages',
-    '--dangerously-skip-permissions',
-  ];
+function chat({ messages, systemPrompt, images, onChunk, onDone, onError }) {
+  const prompt = buildPrompt(messages);
+  const tempFiles = [];
+  const args = ['-p', prompt, '--output-format', 'stream-json', '--verbose'];
 
   if (systemPrompt) {
     args.push('--system-prompt', systemPrompt);
   }
 
-  if (model) {
-    args.push('--model', model);
-  } else {
-    args.push('--model', 'sonnet');
+  if (images && images.length > 0) {
+    for (let i = 0; i < images.length; i++) {
+      const tmpPath = path.join(os.tmpdir(), 'qbo-escalation-img-' + Date.now() + '-' + i + '.png');
+      const base64Data = images[i].replace(/^data:image\/\w+;base64,/, '');
+      fs.writeFileSync(tmpPath, Buffer.from(base64Data, 'base64'));
+      tempFiles.push(tmpPath);
+      args[1] = args[1] + '\n\n[See attached image: ' + tmpPath + ']';
+    }
   }
 
-  if (sessionId) {
-    args.push('--resume', sessionId);
-  } else if (continueSession) {
-    args.push('--continue');
-  }
+  let fullResponse = '';
+  let killed = false;
 
-  for (const imagePath of images) {
-    args.push('--file', imagePath);
-  }
-
-  // Disable all tools — we only need text generation
-  args.push('--tools', '');
-
-  const emitter = new EventEmitter();
-  let buffer = '';
-  let lastSessionId = '';
-  let fullText = '';
-
-  const proc = spawn('claude', args, {
+  const child = spawn('claude', args, {
     stdio: ['pipe', 'pipe', 'pipe'],
+    shell: true,
     env: { ...process.env },
-    shell: true,  // Required on Windows
   });
 
-  proc.stdout.on('data', (chunk) => {
-    buffer += chunk.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop(); // keep incomplete line in buffer
+  let stdoutBuffer = '';
+
+  child.stdout.on('data', (data) => {
+    stdoutBuffer += data.toString();
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop() || '';
 
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
-        handleMessage(msg, emitter, { lastSessionId, fullText });
-        if (msg.session_id) lastSessionId = msg.session_id;
+        const text = extractText(msg);
+        if (text) {
+          fullResponse += text;
+          onChunk(text);
+        }
       } catch {
-        // Non-JSON output (debug info), ignore
+        // Non-JSON line (verbose output), ignore
       }
     }
   });
 
-  proc.stderr.on('data', (chunk) => {
-    const text = chunk.toString().trim();
-    if (text) {
-      // stderr is debug/status output, not errors unless process fails
-    }
+  let stderrOutput = '';
+  child.stderr.on('data', (data) => {
+    stderrOutput += data.toString();
   });
 
-  proc.on('close', (code) => {
-    // Process remaining buffer
-    if (buffer.trim()) {
+  child.on('close', (code) => {
+    if (stdoutBuffer.trim()) {
       try {
-        const msg = JSON.parse(buffer.trim());
-        handleMessage(msg, emitter, { lastSessionId, fullText });
-        if (msg.session_id) lastSessionId = msg.session_id;
-      } catch {
-        // ignore
-      }
+        const msg = JSON.parse(stdoutBuffer);
+        const text = extractText(msg);
+        if (text) {
+          fullResponse += text;
+          onChunk(text);
+        }
+      } catch { /* ignore */ }
     }
 
-    if (code !== 0 && code !== null) {
-      emitter.emit('error', { message: `Claude CLI exited with code ${code}` });
+    for (const f of tempFiles) {
+      try { fs.unlinkSync(f); } catch { /* ignore */ }
     }
-    emitter.emit('done', {});
+
+    if (killed) return;
+    if (code !== 0 && !fullResponse) {
+      onError(new Error('Claude CLI exited with code ' + code + ': ' + stderrOutput.slice(0, 500)));
+    } else {
+      onDone(fullResponse);
+    }
   });
 
-  proc.on('error', (err) => {
-    emitter.emit('error', { message: `Failed to spawn Claude CLI: ${err.message}` });
-    emitter.emit('done', {});
+  child.on('error', (err) => {
+    for (const f of tempFiles) {
+      try { fs.unlinkSync(f); } catch { /* ignore */ }
+    }
+    if (!killed) onError(err);
   });
 
-  const abort = () => {
-    if (!proc.killed) {
-      proc.kill('SIGTERM');
+  return function cleanup() {
+    killed = true;
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    for (const f of tempFiles) {
+      try { fs.unlinkSync(f); } catch { /* ignore */ }
     }
   };
-
-  return { emitter, proc, abort };
-}
-
-function handleMessage(msg, emitter, state) {
-  switch (msg.type) {
-    case 'assistant': {
-      // Extract text from content blocks
-      const blocks = msg.message?.content || [];
-      for (const block of blocks) {
-        if (block.type === 'text' && block.text) {
-          emitter.emit('delta', { text: block.text });
-          state.fullText += block.text;
-        }
-      }
-      break;
-    }
-
-    case 'result': {
-      emitter.emit('result', {
-        text: msg.result || state.fullText,
-        sessionId: msg.session_id || state.lastSessionId,
-      });
-      break;
-    }
-
-    case 'system': {
-      if (msg.session_id) {
-        state.lastSessionId = msg.session_id;
-      }
-      break;
-    }
-  }
 }
 
 /**
- * Build a multi-turn prompt from conversation history.
- * Since CLI -p mode is single-turn, we reconstruct context
- * by including prior messages in the prompt.
+ * Parse an escalation from image or text using Claude CLI with structured output.
  *
- * @param {Array<{role: string, content: string}>} messages
- * @param {string} currentMessage
- * @returns {string}
+ * @param {string} imageBase64OrText - Either a base64 image string or plain text
+ * @returns {Promise<Object>} Parsed escalation fields
  */
-function buildConversationPrompt(messages, currentMessage) {
-  if (!messages.length) return currentMessage;
+async function parseEscalation(imageBase64OrText) {
+  const isBase64Image = imageBase64OrText.startsWith('data:image') ||
+    /^[A-Za-z0-9+/=]{100,}/.test(imageBase64OrText);
 
-  const history = messages.map(m => {
-    const label = m.role === 'user' ? 'User' : 'Assistant';
-    return `${label}: ${m.content}`;
-  }).join('\n\n');
+  const schema = JSON.stringify({
+    type: 'object',
+    properties: {
+      coid:             { type: 'string' },
+      mid:              { type: 'string' },
+      caseNumber:       { type: 'string' },
+      clientContact:    { type: 'string' },
+      agentName:        { type: 'string' },
+      attemptingTo:     { type: 'string' },
+      expectedOutcome:  { type: 'string' },
+      actualOutcome:    { type: 'string' },
+      tsSteps:          { type: 'string' },
+      triedTestAccount: { type: 'string', enum: ['yes', 'no', 'unknown'] },
+      category: {
+        type: 'string',
+        enum: [
+          'payroll', 'bank-feeds', 'reconciliation', 'permissions',
+          'billing', 'tax', 'invoicing', 'reporting', 'inventory',
+          'payments', 'integrations', 'general', 'unknown',
+        ],
+      },
+    },
+    required: ['category'],
+  });
 
-  return `Previous conversation:\n${history}\n\nUser: ${currentMessage}`;
+  let prompt;
+  let tmpPath = null;
+
+  if (isBase64Image) {
+    tmpPath = path.join(os.tmpdir(), 'qbo-parse-' + Date.now() + '.png');
+    const base64Data = imageBase64OrText.replace(/^data:image\/\w+;base64,/, '');
+    fs.writeFileSync(tmpPath, Buffer.from(base64Data, 'base64'));
+
+    prompt = 'Parse this escalation screenshot. Extract all fields: COID, MID, case number, ' +
+      'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
+      'troubleshooting steps, whether they tried a test account, and issue category. ' +
+      'Return ONLY the JSON. Image file: ' + tmpPath;
+  } else {
+    prompt = 'Parse this escalation text. Extract all fields: COID, MID, case number, ' +
+      'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
+      'troubleshooting steps, whether they tried a test account, and issue category. ' +
+      'Return ONLY the JSON.\n\nEscalation text:\n' + imageBase64OrText;
+  }
+
+  const args = ['-p', prompt, '--output-format', 'json', '--json-schema', schema];
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('claude', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env },
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+
+    child.on('close', (code) => {
+      if (tmpPath) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      }
+
+      if (code !== 0 && !stdout) {
+        return reject(new Error('Claude CLI parse failed (code ' + code + '): ' + stderr.slice(0, 500)));
+      }
+
+      try {
+        const parsed = JSON.parse(stdout);
+        const data = parsed.structured_output || parsed.result || parsed;
+        if (typeof data === 'string') {
+          const jsonMatch = data.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            resolve(JSON.parse(jsonMatch[0]));
+          } else {
+            resolve({ category: 'unknown', attemptingTo: data });
+          }
+        } else {
+          resolve(data);
+        }
+      } catch {
+        const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            resolve(JSON.parse(jsonMatch[0]));
+          } catch {
+            resolve({ category: 'unknown', attemptingTo: stdout.slice(0, 500) });
+          }
+        } else {
+          resolve({ category: 'unknown', attemptingTo: stdout.slice(0, 500) });
+        }
+      }
+    });
+
+    child.on('error', (err) => {
+      if (tmpPath) {
+        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+      }
+      reject(err);
+    });
+  });
 }
 
-module.exports = { queryClaudeCLI, buildConversationPrompt };
+/**
+ * Warm up the Claude CLI to reduce first-request latency.
+ */
+async function warmUp() {
+  return new Promise((resolve) => {
+    const child = spawn('claude', ['-p', 'hello', '--output-format', 'text', '--max-turns', '1'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env },
+    });
+
+    const timeout = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      console.log('Claude CLI warm-up timed out (30s) -- continuing anyway');
+      resolve();
+    }, 30000);
+
+    child.on('close', () => {
+      clearTimeout(timeout);
+      console.log('Claude CLI warm-up complete');
+      resolve();
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      console.warn('Claude CLI warm-up failed:', err.message);
+      resolve();
+    });
+  });
+}
+
+// --- Helpers ---
+
+/**
+ * Build a prompt string from a messages array.
+ */
+function buildPrompt(messages) {
+  if (!messages || messages.length === 0) return '';
+  if (messages.length === 1) return messages[0].content;
+
+  const lines = [];
+  for (const msg of messages) {
+    const prefix = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'Assistant' : 'System';
+    lines.push(prefix + ': ' + msg.content);
+  }
+  lines.push('Assistant:');
+  return lines.join('\n\n');
+}
+
+/**
+ * Extract text content from a stream-json message.
+ */
+function extractText(msg) {
+  if (msg.type === 'assistant' && msg.message && msg.message.content) {
+    return msg.message.content
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text)
+      .join('');
+  }
+  if (msg.type === 'result' && msg.result) {
+    return typeof msg.result === 'string' ? msg.result : '';
+  }
+  if (msg.type === 'content_block_delta' && msg.delta && msg.delta.text) {
+    return msg.delta.text;
+  }
+  return '';
+}
+
+module.exports = { chat, parseEscalation, warmUp };

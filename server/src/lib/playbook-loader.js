@@ -1,104 +1,138 @@
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
-const PLAYBOOK_ROOT = path.resolve(__dirname, '../../../playbook');
+const PLAYBOOK_ROOT = path.resolve(__dirname, '..', '..', '..', 'playbook');
 
-let cache = null;
+let cachedPrompt = null;
+let cachedCategories = [];
+let watcher = null;
 
 /**
- * Load all markdown files from the playbook directory tree
- * and concatenate them into a system prompt string.
- *
- * Results are cached until files change (checked via content hash).
- *
- * @returns {{ systemPrompt: string, hash: string, categories: string[], templates: string[] }}
+ * Recursively read all .md files from a directory.
  */
-function loadPlaybook() {
-  const categories = readDir(path.join(PLAYBOOK_ROOT, 'categories'));
-  const templates = readDir(path.join(PLAYBOOK_ROOT, 'templates'));
+function readMarkdownFiles(dir) {
+  const results = [];
+  if (!fs.existsSync(dir)) return results;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      results.push(...readMarkdownFiles(fullPath));
+    } else if (entry.name.endsWith('.md')) {
+      results.push({
+        name: entry.name.replace('.md', ''),
+        path: fullPath,
+        content: fs.readFileSync(fullPath, 'utf-8'),
+      });
+    }
+  }
+  return results;
+}
+
+/**
+ * Build the system prompt from all playbook files.
+ */
+function buildSystemPrompt() {
+  const sections = [];
+
+  // Load the main system prompt if it exists
+  const mainPromptPath = path.join(PLAYBOOK_ROOT, 'system-prompt.md');
+  if (fs.existsSync(mainPromptPath)) {
+    sections.push('[SYSTEM PROMPT]');
+    sections.push(fs.readFileSync(mainPromptPath, 'utf-8'));
+    sections.push('');
+  }
+
+  // Load category-specific guides
+  const categoriesDir = path.join(PLAYBOOK_ROOT, 'categories');
+  const categoryFiles = readMarkdownFiles(categoriesDir);
+  const categories = [];
+
+  for (const file of categoryFiles) {
+    categories.push(file.name);
+    sections.push('[CATEGORY: ' + file.name + ']');
+    sections.push(file.content);
+    sections.push('');
+  }
+
+  // Load templates
+  const templatesDir = path.join(PLAYBOOK_ROOT, 'templates');
+  const templateFiles = readMarkdownFiles(templatesDir);
+
+  for (const file of templateFiles) {
+    sections.push('[TEMPLATE: ' + file.name + ']');
+    sections.push(file.content);
+    sections.push('');
+  }
+
+  // Load edge cases if present
   const edgeCasesPath = path.join(PLAYBOOK_ROOT, 'edge-cases.md');
-  const edgeCases = fs.existsSync(edgeCasesPath)
-    ? fs.readFileSync(edgeCasesPath, 'utf-8')
-    : '';
-
-  const allContent = [
-    ...categories.map(f => f.content),
-    ...templates.map(f => f.content),
-    edgeCases,
-  ].join('\n');
-
-  const hash = crypto.createHash('md5').update(allContent).digest('hex');
-
-  // Return cached version if content hasn't changed
-  if (cache && cache.hash === hash) {
-    return cache;
+  if (fs.existsSync(edgeCasesPath)) {
+    sections.push('[EDGE CASES]');
+    sections.push(fs.readFileSync(edgeCasesPath, 'utf-8'));
+    sections.push('');
   }
 
-  const systemPrompt = buildSystemPrompt(categories, templates, edgeCases);
+  cachedPrompt = sections.join('\n');
+  cachedCategories = categories;
 
-  cache = {
-    systemPrompt,
-    hash,
-    categories: categories.map(f => f.name),
-    templates: templates.map(f => f.name),
-  };
-
-  return cache;
-}
-
-function readDir(dirPath) {
-  if (!fs.existsSync(dirPath)) return [];
-
-  return fs.readdirSync(dirPath)
-    .filter(f => f.endsWith('.md'))
-    .sort()
-    .map(filename => ({
-      name: filename.replace('.md', ''),
-      content: fs.readFileSync(path.join(dirPath, filename), 'utf-8'),
-    }));
-}
-
-function buildSystemPrompt(categories, templates, edgeCases) {
-  const parts = [];
-
-  parts.push('You are a QBO (QuickBooks Online) Escalation Assistant. You help escalation specialists respond to phone agents faster and more accurately.');
-  parts.push('');
-  parts.push('You have deep knowledge of QBO issues, troubleshooting steps, and escalation procedures. When analyzing screenshots of escalation forms, extract all relevant fields and suggest next steps.');
-  parts.push('');
-
-  if (categories.length) {
-    parts.push('## QBO Knowledge Base\n');
-    for (const cat of categories) {
-      parts.push(`### ${cat.name}\n`);
-      parts.push(cat.content);
-      parts.push('');
-    }
-  }
-
-  if (templates.length) {
-    parts.push('## Response Templates\n');
-    parts.push('Use these templates when drafting responses. Replace placeholders like [clientName], [caseNumber] with actual values.\n');
-    for (const tmpl of templates) {
-      parts.push(`### ${tmpl.name}\n`);
-      parts.push(tmpl.content);
-      parts.push('');
-    }
-  }
-
-  if (edgeCases) {
-    parts.push('## Edge Cases & Special Scenarios\n');
-    parts.push(edgeCases);
-  }
-
-  return parts.join('\n');
+  console.log('Playbook loaded: ' + categoryFiles.length + ' categories, ' +
+    templateFiles.length + ' templates (' + cachedPrompt.length + ' chars)');
 }
 
 /**
- * Clear the cached playbook (for testing or forced reload)
+ * Start watching the playbook directory for changes.
  */
-function clearCache() {
-  cache = null;
+function startWatcher() {
+  if (watcher) return;
+  if (!fs.existsSync(PLAYBOOK_ROOT)) {
+    console.warn('Playbook directory not found at ' + PLAYBOOK_ROOT + ' -- skipping watcher');
+    return;
+  }
+
+  try {
+    watcher = fs.watch(PLAYBOOK_ROOT, { recursive: true }, (eventType, filename) => {
+      if (filename && filename.endsWith('.md')) {
+        console.log('Playbook changed: ' + filename + ' -- reloading');
+        buildSystemPrompt();
+      }
+    });
+    watcher.on('error', (err) => {
+      console.warn('Playbook watcher error:', err.message);
+    });
+  } catch (err) {
+    console.warn('Could not start playbook watcher:', err.message);
+  }
 }
 
-module.exports = { loadPlaybook, clearCache };
+/**
+ * Get the full system prompt (cached, built on first call).
+ */
+function getSystemPrompt() {
+  if (!cachedPrompt) {
+    buildSystemPrompt();
+    startWatcher();
+  }
+  return cachedPrompt;
+}
+
+/**
+ * Get the list of available categories.
+ */
+function getCategories() {
+  if (!cachedPrompt) {
+    buildSystemPrompt();
+    startWatcher();
+  }
+  return cachedCategories;
+}
+
+/**
+ * Force reload the playbook from disk.
+ */
+function reloadPlaybook() {
+  buildSystemPrompt();
+}
+
+module.exports = { getSystemPrompt, getCategories, reloadPlaybook };
