@@ -41,11 +41,13 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError }) {
           if (line.startsWith('event: ')) {
             currentEvent = line.slice(7).trim();
           } else if (line.startsWith('data: ')) {
-            const data = JSON.parse(line.slice(6));
-            if (currentEvent === 'init') onInit?.(data);
-            else if (currentEvent === 'chunk') onChunk?.(data);
-            else if (currentEvent === 'done') onDone?.(data);
-            else if (currentEvent === 'error') onError?.(data.error);
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (currentEvent === 'start' || currentEvent === 'init') onInit?.(data);
+              else if (currentEvent === 'chunk') onChunk?.(data);
+              else if (currentEvent === 'done') onDone?.(data);
+              else if (currentEvent === 'error') onError?.(data.error);
+            } catch { /* ignore malformed data lines */ }
           }
         }
       }
@@ -61,7 +63,7 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError }) {
 
 /** List conversations */
 export async function listConversations(limit = 50, skip = 0) {
-  const res = await fetch(`${BASE}/chat/conversations?limit=${limit}&skip=${skip}`);
+  const res = await fetch(`${BASE}/conversations?limit=${limit}&offset=${skip}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to list conversations');
   return data.conversations;
@@ -69,7 +71,7 @@ export async function listConversations(limit = 50, skip = 0) {
 
 /** Get a single conversation with messages */
 export async function getConversation(id) {
-  const res = await fetch(`${BASE}/chat/conversations/${id}`);
+  const res = await fetch(`${BASE}/conversations/${id}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Conversation not found');
   return data.conversation;
@@ -77,7 +79,7 @@ export async function getConversation(id) {
 
 /** Delete a conversation */
 export async function deleteConversation(id) {
-  const res = await fetch(`${BASE}/chat/conversations/${id}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE}/conversations/${id}`, { method: 'DELETE' });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to delete');
   return data;
