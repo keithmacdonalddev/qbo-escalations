@@ -1,11 +1,12 @@
 const express = require('express');
-const router = express.Router();
+const chatRouter = express.Router();
+const conversationsRouter = express.Router();
 const Conversation = require('../models/Conversation');
 const claude = require('../services/claude');
 const { getSystemPrompt } = require('../lib/playbook-loader');
 
 // POST /api/chat -- Send message to Claude, returns SSE stream
-router.post('/', async (req, res) => {
+chatRouter.post('/', async (req, res) => {
   const { conversationId, message, images } = req.body;
 
   if (!message && (!images || images.length === 0)) {
@@ -118,7 +119,7 @@ router.post('/', async (req, res) => {
 });
 
 // POST /api/chat/parse-escalation -- Parse escalation from image/text
-router.post('/parse-escalation', async (req, res) => {
+chatRouter.post('/parse-escalation', async (req, res) => {
   const { image, text } = req.body;
 
   if (!image && !text) {
@@ -131,7 +132,7 @@ router.post('/parse-escalation', async (req, res) => {
 });
 
 // GET /api/conversations -- List conversations (with optional search)
-router.get('/conversations', async (req, res) => {
+conversationsRouter.get('/', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const skip = parseInt(req.query.skip) || parseInt(req.query.offset) || 0;
   const search = (req.query.search || '').trim();
@@ -171,7 +172,7 @@ router.get('/conversations', async (req, res) => {
 });
 
 // GET /api/conversations/:id -- Get full conversation
-router.get('/conversations/:id', async (req, res) => {
+conversationsRouter.get('/:id', async (req, res) => {
   const conversation = await Conversation.findById(req.params.id).lean();
   if (!conversation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
@@ -180,7 +181,7 @@ router.get('/conversations/:id', async (req, res) => {
 });
 
 // PATCH /api/conversations/:id -- Update conversation (rename, link to escalation)
-router.patch('/conversations/:id', async (req, res) => {
+conversationsRouter.patch('/:id', async (req, res) => {
   const { title, escalationId } = req.body;
   const update = {};
   if (typeof title === 'string') update.title = title.slice(0, 200);
@@ -203,7 +204,7 @@ router.patch('/conversations/:id', async (req, res) => {
 });
 
 // GET /api/conversations/:id/export -- Export conversation as plain text
-router.get('/conversations/:id/export', async (req, res) => {
+conversationsRouter.get('/:id/export', async (req, res) => {
   const conversation = await Conversation.findById(req.params.id).lean();
   if (!conversation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
@@ -230,7 +231,7 @@ router.get('/conversations/:id/export', async (req, res) => {
 });
 
 // POST /api/chat/retry -- Retry last message in a conversation (removes bad assistant response, re-sends)
-router.post('/retry', async (req, res) => {
+chatRouter.post('/retry', async (req, res) => {
   const { conversationId } = req.body;
   if (!conversationId) {
     return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
@@ -307,7 +308,7 @@ router.post('/retry', async (req, res) => {
 });
 
 // DELETE /api/conversations/:id -- Delete conversation
-router.delete('/conversations/:id', async (req, res) => {
+conversationsRouter.delete('/:id', async (req, res) => {
   const result = await Conversation.findByIdAndDelete(req.params.id);
   if (!result) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
@@ -315,4 +316,4 @@ router.delete('/conversations/:id', async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = router;
+module.exports = { chatRouter, conversationsRouter };

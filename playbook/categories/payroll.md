@@ -106,6 +106,34 @@
 - Payroll data is missing or corrupted (employees, pay runs disappeared)
 - Customer needs retroactive corrections spanning multiple quarters
 
+## Resolution Notes
+
+When closing a payroll escalation, include in your resolution documentation:
+
+**Resolved — Settings Correction:**
+> The issue was caused by [incorrect W-4 data / wrong accrual policy / missing state tax setup]. We corrected the configuration at [exact navigation path]. The fix will take effect on the next payroll run. No retroactive adjustment is needed unless [condition]. Customer should verify the next paycheck to confirm.
+
+**Resolved — Payroll Reprocessed:**
+> The payroll run on [date] was [voided/adjusted]. A corrected payroll was processed on [date]. Direct deposits will arrive within [1-2 business days]. Customer should verify net pay amounts on the corrected pay stubs.
+
+**Resolved — Escalated to Intuit Payroll:**
+> This issue requires backend intervention from Intuit's payroll team. Case #[NUMBER] has been opened. Expected response within [timeframe]. Customer has been advised to [interim action]. We will follow up on [date].
+
+**Resolved — Education/How-To:**
+> Customer was not aware of [feature/setting]. Walked the agent through [navigation path] and demonstrated the correct workflow. No configuration changes were needed. Recommended the customer review [QBO help article / playbook section].
+
+## Similar Symptoms Across Categories
+
+These symptoms LOOK like payroll issues but may actually be something else:
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "Paycheck amounts are wrong" | **Reports** — report filter/date range issue, not actual paycheck | Check the actual pay stub, not just a report |
+| "Can't access payroll" | **Permissions** — QBO admin ≠ payroll admin (separate systems) | Check Gear > Payroll Settings > Manage Users |
+| "Direct deposit didn't arrive" | **Bank Feeds** — DD posted but bank feed hasn't imported yet | Check bank feed status, not just payroll status |
+| "Payroll charges on my bill" | **Billing** — payroll subscription is separate from QBO | Check Billing settings for both subscriptions |
+| "Tax amounts look wrong on report" | **Reports** — cash vs accrual basis showing different timing | Run the report on both bases and compare |
+
 ## Cross-References
 
 - **[Permissions](permissions.md)** — Employee cannot see/edit their own payroll info? Check user role and payroll access settings

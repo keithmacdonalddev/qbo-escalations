@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import Sidebar from './components/Sidebar.jsx';
 import Chat from './components/Chat.jsx';
+import EscalationDashboard from './components/EscalationDashboard.jsx';
+import PlaybookEditor from './components/PlaybookEditor.jsx';
+import TemplateLibrary from './components/TemplateLibrary.jsx';
+import Analytics from './components/Analytics.jsx';
 
 function parseHashRoute() {
   const hash = window.location.hash || '#/chat';
@@ -11,9 +16,6 @@ function parseHashRoute() {
     return { view: 'chat', conversationId: null };
   }
   if (hash === '#/dashboard') return { view: 'dashboard' };
-  if (hash.startsWith('#/escalations/')) {
-    return { view: 'escalation-detail', escalationId: hash.slice(14) };
-  }
   if (hash === '#/playbook') return { view: 'playbook' };
   if (hash === '#/templates') return { view: 'templates' };
   if (hash === '#/analytics') return { view: 'analytics' };
@@ -22,6 +24,8 @@ function parseHashRoute() {
 
 function App() {
   const [route, setRoute] = useState(parseHashRoute);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const shouldReduceMotion = useReducedMotion();
 
   useEffect(() => {
     const onHashChange = () => setRoute(parseHashRoute());
@@ -29,43 +33,105 @@ function App() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
+  // Set default hash if empty
+  useEffect(() => {
+    if (!window.location.hash) {
+      window.location.hash = '#/chat';
+    }
+  }, []);
+
+  const motionProps = shouldReduceMotion
+    ? {}
+    : {
+        initial: { opacity: 0, y: 8 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, y: -8 },
+        transition: { duration: 0.15 },
+      };
+
   const renderView = useCallback(() => {
     switch (route.view) {
       case 'chat':
-        return <Chat conversationIdFromRoute={route.conversationId} />;
+        return (
+          <motion.div key="chat" {...motionProps} style={{ height: '100%' }}>
+            <Chat conversationIdFromRoute={route.conversationId} />
+          </motion.div>
+        );
       case 'dashboard':
-        return <PlaceholderPage title="Escalation Dashboard" desc="Escalation tracking coming in Phase 2." />;
-      case 'escalation-detail':
-        return <PlaceholderPage title="Escalation Detail" desc="Detail view coming in Phase 2." />;
+        return (
+          <motion.div key="dashboard" {...motionProps}>
+            <EscalationDashboard />
+          </motion.div>
+        );
       case 'playbook':
-        return <PlaceholderPage title="Playbook Editor" desc="Playbook management coming in Phase 3." />;
+        return (
+          <motion.div key="playbook" {...motionProps}>
+            <PlaybookEditor />
+          </motion.div>
+        );
       case 'templates':
-        return <PlaceholderPage title="Template Library" desc="Response templates coming in Phase 3." />;
+        return (
+          <motion.div key="templates" {...motionProps}>
+            <TemplateLibrary />
+          </motion.div>
+        );
       case 'analytics':
-        return <PlaceholderPage title="Analytics" desc="Pattern tracking coming in Phase 4." />;
+        return (
+          <motion.div key="analytics" {...motionProps}>
+            <Analytics />
+          </motion.div>
+        );
       default:
-        return <Chat />;
+        return (
+          <motion.div key="chat-default" {...motionProps} style={{ height: '100%' }}>
+            <Chat />
+          </motion.div>
+        );
     }
-  }, [route]);
+  }, [route, motionProps]);
+
+  const isChatView = route.view === 'chat';
 
   return (
     <div className="app">
+      {/* Mobile sidebar toggle */}
+      <button
+        className="btn btn-ghost btn-icon sidebar-toggle"
+        onClick={() => setSidebarOpen(prev => !prev)}
+        aria-label="Toggle sidebar"
+        type="button"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-overlay"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
       <Sidebar
         currentRoute={window.location.hash || '#/chat'}
         conversationId={route.conversationId}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
-      <main className="app-content">
-        {renderView()}
-      </main>
-    </div>
-  );
-}
 
-function PlaceholderPage({ title, desc }) {
-  return (
-    <div className="empty-state">
-      <div className="empty-state-title">{title}</div>
-      <div className="empty-state-desc">{desc}</div>
+      <main
+        className="app-content"
+        style={isChatView ? { padding: 0, display: 'flex', flexDirection: 'column' } : {}}
+      >
+        <AnimatePresence mode="wait">
+          {renderView()}
+        </AnimatePresence>
+      </main>
     </div>
   );
 }

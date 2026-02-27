@@ -397,6 +397,16 @@ a:hover {
   color: var(--accent);
 }
 
+.sidebar-conv-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-conv-item:hover .sidebar-conv-actions,
+.sidebar-conv-item:focus-within .sidebar-conv-actions {
+  opacity: 1;
+}
+
 /* ----- Cards ----- */
 .card {
   background: var(--bg-raised);
@@ -1152,6 +1162,40 @@ textarea {
   }
 }
 
+/* ----- Sidebar Toggle (mobile) ----- */
+.sidebar-toggle {
+  display: none;
+  position: fixed;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  z-index: 110;
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.3);
+  z-index: 99;
+}
+
+/* ----- Sidebar conversation delete button ----- */
+.sidebar-conv-delete {
+  padding: 2px 4px !important;
+  min-height: auto !important;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.sidebar-conv-item:hover .sidebar-conv-delete {
+  opacity: 0.5;
+}
+
+.sidebar-conv-delete:hover {
+  opacity: 1 !important;
+  color: var(--danger) !important;
+}
+
 /* ----- Responsive: Tablet ----- */
 @media (max-width: 1200px) {
   .sidebar {
@@ -1175,6 +1219,14 @@ textarea {
 
 /* ----- Responsive: Mobile ----- */
 @media (max-width: 900px) {
+  .sidebar-toggle {
+    display: flex;
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
   .sidebar {
     position: fixed;
     left: 0;

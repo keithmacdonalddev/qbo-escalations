@@ -30,7 +30,7 @@ function chat({ messages, systemPrompt, images, onChunk, onDone, onError }) {
       const base64Data = images[i].replace(/^data:image\/\w+;base64,/, '');
       fs.writeFileSync(tmpPath, Buffer.from(base64Data, 'base64'));
       tempFiles.push(tmpPath);
-      args[1] = args[1] + '\n\n[See attached image: ' + tmpPath + ']';
+      args.push('--image', tmpPath);
     }
   }
 
@@ -156,7 +156,7 @@ async function parseEscalation(imageBase64OrText) {
     prompt = 'Parse this escalation screenshot. Extract all fields: COID, MID, case number, ' +
       'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
       'troubleshooting steps, whether they tried a test account, and issue category. ' +
-      'Return ONLY the JSON. Image file: ' + tmpPath;
+      'Return ONLY the JSON.';
   } else {
     prompt = 'Parse this escalation text. Extract all fields: COID, MID, case number, ' +
       'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
@@ -165,6 +165,11 @@ async function parseEscalation(imageBase64OrText) {
   }
 
   const args = ['-p', prompt, '--output-format', 'json', '--json-schema', schema];
+
+  // Use --image flag for image files
+  if (tmpPath) {
+    args.push('--image', tmpPath);
+  }
 
   return new Promise((resolve, reject) => {
     const child = spawn('claude', args, {

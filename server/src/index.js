@@ -26,13 +26,13 @@ app.get('/api/health', (req, res) => {
 });
 
 // Route mounts
-const chatRouter = require('./routes/chat');
+const { chatRouter, conversationsRouter } = require('./routes/chat');
 app.use('/api/chat', chatRouter);
-app.use('/api', chatRouter);  // Mounts /api/conversations/* from the same router
-// app.use('/api/escalations', require('./routes/escalations'));
-// app.use('/api/playbook', require('./routes/playbook'));
-// app.use('/api/templates', require('./routes/templates'));
-// app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/conversations', conversationsRouter);
+app.use('/api/escalations', require('./routes/escalations'));
+app.use('/api/playbook', require('./routes/playbook'));
+app.use('/api/templates', require('./routes/templates'));
+app.use('/api/analytics', require('./routes/analytics'));
 
 // MongoDB connection + server start
 async function start() {
