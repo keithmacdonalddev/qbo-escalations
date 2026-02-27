@@ -137,6 +137,97 @@ router.post('/:id/link', async (req, res) => {
   res.json({ ok: true, escalation: escalation.toObject() });
 });
 
+// POST /api/escalations/from-conversation -- Create escalation from a chat conversation
+// Expects parsed escalation fields + conversationId. Bidirectionally links both records.
+router.post('/from-conversation', async (req, res) => {
+  const { conversationId, ...fields } = req.body;
+  if (!conversationId) {
+    return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
+  }
+
+  const Conversation = require('../models/Conversation');
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+
+  // Pick allowed fields
+  const allowed = ['coid', 'mid', 'caseNumber', 'clientContact', 'agentName',
+    'attemptingTo', 'expectedOutcome', 'actualOutcome', 'tsSteps',
+    'triedTestAccount', 'category', 'source'];
+  const escalationFields = {};
+  for (const key of allowed) {
+    if (fields[key] !== undefined) escalationFields[key] = fields[key];
+  }
+
+  // Create escalation linked to conversation
+  const escalation = new Escalation({
+    ...escalationFields,
+    conversationId,
+    source: escalationFields.source || 'manual',
+  });
+  await escalation.save();
+
+  // Link conversation back to escalation
+  conversation.escalationId = escalation._id;
+  await conversation.save();
+
+  res.status(201).json({ ok: true, escalation: escalation.toObject() });
+});
+
+// GET /api/escalations/similar -- Find past escalations with similar category/symptoms
+// Query: ?category=X or ?escalationId=X (to find similar to an existing one) &limit=10
+router.get('/similar', async (req, res) => {
+  const { category, escalationId, symptoms, limit: limitStr } = req.query;
+  const limit = Math.min(parseInt(limitStr) || 10, 50);
+
+  let searchCategory = category;
+  let searchText = symptoms || '';
+  let excludeId = null;
+
+  // If escalationId provided, use that escalation's category and symptoms
+  if (escalationId) {
+    const source = await Escalation.findById(escalationId).lean();
+    if (!source) {
+      return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Source escalation not found' });
+    }
+    searchCategory = source.category;
+    searchText = [source.attemptingTo, source.actualOutcome, source.tsSteps].filter(Boolean).join(' ');
+    excludeId = source._id;
+  }
+
+  if (!searchCategory && !searchText) {
+    return res.status(400).json({ ok: false, code: 'MISSING_PARAMS', error: 'Provide category, escalationId, or symptoms' });
+  }
+
+  // Strategy: text search if symptoms available, otherwise category match
+  const filter = {};
+  if (excludeId) filter._id = { $ne: excludeId };
+
+  let escalations;
+
+  if (searchText && searchText.trim().length > 3) {
+    // Full-text search scoped to category
+    filter.$text = { $search: searchText };
+    if (searchCategory && searchCategory !== 'unknown') filter.category = searchCategory;
+
+    escalations = await Escalation.find(filter, { score: { $meta: 'textScore' } })
+      .sort({ score: { $meta: 'textScore' } })
+      .limit(limit)
+      .lean();
+  } else {
+    // Category-only match, prefer resolved cases (training value)
+    if (searchCategory) filter.category = searchCategory;
+
+    escalations = await Escalation.find(filter)
+      .sort({ status: 1, createdAt: -1 }) // resolved first, then newest
+      .limit(limit)
+      .lean();
+  }
+
+  res.json({ ok: true, escalations, count: escalations.length });
+});
+
 // POST /api/escalations/parse -- Parse escalation from image/text
 // Uses Claude for images, regex fallback for text if Claude fails
 router.post('/parse', async (req, res) => {

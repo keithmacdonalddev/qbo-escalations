@@ -203,7 +203,7 @@ conversationsRouter.patch('/:id', async (req, res) => {
   res.json({ ok: true, conversation });
 });
 
-// GET /api/conversations/:id/export -- Export conversation as plain text
+// GET /api/conversations/:id/export -- Export conversation as plain text (includes linked escalation)
 conversationsRouter.get('/:id/export', async (req, res) => {
   const conversation = await Conversation.findById(req.params.id).lean();
   if (!conversation) {
@@ -214,9 +214,31 @@ conversationsRouter.get('/:id/export', async (req, res) => {
     `Conversation: ${conversation.title}`,
     `Date: ${new Date(conversation.createdAt).toLocaleString()}`,
     `Messages: ${conversation.messages.length}`,
-    '---',
-    '',
   ];
+
+  // Include linked escalation data if present
+  if (conversation.escalationId) {
+    const Escalation = require('../models/Escalation');
+    const escalation = await Escalation.findById(conversation.escalationId).lean();
+    if (escalation) {
+      lines.push('');
+      lines.push('=== LINKED ESCALATION ===');
+      if (escalation.coid) lines.push(`COID: ${escalation.coid}`);
+      if (escalation.mid) lines.push(`MID: ${escalation.mid}`);
+      if (escalation.caseNumber) lines.push(`Case #: ${escalation.caseNumber}`);
+      if (escalation.clientContact) lines.push(`Client: ${escalation.clientContact}`);
+      if (escalation.agentName) lines.push(`Agent: ${escalation.agentName}`);
+      lines.push(`Category: ${escalation.category}`);
+      lines.push(`Status: ${escalation.status}`);
+      if (escalation.attemptingTo) lines.push(`Attempting: ${escalation.attemptingTo}`);
+      if (escalation.actualOutcome) lines.push(`Actual Outcome: ${escalation.actualOutcome}`);
+      if (escalation.resolution) lines.push(`Resolution: ${escalation.resolution}`);
+      if (escalation.resolvedAt) lines.push(`Resolved: ${new Date(escalation.resolvedAt).toLocaleString()}`);
+      lines.push('========================');
+    }
+  }
+
+  lines.push('---', '');
 
   for (const msg of conversation.messages) {
     const label = msg.role === 'user' ? 'Agent' : msg.role === 'assistant' ? 'Claude' : 'System';
