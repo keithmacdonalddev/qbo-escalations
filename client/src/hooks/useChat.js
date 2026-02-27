@@ -11,6 +11,9 @@ export function useChat() {
   const [responseTime, setResponseTime] = useState(null); // ms for last response
   const abortRef = useRef(null);
   const startTimeRef = useRef(null);
+  const isStreamingRef = useRef(false);
+  const conversationIdRef = useRef(null);
+  const streamingTextRef = useRef('');
 
   // Load conversation list
   const loadConversations = useCallback(async () => {
@@ -33,6 +36,7 @@ export function useChat() {
       setError(null);
       const conv = await getConversation(id);
       setConversationId(conv._id);
+      conversationIdRef.current = conv._id;
       setMessages(conv.messages || []);
     } catch (err) {
       setError(err.message);
@@ -42,66 +46,76 @@ export function useChat() {
   // Start new conversation
   const newConversation = useCallback(() => {
     setConversationId(null);
+    conversationIdRef.current = null;
     setMessages([]);
     setStreamingText('');
     setError(null);
   }, []);
 
-  // Send message
+  // Send message — uses refs to avoid stale closures
   const sendMessage = useCallback((text, images = []) => {
-    if (!text.trim() || isStreaming) return;
+    if ((!text.trim() && images.length === 0) || isStreamingRef.current) return;
 
     setError(null);
     setIsStreaming(true);
+    isStreamingRef.current = true;
     setStreamingText('');
+    streamingTextRef.current = '';
     setResponseTime(null);
     startTimeRef.current = Date.now();
 
     // Optimistically add user message
-    const userMsg = { role: 'user', content: text.trim(), images, timestamp: new Date().toISOString() };
+    const userMsg = { role: 'user', content: text.trim() || '(image attached)', images, timestamp: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
 
     const { abort } = sendChatMessage(
-      { message: text.trim(), conversationId, images },
+      { message: text.trim(), conversationId: conversationIdRef.current, images },
       {
         onInit: (data) => {
           setConversationId(data.conversationId);
+          conversationIdRef.current = data.conversationId;
         },
         onChunk: (data) => {
-          setStreamingText(prev => prev + data.text);
+          streamingTextRef.current += data.text;
+          setStreamingText(streamingTextRef.current);
         },
         onDone: (data) => {
           const elapsed = startTimeRef.current ? Date.now() - startTimeRef.current : null;
           setResponseTime(elapsed);
-          setStreamingText(prev => {
-            // Finalize: add assistant message from accumulated text
-            setMessages(msgs => [...msgs, {
-              role: 'assistant',
-              content: prev,
-              timestamp: new Date().toISOString(),
-              responseTimeMs: elapsed,
-            }]);
-            return '';
-          });
+          // Use ref value for final content — avoids stale state from React batching
+          const finalText = streamingTextRef.current;
+          setMessages(msgs => [...msgs, {
+            role: 'assistant',
+            content: finalText,
+            timestamp: new Date().toISOString(),
+            responseTimeMs: elapsed,
+          }]);
+          setStreamingText('');
+          streamingTextRef.current = '';
           setIsStreaming(false);
+          isStreamingRef.current = false;
           setConversationId(data.conversationId);
+          conversationIdRef.current = data.conversationId;
           loadConversations();
         },
         onError: (errMsg) => {
           setError(errMsg);
           setIsStreaming(false);
+          isStreamingRef.current = false;
           setStreamingText('');
+          streamingTextRef.current = '';
         },
       }
     );
 
     abortRef.current = abort;
-  }, [conversationId, isStreaming, loadConversations]);
+  }, [loadConversations]);
 
   // Abort streaming
   const abortStream = useCallback(() => {
     abortRef.current?.();
     setIsStreaming(false);
+    isStreamingRef.current = false;
     setStreamingText('');
   }, []);
 
