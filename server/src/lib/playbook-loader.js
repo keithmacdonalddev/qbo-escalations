@@ -66,11 +66,16 @@ function buildSystemPrompt() {
     sections.push('');
   }
 
-  // Load edge cases if present
-  const edgeCasesPath = path.join(PLAYBOOK_ROOT, 'edge-cases.md');
-  if (fs.existsSync(edgeCasesPath)) {
-    sections.push('[EDGE CASES]');
-    sections.push(fs.readFileSync(edgeCasesPath, 'utf-8'));
+  // Load all remaining top-level .md files (edge-cases, triage, qbo-urls, error-messages, etc.)
+  const alreadyLoaded = new Set(['system-prompt.md']);
+  const topLevelFiles = fs.readdirSync(PLAYBOOK_ROOT, { withFileTypes: true })
+    .filter(e => !e.isDirectory() && e.name.endsWith('.md') && !alreadyLoaded.has(e.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const entry of topLevelFiles) {
+    const label = entry.name.replace('.md', '').replace(/-/g, ' ').toUpperCase();
+    sections.push('[' + label + ']');
+    sections.push(fs.readFileSync(path.join(PLAYBOOK_ROOT, entry.name), 'utf-8'));
     sections.push('');
   }
 
