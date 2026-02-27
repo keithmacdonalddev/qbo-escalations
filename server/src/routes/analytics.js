@@ -2,13 +2,21 @@ const express = require('express');
 const router = express.Router();
 const Escalation = require('../models/Escalation');
 
-// Helper: build date range filter
+// Helper: build date range filter with validation
 function dateFilter(query) {
   const filter = {};
   if (query.dateFrom || query.dateTo) {
     filter.createdAt = {};
-    if (query.dateFrom) filter.createdAt.$gte = new Date(query.dateFrom);
-    if (query.dateTo) filter.createdAt.$lte = new Date(query.dateTo);
+    if (query.dateFrom) {
+      const d = new Date(query.dateFrom);
+      if (isNaN(d.getTime())) return { _invalid: 'dateFrom' };
+      filter.createdAt.$gte = d;
+    }
+    if (query.dateTo) {
+      const d = new Date(query.dateTo);
+      if (isNaN(d.getTime())) return { _invalid: 'dateTo' };
+      filter.createdAt.$lte = d;
+    }
   }
   return filter;
 }
@@ -49,6 +57,7 @@ router.get('/summary', async (req, res) => {
 // GET /api/analytics/categories -- Escalation count by category
 router.get('/categories', async (req, res) => {
   const match = dateFilter(req.query);
+  if (match._invalid) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: `Invalid ${match._invalid} date` });
   const result = await Escalation.aggregate([
     { $match: match },
     { $group: { _id: '$category', count: { $sum: 1 } } },
@@ -60,7 +69,9 @@ router.get('/categories', async (req, res) => {
 
 // GET /api/analytics/resolution-time -- Avg resolution time by category
 router.get('/resolution-time', async (req, res) => {
-  const match = { status: 'resolved', resolvedAt: { $ne: null }, ...dateFilter(req.query) };
+  const df = dateFilter(req.query);
+  if (df._invalid) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: `Invalid ${df._invalid} date` });
+  const match = { status: 'resolved', resolvedAt: { $ne: null }, ...df };
   const result = await Escalation.aggregate([
     { $match: match },
     { $project: { category: 1, duration: { $subtract: ['$resolvedAt', '$createdAt'] } } },
@@ -83,6 +94,7 @@ router.get('/resolution-time', async (req, res) => {
 router.get('/agents', async (req, res) => {
   const limit = parseInt(req.query.limit) || 20;
   const match = dateFilter(req.query);
+  if (match._invalid) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: `Invalid ${match._invalid} date` });
   // Only include escalations that have an agent name
   match.agentName = { $ne: '' };
 
@@ -100,6 +112,7 @@ router.get('/agents', async (req, res) => {
 router.get('/trends', async (req, res) => {
   const interval = req.query.interval || 'daily';
   const match = dateFilter(req.query);
+  if (match._invalid) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: `Invalid ${match._invalid} date` });
 
   let dateFormat;
   if (interval === 'weekly') {
@@ -186,6 +199,7 @@ router.get('/today', async (req, res) => {
 // GET /api/analytics/status-flow -- How escalations flow between statuses
 router.get('/status-flow', async (req, res) => {
   const match = dateFilter(req.query);
+  if (match._invalid) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: `Invalid ${match._invalid} date` });
 
   const statusCounts = await Escalation.aggregate([
     { $match: match },

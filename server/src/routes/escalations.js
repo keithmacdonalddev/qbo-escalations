@@ -39,16 +39,30 @@ router.get('/:id', async (req, res) => {
 
 // POST /api/escalations -- Create escalation
 router.post('/', async (req, res) => {
-  const escalation = new Escalation(req.body);
+  const allowed = ['coid', 'mid', 'caseNumber', 'clientContact', 'agentName',
+    'attemptingTo', 'expectedOutcome', 'actualOutcome', 'tsSteps',
+    'triedTestAccount', 'category', 'source'];
+  const fields = {};
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) fields[key] = req.body[key];
+  }
+
+  const escalation = new Escalation(fields);
   await escalation.save();
   res.status(201).json({ ok: true, escalation: escalation.toObject() });
 });
 
 // PATCH /api/escalations/:id -- Update escalation
 router.patch('/:id', async (req, res) => {
+  const allowed = ['coid', 'mid', 'caseNumber', 'clientContact', 'agentName',
+    'attemptingTo', 'expectedOutcome', 'actualOutcome', 'tsSteps',
+    'triedTestAccount', 'category', 'status', 'resolution'];
+  const updates = {};
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) updates[key] = req.body[key];
+  }
   // If transitioning to resolved, set resolvedAt
-  const updates = { ...req.body };
-  if (updates.status === 'resolved' && !updates.resolvedAt) {
+  if (updates.status === 'resolved') {
     updates.resolvedAt = new Date();
   }
 
