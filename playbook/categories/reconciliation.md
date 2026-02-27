@@ -97,6 +97,34 @@
 - Audit log shows system-generated changes to reconciled transactions (not user-initiated)
 - Beginning balance changed after a QBO update/migration with no user edits
 
+## Resolution Notes
+
+When closing a reconciliation escalation, include in your resolution documentation:
+
+**Resolved — Reconciliation Completed:**
+> Reconciled [account name] for statement period ending [date]. The [difference amount] was caused by [missing bank charge / transposition error / duplicate transaction / edited reconciled item]. [Entered the missing transaction / corrected the amount / deleted the duplicate / reversed the edit]. Account now reconciles to $0.00 difference.
+
+**Resolved — Beginning Balance Corrected:**
+> Beginning balance mismatch of [amount] was traced to [transaction description] dated [date] that was [edited/deleted/voided] after reconciliation. [Reversed the change / created adjusting journal entry / undid and re-reconciled the affected period]. Beginning balance now matches the bank statement.
+
+**Resolved — Reconciliation Undone and Redone:**
+> Undid reconciliation for [period] because [reason]. Re-reconciled with correct statement balance of [amount]. All transactions now show correct R status. Customer advised to [enable Close the Books with password / not edit reconciled transactions].
+
+**Resolved — Education:**
+> Customer was [months] behind on reconciliation. Walked agent through the process starting from the oldest unreconciled period. Completed [N] months during the call. Remaining [N] months require [bank statements the customer needs to gather]. Scheduled follow-up for [date].
+
+## Similar Symptoms Across Categories
+
+These symptoms LOOK like reconciliation issues but may actually be something else:
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "My balance doesn't match the bank" | **Bank Feeds** — transactions haven't imported yet, or duplicates exist | Check the Banking page For Review tab before starting reconciliation |
+| "Opening Balance Equity has a balance" | **Technical** — migration from Desktop created OBE entries | Check if customer recently migrated — see edge-cases.md Migration Hangover |
+| "Numbers changed after my accountant worked" | **Permissions** — accountant made journal entries or reclassifications | Check Audit Log filtered by accountant's name |
+| "Reports show different amounts" | **Reports** — cash vs accrual basis, or different date range | Run the report with the same basis and dates as the reconciliation |
+| "Reconciliation won't save" | **Technical** — browser timeout or session expiry | Try in incognito, check internet stability |
+
 ## Cross-References
 
 - **[Bank Feeds](bank-feeds.md)** — Duplicate or missing bank feed transactions are the #1 cause of reconciliation discrepancies

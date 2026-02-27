@@ -149,11 +149,9 @@ export default function EscalationDashboard() {
                     key={esc._id}
                     className="table-clickable-row"
                     onClick={() => {
-                      if (esc.conversationId) {
-                        window.location.hash = `#/chat/${esc.conversationId}`;
-                      }
+                      window.location.hash = `#/escalations/${esc._id}`;
                     }}
-                    style={{ cursor: esc.conversationId ? 'pointer' : 'default' }}
+                    style={{ cursor: 'pointer' }}
                   >
                     <td>
                       <select
@@ -204,6 +202,15 @@ export default function EscalationDashboard() {
           </div>
         )}
       </div>
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title="Delete Escalation"
+        message="This escalation will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        danger={true}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

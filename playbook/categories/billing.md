@@ -108,6 +108,29 @@
 - Subscription shows wrong tier despite recent change
 - Customer was charged after confirmed cancellation (with cancellation confirmation email as evidence)
 
+## Resolution Notes
+
+**Resolved — Pricing Explained:**
+> Customer's promotional rate of [amount] expired on [date]. Current full price is [amount/month]. Explained the pricing change. Customer opted to [continue at full price / call Intuit Sales for a new promo / downgrade to [tier] / cancel]. No refund applicable for standard price changes.
+
+**Resolved — Payment Method Updated:**
+> Payment method was [declined / expired]. Customer updated to [new card ending in XXXX / bank account]. System will retry billing within 24 hours. If account was suspended, access should restore automatically after successful payment.
+
+**Resolved — Plan Changed:**
+> Customer [upgraded from X to Y / downgraded from X to Y]. Change is effective [immediately / next billing cycle]. [Prorated credit applied / No proration]. Customer was informed of [features gained / features lost in downgrade].
+
+**Resolved — Escalated to Intuit Billing:**
+> [Double charge confirmed / Post-cancellation charge / Account suspension beyond self-service recovery]. Escalated to Intuit Billing with Case #[NUMBER]. Customer expects [refund / reactivation / confirmation] within [timeframe].
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "I got charged twice" | **Payroll** — QBO sub + Payroll sub are separate charges | Check both charges — different product names on the bank statement |
+| "Features stopped working" | **Permissions** — user role was changed, not subscription | Check Manage Users for role changes before checking subscription |
+| "Can't access my account" | **Technical** — browser/login issue, not billing suspension | Try a different browser first; check status page |
+| "My plan changed without my permission" | **Permissions** — another admin may have changed it | Check Audit Log for subscription-related changes |
+
 ## Cross-References
 
 - **[Permissions](permissions.md)** — Only Master Admin or Company Admin can view/modify billing settings

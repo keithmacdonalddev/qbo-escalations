@@ -94,6 +94,33 @@
 - Customer reports being charged but invoice still shows as unpaid
 - Batch invoicing creating hundreds of incorrect invoices
 
+## Resolution Notes
+
+**Resolved — Email Delivery Fixed:**
+> Invoice email to [customer] was [going to spam / sent to wrong address / blocked by corporate email filter]. [Corrected email address / customer whitelisted quickbooks@notification.intuit.com / shared invoice link directly]. Customer confirmed receipt.
+
+**Resolved — Payment Configuration Fixed:**
+> Online payments were not available because [QB Payments not set up / payment options not enabled on invoice / payment link expired]. [Set up QB Payments / enabled credit card + ACH on the invoice / resent invoice with fresh link]. Customer can now pay online.
+
+**Resolved — Recurring Invoice Fixed:**
+> Recurring invoice was [paused / expired / set to Reminder instead of Scheduled / had wrong interval]. Corrected the settings at Gear > Recurring Transactions > [Invoice name]. Next auto-generation scheduled for [date].
+
+**Resolved — Credit Applied:**
+> Credit memo of [amount] for [reason] was created but not applied to invoice #[NUMBER]. Created a Receive Payment to apply the credit. Invoice balance now shows [remaining amount / $0.00].
+
+**Resolved — Escalated:**
+> [QB Payments received money but didn't apply to invoice / Recurring invoices generating duplicates / Invoice data corruption]. Escalated to [Intuit Payments / Intuit Engineering] with Case #[NUMBER].
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "Invoice has wrong tax" | **Tax** — AST configuration, not invoice settings | Check the item's tax category and customer's tax-exempt status |
+| "Customer says they paid but invoice shows open" | **Bank Feeds** — payment received but not matched in bank feed | Check bank feed For Review tab for the payment amount |
+| "Can't create invoices" | **Permissions** — user role doesn't include invoice creation | Check Manage Users for the user's role |
+| "Invoice charges showing on my bill" | **Billing** — QB Payments fees are separate from QBO subscription | Check billing for Payments-specific charges |
+| "Recurring invoice amounts changed" | **Tax** — tax rate update affected the invoice total | Check if the line item amounts changed or just the tax |
+
 ## Cross-References
 
 - **[Tax](tax.md)** — Invoice showing wrong tax? Check the sales tax category on items and customer tax-exempt status

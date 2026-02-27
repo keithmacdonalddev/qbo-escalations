@@ -107,6 +107,18 @@ export async function deleteConversation(id) {
   return data;
 }
 
+/** Fork a conversation from a specific message index */
+export async function forkConversation(id, fromMessageIndex) {
+  const res = await fetch(`${BASE}/conversations/${id}/fork`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fromMessageIndex }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to fork conversation');
+  return data.conversation;
+}
+
 /** Parse escalation from image or text */
 export async function parseEscalation(input) {
   const body = input.startsWith('data:image') ? { image: input } : { text: input };

@@ -141,6 +141,33 @@
 - 2FA lockout with no backup codes and user cannot verify identity
 - Integration requires API-level debugging by Intuit's partner support team
 
+## Resolution Notes
+
+**Resolved — Browser Issue Fixed:**
+> Issue was caused by [browser cache / extension conflict / outdated browser / pop-up blocker]. Customer [cleared cache / disabled extension / updated browser / whitelisted qbo.intuit.com]. Feature now works correctly in [browser name]. Advised customer to keep browser updated and avoid extensions that modify page content.
+
+**Resolved — Login Issue Fixed:**
+> Customer was [using wrong sign-in method / had locked account / needed password reset / had 2FA issue]. [Reset password / waited 30 minutes for unlock / used backup codes / contacted Intuit for 2FA reset]. Customer can now sign in successfully.
+
+**Resolved — Integration Reconnected:**
+> [App name] was disconnected from QBO due to [expired OAuth token / changed permissions / app update]. Reconnected via Gear > Account and Settings > Connected Apps > [Disconnect and re-authorize]. Data syncing has resumed.
+
+**Resolved — Import Successful:**
+> [CSV/QFX/OFX] import was failing because [wrong date format / special characters / extra blank rows / wrong column mapping / file encoding issue]. Fixed the [issue] in the source file and re-imported. [N] transactions imported successfully.
+
+**Resolved — Escalated:**
+> Issue persists across all browsers, all users, incognito mode. This appears to be a [server-side issue / data corruption / platform bug]. Escalated to Intuit Engineering with Case #[NUMBER]. Customer advised to [workaround / wait].
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "Something went wrong" error | **Any category** — generic error can appear on any feature | Note the URL when the error appears — it tells you which module is affected |
+| "Feature is missing" | **Billing** — feature requires higher tier / **Permissions** — role doesn't include access | Check subscription tier first, then user role |
+| "Page won't load" | **Billing** — account suspended due to payment failure | Check if ANY QBO page loads, or just specific ones |
+| "App not syncing" | **Bank Feeds** — if the "app" is a bank connection, it's a bank feed issue | Check if it's a financial institution (bank feeds) or a third-party app (technical) |
+| "Can't print/export" | **Reports** — report too large for the selected format | Try a smaller date range or different export format first |
+
 ## Cross-References
 
 - **[Bank Feeds](bank-feeds.md)** — Bank connection issues are often browser-related (pop-up blockers, extensions)

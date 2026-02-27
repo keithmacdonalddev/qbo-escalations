@@ -6,6 +6,8 @@ import EscalationDashboard from './components/EscalationDashboard.jsx';
 import PlaybookEditor from './components/PlaybookEditor.jsx';
 import TemplateLibrary from './components/TemplateLibrary.jsx';
 import Analytics from './components/Analytics.jsx';
+import DevMode from './components/DevMode.jsx';
+import EscalationDetail from './components/EscalationDetail.jsx';
 
 function parseHashRoute() {
   const hash = window.location.hash || '#/chat';
@@ -15,10 +17,14 @@ function parseHashRoute() {
   if (hash === '#/chat' || hash === '#/' || hash === '#') {
     return { view: 'chat', conversationId: null };
   }
-  if (hash === '#/dashboard') return { view: 'dashboard' };
+  if (hash.startsWith('#/escalations/')) {
+    return { view: 'escalation-detail', escalationId: hash.slice(14) };
+  }
+  if (hash === '#/dashboard' || hash === '#/escalations') return { view: 'dashboard' };
   if (hash === '#/playbook') return { view: 'playbook' };
   if (hash === '#/templates') return { view: 'templates' };
   if (hash === '#/analytics') return { view: 'analytics' };
+  if (hash === '#/dev') return { view: 'dev' };
   return { view: 'chat', conversationId: null };
 }
 
@@ -63,6 +69,12 @@ function App() {
             <EscalationDashboard />
           </motion.div>
         );
+      case 'escalation-detail':
+        return (
+          <motion.div key="escalation-detail" {...motionProps}>
+            <EscalationDetail escalationId={route.escalationId} />
+          </motion.div>
+        );
       case 'playbook':
         return (
           <motion.div key="playbook" {...motionProps}>
@@ -81,6 +93,12 @@ function App() {
             <Analytics />
           </motion.div>
         );
+      case 'dev':
+        return (
+          <motion.div key="dev" {...motionProps} style={{ height: '100%' }}>
+            <DevMode />
+          </motion.div>
+        );
       default:
         return (
           <motion.div key="chat-default" {...motionProps} style={{ height: '100%' }}>
@@ -90,7 +108,7 @@ function App() {
     }
   }, [route, motionProps]);
 
-  const isChatView = route.view === 'chat';
+  const isFullHeightView = route.view === 'chat' || route.view === 'dev';
 
   return (
     <div className="app">
@@ -126,7 +144,7 @@ function App() {
 
       <main
         className="app-content"
-        style={isChatView ? { padding: 0, display: 'flex', flexDirection: 'column' } : {}}
+        style={isFullHeightView ? { padding: 0, display: 'flex', flexDirection: 'column' } : {}}
       >
         <AnimatePresence mode="wait">
           {renderView()}

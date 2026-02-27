@@ -111,6 +111,34 @@
 - Customer's bank is listed as unsupported or has recently changed aggregator partnerships
 - Bank feed imports are showing wrong amounts (not matching bank statements)
 
+## Resolution Notes
+
+When closing a bank feed escalation, include in your resolution documentation:
+
+**Resolved — Reconnected Successfully:**
+> Bank feed for [bank name] / [account type] was disconnected due to [credential change / bank portal update / MFA requirement]. Reconnected successfully via Banking > Link Account. Transactions are now downloading. Customer should verify transactions in the For Review tab within 24 hours.
+
+**Resolved — Duplicates Cleaned:**
+> Found [N] duplicate transactions between [date range] caused by [manual entry + bank feed overlap / bank sending duplicates]. Deleted the [manual/duplicate] entries and kept the bank feed versions. Advised customer to use [bank feed only / manual entry only] going forward to prevent recurrence.
+
+**Resolved — Missing Transactions Located:**
+> Transactions were [in the Excluded tab / in the Categorized tab / pending at the bank / outside the 90-day import window]. [Moved from Excluded / Confirmed already categorized / Advised to wait for posting / Imported via CSV upload]. Customer verified the expected transactions are now in QBO.
+
+**Resolved — Escalated to Intuit:**
+> Bank connection issue persists after [troubleshooting steps tried]. This appears to be a [Yodlee/Finicity aggregator issue / bank-side incompatibility]. Escalated to Intuit with Case #[NUMBER]. Customer advised to [manually enter transactions / use CSV import] in the interim.
+
+## Similar Symptoms Across Categories
+
+These symptoms LOOK like bank feed issues but may actually be something else:
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "My bank balance doesn't match QBO" | **Reconciliation** — unreconciled transactions, not a feed problem | Check reconciliation status, not just the Banking page |
+| "Transactions are duplicated" | **Invoicing** — customer receiving payment + recording manual deposit | Check if duplicates are invoice payments vs bank deposits |
+| "Bank won't connect" | **Technical** — pop-up blocker, browser extension, or cache issue | Try incognito mode first before blaming the bank connection |
+| "Wrong amounts showing" | **Reports** — report is filtered or using wrong basis | Click into the transaction to verify the actual amount matches the bank |
+| "Money is missing" | **Reconciliation** — transaction categorized to wrong account | Search for the amount in the register of ALL accounts, not just the bank |
+
 ## Cross-References
 
 - **[Reconciliation](reconciliation.md)** — Bank feed issues often surface during reconciliation when balances don't match

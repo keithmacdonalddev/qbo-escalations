@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 
-export default function ChatMessage({ role, content, images, timestamp, isStreaming, responseTimeMs }) {
+export default function ChatMessage({ role, content, images, timestamp, isStreaming, responseTimeMs, onFork }) {
   const bubbleClass = role === 'user'
     ? 'chat-bubble chat-bubble-user'
     : role === 'system'
@@ -17,7 +17,22 @@ export default function ChatMessage({ role, content, images, timestamp, isStream
       {role === 'assistant' && (
         <div className="chat-bubble-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
           <span className="eyebrow">Claude</span>
-          {!isStreaming && content && <CopyButton text={content} />}
+          {!isStreaming && content && (
+            <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
+              {onFork && (
+                <button
+                  className="copy-btn"
+                  onClick={onFork}
+                  type="button"
+                  title="Fork conversation from this point"
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  Fork
+                </button>
+              )}
+              <CopyButton text={content} />
+            </div>
+          )}
         </div>
       )}
 

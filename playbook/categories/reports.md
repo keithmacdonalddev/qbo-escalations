@@ -113,6 +113,32 @@
 
 ## Cross-References
 
+## Resolution Notes
+
+**Resolved — Filter/Basis Corrected:**
+> Report was showing unexpected numbers because [wrong date range / cash vs accrual basis mismatch / class/location filter active / customer/vendor filter leftover from previous run]. Corrected the [setting] and re-ran the report. Numbers now match the customer's expectations.
+
+**Resolved — Data Reclassified:**
+> [N] transactions were categorized to the wrong account, causing [account name] to show [too high/too low] on the [P&L / Balance Sheet]. Reclassified the transactions from [old account] to [correct account]. Report now shows accurate amounts.
+
+**Resolved — Uncategorized Transactions Addressed:**
+> [N] transactions in [Uncategorized Income/Expense/Asset] were causing discrepancies. Categorized all [N] transactions to their correct accounts. [Uncategorized Income/Expense/Asset] balance is now $0.00.
+
+**Resolved — Education:**
+> Customer's CPA expected [cash/accrual] basis but QBO was set to [other basis]. Explained the difference. Showed customer how to toggle the basis on individual reports without changing the company default. Customer will confirm with CPA which basis to use for filing.
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "P&L shows wrong revenue" | **Bank Feeds** — uncategorized bank deposits inflating/deflating income | Check for uncategorized transactions — Reports > Transaction List by Account > Uncategorized Income |
+| "Balance Sheet doesn't balance" | **Reconciliation** — reconciled transactions were edited | Check if Assets = Liabilities + Equity; if not, check Audit Log for changes |
+| "A/R Aging shows paid invoices" | **Invoicing** — payment not applied to the invoice | Open the invoice — check if payment is linked |
+| "Payroll costs look wrong" | **Payroll** — payroll reports ≠ financial reports (different engines) | Compare Payroll Summary Report to P&L payroll line items |
+| "Report is slow/timing out" | **Technical** — browser issue, not data issue | Try incognito mode and a narrower date range |
+
+## Cross-References
+
 - **[Reconciliation](reconciliation.md)** — Balance Sheet bank account balances should match the last reconciled balance
 - **[Tax](tax.md)** — Tax reports (sales tax liability, 1099 detail) have specific considerations
 - **[Payroll](payroll.md)** — Payroll reports are separate from standard financial reports

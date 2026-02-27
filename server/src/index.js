@@ -33,6 +33,8 @@ app.use('/api/escalations', require('./routes/escalations'));
 app.use('/api/playbook', require('./routes/playbook'));
 app.use('/api/templates', require('./routes/templates'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/copilot', require('./routes/copilot'));
+app.use('/api/dev', require('./routes/dev'));
 
 // MongoDB connection + server start
 async function start() {

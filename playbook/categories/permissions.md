@@ -109,6 +109,29 @@
 - Customer needs custom roles but is on Plus (custom roles require Advanced)
 - Security concern: unauthorized user has access to the company file
 
+## Resolution Notes
+
+**Resolved — Role/Access Corrected:**
+> User [name/email] was assigned the [role name] role, which did not include access to [feature]. Changed role to [new role] via Gear > Manage Users. User can now [specific action]. No data was affected.
+
+**Resolved — Invitation Resent:**
+> Original invitation to [email] had [expired / gone to spam / been sent to wrong email]. [Deleted the pending invite and re-sent / corrected the email address and re-invited]. User should accept within 30 days. Advised to check spam folder and whitelist quickbooks@notification.intuit.com.
+
+**Resolved — Master Admin Transferred:**
+> Master Admin role transferred from [old admin] to [new admin] via Gear > Manage Users > Transfer Master Admin. New admin verified they can access all settings. Old admin's role changed to [new role / deleted].
+
+**Resolved — Escalated (Master Admin Unavailable):**
+> Current Master Admin [name] is [unavailable / departed]. This requires Intuit identity verification. Escalated with Case #[NUMBER]. Customer will need to provide business EIN and billing details on file. Expected resolution within [timeframe].
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "Can't access payroll" | **Payroll** — QBO permissions and payroll permissions are separate | Check both Manage Users AND Payroll Settings > Manage Users |
+| "Feature is missing/greyed out" | **Billing** — feature requires a higher subscription tier | Check Account and Settings > Billing for current plan |
+| "Getting permission errors" | **Technical** — stale browser session or cached credentials | Try incognito mode — if it works there, it's a session issue |
+| "Accountant can't connect" | **Technical** — accountant needs QBOA, not regular QBO login | Confirm they're accepting via quickbooks.intuit.com/accountants |
+
 ## Cross-References
 
 - **[Billing](billing.md)** — User limits are tied to subscription tier. Adding users may require a plan upgrade.

@@ -16,8 +16,8 @@
 
 // Label patterns found in real QBO escalation DMs
 const FIELD_PATTERNS = [
-  { field: 'coid',            patterns: [/(?:COID|CO\s*ID|COMPANY\s*ID)[:\s]*([^\n/]+)/i] },
-  { field: 'mid',             patterns: [/(?:MID|MASTER\s*ID)[:\s]*([^\n]+)/i, /COID\/MID[:\s]*[^/]+\/\s*([^\n]+)/i] },
+  { field: 'coid',            patterns: [/COID\/MID[:\s]*([^\n/]+)/i, /(?:COID|CO\s*ID|COMPANY\s*ID)[:\s]*([^\n/]+)/i] },
+  { field: 'mid',             patterns: [/COID\/MID[:\s]*[^/]+\/\s*([^\n]+)/i, /(?:MID|MASTER\s*ID)[:\s]*([^\n]+)/i] },
   { field: 'caseNumber',      patterns: [/(?:CASE(?:\s*(?:#|NUMBER|NUM))?)[:\s]*([^\n]+)/i, /(?:CS-\d{4}-\d+)/i] },
   { field: 'clientContact',   patterns: [/(?:CLIENT(?:\s*\/\s*CONTACT)?|CONTACT|CUSTOMER|CX\s*NAME)[:\s]*([^\n]+)/i] },
   { field: 'agentName',       patterns: [/(?:AGENT(?:\s*NAME)?|FROM|SENT\s*BY)[:\s]*([^\n]+)/i] },

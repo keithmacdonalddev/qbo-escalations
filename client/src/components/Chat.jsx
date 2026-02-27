@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useChat } from '../hooks/useChat.js';
-import { exportConversation } from '../api/chatApi.js';
+import { exportConversation, getConversation, forkConversation } from '../api/chatApi.js';
+import { createEscalation, linkEscalation, getEscalation, transitionEscalation } from '../api/escalationsApi.js';
+import { listTemplates, trackTemplateUsage } from '../api/templatesApi.js';
 import ChatMessage from './ChatMessage.jsx';
 import ImageUpload from './ImageUpload.jsx';
 
@@ -10,6 +12,29 @@ const QUICK_PROMPTS = [
   { label: 'Categorize Issue', prompt: 'What QBO category does this issue fall under? Explain your reasoning and list related known issues in that category.' },
   { label: 'Suggest Troubleshooting', prompt: 'Based on the issue described, what troubleshooting steps should the agent try next? List them in order of likelihood to resolve.' },
 ];
+
+/** Check if an assistant message looks like it contains parsed escalation data */
+function detectEscalationFields(text) {
+  if (!text || text.length < 50) return null;
+  const fields = {};
+  const coidMatch = text.match(/\bCOID[:\s]*(\d{5,})/i);
+  if (coidMatch) fields.coid = coidMatch[1];
+  const caseMatch = text.match(/\bcase\s*(?:#|number|num)?[:\s]*(\d{6,})/i);
+  if (caseMatch) fields.caseNumber = caseMatch[1];
+  const agentMatch = text.match(/\bagent(?:\s+name)?[:\s]*([A-Z][a-z]+ [A-Z][a-z]+)/);
+  if (agentMatch) fields.agentName = agentMatch[1];
+  const categoryKeywords = ['payroll', 'bank.?feed', 'reconciliation', 'permission', 'billing', 'tax', 'invoic', 'report'];
+  for (const kw of categoryKeywords) {
+    if (new RegExp(kw, 'i').test(text)) {
+      fields.category = kw.replace('.?', '-').replace(/ing$/, '').replace(/s$/, '');
+      break;
+    }
+  }
+  const attemptMatch = text.match(/(?:attempting|trying|issue|problem)[:\s]*(.{10,80}?)(?:\.|$)/im);
+  if (attemptMatch) fields.attemptingTo = attemptMatch[1].trim();
+  // Need at least 2 recognized fields to consider it an escalation parse
+  return Object.keys(fields).length >= 2 ? fields : null;
+}
 
 export default function Chat({ conversationIdFromRoute }) {
   const {
@@ -27,12 +52,42 @@ export default function Chat({ conversationIdFromRoute }) {
   } = useChat();
 
   const [exportCopied, setExportCopied] = useState(false);
+  const [savedEscalationId, setSavedEscalationId] = useState(null);
+  const [savingEscalation, setSavingEscalation] = useState(false);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [templates, setTemplates] = useState([]);
+  const [templateCategory, setTemplateCategory] = useState('');
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  const [linkedEscalation, setLinkedEscalation] = useState(null);
+  const [resolvingEscalation, setResolvingEscalation] = useState(false);
 
   const [input, setInput] = useState('');
   const [images, setImages] = useState([]);
   const [showUpload, setShowUpload] = useState(false);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  // Check if current conversation has a linked escalation
+  useEffect(() => {
+    if (!conversationId) { setLinkedEscalation(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const conv = await getConversation(conversationId);
+        if (cancelled) return;
+        if (conv.escalationId) {
+          const esc = await getEscalation(conv.escalationId);
+          if (!cancelled) setLinkedEscalation(esc);
+        } else {
+          setLinkedEscalation(null);
+        }
+      } catch {
+        if (!cancelled) setLinkedEscalation(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conversationId, savedEscalationId]);
 
   // Load conversation from route param
   useEffect(() => {
@@ -116,10 +171,124 @@ export default function Chat({ conversationIdFromRoute }) {
     setShowUpload(false);
   }, [isStreaming, images, sendMessage]);
 
+  // Save parsed escalation from the last assistant message
+  const handleSaveEscalation = useCallback(async (fields) => {
+    if (!conversationId || savingEscalation) return;
+    setSavingEscalation(true);
+    try {
+      const esc = await createEscalation({ ...fields, source: 'chat' });
+      await linkEscalation(esc._id, conversationId);
+      setSavedEscalationId(esc._id);
+    } catch { /* ignore */ }
+    setSavingEscalation(false);
+  }, [conversationId, savingEscalation]);
+
+  // Mark linked escalation as resolved
+  const handleResolveEscalation = useCallback(async () => {
+    if (!linkedEscalation || resolvingEscalation) return;
+    setResolvingEscalation(true);
+    try {
+      const updated = await transitionEscalation(linkedEscalation._id, 'resolved');
+      setLinkedEscalation(updated);
+    } catch { /* ignore */ }
+    setResolvingEscalation(false);
+  }, [linkedEscalation, resolvingEscalation]);
+
+  // Reset saved escalation when conversation changes
+  useEffect(() => {
+    setSavedEscalationId(null);
+  }, [conversationId]);
+
+  // Detect escalation fields in the last assistant message
+  const lastAssistantMsg = messages.length > 0 ? [...messages].reverse().find(m => m.role === 'assistant') : null;
+  const detectedFields = lastAssistantMsg ? detectEscalationFields(lastAssistantMsg.content) : null;
+  const showEscalationAction = detectedFields && !savedEscalationId && !isStreaming && conversationId;
+
+  // Template picker
+  const openTemplatePicker = useCallback(async () => {
+    setShowTemplatePicker(true);
+    setLoadingTemplates(true);
+    try {
+      const list = await listTemplates(templateCategory || undefined);
+      setTemplates(list);
+    } catch { /* ignore */ }
+    setLoadingTemplates(false);
+  }, [templateCategory]);
+
+  const handleTemplateInsert = useCallback((template) => {
+    setInput(prev => prev ? prev + '\n\n' + template.body : template.body);
+    setShowTemplatePicker(false);
+    trackTemplateUsage(template._id).catch(() => {});
+    textareaRef.current?.focus();
+  }, []);
+
+  const handleTemplateCategoryChange = useCallback(async (cat) => {
+    setTemplateCategory(cat);
+    setLoadingTemplates(true);
+    try {
+      const list = await listTemplates(cat || undefined);
+      setTemplates(list);
+    } catch { /* ignore */ }
+    setLoadingTemplates(false);
+  }, []);
+
+  // Fork conversation from a specific message
+  const handleFork = useCallback(async (messageIndex) => {
+    if (!conversationId) return;
+    try {
+      const forked = await forkConversation(conversationId, messageIndex);
+      // Navigate to the new forked conversation
+      window.location.hash = `#/chat/${forked._id}`;
+    } catch { /* ignore */ }
+  }, [conversationId]);
+
   const hasImages = images.length > 0;
 
   return (
     <div className="chat-container">
+      {/* Linked escalation banner */}
+      {linkedEscalation && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--sp-3)',
+          padding: 'var(--sp-2) var(--sp-5)',
+          background: 'var(--bg-sunken)',
+          borderBottom: '1px solid var(--line)',
+          fontSize: 'var(--text-sm)',
+        }}>
+          <span className={`badge badge-${linkedEscalation.status === 'open' ? 'open' : linkedEscalation.status === 'in-progress' ? 'progress' : linkedEscalation.status === 'resolved' ? 'resolved' : 'escalated'}`}>
+            {linkedEscalation.status}
+          </span>
+          <span style={{ flex: 1, color: 'var(--ink-secondary)' }}>
+            Linked escalation
+            {linkedEscalation.coid && <span className="mono" style={{ marginLeft: 'var(--sp-2)' }}>COID: {linkedEscalation.coid}</span>}
+            {linkedEscalation.category && (
+              <span className={`cat-badge cat-${linkedEscalation.category}`} style={{ marginLeft: 'var(--sp-2)', fontSize: 'var(--text-xs)' }}>
+                {linkedEscalation.category.replace('-', ' ')}
+              </span>
+            )}
+          </span>
+          {linkedEscalation.status !== 'resolved' && (
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={handleResolveEscalation}
+              disabled={resolvingEscalation}
+              type="button"
+            >
+              {resolvingEscalation ? 'Resolving...' : 'Mark Resolved'}
+            </button>
+          )}
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={() => { window.location.hash = '#/escalations'; }}
+            type="button"
+          >
+            View
+          </button>
+        </div>
+      )}
+
       {/* Messages area */}
       <div className="chat-messages">
         {messages.length === 0 && !isStreaming && (
@@ -171,6 +340,7 @@ export default function Chat({ conversationIdFromRoute }) {
             images={msg.images}
             timestamp={msg.timestamp}
             responseTimeMs={msg.responseTimeMs}
+            onFork={msg.role === 'assistant' && conversationId && !isStreaming ? () => handleFork(i) : undefined}
           />
         ))}
 
@@ -205,6 +375,67 @@ export default function Chat({ conversationIdFromRoute }) {
               type="button"
             >
               Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Save as Escalation action bar */}
+        {showEscalationAction && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-3)',
+            padding: 'var(--sp-3) var(--sp-5)',
+            margin: '0 var(--sp-3)',
+            background: 'var(--accent-subtle)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--accent)',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="12" y1="18" x2="12" y2="12" />
+              <line x1="9" y1="15" x2="15" y2="15" />
+            </svg>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--accent)', fontWeight: 600, flex: 1 }}>
+              Escalation data detected
+              {detectedFields.coid && <span style={{ fontWeight: 400, marginLeft: 'var(--sp-2)' }}>(COID: {detectedFields.coid})</span>}
+            </span>
+            <button
+              className="btn btn-sm btn-primary"
+              onClick={() => handleSaveEscalation(detectedFields)}
+              disabled={savingEscalation}
+              type="button"
+            >
+              {savingEscalation ? 'Saving...' : 'Save as Escalation'}
+            </button>
+          </div>
+        )}
+
+        {/* Escalation saved confirmation */}
+        {savedEscalationId && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-3)',
+            padding: 'var(--sp-3) var(--sp-5)',
+            margin: '0 var(--sp-3)',
+            background: 'var(--success-subtle, #e8f5e9)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--success, #41a466)',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success, #41a466)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--success, #41a466)', fontWeight: 600, flex: 1 }}>
+              Escalation saved and linked to this conversation
+            </span>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={() => { window.location.hash = '#/escalations'; }}
+              type="button"
+            >
+              View Dashboard
             </button>
           </div>
         )}
@@ -258,6 +489,20 @@ export default function Chat({ conversationIdFromRoute }) {
             </svg>
           </button>
 
+          <button
+            className="btn btn-ghost btn-icon"
+            onClick={openTemplatePicker}
+            title="Insert a response template"
+            type="button"
+            aria-label="Insert template"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="9" y1="21" x2="9" y2="9" />
+            </svg>
+          </button>
+
           <textarea
             ref={textareaRef}
             value={input}
@@ -307,6 +552,104 @@ export default function Chat({ conversationIdFromRoute }) {
           Enter to send &middot; Shift+Enter for new line &middot; Ctrl+V to paste images &middot; Ctrl+N new conversation
         </div>
       </div>
+
+      {/* Template picker overlay */}
+      {showTemplatePicker && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTemplatePicker(false)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setShowTemplatePicker(false); }}
+        >
+          <div
+            className="card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(600px, 90vw)',
+              maxHeight: '70vh',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
+              <h2 style={{ margin: 0, fontSize: 'var(--text-lg)' }}>Insert Template</h2>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setShowTemplatePicker(false)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Category filter chips */}
+            <div style={{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap', marginBottom: 'var(--sp-4)' }}>
+              {['', 'acknowledgment', 'follow-up', 'escalation-up', 'payroll', 'bank-feeds', 'reconciliation', 'general'].map(cat => (
+                <button
+                  key={cat}
+                  className={`btn btn-sm ${templateCategory === cat ? 'btn-primary' : 'btn-secondary'}`}
+                  onClick={() => handleTemplateCategoryChange(cat)}
+                  type="button"
+                  style={{ fontSize: 'var(--text-xs)' }}
+                >
+                  {cat ? cat.replace('-', ' ') : 'All'}
+                </button>
+              ))}
+            </div>
+
+            {/* Template list */}
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {loadingTemplates ? (
+                <div style={{ textAlign: 'center', padding: 'var(--sp-6)' }}>
+                  <span className="spinner spinner-sm" />
+                </div>
+              ) : templates.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: 'var(--sp-6)', color: 'var(--ink-secondary)' }}>
+                  No templates found.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+                  {templates.map(tmpl => (
+                    <button
+                      key={tmpl._id}
+                      onClick={() => handleTemplateInsert(tmpl)}
+                      type="button"
+                      style={{
+                        textAlign: 'left',
+                        padding: 'var(--sp-3) var(--sp-4)',
+                        background: 'var(--bg-sunken)',
+                        border: '1px solid var(--line)',
+                        borderRadius: 'var(--radius-md)',
+                        cursor: 'pointer',
+                        transition: 'border-color 140ms ease',
+                      }}
+                      onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+                      onMouseOut={(e) => { e.currentTarget.style.borderColor = 'var(--line)'; }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-1)' }}>
+                        <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)' }}>{tmpl.title}</span>
+                        <span className={`cat-badge cat-${tmpl.category || 'general'}`} style={{ fontSize: 'var(--text-xs)' }}>
+                          {(tmpl.category || 'general').replace('-', ' ')}
+                        </span>
+                      </div>
+                      <div style={{
+                        fontSize: 'var(--text-xs)',
+                        color: 'var(--ink-secondary)',
+                        whiteSpace: 'pre-wrap',
+                        maxHeight: 60,
+                        overflow: 'hidden',
+                        lineHeight: 1.5,
+                      }}>
+                        {tmpl.body}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -124,22 +124,63 @@ router.post('/:id/link', async (req, res) => {
 });
 
 // POST /api/escalations/parse -- Parse escalation from image/text
+// Uses Claude for images, regex fallback for text if Claude fails
 router.post('/parse', async (req, res) => {
-  const { image, text } = req.body;
+  const { image, text, mode } = req.body;
   if (!image && !text) {
     return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Image or text required' });
   }
 
-  const parsed = await claude.parseEscalation(image || text);
+  let parsed;
+
+  if (mode === 'quick' && text && looksLikeEscalation(text)) {
+    // Quick mode: regex only, no Claude call (instant)
+    parsed = parseEscalationText(text);
+  } else {
+    // Full mode: try Claude first, fall back to regex for text
+    try {
+      parsed = await claude.parseEscalation(image || text);
+      parsed._parsedBy = 'claude';
+    } catch (err) {
+      if (text && looksLikeEscalation(text)) {
+        parsed = parseEscalationText(text);
+        parsed._fallbackReason = err.message;
+      } else {
+        throw err; // Express 5 catches this
+      }
+    }
+  }
 
   // Create escalation record from parsed data
+  const { _parseConfidence, _fieldsFound, _parsedBy, _fallbackReason, ...fields } = parsed;
   const escalation = new Escalation({
-    ...parsed,
+    ...fields,
     source: image ? 'screenshot' : 'manual',
   });
   await escalation.save();
 
-  res.status(201).json({ ok: true, escalation: escalation.toObject() });
+  res.status(201).json({
+    ok: true,
+    escalation: escalation.toObject(),
+    _meta: { parsedBy: _parsedBy, confidence: _parseConfidence, fieldsFound: _fieldsFound, fallbackReason: _fallbackReason },
+  });
+});
+
+// POST /api/escalations/quick-parse -- Regex-only parse (no Claude, instant)
+router.post('/quick-parse', (req, res) => {
+  const { text } = req.body;
+  if (!text) {
+    return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Text required' });
+  }
+
+  const parsed = parseEscalationText(text);
+  const isEscalation = looksLikeEscalation(text);
+
+  res.json({
+    ok: true,
+    escalation: parsed,
+    isEscalation,
+  });
 });
 
 module.exports = router;

@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { hash: '#/playbook', label: 'Playbook', icon: IconBook },
   { hash: '#/templates', label: 'Templates', icon: IconTemplate },
   { hash: '#/analytics', label: 'Analytics', icon: IconChart },
+  { hash: '#/dev', label: 'Dev Mode', icon: IconTerminal },
 ];
 
 export default function Sidebar({ currentRoute, conversationId, isOpen, onClose }) {
@@ -329,6 +330,15 @@ function IconChart({ size = 16 }) {
       <line x1="18" y1="20" x2="18" y2="10" />
       <line x1="12" y1="20" x2="12" y2="4" />
       <line x1="6" y1="20" x2="6" y2="14" />
+    </svg>
+  );
+}
+
+function IconTerminal({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   );
 }

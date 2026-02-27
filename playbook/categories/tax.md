@@ -108,6 +108,31 @@
 
 ## Cross-References
 
+## Resolution Notes
+
+**Resolved — Tax Configuration Corrected:**
+> [Sales tax / 1099 / tax exemption] issue was caused by [incorrect item tax category / missing customer address / vendor not marked for 1099 tracking / wrong AST setting]. Corrected at [exact navigation path]. Fix applies to [new transactions only / retroactively]. Customer should verify the next [invoice / 1099 report].
+
+**Resolved — Tax Rate Verified:**
+> Customer reported tax rate of [X%] on invoices in [jurisdiction]. Verified this rate is correct per [source — jurisdiction website / AST database]. The rate changed on [date] due to [new legislation / Intuit database update / address re-geocoding]. Explained the change to customer. No action needed.
+
+**Resolved — 1099 Filing Corrected:**
+> [N] vendors were [missing from / incorrectly included in] the 1099 filing. [Marked vendors for 1099 tracking / updated tax IDs / corrected box mapping / excluded credit card payments]. Customer should re-run the 1099 Transaction Detail report to verify before filing.
+
+**Resolved — Escalated:**
+> [Tax forms already filed with wrong amounts / state tax notice / AST consistently wrong for specific jurisdiction]. Escalated to [Intuit Tax Team / CPA recommendation] with Case #[NUMBER].
+
+## Similar Symptoms Across Categories
+
+| Symptom | Could Also Be | How to Tell |
+|---------|--------------|-------------|
+| "Tax amounts are wrong on invoices" | **Invoicing** — invoice template or item setup issue | Check item tax category first, then AST settings |
+| "Tax report doesn't match what I filed" | **Reports** — cash vs accrual basis mismatch | Run the report on both bases — the one matching the filing is correct |
+| "1099 amounts are wrong" | **Payroll** — confusing payroll payments with contractor payments | 1099s are for contractors only — payroll has W-2s |
+| "Getting charged for tax filing" | **Billing** — e-filing is a separate add-on in some states | Check billing subscription for tax add-on charges |
+
+## Cross-References
+
 - **[Payroll](payroll.md)** — Payroll tax issues (withholding, filings, W-2s) are in the payroll category, not here
 - **[Reports](reports.md)** — Tax reports must match the basis (cash vs accrual) used for filing
 - **[Reconciliation](reconciliation.md)** — Tax payments should be reconciled against the bank feed
