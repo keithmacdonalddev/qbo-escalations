@@ -22,7 +22,7 @@ chatRouter.post('/', async (req, res) => {
     }
   } else {
     conversation = new Conversation({
-      title: message ? message.slice(0, 80) : 'Image Upload',
+      title: message ? message.slice(0, 80) : 'Screenshot Analysis — ' + new Date().toLocaleDateString(),
       messages: [],
     });
     await conversation.save();
