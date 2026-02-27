@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 
-export default function ChatMessage({ role, content, images, timestamp, isStreaming }) {
+export default function ChatMessage({ role, content, images, timestamp, isStreaming, responseTimeMs }) {
   const bubbleClass = role === 'user'
     ? 'chat-bubble chat-bubble-user'
     : role === 'system'
@@ -51,13 +51,24 @@ export default function ChatMessage({ role, content, images, timestamp, isStream
         </div>
       )}
 
-      {timestamp && (
+      {(timestamp || responseTimeMs) && (
         <div className="chat-bubble-meta">
-          {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {timestamp && new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {responseTimeMs && role === 'assistant' && (
+            <span style={{ marginLeft: timestamp ? 'var(--sp-3)' : 0 }}>
+              {formatResponseTime(responseTimeMs)}
+            </span>
+          )}
         </div>
       )}
     </div>
   );
+}
+
+function formatResponseTime(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = (ms / 1000).toFixed(1);
+  return `${seconds}s`;
 }
 
 /**

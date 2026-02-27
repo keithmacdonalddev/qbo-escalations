@@ -62,7 +62,6 @@ router.post('/', async (req, res) => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
   }, 15000);
 
-  let fullResponse = '';
   let cleanupFn = null;
 
   cleanupFn = claude.chat({
@@ -70,7 +69,6 @@ router.post('/', async (req, res) => {
     systemPrompt: systemPrompt,
     images: images,
     onChunk: (text) => {
-      fullResponse += text;
       try {
         res.write('event: chunk\ndata: ' + JSON.stringify({ text }) + '\n\n');
       } catch { /* client disconnected */ }
@@ -81,7 +79,7 @@ router.post('/', async (req, res) => {
       // Save assistant response to conversation
       conversation.messages.push({
         role: 'assistant',
-        content: response || fullResponse,
+        content: response,
         timestamp: new Date(),
       });
 
@@ -98,7 +96,7 @@ router.post('/', async (req, res) => {
       try {
         res.write('event: done\ndata: ' + JSON.stringify({
           conversationId: conversation._id.toString(),
-          fullResponse: response || fullResponse,
+          fullResponse: response,
         }) + '\n\n');
         res.end();
       } catch { /* client gone */ }
@@ -132,14 +130,19 @@ router.post('/parse-escalation', async (req, res) => {
   res.json({ ok: true, escalation });
 });
 
-// GET /api/conversations -- List conversations
+// GET /api/conversations -- List conversations (with optional search)
 router.get('/conversations', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-  const offset = parseInt(req.query.offset) || 0;
+  const skip = parseInt(req.query.skip) || parseInt(req.query.offset) || 0;
+  const search = (req.query.search || '').trim();
 
-  const conversations = await Conversation.find()
+  const filter = search
+    ? { title: { $regex: search, $options: 'i' } }
+    : {};
+
+  const conversations = await Conversation.find(filter)
     .sort({ updatedAt: -1 })
-    .skip(offset)
+    .skip(skip)
     .limit(limit)
     .lean();
 
@@ -163,7 +166,7 @@ router.get('/conversations', async (req, res) => {
     };
   });
 
-  const total = await Conversation.countDocuments();
+  const total = await Conversation.countDocuments(filter);
   res.json({ ok: true, conversations: items, total });
 });
 
@@ -174,6 +177,133 @@ router.get('/conversations/:id', async (req, res) => {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
   }
   res.json({ ok: true, conversation });
+});
+
+// PATCH /api/conversations/:id -- Update conversation (rename, link to escalation)
+router.patch('/conversations/:id', async (req, res) => {
+  const { title, escalationId } = req.body;
+  const update = {};
+  if (typeof title === 'string') update.title = title.slice(0, 200);
+  if (escalationId !== undefined) update.escalationId = escalationId || null;
+
+  if (Object.keys(update).length === 0) {
+    return res.status(400).json({ ok: false, code: 'NO_FIELDS', error: 'No fields to update' });
+  }
+
+  const conversation = await Conversation.findByIdAndUpdate(
+    req.params.id,
+    { $set: update },
+    { new: true }
+  ).lean();
+
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+  res.json({ ok: true, conversation });
+});
+
+// GET /api/conversations/:id/export -- Export conversation as plain text
+router.get('/conversations/:id/export', async (req, res) => {
+  const conversation = await Conversation.findById(req.params.id).lean();
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+
+  const lines = [
+    `Conversation: ${conversation.title}`,
+    `Date: ${new Date(conversation.createdAt).toLocaleString()}`,
+    `Messages: ${conversation.messages.length}`,
+    '---',
+    '',
+  ];
+
+  for (const msg of conversation.messages) {
+    const label = msg.role === 'user' ? 'Agent' : msg.role === 'assistant' ? 'Claude' : 'System';
+    const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
+    lines.push(`[${label}] ${time}`);
+    lines.push(msg.content);
+    lines.push('');
+  }
+
+  const text = lines.join('\n');
+  res.json({ ok: true, text });
+});
+
+// POST /api/chat/retry -- Retry last message in a conversation (removes bad assistant response, re-sends)
+router.post('/retry', async (req, res) => {
+  const { conversationId } = req.body;
+  if (!conversationId) {
+    return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
+  }
+
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+
+  // Remove the last assistant message if it exists
+  if (conversation.messages.length > 0) {
+    const lastMsg = conversation.messages[conversation.messages.length - 1];
+    if (lastMsg.role === 'assistant') {
+      conversation.messages.pop();
+      await conversation.save();
+    }
+  }
+
+  // Find the last user message to re-send
+  const lastUserMsg = [...conversation.messages].reverse().find((m) => m.role === 'user');
+  if (!lastUserMsg) {
+    return res.status(400).json({ ok: false, code: 'NO_USER_MSG', error: 'No user message to retry' });
+  }
+
+  // Set up SSE and re-run the chat flow
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  res.write('event: start\ndata: ' + JSON.stringify({ conversationId: conversation._id.toString(), retry: true }) + '\n\n');
+
+  const systemPrompt = getSystemPrompt();
+  const messagesForClaude = conversation.messages.map((m) => ({ role: m.role, content: m.content }));
+
+  const heartbeat = setInterval(() => {
+    try { res.write(':heartbeat\n\n'); } catch { /* gone */ }
+  }, 15000);
+
+  let cleanupFn = null;
+
+  cleanupFn = claude.chat({
+    messages: messagesForClaude,
+    systemPrompt: systemPrompt,
+    images: lastUserMsg.images || [],
+    onChunk: (text) => {
+      try { res.write('event: chunk\ndata: ' + JSON.stringify({ text }) + '\n\n'); } catch { /* gone */ }
+    },
+    onDone: async (response) => {
+      clearInterval(heartbeat);
+      conversation.messages.push({ role: 'assistant', content: response, timestamp: new Date() });
+      await conversation.save();
+      try {
+        res.write('event: done\ndata: ' + JSON.stringify({ conversationId: conversation._id.toString(), fullResponse: response }) + '\n\n');
+        res.end();
+      } catch { /* gone */ }
+    },
+    onError: (err) => {
+      clearInterval(heartbeat);
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+        res.end();
+      } catch { /* gone */ }
+    },
+  });
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    if (cleanupFn) cleanupFn();
+  });
 });
 
 // DELETE /api/conversations/:id -- Delete conversation

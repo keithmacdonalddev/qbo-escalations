@@ -8,7 +8,9 @@ export function useChat() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [error, setError] = useState(null);
+  const [responseTime, setResponseTime] = useState(null); // ms for last response
   const abortRef = useRef(null);
+  const startTimeRef = useRef(null);
 
   // Load conversation list
   const loadConversations = useCallback(async () => {
@@ -52,6 +54,8 @@ export function useChat() {
     setError(null);
     setIsStreaming(true);
     setStreamingText('');
+    setResponseTime(null);
+    startTimeRef.current = Date.now();
 
     // Optimistically add user message
     const userMsg = { role: 'user', content: text.trim(), images, timestamp: new Date().toISOString() };
@@ -67,12 +71,15 @@ export function useChat() {
           setStreamingText(prev => prev + data.text);
         },
         onDone: (data) => {
+          const elapsed = startTimeRef.current ? Date.now() - startTimeRef.current : null;
+          setResponseTime(elapsed);
           setStreamingText(prev => {
             // Finalize: add assistant message from accumulated text
             setMessages(msgs => [...msgs, {
               role: 'assistant',
               content: prev,
               timestamp: new Date().toISOString(),
+              responseTimeMs: elapsed,
             }]);
             return '';
           });
@@ -118,6 +125,7 @@ export function useChat() {
     isStreaming,
     streamingText,
     error,
+    responseTime,
     sendMessage,
     abortStream,
     selectConversation,

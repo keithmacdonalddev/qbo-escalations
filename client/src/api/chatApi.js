@@ -61,9 +61,11 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError }) {
   return { abort: () => controller.abort() };
 }
 
-/** List conversations */
-export async function listConversations(limit = 50, skip = 0) {
-  const res = await fetch(`${BASE}/conversations?limit=${limit}&skip=${skip}`);
+/** List conversations (with optional search) */
+export async function listConversations(limit = 50, skip = 0, search = '') {
+  const params = new URLSearchParams({ limit, skip });
+  if (search) params.set('search', search);
+  const res = await fetch(`${BASE}/conversations?${params}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to list conversations');
   return data.conversations;
@@ -77,10 +79,43 @@ export async function getConversation(id) {
   return data.conversation;
 }
 
+/** Rename or update a conversation */
+export async function updateConversation(id, fields) {
+  const res = await fetch(`${BASE}/conversations/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to update');
+  return data.conversation;
+}
+
+/** Export conversation as plain text */
+export async function exportConversation(id) {
+  const res = await fetch(`${BASE}/conversations/${id}/export`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to export');
+  return data.text;
+}
+
 /** Delete a conversation */
 export async function deleteConversation(id) {
   const res = await fetch(`${BASE}/conversations/${id}`, { method: 'DELETE' });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to delete');
   return data;
+}
+
+/** Parse escalation from image or text */
+export async function parseEscalation(input) {
+  const body = input.startsWith('data:image') ? { image: input } : { text: input };
+  const res = await fetch(`${BASE}/chat/parse-escalation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to parse');
+  return data.escalation;
 }
