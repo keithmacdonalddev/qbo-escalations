@@ -1,6 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { transitions, fadeSlideUp } from '../utils/motion.js';
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -61,7 +59,6 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) 
   const leftPct = ((req.startTime - windowStart) / windowDuration) * 100;
   const totalPct = ((effectiveEnd - req.startTime) / windowDuration) * 100;
 
-  // TTFB portion — from start to headersTime
   const ttfbPct = req.headersTime
     ? ((req.headersTime - req.startTime) / windowDuration) * 100
     : 0;
@@ -74,7 +71,6 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) 
 
   return (
     <div className={`wf-row${isActive ? ' wf-row--active' : ''}${isSlow ? ' wf-row--slow' : ''}`}>
-      {/* Label column */}
       <div className="wf-label">
         <span className={`wf-method ${METHOD_CLASSES[req.method] || ''}`}>
           {req.method}
@@ -86,20 +82,13 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) 
           {req.status || '\u2026'}
         </span>
       </div>
-
-      {/* Track column */}
       <div className="wf-track">
-        {/* TTFB bar (lighter) */}
         {ttfbPct > 0.2 && (
           <div
             className="wf-bar wf-bar--ttfb"
-            style={{
-              left: `${leftPct}%`,
-              width: `${ttfbPct}%`,
-            }}
+            style={{ left: `${leftPct}%`, width: `${ttfbPct}%` }}
           />
         )}
-        {/* Body / stream bar */}
         <div
           className={`wf-bar${isActive ? ' wf-bar--pulse' : ''}`}
           style={{
@@ -108,7 +97,6 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) 
             backgroundColor: barColor,
           }}
         />
-        {/* Duration */}
         <span
           className="wf-duration"
           style={{ left: `${Math.min(leftPct + totalPct + 0.5, 95)}%` }}
@@ -130,7 +118,6 @@ function GroupedRow({ group, maxDuration }) {
 
   return (
     <div className={`wf-row${group.active > 0 ? ' wf-row--active' : ''}`}>
-      {/* Label column */}
       <div className="wf-label">
         <span className={`wf-method ${METHOD_CLASSES[group.method] || ''}`}>
           {group.method}
@@ -140,15 +127,11 @@ function GroupedRow({ group, maxDuration }) {
         </span>
         <span className="wf-group-count">{group.count}x</span>
       </div>
-
-      {/* Track column — min/avg/max range bar */}
       <div className="wf-track">
-        {/* Range bar: min to max */}
         <div
           className="wf-bar wf-bar--ttfb"
           style={{ left: `${minPct}%`, width: `${Math.max(maxPct - minPct, 0.5)}%` }}
         />
-        {/* Avg marker */}
         <div
           className="wf-bar"
           style={{
@@ -157,7 +140,6 @@ function GroupedRow({ group, maxDuration }) {
             backgroundColor: group.active > 0 ? STATE_COLORS.streaming : STATE_COLORS.complete,
           }}
         />
-        {/* Labels */}
         <span className="wf-duration wf-duration--grouped">
           {formatDuration(group.min)} / {formatDuration(group.avg)} / {formatDuration(group.max)}
         </span>
@@ -180,8 +162,7 @@ function groupRequests(requests, now) {
     g.count++;
     const isActive = req.state === 'pending' || req.state === 'streaming' || req.state === 'headers';
     if (isActive) g.active++;
-    const dur = (req.endTime || now) - req.startTime;
-    g.durations.push(dur);
+    g.durations.push((req.endTime || now) - req.startTime);
   }
 
   const groups = [];
@@ -199,30 +180,26 @@ function groupRequests(requests, now) {
     });
   }
 
-  // Sort by count descending — chattiest endpoints first
   groups.sort((a, b) => b.count - a.count);
   return groups;
 }
 
-// ── RequestWaterfall ─────────────────────────────────────────
+// ── RequestWaterfall (content — no collapse wrapper) ─────────
 
 export default function RequestWaterfall({
   requests, clearRequests, enabled, setEnabled,
   slowThreshold, setSlowThreshold, persist, setPersist,
 }) {
-  const [collapsed, setCollapsed] = useState(true);
-  const [viewMode, setViewMode] = useState('timeline'); // 'timeline' | 'grouped'
-  const bodyRef = useRef(null);
+  const [viewMode, setViewMode] = useState('timeline');
+  const rowsRef = useRef(null);
 
   const activeCount = useMemo(
     () => requests.filter(r => r.state === 'pending' || r.state === 'streaming' || r.state === 'headers').length,
     [requests],
   );
 
-  // Only run animation frames when panel is open and there are active requests
-  const now = useAnimationFrame(!collapsed && activeCount > 0);
+  const now = useAnimationFrame(activeCount > 0);
 
-  // Grouped view data
   const groups = useMemo(
     () => viewMode === 'grouped' ? groupRequests(requests, now) : [],
     [requests, now, viewMode],
@@ -232,16 +209,15 @@ export default function RequestWaterfall({
     [groups],
   );
 
-  // Auto-scroll to newest when a new request appears (timeline only)
+  // Auto-scroll to newest
   const prevLenRef = useRef(requests.length);
   useEffect(() => {
-    if (viewMode === 'timeline' && requests.length > prevLenRef.current && bodyRef.current) {
-      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+    if (viewMode === 'timeline' && requests.length > prevLenRef.current && rowsRef.current) {
+      rowsRef.current.scrollTop = rowsRef.current.scrollHeight;
     }
     prevLenRef.current = requests.length;
   }, [requests.length, viewMode]);
 
-  // Time window for bar positioning (timeline)
   const windowStart = requests.length > 0
     ? Math.min(...requests.map(r => r.startTime))
     : 0;
@@ -251,132 +227,89 @@ export default function RequestWaterfall({
   const windowDuration = (windowEnd - windowStart) || 1;
 
   return (
-    <div className="wf">
-      {/* Toggle bar */}
-      <button
-        className="wf-toggle"
-        onClick={() => setCollapsed(c => !c)}
-        type="button"
-        aria-expanded={!collapsed}
-        aria-label="Toggle request waterfall"
-      >
-        <svg
-          className={`wf-chevron${collapsed ? '' : ' wf-chevron--open'}`}
-          width="12" height="12" viewBox="0 0 12 12"
-          fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        >
-          <polyline points="3 5 6 8 9 5" />
-        </svg>
-        <span className="wf-toggle-label">Network</span>
-        {requests.length > 0 && (
-          <span className="wf-count">{requests.length}</span>
-        )}
-        {activeCount > 0 && (
-          <span className="wf-active-badge">{activeCount} active</span>
-        )}
-      </button>
-
-      {/* Collapsible body */}
-      <AnimatePresence>
-        {!collapsed && (
-          <motion.div
-            className="wf-body"
-            ref={bodyRef}
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={transitions.fast}
+    <div className="wf-sidebar-content">
+      {/* Toolbar */}
+      <div className="wf-toolbar">
+        <div className="wf-view-toggle">
+          <button
+            className={`wf-view-btn${viewMode === 'timeline' ? ' wf-view-btn--active' : ''}`}
+            onClick={() => setViewMode('timeline')}
+            type="button"
           >
-            {/* Toolbar */}
-            <div className="wf-toolbar">
-              <div className="wf-view-toggle">
-                <button
-                  className={`wf-view-btn${viewMode === 'timeline' ? ' wf-view-btn--active' : ''}`}
-                  onClick={() => setViewMode('timeline')}
-                  type="button"
-                >
-                  Timeline
-                </button>
-                <button
-                  className={`wf-view-btn${viewMode === 'grouped' ? ' wf-view-btn--active' : ''}`}
-                  onClick={() => setViewMode('grouped')}
-                  type="button"
-                >
-                  Grouped
-                </button>
-              </div>
-              <label className="wf-record-toggle">
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  onChange={e => setEnabled(e.target.checked)}
-                />
-                Record
-              </label>
-              <label className="wf-record-toggle" title="Persist request history across page reloads">
-                <input
-                  type="checkbox"
-                  checked={persist}
-                  onChange={e => setPersist(e.target.checked)}
-                />
-                Persist
-              </label>
-              <div className="wf-slow-input" title="Highlight requests slower than this threshold">
-                <span>Slow:</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="100"
-                  value={slowThreshold}
-                  onChange={e => setSlowThreshold(Math.max(0, Number(e.target.value) || 0))}
-                />
-                <span>ms</span>
-              </div>
-              <button
-                className="wf-clear-btn"
-                onClick={clearRequests}
-                type="button"
-                disabled={requests.length === 0}
-              >
-                Clear
-              </button>
-            </div>
+            Timeline
+          </button>
+          <button
+            className={`wf-view-btn${viewMode === 'grouped' ? ' wf-view-btn--active' : ''}`}
+            onClick={() => setViewMode('grouped')}
+            type="button"
+          >
+            Grouped
+          </button>
+        </div>
+        <div className="wf-toolbar-row">
+          <label className="wf-record-toggle">
+            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+            Record
+          </label>
+          <label className="wf-record-toggle" title="Persist request history across page reloads">
+            <input type="checkbox" checked={persist} onChange={e => setPersist(e.target.checked)} />
+            Persist
+          </label>
+        </div>
+        <div className="wf-toolbar-row">
+          <div className="wf-slow-input" title="Highlight requests slower than this threshold">
+            <span>Slow:</span>
+            <input
+              type="number"
+              min="0"
+              step="100"
+              value={slowThreshold}
+              onChange={e => setSlowThreshold(Math.max(0, Number(e.target.value) || 0))}
+            />
+            <span>ms</span>
+          </div>
+          <button
+            className="wf-clear-btn"
+            onClick={clearRequests}
+            type="button"
+            disabled={requests.length === 0}
+          >
+            Clear
+          </button>
+        </div>
+      </div>
 
-            {/* Rows */}
-            {requests.length === 0 ? (
-              <div className="wf-empty">No requests recorded</div>
-            ) : viewMode === 'timeline' ? (
-              <div className="wf-rows">
-                {requests.map(req => (
-                  <WaterfallRow
-                    key={req.id}
-                    req={req}
-                    windowStart={windowStart}
-                    windowDuration={windowDuration}
-                    now={now}
-                    slowThreshold={slowThreshold}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="wf-rows">
-                {groups.map(group => (
-                  <GroupedRow
-                    key={group.key}
-                    group={group}
-                    maxDuration={maxGroupDuration}
-                  />
-                ))}
-              </div>
-            )}
+      {/* Rows */}
+      {requests.length === 0 ? (
+        <div className="wf-empty">No requests recorded</div>
+      ) : viewMode === 'timeline' ? (
+        <div className="wf-rows" ref={rowsRef}>
+          {requests.map(req => (
+            <WaterfallRow
+              key={req.id}
+              req={req}
+              windowStart={windowStart}
+              windowDuration={windowDuration}
+              now={now}
+              slowThreshold={slowThreshold}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="wf-rows" ref={rowsRef}>
+          {groups.map(group => (
+            <GroupedRow
+              key={group.key}
+              group={group}
+              maxDuration={maxGroupDuration}
+            />
+          ))}
+        </div>
+      )}
 
-            {/* Grouped view legend */}
-            {viewMode === 'grouped' && groups.length > 0 && (
-              <div className="wf-legend">min / avg / max</div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {viewMode === 'grouped' && groups.length > 0 && (
+        <div className="wf-legend">min / avg / max</div>
+      )}
     </div>
   );
 }

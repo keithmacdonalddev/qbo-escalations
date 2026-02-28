@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import ChatMessage from './ChatMessage.jsx';
 import Tooltip from './Tooltip.jsx';
 import RequestWaterfall from './RequestWaterfall.jsx';
+import RightSidebar from './RightSidebar.jsx';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -68,6 +69,12 @@ export default function DevMode({
   const [composeFocused, setComposeFocused] = useState(false);
   const [showProviderPopover, setShowProviderPopover] = useState(false);
   const [images, setImages] = useState([]);
+  const [networkOpen, setNetworkOpen] = useState(false);
+
+  const networkActiveCount = useMemo(
+    () => waterfall ? waterfall.requests.filter(r => r.state === 'pending' || r.state === 'streaming' || r.state === 'headers').length : 0,
+    [waterfall?.requests],
+  );
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -196,7 +203,22 @@ export default function DevMode({
           </span>
           <span className="dev-badge">{getProviderLabel(provider)}</span>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          {waterfall && (
+            <button
+              className={`dev-topbar-btn${networkOpen ? ' is-active' : ''}`}
+              onClick={() => setNetworkOpen(o => !o)}
+              type="button"
+              title="Toggle network waterfall"
+              aria-label="Toggle network waterfall"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+              {networkActiveCount > 0 && <span className="dev-topbar-dot" />}
+            </button>
+          )}
+        </div>
       </div>
 
       {fallbackNotice && (
@@ -339,9 +361,6 @@ export default function DevMode({
 
             <div ref={messagesEndRef} />
           </div>
-
-          {/* Request waterfall — collapsible network timing panel */}
-          {waterfall && <RequestWaterfall {...waterfall} />}
 
           {/* Input area — Compose Card */}
           <div className="chat-input-area">
@@ -580,6 +599,28 @@ export default function DevMode({
           </div>
         </div>
       </div>
+
+      {/* Network waterfall — right sidebar overlay */}
+      {waterfall && (
+        <RightSidebar
+          open={networkOpen}
+          onClose={() => setNetworkOpen(false)}
+          title="Network"
+          width={380}
+          badge={
+            <>
+              {waterfall.requests.length > 0 && (
+                <span className="wf-count">{waterfall.requests.length}</span>
+              )}
+              {networkActiveCount > 0 && (
+                <span className="wf-active-badge">{networkActiveCount} active</span>
+              )}
+            </>
+          }
+        >
+          <RequestWaterfall {...waterfall} />
+        </RightSidebar>
+      )}
     </div>
   );
 }
