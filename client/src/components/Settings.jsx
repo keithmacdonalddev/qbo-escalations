@@ -578,9 +578,79 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   />
                   <span>Expand sidebar on hover when collapsed</span>
                 </label>
-                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 'var(--sp-1)', lineHeight: 1.5 }}>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 'var(--sp-1)', lineHeight: 1.5, marginBottom: 'var(--sp-4)' }}>
                   When enabled, hovering over the collapsed sidebar will temporarily reveal its full contents.
                   Moving the cursor away slides it back to collapsed.
+                </div>
+                <label className="settings-ai-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutProps.sidebarShowLabels}
+                    onChange={(e) => layoutProps.setSidebarShowLabels(e.target.checked)}
+                  />
+                  <span>Show icon labels when collapsed</span>
+                </label>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 'var(--sp-1)', lineHeight: 1.5 }}>
+                  Display short text labels (Chat, Dash, Dev, etc.) below each navigation icon in the collapsed sidebar.
+                </div>
+              </div>
+            </div>
+
+            {/* Network Indicator */}
+            <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
+              <h3 className="settings-ai-title">Network Indicator</h3>
+              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', lineHeight: 1.5, marginBottom: 'var(--sp-3)' }}>
+                The edge tab on the right side of the viewport shows a live activity indicator when API requests are in flight.
+              </p>
+              <div className="settings-ai-fields">
+                {/* Mode toggle */}
+                <div style={{ marginBottom: 'var(--sp-3)' }}>
+                  <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Indicator style</span>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
+                    Choose how active requests are indicated on the network tab.
+                  </div>
+                  <div className="settings-filter-bar" role="group" aria-label="LED indicator style" style={{ marginBottom: 0 }}>
+                    {[
+                      { value: 'dot', label: 'LED Dot', desc: 'Glowing dot above the icon' },
+                      { value: 'icon', label: 'Icon Glow', desc: 'The waveform icon itself lights up' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        className={`settings-filter-btn${layoutProps.ledMode === opt.value ? ' is-active' : ''}`}
+                        onClick={() => layoutProps.setLedMode(opt.value)}
+                        type="button"
+                        title={opt.desc}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Intensity slider */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Glow intensity</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
+                      {layoutProps.ledIntensity}%
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
+                    Controls the brightness of the glow and shadow radius. Lower values give a subtle hint, higher values make it unmissable.
+                  </div>
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    step="5"
+                    value={layoutProps.ledIntensity}
+                    onChange={(e) => layoutProps.setLedIntensity(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--accent)' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 2 }}>
+                    <span>Subtle</span>
+                    <span>Bright</span>
+                  </div>
                 </div>
               </div>
             </div>

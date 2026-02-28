@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Profiler } from 'react';
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'framer-motion';
 import { transitions, fade } from './utils/motion.js';
 import Sidebar from './components/Sidebar.jsx';
@@ -20,6 +20,8 @@ import useAiSettings from './hooks/useAiSettings.js';
 import { useChat } from './hooks/useChat.js';
 import { useDevChat } from './hooks/useDevChat.js';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
+import { useRenderFlame } from './hooks/useRenderFlame.js';
+import FlameBar from './components/FlameBar.jsx';
 
 function parseHashRoute() {
   const hash = window.location.hash || '#/chat';
@@ -49,13 +51,27 @@ function App() {
   const [sidebarHoverExpand, setSidebarHoverExpand] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sidebarHoverExpand')) ?? true; } catch { return true; }
   });
+  const [sidebarShowLabels, setSidebarShowLabels] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sidebarShowLabels')) ?? false; } catch { return false; }
+  });
+  // Network indicator settings: intensity 0-100, mode 'dot' | 'icon'
+  const [ledIntensity, setLedIntensity] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ledIntensity')) ?? 70; } catch { return 70; }
+  });
+  const [ledMode, setLedMode] = useState(() => {
+    try { return localStorage.getItem('ledMode') || 'dot'; } catch { return 'dot'; }
+  });
   useEffect(() => { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); }, [sidebarHoverExpand]);
+  useEffect(() => { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); }, [sidebarShowLabels]);
+  useEffect(() => { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); }, [ledIntensity]);
+  useEffect(() => { localStorage.setItem('ledMode', ledMode); }, [ledMode]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
   const aiProps = useAiSettings();
   const chat = useChat({ aiSettings: aiProps.aiSettings });
   const devChat = useDevChat();
   const waterfall = useRequestWaterfall();
+  const flame = useRenderFlame();
   const [networkOpen, setNetworkOpen] = useState(false);
   const networkActiveCount = useMemo(
     () => waterfall.requests.filter(r => r.state === 'pending' || r.state === 'streaming' || r.state === 'headers').length,
@@ -136,19 +152,23 @@ function App() {
       case 'settings':
         return (
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode }} />
           </motion.div>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand]);
+  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels]);
 
   const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings';
 
   return (
+    <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
     <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
+      {/* Render flame bar — dev only */}
+      {import.meta.env.DEV && <FlameBar {...flame} />}
+
       {/* Mobile sidebar toggle */}
       <button
         className="btn btn-ghost btn-icon sidebar-toggle"
@@ -185,6 +205,7 @@ function App() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         hoverExpand={sidebarHoverExpand}
+        showLabels={sidebarShowLabels}
       />
 
       <main
@@ -265,18 +286,19 @@ function App() {
 
       {/* Network waterfall — edge tab + right sidebar overlay */}
       <button
-        className={`network-edge-tab${networkOpen ? ' is-active' : ''}`}
+        className={`network-edge-tab${networkOpen ? ' is-active' : ''}${networkActiveCount > 0 && ledMode === 'icon' ? ' led-icon-glow' : ''}`}
+        style={{ '--led-intensity': ledIntensity / 100 }}
         onClick={() => setNetworkOpen(o => !o)}
         type="button"
         aria-label="Toggle network waterfall"
       >
-        {networkActiveCount > 0 && <span className="network-edge-dot" />}
+        {networkActiveCount > 0 && ledMode === 'dot' && <span className="network-edge-dot" />}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
         </svg>
         <span className="network-edge-tooltip">
           <div className="tooltip-title">Network Waterfall</div>
-          <div className="tooltip-desc">Monitor API request timing</div>
+          <div className="tooltip-desc">Monitor API request timing and spot pileups without browser DevTools.</div>
           <div className="tooltip-status">
             <span className={`tooltip-dot${networkActiveCount === 0 ? ' tooltip-dot--idle' : ''}`} />
             {networkActiveCount > 0
@@ -284,6 +306,11 @@ function App() {
               : waterfall.requests.length > 0
                 ? `${waterfall.requests.length} recorded`
                 : 'No activity'}
+          </div>
+          <div className="tooltip-legend">
+            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--active" />Glowing = requests in flight</div>
+            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--idle" />Dim = idle, no active requests</div>
+            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--error" />Red = errors detected</div>
           </div>
         </span>
       </button>
@@ -308,6 +335,7 @@ function App() {
       </RightSidebar>
     </div>
     </MotionConfig>
+    </Profiler>
   );
 }
 
