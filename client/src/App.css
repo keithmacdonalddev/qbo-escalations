@@ -5581,26 +5581,57 @@ textarea {
 .flame-dot--amber { background: #fbbf24; }
 .flame-dot--red   { background: #f87171; }
 
-/* Toggle button */
-.flame-toggle {
+/* Controls group */
+.flame-controls {
   position: fixed;
   top: 6px;
   right: 56px;
   z-index: 100000;
+  display: flex;
+  gap: 2px;
+  transition: top 150ms ease;
+}
+.flame-controls--shifted { top: 34px; }
+
+.flame-ctrl-btn {
   background: var(--bg-raised);
   border: 1px solid var(--line);
   color: var(--ink-secondary);
   font-size: 11px;
   font-family: var(--font-mono);
-  padding: 4px 10px;
-  border-radius: 6px;
+  padding: 4px 8px;
   cursor: pointer;
   transition: all 150ms ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  line-height: 1;
 }
-.flame-toggle:hover {
+.flame-ctrl-btn { border-radius: 0; }
+.flame-ctrl-btn:first-child { border-radius: 6px 0 0 6px; }
+.flame-ctrl-btn:last-child  { border-radius: 0 6px 6px 0; }
+.flame-ctrl-btn + .flame-ctrl-btn { border-left: none; }
+.flame-ctrl-btn:hover {
   color: var(--ink);
   background: var(--bg);
   border-color: var(--accent);
 }
-.flame-toggle--shifted { top: 34px; }
+.flame-ctrl-btn--active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-raised));
+}
+
+/* Paused badge */
+.flame-paused-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  animation: flame-paused-blink 1.5s ease-in-out infinite;
+}
+@keyframes flame-paused-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

@@ -25,29 +25,38 @@ function getTier(ms) {
  */
 export function useRenderFlame() {
   if (!import.meta.env.DEV) {
-    return { onRender: () => {}, segments: [], stats: { green: 0, amber: 0, red: 0, avg: '0' }, expanded: false, toggleExpanded: () => {} };
+    return { onRender: () => {}, segments: [], stats: { green: 0, amber: 0, red: 0, avg: '0' }, expanded: false, toggleExpanded: () => {}, paused: false, togglePaused: () => {}, clearAll: () => {} };
   }
 
   const [segments, setSegments] = useState([]);
   const [expanded, setExpanded] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) ?? false; } catch { return false; }
   });
+  const [paused, setPaused] = useState(false);
 
   // Mutable buffer — onRender writes here, interval reads it
   const bufferRef = useRef([]);
   const countsRef = useRef({ green: 0, amber: 0, red: 0, total: 0, totalMs: 0 });
   const nextIdRef = useRef(1);
   const dirtyRef = useRef(false);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(expanded)); } catch {}
   }, [expanded]);
 
   const toggleExpanded = useCallback(() => setExpanded(prev => !prev), []);
+  const togglePaused = useCallback(() => {
+    setPaused(prev => {
+      pausedRef.current = !prev;
+      return !prev;
+    });
+  }, []);
 
   // onRender: ONLY mutates refs. Never calls setState. Never schedules rAF.
   // This is the key to avoiding the feedback loop.
   const onRender = useCallback((_profilerId, phase, actualDuration) => {
+    if (pausedRef.current) return;
     const tier = getTier(actualDuration);
     const id = nextIdRef.current++;
     const width = Math.max(3, Math.min(40, actualDuration * 1.5));
@@ -73,6 +82,9 @@ export function useRenderFlame() {
       const buf = bufferRef.current;
       const now = Date.now();
 
+      // When paused, skip lifecycle aging and flush — freeze segments in place
+      if (pausedRef.current) return;
+
       // Apply lifecycle in-place
       let changed = dirtyRef.current;
       for (let i = buf.length - 1; i >= 0; i--) {
@@ -97,6 +109,13 @@ export function useRenderFlame() {
     return () => clearInterval(tid);
   }, []);
 
+  const clearAll = useCallback(() => {
+    bufferRef.current.length = 0;
+    countsRef.current = { green: 0, amber: 0, red: 0, total: 0, totalMs: 0 };
+    dirtyRef.current = false;
+    setSegments([]);
+  }, []);
+
   const stats = {
     green: countsRef.current.green,
     amber: countsRef.current.amber,
@@ -106,5 +125,5 @@ export function useRenderFlame() {
       : '0',
   };
 
-  return { onRender, segments, stats, expanded, toggleExpanded };
+  return { onRender, segments, stats, expanded, toggleExpanded, paused, togglePaused, clearAll };
 }
