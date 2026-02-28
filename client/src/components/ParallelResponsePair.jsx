@@ -11,7 +11,7 @@ export default function ParallelResponsePair({
   onFork,
   accepting,
   isImageParseTurn,
-  discardedProvider,
+  discardedProviders = [],
 }) {
   const [activeTab, setActiveTab] = useState(0);
   const [undoToastVisible, setUndoToastVisible] = useState(false);
@@ -126,8 +126,8 @@ export default function ParallelResponsePair({
       {/* Context line */}
       {!hasAccepted && (
         <div className="parallel-context-line">
-          {sorted.map((r, idx) => (
-            <span key={r.provider} className="ctx-dot" style={{ background: idx === 0 ? 'var(--provider-a)' : 'var(--provider-b)' }} />
+          {sorted.map((r) => (
+            <span key={r.provider} className="ctx-dot" style={{ background: `var(--${getProviderClass(r.provider)})` }} />
           ))}
           <span>{sorted.length} responses — compare and accept one</span>
           {!sorted[0]?.isStreaming && (
@@ -159,7 +159,7 @@ export default function ParallelResponsePair({
           const provClass = getProviderClass(r.provider);
           const isAccepted = r.isAccepted;
           const isRejected = r.isRejected;
-          const isDiscarded = discardedProvider === r.provider;
+          const isDiscarded = discardedProviders?.includes(r.provider);
           const isAccepting = accepting === `${r.turnId}:${r.provider}`;
           const wc = wordCount(r.content);
 
@@ -301,10 +301,17 @@ export default function ParallelResponsePair({
 
       {/* Feature Accordion — only for image parse turns with at least 2 responses */}
       {isImageParseTurn && sorted.length >= 2 && !sorted[0]?.isStreaming && sorted[0]?.content && sorted[1]?.content && (
-        <FeatureAccordion
-          responseA={{ provider: sorted[0].provider, content: sorted[0].content, responseTimeMs: sorted[0].responseTimeMs }}
-          responseB={{ provider: sorted[1].provider, content: sorted[1].content, responseTimeMs: sorted[1].responseTimeMs }}
-        />
+        <>
+          {sorted.length > 2 && (
+            <div style={{ textAlign: 'center', fontSize: '11px', color: 'var(--ink-tertiary)', fontFamily: 'var(--font-mono)', margin: 'var(--sp-2) 0' }}>
+              Comparing first 2 of {sorted.length} responses ({getProviderLabel(sorted[0].provider)} vs {getProviderLabel(sorted[1].provider)})
+            </div>
+          )}
+          <FeatureAccordion
+            responseA={{ provider: sorted[0].provider, content: sorted[0].content, responseTimeMs: sorted[0].responseTimeMs }}
+            responseB={{ provider: sorted[1].provider, content: sorted[1].content, responseTimeMs: sorted[1].responseTimeMs }}
+          />
+        </>
       )}
     </div>
   );

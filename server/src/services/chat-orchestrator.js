@@ -326,7 +326,36 @@ function startChatOrchestration({
           ? [policy.primaryProvider, policy.fallbackProvider]
           : [policy.primaryProvider]);
 
-      const results = await Promise.all(providers.map((providerId) => runSingleAttempt(providerId)));
+      // Global parallel turn timeout: slightly longer than the longest per-provider timeout
+      // to give individual providers a chance to timeout first, with a buffer for cleanup.
+      const maxProviderTimeout = Math.max(...providers.map((p) => getEffectiveTimeoutMs(p)));
+      const globalTimeoutMs = maxProviderTimeout + 10000;
+      let globalTimeoutHandle = null;
+
+      const providerRace = Promise.all(providers.map((providerId) => runSingleAttempt(providerId)));
+      const globalTimeoutPromise = new Promise((resolve) => {
+        globalTimeoutHandle = setTimeout(() => {
+          // Abort any remaining active providers
+          for (const [, cancelFn] of activeCleanups) {
+            try { cancelFn(); } catch { /* ignore */ }
+          }
+          resolve('GLOBAL_TIMEOUT');
+        }, globalTimeoutMs);
+      });
+
+      const raceResult = await Promise.race([providerRace, globalTimeoutPromise]);
+
+      // Clear the global timeout if providers completed normally
+      if (globalTimeoutHandle) {
+        clearTimeout(globalTimeoutHandle);
+        globalTimeoutHandle = null;
+      }
+
+      // Collect results: either from normal completion or from allSettledResults after global timeout
+      const results = raceResult === 'GLOBAL_TIMEOUT'
+        ? allSettledResults.slice()
+        : raceResult;
+
       if (cancelled) return;
 
       const successful = [];

@@ -231,18 +231,18 @@ export const PROVIDER_LABELS = {
   'gpt-5-mini': 'GPT-5 Mini',
 };
 
-const PROVIDER_FAMILY = {
-  claude: 'claude',
-  'claude-sonnet-4-6': 'claude',
-  'chatgpt-5.3-codex-high': 'codex',
-  'gpt-5-mini': 'codex',
+const PROVIDER_CLASS_MAP = {
+  claude: 'provider-a',
+  'claude-sonnet-4-6': 'provider-c',
+  'chatgpt-5.3-codex-high': 'provider-b',
+  'gpt-5-mini': 'provider-d',
 };
 
 export function getProviderLabel(provider) {
+  if (provider === 'regex') return 'Regex Parser';
   return PROVIDER_LABELS[provider] || PROVIDER_LABELS.claude;
 }
 
 export function getProviderClass(provider) {
-  const family = PROVIDER_FAMILY[provider] || 'claude';
-  return family === 'claude' ? 'provider-a' : 'provider-b';
+  return PROVIDER_CLASS_MAP[provider] || 'provider-a';
 }

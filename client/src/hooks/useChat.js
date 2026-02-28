@@ -206,7 +206,7 @@ export function useChat(options = {}) {
     const valid = Array.isArray(nextProviders)
       ? nextProviders.filter(p => PROVIDERS.has(p))
       : [];
-    const unique = [...new Set(valid)];
+    const unique = [...new Set(valid)].slice(0, 4);
     parallelProvidersRef.current = unique;
     setParallelProvidersState(unique);
   }, []);
@@ -633,7 +633,7 @@ export function useChat(options = {}) {
     if (!conversationIdRef.current || isStreamingRef.current) return;
 
     const selectedProvider = normalizeProvider(providerOverride || providerRef.current);
-    const selectedMode = normalizeMode(modeRef.current);
+    const selectedMode = splitModeActiveRef.current ? 'parallel' : normalizeMode(modeRef.current);
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
 
     setError(null);

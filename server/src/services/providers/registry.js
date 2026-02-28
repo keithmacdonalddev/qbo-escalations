@@ -81,7 +81,9 @@ function isValidProvider(provider) {
 }
 
 function normalizeProvider(provider) {
-  return isValidProvider(provider) ? provider : DEFAULT_PROVIDER;
+  if (isValidProvider(provider)) return provider;
+  console.warn(`[registry] Unknown provider "${provider}", falling back to "${DEFAULT_PROVIDER}"`);
+  return DEFAULT_PROVIDER;
 }
 
 function getProvider(provider) {

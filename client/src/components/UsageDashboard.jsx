@@ -51,9 +51,10 @@ function daysAgoISO(n) {
 // ── Provider / service / status display ────────────────────────────────
 
 const PROVIDER_LABELS = {
-  claude: 'Claude',
-  'claude-sonnet-4-6': 'Claude',
+  claude: 'Claude (CLI)',
+  'claude-sonnet-4-6': 'Claude Sonnet',
   'chatgpt-5.3-codex-high': 'Codex',
+  'gpt-5-mini': 'GPT-5 Mini',
   codex: 'Codex',
 };
 
@@ -195,6 +196,7 @@ export default function UsageDashboard() {
     ? `${providerLabel(topProviderRow.provider)} (${totalRequests > 0 ? Math.round((topProviderRow.requests / totalRequests) * 100) : 0}%)`
     : '--';
   const usageCoverage = summary?.usageCoveragePercent ?? 0;
+  const usageCompleteCoverage = summary?.usageCompleteCoveragePercent ?? 0;
 
   // Trend chart max for bar scaling
   const maxTrendCost = trends.length > 0 ? Math.max(...trends.map(t => t.totalCostMicros || 0), 1) : 1;
@@ -248,7 +250,8 @@ export default function UsageDashboard() {
         <StatCard label="Requests Today" value={requestsToday != null ? requestsToday.toLocaleString() : '--'} />
         <StatCard label="Input : Output" value={formatRatio(summary?.totalInputTokens, summary?.totalOutputTokens)} />
         <StatCard label="Top Provider" value={topProvider} />
-        <StatCard label="Usage Coverage" value={`${usageCoverage}%`} accent />
+        <StatCard label="Data Captured" value={`${usageCoverage}%`} accent />
+        <StatCard label="Fully Costed" value={`${usageCompleteCoverage}%`} accent />
       </div>
 
       {/* Data Cards Grid */}
@@ -410,13 +413,14 @@ export default function UsageDashboard() {
                     <th style={{ textAlign: 'right' }}>Cost</th>
                     <th>Status</th>
                     <th style={{ textAlign: 'right' }}>Latency</th>
+                    <th style={{ textAlign: 'center' }}>Usage</th>
                   </tr>
                 </thead>
                 <tbody>
                   {recent.map((r) => (
                     <tr key={r.id} className={r.status !== 'ok' ? `usage-row-${r.status}` : ''}>
                       <td style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-xs)' }}>
-                        {new Date(r.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        {new Date(r.createdAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC' })}
                       </td>
                       <td><span className={serviceBadgeClass(r.service)}>{r.service}</span></td>
                       <td><span className={providerBadgeClass(r.provider)}>{providerLabel(r.provider)}</span></td>
@@ -426,6 +430,22 @@ export default function UsageDashboard() {
                       <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{formatCostPrecise(r.totalCostMicros)}</td>
                       <td><span className={statusBadgeClass(r.status)}>{r.status}</span></td>
                       <td style={{ textAlign: 'right' }}>{formatLatency(r.latencyMs)}</td>
+                      <td style={{ textAlign: 'center', fontSize: 'var(--text-xs)', whiteSpace: 'nowrap' }}>
+                        <span
+                          title={r.usageComplete ? 'Fully costed' : r.usageAvailable ? 'Data captured, not fully costed' : 'No usage data'}
+                          style={{
+                            display: 'inline-block',
+                            width: 8, height: 8,
+                            borderRadius: '50%',
+                            background: r.usageComplete ? 'var(--success, #22c55e)' : r.usageAvailable ? 'var(--warning, #f59e0b)' : 'var(--ink-tertiary)',
+                            marginRight: 4,
+                            verticalAlign: 'middle',
+                          }}
+                        />
+                        <span style={{ verticalAlign: 'middle' }}>
+                          {r.usageComplete ? 'Full' : r.usageAvailable ? 'Partial' : '--'}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

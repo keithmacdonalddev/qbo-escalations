@@ -605,11 +605,13 @@ function applyChatFeatureFlags(policy) {
     next.mode = 'single';
     next.primaryProvider = DEFAULT_PROVIDER;
     next.fallbackProvider = getAlternateProvider(DEFAULT_PROVIDER);
+    next.parallelProviders = null;
     return next;
   }
   if (!isChatFallbackModeEnabled() && next.mode === 'fallback') {
     next.mode = 'single';
     next.fallbackProvider = getAlternateProvider(next.primaryProvider);
+    next.parallelProviders = null;
   }
   return next;
 }
@@ -752,6 +754,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     if (!Array.isArray(parallelProviders)) {
       return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must be an array' });
     }
+    // Note: spec name PARALLEL_PROVIDER_LIMIT_EXCEEDED consolidated into PARALLEL_PROVIDER_COUNT_INVALID
     if (parallelProviders.length < 2 || parallelProviders.length > 4) {
       return res.status(400).json({ ok: false, code: 'PARALLEL_PROVIDER_COUNT_INVALID', error: 'parallelProviders must contain 2 to 4 providers' });
     }
@@ -831,6 +834,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       mode: guardrail.policyOverride.mode,
       primaryProvider: guardrail.policyOverride.primaryProvider,
       fallbackProvider: guardrail.policyOverride.fallbackProvider,
+      parallelProviders: guardrail.policyOverride.parallelProviders || policy.parallelProviders,
     }));
   }
 
@@ -1153,8 +1157,13 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     },
   });
 
-  // Clean up on client disconnect
-  req.on('close', () => {
+  // Clean up on client disconnect.
+  // NOTE: must use res.on('close'), NOT req.on('close'). By the time this
+  // async handler runs, Express has already consumed and closed the request
+  // body stream, so req's 'close' event has already fired before we can
+  // register a listener. The response stream's 'close' event correctly fires
+  // when the underlying TCP socket is torn down (e.g. client tab close).
+  res.on('close', () => {
     clearInterval(heartbeat);
     if (!streamSettled && cleanupFn) cleanupFn();
   });
@@ -1474,6 +1483,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     if (!Array.isArray(parallelProviders)) {
       return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must be an array' });
     }
+    // Note: spec name PARALLEL_PROVIDER_LIMIT_EXCEEDED consolidated into PARALLEL_PROVIDER_COUNT_INVALID
     if (parallelProviders.length < 2 || parallelProviders.length > 4) {
       return res.status(400).json({ ok: false, code: 'PARALLEL_PROVIDER_COUNT_INVALID', error: 'parallelProviders must contain 2 to 4 providers' });
     }
@@ -1558,6 +1568,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       mode: guardrail.policyOverride.mode,
       primaryProvider: guardrail.policyOverride.primaryProvider,
       fallbackProvider: guardrail.policyOverride.fallbackProvider,
+      parallelProviders: guardrail.policyOverride.parallelProviders || policy.parallelProviders,
     }));
   }
 
@@ -1636,6 +1647,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
 
   if (requestTurnId) {
     try {
+      // Expire any existing open parallel turns for this conversation before creating a new one
+      await ParallelCandidateTurn.updateMany(
+        { conversationId: conversation._id, status: 'open' },
+        { $set: { status: 'expired' } }
+      );
       const candidateProviders = policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider];
       await ParallelCandidateTurn.create({
         turnId: requestTurnId,
@@ -1861,7 +1877,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     },
   });
 
-  req.on('close', () => {
+  // See comment on main chat route — must use res.on('close') not req.on('close').
+  res.on('close', () => {
     clearInterval(heartbeat);
     if (!retryStreamSettled && cleanupFn) cleanupFn();
   });
@@ -2019,31 +2036,48 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
   conversation.set('messages', retainedMessages);
   await saveConversationLenient(conversation);
 
-  // Record model performance metrics (non-blocking)
+  // Record model performance metrics — one entry per losing provider (non-blocking)
   try {
     const ModelPerformance = require('../models/ModelPerformance');
     const turnDoc2 = await ParallelCandidateTurn.findOne({ turnId, conversationId: conversation._id }).lean();
     const candidates = turnDoc2 ? turnDoc2.candidates : [];
     const winnerCandidate = candidates.find(c => c.provider === provider);
-    const loserCandidate = candidates.find(c => c.provider !== provider);
+    const loserCandidates = candidates.filter(c => c.provider !== provider);
     const userMsgBefore = conversation.messages
       .slice(0, firstTurnIndex)
       .reverse()
       .find(m => m.role === 'user');
     const isImageParse = userMsgBefore && Array.isArray(userMsgBefore.images) && userMsgBefore.images.length > 0;
     const wc = (text) => text ? text.trim().split(/\s+/).filter(Boolean).length : 0;
-    await ModelPerformance.create({
-      turnId,
-      conversationId: conversation._id,
-      winnerProvider: provider,
-      loserProvider: loserCandidate ? loserCandidate.provider : (provider === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude'),
-      winnerLatencyMs: winnerCandidate ? winnerCandidate.latencyMs : 0,
-      loserLatencyMs: loserCandidate ? loserCandidate.latencyMs : 0,
-      winnerWordCount: wc(resolvedContent),
-      loserWordCount: loserCandidate ? wc(loserCandidate.content) : 0,
-      context: isImageParse ? 'image-parse' : 'general-chat',
-      decidedAt: acceptedAt,
-    });
+    for (const loser of loserCandidates) {
+      await ModelPerformance.create({
+        turnId,
+        conversationId: conversation._id,
+        winnerProvider: provider,
+        loserProvider: loser.provider,
+        winnerLatencyMs: winnerCandidate ? winnerCandidate.latencyMs : 0,
+        loserLatencyMs: loser.latencyMs || 0,
+        winnerWordCount: wc(resolvedContent),
+        loserWordCount: wc(loser.content),
+        context: isImageParse ? 'image-parse' : 'general-chat',
+        decidedAt: acceptedAt,
+      });
+    }
+    // Fallback: if no loser candidates found (e.g. missing turnDoc), create a single record
+    if (loserCandidates.length === 0) {
+      await ModelPerformance.create({
+        turnId,
+        conversationId: conversation._id,
+        winnerProvider: provider,
+        loserProvider: provider === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude',
+        winnerLatencyMs: winnerCandidate ? winnerCandidate.latencyMs : 0,
+        loserLatencyMs: 0,
+        winnerWordCount: wc(resolvedContent),
+        loserWordCount: 0,
+        context: isImageParse ? 'image-parse' : 'general-chat',
+        decidedAt: acceptedAt,
+      });
+    }
   } catch (_perfErr) {
     // Performance tracking must never break the accept flow
   }
@@ -2286,10 +2320,10 @@ chatRouter.post('/parallel/:turnId/unaccept', parallelDecisionRateLimit, async (
     }
   ).catch((err) => console.warn('ParallelCandidateTurn update failed (reset):', err.message));
 
-  // Remove the ModelPerformance record for this turn (non-blocking)
+  // Remove all ModelPerformance records for this turn (non-blocking)
   try {
     const ModelPerformance = require('../models/ModelPerformance');
-    await ModelPerformance.deleteOne({ turnId });
+    await ModelPerformance.deleteMany({ turnId });
   } catch (_e) { /* non-blocking */ }
 
   return res.json({

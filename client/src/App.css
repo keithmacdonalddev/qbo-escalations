@@ -60,7 +60,7 @@
   --danger-subtle: #fceae8;
   --info: #1a7a6d;
 
-  /* Provider identity — Specialist A (Claude) = teal, Specialist B (Codex) = purple */
+  /* Provider identity — Specialist A (Claude) = teal, Specialist B (Codex) = purple, C (Claude Sonnet) = amber, D (GPT-5 Mini) = emerald */
   --provider-a: #1a7a6d;
   --provider-a-hover: #145f55;
   --provider-a-subtle: #e5f3f0;
@@ -69,6 +69,14 @@
   --provider-b-hover: #4a2f70;
   --provider-b-subtle: #ede5f5;
   --provider-b-glow: rgba(94, 61, 138, 0.15);
+  --provider-c: #b45309;
+  --provider-c-hover: #92400e;
+  --provider-c-subtle: #fef3c7;
+  --provider-c-glow: rgba(180, 83, 9, 0.15);
+  --provider-d: #047857;
+  --provider-d-hover: #065f46;
+  --provider-d-subtle: #d1fae5;
+  --provider-d-glow: rgba(4, 120, 87, 0.15);
 
   /* Status — Open (warm amber, needs attention) */
   --status-open-bg: #fdf0d5;
@@ -214,6 +222,14 @@
     --provider-b-hover: #d4bef0;
     --provider-b-subtle: #2e2340;
     --provider-b-glow: rgba(197, 168, 232, 0.2);
+    --provider-c: #fbbf24;
+    --provider-c-hover: #fcd34d;
+    --provider-c-subtle: #3a2e14;
+    --provider-c-glow: rgba(251, 191, 36, 0.2);
+    --provider-d: #34d399;
+    --provider-d-hover: #6ee7b7;
+    --provider-d-subtle: #14302b;
+    --provider-d-glow: rgba(52, 211, 153, 0.2);
 
     /* Status */
     --status-open-bg: #3a2e14;
@@ -2073,6 +2089,38 @@ textarea {
   box-shadow: var(--shadow-lg), 0 0 12px var(--provider-b-glow);
 }
 
+/* Provider C (Claude Sonnet) — amber */
+.parallel-column.provider-c {
+  border-color: color-mix(in srgb, var(--provider-c) 30%, var(--line));
+}
+.parallel-column.provider-c .parallel-column-header {
+  background: linear-gradient(180deg, var(--provider-c-subtle), color-mix(in srgb, var(--provider-c) 6%, transparent));
+  border-bottom: 2px solid var(--provider-c);
+}
+.parallel-column.provider-c .provider-name {
+  color: var(--provider-c);
+}
+.parallel-column.provider-c:hover {
+  border-color: color-mix(in srgb, var(--provider-c) 50%, var(--line));
+  box-shadow: var(--shadow-lg), 0 0 12px var(--provider-c-glow);
+}
+
+/* Provider D (GPT-5 Mini) — emerald */
+.parallel-column.provider-d {
+  border-color: color-mix(in srgb, var(--provider-d) 30%, var(--line));
+}
+.parallel-column.provider-d .parallel-column-header {
+  background: linear-gradient(180deg, var(--provider-d-subtle), color-mix(in srgb, var(--provider-d) 6%, transparent));
+  border-bottom: 2px solid var(--provider-d);
+}
+.parallel-column.provider-d .provider-name {
+  color: var(--provider-d);
+}
+.parallel-column.provider-d:hover {
+  border-color: color-mix(in srgb, var(--provider-d) 50%, var(--line));
+  box-shadow: var(--shadow-lg), 0 0 12px var(--provider-d-glow);
+}
+
 /* Accepted winner — strong glow */
 .parallel-column.is-accepted {
   cursor: default;
@@ -2084,6 +2132,14 @@ textarea {
 .parallel-column.provider-b.is-accepted {
   border-color: var(--provider-b);
   box-shadow: var(--shadow-lg), 0 0 20px var(--provider-b-glow), 0 0 40px rgba(94, 61, 138, 0.06);
+}
+.parallel-column.provider-c.is-accepted {
+  border-color: var(--provider-c);
+  box-shadow: var(--shadow-lg), 0 0 20px var(--provider-c-glow), 0 0 40px rgba(180, 83, 9, 0.06);
+}
+.parallel-column.provider-d.is-accepted {
+  border-color: var(--provider-d);
+  box-shadow: var(--shadow-lg), 0 0 20px var(--provider-d-glow), 0 0 40px rgba(4, 120, 87, 0.06);
 }
 
 /* Discarded loser — collapsed slim bar */
@@ -2144,6 +2200,14 @@ textarea {
 .provider-b .provider-dot {
   background: var(--provider-b);
   box-shadow: 0 0 6px var(--provider-b-glow);
+}
+.provider-c .provider-dot {
+  background: var(--provider-c);
+  box-shadow: 0 0 6px var(--provider-c-glow);
+}
+.provider-d .provider-dot {
+  background: var(--provider-d);
+  box-shadow: 0 0 6px var(--provider-d-glow);
 }
 .parallel-column-header .header-actions {
   display: flex;
@@ -2222,6 +2286,20 @@ textarea {
 .provider-b .parallel-accept-btn:hover {
   background: var(--provider-b-hover);
   box-shadow: 0 2px 8px var(--provider-b-glow);
+}
+.provider-c .parallel-accept-btn {
+  background: var(--provider-c);
+}
+.provider-c .parallel-accept-btn:hover {
+  background: var(--provider-c-hover);
+  box-shadow: 0 2px 8px var(--provider-c-glow);
+}
+.provider-d .parallel-accept-btn {
+  background: var(--provider-d);
+}
+.provider-d .parallel-accept-btn:hover {
+  background: var(--provider-d-hover);
+  box-shadow: 0 2px 8px var(--provider-d-glow);
 }
 
 /* Discard button */
@@ -2314,6 +2392,8 @@ textarea {
   }
   .parallel-tab.provider-a-tab.is-active { color: var(--provider-a); }
   .parallel-tab.provider-b-tab.is-active { color: var(--provider-b); }
+  .parallel-tab.provider-c-tab.is-active { color: var(--provider-c); }
+  .parallel-tab.provider-d-tab.is-active { color: var(--provider-d); }
   .parallel-column { display: none; }
   .parallel-column.is-visible-tab { display: flex; }
 }

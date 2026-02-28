@@ -17,6 +17,7 @@ import TriageCard from './TriageCard.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import ThinkingSidebar from './ThinkingSidebar.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
+import { getProviderLabel } from '../utils/markdown.jsx';
 
 /**
  * Group messages for rendering: parallel messages with the same turnId become a single group.
@@ -89,12 +90,6 @@ function formatTokenEstimate(value) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(Math.round(n));
-}
-
-function getProviderLabel(provider) {
-  if (provider === 'regex') return 'Regex Parser';
-  const option = PROVIDER_OPTIONS.find((p) => p.value === provider);
-  return option ? option.label : 'Claude';
 }
 
 function formatProcessEventTime(value) {
@@ -193,7 +188,11 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   const providerPopoverRef = useRef(null);
 
   const handleDiscardProvider = useCallback((turnId, discardedProvider) => {
-    setDiscardedProviders(prev => ({ ...prev, [turnId]: discardedProvider }));
+    setDiscardedProviders(prev => {
+      const existing = prev[turnId] || [];
+      if (existing.includes(discardedProvider)) return prev;
+      return { ...prev, [turnId]: [...existing, discardedProvider] };
+    });
   }, []);
   const handleReEnableProvider = useCallback((turnId) => {
     setDiscardedProviders(prev => {
@@ -851,7 +850,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                     onFork={conversationId && !isStreaming ? (idx) => handleFork(idx) : undefined}
                     accepting={parallelAcceptingKey}
                     isImageParseTurn={isImageParse}
-                    discardedProvider={discardedProviders[turnId] || null}
+                    discardedProviders={discardedProviders[turnId] || []}
                   />
                 </motion.div>
               );
@@ -917,7 +916,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   }))}
                   accepting={null}
                   isImageParseTurn={false}
-                  discardedProvider={null}
+                  discardedProviders={[]}
                 />
               </motion.div>
             );
@@ -1305,6 +1304,11 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                             Select at least 2 providers
                           </div>
                         )}
+                        {parallelProviders.length > 4 && (
+                          <div role="alert" style={{ fontSize: '0.7rem', color: 'var(--danger)', marginTop: 4 }}>
+                            Maximum 4 providers allowed
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -1511,7 +1515,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   key="send"
                   className="compose-send-btn"
                   onClick={handleSubmit}
-                  disabled={(!input.trim() && images.length === 0) || (effectiveMode === 'parallel' && parallelProviders.length < 2)}
+                  disabled={(!input.trim() && images.length === 0) || (effectiveMode === 'parallel' && (parallelProviders.length < 2 || parallelProviders.length > 4))}
                   type="button"
                   aria-label="Send message"
                   title="Send message"
