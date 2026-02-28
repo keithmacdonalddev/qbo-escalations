@@ -14,6 +14,34 @@ const codex = require('../src/services/codex');
 
 const SAMPLE_PNG_DATA_URL = 'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z8UkAAAAASUVORK5CYII=';
+const REQUIRED_QUICK_PARSE_SECTIONS = [
+  'What the Agent Is Attempting',
+  'Expected vs Actual Outcome',
+  'Troubleshooting Steps Taken',
+  'Diagnosis',
+  'Steps for Agent',
+  'Customer-Facing Explanation',
+];
+
+function parseSseEvents(payload) {
+  const blocks = String(payload || '').split('\n\n');
+  const events = [];
+  for (const block of blocks) {
+    if (!block || block.startsWith(':')) continue;
+    const lines = block.split('\n');
+    let event = '';
+    let data = '';
+    for (const line of lines) {
+      if (line.startsWith('event:')) {
+        event = line.slice('event:'.length).trim();
+      } else if (line.startsWith('data:')) {
+        data += (data ? '\n' : '') + line.slice('data:'.length).trim();
+      }
+    }
+    if (event) events.push({ event, data });
+  }
+  return events;
+}
 
 let mongod;
 let app;
@@ -238,6 +266,102 @@ test('chat and retry endpoints stream SSE and persist conversation updates', asy
   assert.equal(updatedConversation.messages[0].role, 'user');
   assert.equal(updatedConversation.messages[1].role, 'assistant');
   assert.equal(updatedConversation.messages[1].content, 'mock assistant response');
+});
+
+test('image-only chat emits triage card before chunks and repairs quick-parse format', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({ message: '', images: [SAMPLE_PNG_DATA_URL], provider: 'claude' });
+
+  assert.equal(chatRes.status, 200);
+
+  const events = parseSseEvents(chatRes.text);
+  const triageIdx = events.findIndex((e) => e.event === 'triage_card');
+  const chunkIdx = events.findIndex((e) => e.event === 'chunk');
+  assert.ok(triageIdx >= 0, 'triage_card event must be present');
+  assert.ok(chunkIdx === -1 || triageIdx < chunkIdx, 'triage card must arrive before chunks');
+
+  const triageEvent = events.find((e) => e.event === 'triage_card');
+  const triageData = JSON.parse(triageEvent.data);
+  assert.ok(triageData.agent);
+  assert.ok(triageData.client);
+  assert.ok(triageData.read);
+  assert.ok(triageData.action);
+  assert.match(triageData.category, /^(payroll|bank-feeds|reconciliation|permissions|billing|tax|reports|technical|invoicing)$/);
+  assert.match(triageData.severity, /^P[1-4]$/);
+
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
+    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
+  }
+  assert.equal(doneData.responseRepaired, true);
+});
+
+test('image + custom text still emits triage card and enforces quick-parse sections', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({
+      message: 'Customer shared this screenshot after login failure.',
+      images: [SAMPLE_PNG_DATA_URL],
+      provider: 'claude',
+    });
+
+  assert.equal(chatRes.status, 200);
+  const events = parseSseEvents(chatRes.text);
+  const triageEvent = events.find((e) => e.event === 'triage_card');
+  assert.ok(triageEvent, 'triage_card event must be present');
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
+    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
+  }
+});
+
+test('text-only chat does not emit triage card and preserves normal response', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({ message: 'Text only request', provider: 'claude' });
+
+  assert.equal(chatRes.status, 200);
+  const events = parseSseEvents(chatRes.text);
+  const triageEvent = events.find((e) => e.event === 'triage_card');
+  assert.equal(triageEvent, undefined);
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent);
+  const doneData = JSON.parse(doneEvent.data);
+  assert.equal(doneData.fullResponse, 'mock assistant response');
+  assert.equal(doneData.responseRepaired, false);
+});
+
+test('chat retry emits triage card when the retried user turn had images', async () => {
+  const firstRun = await agent
+    .post('/api/chat')
+    .send({ message: '', images: [SAMPLE_PNG_DATA_URL], provider: 'claude' });
+  assert.equal(firstRun.status, 200);
+
+  const firstEvents = parseSseEvents(firstRun.text);
+  const firstStart = firstEvents.find((e) => e.event === 'start');
+  assert.ok(firstStart);
+  const firstStartData = JSON.parse(firstStart.data);
+  assert.ok(firstStartData.conversationId);
+
+  const retryRes = await agent
+    .post('/api/chat/retry')
+    .send({ conversationId: firstStartData.conversationId, provider: 'claude' });
+  assert.equal(retryRes.status, 200);
+
+  const retryEvents = parseSseEvents(retryRes.text);
+  const triageEvent = retryEvents.find((e) => e.event === 'triage_card');
+  assert.ok(triageEvent, 'retry should emit triage_card event for image turns');
+  const doneEvent = retryEvents.find((e) => e.event === 'done');
+  assert.ok(doneEvent);
+  const doneData = JSON.parse(doneEvent.data);
+  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
+    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
+  }
 });
 
 test('parallel chat mode persists both provider responses and retry replaces both', async () => {

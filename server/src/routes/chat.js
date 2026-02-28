@@ -30,6 +30,266 @@ const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
 
 const DEFAULT_PROVIDER = getDefaultProvider();
+const TRIAGE_ALLOWED_CATEGORIES = Object.freeze([
+  'payroll',
+  'bank-feeds',
+  'reconciliation',
+  'permissions',
+  'billing',
+  'tax',
+  'reports',
+  'technical',
+  'invoicing',
+]);
+const TRIAGE_CATEGORY_MAP = Object.freeze({
+  payroll: 'payroll',
+  'bank-feeds': 'bank-feeds',
+  reconciliation: 'reconciliation',
+  permissions: 'permissions',
+  billing: 'billing',
+  tax: 'tax',
+  reports: 'reports',
+  reporting: 'reports',
+  technical: 'technical',
+  invoicing: 'invoicing',
+});
+const QUICK_PARSE_SECTION_TITLES = Object.freeze([
+  'What the Agent Is Attempting',
+  'Expected vs Actual Outcome',
+  'Troubleshooting Steps Taken',
+  'Diagnosis',
+  'Steps for Agent',
+  'Customer-Facing Explanation',
+]);
+
+function firstNonEmpty(values, fallback = '') {
+  if (!Array.isArray(values)) return fallback;
+  for (const value of values) {
+    const text = safeString(value, '').trim();
+    if (text) return text;
+  }
+  return fallback;
+}
+
+function normalizeTriageCategory(rawCategory) {
+  const normalized = safeString(rawCategory, '').trim().toLowerCase();
+  const mapped = TRIAGE_CATEGORY_MAP[normalized];
+  if (mapped && TRIAGE_ALLOWED_CATEGORIES.includes(mapped)) return mapped;
+  return 'technical';
+}
+
+function inferTriageSeverity(fields) {
+  const haystack = [
+    safeString(fields && fields.attemptingTo, ''),
+    safeString(fields && fields.expectedOutcome, ''),
+    safeString(fields && fields.actualOutcome, ''),
+    safeString(fields && fields.tsSteps, ''),
+  ].join(' ').toLowerCase();
+
+  if (/(outage|down for everyone|all users|system down|security breach|data loss)/.test(haystack)) return 'P1';
+  if (/(cannot|can't|unable|blocked|lock(ed)? out|hard stop|failed|error)/.test(haystack)) return 'P2';
+  if (/(slow|intermittent|workaround|degraded|delay)/.test(haystack)) return 'P3';
+  return 'P3';
+}
+
+function buildTriageRead(fields, category) {
+  const attempting = safeString(fields && fields.attemptingTo, '').trim();
+  const actual = safeString(fields && fields.actualOutcome, '').trim();
+
+  if (attempting && actual) {
+    return `The agent is trying to ${attempting}, but ${actual}. This looks like a ${category} workflow issue in QBO that needs targeted troubleshooting.`;
+  }
+  if (actual) {
+    return `${actual}. This appears to be a ${category} issue and likely needs a focused settings and browser/session check.`;
+  }
+  if (attempting) {
+    return `The agent is trying to ${attempting}, but the expected result is not happening. This appears to be a ${category} workflow issue.`;
+  }
+  return 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the failing step.';
+}
+
+function buildTriageAction(fields, category) {
+  const attempted = safeString(fields && fields.attemptingTo, '').trim();
+  if (category === 'bank-feeds') {
+    return 'Capture the exact bank error text/code and retry the connection once in an incognito window.';
+  }
+  if (category === 'payroll') {
+    return 'Confirm payroll deadline impact and capture the exact payroll error text/code before the next retry.';
+  }
+  if (category === 'permissions') {
+    return 'Verify the user role and company access level, then retest the exact same step.';
+  }
+  if (attempted) {
+    return `Capture the exact error text/code while retrying "${attempted}" once in an incognito window.`;
+  }
+  return 'Capture the exact error text/code and reproduce the issue once in an incognito window before escalating.';
+}
+
+function buildFallbackTriageCard() {
+  return {
+    agent: 'Unknown',
+    client: 'Unknown',
+    category: 'technical',
+    severity: 'P3',
+    read: 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the exact failure point.',
+    action: 'Capture the exact error text/code and reproduce the issue once in an incognito window before escalating.',
+  };
+}
+
+function buildServerTriageCard(fields) {
+  const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  const category = normalizeTriageCategory(sourceFields.category);
+  const severity = inferTriageSeverity(sourceFields);
+  return {
+    agent: firstNonEmpty([sourceFields.agentName], 'Unknown'),
+    client: firstNonEmpty([sourceFields.clientContact], 'Unknown'),
+    category,
+    severity,
+    read: buildTriageRead(sourceFields, category),
+    action: buildTriageAction(sourceFields, category),
+  };
+}
+
+function buildImageTurnSystemPrompt(baseSystemPrompt) {
+  const runtimeRules = [
+    'Image Turn Runtime Contract (server-enforced):',
+    '- A triage card is already emitted by the server. Do NOT output TRIAGE_START/TRIAGE_END blocks or repeat the triage card.',
+    '- Return the response in this exact compact format with these headings only:',
+    '1. What the Agent Is Attempting',
+    '2. Expected vs Actual Outcome',
+    '3. Troubleshooting Steps Taken',
+    '4. Diagnosis',
+    '5. Steps for Agent',
+    '6. Customer-Facing Explanation',
+    '- Keep the response concise and actionable.',
+  ].join('\n');
+  const base = safeString(baseSystemPrompt, '').trim();
+  return base ? `${base}\n\n${runtimeRules}` : runtimeRules;
+}
+
+function responseHasQuickParseSections(text) {
+  const normalized = safeString(text, '').toLowerCase();
+  if (!normalized.trim()) return false;
+  return QUICK_PARSE_SECTION_TITLES.every((title) => normalized.includes(title.toLowerCase()));
+}
+
+function summarizeModelText(text) {
+  const compact = safeString(text, '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (compact.length <= 220) return compact;
+  return `${compact.slice(0, 217)}...`;
+}
+
+function buildQuickParseRepairResponse({ fields, triageCard, originalText }) {
+  const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  const triage = triageCard || buildFallbackTriageCard();
+
+  const attempting = firstNonEmpty([sourceFields.attemptingTo], 'Unknown');
+  const expected = firstNonEmpty([sourceFields.expectedOutcome], 'Unknown');
+  const actual = firstNonEmpty([sourceFields.actualOutcome], 'Unknown');
+  const tsSteps = firstNonEmpty([sourceFields.tsSteps], 'Unknown');
+  const diagnosis = firstNonEmpty([triage.read], 'This appears to be a QBO workflow issue requiring targeted troubleshooting.');
+  const action = firstNonEmpty([triage.action], 'Capture the exact error text/code and reproduce once in an incognito window.');
+  const modelSummary = summarizeModelText(originalText);
+  const customerExplanation = expected !== 'Unknown' && actual !== 'Unknown'
+    ? `You expected ${expected.toLowerCase()}, but ${actual.toLowerCase()}. We are now isolating the exact point of failure and next best fix.`
+    : 'We can see the workflow is not behaving as expected, and we are isolating the exact cause so we can provide the fastest safe fix.';
+
+  return [
+    '1. What the Agent Is Attempting',
+    attempting,
+    '',
+    '2. Expected vs Actual Outcome',
+    `Expected: ${expected}`,
+    `Actual: ${actual}`,
+    '',
+    '3. Troubleshooting Steps Taken',
+    tsSteps,
+    '',
+    '4. Diagnosis',
+    modelSummary ? `${diagnosis}\nAdditional context: ${modelSummary}` : diagnosis,
+    '',
+    '5. Steps for Agent',
+    `1. ${action}`,
+    '2. Verify the exact QBO navigation path and permission/session state before retrying the same step.',
+    '3. If the issue persists, capture timestamp and exact error text/code, then escalate with the expected vs actual result.',
+    '',
+    '6. Customer-Facing Explanation',
+    customerExplanation,
+  ].join('\n');
+}
+
+function repairImageTurnResponse(text, triageContext) {
+  const original = safeString(text, '').trim();
+  if (responseHasQuickParseSections(original)) return original;
+  return buildQuickParseRepairResponse({
+    fields: triageContext && triageContext.parseFields ? triageContext.parseFields : {},
+    triageCard: triageContext && triageContext.triageCard ? triageContext.triageCard : buildFallbackTriageCard(),
+    originalText: original,
+  });
+}
+
+function applyImageResponseCompliance(data, triageContext) {
+  if (!triageContext || !triageContext.triageCard) {
+    return { ...data, responseRepaired: false };
+  }
+
+  let repairedAny = false;
+  const next = { ...data };
+
+  if (typeof next.fullResponse === 'string') {
+    const repaired = repairImageTurnResponse(next.fullResponse, triageContext);
+    if (repaired !== next.fullResponse) repairedAny = true;
+    next.fullResponse = repaired;
+  }
+
+  if (Array.isArray(next.results)) {
+    next.results = next.results.map((result) => {
+      if (!result || result.status !== 'ok' || typeof result.fullResponse !== 'string') return result;
+      const repaired = repairImageTurnResponse(result.fullResponse, triageContext);
+      const changed = repaired !== result.fullResponse;
+      if (changed) repairedAny = true;
+      return {
+        ...result,
+        fullResponse: repaired,
+        responseRepaired: changed,
+      };
+    });
+  }
+
+  next.responseRepaired = repairedAny;
+  return next;
+}
+
+async function buildImageTriageContext({ images, mode, primaryProvider, fallbackProvider, timeoutMs }) {
+  if (!Array.isArray(images) || images.length === 0) return null;
+
+  const triageMode = mode === 'parallel' ? 'fallback' : (mode === 'fallback' ? 'fallback' : 'single');
+  const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? Math.min(timeoutMs, 15000)
+    : 15000;
+
+  let parseFields = null;
+  try {
+    const parseResult = await parseWithPolicy({
+      image: images[0],
+      text: '',
+      mode: triageMode,
+      primaryProvider,
+      fallbackProvider,
+      timeoutMs: effectiveTimeoutMs,
+      allowRegexFallback: false,
+    });
+    parseFields = parseResult && parseResult.fields ? parseResult.fields : null;
+  } catch {
+    parseFields = null;
+  }
+
+  return {
+    triageCard: parseFields ? buildServerTriageCard(parseFields) : buildFallbackTriageCard(),
+    parseFields: parseFields || {},
+  };
+}
 
 function buildUsageSubdoc(usage) {
   if (!usage) return null;
@@ -594,6 +854,20 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }
   }
 
+  let imageTriageContext = null;
+  if (normalizedImages.length > 0) {
+    imageTriageContext = await buildImageTriageContext({
+      images: normalizedImages,
+      mode: policy.mode,
+      primaryProvider: policy.primaryProvider,
+      fallbackProvider: policy.fallbackProvider,
+      timeoutMs: effectiveTimeoutMs,
+    });
+  }
+  const effectiveSystemPrompt = normalizedImages.length > 0
+    ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
+    : contextBundle.systemPrompt;
+
   if (conversation.provider !== policy.primaryProvider) {
     conversation.provider = policy.primaryProvider;
   }
@@ -642,6 +916,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
+  if (imageTriageContext && imageTriageContext.triageCard) {
+    try {
+      res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
+    } catch { /* client disconnected */ }
+  }
   const turnStartedAt = Date.now();
   const requestId = randomUUID();
   let streamSettled = false;
@@ -651,30 +930,17 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
   }, 15000);
 
-  // Triage card detector: only active when images are present
-  const triageDetector = normalizedImages.length > 0 ? createTriageCardDetector() : null;
-
   const cleanupFn = startChatOrchestration({
     mode: policy.mode,
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.fallbackProvider,
     messages: contextBundle.messagesForModel,
-    systemPrompt: contextBundle.systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
       try {
-        if (!triageDetector) {
-          res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n');
-          return;
-        }
-        const { triageCard, passthrough } = triageDetector.feed(text);
-        if (triageCard) {
-          res.write('event: triage_card\ndata: ' + JSON.stringify(triageCard) + '\n\n');
-        }
-        if (passthrough) {
-          res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text: passthrough }) + '\n\n');
-        }
+        res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onProviderError: (data) => {
@@ -691,25 +957,26 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       streamSettled = true;
       clearInterval(heartbeat);
       const latencyMs = Date.now() - turnStartedAt;
-      const attempts = data.attempts || [];
-      logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: data.mode || policy.mode });
+      const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
+      const attempts = compliantData.attempts || [];
+      logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });
       logChatTurn({
         route: '/api/chat',
         conversationId: conversation._id.toString(),
-        mode: data.mode || policy.mode,
+        mode: compliantData.mode || policy.mode,
         requestedMode,
         requestedPrimaryProvider,
-        providerUsed: data.providerUsed,
-        fallbackUsed: Boolean(data.fallbackUsed),
-        fallbackReasonCode: deriveFallbackReasonCode(data.fallbackFrom, attempts),
+        providerUsed: compliantData.providerUsed,
+        fallbackUsed: Boolean(compliantData.fallbackUsed),
+        fallbackReasonCode: deriveFallbackReasonCode(compliantData.fallbackFrom, attempts),
         latencyMs,
         errorCode: null,
         attempts: attempts.length,
       });
       try {
-        if (data.mode === 'parallel' && Array.isArray(data.results)) {
-          const turnId = data.turnId || requestTurnId || randomUUID();
-          const hasSuccessful = data.results.some((r) => r.status === 'ok');
+        if (compliantData.mode === 'parallel' && Array.isArray(compliantData.results)) {
+          const turnId = compliantData.turnId || requestTurnId || randomUUID();
+          const hasSuccessful = compliantData.results.some((r) => r.status === 'ok');
           try {
             await ParallelCandidateTurn.findOneAndUpdate(
               { turnId },
@@ -718,8 +985,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
                   service: 'chat',
                   conversationId: conversation._id,
                   status: hasSuccessful ? 'open' : 'expired',
-                  candidates: data.results.map(toCandidateFromResult),
-                  attempts: data.attempts || [],
+                  candidates: compliantData.results.map(toCandidateFromResult),
+                  attempts: compliantData.attempts || [],
                 },
               },
               { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
@@ -727,15 +994,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           } catch {
             // non-blocking for chat flow
           }
-          const successful = data.results.filter((r) => r.status === 'ok' && typeof r.fullResponse === 'string');
+          const successful = compliantData.results.filter((r) => r.status === 'ok' && typeof r.fullResponse === 'string');
           for (const result of successful) {
             conversation.messages.push({
               role: 'assistant',
               content: result.fullResponse,
               provider: result.provider,
-              mode: data.mode || policy.mode,
+              mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
-              attemptMeta: { attempts: data.attempts || [], parallel: true, turnId },
+              attemptMeta: { attempts: compliantData.attempts || [], parallel: true, turnId },
               usage: buildUsageSubdoc(result.usage),
               timestamp: new Date(),
             });
@@ -743,12 +1010,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         } else {
           conversation.messages.push({
             role: 'assistant',
-            content: data.fullResponse,
-            provider: data.providerUsed,
-            mode: data.mode || policy.mode,
-            fallbackFrom: data.fallbackFrom || null,
-            attemptMeta: { attempts: data.attempts || [] },
-            usage: buildUsageSubdoc(data.usage),
+            content: compliantData.fullResponse,
+            provider: compliantData.providerUsed,
+            mode: compliantData.mode || policy.mode,
+            fallbackFrom: compliantData.fallbackFrom || null,
+            attemptMeta: { attempts: compliantData.attempts || [] },
+            usage: buildUsageSubdoc(compliantData.usage),
             timestamp: new Date(),
           });
         }
@@ -761,20 +1028,24 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         await saveConversationLenient(conversation);
 
         try {
-          const usagePayload = buildUsageSubdoc(data.usage);
+          const usagePayload = buildUsageSubdoc(compliantData.usage);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
-            provider: data.mode === 'parallel' ? policy.primaryProvider : data.providerUsed, // backward-compat
-            providerUsed: data.providerUsed,
-            fallbackUsed: data.fallbackUsed,
-            fallbackFrom: data.fallbackFrom || null,
-            mode: data.mode || policy.mode,
-            turnId: data.mode === 'parallel' ? (data.turnId || requestTurnId) : null,
-            attempts: data.attempts || [],
-            fullResponse: data.fullResponse,
-            results: Array.isArray(data.results) ? data.results : null,
+            provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
+            providerUsed: compliantData.providerUsed,
+            fallbackUsed: compliantData.fallbackUsed,
+            fallbackFrom: compliantData.fallbackFrom || null,
+            mode: compliantData.mode || policy.mode,
+            turnId: compliantData.mode === 'parallel' ? (compliantData.turnId || requestTurnId) : null,
+            attempts: compliantData.attempts || [],
+            fullResponse: compliantData.fullResponse,
+            results: Array.isArray(compliantData.results) ? compliantData.results.map(r => ({
+              ...r,
+              usage: buildUsageSubdoc(r.usage),
+            })) : null,
             usage: usagePayload,
-            usageAvailable: !!data.usage,
+            usageAvailable: !!compliantData.usage,
+            responseRepaired: Boolean(compliantData.responseRepaired),
             warnings: guardrail.warnings || [],
             contextDebug: contextDebugPayload,
           }) + '\n\n');
@@ -830,7 +1101,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             },
           },
           { upsert: true, setDefaultsOnInsert: true }
-        ).catch(() => {});
+        ).catch((err2) => console.warn('ParallelCandidateTurn update failed (chat error):', err2.message));
       }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
@@ -1268,6 +1539,20 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     }
   }
 
+  let imageTriageContext = null;
+  if (normalizedImages.length > 0) {
+    imageTriageContext = await buildImageTriageContext({
+      images: normalizedImages,
+      mode: policy.mode,
+      primaryProvider: policy.primaryProvider,
+      fallbackProvider: policy.fallbackProvider,
+      timeoutMs: effectiveTimeoutMs,
+    });
+  }
+  const effectiveSystemPrompt = normalizedImages.length > 0
+    ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
+    : contextBundle.systemPrompt;
+
   let shouldSaveConversation = false;
   if (removedAnyAssistant) {
     conversation.set('messages', retryMessages);
@@ -1321,6 +1606,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
+  if (imageTriageContext && imageTriageContext.triageCard) {
+    try {
+      res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
+    } catch { /* gone */ }
+  }
 
   const turnStartedAt = Date.now();
   const retryRequestId = randomUUID();
@@ -1335,7 +1625,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.fallbackProvider,
     messages: contextBundle.messagesForModel,
-    systemPrompt: contextBundle.systemPrompt,
+    systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
@@ -1351,25 +1641,26 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       retryStreamSettled = true;
       clearInterval(heartbeat);
       const latencyMs = Date.now() - turnStartedAt;
-      const attempts = data.attempts || [];
-      logAttemptsUsage(attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: data.mode || policy.mode });
+      const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
+      const attempts = compliantData.attempts || [];
+      logAttemptsUsage(attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });
       logChatTurn({
         route: '/api/chat/retry',
         conversationId: conversation._id.toString(),
-        mode: data.mode || policy.mode,
+        mode: compliantData.mode || policy.mode,
         requestedMode,
         requestedPrimaryProvider,
-        providerUsed: data.providerUsed,
-        fallbackUsed: Boolean(data.fallbackUsed),
-        fallbackReasonCode: deriveFallbackReasonCode(data.fallbackFrom, attempts),
+        providerUsed: compliantData.providerUsed,
+        fallbackUsed: Boolean(compliantData.fallbackUsed),
+        fallbackReasonCode: deriveFallbackReasonCode(compliantData.fallbackFrom, attempts),
         latencyMs,
         errorCode: null,
         attempts: attempts.length,
       });
       try {
-        if (data.mode === 'parallel' && Array.isArray(data.results)) {
-          const turnId = data.turnId || requestTurnId || randomUUID();
-          const hasSuccessful = data.results.some((r) => r.status === 'ok');
+        if (compliantData.mode === 'parallel' && Array.isArray(compliantData.results)) {
+          const turnId = compliantData.turnId || requestTurnId || randomUUID();
+          const hasSuccessful = compliantData.results.some((r) => r.status === 'ok');
           try {
             await ParallelCandidateTurn.findOneAndUpdate(
               { turnId },
@@ -1378,8 +1669,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
                   service: 'chat',
                   conversationId: conversation._id,
                   status: hasSuccessful ? 'open' : 'expired',
-                  candidates: data.results.map(toCandidateFromResult),
-                  attempts: data.attempts || [],
+                  candidates: compliantData.results.map(toCandidateFromResult),
+                  attempts: compliantData.attempts || [],
                 },
               },
               { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
@@ -1387,15 +1678,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           } catch {
             // non-blocking for chat flow
           }
-          const successful = data.results.filter((r) => r.status === 'ok' && typeof r.fullResponse === 'string');
+          const successful = compliantData.results.filter((r) => r.status === 'ok' && typeof r.fullResponse === 'string');
           for (const result of successful) {
             conversation.messages.push({
               role: 'assistant',
               content: result.fullResponse,
               provider: result.provider,
-              mode: data.mode || policy.mode,
+              mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
-              attemptMeta: { attempts: data.attempts || [], parallel: true, turnId },
+              attemptMeta: { attempts: compliantData.attempts || [], parallel: true, turnId },
               usage: buildUsageSubdoc(result.usage),
               timestamp: new Date(),
             });
@@ -1403,31 +1694,35 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         } else {
           conversation.messages.push({
             role: 'assistant',
-            content: data.fullResponse,
-            provider: data.providerUsed,
-            mode: data.mode || policy.mode,
-            fallbackFrom: data.fallbackFrom || null,
-            attemptMeta: { attempts: data.attempts || [] },
-            usage: buildUsageSubdoc(data.usage),
+            content: compliantData.fullResponse,
+            provider: compliantData.providerUsed,
+            mode: compliantData.mode || policy.mode,
+            fallbackFrom: compliantData.fallbackFrom || null,
+            attemptMeta: { attempts: compliantData.attempts || [] },
+            usage: buildUsageSubdoc(compliantData.usage),
             timestamp: new Date(),
           });
         }
         await saveConversationLenient(conversation);
         try {
-          const retryUsagePayload = buildUsageSubdoc(data.usage);
+          const retryUsagePayload = buildUsageSubdoc(compliantData.usage);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
-            provider: data.mode === 'parallel' ? policy.primaryProvider : data.providerUsed, // backward-compat
-            providerUsed: data.providerUsed,
-            fallbackUsed: data.fallbackUsed,
-            fallbackFrom: data.fallbackFrom || null,
-            mode: data.mode || policy.mode,
-            turnId: data.mode === 'parallel' ? (data.turnId || requestTurnId) : null,
-            attempts: data.attempts || [],
-            fullResponse: data.fullResponse,
-            results: Array.isArray(data.results) ? data.results : null,
+            provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
+            providerUsed: compliantData.providerUsed,
+            fallbackUsed: compliantData.fallbackUsed,
+            fallbackFrom: compliantData.fallbackFrom || null,
+            mode: compliantData.mode || policy.mode,
+            turnId: compliantData.mode === 'parallel' ? (compliantData.turnId || requestTurnId) : null,
+            attempts: compliantData.attempts || [],
+            fullResponse: compliantData.fullResponse,
+            results: Array.isArray(compliantData.results) ? compliantData.results.map(r => ({
+              ...r,
+              usage: buildUsageSubdoc(r.usage),
+            })) : null,
             usage: retryUsagePayload,
-            usageAvailable: !!data.usage,
+            usageAvailable: !!compliantData.usage,
+            responseRepaired: Boolean(compliantData.responseRepaired),
             warnings: guardrail.warnings || [],
             contextDebug: contextDebugPayload,
           }) + '\n\n');
@@ -1483,7 +1778,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             },
           },
           { upsert: true, setDefaultsOnInsert: true }
-        ).catch(() => {});
+        ).catch((err2) => console.warn('ParallelCandidateTurn update failed (retry error):', err2.message));
       }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
@@ -1700,7 +1995,7 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
       },
     },
     { upsert: true, setDefaultsOnInsert: true }
-  ).catch(() => {});
+  ).catch((err) => console.warn('ParallelCandidateTurn update failed (accept):', err.message));
   return res.json({
     ok: true,
     idempotent: false,
@@ -1797,7 +2092,7 @@ chatRouter.post('/parallel/:turnId/discard', parallelDecisionRateLimit, async (r
       },
     },
     { upsert: true, setDefaultsOnInsert: true }
-  ).catch(() => {});
+  ).catch((err) => console.warn('ParallelCandidateTurn update failed (discard):', err.message));
 
   return res.json({
     ok: true,
@@ -1920,7 +2215,7 @@ chatRouter.post('/parallel/:turnId/unaccept', parallelDecisionRateLimit, async (
         acceptedMessageIndex: null,
       },
     }
-  ).catch(() => {});
+  ).catch((err) => console.warn('ParallelCandidateTurn update failed (reset):', err.message));
 
   // Remove the ModelPerformance record for this turn (non-blocking)
   try {

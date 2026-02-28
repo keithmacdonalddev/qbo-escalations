@@ -469,6 +469,7 @@ export function useChat(options = {}) {
                 },
                 timestamp: new Date().toISOString(),
                 responseTimeMs: elapsed,
+                usage: result.usage || null,
               }));
 
             if (nextMessages.length > 0) {
@@ -491,7 +492,9 @@ export function useChat(options = {}) {
               });
             }
           } else {
-            const finalText = streamingTextRef.current || data.fullResponse || '';
+            const finalText = data.responseRepaired
+              ? (data.fullResponse || '')
+              : (streamingTextRef.current || data.fullResponse || '');
             const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProvider);
 
             setMessages((prev) => [...prev, {
@@ -503,6 +506,7 @@ export function useChat(options = {}) {
               attemptMeta: data.attempts ? { attempts: data.attempts } : null,
               timestamp: new Date().toISOString(),
               responseTimeMs: elapsed,
+              usage: data.usage || null,
             }]);
             setStreamProvider(finalProvider);
           }
@@ -727,6 +731,7 @@ export function useChat(options = {}) {
                 },
                 timestamp: new Date().toISOString(),
                 responseTimeMs: elapsed,
+                usage: result.usage || null,
               }));
             if (nextMessages.length > 0) {
               setMessages((prev) => [...prev, ...nextMessages]);
@@ -745,7 +750,9 @@ export function useChat(options = {}) {
               });
             }
           } else {
-            const finalText = streamingTextRef.current || data.fullResponse || '';
+            const finalText = data.responseRepaired
+              ? (data.fullResponse || '')
+              : (streamingTextRef.current || data.fullResponse || '');
             const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProvider);
 
             setMessages((prev) => [...prev, {
@@ -757,6 +764,7 @@ export function useChat(options = {}) {
               attemptMeta: data.attempts ? { attempts: data.attempts } : null,
               timestamp: new Date().toISOString(),
               responseTimeMs: elapsed,
+              usage: data.usage || null,
             }]);
             setStreamProvider(finalProvider);
           }
