@@ -1,11 +1,28 @@
-import { memo } from 'react';
+import { memo, useState, useEffect } from 'react';
 
 /**
  * Dev-only render flame bar. Deliberately avoids Framer Motion —
  * AnimatePresence + rapid segment churn was a major memory source.
  * Pure CSS transitions are sufficient and zero-overhead.
  */
-function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePaused, clearAll }) {
+function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePaused, clearAll, timeline }) {
+  // HMR reload indicator — reads timestamp from sessionStorage, fades out after 30s
+  const [hmrAge, setHmrAge] = useState(null);
+  useEffect(() => {
+    let raw;
+    try { raw = sessionStorage.getItem('qbo-hmr-reload-at'); } catch {}
+    if (!raw) return;
+    const ts = Number(raw);
+    const update = () => {
+      const sec = Math.round((Date.now() - ts) / 1000);
+      if (sec > 30) { setHmrAge(null); sessionStorage.removeItem('qbo-hmr-reload-at'); return; }
+      setHmrAge(sec < 2 ? 'just now' : `${sec}s ago`);
+    };
+    update();
+    const tid = setInterval(update, 1000);
+    return () => clearInterval(tid);
+  }, []);
+
   if (!segments) return null;
 
   return (
@@ -28,6 +45,20 @@ function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePau
         ))}
       </div>
 
+      {/* Heatmap timeline — 60s render density minimap */}
+      <div className={`flame-timeline${expanded ? ' flame-timeline--expanded' : ''}`}>
+        {timeline && timeline.map((bucket, i) => (
+          <div
+            key={i}
+            className={`flame-tl-col${bucket ? ` flame-tl-col--${bucket.worst}` : ''}`}
+            style={bucket ? { opacity: 0.2 + bucket.intensity * 0.8 } : undefined}
+            title={expanded && bucket
+              ? `${bucket.total} render${bucket.total !== 1 ? 's' : ''} · ${i === timeline.length - 1 ? 'now' : `${timeline.length - 1 - i}s ago`}`
+              : undefined}
+          />
+        ))}
+      </div>
+
       {/* Stats overlay */}
       <div className={`flame-stats${expanded ? ' flame-stats--shifted' : ''}`}>
         <span>
@@ -46,6 +77,7 @@ function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePau
           avg <span className="flame-stat-val">{stats.avg}ms</span>
         </span>
         {paused && <span className="flame-paused-badge">PAUSED</span>}
+        {hmrAge && <span className="flame-hmr-badge" title="Last HMR auto-reload">reloaded {hmrAge}</span>}
       </div>
 
       {/* Controls */}

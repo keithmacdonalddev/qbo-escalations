@@ -5087,6 +5087,40 @@ textarea {
   box-shadow: 0 0 6px color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
+/* Duplicate request detection */
+.wf-row--duplicate {
+  border-left: 3px solid var(--warning, #c47c1e);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+  animation: wf-duplicate-pulse 600ms ease-in-out infinite;
+}
+@keyframes wf-duplicate-pulse {
+  0%, 100% { background: color-mix(in srgb, var(--warning) 8%, transparent); }
+  50%      { background: color-mix(in srgb, var(--warning) 14%, transparent); }
+}
+.wf-duplicate-badge {
+  display: inline-block;
+  background: var(--warning, #c47c1e);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 8px;
+  letter-spacing: 0.5px;
+  animation: wf-badge-pop 250ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+@keyframes wf-badge-pop {
+  0%   { opacity: 0; transform: scale(0.75); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.wf-row--duplicate .wf-duration {
+  color: var(--warning, #c47c1e);
+  font-weight: 600;
+}
+.wf-row--duplicate .wf-bar {
+  box-shadow: 0 0 8px color-mix(in srgb, var(--warning) 40%, transparent);
+}
+
 /* Slow threshold input */
 .wf-slow-input {
   display: flex;
@@ -5629,7 +5663,7 @@ textarea {
 /* Stats overlay */
 .flame-stats {
   position: fixed;
-  top: 6px;
+  top: 9px;
   left: 12px;
   z-index: 100000;
   display: flex;
@@ -5639,13 +5673,15 @@ textarea {
   color: var(--ink-tertiary);
   pointer-events: none;
   transition: top 150ms ease;
+  white-space: nowrap;
 }
-.flame-stats--shifted { top: 34px; }
+.flame-stats--shifted { top: 44px; }
 
 .flame-stat-val {
   color: var(--ink);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .flame-dot {
@@ -5663,14 +5699,14 @@ textarea {
 /* Controls group */
 .flame-controls {
   position: fixed;
-  top: 6px;
+  top: 9px;
   right: 56px;
   z-index: 100000;
   display: flex;
   gap: 2px;
   transition: top 150ms ease;
 }
-.flame-controls--shifted { top: 34px; }
+.flame-controls--shifted { top: 44px; }
 
 .flame-ctrl-btn {
   background: var(--bg-raised);
@@ -5721,4 +5757,41 @@ textarea {
   font-variant-numeric: tabular-nums;
   opacity: 0.8;
   transition: opacity 500ms ease;
+}
+
+/* Heatmap timeline — 60s render density minimap */
+.flame-timeline {
+  position: fixed;
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 99998;
+  display: flex;
+  pointer-events: none;
+  overflow: hidden;
+  transition: top 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              height 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.flame-timeline--expanded {
+  top: 28px;
+  height: 10px;
+  pointer-events: auto;
+  background: var(--bg-sunken);
+  border-bottom: 1px solid var(--line);
+}
+
+.flame-tl-col {
+  flex: 1;
+  min-width: 0;
+  transition: opacity 400ms ease;
+}
+
+.flame-tl-col--green { background: #34d399; }
+.flame-tl-col--amber { background: #fbbf24; }
+.flame-tl-col--red   { background: #f87171; }
+
+.flame-timeline--expanded .flame-tl-col + .flame-tl-col {
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
 }
