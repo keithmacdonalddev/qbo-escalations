@@ -789,3 +789,112 @@ test('resolvePolicy rejects parallelProviders with fewer than 2 providers', asyn
     }
   );
 });
+
+test('resolvePolicy deduplicates parallelProviders and keeps unique set', async () => {
+  const policy = resolvePolicy({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'gpt-5-mini', 'claude', 'gpt-5-mini'],
+  });
+  assert.deepEqual(policy.parallelProviders, ['claude', 'gpt-5-mini']);
+});
+
+test('resolvePolicy rejects when primaryProvider not in parallelProviders', async () => {
+  assert.throws(
+    () => resolvePolicy({
+      mode: 'parallel',
+      primaryProvider: 'gpt-5-mini',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+    }),
+    (err) => {
+      assert.equal(err.code, 'INVALID_PARALLEL_PROVIDERS');
+      return true;
+    }
+  );
+});
+
+test('resolvePolicy accepts all 4 valid providers in parallelProviders', async () => {
+  const policy = resolvePolicy({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
+  });
+  assert.equal(policy.parallelProviders.length, 4);
+  assert.deepEqual(policy.parallelProviders, ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
+});
+
+test('resolvePolicy with empty parallelProviders array falls through to legacy behavior', async () => {
+  // Empty array doesn't meet the length >= 2 guard, so parallelProviders is not set
+  const policy = resolvePolicy({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: [],
+  });
+  assert.equal(policy.parallelProviders, undefined);
+  assert.equal(policy.primaryProvider, 'claude');
+});
+
+test('resolvePolicy with null/undefined entries in parallelProviders rejects as invalid', async () => {
+  assert.throws(
+    () => resolvePolicy({
+      mode: 'parallel',
+      primaryProvider: 'claude',
+      parallelProviders: ['claude', null, 'gpt-5-mini'],
+    }),
+    (err) => {
+      assert.equal(err.code, 'INVALID_PARALLEL_PROVIDERS');
+      return true;
+    }
+  );
+
+  assert.throws(
+    () => resolvePolicy({
+      mode: 'parallel',
+      primaryProvider: 'claude',
+      parallelProviders: ['claude', undefined, 'gpt-5-mini'],
+    }),
+    (err) => {
+      assert.equal(err.code, 'INVALID_PARALLEL_PROVIDERS');
+      return true;
+    }
+  );
+});
+
+test('parallel cancel with 3 providers aborts in-flight and preserves completed', async () => {
+  const claudeUsage = { inputTokens: 50, outputTokens: 25, model: 'claude-sonnet-4-6' };
+  claude.chat = ({ onDone }) => {
+    // Claude finishes quickly
+    onDone('claude-done', claudeUsage);
+    return () => {};
+  };
+  codex.chat = ({ onDone }) => {
+    // Codex is slow — still in-flight when cancel fires
+    const handle = setTimeout(() => onDone('codex-done'), 500);
+    return () => {
+      clearTimeout(handle);
+      return { usage: { inputTokens: 10, outputTokens: 0, model: 'gpt-5.3-codex' }, partialResponse: '' };
+    };
+  };
+
+  let abortData = null;
+  const cleanup = startChatOrchestration({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+    onChunk: () => {},
+    onDone: () => {},
+    onError: () => {},
+    onAbort: (data) => { abortData = data; },
+  });
+
+  // Wait for claude to settle but not codex, then cancel
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  cleanup();
+
+  assert.ok(abortData, 'onAbort must fire for 3-provider cancel');
+  assert.ok(Array.isArray(abortData.attempts));
+  assert.equal(abortData.attempts.length, 3, 'must include all 3 provider results');
+});

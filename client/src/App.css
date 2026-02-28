@@ -2015,6 +2015,10 @@ textarea {
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-5);
   max-width: 100%;
+  overflow-x: auto;
+}
+.parallel-split > * {
+  min-width: 220px;
 }
 
 .parallel-column {

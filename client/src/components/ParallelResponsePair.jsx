@@ -44,8 +44,9 @@ export default function ParallelResponsePair({
   // Keyboard shortcuts: 1/2 to accept, Ctrl+Z to undo
   useEffect(() => {
     const handler = (e) => {
-      const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
 
       // Ctrl+Z / Cmd+Z to undo acceptance
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && hasAccepted && onUnaccept && turnId) {
@@ -65,7 +66,7 @@ export default function ParallelResponsePair({
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onAccept, onUnaccept, hasAccepted, sorted, turnId]);
+  }, [onAccept, onUnaccept, hasAccepted, sorted, turnId, unaccepting]);
 
   const handleAccept = useCallback((provider) => {
     if (!onAccept || !turnId) return;
@@ -136,10 +137,12 @@ export default function ParallelResponsePair({
       )}
 
       {/* Mobile tab bar */}
-      <div className="parallel-tab-bar">
+      <div className="parallel-tab-bar" role="tablist" aria-label="Parallel responses">
         {sorted.map((r, idx) => (
           <button
             key={r.provider}
+            role="tab"
+            aria-selected={activeTab === idx}
             className={`parallel-tab ${getProviderClass(r.provider)}-tab${activeTab === idx ? ' is-active' : ''}`}
             onClick={() => setActiveTab(idx)}
             type="button"
@@ -223,6 +226,7 @@ export default function ParallelResponsePair({
                           onClick={(e) => { e.stopPropagation(); handleAccept(r.provider); }}
                           type="button"
                           disabled={isAccepting}
+                          aria-label={`Accept ${getProviderLabel(r.provider)} response`}
                         >
                           {isAccepting ? 'Accepting...' : 'Accept'}
                         </button>

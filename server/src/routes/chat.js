@@ -2027,7 +2027,7 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
     const winnerCandidate = candidates.find(c => c.provider === provider);
     const loserCandidate = candidates.find(c => c.provider !== provider);
     const userMsgBefore = conversation.messages
-      .slice(0, winnerEntry.index)
+      .slice(0, firstTurnIndex)
       .reverse()
       .find(m => m.role === 'user');
     const isImageParse = userMsgBefore && Array.isArray(userMsgBefore.images) && userMsgBefore.images.length > 0;

@@ -362,8 +362,8 @@ export function useChat(options = {}) {
     startTimeRef.current = Date.now();
     setThinkingText('');
     thinkingTextRef.current = '';
-    setIsThinking(false);
-    isThinkingRef.current = false;
+    setIsThinking(true);
+    isThinkingRef.current = true;
     setThinkingStartTime(Date.now());
 
     const userMsg = {
@@ -660,8 +660,8 @@ export function useChat(options = {}) {
     startTimeRef.current = Date.now();
     setThinkingText('');
     thinkingTextRef.current = '';
-    setIsThinking(false);
-    isThinkingRef.current = false;
+    setIsThinking(true);
+    isThinkingRef.current = true;
     setThinkingStartTime(Date.now());
 
     setMessages((prev) => {

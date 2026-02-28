@@ -255,10 +255,6 @@ function chat({ messages, systemPrompt, images, model, onChunk, onThinkingChunk,
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
-        // Debug: log events that might contain usage (result, message_start, message_delta, assistant)
-        if (msg.type === 'result' || msg.type === 'message_start' || msg.type === 'message_delta' || (msg.type === 'assistant' && msg.message?.usage)) {
-          console.log('[claude-usage-debug]', JSON.stringify(msg).slice(0, 500));
-        }
         const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
         if (usage) capturedUsage = usage;
         const thinking = extractThinking(msg);
@@ -524,13 +520,11 @@ async function warmUp() {
 
     const timeout = setTimeout(() => {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      console.log('Claude CLI warm-up timed out (30s) -- continuing anyway');
       resolve();
     }, 30000);
 
     child.on('close', () => {
       clearTimeout(timeout);
-      console.log('Claude CLI warm-up complete');
       resolve();
     });
 

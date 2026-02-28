@@ -1251,3 +1251,248 @@ test('POST /api/chat parallel mode without parallelProviders still works (legacy
   assert.ok(Array.isArray(startData.parallelProviders));
   assert.equal(startData.parallelProviders.length, 2);
 });
+
+test('POST /api/chat/retry with 3 parallelProviders streams 3 lanes', async () => {
+  // Create initial conversation
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({ message: 'retry parallel setup', provider: 'claude' });
+  assert.equal(chatRes.status, 200);
+
+  const chatEvents = parseSseEvents(chatRes.text);
+  const chatStart = chatEvents.find((e) => e.event === 'start');
+  const chatStartData = JSON.parse(chatStart.data);
+
+  const retryRes = await agent
+    .post('/api/chat/retry')
+    .send({
+      conversationId: chatStartData.conversationId,
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    });
+
+  assert.equal(retryRes.status, 200);
+
+  const events = parseSseEvents(retryRes.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  assert.ok(startEvent, 'start event must be present');
+  const startData = JSON.parse(startEvent.data);
+  assert.ok(startData.retry);
+  assert.ok(Array.isArray(startData.parallelProviders));
+  assert.equal(startData.parallelProviders.length, 3);
+
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.ok(Array.isArray(doneData.results));
+  assert.equal(doneData.results.length, 3);
+});
+
+test('parallel accept from 3rd provider in 3-way parallelProviders', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({
+      message: '3-way accept test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    });
+  assert.equal(chatRes.status, 200);
+
+  const events = parseSseEvents(chatRes.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  const startData = JSON.parse(startEvent.data);
+  const doneEvent = events.find((e) => e.event === 'done');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.ok(doneData.turnId);
+  assert.equal(doneData.results.length, 3);
+
+  // Accept the 3rd provider (claude-sonnet-4-6)
+  const acceptRes = await agent
+    .post(`/api/chat/parallel/${doneData.turnId}/accept`)
+    .send({
+      conversationId: startData.conversationId,
+      provider: 'claude-sonnet-4-6',
+    });
+  assert.equal(acceptRes.status, 200);
+  assert.equal(acceptRes.body.ok, true);
+  assert.equal(acceptRes.body.acceptedProvider, 'claude-sonnet-4-6');
+
+  // Verify conversation has only the accepted provider's message
+  const conversation = await Conversation.findById(startData.conversationId).lean();
+  const assistants = conversation.messages.filter((m) => m.role === 'assistant');
+  assert.equal(assistants.length, 1);
+  assert.equal(assistants[0].provider, 'claude-sonnet-4-6');
+
+  // Verify turn doc is updated
+  const turn = await ParallelCandidateTurn.findOne({ turnId: doneData.turnId }).lean();
+  assert.equal(turn.status, 'accepted');
+  assert.equal(turn.acceptedProvider, 'claude-sonnet-4-6');
+  assert.ok(Array.isArray(turn.requestedProviders));
+  assert.equal(turn.requestedProviders.length, 3);
+});
+
+test('parallel discard 3-way removes all 3 candidates', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({
+      message: '3-way discard test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    });
+  assert.equal(chatRes.status, 200);
+
+  const events = parseSseEvents(chatRes.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  const startData = JSON.parse(startEvent.data);
+  const doneEvent = events.find((e) => e.event === 'done');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.ok(doneData.turnId);
+
+  const discardRes = await agent
+    .post(`/api/chat/parallel/${doneData.turnId}/discard`)
+    .send({ conversationId: startData.conversationId });
+  assert.equal(discardRes.status, 200);
+  assert.equal(discardRes.body.ok, true);
+  assert.equal(discardRes.body.discardedCount, 3);
+
+  // Conversation should only have the user message
+  const conversation = await Conversation.findById(startData.conversationId).lean();
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].role, 'user');
+
+  // Turn should be marked discarded
+  const turn = await ParallelCandidateTurn.findOne({ turnId: doneData.turnId }).lean();
+  assert.equal(turn.status, 'discarded');
+});
+
+test('parallel accept rejects provider not in requestedProviders for 3-way', async () => {
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({
+      message: 'accept reject test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    });
+  assert.equal(chatRes.status, 200);
+
+  const events = parseSseEvents(chatRes.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  const startData = JSON.parse(startEvent.data);
+  const doneEvent = events.find((e) => e.event === 'done');
+  const doneData = JSON.parse(doneEvent.data);
+
+  // Try to accept gpt-5-mini which was NOT in the parallelProviders
+  const acceptRes = await agent
+    .post(`/api/chat/parallel/${doneData.turnId}/accept`)
+    .send({
+      conversationId: startData.conversationId,
+      provider: 'gpt-5-mini',
+    });
+  assert.equal(acceptRes.status, 400);
+  assert.equal(acceptRes.body.code, 'INVALID_PROVIDER');
+});
+
+test('POST /api/chat rejects duplicate parallelProviders', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'claude', 'gpt-5-mini'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+test('POST /api/chat rejects parallelProviders that is not an array', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      parallelProviders: 'claude',
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+test('POST /api/chat/retry rejects invalid parallelProviders', async () => {
+  // Create initial conversation
+  const chatRes = await agent
+    .post('/api/chat')
+    .send({ message: 'retry validation setup', provider: 'claude' });
+  assert.equal(chatRes.status, 200);
+
+  const chatEvents = parseSseEvents(chatRes.text);
+  const chatStart = chatEvents.find((e) => e.event === 'start');
+  const chatStartData = JSON.parse(chatStart.data);
+
+  const retryRes = await agent
+    .post('/api/chat/retry')
+    .send({
+      conversationId: chatStartData.conversationId,
+      mode: 'parallel',
+      parallelProviders: ['claude', 'invalid-provider'],
+    });
+
+  assert.equal(retryRes.status, 400);
+  assert.equal(retryRes.body.ok, false);
+  assert.equal(retryRes.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+// ──────────────────────────────────────────────
+// COPILOT: improve-template
+// ──────────────────────────────────────────────
+
+test('POST /api/copilot/improve-template returns 400 when templateContent is missing', async () => {
+  const res = await agent
+    .post('/api/copilot/improve-template')
+    .send({});
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'VALIDATION');
+});
+
+test('POST /api/copilot/improve-template returns 400 when templateContent is empty string', async () => {
+  const res = await agent
+    .post('/api/copilot/improve-template')
+    .send({ templateContent: '' });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'VALIDATION');
+});
+
+test('POST /api/copilot/improve-template returns 400 when templateContent is not a string', async () => {
+  const res = await agent
+    .post('/api/copilot/improve-template')
+    .send({ templateContent: 123 });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'VALIDATION');
+});
+
+test('POST /api/copilot/improve-template streams improvement for valid templateContent', async () => {
+  const res = await agent
+    .post('/api/copilot/improve-template')
+    .send({ templateContent: 'Hello {{CLIENT_NAME}}, your issue has been resolved.' });
+
+  assert.equal(res.status, 200);
+
+  const events = parseSseEvents(res.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  assert.ok(startEvent, 'start event must be present');
+  const startData = JSON.parse(startEvent.data);
+  assert.equal(startData.type, 'improve-template');
+
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.equal(doneData.fullResponse, 'mock assistant response');
+});

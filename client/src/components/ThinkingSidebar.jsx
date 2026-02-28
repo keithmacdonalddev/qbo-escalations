@@ -10,17 +10,27 @@ function formatElapsed(ms) {
   return `${minutes}m ${seconds.padStart(2, '0')}s`;
 }
 
-export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStartTime, isStreaming, streamingText }) {
+function hasAnyStreamingText(streamingText, parallelStreaming) {
+  if (streamingText) return true;
+  if (parallelStreaming) {
+    for (const key in parallelStreaming) {
+      if (parallelStreaming[key]) return true;
+    }
+  }
+  return false;
+}
+
+export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStartTime, isStreaming, streamingText, parallelStreaming, isParallelMode }) {
   const [elapsed, setElapsed] = useState(0);
   const scrollRef = useRef(null);
   const prevLenRef = useRef(0);
-  const frozenRef = useRef(null);
+  const frozenElapsedRef = useRef(null);
 
   // Timer: tick every 100ms while streaming
   useEffect(() => {
     if (!thinkingStartTime || !isStreaming) {
       setElapsed(0);
-      frozenRef.current = null;
+      frozenElapsedRef.current = null;
       return;
     }
     setElapsed(Date.now() - thinkingStartTime);
@@ -30,10 +40,10 @@ export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStar
     return () => clearInterval(interval);
   }, [thinkingStartTime, isStreaming]);
 
-  // Freeze timer when thinking ends (first text chunk arrives)
+  // Freeze timer when first response text chunk arrives (thinking phase ended)
   useEffect(() => {
-    if (!isThinking && streamingText && frozenRef.current === null && elapsed > 0) {
-      frozenRef.current = elapsed;
+    if (!isThinking && streamingText && frozenElapsedRef.current === null && elapsed > 0) {
+      frozenElapsedRef.current = elapsed;
     }
   }, [isThinking, streamingText, elapsed]);
 
@@ -45,8 +55,11 @@ export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStar
     prevLenRef.current = thinkingText.length;
   }, [thinkingText]);
 
-  const visible = isStreaming && (thinkingText || isThinking);
-  const displayElapsed = frozenRef.current ?? elapsed;
+  // Hide sidebar entirely in parallel mode (graceful degradation — parallel thinking is Phase 2)
+  // Show sidebar whenever streaming is active in single/fallback mode
+  const visible = isStreaming && Boolean(thinkingStartTime) && !isParallelMode;
+  const displayElapsed = frozenElapsedRef.current ?? elapsed;
+  const showingThoughtContent = !isThinking && thinkingText && streamingText;
 
   return (
     <AnimatePresence>
@@ -61,8 +74,8 @@ export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStar
         >
           <div className="thinking-sidebar-header">
             <div className="thinking-sidebar-title">
-              {isThinking && <span className="spinner spinner-sm" />}
-              <span>{isThinking ? 'Thinking...' : 'Thought Process'}</span>
+              {!showingThoughtContent && <span className="spinner spinner-sm" />}
+              <span>{showingThoughtContent ? 'Thought Process' : 'Thinking...'}</span>
             </div>
             <div className="thinking-sidebar-timer">
               {formatElapsed(displayElapsed)}
@@ -74,7 +87,7 @@ export default function ThinkingSidebar({ thinkingText, isThinking, thinkingStar
               <pre className="thinking-sidebar-text">{thinkingText}</pre>
             ) : (
               <span className="thinking-sidebar-placeholder">
-                Waiting for reasoning output...
+                {isThinking ? 'Reasoning...' : 'Waiting for model response...'}
               </span>
             )}
             {isThinking && thinkingText && <span className="streaming-cursor" />}

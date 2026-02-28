@@ -32,3 +32,18 @@
 - Never start, restart, stop, kill, or otherwise manage server/client processes unless the user explicitly asks for it in the current prompt message.
 - This includes app servers, API servers, frontend dev servers, workers, watchers, and local client processes.
 - If process control is not explicitly requested, do not perform it.
+
+### Verification and Accuracy Discipline (Strict)
+
+- Do not make status claims (e.g., "fixed", "removed", "not present") from memory, prior outputs, or editor state alone.
+- Before any final claim, re-verify directly from disk in the current workspace using:
+  - `git diff` (or `git status --short`) for change presence
+  - `rg` for symbol/log-string confirmation
+  - `Get-Content`/file read for line-level proof when needed
+- If new commits or edits may have landed during review, re-run verification commands immediately before responding.
+- If uncertainty remains, state uncertainty explicitly and verify again before asserting.
+
+### Incident Note (2026-02-28)
+
+- A stale-state reporting mistake occurred: a debug-log finding was reported after the file had already been updated.
+- Preventive rule: all factual code-state assertions must be backed by a fresh on-disk check in the same turn.

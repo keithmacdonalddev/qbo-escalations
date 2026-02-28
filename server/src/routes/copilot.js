@@ -241,22 +241,19 @@ router.post('/generate-template', async (req, res) => {
   streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'generate-template' });
 });
 
-// POST /api/copilot/improve-template -- Suggest improvements for an existing template
+// POST /api/copilot/improve-template -- Suggest improvements for pasted template content
 router.post('/improve-template', async (req, res) => {
-  const { templateId } = req.body;
+  const { templateContent } = req.body;
 
-  const template = await Template.findById(templateId).lean();
-  if (!template) {
-    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Template not found' });
+  if (!templateContent || typeof templateContent !== 'string' || !templateContent.trim()) {
+    return res.status(400).json({ ok: false, code: 'VALIDATION', error: 'templateContent is required' });
   }
 
   const heartbeat = initSSE(res);
   res.write('event: start\ndata: ' + JSON.stringify({ type: 'improve-template' }) + '\n\n');
 
   const prompt = 'Review this QBO escalation response template and suggest improvements:\n\n' +
-    'Title: ' + template.title + '\n' +
-    'Category: ' + template.category + '\n' +
-    'Body:\n' + template.body + '\n\n' +
+    templateContent.trim() + '\n\n' +
     'Evaluate and improve:\n' +
     '1. Clarity -- is it easy for a phone agent to read aloud?\n' +
     '2. Accuracy -- are the QBO navigation paths correct and specific?\n' +

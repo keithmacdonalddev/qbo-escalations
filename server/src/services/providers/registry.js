@@ -77,7 +77,7 @@ function getDefaultProvider() {
 }
 
 function isValidProvider(provider) {
-  return Boolean(provider && PROVIDER_DEFS[provider]);
+  return Boolean(provider && typeof provider === 'string' && Object.prototype.hasOwnProperty.call(PROVIDER_DEFS, provider));
 }
 
 function normalizeProvider(provider) {

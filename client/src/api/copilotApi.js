@@ -50,8 +50,8 @@ export function streamGenerateTemplate(category, description, handlers) {
   return streamRequest(`${BASE}/generate-template`, { category, description }, handlers);
 }
 
-export function streamImproveTemplate(templateId, handlers) {
-  return streamRequest(`${BASE}/improve-template`, { templateId }, handlers);
+export function streamImproveTemplate(templateContent, handlers) {
+  return streamRequest(`${BASE}/improve-template`, { templateContent }, handlers);
 }
 
 export function streamExplainTrends(handlers) {

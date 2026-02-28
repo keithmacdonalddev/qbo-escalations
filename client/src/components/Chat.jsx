@@ -174,7 +174,11 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     thinkingText,
     isThinking,
     thinkingStartTime,
+    splitModeActive,
   } = chat;
+
+  // Effective mode accounts for persistent split mode from prior parallel turns
+  const effectiveMode = splitModeActive ? 'parallel' : mode;
 
   const [exportCopied, setExportCopied] = useState(false);
   const [savedEscalationId, setSavedEscalationId] = useState(null);
@@ -881,7 +885,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
 
         {/* Streaming response (single/fallback) */}
         <AnimatePresence>
-          {isStreaming && mode !== 'parallel' && streamingText && (
+          {isStreaming && effectiveMode !== 'parallel' && streamingText && (
             <motion.div key="streaming-single" {...fadeSlideUp} transition={transitions.normal}>
               <ChatMessage
                 role="assistant"
@@ -895,7 +899,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
 
         {/* Streaming response (parallel) — split-column layout */}
         <AnimatePresence>
-          {isStreaming && mode === 'parallel' && (() => {
+          {isStreaming && effectiveMode === 'parallel' && (() => {
             const activeParallelProviders = parallelProviders.length >= 2
               ? parallelProviders
               : [...new Set([provider, fallbackProvider])].filter(Boolean);
@@ -920,16 +924,13 @@ export function ChatView({ conversationIdFromRoute, chat }) {
           })()}
         </AnimatePresence>
 
-        {/* Streaming but no text yet (single/fallback) */}
+        {/* Streaming but no text yet (single/fallback) — minimal indicator since sidebar shows details */}
         <AnimatePresence>
-          {isStreaming && mode !== 'parallel' && !streamingText && (
+          {isStreaming && effectiveMode !== 'parallel' && !streamingText && (
             <motion.div key="streaming-thinking" {...fadeSlideUp} transition={transitions.normal}>
               <div className="chat-bubble chat-bubble-assistant" style={{ alignSelf: 'flex-start' }}>
                 <div className="eyebrow" style={{ marginBottom: 'var(--sp-2)' }}>{getProviderLabel(streamProvider || provider)}</div>
                 <span className="spinner spinner-sm" />
-                <span className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginLeft: 'var(--sp-2)' }}>
-                  Thinking...
-                </span>
               </div>
             </motion.div>
           )}
@@ -1260,7 +1261,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                     <>
                       <div className="provider-popover-divider" />
                       <div className="provider-multi-select">
-                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--ink-secondary)', marginBottom: 4, display: 'block' }}>
                           Parallel Providers (select 2–4)
                         </label>
                         {PROVIDER_OPTIONS.map(opt => {
@@ -1269,6 +1270,9 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                             <button
                               key={opt.value}
                               type="button"
+                              role="switch"
+                              aria-checked={isSelected}
+                              aria-label={`${opt.label} provider`}
                               className={`provider-chip ${isSelected ? 'selected' : ''}`}
                               onClick={() => {
                                 const next = isSelected
@@ -1283,9 +1287,9 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                                 padding: '4px 10px',
                                 margin: '2px 4px 2px 0',
                                 borderRadius: 12,
-                                border: isSelected ? '1.5px solid var(--accent)' : '1px solid var(--border)',
-                                background: isSelected ? 'var(--accent-bg, rgba(99,102,241,0.1))' : 'transparent',
-                                color: isSelected ? 'var(--accent)' : 'var(--text-secondary)',
+                                border: isSelected ? '1.5px solid var(--accent)' : '1px solid var(--line)',
+                                background: isSelected ? 'var(--accent-subtle)' : 'transparent',
+                                color: isSelected ? 'var(--accent)' : 'var(--ink-secondary)',
                                 cursor: 'pointer',
                                 fontSize: '0.8rem',
                                 fontWeight: isSelected ? 600 : 400,
@@ -1297,7 +1301,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                           );
                         })}
                         {parallelProviders.length < 2 && (
-                          <div style={{ fontSize: '0.7rem', color: 'var(--error, #ef4444)', marginTop: 4 }}>
+                          <div role="alert" style={{ fontSize: '0.7rem', color: 'var(--danger)', marginTop: 4 }}>
                             Select at least 2 providers
                           </div>
                         )}
@@ -1507,7 +1511,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   key="send"
                   className="compose-send-btn"
                   onClick={handleSubmit}
-                  disabled={(!input.trim() && images.length === 0) || (mode === 'parallel' && parallelProviders.length < 2)}
+                  disabled={(!input.trim() && images.length === 0) || (effectiveMode === 'parallel' && parallelProviders.length < 2)}
                   type="button"
                   aria-label="Send message"
                   title="Send message"
@@ -1643,6 +1647,8 @@ export function ChatView({ conversationIdFromRoute, chat }) {
       thinkingStartTime={thinkingStartTime}
       isStreaming={isStreaming}
       streamingText={streamingText}
+      parallelStreaming={parallelStreaming}
+      isParallelMode={effectiveMode === 'parallel'}
     />
     </div>
   );
