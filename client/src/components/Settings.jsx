@@ -603,27 +603,51 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                 The edge tab on the right side of the viewport shows a live activity indicator when API requests are in flight.
               </p>
               <div className="settings-ai-fields">
-                {/* Mode toggle */}
+                {/* Mode toggle — visual preview cards */}
                 <div style={{ marginBottom: 'var(--sp-3)' }}>
                   <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Indicator style</span>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
                     Choose how active requests are indicated on the network tab.
                   </div>
-                  <div className="settings-filter-bar" role="group" aria-label="LED indicator style" style={{ marginBottom: 0 }}>
-                    {[
-                      { value: 'dot', label: 'LED Dot', desc: 'Glowing dot above the icon' },
-                      { value: 'icon', label: 'Icon Glow', desc: 'The waveform icon itself lights up' },
-                    ].map(opt => (
-                      <button
-                        key={opt.value}
-                        className={`settings-filter-btn${layoutProps.ledMode === opt.value ? ' is-active' : ''}`}
-                        onClick={() => layoutProps.setLedMode(opt.value)}
-                        type="button"
-                        title={opt.desc}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
+                  <div className="led-mode-cards" role="group" aria-label="LED indicator style">
+                    {/* LED Dot card */}
+                    <button
+                      className={`led-mode-card${layoutProps.ledMode === 'dot' ? ' is-active' : ''}`}
+                      onClick={() => layoutProps.setLedMode('dot')}
+                      type="button"
+                    >
+                      <div className="led-mode-preview">
+                        <div className="led-mode-tab-mock">
+                          <span className="led-mode-dot-preview" />
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="led-mode-info">
+                        <span className="led-mode-name">LED Dot</span>
+                        <span className="led-mode-desc">Glowing dot above icon</span>
+                      </div>
+                    </button>
+
+                    {/* Icon Glow card */}
+                    <button
+                      className={`led-mode-card${layoutProps.ledMode === 'icon' ? ' is-active' : ''}`}
+                      onClick={() => layoutProps.setLedMode('icon')}
+                      type="button"
+                    >
+                      <div className="led-mode-preview">
+                        <div className="led-mode-tab-mock led-mode-tab-mock--glow">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                          </svg>
+                        </div>
+                      </div>
+                      <div className="led-mode-info">
+                        <span className="led-mode-name">Icon Glow</span>
+                        <span className="led-mode-desc">Waveform icon lights up</span>
+                      </div>
+                    </button>
                   </div>
                 </div>
 
