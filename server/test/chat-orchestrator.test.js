@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 const claude = require('../src/services/claude');
 const codex = require('../src/services/codex');
-const { startChatOrchestration } = require('../src/services/chat-orchestrator');
+const { startChatOrchestration, resolvePolicy } = require('../src/services/chat-orchestrator');
 const { resetProviderHealth, getProviderHealth, recordFailure } = require('../src/services/provider-health');
 
 let originalClaudeChat;
@@ -640,4 +640,152 @@ test('P5: parallel mode with mixed new providers', async () => {
   const miniResult = out.data.results.find((r) => r.provider === 'gpt-5-mini');
   assert.equal(sonnetResult.status, 'ok');
   assert.equal(miniResult.status, 'ok');
+});
+
+// ---------- Phase 6: N-way parallel provider support ----------
+
+test('parallel mode with 3 parallelProviders returns 3 ordered results', async () => {
+  let claudeCallCount = 0;
+  claude.chat = ({ onChunk, onDone }) => {
+    claudeCallCount++;
+    const label = claudeCallCount === 1 ? 'claude-response' : 'sonnet-response';
+    setTimeout(() => onChunk(label), 3);
+    setTimeout(() => onDone(label), 6);
+    return () => {};
+  };
+  codex.chat = ({ onChunk, onDone }) => {
+    setTimeout(() => onChunk('codex-response'), 4);
+    setTimeout(() => onDone('codex-response'), 7);
+    return () => {};
+  };
+
+  const out = await runChat({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+  });
+
+  assert.equal(out.result, 'done');
+  assert.equal(out.data.mode, 'parallel');
+  assert.ok(Array.isArray(out.data.results));
+  assert.equal(out.data.results.length, 3);
+
+  // Verify ordering matches the requested parallelProviders
+  assert.equal(out.data.results[0].provider, 'claude');
+  assert.equal(out.data.results[1].provider, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.results[2].provider, 'claude-sonnet-4-6');
+
+  // Verify each result has the expected fields
+  for (const result of out.data.results) {
+    assert.equal(result.status, 'ok');
+    assert.ok(typeof result.fullResponse === 'string');
+    assert.ok(typeof result.latencyMs === 'number');
+  }
+});
+
+test('parallel mode with 4 parallelProviders handles mixed success and failure', async () => {
+  claude.chat = ({ onChunk, onDone }) => {
+    setTimeout(() => onChunk('claude-ok'), 3);
+    setTimeout(() => onDone('claude-ok'), 6);
+    return () => {};
+  };
+  codex.chat = ({ onError }) => {
+    const err = new Error('codex family down');
+    err.code = 'PROVIDER_EXEC_FAILED';
+    setTimeout(() => onError(err), 4);
+    return () => {};
+  };
+
+  const out = await runChat({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+  });
+
+  assert.equal(out.result, 'done');
+  assert.equal(out.data.mode, 'parallel');
+  assert.ok(Array.isArray(out.data.results));
+  assert.equal(out.data.results.length, 4);
+
+  // Verify ordering matches parallelProviders
+  assert.equal(out.data.results[0].provider, 'claude');
+  assert.equal(out.data.results[1].provider, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.results[2].provider, 'claude-sonnet-4-6');
+  assert.equal(out.data.results[3].provider, 'gpt-5-mini');
+
+  // claude family succeeds, codex family fails
+  assert.equal(out.data.results[0].status, 'ok');
+  assert.equal(out.data.results[1].status, 'error');
+  assert.equal(out.data.results[2].status, 'ok');
+  assert.equal(out.data.results[3].status, 'error');
+
+  // Verify provider_error events were emitted for failed providers
+  assert.equal(out.events.filter((e) => e.type === 'provider_error').length, 2);
+});
+
+test('parallel mode with 2 parallelProviders behaves like legacy primary+fallback', async () => {
+  claude.chat = ({ onChunk, onDone }) => {
+    setTimeout(() => onChunk('claude-part'), 3);
+    setTimeout(() => onDone('claude-final'), 6);
+    return () => {};
+  };
+  codex.chat = ({ onChunk, onDone }) => {
+    setTimeout(() => onChunk('codex-part'), 4);
+    setTimeout(() => onDone('codex-final'), 7);
+    return () => {};
+  };
+
+  const out = await runChat({
+    mode: 'parallel',
+    primaryProvider: 'claude',
+    parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+  });
+
+  assert.equal(out.result, 'done');
+  assert.equal(out.data.mode, 'parallel');
+  assert.ok(Array.isArray(out.data.results));
+  assert.equal(out.data.results.length, 2);
+  const claudeResult = out.data.results.find((r) => r.provider === 'claude');
+  const codexResult = out.data.results.find((r) => r.provider === 'chatgpt-5.3-codex-high');
+  assert.equal(claudeResult.status, 'ok');
+  assert.equal(claudeResult.fullResponse, 'claude-final');
+  assert.equal(codexResult.status, 'ok');
+  assert.equal(codexResult.fullResponse, 'codex-final');
+});
+
+test('resolvePolicy rejects parallelProviders with invalid provider', async () => {
+  assert.throws(
+    () => resolvePolicy({
+      mode: 'parallel',
+      primaryProvider: 'claude',
+      parallelProviders: ['claude', 'invalid-provider-id'],
+    }),
+    (err) => {
+      assert.equal(err.code, 'INVALID_PARALLEL_PROVIDERS');
+      return true;
+    }
+  );
+});
+
+test('resolvePolicy rejects parallelProviders with fewer than 2 providers', async () => {
+  assert.throws(
+    () => resolvePolicy({
+      mode: 'parallel',
+      primaryProvider: 'claude',
+      parallelProviders: ['claude', 'claude'],
+    }),
+    (err) => {
+      assert.equal(err.code, 'PARALLEL_PROVIDER_COUNT_INVALID');
+      return true;
+    }
+  );
 });

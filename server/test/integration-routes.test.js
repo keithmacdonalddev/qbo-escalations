@@ -1108,3 +1108,146 @@ test('P5: parse parallel mode downgrades to single when providers collapse', asy
   assert.equal(res.body.ok, true);
   assert.equal(res.body._meta.mode, 'single');
 });
+
+// ---------- Phase 6: N-way parallelProviders route tests ----------
+
+test('POST /api/chat with 3 parallelProviders streams 3 lanes', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test 3-way parallel',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    });
+
+  assert.equal(res.status, 200);
+
+  const events = parseSseEvents(res.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  assert.ok(startEvent, 'start event must be present');
+  const startData = JSON.parse(startEvent.data);
+  assert.ok(Array.isArray(startData.parallelProviders));
+  assert.equal(startData.parallelProviders.length, 3);
+  assert.deepEqual(startData.parallelProviders, ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6']);
+
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.ok(Array.isArray(doneData.results));
+  assert.equal(doneData.results.length, 3);
+});
+
+test('POST /api/chat with 4 parallelProviders streams 4 lanes', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test 4-way parallel',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
+    });
+
+  assert.equal(res.status, 200);
+
+  const events = parseSseEvents(res.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  assert.ok(startEvent, 'start event must be present');
+  const startData = JSON.parse(startEvent.data);
+  assert.ok(Array.isArray(startData.parallelProviders));
+  assert.equal(startData.parallelProviders.length, 4);
+
+  const doneEvent = events.find((e) => e.event === 'done');
+  assert.ok(doneEvent, 'done event must be present');
+  const doneData = JSON.parse(doneEvent.data);
+  assert.ok(Array.isArray(doneData.results));
+  assert.equal(doneData.results.length, 4);
+});
+
+test('POST /api/chat rejects parallelProviders with 1 provider', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      parallelProviders: ['claude'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'PARALLEL_PROVIDER_COUNT_INVALID');
+});
+
+test('POST /api/chat rejects parallelProviders with 5 providers', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini', 'claude'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'PARALLEL_PROVIDER_COUNT_INVALID');
+});
+
+test('POST /api/chat rejects parallelProviders with invalid provider', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      parallelProviders: ['claude', 'invalid-provider'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+test('POST /api/chat rejects parallelProviders when mode is not parallel', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'single',
+      parallelProviders: ['claude', 'gpt-5-mini'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+test('POST /api/chat rejects when primaryProvider not in parallelProviders', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test',
+      mode: 'parallel',
+      primaryProvider: 'gpt-5-mini',
+      parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+    });
+
+  assert.equal(res.status, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
+});
+
+test('POST /api/chat parallel mode without parallelProviders still works (legacy)', async () => {
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: 'test legacy parallel',
+      mode: 'parallel',
+      provider: 'claude',
+      fallbackProvider: 'gpt-5-mini',
+    });
+
+  assert.equal(res.status, 200);
+
+  const events = parseSseEvents(res.text);
+  const startEvent = events.find((e) => e.event === 'start');
+  assert.ok(startEvent, 'start event must be present');
+  const startData = JSON.parse(startEvent.data);
+  assert.ok(Array.isArray(startData.parallelProviders));
+  assert.equal(startData.parallelProviders.length, 2);
+});
