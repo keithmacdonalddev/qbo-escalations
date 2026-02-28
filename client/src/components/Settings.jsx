@@ -2,16 +2,87 @@ import { useState, useCallback, useRef } from 'react';
 import Tooltip from './Tooltip.jsx';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
 
+// --- SVG Icons (must be above SETTINGS_SECTIONS for Vite HMR) ---
+
+function IconCpu({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
+      <rect x="9" y="9" width="6" height="6" />
+      <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
+      <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
+      <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
+      <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
+    </svg>
+  );
+}
+
+function IconPalette({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="13.5" cy="6.5" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
+      <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor" stroke="none" />
+      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
+    </svg>
+  );
+}
+
+function IconSliders({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
+      <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
+      <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
+      <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+    </svg>
+  );
+}
+
+function IconTextSize({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  );
+}
+
+function IconLayout({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" /><line x1="9" y1="9" x2="21" y2="9" />
+    </svg>
+  );
+}
+
+function IconHint({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+function IconInfo({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  );
+}
+
 const SETTINGS_SECTIONS = [
   { id: 'assistant', label: 'AI Assistant', icon: IconCpu, desc: 'Context, retrieval, budget controls' },
   { id: 'appearance', label: 'Appearance', icon: IconPalette, desc: 'Color schemes and themes' },
   { id: 'adjustments', label: 'Adjustments', icon: IconSliders, desc: 'Brightness, contrast, and tuning' },
   { id: 'typography', label: 'Typography', icon: IconTextSize, desc: 'Text size and readability' },
+  { id: 'layout', label: 'Layout', icon: IconLayout, desc: 'Sidebar and navigation behavior' },
   { id: 'tooltips', label: 'Tooltips', icon: IconHint, desc: 'Hover hint verbosity' },
   { id: 'about', label: 'About', icon: IconInfo, desc: 'App information' },
 ];
 
-export default function Settings({ themeProps, aiProps }) {
+export default function Settings({ themeProps, aiProps, layoutProps }) {
   const {
     themeId, setThemeId,
     brightness, setBrightness,
@@ -487,6 +558,35 @@ export default function Settings({ themeProps, aiProps }) {
           </div>
         )}
 
+        {activeSection === 'layout' && layoutProps && (
+          <div className="settings-panel">
+            <div className="settings-panel-header">
+              <h2 className="settings-panel-title">Layout</h2>
+            </div>
+            <p className="settings-section-desc">
+              Configure sidebar behavior and navigation preferences.
+            </p>
+
+            <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
+              <h3 className="settings-ai-title">Sidebar</h3>
+              <div className="settings-ai-fields">
+                <label className="settings-ai-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutProps.sidebarHoverExpand}
+                    onChange={(e) => layoutProps.setSidebarHoverExpand(e.target.checked)}
+                  />
+                  <span>Expand sidebar on hover when collapsed</span>
+                </label>
+                <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 'var(--sp-1)', lineHeight: 1.5 }}>
+                  When enabled, hovering over the collapsed sidebar will temporarily reveal its full contents.
+                  Moving the cursor away slides it back to collapsed.
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeSection === 'tooltips' && (
           <div className="settings-panel">
             <div className="settings-panel-header">
@@ -710,43 +810,7 @@ import { COLOR_THEMES } from '../hooks/useTheme.js';
 const COLOR_THEMES_MAP = Object.fromEntries(COLOR_THEMES.map(t => [t.id, t.name]));
 
 
-// --- SVG Icons ---
-
-function IconCpu({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="4" width="16" height="16" rx="2" ry="2" />
-      <rect x="9" y="9" width="6" height="6" />
-      <line x1="9" y1="1" x2="9" y2="4" /><line x1="15" y1="1" x2="15" y2="4" />
-      <line x1="9" y1="20" x2="9" y2="23" /><line x1="15" y1="20" x2="15" y2="23" />
-      <line x1="20" y1="9" x2="23" y2="9" /><line x1="20" y1="14" x2="23" y2="14" />
-      <line x1="1" y1="9" x2="4" y2="9" /><line x1="1" y1="14" x2="4" y2="14" />
-    </svg>
-  );
-}
-
-function IconPalette({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="13.5" cy="6.5" r="0.5" fill="currentColor" stroke="none" />
-      <circle cx="17.5" cy="10.5" r="0.5" fill="currentColor" stroke="none" />
-      <circle cx="8.5" cy="7.5" r="0.5" fill="currentColor" stroke="none" />
-      <circle cx="6.5" cy="12.5" r="0.5" fill="currentColor" stroke="none" />
-      <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 011.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z" />
-    </svg>
-  );
-}
-
-function IconSliders({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" />
-      <line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" />
-      <line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" />
-      <line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
-    </svg>
-  );
-}
+// --- SVG Icons (render-only, not referenced in SETTINGS_SECTIONS) ---
 
 function IconSun({ size = 16 }) {
   return (
@@ -788,30 +852,6 @@ function IconReset({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" />
-    </svg>
-  );
-}
-
-function IconHint({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" />
-    </svg>
-  );
-}
-
-function IconInfo({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" />
-    </svg>
-  );
-}
-
-function IconTextSize({ size = 16 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="4 7 4 4 20 4 20 7" /><line x1="9" y1="20" x2="15" y2="20" /><line x1="12" y1="4" x2="12" y2="20" />
     </svg>
   );
 }
