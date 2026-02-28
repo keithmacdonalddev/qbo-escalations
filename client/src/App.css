@@ -4831,3 +4831,62 @@ textarea {
   line-height: 14px;
   pointer-events: none;
 }
+
+/* Grouped view — duration pinned right instead of absolute-positioned */
+.wf-duration--grouped {
+  position: static;
+  float: right;
+  line-height: 14px;
+}
+
+/* View mode toggle */
+.wf-view-toggle {
+  display: flex;
+  border: 1px solid var(--border, color-mix(in srgb, var(--ink) 12%, transparent));
+  border-radius: var(--radius-sm, 4px);
+  overflow: hidden;
+}
+
+.wf-view-btn {
+  padding: 1px 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: all var(--duration-fast, 150ms) ease;
+}
+.wf-view-btn:not(:last-child) {
+  border-right: 1px solid var(--border, color-mix(in srgb, var(--ink) 12%, transparent));
+}
+.wf-view-btn--active {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.wf-view-btn:hover:not(.wf-view-btn--active) {
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+  color: var(--ink-secondary);
+}
+
+/* Grouped row — call count badge */
+.wf-group-count {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border-radius: var(--radius-pill, 100px);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Grouped view legend */
+.wf-legend {
+  padding: 2px var(--sp-3, 12px) 4px;
+  text-align: right;
+  color: var(--ink-tertiary);
+  font-size: 9px;
+  font-style: italic;
+}

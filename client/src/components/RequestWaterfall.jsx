@@ -119,10 +119,95 @@ function WaterfallRow({ req, windowStart, windowDuration, now }) {
   );
 }
 
+// ── GroupedRow ───────────────────────────────────────────────
+
+function GroupedRow({ group, maxDuration }) {
+  const scale = maxDuration > 0 ? 1 / maxDuration : 1;
+  const minPct = (group.min * scale) * 100;
+  const avgPct = (group.avg * scale) * 100;
+  const maxPct = (group.max * scale) * 100;
+
+  return (
+    <div className={`wf-row${group.active > 0 ? ' wf-row--active' : ''}`}>
+      {/* Label column */}
+      <div className="wf-label">
+        <span className={`wf-method ${METHOD_CLASSES[group.method] || ''}`}>
+          {group.method}
+        </span>
+        <span className="wf-url" title={group.endpoint}>
+          {group.endpoint}
+        </span>
+        <span className="wf-group-count">{group.count}x</span>
+      </div>
+
+      {/* Track column — min/avg/max range bar */}
+      <div className="wf-track">
+        {/* Range bar: min to max */}
+        <div
+          className="wf-bar wf-bar--ttfb"
+          style={{ left: `${minPct}%`, width: `${Math.max(maxPct - minPct, 0.5)}%` }}
+        />
+        {/* Avg marker */}
+        <div
+          className="wf-bar"
+          style={{
+            left: `${avgPct}%`,
+            width: `${Math.max(maxPct - avgPct, 0.5)}%`,
+            backgroundColor: group.active > 0 ? STATE_COLORS.streaming : STATE_COLORS.complete,
+          }}
+        />
+        {/* Labels */}
+        <span className="wf-duration wf-duration--grouped">
+          {formatDuration(group.min)} / {formatDuration(group.avg)} / {formatDuration(group.max)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── groupRequests ────────────────────────────────────────────
+
+function groupRequests(requests, now) {
+  const map = new Map();
+  for (const req of requests) {
+    const endpoint = req.url.split('?')[0].replace('/api/', '');
+    const key = `${req.method} ${endpoint}`;
+    if (!map.has(key)) {
+      map.set(key, { method: req.method, endpoint, count: 0, durations: [], active: 0 });
+    }
+    const g = map.get(key);
+    g.count++;
+    const isActive = req.state === 'pending' || req.state === 'streaming' || req.state === 'headers';
+    if (isActive) g.active++;
+    const dur = (req.endTime || now) - req.startTime;
+    g.durations.push(dur);
+  }
+
+  const groups = [];
+  for (const g of map.values()) {
+    const sorted = g.durations.sort((a, b) => a - b);
+    groups.push({
+      key: `${g.method} ${g.endpoint}`,
+      method: g.method,
+      endpoint: g.endpoint,
+      count: g.count,
+      active: g.active,
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      avg: sorted.reduce((a, b) => a + b, 0) / sorted.length,
+    });
+  }
+
+  // Sort by count descending — chattiest endpoints first
+  groups.sort((a, b) => b.count - a.count);
+  return groups;
+}
+
 // ── RequestWaterfall ─────────────────────────────────────────
 
 export default function RequestWaterfall({ requests, clearRequests, enabled, setEnabled }) {
   const [collapsed, setCollapsed] = useState(true);
+  const [viewMode, setViewMode] = useState('timeline'); // 'timeline' | 'grouped'
   const bodyRef = useRef(null);
 
   const activeCount = useMemo(
@@ -133,16 +218,26 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
   // Only run animation frames when panel is open and there are active requests
   const now = useAnimationFrame(!collapsed && activeCount > 0);
 
-  // Auto-scroll to newest when a new request appears
+  // Grouped view data
+  const groups = useMemo(
+    () => viewMode === 'grouped' ? groupRequests(requests, now) : [],
+    [requests, now, viewMode],
+  );
+  const maxGroupDuration = useMemo(
+    () => groups.length > 0 ? Math.max(...groups.map(g => g.max)) : 1,
+    [groups],
+  );
+
+  // Auto-scroll to newest when a new request appears (timeline only)
   const prevLenRef = useRef(requests.length);
   useEffect(() => {
-    if (requests.length > prevLenRef.current && bodyRef.current) {
+    if (viewMode === 'timeline' && requests.length > prevLenRef.current && bodyRef.current) {
       bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
     }
     prevLenRef.current = requests.length;
-  }, [requests.length]);
+  }, [requests.length, viewMode]);
 
-  // Time window for bar positioning
+  // Time window for bar positioning (timeline)
   const windowStart = requests.length > 0
     ? Math.min(...requests.map(r => r.startTime))
     : 0;
@@ -190,6 +285,22 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
           >
             {/* Toolbar */}
             <div className="wf-toolbar">
+              <div className="wf-view-toggle">
+                <button
+                  className={`wf-view-btn${viewMode === 'timeline' ? ' wf-view-btn--active' : ''}`}
+                  onClick={() => setViewMode('timeline')}
+                  type="button"
+                >
+                  Timeline
+                </button>
+                <button
+                  className={`wf-view-btn${viewMode === 'grouped' ? ' wf-view-btn--active' : ''}`}
+                  onClick={() => setViewMode('grouped')}
+                  type="button"
+                >
+                  Grouped
+                </button>
+              </div>
               <label className="wf-record-toggle">
                 <input
                   type="checkbox"
@@ -211,7 +322,7 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
             {/* Rows */}
             {requests.length === 0 ? (
               <div className="wf-empty">No requests recorded</div>
-            ) : (
+            ) : viewMode === 'timeline' ? (
               <div className="wf-rows">
                 {requests.map(req => (
                   <WaterfallRow
@@ -223,6 +334,21 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
                   />
                 ))}
               </div>
+            ) : (
+              <div className="wf-rows">
+                {groups.map(group => (
+                  <GroupedRow
+                    key={group.key}
+                    group={group}
+                    maxDuration={maxGroupDuration}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Grouped view legend */}
+            {viewMode === 'grouped' && groups.length > 0 && (
+              <div className="wf-legend">min / avg / max</div>
             )}
           </motion.div>
         )}
