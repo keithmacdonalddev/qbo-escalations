@@ -73,13 +73,13 @@ function IconInfo({ size = 16 }) {
 }
 
 const SETTINGS_SECTIONS = [
+  { id: 'about', label: 'About', icon: IconInfo, desc: 'App information' },
   { id: 'assistant', label: 'AI Assistant', icon: IconCpu, desc: 'Context, retrieval, budget controls' },
   { id: 'appearance', label: 'Appearance', icon: IconPalette, desc: 'Color schemes and themes' },
   { id: 'adjustments', label: 'Adjustments', icon: IconSliders, desc: 'Brightness, contrast, and tuning' },
   { id: 'typography', label: 'Typography', icon: IconTextSize, desc: 'Text size and readability' },
   { id: 'layout', label: 'Layout', icon: IconLayout, desc: 'Sidebar and navigation behavior' },
   { id: 'tooltips', label: 'Tooltips', icon: IconHint, desc: 'Hover hint verbosity' },
-  { id: 'about', label: 'About', icon: IconInfo, desc: 'App information' },
 ];
 
 export default function Settings({ themeProps, aiProps, layoutProps }) {
@@ -102,7 +102,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const isAiModified = Boolean(aiProps?.isAiModified);
 
   const { level: tooltipLevel, setLevel: setTooltipLevel } = useTooltipLevel();
-  const [activeSection, setActiveSection] = useState('appearance');
+  const [activeSection, setActiveSection] = useState('about');
   const liveRegionRef = useRef(null);
 
   const handleThemeSelect = useCallback((id, name) => {
@@ -674,6 +674,32 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 2 }}>
                     <span>Subtle</span>
                     <span>Bright</span>
+                  </div>
+                </div>
+
+                {/* Pulse speed slider */}
+                <div style={{ marginTop: 'var(--sp-3)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Pulse speed</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
+                      {layoutProps.ledSpeed}s
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
+                    How long one full breathe cycle takes. Shorter = more urgent, longer = calm ambient glow.
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="6"
+                    step="0.5"
+                    value={layoutProps.ledSpeed}
+                    onChange={(e) => layoutProps.setLedSpeed(Number(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--accent)' }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 2 }}>
+                    <span>Fast (0.5s)</span>
+                    <span>Slow (6s)</span>
                   </div>
                 </div>
               </div>

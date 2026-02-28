@@ -54,17 +54,21 @@ function App() {
   const [sidebarShowLabels, setSidebarShowLabels] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sidebarShowLabels')) ?? false; } catch { return false; }
   });
-  // Network indicator settings: intensity 0-100, mode 'dot' | 'icon'
+  // Network indicator settings: intensity 0-100, mode 'dot' | 'icon', speed in seconds
   const [ledIntensity, setLedIntensity] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ledIntensity')) ?? 70; } catch { return 70; }
   });
   const [ledMode, setLedMode] = useState(() => {
     try { return localStorage.getItem('ledMode') || 'dot'; } catch { return 'dot'; }
   });
+  const [ledSpeed, setLedSpeed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ledSpeed')) ?? 2; } catch { return 2; }
+  });
   useEffect(() => { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); }, [sidebarHoverExpand]);
   useEffect(() => { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); }, [sidebarShowLabels]);
   useEffect(() => { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); }, [ledIntensity]);
   useEffect(() => { localStorage.setItem('ledMode', ledMode); }, [ledMode]);
+  useEffect(() => { localStorage.setItem('ledSpeed', JSON.stringify(ledSpeed)); }, [ledSpeed]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
   const aiProps = useAiSettings();
@@ -152,7 +156,7 @@ function App() {
       case 'settings':
         return (
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed }} />
           </motion.div>
         );
       default:
@@ -287,7 +291,7 @@ function App() {
       {/* Network waterfall — edge tab + right sidebar overlay */}
       <button
         className={`network-edge-tab${networkOpen ? ' is-active' : ''}${networkActiveCount > 0 && ledMode === 'icon' ? ' led-icon-glow' : ''}`}
-        style={{ '--led-intensity': ledIntensity / 100 }}
+        style={{ '--led-intensity': ledIntensity / 100, '--led-speed': `${ledSpeed}s` }}
         onClick={() => setNetworkOpen(o => !o)}
         type="button"
         aria-label="Toggle network waterfall"
