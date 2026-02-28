@@ -46,6 +46,10 @@ function App() {
   const [route, setRoute] = useState(parseHashRoute);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarHoverExpand, setSidebarHoverExpand] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sidebarHoverExpand')) ?? true; } catch { return true; }
+  });
+  useEffect(() => { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); }, [sidebarHoverExpand]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
   const aiProps = useAiSettings();
@@ -132,13 +136,13 @@ function App() {
       case 'settings':
         return (
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand }} />
           </motion.div>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps]);
+  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand]);
 
   const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings';
 
@@ -180,6 +184,7 @@ function App() {
         onClose={() => setSidebarOpen(false)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
+        hoverExpand={sidebarHoverExpand}
       />
 
       <main
@@ -263,13 +268,24 @@ function App() {
         className={`network-edge-tab${networkOpen ? ' is-active' : ''}`}
         onClick={() => setNetworkOpen(o => !o)}
         type="button"
-        title="Network waterfall"
         aria-label="Toggle network waterfall"
       >
+        {networkActiveCount > 0 && <span className="network-edge-dot" />}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
         </svg>
-        {networkActiveCount > 0 && <span className="network-edge-dot" />}
+        <span className="network-edge-tooltip">
+          <div className="tooltip-title">Network Waterfall</div>
+          <div className="tooltip-desc">Monitor API request timing</div>
+          <div className="tooltip-status">
+            <span className={`tooltip-dot${networkActiveCount === 0 ? ' tooltip-dot--idle' : ''}`} />
+            {networkActiveCount > 0
+              ? `${networkActiveCount} active request${networkActiveCount > 1 ? 's' : ''}`
+              : waterfall.requests.length > 0
+                ? `${waterfall.requests.length} recorded`
+                : 'No activity'}
+          </div>
+        </span>
       </button>
 
       <RightSidebar
