@@ -17,6 +17,7 @@ import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import { useChat } from './hooks/useChat.js';
 import { useDevChat } from './hooks/useDevChat.js';
+import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 
 function parseHashRoute() {
   const hash = window.location.hash || '#/chat';
@@ -48,6 +49,7 @@ function App() {
   const aiProps = useAiSettings();
   const chat = useChat({ aiSettings: aiProps.aiSettings });
   const devChat = useDevChat();
+  const waterfall = useRequestWaterfall();
   const previousHashRef = useRef('#/chat');
   const settingsOpen = route.view === 'settings';
 
@@ -184,7 +186,7 @@ function App() {
 
         {/* DevMode — always mounted, hidden when not the active view */}
         <div style={{ display: route.view === 'dev' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <DevMode {...devChat} />
+          <DevMode {...devChat} waterfall={waterfall} />
         </div>
 
         {/* All other views use AnimatePresence for transitions */}

@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ChatMessage from './ChatMessage.jsx';
 import Tooltip from './Tooltip.jsx';
+import RequestWaterfall from './RequestWaterfall.jsx';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -59,6 +60,7 @@ export default function DevMode({
   newConversation,
   removeConversation,
   setError,
+  waterfall,
 }) {
 
   const [input, setInput] = useState('');
@@ -337,6 +339,9 @@ export default function DevMode({
 
             <div ref={messagesEndRef} />
           </div>
+
+          {/* Request waterfall — collapsible network timing panel */}
+          {waterfall && <RequestWaterfall {...waterfall} />}
 
           {/* Input area — Compose Card */}
           <div className="chat-input-area">
