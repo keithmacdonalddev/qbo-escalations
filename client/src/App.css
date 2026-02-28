@@ -5272,13 +5272,12 @@ textarea {
   right: calc(100% + 10px);
   top: 50%;
   transform: translateY(-50%);
-  width: max-content;
-  max-width: 220px;
-  padding: 8px 12px;
-  border-radius: 6px;
+  width: 240px;
+  padding: 10px 14px;
+  border-radius: 8px;
   background: var(--bg-raised, #2a2a2a);
   border: 1px solid var(--border, color-mix(in srgb, var(--ink) 15%, transparent));
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.12);
   color: var(--ink);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -5287,7 +5286,7 @@ textarea {
   opacity: 0;
   transition: opacity 180ms ease, transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: translateY(-50%) translateX(6px);
-  white-space: nowrap;
+  white-space: normal;
 }
 .network-edge-tooltip::after {
   content: '';
@@ -5307,12 +5306,14 @@ textarea {
 }
 .network-edge-tooltip .tooltip-title {
   font-weight: 700;
+  font-size: 12px;
   color: var(--ink);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 .network-edge-tooltip .tooltip-desc {
   color: var(--ink-secondary);
   font-size: 10px;
+  line-height: 1.4;
 }
 .network-edge-tooltip .tooltip-status {
   display: flex;
