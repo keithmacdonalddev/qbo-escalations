@@ -1050,6 +1050,15 @@ textarea {
   transition: box-shadow var(--duration-normal) var(--ease-standard);
 }
 
+.compose-card:hover:not(.is-focused) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 38%, var(--line)),
+    0 3px 6px rgba(0, 0, 0, 0.12),
+    0 8px 20px rgba(0, 0, 0, 0.09),
+    0 0 8px color-mix(in srgb, var(--accent) 7%, transparent),
+    var(--shadow-inset-top);
+}
+
 .compose-card.is-focused {
   box-shadow:
     0 0 0 1px var(--accent),
@@ -1349,6 +1358,14 @@ textarea {
   text-align: center;
 }
 
+.compose-char-count {
+  font-size: var(--text-xs);
+  color: var(--ink-tertiary);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
 @media (max-width: 700px) {
   .compose-footer-hint {
     display: none;
@@ -1424,7 +1441,9 @@ textarea {
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15), 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   transition: transform var(--duration-fast) var(--ease-standard),
               box-shadow var(--duration-normal) var(--ease-standard),
-              background var(--duration-fast) var(--ease-standard);
+              background var(--duration-fast) var(--ease-standard),
+              opacity 200ms var(--ease-standard),
+              filter 200ms var(--ease-standard);
   position: relative;
 }
 
@@ -1462,7 +1481,8 @@ textarea {
 }
 
 .compose-send-btn:disabled {
-  opacity: 0.35;
+  opacity: 0.22;
+  filter: saturate(0.15) brightness(0.6);
   cursor: not-allowed;
   pointer-events: none;
   box-shadow: none;
@@ -4757,11 +4777,21 @@ textarea {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   cursor: pointer;
-  transition: all var(--duration-fast, 150ms) ease;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .wf-clear-btn:hover:not(:disabled) {
-  background: var(--bg-raised);
-  color: var(--ink);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  transform: scale(1.03);
+}
+.wf-clear-btn:active:not(:disabled) {
+  transform: scale(0.95);
+  transition: transform 60ms ease;
 }
 .wf-clear-btn:disabled {
   opacity: 0.4;
@@ -4785,10 +4815,24 @@ textarea {
   align-items: center;
   padding: 2px var(--sp-3, 12px);
   border-bottom: 1px solid color-mix(in srgb, var(--ink) 5%, transparent);
-  transition: background var(--duration-micro, 100ms) ease;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    transform 120ms ease;
+  animation: wf-row-enter 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
-.wf-row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
-.wf-row--active { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+@keyframes wf-row-enter {
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.wf-row:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border-color: color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.wf-row--active {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-left: 2px solid var(--accent);
+}
 
 /* Label column */
 .wf-label {
@@ -4803,23 +4847,37 @@ textarea {
 /* Replay button — appears on hover for completed rows */
 .wf-replay-btn {
   flex-shrink: 0;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   width: 16px;
   height: 16px;
   border: none;
-  border-radius: 2px;
+  border-radius: 3px;
   background: transparent;
   color: var(--ink-tertiary);
   cursor: pointer;
   padding: 0;
-  transition: all var(--duration-fast, 150ms) ease;
+  opacity: 0;
+  transform: scale(0.8) rotate(-45deg);
+  transition:
+    opacity 150ms ease,
+    transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    color 120ms ease,
+    background 120ms ease;
 }
-.wf-row:hover .wf-replay-btn { display: flex; }
+.wf-row:hover .wf-replay-btn {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
 .wf-replay-btn:hover {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+  transform: scale(1.15) rotate(0deg);
+}
+.wf-replay-btn:active {
+  transform: scale(0.9) rotate(30deg);
+  transition: transform 80ms ease;
 }
 
 .wf-method {
@@ -4863,9 +4921,14 @@ textarea {
   position: absolute;
   top: 2px;
   height: 10px;
-  border-radius: 2px;
+  border-radius: 3px;
   min-width: 2px;
-  transition: width 60ms linear;
+  transition: width 80ms linear, opacity 150ms ease;
+  animation: wf-bar-enter 250ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes wf-bar-enter {
+  from { opacity: 0; transform: scaleX(0); transform-origin: left; }
+  to   { opacity: 1; transform: scaleX(1); transform-origin: left; }
 }
 
 .wf-bar--ttfb {
@@ -4873,12 +4936,19 @@ textarea {
 }
 
 .wf-bar--pulse {
-  animation: wf-bar-pulse 1.5s ease-in-out infinite;
+  animation: wf-bar-pulse 1.8s ease-in-out infinite;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 @keyframes wf-bar-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.65; }
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  50% {
+    opacity: 0.7;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
 }
 
 .wf-duration {
@@ -5084,37 +5154,160 @@ textarea {
   transform: translateY(-50%);
   z-index: 899;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 48px;
+  gap: 2px;
+  width: 30px;
+  height: 52px;
   border: 1px solid var(--border, color-mix(in srgb, var(--ink) 12%, transparent));
   border-right: none;
-  border-radius: var(--radius-sm, 4px) 0 0 var(--radius-sm, 4px);
+  border-radius: 6px 0 0 6px;
   background: var(--bg-raised, #faf9f6);
   color: var(--ink-secondary);
   cursor: pointer;
-  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.06);
-  transition: all var(--duration-fast, 150ms) ease;
+  box-shadow:
+    -2px 0 8px rgba(0, 0, 0, 0.08),
+    -1px 0 3px rgba(0, 0, 0, 0.04),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06);
+  transition:
+    width 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 180ms ease,
+    color 180ms ease,
+    box-shadow 250ms ease,
+    border-color 180ms ease;
 }
 .network-edge-tab:hover {
   background: var(--bg, #fff);
   color: var(--ink);
-  width: 32px;
+  width: 36px;
+  box-shadow:
+    -4px 0 16px rgba(0, 0, 0, 0.12),
+    -1px 0 4px rgba(0, 0, 0, 0.06),
+    inset 1px 0 0 rgba(255, 255, 255, 0.1);
+}
+.network-edge-tab:active {
+  width: 28px;
+  transition: width 80ms ease;
 }
 .network-edge-tab.is-active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
   color: var(--accent);
+  box-shadow:
+    -4px 0 20px color-mix(in srgb, var(--accent) 20%, transparent),
+    -1px 0 6px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.network-edge-dot {
+/* Tooltip — shows on hover, positioned to the left of the tab */
+.network-edge-tooltip {
   position: absolute;
-  top: 6px;
-  left: 6px;
+  right: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: max-content;
+  max-width: 220px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--bg-raised, #2a2a2a);
+  border: 1px solid var(--border, color-mix(in srgb, var(--ink) 15%, transparent));
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease, transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transform: translateY(-50%) translateX(6px);
+  white-space: nowrap;
+}
+.network-edge-tooltip::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  transform: translateY(-50%) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: var(--bg-raised, #2a2a2a);
+  border-right: 1px solid var(--border, color-mix(in srgb, var(--ink) 15%, transparent));
+  border-top: 1px solid var(--border, color-mix(in srgb, var(--ink) 15%, transparent));
+}
+.network-edge-tab:hover .network-edge-tooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+.network-edge-tooltip .tooltip-title {
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.network-edge-tooltip .tooltip-desc {
+  color: var(--ink-secondary);
+  font-size: 10px;
+}
+.network-edge-tooltip .tooltip-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+.network-edge-tooltip .tooltip-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--accent);
-  animation: wf-pulse 2s ease-in-out infinite;
+  background: var(--success, #34a853);
+  box-shadow: 0 0 4px var(--success, #34a853);
+  flex-shrink: 0;
+}
+.network-edge-tooltip .tooltip-dot--idle {
+  background: var(--ink-tertiary);
+  box-shadow: none;
+}
+
+/* Activity dot — glowing light effect */
+.network-edge-dot {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success, #34a853);
+  box-shadow:
+    0 0 4px var(--success, #34a853),
+    0 0 8px color-mix(in srgb, var(--success, #34a853) 60%, transparent),
+    0 0 14px color-mix(in srgb, var(--success, #34a853) 30%, transparent);
+  animation: network-dot-glow 2s ease-in-out infinite;
+}
+
+@keyframes network-dot-glow {
+  0%, 100% {
+    opacity: 1;
+    box-shadow:
+      0 0 4px var(--success, #34a853),
+      0 0 8px color-mix(in srgb, var(--success, #34a853) 60%, transparent),
+      0 0 14px color-mix(in srgb, var(--success, #34a853) 30%, transparent);
+  }
+  50% {
+    opacity: 0.85;
+    box-shadow:
+      0 0 6px var(--success, #34a853),
+      0 0 12px color-mix(in srgb, var(--success, #34a853) 70%, transparent),
+      0 0 20px color-mix(in srgb, var(--success, #34a853) 40%, transparent);
+  }
+}
+
+/* Edge tab icon pulse when active */
+.network-edge-tab:has(.network-edge-dot) svg {
+  animation: network-icon-pulse 2s ease-in-out infinite;
+}
+@keyframes network-icon-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }

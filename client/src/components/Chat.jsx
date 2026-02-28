@@ -1492,6 +1492,8 @@ export function ChatView({ conversationIdFromRoute, chat }) {
 
             <span className="compose-footer-hint">Drag and drop images into this box</span>
 
+            <span className="compose-char-count">{input.length} chars</span>
+
             <AnimatePresence mode="wait" initial={false}>
               {isStreaming ? (
                 <motion.button
