@@ -612,6 +612,42 @@ a:hover {
   display: none;
 }
 
+/* Hover-expand: push content like normal expand, staying in document flow */
+.sidebar.is-collapsed.is-hover-expanded {
+  width: var(--sidebar-width);
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-header {
+  justify-content: flex-start;
+  padding: 10px var(--sp-5);
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-header span,
+.sidebar.is-collapsed.is-hover-expanded .sidebar-header > svg {
+  display: initial;
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-collapse-btn {
+  margin-left: auto;
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-nav-item {
+  justify-content: flex-start;
+  padding: var(--sp-3) var(--sp-5);
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-nav-item span {
+  display: initial;
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-collapsible {
+  display: flex;
+}
+
+.sidebar.is-collapsed.is-hover-expanded .sidebar-circuit-indicator span:last-child {
+  display: initial;
+}
+
 .sidebar-circuit-dot {
   width: 8px;
   height: 8px;
@@ -3226,10 +3262,16 @@ textarea {
   }
 
   .sidebar-header span,
+  .sidebar-header > svg,
   .sidebar-section-title,
   .sidebar-nav-item span,
   .sidebar-conv-item span {
     display: none;
+  }
+
+  .sidebar-header {
+    justify-content: center;
+    padding: var(--sp-4) var(--sp-2);
   }
 
   .sidebar-nav-item,
@@ -3239,7 +3281,8 @@ textarea {
   }
 
   .sidebar-collapse-btn {
-    display: none;
+    display: flex;
+    margin-left: 0;
   }
 }
 
@@ -4755,6 +4798,28 @@ textarea {
   width: 180px;
   min-width: 180px;
   overflow: hidden;
+}
+
+/* Replay button — appears on hover for completed rows */
+.wf-replay-btn {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--duration-fast, 150ms) ease;
+}
+.wf-row:hover .wf-replay-btn { display: flex; }
+.wf-replay-btn:hover {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .wf-method {

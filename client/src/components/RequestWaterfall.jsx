@@ -54,7 +54,7 @@ function useAnimationFrame(active) {
 
 // ── WaterfallRow ─────────────────────────────────────────────
 
-function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) {
+function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold, onReplay }) {
   const effectiveEnd = req.endTime || now;
   const leftPct = ((req.startTime - windowStart) / windowDuration) * 100;
   const totalPct = ((effectiveEnd - req.startTime) / windowDuration) * 100;
@@ -81,6 +81,19 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) 
         <span className={`wf-status${req.ok === false ? ' wf-status--err' : ''}`}>
           {req.status || '\u2026'}
         </span>
+        {!isActive && onReplay && (
+          <button
+            className="wf-replay-btn"
+            onClick={(e) => { e.stopPropagation(); onReplay(req.id); }}
+            type="button"
+            title={`Replay ${req.method} ${req.url.split('?')[0].replace('/api/', '')}`}
+            aria-label="Replay request"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17.65 6.35A7.96 7.96 0 0012 4a8 8 0 108 8h-2a6 6 0 11-1.76-4.24L14 10h7V3l-3.35 3.35z" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="wf-track">
         {ttfbPct > 0.2 && (
@@ -189,6 +202,7 @@ function groupRequests(requests, now) {
 export default function RequestWaterfall({
   requests, clearRequests, enabled, setEnabled,
   slowThreshold, setSlowThreshold, persist, setPersist,
+  replayRequest,
 }) {
   const [viewMode, setViewMode] = useState('timeline');
   const rowsRef = useRef(null);
@@ -292,6 +306,7 @@ export default function RequestWaterfall({
               windowDuration={windowDuration}
               now={now}
               slowThreshold={slowThreshold}
+              onReplay={replayRequest}
             />
           ))}
         </div>

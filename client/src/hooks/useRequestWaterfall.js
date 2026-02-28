@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { setRequestTracker } from '../api/http.js';
+import { setRequestTracker, apiFetch } from '../api/http.js';
 
 const MAX_REQUESTS = 500;
 const STORAGE_KEY = 'qbo-waterfall-requests';
@@ -71,9 +71,12 @@ export function useRequestWaterfall() {
   useEffect(() => { saveJSON(PERSIST_KEY, persist); }, [persist]);
 
   // Save request buffer to localStorage (debounced via rAF — only completed entries)
+  // Strip _options before persisting — they can contain large bodies (images)
   const persistIfEnabled = useCallback(() => {
     if (!persist) return;
-    const completed = requestsRef.current.filter(r => r.state === 'complete' || r.state === 'error' || r.state === 'aborted');
+    const completed = requestsRef.current
+      .filter(r => r.state === 'complete' || r.state === 'error' || r.state === 'aborted')
+      .map(({ _options, ...rest }) => rest);
     saveJSON(STORAGE_KEY, completed);
   }, [persist]);
 
@@ -90,7 +93,7 @@ export function useRequestWaterfall() {
 
   // Stable tracker object — mutates entries in-place for perf
   const tracker = useRef({
-    start({ url, method, startTime }) {
+    start({ url, method, startTime, options }) {
       const id = `req-${nextIdRef.current++}`;
       const shortUrl = url.split('?')[0].replace('/api/', '');
       const entry = {
@@ -106,6 +109,7 @@ export function useRequestWaterfall() {
         isSSE: false,
         error: null,
         label: `${method} ${shortUrl}`,
+        _options: options || null, // kept in memory only, stripped before persist
       };
       const arr = requestsRef.current;
       requestsRef.current = arr.length >= MAX_REQUESTS
@@ -177,9 +181,26 @@ export function useRequestWaterfall() {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ok */ }
   }, []);
 
+  // Re-fire a completed request. The new request flows through apiFetch
+  // and appears as a fresh entry in the waterfall.
+  const replayRequest = useCallback((reqId) => {
+    const req = requestsRef.current.find(r => r.id === reqId);
+    if (!req) return;
+    const { url, method, _options } = req;
+    // Rebuild options — strip signal (stale AbortController) but keep body/headers/method
+    const opts = { method };
+    if (_options) {
+      if (_options.body) opts.body = _options.body;
+      if (_options.headers) opts.headers = _options.headers;
+    }
+    // Fire and forget — tracking will pick it up automatically
+    apiFetch(url, opts).catch(() => { /* errors tracked by waterfall */ });
+  }, []);
+
   return {
     requests, clearRequests, enabled, setEnabled,
     slowThreshold, setSlowThreshold,
     persist, setPersist,
+    replayRequest,
   };
 }

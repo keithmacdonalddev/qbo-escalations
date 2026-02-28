@@ -1,23 +1,89 @@
 // ---------------------------------------------------------------------------
-// apiFetch — thin wrapper around fetch with three mechanisms:
+// apiFetch — thin wrapper around fetch with five mechanisms:
 //
-// 1. Single-flight dedupe for GET requests:
-//    If a GET to the same URL is already in-flight, callers share the same
-//    promise instead of issuing a duplicate network request.
-//
-// 2. Auto-timeout for GET requests (default 15 s):
-//    Prevents hanging requests from accumulating when the backend is slow.
-//    POST / SSE callers supply their own AbortController, so they are exempt.
-//
-// 3. Request tracking (optional):
-//    When a tracker is registered via setRequestTracker(), every request's
-//    lifecycle is recorded for the waterfall visualizer.
+// 1. Single-flight dedupe for GET requests
+// 2. Auto-timeout for GET requests (default 15 s)
+// 3. Bounded retries with exponential backoff + jitter (GET only, max 2)
+// 4. Circuit breaker — stops sending requests after consecutive failures
+// 5. Request tracking for the waterfall visualizer (optional)
 // ---------------------------------------------------------------------------
 
 /** @type {Map<string, Promise<Response>>} */
 const _inFlight = new Map();
 
 const DEFAULT_TIMEOUT_MS = 15_000;
+const MAX_GET_RETRIES = 2;
+
+// ---- Circuit breaker --------------------------------------------------------
+// After THRESHOLD consecutive GET failures, the circuit opens for RESET_MS.
+// While open, GET requests fail immediately without network cost.
+// After RESET_MS, one request is allowed through (half-open). If it succeeds,
+// the circuit resets. If it fails, the circuit re-opens.
+
+const _circuit = {
+  failures: 0,
+  openUntil: 0,
+  THRESHOLD: 5,
+  RESET_MS: 30_000,
+};
+
+function _isCircuitOpen() {
+  if (_circuit.failures < _circuit.THRESHOLD) return false;
+  if (Date.now() > _circuit.openUntil) {
+    // Half-open: allow one attempt through
+    _circuit.failures = _circuit.THRESHOLD - 1;
+    return false;
+  }
+  return true;
+}
+
+function _recordSuccess() {
+  const was = _circuit.failures;
+  _circuit.failures = 0;
+  if (was > 0) _notifyCircuit();
+}
+
+function _recordFailure() {
+  _circuit.failures++;
+  if (_circuit.failures >= _circuit.THRESHOLD) {
+    _circuit.openUntil = Date.now() + _circuit.RESET_MS;
+  }
+  _notifyCircuit();
+}
+
+// ---- Circuit state subscription ------------------------------------------------
+// Lets UI components (e.g. Sidebar) observe the circuit breaker without polling.
+
+/** @type {Set<(state: {status: string, failures: number}) => void>} */
+const _circuitListeners = new Set();
+
+function _getCircuitStatus() {
+  if (_circuit.failures >= _circuit.THRESHOLD && Date.now() <= _circuit.openUntil) return 'open';
+  if (_circuit.failures > 0) return 'degraded';
+  return 'closed';
+}
+
+function _notifyCircuit() {
+  const state = { status: _getCircuitStatus(), failures: _circuit.failures };
+  for (const fn of _circuitListeners) fn(state);
+}
+
+/**
+ * Subscribe to circuit breaker state changes.
+ * Callback receives `{ status: 'closed' | 'degraded' | 'open', failures: number }`.
+ * Returns an unsubscribe function.
+ */
+export function onCircuitChange(fn) {
+  _circuitListeners.add(fn);
+  fn({ status: _getCircuitStatus(), failures: _circuit.failures }); // immediate sync
+  return () => _circuitListeners.delete(fn);
+}
+
+/** Exponential backoff with full jitter: base * 2^(attempt-1) + random */
+function _jitteredDelay(attempt) {
+  const base = 500 * Math.pow(2, attempt - 1);
+  return base + Math.random() * base;
+}
 
 // ---- Request tracking -------------------------------------------------------
 
@@ -36,7 +102,7 @@ export function setRequestTracker(tracker) {
 
 /**
  * Drop-in replacement for `fetch()` with GET deduplication, auto-timeout,
- * and optional request tracking.
+ * bounded retries, circuit breaker, and optional request tracking.
  *
  * @param {string} url
  * @param {RequestInit & { timeout?: number }} options
@@ -49,7 +115,7 @@ export function apiFetch(url, options = {}) {
   if (method === 'GET') {
     if (_inFlight.has(url)) return _inFlight.get(url);
 
-    const p = _trackedFetch(url, method, _fetchWithTimeout(url, options))
+    const p = _trackedFetch(url, method, options, _fetchWithRetry(url, options))
       .finally(() => _inFlight.delete(url));
     _inFlight.set(url, p);
     return p;
@@ -57,10 +123,42 @@ export function apiFetch(url, options = {}) {
 
   // Non-GET requests (POST, PATCH, DELETE) pass through directly.
   // SSE / streaming callers already attach their own AbortController signal.
-  return _trackedFetch(url, method, fetch(url, options));
+  return _trackedFetch(url, method, options, fetch(url, options));
 }
 
 // ---- internal ---------------------------------------------------------------
+
+/**
+ * Bounded retry loop for GET requests with circuit breaker.
+ * Retries on 5xx responses. Does NOT retry on timeouts (AbortError) or 4xx.
+ */
+async function _fetchWithRetry(url, options) {
+  if (_isCircuitOpen()) {
+    throw new Error('Service temporarily unavailable');
+  }
+
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_GET_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, _jitteredDelay(attempt)));
+    }
+    try {
+      const res = await _fetchWithTimeout(url, options);
+      if (res.ok || res.status < 500) {
+        _recordSuccess();
+        return res;
+      }
+      // 5xx — retriable server error
+      lastError = new Error(`HTTP ${res.status}`);
+      _recordFailure();
+    } catch (err) {
+      lastError = err;
+      _recordFailure();
+      if (err.name === 'AbortError') break; // Timeout — don't retry
+    }
+  }
+  throw lastError;
+}
 
 function _fetchWithTimeout(url, options) {
   // If the caller already manages its own signal, don't layer a second one.
@@ -78,11 +176,11 @@ function _fetchWithTimeout(url, options) {
  * Wraps a fetch promise with tracker lifecycle events.
  * If no tracker is registered, returns the promise as-is.
  */
-function _trackedFetch(url, method, fetchPromise) {
+function _trackedFetch(url, method, options, fetchPromise) {
   const tracker = _tracker;
   if (!tracker) return fetchPromise;
 
-  const id = tracker.start({ url, method, startTime: performance.now() });
+  const id = tracker.start({ url, method, startTime: performance.now(), options });
 
   return fetchPromise.then(
     (res) => {
