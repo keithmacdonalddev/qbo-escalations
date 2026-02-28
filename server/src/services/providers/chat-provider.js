@@ -34,6 +34,9 @@ function validateChatRequest(providerId, opts) {
   ensureFunction(opts.onChunk, 'onChunk', providerId);
   ensureFunction(opts.onDone, 'onDone', providerId);
   ensureFunction(opts.onError, 'onError', providerId);
+  if (opts.onThinkingChunk != null) {
+    ensureFunction(opts.onThinkingChunk, 'onThinkingChunk', providerId);
+  }
 
   if (opts.timeoutMs !== undefined && (!Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0)) {
     throw createContractError(providerId, 'timeoutMs must be a positive number when provided');

@@ -710,6 +710,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     mode,
     primaryProvider,
     fallbackProvider,
+    parallelProviders,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -747,6 +748,30 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_MODE', error: 'Unsupported mode' });
   }
 
+  if (parallelProviders !== undefined) {
+    if (!Array.isArray(parallelProviders)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must be an array' });
+    }
+    if (parallelProviders.length < 2 || parallelProviders.length > 4) {
+      return res.status(400).json({ ok: false, code: 'PARALLEL_PROVIDER_COUNT_INVALID', error: 'parallelProviders must contain 2 to 4 providers' });
+    }
+    const uniqueParallel = [...new Set(parallelProviders)];
+    if (uniqueParallel.length !== parallelProviders.length) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must contain unique providers' });
+    }
+    for (const pp of parallelProviders) {
+      if (!isValidProvider(pp)) {
+        return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: `Invalid provider in parallelProviders: ${pp}` });
+      }
+    }
+    if (mode !== 'parallel') {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders only allowed when mode is parallel' });
+    }
+    if (primaryProvider && !parallelProviders.includes(normalizeProvider(primaryProvider))) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'primaryProvider must be included in parallelProviders' });
+    }
+  }
+
   // Get or create conversation
   let conversation;
   let isNewConversation = false;
@@ -779,6 +804,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     mode: requestedMode,
     primaryProvider: requestedPrimary,
     fallbackProvider: requestedFallback,
+    parallelProviders: parallelProviders || undefined,
   }));
 
   ensureMessagesArray(conversation);
@@ -808,7 +834,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }));
   }
 
-  if ((policy.mode === 'fallback' || policy.mode === 'parallel') && policy.fallbackProvider === policy.primaryProvider) {
+  if (!policy.parallelProviders && (policy.mode === 'fallback' || policy.mode === 'parallel') && policy.fallbackProvider === policy.primaryProvider) {
     return res.status(400).json({
       ok: false,
       code: 'INVALID_FALLBACK_PROVIDER',
@@ -887,15 +913,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 
   if (requestTurnId) {
     try {
+      const candidateProviders = policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider];
       await ParallelCandidateTurn.create({
         turnId: requestTurnId,
         service: 'chat',
         conversationId: conversation._id,
         status: 'open',
-        candidates: [
-          { provider: policy.primaryProvider, state: 'ok', content: '' },
-          { provider: policy.fallbackProvider, state: 'ok', content: '' },
-        ].filter((c, index, arr) => arr.findIndex((x) => x.provider === c.provider) === index),
+        requestedProviders: candidateProviders,
+        candidates: candidateProviders
+          .map((p) => ({ provider: p, state: 'ok', content: '' }))
+          .filter((c, index, arr) => arr.findIndex((x) => x.provider === c.provider) === index),
       });
     } catch {
       // non-blocking for chat flow
@@ -910,7 +937,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
-    parallelProviders: policy.mode === 'parallel' ? [policy.primaryProvider, policy.fallbackProvider] : null,
+    parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,
     warnings: guardrail.warnings || [],
@@ -934,6 +961,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     mode: policy.mode,
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.fallbackProvider,
+    parallelProviders: policy.parallelProviders || undefined,
     messages: contextBundle.messagesForModel,
     systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
@@ -941,6 +969,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     onChunk: ({ provider: chunkProvider, text }) => {
       try {
         res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n');
+      } catch { /* client disconnected */ }
+    },
+    onThinkingChunk: ({ provider: thinkingProvider, thinking }) => {
+      try {
+        res.write('event: thinking\ndata: ' + JSON.stringify({ provider: thinkingProvider, thinking }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onProviderError: (data) => {
@@ -1408,6 +1441,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     mode,
     primaryProvider,
     fallbackProvider,
+    parallelProviders,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -1436,6 +1470,30 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_MODE', error: 'Unsupported mode' });
   }
 
+  if (parallelProviders !== undefined) {
+    if (!Array.isArray(parallelProviders)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must be an array' });
+    }
+    if (parallelProviders.length < 2 || parallelProviders.length > 4) {
+      return res.status(400).json({ ok: false, code: 'PARALLEL_PROVIDER_COUNT_INVALID', error: 'parallelProviders must contain 2 to 4 providers' });
+    }
+    const uniqueParallel = [...new Set(parallelProviders)];
+    if (uniqueParallel.length !== parallelProviders.length) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders must contain unique providers' });
+    }
+    for (const pp of parallelProviders) {
+      if (!isValidProvider(pp)) {
+        return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: `Invalid provider in parallelProviders: ${pp}` });
+      }
+    }
+    if (mode !== 'parallel') {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'parallelProviders only allowed when mode is parallel' });
+    }
+    if (primaryProvider && !parallelProviders.includes(normalizeProvider(primaryProvider))) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PARALLEL_PROVIDERS', error: 'primaryProvider must be included in parallelProviders' });
+    }
+  }
+
   const conversation = await Conversation.findById(conversationId);
   if (!conversation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
@@ -1456,6 +1514,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     mode: requestedMode,
     primaryProvider: requestedPrimary,
     fallbackProvider: requestedFallback,
+    parallelProviders: parallelProviders || undefined,
   }));
 
   // Build retry context from a non-mutating snapshot. We only persist removals
@@ -1502,7 +1561,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     }));
   }
 
-  if ((policy.mode === 'fallback' || policy.mode === 'parallel') && policy.fallbackProvider === policy.primaryProvider) {
+  if (!policy.parallelProviders && (policy.mode === 'fallback' || policy.mode === 'parallel') && policy.fallbackProvider === policy.primaryProvider) {
     return res.status(400).json({
       ok: false,
       code: 'INVALID_FALLBACK_PROVIDER',
@@ -1577,15 +1636,16 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
 
   if (requestTurnId) {
     try {
+      const candidateProviders = policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider];
       await ParallelCandidateTurn.create({
         turnId: requestTurnId,
         service: 'chat',
         conversationId: conversation._id,
         status: 'open',
-        candidates: [
-          { provider: policy.primaryProvider, state: 'ok', content: '' },
-          { provider: policy.fallbackProvider, state: 'ok', content: '' },
-        ].filter((c, index, arr) => arr.findIndex((x) => x.provider === c.provider) === index),
+        requestedProviders: candidateProviders,
+        candidates: candidateProviders
+          .map((p) => ({ provider: p, state: 'ok', content: '' }))
+          .filter((c, index, arr) => arr.findIndex((x) => x.provider === c.provider) === index),
       });
     } catch {
       // non-blocking for chat flow
@@ -1600,7 +1660,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
-    parallelProviders: policy.mode === 'parallel' ? [policy.primaryProvider, policy.fallbackProvider] : null,
+    parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,
     warnings: guardrail.warnings || [],
@@ -1624,12 +1684,16 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     mode: policy.mode,
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.fallbackProvider,
+    parallelProviders: policy.parallelProviders || undefined,
     messages: contextBundle.messagesForModel,
     systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
       try { res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n'); } catch { /* gone */ }
+    },
+    onThinkingChunk: ({ provider: thinkingProvider, thinking }) => {
+      try { res.write('event: thinking\ndata: ' + JSON.stringify({ provider: thinkingProvider, thinking }) + '\n\n'); } catch { /* gone */ }
     },
     onProviderError: (data) => {
       try { res.write('event: provider_error\ndata: ' + JSON.stringify(data) + '\n\n'); } catch { /* gone */ }
@@ -1841,6 +1905,11 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
   }
   const turnDoc = await ParallelCandidateTurn.findOne({ turnId, conversationId: conversation._id }).lean();
+  if (turnDoc && Array.isArray(turnDoc.requestedProviders) && turnDoc.requestedProviders.length > 0) {
+    if (!turnDoc.requestedProviders.includes(provider)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: 'Provider not in requested parallel providers' });
+    }
+  }
   if (turnDoc) {
     if (turnDoc.status === 'accepted') {
       if (turnDoc.acceptedProvider === provider) {

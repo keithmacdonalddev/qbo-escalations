@@ -26,3 +26,9 @@
 
 - Keep prototype files and experiments out of core test/review paths by default.
 - Prefer separate branch for prototypes when feasible.
+
+### Process Control Safety (Strict)
+
+- Never start, restart, stop, kill, or otherwise manage server/client processes unless the user explicitly asks for it in the current prompt message.
+- This includes app servers, API servers, frontend dev servers, workers, watchers, and local client processes.
+- If process control is not explicitly requested, do not perform it.

@@ -33,11 +33,11 @@ function normalizeErrorPayload(payload, fallbackMessage = 'Request failed') {
 
 /**
  * Send a chat message and consume SSE stream.
- * @param {{ message: string, conversationId?: string, images?: string[], provider?: string, mode?: string, fallbackProvider?: string, settings?: object }} body
+ * @param {{ message: string, conversationId?: string, images?: string[], provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
  * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onDone, onError, onProviderError, onFallback, onTriageCard }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
   const controller = new AbortController();
 
   (async () => {
@@ -58,6 +58,7 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError, onProv
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
@@ -76,11 +77,11 @@ export function sendChatMessage(body, { onInit, onChunk, onDone, onError, onProv
 
 /**
  * Retry last assistant response for a conversation and consume SSE stream.
- * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function }} handlers
+ * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
+ * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onDone, onError, onProviderError, onFallback, onTriageCard }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
   const controller = new AbortController();
 
   (async () => {
@@ -101,6 +102,7 @@ export function retryChatMessage(body, { onInit, onChunk, onDone, onError, onPro
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);

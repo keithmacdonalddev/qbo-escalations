@@ -152,6 +152,7 @@ function runConsolidation(sessionFile) {
   const sessionMarkers = [];
   let inHeader = true;
 
+  let foundHrule = false;
   for (const line of lines) {
     // Session end markers stay as-is
     if (line.startsWith('**Session ended at')) {
@@ -159,17 +160,12 @@ function runConsolidation(sessionFile) {
       continue;
     }
 
-    // Horizontal rules stay as-is
+    // Horizontal rules: keep the first one in header, skip others
     if (line.trim() === '---') {
-      if (inHeader) {
+      if (inHeader && !foundHrule) {
         header.push(line);
+        foundHrule = true;
       }
-      continue;
-    }
-
-    // Header lines (before first observation)
-    if (inHeader && !line.startsWith('- **')) {
-      header.push(line);
       continue;
     }
 
@@ -177,7 +173,16 @@ function runConsolidation(sessionFile) {
     if (line.startsWith('- **')) {
       inHeader = false;
       observations.push(parseLine(line));
+      continue;
     }
+
+    // Header lines (before first observation) — skip trailing blanks after ---
+    if (inHeader) {
+      if (foundHrule && line.trim() === '') continue; // drop blanks between --- and first observation
+      header.push(line);
+      continue;
+    }
+    // Non-observation, non-header lines after observations started — skip blanks
   }
 
   // If too few observations, don't consolidate
@@ -289,13 +294,14 @@ function consolidateObservations(observations) {
   // Second pass: consolidate repetitive file touches
   for (const [fileName, group] of fileGroups) {
     if (group.length >= 3) {
-      // Consolidate this group
-      const startTime = group[0].time;
-      const endTime = group[group.length - 1].time;
+      // Consolidate this group — use first/last known time, fallback to '??:??'
+      const startTime = group.find(o => o.time)?.time || '??:??';
+      const endTime = [...group].reverse().find(o => o.time)?.time || startTime;
       const tools = [...new Set(group.map(o => o.tool).filter(Boolean))];
       const toolStr = tools.length > 0 ? tools.join('/') : 'multiple ops';
 
-      const consolidatedLine = `- **${startTime}-${endTime}** | Heavy activity | \`${fileName}\` (${group.length} touches: ${toolStr})`;
+      const timeRange = startTime === endTime ? startTime : `${startTime}-${endTime}`;
+      const consolidatedLine = `- **${timeRange}** | Heavy activity | \`${fileName}\` (${group.length} touches: ${toolStr})`;
       result.push({ line: consolidatedLine, time: startTime, consolidated: true });
     } else {
       // Too few to consolidate, keep as-is
@@ -312,8 +318,29 @@ function consolidateObservations(observations) {
   return result;
 }
 
+/**
+ * Extract a plain-text string from tool_response for error detection and stats.
+ * Claude Code sends tool_response as an object with varying shapes per tool.
+ */
+function extractOutputText(toolResponse) {
+  if (!toolResponse) return '';
+  if (typeof toolResponse === 'string') return toolResponse;
+  // Bash: { stdout, stderr }
+  if (typeof toolResponse.stdout === 'string') {
+    return toolResponse.stdout + (toolResponse.stderr || '');
+  }
+  // Read/Edit: { type: 'text', file: { content } } or plain text
+  if (toolResponse.file && typeof toolResponse.file.content === 'string') {
+    return toolResponse.file.content;
+  }
+  if (typeof toolResponse.content === 'string') return toolResponse.content;
+  // Glob/Grep: may be a plain string result
+  if (typeof toolResponse.text === 'string') return toolResponse.text;
+  return '';
+}
+
 function captureObservation(hookData) {
-  const { tool_name, tool_input, tool_output } = hookData || {};
+  const { tool_name, tool_input, tool_response } = hookData || {};
 
   if (!tool_name) {
     process.exit(0);
@@ -336,8 +363,11 @@ function captureObservation(hookData) {
   const timeStr = now.toTimeString().split(' ')[0].slice(0, 5); // HH:MM local
   const sessionFile = join(SESSIONS_DIR, `${dateStr}.md`);
 
+  // Extract plain text from tool_response for error detection and stats
+  const outputText = extractOutputText(tool_response);
+
   // Extract relevant info based on tool type
-  let observation = formatObservation(tool_name, tool_input, tool_output, timeStr);
+  let observation = formatObservation(tool_name, tool_input, outputText, timeStr);
 
   if (!observation) {
     process.exit(0);

@@ -17,13 +17,14 @@ export default function ParallelResponsePair({
   const [undoToastVisible, setUndoToastVisible] = useState(false);
   const [unaccepting, setUnaccepting] = useState(false);
 
-  // Sort responses: provider-a first, provider-b second (consistent ordering)
+  // Sort responses: claude providers first, then others (consistent ordering)
   const sorted = useMemo(() => {
-    if (!responses || responses.length < 2) return responses || [];
-    const a = responses.find(r => r.provider === 'claude');
-    const b = responses.find(r => r.provider !== 'claude');
-    if (a && b) return [a, b];
-    return responses;
+    if (!responses || responses.length === 0) return [];
+    return [...responses].sort((a, b) => {
+      const isClaudeA = (a.provider || '').startsWith('claude') ? 0 : 1;
+      const isClaudeB = (b.provider || '').startsWith('claude') ? 0 : 1;
+      return isClaudeA - isClaudeB;
+    });
   }, [responses]);
 
   const hasAccepted = sorted.some(r => r.isAccepted);
@@ -53,14 +54,12 @@ export default function ParallelResponsePair({
         return;
       }
 
-      // 1/2 to accept (only when not yet accepted)
+      // 1-4 to accept (only when not yet accepted)
       if (!onAccept || hasAccepted) return;
-      if (e.key === '1' && sorted[0]) {
+      const keyIndex = parseInt(e.key, 10) - 1;
+      if (keyIndex >= 0 && keyIndex < sorted.length && sorted[keyIndex]) {
         e.preventDefault();
-        onAccept(sorted[0].turnId, sorted[0].provider);
-      } else if (e.key === '2' && sorted[1]) {
-        e.preventDefault();
-        onAccept(sorted[1].turnId, sorted[1].provider);
+        onAccept(sorted[keyIndex].turnId, sorted[keyIndex].provider);
       }
     };
 
@@ -126,11 +125,12 @@ export default function ParallelResponsePair({
       {/* Context line */}
       {!hasAccepted && (
         <div className="parallel-context-line">
-          <span className="ctx-dot" style={{ background: 'var(--provider-a)' }} />
-          <span className="ctx-dot" style={{ background: 'var(--provider-b)' }} />
-          <span>2 responses — compare and accept one</span>
+          {sorted.map((r, idx) => (
+            <span key={r.provider} className="ctx-dot" style={{ background: idx === 0 ? 'var(--provider-a)' : 'var(--provider-b)' }} />
+          ))}
+          <span>{sorted.length} responses — compare and accept one</span>
           {!sorted[0]?.isStreaming && (
-            <span className="ctx-hints">Press 1 or 2 to accept</span>
+            <span className="ctx-hints">Press 1–{sorted.length} to accept</span>
           )}
         </div>
       )}
@@ -151,7 +151,7 @@ export default function ParallelResponsePair({
       </div>
 
       {/* Split columns */}
-      <div className="parallel-split">
+      <div className="parallel-split" style={{ gridTemplateColumns: `repeat(${sorted.length}, 1fr)` }}>
         {sorted.map((r, idx) => {
           const provClass = getProviderClass(r.provider);
           const isAccepted = r.isAccepted;
@@ -210,7 +210,12 @@ export default function ParallelResponsePair({
                 <div className="header-actions">
                   {!r.isStreaming && r.content && (
                     <>
-                      <span className="header-meta">{wc} words{r.responseTimeMs ? ` \u00B7 ${formatResponseTime(r.responseTimeMs)}` : ''}</span>
+                      <span className="header-meta">
+                        {wc} words{r.responseTimeMs ? ` \u00B7 ${formatResponseTime(r.responseTimeMs)}` : ''}
+                        {r.usage && r.usage.usageAvailable !== false && r.usage.totalTokens > 0 && (
+                          <> &middot; <span className="usage-badge">{r.usage.totalTokens >= 1000 ? (r.usage.totalTokens / 1000).toFixed(1) + 'K' : r.usage.totalTokens} tokens{r.usage.totalCostMicros > 0 && ` ($${(r.usage.totalCostMicros / 1_000_000).toFixed(4)})`}</span></>
+                        )}
+                      </span>
                       {/* Accept button — only if no winner yet */}
                       {onAccept && !hasAccepted && (
                         <button
@@ -290,8 +295,8 @@ export default function ParallelResponsePair({
         </div>
       )}
 
-      {/* Feature Accordion — only for image parse turns */}
-      {isImageParseTurn && !sorted[0]?.isStreaming && sorted[0]?.content && sorted[1]?.content && (
+      {/* Feature Accordion — only for image parse turns with at least 2 responses */}
+      {isImageParseTurn && sorted.length >= 2 && !sorted[0]?.isStreaming && sorted[0]?.content && sorted[1]?.content && (
         <FeatureAccordion
           responseA={{ provider: sorted[0].provider, content: sorted[0].content, responseTimeMs: sorted[0].responseTimeMs }}
           responseB={{ provider: sorted[1].provider, content: sorted[1].content, responseTimeMs: sorted[1].responseTimeMs }}

@@ -6,6 +6,13 @@ import { renderMarkdown, CopyButton, formatResponseTime, getProviderLabel } from
 import Tooltip from './Tooltip.jsx';
 import { transitions } from '../utils/motion.js';
 
+function formatTokenCount(n) {
+  if (n == null) return '';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
 function ChatMessage({
   role,
   content,
@@ -16,6 +23,7 @@ function ChatMessage({
   timestamp,
   isStreaming,
   responseTimeMs,
+  usage,
   onFork,
   onAccept,
   accepting = false,
@@ -167,7 +175,7 @@ function ChatMessage({
         </div>
       )}
 
-      {(timestamp || responseTimeMs) && (
+      {(timestamp || responseTimeMs || usage) && (
         <div className="chat-bubble-meta">
           {timestamp && new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {responseTimeMs && role === 'assistant' && (
@@ -176,6 +184,12 @@ function ChatMessage({
                 {formatResponseTime(responseTimeMs)}
               </span>
             </Tooltip>
+          )}
+          {role === 'assistant' && usage && usage.usageAvailable !== false && usage.totalTokens > 0 && (
+            <span className="usage-badge" style={{ marginLeft: 'var(--sp-3)' }}>
+              {formatTokenCount(usage.totalTokens)} tokens
+              {usage.totalCostMicros > 0 && ` ($${(usage.totalCostMicros / 1_000_000).toFixed(4)})`}
+            </span>
           )}
         </div>
       )}

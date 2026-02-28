@@ -14,6 +14,8 @@ import { listTemplates, trackTemplateUsage } from '../api/templatesApi.js';
 import ChatMessage from './ChatMessage.jsx';
 import ParallelResponsePair from './ParallelResponsePair.jsx';
 import TriageCard from './TriageCard.jsx';
+import CopilotPanel from './CopilotPanel.jsx';
+import ThinkingSidebar from './ThinkingSidebar.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
 
 /**
@@ -60,24 +62,7 @@ function detectImageParseTurn(messages, parallelIndex) {
   return false;
 }
 
-const PARSE_ESCALATION_PROMPT = [
-  'Parse this escalation screenshot for backend capture, but keep the on-screen response concise for quick action.',
-  '',
-  'Output ONLY these sections in this exact order:',
-  '1) What the Agent Is Attempting',
-  '2) Expected vs Actual Outcome',
-  '3) Troubleshooting Steps Taken',
-  '4) Diagnosis',
-  '5) Steps for Agent',
-  '6) Customer-Facing Explanation',
-  '',
-  'Response requirements:',
-  '- Do not include structured summary tables or field/value metadata blocks.',
-  '- Do not show COID, MID, case number, agent name, client contact, severity, environment, or source/citation notes unless needed to explain action.',
-  '- Do not include Recommended Template, Resolution Note, Similar Symptoms Flag, or extra headers.',
-  '- Keep it tight and actionable.',
-  '- Do not repeat content.',
-].join('\n');
+const PARSE_ESCALATION_PROMPT = 'Parse this escalation image for fast triage.';
 
 const QUICK_PROMPTS = [
   { label: 'Parse Escalation', prompt: PARSE_ESCALATION_PROMPT },
@@ -173,6 +158,8 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     setProvider,
     setMode,
     setFallbackProvider,
+    parallelProviders,
+    setParallelProviders,
     dismissFallbackNotice,
     dismissRuntimeWarnings,
     acceptParallelTurn,
@@ -184,6 +171,9 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     setError,
     appendProcessEvent,
     clearProcessEvents,
+    thinkingText,
+    isThinking,
+    thinkingStartTime,
   } = chat;
 
   const [exportCopied, setExportCopied] = useState(false);
@@ -228,6 +218,9 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     return stored === null ? true : stored === 'true';
   });
   const [copiedField, setCopiedField] = useState(null);
+
+  // Co-pilot panel toggle
+  const [showCopilot, setShowCopilot] = useState(false);
 
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [resolvingEscalation, setResolvingEscalation] = useState(false);
@@ -636,6 +629,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   );
 
   return (
+    <div className="chat-with-thinking">
     <div className="chat-container">
       {/* Linked escalation banner */}
       {linkedEscalation && (
@@ -789,9 +783,17 @@ export function ChatView({ conversationIdFromRoute, chat }) {
           </motion.div>
         )}
 
-        {/* Export button when conversation has messages */}
+        {/* Conversation actions — New Chat + Export + Retry */}
         {messages.length > 1 && !isStreaming && conversationId && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', padding: '0 var(--sp-2)' }}>
+            <button
+              className="copy-btn"
+              onClick={newConversation}
+              type="button"
+              title="Start a new conversation"
+            >
+              New Chat
+            </button>
             {canRetryLastResponse && (
               <button
                 className="copy-btn"
@@ -833,6 +835,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                       content: r.content,
                       isStreaming: false,
                       responseTimeMs: r.responseTimeMs,
+                      usage: r.usage || null,
                       turnId,
                       isAccepted: Boolean(r.attemptMeta?.accepted),
                       isRejected: Boolean(r.attemptMeta?.rejected),
@@ -863,6 +866,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   fallbackFrom={msg.fallbackFrom}
                   timestamp={msg.timestamp}
                   responseTimeMs={msg.responseTimeMs}
+                  usage={msg.usage}
                   onFork={msg.role === 'assistant' && conversationId && !isStreaming ? () => handleFork(i) : undefined}
                 />
               </motion.div>
@@ -891,24 +895,29 @@ export function ChatView({ conversationIdFromRoute, chat }) {
 
         {/* Streaming response (parallel) — split-column layout */}
         <AnimatePresence>
-          {isStreaming && mode === 'parallel' && (
-            <motion.div key="streaming-parallel" {...fadeSlideUp} transition={transitions.normal}>
-              <ParallelResponsePair
-                responses={[...new Set([provider, fallbackProvider])].filter(Boolean).map(p => ({
-                  provider: p,
-                  content: parallelStreaming[p] || '',
-                  isStreaming: true,
-                  responseTimeMs: null,
-                  turnId: null,
-                  isAccepted: false,
-                  isRejected: false,
-                }))}
-                accepting={null}
-                isImageParseTurn={false}
-                discardedProvider={null}
-              />
-            </motion.div>
-          )}
+          {isStreaming && mode === 'parallel' && (() => {
+            const activeParallelProviders = parallelProviders.length >= 2
+              ? parallelProviders
+              : [...new Set([provider, fallbackProvider])].filter(Boolean);
+            return (
+              <motion.div key="streaming-parallel" {...fadeSlideUp} transition={transitions.normal}>
+                <ParallelResponsePair
+                  responses={activeParallelProviders.map(p => ({
+                    provider: p,
+                    content: parallelStreaming[p] || '',
+                    isStreaming: true,
+                    responseTimeMs: null,
+                    turnId: null,
+                    isAccepted: false,
+                    isRejected: false,
+                  }))}
+                  accepting={null}
+                  isImageParseTurn={false}
+                  discardedProvider={null}
+                />
+              </motion.div>
+            );
+          })()}
         </AnimatePresence>
 
         {/* Streaming but no text yet (single/fallback) */}
@@ -925,6 +934,27 @@ export function ChatView({ conversationIdFromRoute, chat }) {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Discard unsaved chat — shows when aborted/failed before server saved the conversation,
+             or when only user messages exist with an error (no assistant response came through) */}
+        {!isStreaming && messages.length > 0 && (
+          !conversationId || (error && !messages.some(m => m.role === 'assistant'))
+        ) && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            padding: 'var(--sp-3) 0',
+          }}>
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={newConversation}
+              type="button"
+              style={{ color: 'var(--ink-tertiary)', fontSize: 'var(--text-sm)' }}
+            >
+              Discard &amp; start over
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         <AnimatePresence>
@@ -1058,7 +1088,36 @@ export function ChatView({ conversationIdFromRoute, chat }) {
               {qp.label}
             </button>
           ))}
+          <button
+            className={`quick-action-chip${showCopilot ? ' is-active' : ''}`}
+            onClick={() => setShowCopilot(prev => !prev)}
+            type="button"
+            style={showCopilot ? { background: 'var(--accent)', color: '#fff' } : {}}
+          >
+            Co-pilot
+          </button>
         </div>
+
+        {/* Co-pilot panel — collapsible */}
+        <AnimatePresence>
+          {showCopilot && (
+            <motion.div
+              key="copilot-drawer"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2, ease: 'easeInOut' }}
+              style={{ overflow: 'hidden' }}
+            >
+              <div style={{ padding: 'var(--sp-2) 0' }}>
+                <CopilotPanel
+                  escalationId={savedEscalationId}
+                  title="Co-pilot"
+                />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Escalation context pill */}
         {contextPillEnabled && linkedEscalation && (linkedEscalation.coid || linkedEscalation.caseNumber || linkedEscalation.category || linkedEscalation.status) && (
@@ -1142,8 +1201,11 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                 {getProviderLabel(provider)}
                 {' \u00b7 '}
                 {MODE_OPTIONS.find(m => m.value === mode)?.label || 'Single'}
-                {mode !== 'single' && (
+                {mode === 'fallback' && (
                   <> + {getProviderLabel(fallbackProvider)}</>
+                )}
+                {mode === 'parallel' && parallelProviders.length >= 2 && (
+                  <> · Parallel ({parallelProviders.length})</>
                 )}
                 <span className="chevron">&#9662;</span>
               </button>
@@ -1177,12 +1239,10 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                       {option.label}
                     </button>
                   ))}
-                  {mode !== 'single' && (
+                  {mode === 'fallback' && (
                     <>
                       <div className="provider-popover-divider" />
-                      <div className="provider-popover-label">
-                        {mode === 'parallel' ? 'Second Provider' : 'Fallback Provider'}
-                      </div>
+                      <div className="provider-popover-label">Fallback Provider</div>
                       {PROVIDER_OPTIONS.filter((o) => o.value !== provider).map((option) => (
                         <button
                           key={option.value}
@@ -1194,6 +1254,54 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                           {option.label}
                         </button>
                       ))}
+                    </>
+                  )}
+                  {mode === 'parallel' && (
+                    <>
+                      <div className="provider-popover-divider" />
+                      <div className="provider-multi-select">
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>
+                          Parallel Providers (select 2–4)
+                        </label>
+                        {PROVIDER_OPTIONS.map(opt => {
+                          const isSelected = parallelProviders.includes(opt.value);
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              className={`provider-chip ${isSelected ? 'selected' : ''}`}
+                              onClick={() => {
+                                const next = isSelected
+                                  ? parallelProviders.filter(p => p !== opt.value)
+                                  : [...parallelProviders, opt.value];
+                                setParallelProviders(next);
+                              }}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                padding: '4px 10px',
+                                margin: '2px 4px 2px 0',
+                                borderRadius: 12,
+                                border: isSelected ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                                background: isSelected ? 'var(--accent-bg, rgba(99,102,241,0.1))' : 'transparent',
+                                color: isSelected ? 'var(--accent)' : 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                fontSize: '0.8rem',
+                                fontWeight: isSelected ? 600 : 400,
+                                transition: 'all 0.15s ease',
+                              }}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                        {parallelProviders.length < 2 && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--error, #ef4444)', marginTop: 4 }}>
+                            Select at least 2 providers
+                          </div>
+                        )}
+                      </div>
                     </>
                   )}
                 </motion.div>
@@ -1399,7 +1507,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   key="send"
                   className="compose-send-btn"
                   onClick={handleSubmit}
-                  disabled={!input.trim() && images.length === 0}
+                  disabled={(!input.trim() && images.length === 0) || (mode === 'parallel' && parallelProviders.length < 2)}
                   type="button"
                   aria-label="Send message"
                   title="Send message"
@@ -1528,6 +1636,14 @@ export function ChatView({ conversationIdFromRoute, chat }) {
         </motion.div>
       )}
       </AnimatePresence>
+    </div>
+    <ThinkingSidebar
+      thinkingText={thinkingText}
+      isThinking={isThinking}
+      thinkingStartTime={thinkingStartTime}
+      isStreaming={isStreaming}
+      streamingText={streamingText}
+    />
     </div>
   );
 }

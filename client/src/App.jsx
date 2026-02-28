@@ -7,6 +7,7 @@ import EscalationDashboard from './components/EscalationDashboard.jsx';
 import PlaybookEditor from './components/PlaybookEditor.jsx';
 import TemplateLibrary from './components/TemplateLibrary.jsx';
 import Analytics from './components/Analytics.jsx';
+import UsageDashboard from './components/UsageDashboard.jsx';
 import DevMode from './components/DevMode.jsx';
 import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
@@ -32,6 +33,7 @@ function parseHashRoute() {
   if (hash === '#/playbook') return { view: 'playbook' };
   if (hash === '#/templates') return { view: 'templates' };
   if (hash === '#/analytics') return { view: 'analytics' };
+  if (hash === '#/usage') return { view: 'usage' };
   if (hash === '#/dev') return { view: 'dev' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'chat', conversationId: null };
@@ -110,6 +112,12 @@ function App() {
         return (
           <motion.div key="analytics" {...motionProps}>
             <Analytics />
+          </motion.div>
+        );
+      case 'usage':
+        return (
+          <motion.div key="usage" {...motionProps}>
+            <UsageDashboard />
           </motion.div>
         );
       case 'settings':

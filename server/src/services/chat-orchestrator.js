@@ -2,6 +2,7 @@ const {
   getProvider,
   getAlternateProvider,
   normalizeProvider,
+  isValidProvider,
 } = require('./providers/registry');
 const {
   recordSuccess,
@@ -15,16 +16,50 @@ function normalizeMode(mode) {
   return VALID_MODES.has(mode) ? mode : 'single';
 }
 
-function resolvePolicy({ mode, primaryProvider, fallbackProvider }) {
+function resolvePolicy({ mode, primaryProvider, fallbackProvider, parallelProviders }) {
   const resolvedMode = normalizeMode(mode);
   const resolvedPrimary = normalizeProvider(primaryProvider);
   const resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
 
-  return {
+  const policy = {
     mode: resolvedMode,
     primaryProvider: resolvedPrimary,
     fallbackProvider: resolvedFallback,
   };
+
+  if (parallelProviders && Array.isArray(parallelProviders) && parallelProviders.length >= 2) {
+    const invalid = parallelProviders.filter((p) => !isValidProvider(p));
+    if (invalid.length > 0) {
+      const err = new Error(
+        `Invalid parallel providers: ${invalid.join(', ')}. Each provider must be a recognized provider ID.`
+      );
+      err.code = 'INVALID_PARALLEL_PROVIDERS';
+      throw err;
+    }
+
+    const deduped = [...new Set(parallelProviders)];
+
+    if (deduped.length < 2 || deduped.length > 4) {
+      const err = new Error(
+        `parallelProviders must contain between 2 and 4 unique providers (got ${deduped.length} after deduplication).`
+      );
+      err.code = 'PARALLEL_PROVIDER_COUNT_INVALID';
+      throw err;
+    }
+
+    if (primaryProvider && isValidProvider(primaryProvider) && !deduped.includes(primaryProvider)) {
+      const err = new Error(
+        `primaryProvider "${primaryProvider}" is not included in parallelProviders [${deduped.join(', ')}]. ` +
+        'The primary provider must be one of the parallel providers when both are specified.'
+      );
+      err.code = 'INVALID_PARALLEL_PROVIDERS';
+      throw err;
+    }
+
+    policy.parallelProviders = deduped;
+  }
+
+  return policy;
 }
 
 function toProviderErrorMessage(provider, code, rawMessage) {
@@ -77,6 +112,7 @@ function runAttempt({
   images,
   timeoutMs,
   onChunk,
+  onThinkingChunk,
   onSettled,
 }) {
   const provider = getProvider(providerId);
@@ -106,6 +142,10 @@ function runAttempt({
           text,
         });
       },
+      onThinkingChunk: onThinkingChunk ? (thinking) => {
+        if (settled) return;
+        onThinkingChunk({ provider: providerId, thinking });
+      } : undefined,
       onDone: (fullResponse, usageMeta) => {
         if (settled) return;
         recordSuccess(providerId);
@@ -230,18 +270,20 @@ function startChatOrchestration({
   mode,
   primaryProvider,
   fallbackProvider,
+  parallelProviders,
   messages,
   systemPrompt,
   images = [],
   timeoutMs,
   onChunk,
+  onThinkingChunk,
   onProviderError,
   onFallback,
   onDone,
   onError,
   onAbort,
 }) {
-  const policy = resolvePolicy({ mode, primaryProvider, fallbackProvider });
+  const policy = resolvePolicy({ mode, primaryProvider, fallbackProvider, parallelProviders });
 
   let cancelled = false;
   let orchestrationSettled = false;
@@ -265,6 +307,7 @@ function startChatOrchestration({
         images,
         timeoutMs: getEffectiveTimeoutMs(providerId),
         onChunk: onChunk || (() => {}),
+        onThinkingChunk: onThinkingChunk || null,
         onSettled: (result) => {
           activeCleanups.delete(providerId);
           allSettledResults.push(result);
@@ -277,9 +320,11 @@ function startChatOrchestration({
 
   (async () => {
     if (policy.mode === 'parallel') {
-      const providers = policy.fallbackProvider !== policy.primaryProvider
-        ? [policy.primaryProvider, policy.fallbackProvider]
-        : [policy.primaryProvider];
+      const providers = policy.parallelProviders && policy.parallelProviders.length >= 2
+        ? policy.parallelProviders
+        : (policy.fallbackProvider !== policy.primaryProvider
+          ? [policy.primaryProvider, policy.fallbackProvider]
+          : [policy.primaryProvider]);
 
       const results = await Promise.all(providers.map((providerId) => runSingleAttempt(providerId)));
       if (cancelled) return;

@@ -847,10 +847,89 @@ textarea {
 .cat-unknown        { background: var(--cat-unknown-bg);        color: var(--cat-unknown-text); }
 
 /* ----- Chat Layout ----- */
+/* Thinking sidebar layout wrapper */
+.chat-with-thinking {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.chat-with-thinking > .chat-container {
+  flex: 1;
+  min-width: 0;
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* ----- Thinking Sidebar ----- */
+.thinking-sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--line-subtle);
+  height: 100%;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.thinking-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-raised);
+}
+
+.thinking-sidebar-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.thinking-sidebar-timer {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 48px;
+  text-align: right;
+}
+
+.thinking-sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-4);
+  min-height: 0;
+}
+
+.thinking-sidebar-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--ink-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.thinking-sidebar-placeholder {
+  font-size: var(--text-sm);
+  color: var(--ink-tertiary);
+  font-style: italic;
+}
+
+@media (max-width: 900px) {
+  .thinking-sidebar {
+    display: none;
+  }
 }
 
 .chat-messages {
@@ -1932,6 +2011,7 @@ textarea {
 
 .parallel-split {
   display: grid;
+  /* grid-template-columns set inline for 2-4 column support */
   grid-template-columns: 1fr 1fr;
   gap: var(--sp-5);
   max-width: 100%;
@@ -4367,4 +4447,100 @@ textarea {
   .tip-anchor:hover > .tip-popover {
     animation: none;
   }
+}
+
+/* ── Usage Dashboard ────────────────────────────────────────────────── */
+
+.usage-date-input {
+  display: block;
+  margin-top: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+}
+.usage-date-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.usage-card-title {
+  font-size: var(--text-md);
+  font-weight: 700;
+  margin-bottom: var(--sp-5);
+}
+
+.usage-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-subtle);
+}
+
+/* Provider badges */
+.badge-provider {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.badge-claude {
+  background: color-mix(in srgb, var(--provider-a) 15%, transparent);
+  color: var(--provider-a);
+}
+.badge-codex {
+  background: color-mix(in srgb, var(--provider-b) 15%, transparent);
+  color: var(--provider-b);
+}
+
+/* Service badges */
+.badge-service {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-sunken);
+  color: var(--ink-secondary);
+}
+.badge-service-chat { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.badge-service-parse { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
+.badge-service-dev { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+.badge-service-copilot { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+
+/* Status badges */
+.badge-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.badge-ok { background: color-mix(in srgb, var(--success) 15%, transparent); color: var(--success); }
+.badge-error { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+.badge-timeout { background: color-mix(in srgb, var(--warning) 15%, transparent); color: var(--warning); }
+.badge-abort { background: color-mix(in srgb, #a855f7 15%, transparent); color: #a855f7; }
+
+/* Recent table row tints */
+.usage-row-error { background: color-mix(in srgb, var(--danger) 5%, transparent); }
+.usage-row-timeout { background: color-mix(in srgb, var(--warning) 5%, transparent); }
+.usage-row-abort { background: color-mix(in srgb, #a855f7 5%, transparent); }
+
+/* Usage badge on chat messages */
+.usage-badge {
+  font-size: var(--text-xs);
+  color: var(--ink-tertiary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }

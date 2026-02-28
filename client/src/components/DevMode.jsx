@@ -283,6 +283,7 @@ export default function DevMode({
                 fallbackFrom={msg.fallbackFrom}
                 timestamp={msg.timestamp}
                 responseTimeMs={msg.responseTimeMs}
+                usage={msg.usage}
                 isStreaming={false}
                 variant="dev"
                 toolEvents={msg.toolEvents}

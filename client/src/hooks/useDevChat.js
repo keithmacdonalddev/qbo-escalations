@@ -287,6 +287,7 @@ export function useDevChat() {
             mode: data.mode || selectedMode,
             fallbackFrom: data.fallbackFrom || null,
             attemptMeta: data.attempts ? { attempts: data.attempts } : null,
+            usage: data.usage || null,
           }]);
           setStreamingText('');
           streamingTextRef.current = '';

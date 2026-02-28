@@ -163,7 +163,7 @@ function writeTempImageFile(imageInput, prefix, index) {
  * @param {function} opts.onError - Called on failure
  * @returns {function} cleanup - Call to kill the subprocess
  */
-function chat({ messages, systemPrompt, images, model, onChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, onChunk, onThinkingChunk, onDone, onError }) {
   const prompt = buildPrompt(messages);
   const tempFiles = [];
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
@@ -255,8 +255,16 @@ function chat({ messages, systemPrompt, images, model, onChunk, onDone, onError 
       if (!line.trim()) continue;
       try {
         const msg = JSON.parse(line);
+        // Debug: log events that might contain usage (result, message_start, message_delta, assistant)
+        if (msg.type === 'result' || msg.type === 'message_start' || msg.type === 'message_delta' || (msg.type === 'assistant' && msg.message?.usage)) {
+          console.log('[claude-usage-debug]', JSON.stringify(msg).slice(0, 500));
+        }
         const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
         if (usage) capturedUsage = usage;
+        const thinking = extractThinking(msg);
+        if (thinking && onThinkingChunk) {
+          try { onThinkingChunk(thinking); } catch { /* ignore */ }
+        }
         const text = extractText(msg);
         if (text) {
           fullResponse += text;
@@ -281,6 +289,10 @@ function chat({ messages, systemPrompt, images, model, onChunk, onDone, onError 
         const msg = JSON.parse(stdoutBuffer);
         const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
         if (usage) capturedUsage = usage;
+        const thinking = extractThinking(msg);
+        if (thinking && onThinkingChunk) {
+          try { onThinkingChunk(thinking); } catch { /* ignore */ }
+        }
         const text = extractText(msg);
         if (text) {
           fullResponse += text;
@@ -546,6 +558,19 @@ function buildPrompt(messages) {
   }
   lines.push('Assistant:');
   return lines.join('\n\n');
+}
+
+/**
+ * Extract thinking content from a stream-json thinking_delta message.
+ */
+function extractThinking(msg) {
+  if (msg.type === 'content_block_delta'
+      && msg.delta
+      && msg.delta.type === 'thinking_delta'
+      && typeof msg.delta.thinking === 'string') {
+    return msg.delta.thinking;
+  }
+  return null;
 }
 
 /**

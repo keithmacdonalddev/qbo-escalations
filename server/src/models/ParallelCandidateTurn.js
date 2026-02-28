@@ -29,6 +29,7 @@ const parallelCandidateTurnSchema = new mongoose.Schema({
     index: true,
   },
   candidates: { type: [candidateSchema], default: [] },
+  requestedProviders: { type: [String], enum: PROVIDERS, default: [] },
   attempts: { type: [mongoose.Schema.Types.Mixed], default: [] },
   acceptedProvider: { type: String, enum: PROVIDERS, default: null },
   acceptedContent: { type: String, default: '' },

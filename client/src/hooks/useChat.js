@@ -103,6 +103,7 @@ export function useChat(options = {}) {
     const savedProvider = normalizeProvider(window.localStorage.getItem('qbo-chat-provider'));
     return normalizeFallback(savedProvider, window.localStorage.getItem('qbo-chat-fallback-provider'));
   });
+  const [parallelProviders, setParallelProvidersState] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [parallelStreaming, setParallelStreaming] = useState({});
@@ -117,6 +118,9 @@ export function useChat(options = {}) {
   const [runtimeWarnings, setRuntimeWarnings] = useState([]);
   const [triageCard, setTriageCard] = useState(null);
   const [processEvents, setProcessEvents] = useState([]);
+  const [thinkingText, setThinkingText] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [thinkingStartTime, setThinkingStartTime] = useState(null);
 
   const abortRef = useRef(null);
   const startTimeRef = useRef(null);
@@ -128,9 +132,12 @@ export function useChat(options = {}) {
   const modeRef = useRef(mode);
   const splitModeActiveRef = useRef(false);
   const fallbackProviderRef = useRef(fallbackProvider);
+  const parallelProvidersRef = useRef([]);
   const aiSettingsRef = useRef(aiSettings);
   const processEventsRef = useRef([]);
   const chunkStartedProvidersRef = useRef(new Set());
+  const thinkingTextRef = useRef('');
+  const isThinkingRef = useRef(false);
 
   const shouldShowContextDebug = useCallback(() => (
     Boolean(aiSettingsRef.current?.debug?.showContextDebug)
@@ -195,6 +202,15 @@ export function useChat(options = {}) {
     }
   }, []);
 
+  const setParallelProviders = useCallback((nextProviders) => {
+    const valid = Array.isArray(nextProviders)
+      ? nextProviders.filter(p => PROVIDERS.has(p))
+      : [];
+    const unique = [...new Set(valid)];
+    parallelProvidersRef.current = unique;
+    setParallelProvidersState(unique);
+  }, []);
+
   useEffect(() => {
     providerRef.current = provider;
   }, [provider]);
@@ -254,6 +270,11 @@ export function useChat(options = {}) {
       setContextDebug(null);
       setRuntimeWarnings([]);
       resetProcessEvents();
+      setThinkingText('');
+      thinkingTextRef.current = '';
+      setIsThinking(false);
+      isThinkingRef.current = false;
+      setThinkingStartTime(null);
 
       const conv = await getConversation(id);
       setConversationId(conv._id);
@@ -302,6 +323,11 @@ export function useChat(options = {}) {
     resetProcessEvents();
     setSplitModeActive(false);
     splitModeActiveRef.current = false;
+    setThinkingText('');
+    thinkingTextRef.current = '';
+    setIsThinking(false);
+    isThinkingRef.current = false;
+    setThinkingStartTime(null);
   }, [resetProcessEvents, setError]);
 
   const sendMessage = useCallback((text, images = [], providerOverride) => {
@@ -334,6 +360,11 @@ export function useChat(options = {}) {
     setStreamProvider(selectedProvider);
     setResponseTime(null);
     startTimeRef.current = Date.now();
+    setThinkingText('');
+    thinkingTextRef.current = '';
+    setIsThinking(false);
+    isThinkingRef.current = false;
+    setThinkingStartTime(Date.now());
 
     const userMsg = {
       role: 'user',
@@ -351,6 +382,9 @@ export function useChat(options = {}) {
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode !== 'single' ? selectedFallback : undefined,
+        parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
+          ? parallelProvidersRef.current
+          : undefined,
         settings: aiSettingsRef.current || undefined,
       },
       {
@@ -380,6 +414,10 @@ export function useChat(options = {}) {
               code: data.warnings[0]?.code || 'RUNTIME_WARNING',
             });
           }
+          if (Array.isArray(data.parallelProviders) && data.parallelProviders.length >= 2) {
+            parallelProvidersRef.current = data.parallelProviders;
+            setParallelProvidersState(data.parallelProviders);
+          }
         },
         onTriageCard: (data) => {
           setTriageCard(data);
@@ -390,7 +428,19 @@ export function useChat(options = {}) {
             code: 'TRIAGE_CARD',
           });
         },
+        onThinking: (data) => {
+          if (!isThinkingRef.current) {
+            isThinkingRef.current = true;
+            setIsThinking(true);
+          }
+          thinkingTextRef.current += data.thinking;
+          setThinkingText(thinkingTextRef.current);
+        },
         onChunk: (data) => {
+          if (isThinkingRef.current) {
+            isThinkingRef.current = false;
+            setIsThinking(false);
+          }
           const chunkProvider = normalizeProvider(data.provider || selectedProvider);
           if (!chunkStartedProvidersRef.current.has(chunkProvider)) {
             chunkStartedProvidersRef.current.add(chunkProvider);
@@ -527,6 +577,11 @@ export function useChat(options = {}) {
           parallelStreamingRef.current = {};
           setIsStreaming(false);
           isStreamingRef.current = false;
+          setThinkingText('');
+          thinkingTextRef.current = '';
+          setIsThinking(false);
+          isThinkingRef.current = false;
+          setThinkingStartTime(null);
           setConversationId(data.conversationId);
           conversationIdRef.current = data.conversationId;
           loadConversations();
@@ -562,6 +617,11 @@ export function useChat(options = {}) {
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
+          setThinkingText('');
+          thinkingTextRef.current = '';
+          setIsThinking(false);
+          isThinkingRef.current = false;
+          setThinkingStartTime(null);
         },
       }
     );
@@ -598,6 +658,11 @@ export function useChat(options = {}) {
     setStreamProvider(selectedProvider);
     setResponseTime(null);
     startTimeRef.current = Date.now();
+    setThinkingText('');
+    thinkingTextRef.current = '';
+    setIsThinking(false);
+    isThinkingRef.current = false;
+    setThinkingStartTime(Date.now());
 
     setMessages((prev) => {
       if (prev.length === 0) return prev;
@@ -614,6 +679,9 @@ export function useChat(options = {}) {
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode !== 'single' ? selectedFallback : undefined,
+        parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
+          ? parallelProvidersRef.current
+          : undefined,
         settings: aiSettingsRef.current || undefined,
       },
       {
@@ -643,6 +711,10 @@ export function useChat(options = {}) {
               code: data.warnings[0]?.code || 'RUNTIME_WARNING',
             });
           }
+          if (Array.isArray(data.parallelProviders) && data.parallelProviders.length >= 2) {
+            parallelProvidersRef.current = data.parallelProviders;
+            setParallelProvidersState(data.parallelProviders);
+          }
         },
         onTriageCard: (data) => {
           setTriageCard(data);
@@ -653,7 +725,19 @@ export function useChat(options = {}) {
             code: 'TRIAGE_CARD',
           });
         },
+        onThinking: (data) => {
+          if (!isThinkingRef.current) {
+            isThinkingRef.current = true;
+            setIsThinking(true);
+          }
+          thinkingTextRef.current += data.thinking;
+          setThinkingText(thinkingTextRef.current);
+        },
         onChunk: (data) => {
+          if (isThinkingRef.current) {
+            isThinkingRef.current = false;
+            setIsThinking(false);
+          }
           const chunkProvider = normalizeProvider(data.provider || selectedProvider);
           if (!chunkStartedProvidersRef.current.has(chunkProvider)) {
             chunkStartedProvidersRef.current.add(chunkProvider);
@@ -785,6 +869,11 @@ export function useChat(options = {}) {
           parallelStreamingRef.current = {};
           setIsStreaming(false);
           isStreamingRef.current = false;
+          setThinkingText('');
+          thinkingTextRef.current = '';
+          setIsThinking(false);
+          isThinkingRef.current = false;
+          setThinkingStartTime(null);
           loadConversations();
         },
         onError: (errPayload) => {
@@ -818,6 +907,11 @@ export function useChat(options = {}) {
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
+          setThinkingText('');
+          thinkingTextRef.current = '';
+          setIsThinking(false);
+          isThinkingRef.current = false;
+          setThinkingStartTime(null);
         },
       }
     );
@@ -842,6 +936,11 @@ export function useChat(options = {}) {
     streamingTextRef.current = '';
     setParallelStreaming({});
     parallelStreamingRef.current = {};
+    setThinkingText('');
+    thinkingTextRef.current = '';
+    setIsThinking(false);
+    isThinkingRef.current = false;
+    setThinkingStartTime(null);
   }, [pushProcessEvent]);
 
   const removeConversation = useCallback(async (id) => {
@@ -937,6 +1036,7 @@ export function useChat(options = {}) {
     provider,
     mode,
     fallbackProvider,
+    parallelProviders,
     isStreaming,
     streamingText,
     parallelStreaming,
@@ -954,6 +1054,7 @@ export function useChat(options = {}) {
     setProvider,
     setMode,
     setFallbackProvider,
+    setParallelProviders,
     dismissFallbackNotice,
     dismissRuntimeWarnings,
     acceptParallelTurn,
@@ -968,5 +1069,8 @@ export function useChat(options = {}) {
     clearProcessEvents,
     splitModeActive,
     setSplitModeActive,
+    thinkingText,
+    isThinking,
+    thinkingStartTime,
   };
 }
