@@ -56,7 +56,7 @@ function useAnimationFrame(active) {
 
 // ── WaterfallRow ─────────────────────────────────────────────
 
-function WaterfallRow({ req, windowStart, windowDuration, now }) {
+function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold }) {
   const effectiveEnd = req.endTime || now;
   const leftPct = ((req.startTime - windowStart) / windowDuration) * 100;
   const totalPct = ((effectiveEnd - req.startTime) / windowDuration) * 100;
@@ -70,9 +70,10 @@ function WaterfallRow({ req, windowStart, windowDuration, now }) {
   const barColor = STATE_COLORS[req.state] || STATE_COLORS.pending;
   const isActive = req.state === 'pending' || req.state === 'streaming' || req.state === 'headers';
   const duration = effectiveEnd - req.startTime;
+  const isSlow = slowThreshold > 0 && duration > slowThreshold;
 
   return (
-    <div className={`wf-row${isActive ? ' wf-row--active' : ''}`}>
+    <div className={`wf-row${isActive ? ' wf-row--active' : ''}${isSlow ? ' wf-row--slow' : ''}`}>
       {/* Label column */}
       <div className="wf-label">
         <span className={`wf-method ${METHOD_CLASSES[req.method] || ''}`}>
@@ -205,7 +206,10 @@ function groupRequests(requests, now) {
 
 // ── RequestWaterfall ─────────────────────────────────────────
 
-export default function RequestWaterfall({ requests, clearRequests, enabled, setEnabled }) {
+export default function RequestWaterfall({
+  requests, clearRequests, enabled, setEnabled,
+  slowThreshold, setSlowThreshold, persist, setPersist,
+}) {
   const [collapsed, setCollapsed] = useState(true);
   const [viewMode, setViewMode] = useState('timeline'); // 'timeline' | 'grouped'
   const bodyRef = useRef(null);
@@ -309,6 +313,25 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
                 />
                 Record
               </label>
+              <label className="wf-record-toggle" title="Persist request history across page reloads">
+                <input
+                  type="checkbox"
+                  checked={persist}
+                  onChange={e => setPersist(e.target.checked)}
+                />
+                Persist
+              </label>
+              <div className="wf-slow-input" title="Highlight requests slower than this threshold">
+                <span>Slow:</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="100"
+                  value={slowThreshold}
+                  onChange={e => setSlowThreshold(Math.max(0, Number(e.target.value) || 0))}
+                />
+                <span>ms</span>
+              </div>
               <button
                 className="wf-clear-btn"
                 onClick={clearRequests}
@@ -331,6 +354,7 @@ export default function RequestWaterfall({ requests, clearRequests, enabled, set
                     windowStart={windowStart}
                     windowDuration={windowDuration}
                     now={now}
+                    slowThreshold={slowThreshold}
                   />
                 ))}
               </div>
