@@ -5513,6 +5513,12 @@ textarea {
   flex-shrink: 0;
   min-width: 1px;
   transform-origin: bottom;
+  animation: flame-seg-in 120ms ease-out both;
+  transition: opacity 300ms ease;
+}
+@keyframes flame-seg-in {
+  from { opacity: 0; transform: scaleY(0.3); }
+  to   { opacity: 1; transform: scaleY(1); }
 }
 .flame-seg--green { background: #34d399; box-shadow: 0 0 6px rgba(52, 211, 153, 0.4); }
 .flame-seg--amber { background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
