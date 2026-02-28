@@ -71,6 +71,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/post-task-verify.sh",
+            "timeout": 10,
+            "statusMessage": "🔍 Agent finished — checking verification..."
+          }
+        ]
       }
     ],
     "Stop": [

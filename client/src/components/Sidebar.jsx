@@ -22,22 +22,42 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   const [editTitle, setEditTitle] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const editInputRef = useRef(null);
+  const loadingRef = useRef(false);
 
   const loadConversations = useCallback(async (searchTerm = '') => {
+    if (loadingRef.current) return;          // skip if prior request still pending
+    loadingRef.current = true;
     try {
       const list = await listConversations(50, 0, searchTerm);
       setConversations(list);
     } catch {
       // Non-critical
+    } finally {
+      loadingRef.current = false;
     }
   }, []);
 
+  // Backpressure-safe polling: next tick only after prior request settles.
+  // Prevents unbounded pending-request accumulation when backend is slow.
   useEffect(() => {
-    loadConversations(search);
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') loadConversations(search);
-    }, 10000);
-    return () => clearInterval(interval);
+    let cancelled = false;
+    let tid = null;
+
+    const poll = async () => {
+      if (cancelled) return;
+      if (document.visibilityState !== 'visible') {
+        // Tab hidden — skip fetch, schedule next check
+        tid = setTimeout(poll, 10_000);
+        return;
+      }
+      await loadConversations(search);
+      if (!cancelled) tid = setTimeout(poll, 10_000);
+    };
+
+    loadConversations(search);                 // initial fetch
+    tid = setTimeout(poll, 10_000);            // first poll after 10 s
+
+    return () => { cancelled = true; clearTimeout(tid); };
   }, [loadConversations, search]);
 
   useEffect(() => {

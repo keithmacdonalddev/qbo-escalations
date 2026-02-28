@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   sendChatMessage,
   retryChatMessage,
-  listConversations,
   getConversation,
   deleteConversation,
   acceptParallelTurn as acceptParallelTurnApi,
@@ -13,6 +12,10 @@ const DEFAULT_PROVIDER = 'claude';
 const DEFAULT_MODE = 'single';
 const PROVIDERS = new Set(['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
 const MODES = new Set(['single', 'fallback', 'parallel']);
+
+// Stable empty array returned for `conversations` — Sidebar is the single
+// source of truth for conversation list. Kept for API compatibility.
+const EMPTY_CONVERSATIONS = Object.freeze([]);
 
 const PROVIDER_FAMILY = {
   claude: 'claude',
@@ -89,7 +92,6 @@ export function useChat(options = {}) {
   const { aiSettings = null } = options;
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
-  const [conversations, setConversations] = useState([]);
   const [provider, setProviderState] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_PROVIDER;
     return normalizeProvider(window.localStorage.getItem('qbo-chat-provider'));
@@ -232,19 +234,6 @@ export function useChat(options = {}) {
       setContextDebug(null);
     }
   }, [aiSettings?.debug?.showContextDebug]);
-
-  const loadConversations = useCallback(async () => {
-    try {
-      const list = await listConversations();
-      setConversations(list);
-    } catch {
-      // non-critical
-    }
-  }, []);
-
-  useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
 
   // Abort any in-flight stream on unmount
   useEffect(() => {
@@ -584,7 +573,6 @@ export function useChat(options = {}) {
           setThinkingStartTime(null);
           setConversationId(data.conversationId);
           conversationIdRef.current = data.conversationId;
-          loadConversations();
         },
         onError: (errPayload) => {
           const normalized = normalizeChatError(errPayload);
@@ -627,7 +615,7 @@ export function useChat(options = {}) {
     );
 
     abortRef.current = abort;
-  }, [loadConversations, pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
+  }, [pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
 
   const retryLastResponse = useCallback((providerOverride) => {
     if (!conversationIdRef.current || isStreamingRef.current) return;
@@ -874,7 +862,6 @@ export function useChat(options = {}) {
           setIsThinking(false);
           isThinkingRef.current = false;
           setThinkingStartTime(null);
-          loadConversations();
         },
         onError: (errPayload) => {
           const normalized = normalizeChatError(errPayload);
@@ -917,7 +904,7 @@ export function useChat(options = {}) {
     );
 
     abortRef.current = abort;
-  }, [loadConversations, pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
+  }, [pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
 
   const abortStream = useCallback(() => {
     if (isStreamingRef.current) {
@@ -947,11 +934,10 @@ export function useChat(options = {}) {
     try {
       await deleteConversation(id);
       if (conversationIdRef.current === id) newConversation();
-      await loadConversations();
     } catch (err) {
       setError(err.message);
     }
-  }, [newConversation, loadConversations]);
+  }, [newConversation]);
 
   const dismissFallbackNotice = useCallback(() => {
     setFallbackNotice(null);
@@ -998,7 +984,6 @@ export function useChat(options = {}) {
       setMessages(normalizedMessages);
       setConversationId(conversation._id);
       conversationIdRef.current = conversation._id;
-      await loadConversations();
       return out;
     } catch (err) {
       setError(err.message || 'Failed to accept parallel response');
@@ -1006,7 +991,7 @@ export function useChat(options = {}) {
     } finally {
       setParallelAcceptingKey(null);
     }
-  }, [loadConversations, setMode, setProvider]);
+  }, [setMode, setProvider]);
 
   const unacceptParallelTurn = useCallback(async (turnId) => {
     if (!turnId || !conversationIdRef.current) return null;
@@ -1032,7 +1017,7 @@ export function useChat(options = {}) {
   return {
     messages,
     conversationId,
-    conversations,
+    conversations: EMPTY_CONVERSATIONS,
     provider,
     mode,
     fallbackProvider,

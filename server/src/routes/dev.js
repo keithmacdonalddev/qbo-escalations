@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { spawn } = require('child_process');
 const path = require('path');
@@ -925,42 +926,69 @@ router.get('/sessions', (req, res) => {
 
 // GET /api/dev/conversations -- List persistent dev conversations
 router.get('/conversations', async (req, res) => {
+  // Fail fast when DB is not connected — prevents requests from hanging
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Database is not available' });
+  }
+
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const skip = parseInt(req.query.skip) || parseInt(req.query.offset) || 0;
   const search = (req.query.search || '').trim();
 
-  const filter = search ? { title: { $regex: search, $options: 'i' } } : {};
-  const docs = await DevConversation.find(filter)
-    .sort({ updatedAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  // Escape regex special chars to prevent regex injection / ReDoS
+  const escapedSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const filter = escapedSearch ? { title: { $regex: escapedSearch, $options: 'i' } } : {};
 
-  const items = docs.map((doc) => {
-    const lastMessage = doc.messages && doc.messages.length > 0
-      ? doc.messages[doc.messages.length - 1]
-      : null;
-    return {
-      _id: doc._id,
-      title: doc.title,
-      provider: normalizeProvider(doc.provider),
-      sessionId: doc.sessionId || null,
-      messageCount: doc.messages ? doc.messages.length : 0,
-      lastMessage: lastMessage
-        ? {
-            role: lastMessage.role,
-            preview: (lastMessage.content || '').slice(0, 120),
-            provider: lastMessage.provider || null,
-            timestamp: lastMessage.timestamp,
-          }
-        : null,
-      createdAt: doc.createdAt,
-      updatedAt: doc.updatedAt,
-    };
-  });
+  try {
+    // Aggregation pipeline projects only needed fields server-side,
+    // avoiding transfer of the full messages array per conversation.
+    const docs = await DevConversation.aggregate([
+      { $match: filter },
+      { $sort: { updatedAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: {
+        title: 1,
+        provider: 1,
+        sessionId: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        messageCount: { $size: { $ifNull: ['$messages', []] } },
+        lastMessage: { $arrayElemAt: ['$messages', -1] },
+      }},
+    ]).option({ maxTimeMS: 8000 });
 
-  const total = await DevConversation.countDocuments(filter);
-  res.json({ ok: true, conversations: items, total });
+    const items = docs.map((doc) => {
+      const lastMsg = doc.lastMessage || null;
+      return {
+        _id: doc._id,
+        title: doc.title,
+        provider: normalizeProvider(doc.provider),
+        sessionId: doc.sessionId || null,
+        messageCount: doc.messageCount || 0,
+        lastMessage: lastMsg
+          ? {
+              role: lastMsg.role,
+              preview: (lastMsg.content || '').slice(0, 120),
+              provider: lastMsg.provider || null,
+              timestamp: lastMsg.timestamp,
+            }
+          : null,
+        createdAt: doc.createdAt,
+        updatedAt: doc.updatedAt,
+      };
+    });
+
+    const total = await DevConversation.countDocuments(filter).maxTimeMS(5000);
+    res.json({ ok: true, conversations: items, total });
+  } catch (err) {
+    const isTimeout = err.codeName === 'MaxTimeMSExpired' || err.code === 50;
+    res.status(isTimeout ? 504 : 500).json({
+      ok: false,
+      code: isTimeout ? 'QUERY_TIMEOUT' : 'LIST_FAILED',
+      error: isTimeout ? 'Query timed out' : 'Failed to list dev conversations',
+    });
+  }
 });
 
 // GET /api/dev/conversations/:id -- Get full persistent dev conversation

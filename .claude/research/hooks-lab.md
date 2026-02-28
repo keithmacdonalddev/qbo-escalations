@@ -210,10 +210,30 @@ Source: Official hooks reference, confirmed by GitHub issues research.
 - **Status:** PENDING — needs fresh session to test
 - Success criteria: Agent reports receiving "AGENT BOILERPLATE" or equivalent content AND logs start entry
 
-### Risks
-- Agent might ignore "read this file first" instruction (same drift problem)
-- File write timing — does hook complete before agent starts reading?
-- Multiple concurrent agents could get stale file (race condition if hook rewrites mid-read)
+### Test Result: SUCCESS ✓
+- **Date:** 2026-02-28
+- **Agent type:** worker (custom agent definition)
+- **Prompt:** "add a comment to Conversation.js" (no mention of boilerplate file)
+- **Agent's first action:** Read `.claude/hooks/active-boilerplate.md` ← UNPROMPTED
+- **Agent's second action:** Read `.claude/memory/agent-completion-log.md` ← UNPROMPTED
+- **Agent logged completion:** YES with Agent ID: worker, task summary, files touched
+- **Agent followed boilerplate rules:** YES (didn't start servers, didn't run tests)
+
+### Key Evidence
+The worker agent definition says "FIRST ACTION: Read `.claude/hooks/active-boilerplate.md`" — and the agent obeyed this without any prompt-level instruction. The filesystem relay pattern WORKS.
+
+### Why This Works When additionalContext Doesn't
+- Agent definitions are loaded into agent context at spawn (confirmed reliable channel)
+- Agent definitions can instruct agents to read specific files
+- SubagentStart hook reliably writes files (confirmed by debug log)
+- Agent has Read tool access
+- The chain is: hook writes file → agent definition says "read that file" → agent reads it
+- No broken additionalContext injection needed
+
+### Risks (Updated After Test)
+- ~~Agent might ignore "read this file first" instruction~~ — DID NOT HAPPEN, agent obeyed
+- File write timing — hook completed before agent read (28s total task, no race condition observed)
+- Multiple concurrent agents could get stale file (untested — need parallel agent test)
 
 ---
 
@@ -225,8 +245,8 @@ Source: Official hooks reference, confirmed by GitHub issues research.
 3. **CLAUDE.md/MEMORY.md** — always loaded into agent context. Confirmed working.
 4. **PostToolUse for side effects** — formatting, linting after file changes. Confirmed.
 
-### Active Experiments
-5. **Filesystem relay** (Trial 5) — SubagentStart writes file, agent reads it. PENDING.
+### Active Experiments (Now Confirmed)
+5. **Filesystem relay** (Trial 5) — SubagentStart writes file, agent reads it. **CONFIRMED WORKING ✓** (2026-02-28)
 
 ### Untested Ideas
 6. **PreToolUse on Task tool** — intercept Task call in parent context. PreToolUse stdout IS context for parent. Could modify prompt before sending? Need to test if `updatedInput` works with Task tool.
@@ -241,6 +261,48 @@ Source: Official hooks reference, confirmed by GitHub issues research.
 13. **Move ALL agent instructions to agent definitions** — skip hooks entirely for agent injection. Agent definitions are confirmed injected. Make them comprehensive.
 14. **Move ALL agent instructions to preloaded skills** — skills field confirmed working. Create a `worker-instructions` skill with everything.
 15. **Combine: agent definition + skill + CLAUDE.md** — triple redundancy through confirmed-working channels. No hooks needed for agent injection.
+
+## Trial 6: PostToolUse on Task — Auto-Verification Pipeline
+
+**Date:** 2026-02-28
+**Hypothesis:** PostToolUse fires in PM context after Task tool returns. Two injection paths tested simultaneously:
+1. **Direct stdout** — echo "VERIFICATION NEEDED" from PostToolUse. May or may not become PM context (research says PostToolUse stdout → verbose only, but untested for Task tool specifically).
+2. **Two-hook chain** — PostToolUse writes `pending-verification.json`, pm-rules.sh (UserPromptSubmit) reads it on next prompt and injects "VERIFY NOW" into PM context. UserPromptSubmit stdout → context is CONFIRMED working.
+
+### Setup
+- Hook: `.claude/hooks/post-task-verify.sh`
+- Event: `PostToolUse` with `"matcher": "Task"`
+- Settings: added new PostToolUse entry alongside existing `.*` matcher
+- pm-rules.sh: modified to check for `pending-verification.json` at end of output
+
+### Guards (infinite loop prevention)
+- Agent name/description/prompt containing "verif" → skip + delete pending file
+- subagent_type: Explore, Plan, claude-code-guide, statusline-setup → skip
+- No task summary in log → skip
+- Verifier completion → deletes pending-verification.json (cleanup)
+
+### Self-Healing Flow
+1. Worker finishes → PostToolUse writes pending-verification.json
+2. PM follows rule #9 → spawns verifier (primary path)
+3. Verifier finishes → PostToolUse catches "verif" → deletes pending file (cleanup)
+4. If PM forgets rule #9 → next UserPromptSubmit → pm-rules.sh sees file → injects "VERIFY NOW"
+5. PM sees instruction → spawns verifier (safety net path)
+
+### Test
+- **Status:** PENDING — needs fresh session to test
+- Success criteria:
+  - PostToolUse debug log shows "PostToolUse:Task fired"
+  - Either: PM sees stdout directly (path 1) OR pm-rules.sh injects on next prompt (path 2)
+  - Verifier spawned without PM having to remember rule #9
+  - pending-verification.json cleaned up after verifier runs
+
+### Questions
+1. Does PostToolUse stdout become PM context? (research says no, but untested for Task tool)
+2. Does PostToolUse even fire for the Task tool? (might only fire for Read/Write/Edit/Bash)
+3. What's in tool_input for Task? (we're guessing the JSON structure)
+4. Timing: does PostToolUse fire before PM processes the task result, or after?
+
+---
 
 ## Ideas to Try
 
@@ -438,12 +500,12 @@ Source: Official hooks reference, confirmed by GitHub issues research.
 - **Performance:** 50-100ms overhead per file edit
 
 #### Workaround 6: Filesystem Relay Pattern
-- **Status:** PENDING TESTING but theoretically sound
-- **Hypothesis:** SubagentStart hook writes boilerplate to `.claude/hooks/active-boilerplate.md`
+- **Status:** CONFIRMED WORKING ✓ (2026-02-28)
+- **Method:** SubagentStart hook writes boilerplate to `.claude/hooks/active-boilerplate.md`
 - **Agent definition instructs:** "FIRST ACTION: Read `.claude/hooks/active-boilerplate.md`"
-- **Why should work:** File writes are side effects; agent definitions confirmed injected; Read tool available to agents
-- **Risks:** Agent drift (might not read first), file race conditions with concurrent agents
-- **Alternative to broken:** SubagentStart additionalContext injection
+- **Test result:** Worker agent read boilerplate as FIRST action without prompt-level instruction, logged completion, followed all rules
+- **Risks:** File race conditions with concurrent agents (untested), but no agent drift observed
+- **Novel workaround:** Not documented elsewhere in the community as of Feb 2026
 
 #### Workaround 7: PreToolUse for Blocking (Better Than Deny Rules)
 - **Status:** CONFIRMED MORE RELIABLE

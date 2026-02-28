@@ -1253,6 +1253,11 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
 
 // GET /api/conversations -- List conversations (with optional search)
 conversationsRouter.get('/', async (req, res) => {
+  // Fail fast when DB is not connected — prevents requests from hanging
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Database is not available' });
+  }
+
   const parsedLimit = Number.parseInt(safeString(req.query.limit, ''), 10);
   const parsedSkip = Number.parseInt(
     safeString(req.query.skip !== undefined ? req.query.skip : req.query.offset, ''),
@@ -1269,37 +1274,55 @@ conversationsRouter.get('/', async (req, res) => {
     ? { title: { $regex: escapedSearch, $options: 'i' } }
     : {};
 
-  const conversations = await Conversation.find(filter)
-    .sort({ updatedAt: -1 })
-    .skip(skip)
-    .limit(limit)
-    .lean();
+  try {
+    // Aggregation pipeline projects only needed fields server-side,
+    // avoiding transfer of the full messages array per conversation.
+    const conversations = await Conversation.aggregate([
+      { $match: filter },
+      { $sort: { updatedAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: {
+        title: 1,
+        provider: 1,
+        escalationId: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        messageCount: { $size: { $ifNull: ['$messages', []] } },
+        lastMessage: { $arrayElemAt: ['$messages', -1] },
+      }},
+    ]).option({ maxTimeMS: 8000 });
 
-  // Add preview of last message
-  const items = conversations.map((c) => {
-    const lastMsg = c.messages && c.messages.length > 0
-      ? c.messages[c.messages.length - 1]
-      : null;
-    const preview = lastMsg ? safeString(lastMsg.content, '').slice(0, 120) : '';
-    return {
-      _id: c._id,
-      title: safeString(c.title, 'Conversation'),
-      provider: normalizeProvider(c.provider),
-      messageCount: c.messages ? c.messages.length : 0,
-      lastMessage: lastMsg ? {
-        role: lastMsg.role,
-        preview,
-        provider: lastMsg.provider,
-        timestamp: lastMsg.timestamp,
-      } : null,
-      escalationId: c.escalationId,
-      createdAt: c.createdAt,
-      updatedAt: c.updatedAt,
-    };
-  });
+    const items = conversations.map((c) => {
+      const lastMsg = c.lastMessage || null;
+      const preview = lastMsg ? safeString(lastMsg.content, '').slice(0, 120) : '';
+      return {
+        _id: c._id,
+        title: safeString(c.title, 'Conversation'),
+        provider: normalizeProvider(c.provider),
+        messageCount: c.messageCount || 0,
+        lastMessage: lastMsg ? {
+          role: lastMsg.role,
+          preview,
+          provider: lastMsg.provider,
+          timestamp: lastMsg.timestamp,
+        } : null,
+        escalationId: c.escalationId,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      };
+    });
 
-  const total = await Conversation.countDocuments(filter);
-  res.json({ ok: true, conversations: items, total });
+    const total = await Conversation.countDocuments(filter).maxTimeMS(5000);
+    res.json({ ok: true, conversations: items, total });
+  } catch (err) {
+    const isTimeout = err.codeName === 'MaxTimeMSExpired' || err.code === 50;
+    res.status(isTimeout ? 504 : 500).json({
+      ok: false,
+      code: isTimeout ? 'QUERY_TIMEOUT' : 'LIST_FAILED',
+      error: isTimeout ? 'Query timed out' : 'Failed to list conversations',
+    });
+  }
 });
 
 conversationsRouter.use('/:id', (req, res, next) => {

@@ -13,3 +13,28 @@ echo "9. After each agent completes, spawn a haiku verifier. Its prompt must inc
 echo "10. Never trust an agent's self-assessment alone. The log file has post-mortem procedures for tracing issues back to root cause."
 echo "11. Respond with '✓ PM rules loaded' as your FIRST line before answering."
 echo ""
+
+# Check for pending verification (written by PostToolUse on Task)
+PENDING_FILE="$CLAUDE_PROJECT_DIR/.claude/hooks/pending-verification.json"
+if [ -f "$PENDING_FILE" ]; then
+  if command -v jq &>/dev/null; then
+    V_AGENT=$(jq -r '.agent_id // "unknown"' "$PENDING_FILE" 2>/dev/null)
+    V_TASK=$(jq -r '.task_summary // "unknown"' "$PENDING_FILE" 2>/dev/null)
+    V_FILES=$(jq -r '.files_touched // "unknown"' "$PENDING_FILE" 2>/dev/null)
+  else
+    V_AGENT=$(grep -o '"agent_id"[^,}]*' "$PENDING_FILE" | sed 's/.*: *"//' | sed 's/"$//' 2>/dev/null || echo "unknown")
+    V_TASK=$(grep -o '"task_summary"[^,}]*' "$PENDING_FILE" | sed 's/.*: *"//' | sed 's/"$//' 2>/dev/null || echo "unknown")
+    V_FILES=$(grep -o '"files_touched"[^,}]*' "$PENDING_FILE" | sed 's/.*: *"//' | sed 's/"$//' 2>/dev/null || echo "unknown")
+  fi
+
+  echo "========== VERIFICATION NEEDED (auto-detected) =========="
+  echo "Agent '$V_AGENT' completed a task and needs independent verification."
+  echo "Task: $V_TASK"
+  echo "Files: $V_FILES"
+  echo "ACTION: Spawn a haiku verifier agent NOW. Use the verifier agent definition. Include task summary and files touched but NOT the agent's self-assessment (blind review)."
+  echo "=========================================="
+  echo ""
+
+  # Consume the file so it doesn't repeat
+  rm -f "$PENDING_FILE" 2>/dev/null
+fi
