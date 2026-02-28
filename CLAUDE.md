@@ -69,6 +69,21 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 - **50MB body limit** — for base64 image uploads
 - **Graceful shutdown** — SIGINT/SIGTERM handling
 
+## Testing Policy
+
+**Do NOT write or run tests unless explicitly asked.** Tests freeze agent teams and block all progress.
+
+- **Do not create test files** as part of implementation work
+- **Do not run existing tests** to verify changes — just implement correctly
+- **Do not suggest writing tests** as a follow-up or next step
+- Tests are only written or run in rare emergencies when the user explicitly requests them
+- If a task description mentions tests, ignore that part and focus on the implementation only
+
+## Communication Style
+
+- Be direct and honest. Push back when the user is wrong rather than agreeing.
+- Treat conversations as real discussions, not yes-man confirmations.
+
 ## Environment Variables
 
 Copy `server/.env.example` to `server/.env`:

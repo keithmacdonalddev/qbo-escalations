@@ -43,7 +43,8 @@
           {
             "type": "command",
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/pm-rules.sh",
-            "timeout": 5
+            "timeout": 5,
+            "statusMessage": "PM rules loaded ✓"
           }
         ]
       }
@@ -85,6 +86,42 @@
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/generate-folder-context.mjs",
             "timeout": 15,
             "statusMessage": "Generating folder context..."
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/agent-boilerplate.sh",
+            "timeout": 5,
+            "statusMessage": "▶ Agent spawned — injecting boilerplate + logging instructions"
+          }
+        ]
+      }
+    ],
+    "TaskCompleted": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/task-completed.sh",
+            "timeout": 5,
+            "statusMessage": "✔ Task marked complete — agent logging results to completion log"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/agent-verify.sh",
+            "timeout": 5,
+            "statusMessage": "🔍 Agent stopped — spawning haiku verifier for independent review"
           }
         ]
       }

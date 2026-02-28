@@ -6,9 +6,6 @@ const codex = require('../src/services/codex');
 const { startChatOrchestration, resolvePolicy } = require('../src/services/chat-orchestrator');
 const { resetProviderHealth, getProviderHealth, recordFailure } = require('../src/services/provider-health');
 
-let originalClaudeChat;
-let originalCodexChat;
-
 function runChat(options) {
   return new Promise((resolve) => {
     const events = [];
@@ -23,22 +20,26 @@ function runChat(options) {
   });
 }
 
-test.before(() => {
-  originalClaudeChat = claude.chat;
-  originalCodexChat = codex.chat;
-});
+test('chat-orchestrator suite', async (t) => {
+  let originalClaudeChat;
+  let originalCodexChat;
 
-test.after(() => {
-  claude.chat = originalClaudeChat;
-  codex.chat = originalCodexChat;
-  resetProviderHealth();
-});
+  t.before(() => {
+    originalClaudeChat = claude.chat;
+    originalCodexChat = codex.chat;
+  });
 
-test.beforeEach(() => {
-  resetProviderHealth();
-});
+  t.after(() => {
+    claude.chat = originalClaudeChat;
+    codex.chat = originalCodexChat;
+    resetProviderHealth();
+  });
 
-test('single mode returns primary provider response', async () => {
+  t.beforeEach(() => {
+    resetProviderHealth();
+  });
+
+  await t.test('single mode returns primary provider response', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     onChunk('hello');
     onDone('hello');
@@ -59,7 +60,7 @@ test('single mode returns primary provider response', async () => {
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 0);
 });
 
-test('fallback mode switches to alternate provider on primary failure', async () => {
+await t.test('fallback mode switches to alternate provider on primary failure', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('primary failed');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -88,7 +89,7 @@ test('fallback mode switches to alternate provider on primary failure', async ()
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 1);
 });
 
-test('fallback mode returns terminal error when both providers fail', async () => {
+await t.test('fallback mode returns terminal error when both providers fail', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('claude failed');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -117,7 +118,7 @@ test('fallback mode returns terminal error when both providers fail', async () =
   assert.equal(out.data.attempts.length, 2);
 });
 
-test('timeout does not get overwritten by late provider success callback', async () => {
+await t.test('timeout does not get overwritten by late provider success callback', async () => {
   claude.chat = ({ onDone }) => {
     setTimeout(() => onDone('late success'), 25);
     return () => {};
@@ -141,7 +142,7 @@ test('timeout does not get overwritten by late provider success callback', async
   assert.equal(health.consecutiveFailures, 1);
 });
 
-test('synchronous provider throw increments failure only once', async () => {
+await t.test('synchronous provider throw increments failure only once', async () => {
   claude.chat = () => {
     const err = new Error('sync spawn fail');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -165,7 +166,7 @@ test('synchronous provider throw increments failure only once', async () => {
   assert.equal(health.consecutiveFailures, 1);
 });
 
-test('fallback mode prefers healthy provider when primary is unhealthy', async () => {
+await t.test('fallback mode prefers healthy provider when primary is unhealthy', async () => {
   recordFailure('claude', 'E1', 'fail 1');
   recordFailure('claude', 'E2', 'fail 2');
   recordFailure('claude', 'E3', 'fail 3');
@@ -196,7 +197,7 @@ test('fallback mode prefers healthy provider when primary is unhealthy', async (
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 0);
 });
 
-test('parallel mode returns both provider responses', async () => {
+await t.test('parallel mode returns both provider responses', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     setTimeout(() => onChunk('claude-part'), 5);
     setTimeout(() => onDone('claude-final'), 10);
@@ -232,7 +233,7 @@ test('parallel mode returns both provider responses', async () => {
 
 // --- Phase 3: Usage propagation and abort semantics ---
 
-test('single mode propagates usage in onDone', async () => {
+await t.test('single mode propagates usage in onDone', async () => {
   const mockUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
   claude.chat = ({ onDone }) => {
     onDone('hello', mockUsage);
@@ -255,7 +256,7 @@ test('single mode propagates usage in onDone', async () => {
   assert.deepStrictEqual(out.data.attempts[0].usage, mockUsage);
 });
 
-test('onError includes usage from err._usage on failure', async () => {
+await t.test('onError includes usage from err._usage on failure', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('fail');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -277,7 +278,7 @@ test('onError includes usage from err._usage on failure', async () => {
   assert.equal(out.data.attempts[0].inputTokens, 30);
 });
 
-test('onError(null) does not crash — safe err._usage dereference', async () => {
+await t.test('onError(null) does not crash — safe err._usage dereference', async () => {
   claude.chat = ({ onError }) => {
     onError(null);
     return () => {};
@@ -295,7 +296,7 @@ test('onError(null) does not crash — safe err._usage dereference', async () =>
   assert.equal(out.data.usage, null);
 });
 
-test('onError(undefined) does not crash — safe err._usage dereference', async () => {
+await t.test('onError(undefined) does not crash — safe err._usage dereference', async () => {
   claude.chat = ({ onError }) => {
     onError(undefined);
     return () => {};
@@ -313,7 +314,7 @@ test('onError(undefined) does not crash — safe err._usage dereference', async 
   assert.equal(out.data.usage, null);
 });
 
-test('cancel after successful completion does NOT fire onAbort', async () => {
+await t.test('cancel after successful completion does NOT fire onAbort', async () => {
   claude.chat = ({ onDone }) => {
     onDone('hello', { inputTokens: 10, outputTokens: 5, model: 'test' });
     return () => {};
@@ -340,7 +341,7 @@ test('cancel after successful completion does NOT fire onAbort', async () => {
   assert.equal(abortFired, false, 'onAbort must not fire after normal completion');
 });
 
-test('cancel after error completion does NOT fire onAbort', async () => {
+await t.test('cancel after error completion does NOT fire onAbort', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('fail');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -367,7 +368,7 @@ test('cancel after error completion does NOT fire onAbort', async () => {
   assert.equal(abortFired, false, 'onAbort must not fire after error completion');
 });
 
-test('cancel during in-flight request fires onAbort with usage', async () => {
+await t.test('cancel during in-flight request fires onAbort with usage', async () => {
   const mockUsage = { inputTokens: 20, outputTokens: 0, model: 'claude-sonnet-4-6' };
   claude.chat = ({ onDone }) => {
     const handle = setTimeout(() => onDone('late', mockUsage), 200);
@@ -402,7 +403,7 @@ test('cancel during in-flight request fires onAbort with usage', async () => {
   assert.deepStrictEqual(abortData.attempts[0].usage, mockUsage);
 });
 
-test('cancel is idempotent — second call is a no-op', async () => {
+await t.test('cancel is idempotent — second call is a no-op', async () => {
   claude.chat = ({ onDone }) => {
     const handle = setTimeout(() => onDone('late'), 200);
     return () => { clearTimeout(handle); };
@@ -429,7 +430,7 @@ test('cancel is idempotent — second call is a no-op', async () => {
   assert.equal(abortCount, 1, 'onAbort must fire exactly once');
 });
 
-test('parallel cancel includes all provider results including pre-cancel completions', async () => {
+await t.test('parallel cancel includes all provider results including pre-cancel completions', async () => {
   const claudeUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
   const codexUsage = { inputTokens: 80, outputTokens: 0, model: 'gpt-5.3-codex' };
 
@@ -480,7 +481,7 @@ test('parallel cancel includes all provider results including pre-cancel complet
   assert.deepStrictEqual(codexAttempt.usage, codexUsage);
 });
 
-test('parallel mode propagates per-result usage', async () => {
+await t.test('parallel mode propagates per-result usage', async () => {
   const claudeUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
   const codexUsage = { inputTokens: 80, outputTokens: 40, model: 'gpt-5.3-codex' };
   claude.chat = ({ onDone }) => {
@@ -508,7 +509,7 @@ test('parallel mode propagates per-result usage', async () => {
   assert.deepStrictEqual(codexResult.usage, codexUsage);
 });
 
-test('parallel mode succeeds when one provider fails and one succeeds', async () => {
+await t.test('parallel mode succeeds when one provider fails and one succeeds', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('claude down');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -543,7 +544,7 @@ test('parallel mode succeeds when one provider fails and one succeeds', async ()
 
 // ---------- Phase 5: Expanded provider set ----------
 
-test('P5: single mode with claude-sonnet-4-6 routes through claude CLI', async () => {
+await t.test('P5: single mode with claude-sonnet-4-6 routes through claude CLI', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     onChunk('sonnet response');
     onDone('sonnet response');
@@ -563,7 +564,7 @@ test('P5: single mode with claude-sonnet-4-6 routes through claude CLI', async (
   assert.equal(out.data.fullResponse, 'sonnet response');
 });
 
-test('P5: single mode with gpt-5-mini routes through codex CLI', async () => {
+await t.test('P5: single mode with gpt-5-mini routes through codex CLI', async () => {
   codex.chat = ({ onChunk, onDone }) => {
     onChunk('mini response');
     onDone('mini response');
@@ -583,7 +584,7 @@ test('P5: single mode with gpt-5-mini routes through codex CLI', async () => {
   assert.equal(out.data.fullResponse, 'mini response');
 });
 
-test('P5: fallback from claude-sonnet-4-6 to gpt-5-mini', async () => {
+await t.test('P5: fallback from claude-sonnet-4-6 to gpt-5-mini', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('sonnet failed');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -611,7 +612,7 @@ test('P5: fallback from claude-sonnet-4-6 to gpt-5-mini', async () => {
   assert.equal(out.data.fallbackFrom, 'claude-sonnet-4-6');
 });
 
-test('P5: parallel mode with mixed new providers', async () => {
+await t.test('P5: parallel mode with mixed new providers', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     onChunk('sonnet parallel');
     onDone('sonnet parallel');
@@ -644,7 +645,7 @@ test('P5: parallel mode with mixed new providers', async () => {
 
 // ---------- Phase 6: N-way parallel provider support ----------
 
-test('parallel mode with 3 parallelProviders returns 3 ordered results', async () => {
+await t.test('parallel mode with 3 parallelProviders returns 3 ordered results', async () => {
   let claudeCallCount = 0;
   claude.chat = ({ onChunk, onDone }) => {
     claudeCallCount++;
@@ -686,7 +687,7 @@ test('parallel mode with 3 parallelProviders returns 3 ordered results', async (
   }
 });
 
-test('parallel mode with 4 parallelProviders handles mixed success and failure', async () => {
+await t.test('parallel mode with 4 parallelProviders handles mixed success and failure', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     setTimeout(() => onChunk('claude-ok'), 3);
     setTimeout(() => onDone('claude-ok'), 6);
@@ -729,7 +730,7 @@ test('parallel mode with 4 parallelProviders handles mixed success and failure',
   assert.equal(out.events.filter((e) => e.type === 'provider_error').length, 2);
 });
 
-test('parallel mode with 2 parallelProviders behaves like legacy primary+fallback', async () => {
+await t.test('parallel mode with 2 parallelProviders behaves like legacy primary+fallback', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     setTimeout(() => onChunk('claude-part'), 3);
     setTimeout(() => onDone('claude-final'), 6);
@@ -762,7 +763,7 @@ test('parallel mode with 2 parallelProviders behaves like legacy primary+fallbac
   assert.equal(codexResult.fullResponse, 'codex-final');
 });
 
-test('resolvePolicy rejects parallelProviders with invalid provider', async () => {
+await t.test('resolvePolicy rejects parallelProviders with invalid provider', async () => {
   assert.throws(
     () => resolvePolicy({
       mode: 'parallel',
@@ -776,7 +777,7 @@ test('resolvePolicy rejects parallelProviders with invalid provider', async () =
   );
 });
 
-test('resolvePolicy rejects parallelProviders with fewer than 2 providers', async () => {
+await t.test('resolvePolicy rejects parallelProviders with fewer than 2 providers', async () => {
   assert.throws(
     () => resolvePolicy({
       mode: 'parallel',
@@ -790,7 +791,7 @@ test('resolvePolicy rejects parallelProviders with fewer than 2 providers', asyn
   );
 });
 
-test('resolvePolicy deduplicates parallelProviders and keeps unique set', async () => {
+await t.test('resolvePolicy deduplicates parallelProviders and keeps unique set', async () => {
   const policy = resolvePolicy({
     mode: 'parallel',
     primaryProvider: 'claude',
@@ -799,7 +800,7 @@ test('resolvePolicy deduplicates parallelProviders and keeps unique set', async 
   assert.deepEqual(policy.parallelProviders, ['claude', 'gpt-5-mini']);
 });
 
-test('resolvePolicy rejects when primaryProvider not in parallelProviders', async () => {
+await t.test('resolvePolicy rejects when primaryProvider not in parallelProviders', async () => {
   assert.throws(
     () => resolvePolicy({
       mode: 'parallel',
@@ -813,7 +814,7 @@ test('resolvePolicy rejects when primaryProvider not in parallelProviders', asyn
   );
 });
 
-test('resolvePolicy accepts all 4 valid providers in parallelProviders', async () => {
+await t.test('resolvePolicy accepts all 4 valid providers in parallelProviders', async () => {
   const policy = resolvePolicy({
     mode: 'parallel',
     primaryProvider: 'claude',
@@ -823,7 +824,7 @@ test('resolvePolicy accepts all 4 valid providers in parallelProviders', async (
   assert.deepEqual(policy.parallelProviders, ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
 });
 
-test('resolvePolicy with empty parallelProviders array falls through to legacy behavior', async () => {
+await t.test('resolvePolicy with empty parallelProviders array falls through to legacy behavior', async () => {
   // Empty array doesn't meet the length >= 2 guard, so parallelProviders is not set
   const policy = resolvePolicy({
     mode: 'parallel',
@@ -834,7 +835,7 @@ test('resolvePolicy with empty parallelProviders array falls through to legacy b
   assert.equal(policy.primaryProvider, 'claude');
 });
 
-test('resolvePolicy with null/undefined entries in parallelProviders rejects as invalid', async () => {
+await t.test('resolvePolicy with null/undefined entries in parallelProviders rejects as invalid', async () => {
   assert.throws(
     () => resolvePolicy({
       mode: 'parallel',
@@ -860,7 +861,7 @@ test('resolvePolicy with null/undefined entries in parallelProviders rejects as 
   );
 });
 
-test('parallel cancel with 3 providers aborts in-flight and preserves completed', async () => {
+await t.test('parallel cancel with 3 providers aborts in-flight and preserves completed', async () => {
   const claudeUsage = { inputTokens: 50, outputTokens: 25, model: 'claude-sonnet-4-6' };
   claude.chat = ({ onDone }) => {
     // Claude finishes quickly
@@ -897,4 +898,5 @@ test('parallel cancel with 3 providers aborts in-flight and preserves completed'
   assert.ok(abortData, 'onAbort must fire for 3-provider cancel');
   assert.ok(Array.isArray(abortData.attempts));
   assert.equal(abortData.attempts.length, 3, 'must include all 3 provider results');
+});
 });

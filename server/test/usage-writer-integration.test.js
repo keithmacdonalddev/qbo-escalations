@@ -1,18 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 
+const { connect, disconnect } = require('./_mongo-helper');
 const { logUsage, drainPendingWrites, getPendingCount, resetDrain } = require('../src/lib/usage-writer');
 const UsageLog = require('../src/models/UsageLog');
 
-let mongod;
-
 test('usage-writer integration suite', async (t) => {
-  // Start in-memory MongoDB
-  mongod = await MongoMemoryServer.create();
-  const uri = mongod.getUri();
-  await mongoose.connect(uri);
+  await connect();
 
   await t.test('logUsage persists a valid document with correct fields', async () => {
     resetDrain();
@@ -276,6 +271,5 @@ test('usage-writer integration suite', async (t) => {
 
   // Cleanup
   await mongoose.connection.dropDatabase();
-  await mongoose.disconnect();
-  await mongod.stop();
+  await disconnect();
 });

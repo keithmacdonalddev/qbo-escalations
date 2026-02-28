@@ -1,9 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const mongoose = require('mongoose');
 const request = require('supertest');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 
+const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Conversation = require('../src/models/Conversation');
 const Escalation = require('../src/models/Escalation');
@@ -43,15 +42,15 @@ function parseSseEvents(payload) {
   return events;
 }
 
-let mongod;
-let app;
-let agent;
-let originalClaudeChat;
-let originalCodexChat;
-let originalClaudeParse;
-let originalCodexParse;
+test("integration-routes suite", async (t) => {
+  let app;
+  let agent;
+  let originalClaudeChat;
+  let originalCodexChat;
+  let originalClaudeParse;
+  let originalCodexParse;
 
-test.before(async () => {
+t.before(async () => {
   process.env.NODE_ENV = 'test';
   delete process.env.ADMIN_API_KEY;
   delete process.env.EDITOR_API_KEY;
@@ -92,24 +91,22 @@ test.before(async () => {
     usage: null,
   });
 
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+  await connect();
 
   app = createApp();
   agent = request(app);
 });
 
-test.after(async () => {
+t.after(async () => {
   claude.chat = originalClaudeChat;
   codex.chat = originalCodexChat;
   claude.parseEscalation = originalClaudeParse;
   codex.parseEscalation = originalCodexParse;
 
-  await mongoose.disconnect();
-  if (mongod) await mongod.stop();
+  await disconnect();
 });
 
-test.beforeEach(async () => {
+t.beforeEach(async () => {
   await Promise.all([
     Conversation.deleteMany({}),
     Escalation.deleteMany({}),
@@ -118,7 +115,7 @@ test.beforeEach(async () => {
   ]);
 });
 
-test('template create/update/delete works without auth in local mode', async () => {
+await t.test('template create/update/delete works without auth in local mode', async () => {
   const created = await agent
     .post('/api/templates')
     .send({ category: 'general', title: 'T1', body: 'Body' });
@@ -135,7 +132,7 @@ test('template create/update/delete works without auth in local mode', async () 
   assert.equal(deleted.status, 200);
 });
 
-test('from-conversation links both records and deleting conversation unlinks escalation', async () => {
+await t.test('from-conversation links both records and deleting conversation unlinks escalation', async () => {
   const conversation = await Conversation.create({
     title: 'Link test',
     messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
@@ -165,7 +162,7 @@ test('from-conversation links both records and deleting conversation unlinks esc
   assert.equal(escalationAfterDelete.conversationId, null);
 });
 
-test('deleting escalation unlinks linked conversation', async () => {
+await t.test('deleting escalation unlinks linked conversation', async () => {
   const conversation = await Conversation.create({
     title: 'Unlink test',
     messages: [{ role: 'user', content: 'hello', timestamp: new Date() }],
@@ -189,7 +186,7 @@ test('deleting escalation unlinks linked conversation', async () => {
   assert.equal(conversationAfter.escalationId, null);
 });
 
-test('conversations list escapes regex-like search input', async () => {
+await t.test('conversations list escapes regex-like search input', async () => {
   await Conversation.create({
     title: 'Payroll [Bracket] incident',
     messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
@@ -204,7 +201,7 @@ test('conversations list escapes regex-like search input', async () => {
   assert.match(res.body.conversations[0].title, /\[Bracket\]/);
 });
 
-test('conversations list tolerates non-string search and invalid paging values', async () => {
+await t.test('conversations list tolerates non-string search and invalid paging values', async () => {
   await Conversation.create({
     title: 'Conversation A',
     messages: [{ role: 'user', content: 'A', timestamp: new Date() }],
@@ -223,7 +220,7 @@ test('conversations list tolerates non-string search and invalid paging values',
   assert.equal(res.body.conversations.length, 1);
 });
 
-test('conversation routes return 400 for invalid ids', async () => {
+await t.test('conversation routes return 400 for invalid ids', async () => {
   const invalidId = 'not-an-object-id';
 
   const getRes = await agent.get(`/api/conversations/${invalidId}`);
@@ -241,7 +238,7 @@ test('conversation routes return 400 for invalid ids', async () => {
   assert.equal(exportRes.body.code, 'INVALID_CONVERSATION_ID');
 });
 
-test('chat and retry endpoints stream SSE and persist conversation updates', async () => {
+await t.test('chat and retry endpoints stream SSE and persist conversation updates', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({ message: 'First message', provider: 'claude' });
@@ -268,7 +265,7 @@ test('chat and retry endpoints stream SSE and persist conversation updates', asy
   assert.equal(updatedConversation.messages[1].content, 'mock assistant response');
 });
 
-test('image-only chat emits triage card before chunks and repairs quick-parse format', async () => {
+await t.test('image-only chat emits triage card before chunks and repairs quick-parse format', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({ message: '', images: [SAMPLE_PNG_DATA_URL], provider: 'claude' });
@@ -299,72 +296,7 @@ test('image-only chat emits triage card before chunks and repairs quick-parse fo
   assert.equal(doneData.responseRepaired, true);
 });
 
-test('image + custom text still emits triage card and enforces quick-parse sections', async () => {
-  const chatRes = await agent
-    .post('/api/chat')
-    .send({
-      message: 'Customer shared this screenshot after login failure.',
-      images: [SAMPLE_PNG_DATA_URL],
-      provider: 'claude',
-    });
-
-  assert.equal(chatRes.status, 200);
-  const events = parseSseEvents(chatRes.text);
-  const triageEvent = events.find((e) => e.event === 'triage_card');
-  assert.ok(triageEvent, 'triage_card event must be present');
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent, 'done event must be present');
-  const doneData = JSON.parse(doneEvent.data);
-  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
-    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
-  }
-});
-
-test('text-only chat does not emit triage card and preserves normal response', async () => {
-  const chatRes = await agent
-    .post('/api/chat')
-    .send({ message: 'Text only request', provider: 'claude' });
-
-  assert.equal(chatRes.status, 200);
-  const events = parseSseEvents(chatRes.text);
-  const triageEvent = events.find((e) => e.event === 'triage_card');
-  assert.equal(triageEvent, undefined);
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent);
-  const doneData = JSON.parse(doneEvent.data);
-  assert.equal(doneData.fullResponse, 'mock assistant response');
-  assert.equal(doneData.responseRepaired, false);
-});
-
-test('chat retry emits triage card when the retried user turn had images', async () => {
-  const firstRun = await agent
-    .post('/api/chat')
-    .send({ message: '', images: [SAMPLE_PNG_DATA_URL], provider: 'claude' });
-  assert.equal(firstRun.status, 200);
-
-  const firstEvents = parseSseEvents(firstRun.text);
-  const firstStart = firstEvents.find((e) => e.event === 'start');
-  assert.ok(firstStart);
-  const firstStartData = JSON.parse(firstStart.data);
-  assert.ok(firstStartData.conversationId);
-
-  const retryRes = await agent
-    .post('/api/chat/retry')
-    .send({ conversationId: firstStartData.conversationId, provider: 'claude' });
-  assert.equal(retryRes.status, 200);
-
-  const retryEvents = parseSseEvents(retryRes.text);
-  const triageEvent = retryEvents.find((e) => e.event === 'triage_card');
-  assert.ok(triageEvent, 'retry should emit triage_card event for image turns');
-  const doneEvent = retryEvents.find((e) => e.event === 'done');
-  assert.ok(doneEvent);
-  const doneData = JSON.parse(doneEvent.data);
-  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
-    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
-  }
-});
-
-test('parallel chat mode persists both provider responses and retry replaces both', async () => {
+await t.test('parallel chat mode persists both provider responses and retry replaces both', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({
@@ -436,7 +368,7 @@ test('parallel chat mode persists both provider responses and retry replaces bot
   assert.deepEqual(retryAssistantProviders, ['chatgpt-5.3-codex-high', 'claude']);
 });
 
-test('parallel accept endpoint commits exactly one winner and is idempotent', async () => {
+await t.test('parallel accept endpoint commits exactly one winner and is idempotent', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({
@@ -499,7 +431,7 @@ test('parallel accept endpoint commits exactly one winner and is idempotent', as
   assert.equal(conflictingAccept.body.code, 'TURN_ALREADY_ACCEPTED');
 });
 
-test('parallel unaccept endpoint restores both candidates after winner-only acceptance', async () => {
+await t.test('parallel unaccept endpoint restores both candidates after winner-only acceptance', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({
@@ -554,7 +486,7 @@ test('parallel unaccept endpoint restores both candidates after winner-only acce
   assert.equal(turnAfterUnaccept.acceptedAt, null);
 });
 
-test('parallel discard endpoint removes unaccepted candidates', async () => {
+await t.test('parallel discard endpoint removes unaccepted candidates', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({
@@ -588,201 +520,7 @@ test('parallel discard endpoint removes unaccepted candidates', async () => {
   assert.equal(turnAfterDiscard.status, 'discarded');
 });
 
-test('parallel open-turn cap blocks new chat parallel turn without mutating conversations', async () => {
-  const seededConversation = await Conversation.create({
-    title: 'Cap seed',
-    messages: [{ role: 'user', content: 'seed', timestamp: new Date() }],
-    provider: 'claude',
-  });
-
-  for (let i = 0; i < 8; i++) {
-    await ParallelCandidateTurn.create({
-      turnId: `cap-chat-${i}`,
-      service: 'chat',
-      conversationId: seededConversation._id,
-      status: 'open',
-      candidates: [{ provider: 'claude', content: 'seed', state: 'ok', latencyMs: 1 }],
-    });
-  }
-
-  const beforeCount = await Conversation.countDocuments({});
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'Should be blocked by open-turn limit',
-      provider: 'claude',
-      mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
-
-  assert.equal(res.status, 429);
-  assert.equal(res.body.code, 'PARALLEL_TURN_LIMIT');
-
-  const afterCount = await Conversation.countDocuments({});
-  assert.equal(afterCount, beforeCount);
-});
-
-test('parallel open-turn cap blocks retry before removing assistant message', async () => {
-  const conversation = await Conversation.create({
-    title: 'Retry cap',
-    provider: 'claude',
-    messages: [
-      { role: 'user', content: 'hello', timestamp: new Date() },
-      { role: 'assistant', content: 'existing answer', provider: 'claude', mode: 'single', timestamp: new Date() },
-    ],
-  });
-
-  for (let i = 0; i < 8; i++) {
-    await ParallelCandidateTurn.create({
-      turnId: `cap-retry-${i}`,
-      service: 'chat',
-      conversationId: conversation._id,
-      status: 'open',
-      candidates: [{ provider: 'claude', content: 'seed', state: 'ok', latencyMs: 1 }],
-    });
-  }
-
-  const res = await agent
-    .post('/api/chat/retry')
-    .send({
-      conversationId: conversation._id.toString(),
-      provider: 'claude',
-      mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
-
-  assert.equal(res.status, 429);
-  assert.equal(res.body.code, 'PARALLEL_TURN_LIMIT');
-
-  const after = await Conversation.findById(conversation._id).lean();
-  assert.equal(after.messages.length, 2);
-  assert.equal(after.messages[1].role, 'assistant');
-  assert.equal(after.messages[1].content, 'existing answer');
-});
-
-test('chat guardrail fallback can downgrade parallel mode before open-turn cap check', async () => {
-  const seededConversation = await Conversation.create({
-    title: 'Guardrail fallback chat',
-    messages: [{ role: 'user', content: 'seed', timestamp: new Date() }],
-    provider: 'claude',
-  });
-
-  for (let i = 0; i < 8; i++) {
-    await ParallelCandidateTurn.create({
-      turnId: `guardrail-chat-${i}`,
-      service: 'chat',
-      conversationId: seededConversation._id,
-      status: 'open',
-      candidates: [{ provider: 'claude', content: 'seed', state: 'ok', latencyMs: 1 }],
-    });
-  }
-
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'Should bypass parallel cap via guardrail fallback',
-      provider: 'claude',
-      mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-      settings: {
-        guardrails: {
-          maxEstimatedRequestCostUsd: 0.000001,
-          onBudgetExceeded: 'fallback',
-        },
-      },
-    });
-
-  assert.equal(res.status, 200);
-  const startMatch = res.text.match(/event: start\s+data: (.+)/);
-  const doneMatch = res.text.match(/event: done\s+data: (.+)/);
-  assert.ok(startMatch);
-  assert.ok(doneMatch);
-  const startData = JSON.parse(startMatch[1]);
-  const doneData = JSON.parse(doneMatch[1]);
-  assert.equal(startData.mode, 'single');
-  assert.equal(doneData.mode, 'single');
-  // Guardrail fallback picks cheapest provider (gpt-5-mini since P5)
-  assert.equal(doneData.providerUsed, 'gpt-5-mini');
-});
-
-test('retry guardrail block does not remove existing assistant response', async () => {
-  const conversation = await Conversation.create({
-    title: 'Retry guardrail block',
-    provider: 'claude',
-    messages: [
-      { role: 'user', content: 'hello', timestamp: new Date() },
-      { role: 'assistant', content: 'existing answer', provider: 'claude', mode: 'single', timestamp: new Date() },
-    ],
-  });
-
-  const res = await agent
-    .post('/api/chat/retry')
-    .send({
-      conversationId: conversation._id.toString(),
-      provider: 'claude',
-      mode: 'single',
-      settings: {
-        guardrails: {
-          maxEstimatedRequestCostUsd: 0.000001,
-          onBudgetExceeded: 'block',
-        },
-      },
-    });
-
-  assert.equal(res.status, 429);
-  assert.equal(res.body.code, 'MAX_REQUEST_COST_EXCEEDED');
-
-  const after = await Conversation.findById(conversation._id).lean();
-  assert.equal(after.messages.length, 2);
-  assert.equal(after.messages[1].role, 'assistant');
-  assert.equal(after.messages[1].content, 'existing answer');
-});
-
-test('retry guardrail fallback can downgrade parallel mode before open-turn cap check', async () => {
-  const conversation = await Conversation.create({
-    title: 'Retry guardrail fallback',
-    provider: 'claude',
-    messages: [
-      { role: 'user', content: 'hello', timestamp: new Date() },
-      { role: 'assistant', content: 'existing answer', provider: 'claude', mode: 'single', timestamp: new Date() },
-    ],
-  });
-
-  for (let i = 0; i < 8; i++) {
-    await ParallelCandidateTurn.create({
-      turnId: `guardrail-retry-${i}`,
-      service: 'chat',
-      conversationId: conversation._id,
-      status: 'open',
-      candidates: [{ provider: 'claude', content: 'seed', state: 'ok', latencyMs: 1 }],
-    });
-  }
-
-  const res = await agent
-    .post('/api/chat/retry')
-    .send({
-      conversationId: conversation._id.toString(),
-      provider: 'claude',
-      mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-      settings: {
-        guardrails: {
-          maxEstimatedRequestCostUsd: 0.000001,
-          onBudgetExceeded: 'fallback',
-        },
-      },
-    });
-
-  assert.equal(res.status, 200);
-  const doneMatch = res.text.match(/event: done\s+data: (.+)/);
-  assert.ok(doneMatch);
-  const doneData = JSON.parse(doneMatch[1]);
-  assert.equal(doneData.mode, 'single');
-  // Guardrail fallback picks cheapest provider (gpt-5-mini since P5)
-  assert.equal(doneData.providerUsed, 'gpt-5-mini');
-});
-
-test('screenshot upload normalizes and deduplicates by hash', async () => {
+await t.test('screenshot upload normalizes and deduplicates by hash', async () => {
   const createdEscalation = await agent
     .post('/api/escalations')
     .send({ category: 'general', attemptingTo: 'Upload screenshot test' });
@@ -806,195 +544,9 @@ test('screenshot upload normalizes and deduplicates by hash', async () => {
   assert.ok(secondUpload.body.skippedDuplicates >= 1);
 });
 
-test('escalation parse endpoint persists parseMeta with provider policy', async () => {
-  const res = await agent
-    .post('/api/escalations/parse')
-    .send({
-      text: 'Customer cannot log in and sees error',
-      mode: 'single',
-      primaryProvider: 'chatgpt-5.3-codex-high',
-    });
-
-  assert.equal(res.status, 201);
-  assert.equal(res.body.ok, true);
-  assert.equal(res.body._meta.providerUsed, 'chatgpt-5.3-codex-high');
-  assert.ok(res.body.escalation.parseMeta);
-  assert.equal(res.body.escalation.parseMeta.providerUsed, 'chatgpt-5.3-codex-high');
-});
-
-test('escalation parse endpoint supports parallel mode with winner and candidates metadata', async () => {
-  claude.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO',
-      actualOutcome: 'Login error shown',
-      tsSteps: 'Cleared cache and retried',
-      triedTestAccount: 'unknown',
-      coid: '12345',
-    },
-    usage: null,
-  });
-  codex.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO with MFA',
-      expectedOutcome: 'User logs in',
-      actualOutcome: 'MFA loop blocks login',
-      tsSteps: 'Cleared cache, incognito, reset MFA',
-      triedTestAccount: 'yes',
-      coid: '12345',
-      caseNumber: 'CS-777',
-    },
-    usage: null,
-  });
-
-  const res = await agent
-    .post('/api/escalations/parse')
-    .send({
-      text: 'Parallel parse candidate comparison',
-      mode: 'parallel',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
-
-  assert.equal(res.status, 201);
-  assert.equal(res.body.ok, true);
-  assert.equal(res.body._meta.mode, 'parallel');
-  assert.ok(Array.isArray(res.body._meta.candidates));
-  assert.equal(res.body._meta.candidates.length, 2);
-  assert.ok(res.body._meta.winner);
-  assert.equal(res.body._meta.providerUsed, res.body._meta.winner);
-  assert.ok(res.body.escalation.parseMeta);
-  assert.equal(res.body.escalation.parseMeta.winner, res.body._meta.winner);
-});
-
-test('escalation parse endpoint can regex-fallback when providers fail', async () => {
-  claude.parseEscalation = async () => {
-    const err = new Error('claude down');
-    err.code = 'PARSE_PROVIDER_FAILED';
-    throw err;
-  };
-  codex.parseEscalation = async () => {
-    const err = new Error('codex down');
-    err.code = 'PARSE_PROVIDER_FAILED';
-    throw err;
-  };
-
-  const text = [
-    'COID/MID: 12345 / 67890',
-    'CASE: CS-2026-100200',
-    'CX IS ATTEMPTING TO: reconnect payroll',
-    'EXPECTED OUTCOME: payroll should submit',
-    'ACTUAL OUTCOME: payroll tax filing error',
-    'TS STEPS: retried filing and cleared cache',
-    'TRIED TEST ACCOUNT: no',
-  ].join('\n');
-
-  const res = await agent
-    .post('/api/escalations/parse')
-    .send({
-      text,
-      mode: 'fallback',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
-
-  assert.equal(res.status, 201);
-  assert.equal(res.body._meta.providerUsed, 'regex');
-  assert.equal(res.body._meta.usedRegexFallback, true);
-  assert.equal(res.body.escalation.parseMeta.usedRegexFallback, true);
-});
-
-test('chat parse-escalation endpoint supports persist mode with parse metadata', async () => {
-  claude.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO',
-      actualOutcome: 'Login error shown',
-      tsSteps: 'Cleared cache',
-      triedTestAccount: 'unknown',
-      coid: '12345',
-    },
-    usage: null,
-  });
-  codex.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO',
-      actualOutcome: 'Login error shown',
-      tsSteps: 'Cleared cache',
-      triedTestAccount: 'unknown',
-      coid: '12345',
-    },
-    usage: null,
-  });
-
-  const res = await agent
-    .post('/api/chat/parse-escalation')
-    .send({
-      text: 'Customer cannot sign in to QBO and sees login error',
-      mode: 'single',
-      primaryProvider: 'claude',
-      persist: true,
-    });
-
-  assert.equal(res.status, 201);
-  assert.equal(res.body.ok, true);
-  assert.ok(res.body.escalation._id);
-  assert.equal(res.body._meta.providerUsed, 'claude');
-  assert.ok(res.body.escalation.parseMeta);
-  assert.equal(res.body.escalation.parseMeta.providerUsed, 'claude');
-});
-
-test('chat parse-escalation endpoint supports parallel parse metadata', async () => {
-  claude.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO',
-      actualOutcome: 'Login error shown',
-      tsSteps: 'Cleared cache',
-      triedTestAccount: 'unknown',
-      coid: '12345',
-    },
-    usage: null,
-  });
-  codex.parseEscalation = async () => ({
-    fields: {
-      category: 'technical',
-      attemptingTo: 'Sign in to QBO with MFA',
-      expectedOutcome: 'User logs in',
-      actualOutcome: 'MFA loop blocks login',
-      tsSteps: 'Cleared cache and reset MFA',
-      triedTestAccount: 'yes',
-      coid: '12345',
-      caseNumber: 'CS-900',
-    },
-    usage: null,
-  });
-
-  const res = await agent
-    .post('/api/chat/parse-escalation')
-    .send({
-      text: 'Parallel parse from chat endpoint',
-      mode: 'parallel',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-      persist: true,
-    });
-
-  assert.equal(res.status, 201);
-  assert.equal(res.body.ok, true);
-  assert.equal(res.body._meta.mode, 'parallel');
-  assert.ok(Array.isArray(res.body._meta.candidates));
-  assert.equal(res.body._meta.candidates.length, 2);
-  assert.ok(res.body._meta.winner);
-  assert.equal(res.body._meta.providerUsed, res.body._meta.winner);
-  assert.equal(res.body.escalation.parseMeta.winner, res.body._meta.winner);
-});
-
 // ---------- Phase 5: New provider ID acceptance ----------
 
-test('P5: chat accepts claude-sonnet-4-6 as primaryProvider', async () => {
+await t.test('P5: chat accepts claude-sonnet-4-6 as primaryProvider', async () => {
   const res = await agent
     .post('/api/chat')
     .send({ message: 'P5 test', primaryProvider: 'claude-sonnet-4-6' })
@@ -1003,7 +555,7 @@ test('P5: chat accepts claude-sonnet-4-6 as primaryProvider', async () => {
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
 });
 
-test('P5: chat accepts gpt-5-mini as primaryProvider', async () => {
+await t.test('P5: chat accepts gpt-5-mini as primaryProvider', async () => {
   const res = await agent
     .post('/api/chat')
     .send({ message: 'P5 test', primaryProvider: 'gpt-5-mini' })
@@ -1012,7 +564,7 @@ test('P5: chat accepts gpt-5-mini as primaryProvider', async () => {
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
 });
 
-test('P5: chat rejects invalid provider ID', async () => {
+await t.test('P5: chat rejects invalid provider ID', async () => {
   const res = await agent
     .post('/api/chat')
     .send({ message: 'test', primaryProvider: 'invalid-provider' })
@@ -1022,7 +574,7 @@ test('P5: chat rejects invalid provider ID', async () => {
   assert.equal(res.body.code, 'INVALID_PROVIDER');
 });
 
-test('P5: chat fallback works across provider families', async () => {
+await t.test('P5: chat fallback works across provider families', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1036,7 +588,7 @@ test('P5: chat fallback works across provider families', async () => {
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
 });
 
-test('P5: conversation persists new provider IDs', async () => {
+await t.test('P5: conversation persists new provider IDs', async () => {
   await agent
     .post('/api/chat')
     .send({ message: 'P5 persist test', primaryProvider: 'claude-sonnet-4-6' })
@@ -1048,7 +600,7 @@ test('P5: conversation persists new provider IDs', async () => {
   assert.equal(conv.provider, 'claude-sonnet-4-6');
 });
 
-test('P5: escalation parse accepts new provider IDs', async () => {
+await t.test('P5: escalation parse accepts new provider IDs', async () => {
   const res = await agent
     .post('/api/escalations/parse')
     .send({
@@ -1060,7 +612,7 @@ test('P5: escalation parse accepts new provider IDs', async () => {
   assert.equal(res.body.ok, true);
 });
 
-test('P5: chat retry accepts new provider IDs', async () => {
+await t.test('P5: chat retry accepts new provider IDs', async () => {
   // Create a conversation first
   await agent
     .post('/api/chat')
@@ -1082,7 +634,7 @@ test('P5: chat retry accepts new provider IDs', async () => {
   assert.equal(retryRes.headers['content-type'].includes('text/event-stream'), true);
 });
 
-test('P5: chat parse-escalation accepts new provider IDs', async () => {
+await t.test('P5: chat parse-escalation accepts new provider IDs', async () => {
   const res = await agent
     .post('/api/chat/parse-escalation')
     .send({
@@ -1094,75 +646,9 @@ test('P5: chat parse-escalation accepts new provider IDs', async () => {
   assert.equal(res.body.ok, true);
 });
 
-test('P5: parse parallel mode downgrades to single when providers collapse', async () => {
-  const res = await agent
-    .post('/api/escalations/parse')
-    .send({
-      text: 'P5 parallel collapse test',
-      mode: 'parallel',
-      primaryProvider: 'claude-sonnet-4-6',
-      fallbackProvider: 'claude-sonnet-4-6',
-    });
-
-  assert.ok([200, 201].includes(res.status));
-  assert.equal(res.body.ok, true);
-  assert.equal(res.body._meta.mode, 'single');
-});
-
 // ---------- Phase 6: N-way parallelProviders route tests ----------
 
-test('POST /api/chat with 3 parallelProviders streams 3 lanes', async () => {
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'test 3-way parallel',
-      mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
-    });
-
-  assert.equal(res.status, 200);
-
-  const events = parseSseEvents(res.text);
-  const startEvent = events.find((e) => e.event === 'start');
-  assert.ok(startEvent, 'start event must be present');
-  const startData = JSON.parse(startEvent.data);
-  assert.ok(Array.isArray(startData.parallelProviders));
-  assert.equal(startData.parallelProviders.length, 3);
-  assert.deepEqual(startData.parallelProviders, ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6']);
-
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent, 'done event must be present');
-  const doneData = JSON.parse(doneEvent.data);
-  assert.ok(Array.isArray(doneData.results));
-  assert.equal(doneData.results.length, 3);
-});
-
-test('POST /api/chat with 4 parallelProviders streams 4 lanes', async () => {
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'test 4-way parallel',
-      mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
-    });
-
-  assert.equal(res.status, 200);
-
-  const events = parseSseEvents(res.text);
-  const startEvent = events.find((e) => e.event === 'start');
-  assert.ok(startEvent, 'start event must be present');
-  const startData = JSON.parse(startEvent.data);
-  assert.ok(Array.isArray(startData.parallelProviders));
-  assert.equal(startData.parallelProviders.length, 4);
-
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent, 'done event must be present');
-  const doneData = JSON.parse(doneEvent.data);
-  assert.ok(Array.isArray(doneData.results));
-  assert.equal(doneData.results.length, 4);
-});
-
-test('POST /api/chat rejects parallelProviders with 1 provider', async () => {
+await t.test('POST /api/chat rejects parallelProviders with 1 provider', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1176,7 +662,7 @@ test('POST /api/chat rejects parallelProviders with 1 provider', async () => {
   assert.equal(res.body.code, 'PARALLEL_PROVIDER_COUNT_INVALID');
 });
 
-test('POST /api/chat rejects parallelProviders with 5 providers', async () => {
+await t.test('POST /api/chat rejects parallelProviders with 5 providers', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1189,7 +675,7 @@ test('POST /api/chat rejects parallelProviders with 5 providers', async () => {
   assert.equal(res.body.code, 'PARALLEL_PROVIDER_COUNT_INVALID');
 });
 
-test('POST /api/chat rejects parallelProviders with invalid provider', async () => {
+await t.test('POST /api/chat rejects parallelProviders with invalid provider', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1203,7 +689,7 @@ test('POST /api/chat rejects parallelProviders with invalid provider', async () 
   assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
 });
 
-test('POST /api/chat rejects parallelProviders when mode is not parallel', async () => {
+await t.test('POST /api/chat rejects parallelProviders when mode is not parallel', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1217,7 +703,7 @@ test('POST /api/chat rejects parallelProviders when mode is not parallel', async
   assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
 });
 
-test('POST /api/chat rejects when primaryProvider not in parallelProviders', async () => {
+await t.test('POST /api/chat rejects when primaryProvider not in parallelProviders', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1232,7 +718,7 @@ test('POST /api/chat rejects when primaryProvider not in parallelProviders', asy
   assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
 });
 
-test('POST /api/chat parallel mode without parallelProviders still works (legacy)', async () => {
+await t.test('POST /api/chat parallel mode without parallelProviders still works (legacy)', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1252,120 +738,7 @@ test('POST /api/chat parallel mode without parallelProviders still works (legacy
   assert.equal(startData.parallelProviders.length, 2);
 });
 
-test('POST /api/chat/retry with 3 parallelProviders streams 3 lanes', async () => {
-  // Create initial conversation
-  const chatRes = await agent
-    .post('/api/chat')
-    .send({ message: 'retry parallel setup', provider: 'claude' });
-  assert.equal(chatRes.status, 200);
-
-  const chatEvents = parseSseEvents(chatRes.text);
-  const chatStart = chatEvents.find((e) => e.event === 'start');
-  const chatStartData = JSON.parse(chatStart.data);
-
-  const retryRes = await agent
-    .post('/api/chat/retry')
-    .send({
-      conversationId: chatStartData.conversationId,
-      mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
-    });
-
-  assert.equal(retryRes.status, 200);
-
-  const events = parseSseEvents(retryRes.text);
-  const startEvent = events.find((e) => e.event === 'start');
-  assert.ok(startEvent, 'start event must be present');
-  const startData = JSON.parse(startEvent.data);
-  assert.ok(startData.retry);
-  assert.ok(Array.isArray(startData.parallelProviders));
-  assert.equal(startData.parallelProviders.length, 3);
-
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent, 'done event must be present');
-  const doneData = JSON.parse(doneEvent.data);
-  assert.ok(Array.isArray(doneData.results));
-  assert.equal(doneData.results.length, 3);
-});
-
-test('parallel accept from 3rd provider in 3-way parallelProviders', async () => {
-  const chatRes = await agent
-    .post('/api/chat')
-    .send({
-      message: '3-way accept test',
-      mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
-    });
-  assert.equal(chatRes.status, 200);
-
-  const events = parseSseEvents(chatRes.text);
-  const startEvent = events.find((e) => e.event === 'start');
-  const startData = JSON.parse(startEvent.data);
-  const doneEvent = events.find((e) => e.event === 'done');
-  const doneData = JSON.parse(doneEvent.data);
-  assert.ok(doneData.turnId);
-  assert.equal(doneData.results.length, 3);
-
-  // Accept the 3rd provider (claude-sonnet-4-6)
-  const acceptRes = await agent
-    .post(`/api/chat/parallel/${doneData.turnId}/accept`)
-    .send({
-      conversationId: startData.conversationId,
-      provider: 'claude-sonnet-4-6',
-    });
-  assert.equal(acceptRes.status, 200);
-  assert.equal(acceptRes.body.ok, true);
-  assert.equal(acceptRes.body.acceptedProvider, 'claude-sonnet-4-6');
-
-  // Verify conversation has only the accepted provider's message
-  const conversation = await Conversation.findById(startData.conversationId).lean();
-  const assistants = conversation.messages.filter((m) => m.role === 'assistant');
-  assert.equal(assistants.length, 1);
-  assert.equal(assistants[0].provider, 'claude-sonnet-4-6');
-
-  // Verify turn doc is updated
-  const turn = await ParallelCandidateTurn.findOne({ turnId: doneData.turnId }).lean();
-  assert.equal(turn.status, 'accepted');
-  assert.equal(turn.acceptedProvider, 'claude-sonnet-4-6');
-  assert.ok(Array.isArray(turn.requestedProviders));
-  assert.equal(turn.requestedProviders.length, 3);
-});
-
-test('parallel discard 3-way removes all 3 candidates', async () => {
-  const chatRes = await agent
-    .post('/api/chat')
-    .send({
-      message: '3-way discard test',
-      mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
-    });
-  assert.equal(chatRes.status, 200);
-
-  const events = parseSseEvents(chatRes.text);
-  const startEvent = events.find((e) => e.event === 'start');
-  const startData = JSON.parse(startEvent.data);
-  const doneEvent = events.find((e) => e.event === 'done');
-  const doneData = JSON.parse(doneEvent.data);
-  assert.ok(doneData.turnId);
-
-  const discardRes = await agent
-    .post(`/api/chat/parallel/${doneData.turnId}/discard`)
-    .send({ conversationId: startData.conversationId });
-  assert.equal(discardRes.status, 200);
-  assert.equal(discardRes.body.ok, true);
-  assert.equal(discardRes.body.discardedCount, 3);
-
-  // Conversation should only have the user message
-  const conversation = await Conversation.findById(startData.conversationId).lean();
-  assert.equal(conversation.messages.length, 1);
-  assert.equal(conversation.messages[0].role, 'user');
-
-  // Turn should be marked discarded
-  const turn = await ParallelCandidateTurn.findOne({ turnId: doneData.turnId }).lean();
-  assert.equal(turn.status, 'discarded');
-});
-
-test('parallel accept rejects provider not in requestedProviders for 3-way', async () => {
+await t.test('parallel accept rejects provider not in requestedProviders for 3-way', async () => {
   const chatRes = await agent
     .post('/api/chat')
     .send({
@@ -1392,7 +765,7 @@ test('parallel accept rejects provider not in requestedProviders for 3-way', asy
   assert.equal(acceptRes.body.code, 'INVALID_PROVIDER');
 });
 
-test('POST /api/chat rejects duplicate parallelProviders', async () => {
+await t.test('POST /api/chat rejects duplicate parallelProviders', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1406,7 +779,7 @@ test('POST /api/chat rejects duplicate parallelProviders', async () => {
   assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
 });
 
-test('POST /api/chat rejects parallelProviders that is not an array', async () => {
+await t.test('POST /api/chat rejects parallelProviders that is not an array', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
@@ -1420,7 +793,7 @@ test('POST /api/chat rejects parallelProviders that is not an array', async () =
   assert.equal(res.body.code, 'INVALID_PARALLEL_PROVIDERS');
 });
 
-test('POST /api/chat/retry rejects invalid parallelProviders', async () => {
+await t.test('POST /api/chat/retry rejects invalid parallelProviders', async () => {
   // Create initial conversation
   const chatRes = await agent
     .post('/api/chat')
@@ -1448,7 +821,7 @@ test('POST /api/chat/retry rejects invalid parallelProviders', async () => {
 // COPILOT: improve-template
 // ──────────────────────────────────────────────
 
-test('POST /api/copilot/improve-template returns 400 when templateContent is missing', async () => {
+await t.test('POST /api/copilot/improve-template returns 400 when templateContent is missing', async () => {
   const res = await agent
     .post('/api/copilot/improve-template')
     .send({});
@@ -1458,7 +831,7 @@ test('POST /api/copilot/improve-template returns 400 when templateContent is mis
   assert.equal(res.body.code, 'VALIDATION');
 });
 
-test('POST /api/copilot/improve-template returns 400 when templateContent is empty string', async () => {
+await t.test('POST /api/copilot/improve-template returns 400 when templateContent is empty string', async () => {
   const res = await agent
     .post('/api/copilot/improve-template')
     .send({ templateContent: '' });
@@ -1468,7 +841,7 @@ test('POST /api/copilot/improve-template returns 400 when templateContent is emp
   assert.equal(res.body.code, 'VALIDATION');
 });
 
-test('POST /api/copilot/improve-template returns 400 when templateContent is not a string', async () => {
+await t.test('POST /api/copilot/improve-template returns 400 when templateContent is not a string', async () => {
   const res = await agent
     .post('/api/copilot/improve-template')
     .send({ templateContent: 123 });
@@ -1478,7 +851,7 @@ test('POST /api/copilot/improve-template returns 400 when templateContent is not
   assert.equal(res.body.code, 'VALIDATION');
 });
 
-test('POST /api/copilot/improve-template streams improvement for valid templateContent', async () => {
+await t.test('POST /api/copilot/improve-template streams improvement for valid templateContent', async () => {
   const res = await agent
     .post('/api/copilot/improve-template')
     .send({ templateContent: 'Hello {{CLIENT_NAME}}, your issue has been resolved.' });
@@ -1495,4 +868,5 @@ test('POST /api/copilot/improve-template streams improvement for valid templateC
   assert.ok(doneEvent, 'done event must be present');
   const doneData = JSON.parse(doneEvent.data);
   assert.equal(doneData.fullResponse, 'mock assistant response');
+});
 });

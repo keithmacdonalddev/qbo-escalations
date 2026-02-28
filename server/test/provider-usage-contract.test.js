@@ -12,7 +12,9 @@ const childProcess = require('child_process');
 
 const originalSpawn = childProcess.spawn;
 
-test.after(() => {
+test("provider-usage-contract suite", async (t) => {
+
+t.after(() => {
   childProcess.spawn = originalSpawn;
 });
 
@@ -53,7 +55,7 @@ function requireFresh(modulePath) {
 // Claude chat() contract
 // ============================================================
 
-test('claude chat() onDone receives usage as second argument', (t, done) => {
+await t.test('claude chat() onDone receives usage as second argument', (t, done) => {
   withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     claude.chat({
@@ -81,7 +83,7 @@ test('claude chat() onDone receives usage as second argument', (t, done) => {
   });
 });
 
-test('claude chat() onError receives err._usage on CLI failure', (t, done) => {
+await t.test('claude chat() onError receives err._usage on CLI failure', (t, done) => {
   withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     claude.chat({
@@ -106,7 +108,7 @@ test('claude chat() onError receives err._usage on CLI failure', (t, done) => {
   });
 });
 
-test('claude chat() cleanup() returns usage and partialResponse', (t, done) => {
+await t.test('claude chat() cleanup() returns usage and partialResponse', (t, done) => {
   withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     const cleanup = claude.chat({
@@ -137,7 +139,7 @@ test('claude chat() cleanup() returns usage and partialResponse', (t, done) => {
 // Claude parseEscalation() contract
 // ============================================================
 
-test('claude parseEscalation() returns { fields, usage } wrapper', async () => {
+await t.test('claude parseEscalation() returns { fields, usage } wrapper', async () => {
   const result = await withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     const promise = claude.parseEscalation('some escalation text');
@@ -169,7 +171,7 @@ test('claude parseEscalation() returns { fields, usage } wrapper', async () => {
   assert.equal(result.usage.model, 'claude-sonnet-4-6');
 });
 
-test('claude parseEscalation() catch fallback extracts usage from non-canonical stdout', async () => {
+await t.test('claude parseEscalation() catch fallback extracts usage from non-canonical stdout', async () => {
   const result = await withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     const promise = claude.parseEscalation('some escalation text');
@@ -203,7 +205,7 @@ test('claude parseEscalation() catch fallback extracts usage from non-canonical 
 // Codex chat() contract
 // ============================================================
 
-test('codex chat() onDone receives usage as second argument', (t, done) => {
+await t.test('codex chat() onDone receives usage as second argument', (t, done) => {
   withMock((fakeChild) => {
     const codex = requireFresh('../src/services/codex');
     codex.chat({
@@ -227,7 +229,7 @@ test('codex chat() onDone receives usage as second argument', (t, done) => {
   });
 });
 
-test('codex chat() onError receives err._usage on failure', (t, done) => {
+await t.test('codex chat() onError receives err._usage on failure', (t, done) => {
   withMock((fakeChild) => {
     const codex = requireFresh('../src/services/codex');
     codex.chat({
@@ -248,7 +250,7 @@ test('codex chat() onError receives err._usage on failure', (t, done) => {
   });
 });
 
-test('codex chat() cleanup() returns usage and partialResponse', (t, done) => {
+await t.test('codex chat() cleanup() returns usage and partialResponse', (t, done) => {
   withMock((fakeChild) => {
     const codex = requireFresh('../src/services/codex');
     const cleanup = codex.chat({
@@ -276,7 +278,7 @@ test('codex chat() cleanup() returns usage and partialResponse', (t, done) => {
 // Codex parseEscalation() contract
 // ============================================================
 
-test('codex parseEscalation() returns { fields, usage } wrapper', async () => {
+await t.test('codex parseEscalation() returns { fields, usage } wrapper', async () => {
   const result = await withMock((fakeChild) => {
     const codex = requireFresh('../src/services/codex');
     const promise = codex.parseEscalation('some escalation text');
@@ -304,7 +306,7 @@ test('codex parseEscalation() returns { fields, usage } wrapper', async () => {
 // Model attribution — event model preferred over env fallback
 // ============================================================
 
-test('claude chat() usage prefers model from event over env fallback', (t, done) => {
+await t.test('claude chat() usage prefers model from event over env fallback', (t, done) => {
   withMock((fakeChild) => {
     const claude = requireFresh('../src/services/claude');
     claude.chat({
@@ -328,7 +330,7 @@ test('claude chat() usage prefers model from event over env fallback', (t, done)
   });
 });
 
-test('codex chat() usage prefers model from event over env fallback', (t, done) => {
+await t.test('codex chat() usage prefers model from event over env fallback', (t, done) => {
   withMock((fakeChild) => {
     const codex = requireFresh('../src/services/codex');
     codex.chat({
@@ -348,4 +350,5 @@ test('codex chat() usage prefers model from event over env fallback', (t, done) 
     ]);
     closeChild(fakeChild, 0);
   });
+});
 });

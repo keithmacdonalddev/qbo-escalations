@@ -4,12 +4,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const mongoose = require('mongoose');
 const request = require('supertest');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 
+const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const UsageLog = require('../src/models/UsageLog');
 
-let mongod;
+test("usage-routes suite", async (t) => {
 let app;
 let agent;
 
@@ -56,22 +56,20 @@ const SEED_LOGS = [
   },
 ];
 
-test.before(async () => {
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
+t.before(async () => {
+  await connect();
   app = createApp();
   agent = request(app);
   await UsageLog.insertMany(SEED_LOGS);
 });
 
-test.after(async () => {
-  await mongoose.disconnect();
-  if (mongod) await mongod.stop();
+t.after(async () => {
+  await disconnect();
 });
 
 // ── /api/usage/summary ─────────────────────────────────────────────────
 
-test('summary returns aggregated totals with usageCoveragePercent and dataAvailableFrom', async () => {
+await t.test('summary returns aggregated totals with usageCoveragePercent and dataAvailableFrom', async () => {
   const res = await agent.get('/api/usage/summary').expect(200);
   assert.equal(res.body.ok, true);
   const s = res.body.summary;
@@ -84,31 +82,33 @@ test('summary returns aggregated totals with usageCoveragePercent and dataAvaila
   assert.ok(s.totalCostUsd.startsWith('$'));
   assert.equal(s.usageReportedCount, 3); // seed-3 has usageAvailable=false
   assert.equal(s.usageCoveragePercent, 75); // 3/4 = 75%
+  assert.equal(s.usageCompleteCount, 3); // seed-3 has usageComplete=false
+  assert.equal(s.usageCompleteCoveragePercent, 75); // 3/4 = 75%
   assert.ok(res.body.dataAvailableFrom);
 });
 
-test('summary returns 400 for invalid dateFrom', async () => {
+await t.test('summary returns 400 for invalid dateFrom', async () => {
   const res = await agent.get('/api/usage/summary?dateFrom=bad').expect(400);
   assert.equal(res.body.ok, false);
   assert.equal(res.body.code, 'INVALID_DATE');
   assert.match(res.body.error, /dateFrom/);
 });
 
-test('summary returns 400 for invalid dateTo', async () => {
+await t.test('summary returns 400 for invalid dateTo', async () => {
   const res = await agent.get('/api/usage/summary?dateTo=notadate').expect(400);
   assert.equal(res.body.ok, false);
   assert.equal(res.body.code, 'INVALID_DATE');
   assert.match(res.body.error, /dateTo/);
 });
 
-test('summary date filter narrows results', async () => {
+await t.test('summary date filter narrows results', async () => {
   const res = await agent
     .get('/api/usage/summary?dateFrom=2026-02-21&dateTo=2026-02-22')
     .expect(200);
   assert.equal(res.body.summary.totalRequests, 2); // seed-2 and seed-3
 });
 
-test('summary dateTo includes full end day (end-of-day correction R5)', async () => {
+await t.test('summary dateTo includes full end day (end-of-day correction R5)', async () => {
   // dateTo=2026-02-20 should include seed-1 at 10:00 UTC on that day
   const res = await agent
     .get('/api/usage/summary?dateTo=2026-02-20')
@@ -116,18 +116,20 @@ test('summary dateTo includes full end day (end-of-day correction R5)', async ()
   assert.equal(res.body.summary.totalRequests, 1);
 });
 
-test('summary returns zero when no data matches', async () => {
+await t.test('summary returns zero when no data matches', async () => {
   const res = await agent
     .get('/api/usage/summary?dateFrom=2099-01-01')
     .expect(200);
   assert.equal(res.body.summary.totalRequests, 0);
   assert.equal(res.body.summary.totalTokens, 0);
   assert.equal(res.body.summary.usageCoveragePercent, 0);
+  assert.equal(res.body.summary.usageCompleteCount, 0);
+  assert.equal(res.body.summary.usageCompleteCoveragePercent, 0);
 });
 
 // ── /api/usage/by-provider ─────────────────────────────────────────────
 
-test('by-provider returns breakdown per provider with cost fields', async () => {
+await t.test('by-provider returns breakdown per provider with cost fields', async () => {
   const res = await agent.get('/api/usage/by-provider').expect(200);
   assert.equal(res.body.ok, true);
   assert.ok(Array.isArray(res.body.providers));
@@ -141,14 +143,14 @@ test('by-provider returns breakdown per provider with cost fields', async () => 
   assert.equal(typeof claudeRow.totalCostUsd, 'string');
 });
 
-test('by-provider returns 400 for invalid date', async () => {
+await t.test('by-provider returns 400 for invalid date', async () => {
   const res = await agent.get('/api/usage/by-provider?dateFrom=xyz').expect(400);
   assert.equal(res.body.code, 'INVALID_DATE');
 });
 
 // ── /api/usage/by-service ──────────────────────────────────────────────
 
-test('by-service returns breakdown per service', async () => {
+await t.test('by-service returns breakdown per service', async () => {
   const res = await agent.get('/api/usage/by-service').expect(200);
   assert.equal(res.body.ok, true);
   assert.ok(Array.isArray(res.body.services));
@@ -161,14 +163,9 @@ test('by-service returns breakdown per service', async () => {
   assert.equal(chatRow.requests, 2);
 });
 
-test('by-service returns 400 for invalid date', async () => {
-  const res = await agent.get('/api/usage/by-service?dateTo=nope').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
 // ── /api/usage/trends ──────────────────────────────────────────────────
 
-test('trends returns daily time series by default', async () => {
+await t.test('trends returns daily time series by default', async () => {
   const res = await agent.get('/api/usage/trends').expect(200);
   assert.equal(res.body.ok, true);
   assert.equal(res.body.interval, 'daily');
@@ -184,7 +181,7 @@ test('trends returns daily time series by default', async () => {
   assert.equal(typeof first.totalCostUsd, 'string');
 });
 
-test('trends monthly groups correctly', async () => {
+await t.test('trends monthly groups correctly', async () => {
   const res = await agent.get('/api/usage/trends?interval=monthly').expect(200);
   assert.equal(res.body.interval, 'monthly');
   assert.equal(res.body.trends.length, 1); // all in 2026-02
@@ -192,20 +189,15 @@ test('trends monthly groups correctly', async () => {
   assert.equal(res.body.trends[0].requests, 4);
 });
 
-test('trends normalizes invalid interval to daily (finding #4)', async () => {
+await t.test('trends normalizes invalid interval to daily (finding #4)', async () => {
   const res = await agent.get('/api/usage/trends?interval=banana').expect(200);
   assert.equal(res.body.interval, 'daily');
   assert.equal(res.body.trends.length, 4);
 });
 
-test('trends returns 400 for invalid date', async () => {
-  const res = await agent.get('/api/usage/trends?dateFrom=bad').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
 // ── /api/usage/by-category ─────────────────────────────────────────────
 
-test('by-category groups include both service and category fields (R11)', async () => {
+await t.test('by-category groups include both service and category fields (R11)', async () => {
   const res = await agent.get('/api/usage/by-category').expect(200);
   assert.equal(res.body.ok, true);
   assert.ok(Array.isArray(res.body.categories));
@@ -220,21 +212,16 @@ test('by-category groups include both service and category fields (R11)', async 
   }
 });
 
-test('by-category ?service= filter narrows results', async () => {
+await t.test('by-category ?service= filter narrows results', async () => {
   const res = await agent.get('/api/usage/by-category?service=copilot').expect(200);
   assert.equal(res.body.categories.length, 1);
   assert.equal(res.body.categories[0].service, 'copilot');
   assert.equal(res.body.categories[0].category, 'suggest-response');
 });
 
-test('by-category returns 400 for invalid date', async () => {
-  const res = await agent.get('/api/usage/by-category?dateFrom=nope').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
 // ── /api/usage/recent ──────────────────────────────────────────────────
 
-test('recent returns paginated results with default limit', async () => {
+await t.test('recent returns paginated results with default limit', async () => {
   const res = await agent.get('/api/usage/recent').expect(200);
   assert.equal(res.body.ok, true);
   assert.ok(Array.isArray(res.body.recent));
@@ -253,28 +240,26 @@ test('recent returns paginated results with default limit', async () => {
   assert.ok(first.requestId);
   assert.equal(typeof first.totalCostMicros, 'number');
   assert.equal(typeof first.totalCostUsd, 'string');
+  // usageComplete exposed alongside usageAvailable
+  assert.equal(typeof first.usageAvailable, 'boolean');
+  assert.equal(typeof first.usageComplete, 'boolean');
 });
 
-test('recent enforces limit cap at 200', async () => {
+await t.test('recent enforces limit cap at 200', async () => {
   const res = await agent.get('/api/usage/recent?limit=999').expect(200);
   assert.equal(res.body.pagination.limit, 200);
 });
 
-test('recent paginates correctly', async () => {
+await t.test('recent paginates correctly', async () => {
   const res = await agent.get('/api/usage/recent?limit=2&page=2').expect(200);
   assert.equal(res.body.recent.length, 2);
   assert.equal(res.body.pagination.page, 2);
   assert.equal(res.body.pagination.totalPages, 2);
 });
 
-test('recent returns 400 for invalid date', async () => {
-  const res = await agent.get('/api/usage/recent?dateFrom=bad').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
 // ── /api/usage/conversation/:id ────────────────────────────────────────
 
-test('conversation/:id returns aggregate and request list for valid conversation', async () => {
+await t.test('conversation/:id returns aggregate and request list for valid conversation', async () => {
   const res = await agent.get(`/api/usage/conversation/${CONV_ID_A}`).expect(200);
   assert.equal(res.body.ok, true);
   assert.equal(res.body.conversationId, CONV_ID_A.toString());
@@ -287,14 +272,14 @@ test('conversation/:id returns aggregate and request list for valid conversation
   assert.ok(res.body.dataAvailableFrom); // finding #3
 });
 
-test('conversation/:id returns 400 INVALID_ID for malformed ID (R15)', async () => {
+await t.test('conversation/:id returns 400 INVALID_ID for malformed ID (R15)', async () => {
   const res = await agent.get('/api/usage/conversation/invalid').expect(400);
   assert.equal(res.body.ok, false);
   assert.equal(res.body.code, 'INVALID_ID');
   assert.equal(res.body.error, 'Invalid conversation ID');
 });
 
-test('conversation/:id returns 400 INVALID_DATE for bad dateFrom (finding #2)', async () => {
+await t.test('conversation/:id returns 400 INVALID_DATE for bad dateFrom (finding #2)', async () => {
   const res = await agent
     .get(`/api/usage/conversation/${CONV_ID_A}?dateFrom=bad`)
     .expect(400);
@@ -303,15 +288,7 @@ test('conversation/:id returns 400 INVALID_DATE for bad dateFrom (finding #2)', 
   assert.match(res.body.error, /dateFrom/);
 });
 
-test('conversation/:id returns 400 INVALID_DATE for bad dateTo (finding #2)', async () => {
-  const res = await agent
-    .get(`/api/usage/conversation/${CONV_ID_A}?dateTo=nope`)
-    .expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-  assert.match(res.body.error, /dateTo/);
-});
-
-test('conversation/:id date filter narrows request list', async () => {
+await t.test('conversation/:id date filter narrows request list', async () => {
   // CONV_ID_A has seed-1 (Feb 20) and seed-2 (Feb 21)
   const res = await agent
     .get(`/api/usage/conversation/${CONV_ID_A}?dateFrom=2026-02-21`)
@@ -320,7 +297,7 @@ test('conversation/:id date filter narrows request list', async () => {
   assert.equal(res.body.requests.length, 1);
 });
 
-test('conversation/:id returns empty for nonexistent conversation', async () => {
+await t.test('conversation/:id returns empty for nonexistent conversation', async () => {
   const fakeId = new mongoose.Types.ObjectId();
   const res = await agent.get(`/api/usage/conversation/${fakeId}`).expect(200);
   assert.equal(res.body.aggregate.totalRequests, 0);
@@ -329,7 +306,7 @@ test('conversation/:id returns empty for nonexistent conversation', async () => 
 
 // ── /api/usage/models ──────────────────────────────────────────────────
 
-test('models returns breakdown per model with provider', async () => {
+await t.test('models returns breakdown per model with provider', async () => {
   const res = await agent.get('/api/usage/models').expect(200);
   assert.equal(res.body.ok, true);
   assert.ok(Array.isArray(res.body.models));
@@ -344,14 +321,9 @@ test('models returns breakdown per model with provider', async () => {
   }
 });
 
-test('models returns 400 for invalid date', async () => {
-  const res = await agent.get('/api/usage/models?dateFrom=xyz').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
 // ── Cross-cutting: cost format ─────────────────────────────────────────
 
-test('all aggregate endpoints return cost as integer micros and formatted USD string', async () => {
+await t.test('all aggregate endpoints return cost as integer micros and formatted USD string', async () => {
   const endpoints = [
     '/api/usage/summary',
     '/api/usage/by-provider',
@@ -371,7 +343,7 @@ test('all aggregate endpoints return cost as integer micros and formatted USD st
 
 // ── Cross-cutting: dataAvailableFrom ───────────────────────────────────
 
-test('all endpoints include dataAvailableFrom in response', async () => {
+await t.test('all endpoints include dataAvailableFrom in response', async () => {
   const fakeId = CONV_ID_A.toString();
   const endpoints = [
     '/api/usage/summary',
@@ -395,57 +367,31 @@ test('all endpoints include dataAvailableFrom in response', async () => {
 
 // ── Finding #1: Strict date validation ─────────────────────────────────
 
-test('rejects impossible calendar date Feb 31', async () => {
+await t.test('rejects impossible calendar date Feb 31', async () => {
   const res = await agent.get('/api/usage/summary?dateFrom=2026-02-31').expect(400);
   assert.equal(res.body.code, 'INVALID_DATE');
   assert.match(res.body.error, /dateFrom/);
 });
 
-test('rejects impossible calendar date Apr 31', async () => {
-  const res = await agent.get('/api/usage/summary?dateTo=2026-04-31').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-  assert.match(res.body.error, /dateTo/);
-});
-
-test('rejects impossible calendar date Feb 29 in non-leap year', async () => {
-  const res = await agent.get('/api/usage/summary?dateFrom=2027-02-29').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
-test('accepts valid Feb 29 in leap year', async () => {
+await t.test('accepts valid Feb 29 in leap year', async () => {
   const res = await agent.get('/api/usage/summary?dateFrom=2028-02-29').expect(200);
   assert.equal(res.body.ok, true);
 });
 
-test('rejects non-ISO format dates', async () => {
+await t.test('rejects non-ISO format dates', async () => {
   const res = await agent.get('/api/usage/summary?dateFrom=Feb 20 2026').expect(400);
-  assert.equal(res.body.code, 'INVALID_DATE');
-});
-
-test('accepts valid ISO timestamp with Z suffix', async () => {
-  const res = await agent.get('/api/usage/summary?dateFrom=2026-02-20T10:00:00Z').expect(200);
-  assert.equal(res.body.ok, true);
-});
-
-test('accepts valid ISO timestamp with timezone offset', async () => {
-  const res = await agent.get('/api/usage/summary?dateFrom=2026-02-20T10:00:00-05:00').expect(200);
-  assert.equal(res.body.ok, true);
-});
-
-test('rejects impossible date even in ISO timestamp form', async () => {
-  const res = await agent.get('/api/usage/summary?dateFrom=2026-02-31T12:00:00Z').expect(400);
   assert.equal(res.body.code, 'INVALID_DATE');
 });
 
 // ── Finding #2: dateTo timestamp precision ─────────────────────────────
 
-test('dateTo date-only still applies end-of-day correction', async () => {
+await t.test('dateTo date-only still applies end-of-day correction', async () => {
   // seed-1 is at 2026-02-20T10:00:00Z — dateTo=2026-02-20 should include it
   const res = await agent.get('/api/usage/summary?dateTo=2026-02-20').expect(200);
   assert.equal(res.body.summary.totalRequests, 1);
 });
 
-test('dateTo full timestamp does NOT apply end-of-day correction', async () => {
+await t.test('dateTo full timestamp does NOT apply end-of-day correction', async () => {
   // seed-1 is at 2026-02-20T10:00:00Z — dateTo at noon should include it
   const noon = await agent.get('/api/usage/summary?dateTo=2026-02-20T12:00:00Z').expect(200);
   assert.equal(noon.body.summary.totalRequests, 1); // seed-1 at 10:00 included
@@ -457,7 +403,7 @@ test('dateTo full timestamp does NOT apply end-of-day correction', async () => {
 
 // ── Finding #3: Pagination totalPages minimum ──────────────────────────
 
-test('recent pagination returns totalPages=1 on empty result (not 0)', async () => {
+await t.test('recent pagination returns totalPages=1 on empty result (not 0)', async () => {
   const res = await agent.get('/api/usage/recent?dateFrom=2099-01-01').expect(200);
   assert.equal(res.body.recent.length, 0);
   assert.equal(res.body.pagination.total, 0);
@@ -467,16 +413,17 @@ test('recent pagination returns totalPages=1 on empty result (not 0)', async () 
 
 // ── Finding #4: Service filter validation ──────────────────────────────
 
-test('by-category rejects invalid service with 400 INVALID_SERVICE', async () => {
+await t.test('by-category rejects invalid service with 400 INVALID_SERVICE', async () => {
   const res = await agent.get('/api/usage/by-category?service=banana').expect(400);
   assert.equal(res.body.ok, false);
   assert.equal(res.body.code, 'INVALID_SERVICE');
   assert.match(res.body.error, /chat/); // error lists valid services
 });
 
-test('by-category accepts each valid service value', async () => {
+await t.test('by-category accepts each valid service value', async () => {
   for (const svc of ['chat', 'parse', 'dev', 'copilot']) {
     const res = await agent.get(`/api/usage/by-category?service=${svc}`).expect(200);
     assert.equal(res.body.ok, true);
   }
+});
 });

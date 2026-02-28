@@ -81,7 +81,12 @@ function streamClaude({ res, req, heartbeat, messages, systemPrompt, images, req
     },
   });
 
-  req.on('close', () => {
+  // NOTE: must use res.on('close'), NOT req.on('close'). By the time this
+  // async handler runs, Express 5 has already consumed and closed the request
+  // body stream, so req's 'close' event has already fired before we can
+  // register a listener. The response stream's 'close' event correctly fires
+  // when the underlying TCP socket is torn down (e.g. client tab close).
+  res.on('close', () => {
     clearInterval(heartbeat);
     if (!streamSettled && cleanupFn) {
       const abortData = cleanupFn();

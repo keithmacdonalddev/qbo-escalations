@@ -1,9 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const mongoose = require('mongoose');
 const request = require('supertest');
-const { MongoMemoryServer } = require('mongodb-memory-server');
 
+const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Conversation = require('../src/models/Conversation');
 const claude = require('../src/services/claude');
@@ -11,12 +10,6 @@ const codex = require('../src/services/codex');
 
 const SAMPLE_IMAGE = 'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z8UkAAAAASUVORK5CYII=';
-
-let mongod;
-let app;
-let agent;
-let originalClaudeChat;
-let originalCodexChat;
 
 function setDefaultChatStubs() {
   claude.chat = ({ onChunk, onDone }) => {
@@ -36,180 +29,185 @@ function parseEvent(text, name) {
   return match ? JSON.parse(match[1]) : null;
 }
 
-test.before(async () => {
-  process.env.NODE_ENV = 'test';
-  delete process.env.ADMIN_API_KEY;
-  delete process.env.EDITOR_API_KEY;
-  delete process.env.VIEWER_API_KEY;
+test('chat-fallback-integration suite', async (t) => {
+  let app;
+  let agent;
+  let originalClaudeChat;
+  let originalCodexChat;
 
-  originalClaudeChat = claude.chat;
-  originalCodexChat = codex.chat;
-  setDefaultChatStubs();
+  t.before(async () => {
+    process.env.NODE_ENV = 'test';
+    delete process.env.ADMIN_API_KEY;
+    delete process.env.EDITOR_API_KEY;
+    delete process.env.VIEWER_API_KEY;
 
-  mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri());
-  app = createApp();
-  agent = request(app);
-});
+    originalClaudeChat = claude.chat;
+    originalCodexChat = codex.chat;
+    setDefaultChatStubs();
 
-test.after(async () => {
-  claude.chat = originalClaudeChat;
-  codex.chat = originalCodexChat;
-  delete process.env.FEATURE_CHAT_PROVIDER_PARITY;
-  delete process.env.FEATURE_CHAT_FALLBACK_MODE;
-  delete process.env.CHAT_MAX_IMAGES_PER_REQUEST;
-  await mongoose.disconnect();
-  if (mongod) await mongod.stop();
-});
+    await connect();
+    app = createApp();
+    agent = request(app);
+  });
 
-test.beforeEach(async () => {
-  setDefaultChatStubs();
-  delete process.env.FEATURE_CHAT_PROVIDER_PARITY;
-  delete process.env.FEATURE_CHAT_FALLBACK_MODE;
-  delete process.env.CHAT_MAX_IMAGES_PER_REQUEST;
-  await Conversation.deleteMany({});
-});
+  t.after(async () => {
+    claude.chat = originalClaudeChat;
+    codex.chat = originalCodexChat;
+    delete process.env.FEATURE_CHAT_PROVIDER_PARITY;
+    delete process.env.FEATURE_CHAT_FALLBACK_MODE;
+    delete process.env.CHAT_MAX_IMAGES_PER_REQUEST;
+    await disconnect();
+  });
 
-test('chat fallback streams provider_error and fallback events then succeeds on alternate', async () => {
-  claude.chat = ({ onError }) => {
-    const err = new Error('claude failed');
-    err.code = 'PROVIDER_EXEC_FAILED';
-    onError(err);
-    return () => {};
-  };
-  codex.chat = ({ onChunk, onDone }) => {
-    onChunk('fallback response');
-    onDone('fallback response');
-    return () => {};
-  };
+  t.beforeEach(async () => {
+    setDefaultChatStubs();
+    delete process.env.FEATURE_CHAT_PROVIDER_PARITY;
+    delete process.env.FEATURE_CHAT_FALLBACK_MODE;
+    delete process.env.CHAT_MAX_IMAGES_PER_REQUEST;
+    await Conversation.deleteMany({});
+  });
 
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'fallback please',
-      mode: 'fallback',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
+  await t.test('chat fallback streams provider_error and fallback events then succeeds on alternate', async () => {
+    claude.chat = ({ onError }) => {
+      const err = new Error('claude failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+    codex.chat = ({ onChunk, onDone }) => {
+      onChunk('fallback response');
+      onDone('fallback response');
+      return () => {};
+    };
 
-  assert.equal(res.status, 200);
-  assert.match(res.text, /event: provider_error/);
-  assert.match(res.text, /event: fallback/);
-  assert.match(res.text, /event: done/);
+    const res = await agent
+      .post('/api/chat')
+      .send({
+        message: 'fallback please',
+        mode: 'fallback',
+        primaryProvider: 'claude',
+        fallbackProvider: 'chatgpt-5.3-codex-high',
+      });
 
-  const done = parseEvent(res.text, 'done');
-  assert.ok(done);
-  assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
-  assert.equal(done.fallbackUsed, true);
-  assert.equal(done.fallbackFrom, 'claude');
-});
+    assert.equal(res.status, 200);
+    assert.match(res.text, /event: provider_error/);
+    assert.match(res.text, /event: fallback/);
+    assert.match(res.text, /event: done/);
 
-test('chat retry supports fallback policy and emits fallback metadata', async () => {
-  const first = await agent
-    .post('/api/chat')
-    .send({ message: 'first', provider: 'claude' });
-  assert.equal(first.status, 200);
-  const start = parseEvent(first.text, 'start');
-  assert.ok(start);
+    const done = parseEvent(res.text, 'done');
+    assert.ok(done);
+    assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
+    assert.equal(done.fallbackUsed, true);
+    assert.equal(done.fallbackFrom, 'claude');
+  });
 
-  claude.chat = ({ onError }) => {
-    const err = new Error('claude retry failed');
-    err.code = 'PROVIDER_EXEC_FAILED';
-    onError(err);
-    return () => {};
-  };
-  codex.chat = ({ onDone }) => {
-    onDone('retry fallback');
-    return () => {};
-  };
+  await t.test('chat retry supports fallback policy and emits fallback metadata', async () => {
+    const first = await agent
+      .post('/api/chat')
+      .send({ message: 'first', provider: 'claude' });
+    assert.equal(first.status, 200);
+    const start = parseEvent(first.text, 'start');
+    assert.ok(start);
 
-  const retry = await agent
-    .post('/api/chat/retry')
-    .send({
-      conversationId: start.conversationId,
-      mode: 'fallback',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
+    claude.chat = ({ onError }) => {
+      const err = new Error('claude retry failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+    codex.chat = ({ onDone }) => {
+      onDone('retry fallback');
+      return () => {};
+    };
 
-  assert.equal(retry.status, 200);
-  assert.match(retry.text, /event: fallback/);
-  const done = parseEvent(retry.text, 'done');
-  assert.ok(done);
-  assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
-  assert.equal(done.fallbackUsed, true);
-  assert.equal(done.fallbackFrom, 'claude');
-});
+    const retry = await agent
+      .post('/api/chat/retry')
+      .send({
+        conversationId: start.conversationId,
+        mode: 'fallback',
+        primaryProvider: 'claude',
+        fallbackProvider: 'chatgpt-5.3-codex-high',
+      });
 
-test('fallback mode flag disables fallback execution path', async () => {
-  process.env.FEATURE_CHAT_FALLBACK_MODE = '0';
-  let codexCalled = false;
-  codex.chat = ({ onDone }) => {
-    codexCalled = true;
-    onDone('codex');
-    return () => {};
-  };
+    assert.equal(retry.status, 200);
+    assert.match(retry.text, /event: fallback/);
+    const done = parseEvent(retry.text, 'done');
+    assert.ok(done);
+    assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
+    assert.equal(done.fallbackUsed, true);
+    assert.equal(done.fallbackFrom, 'claude');
+  });
 
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'flag test',
-      mode: 'fallback',
-      primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
-    });
+  await t.test('fallback mode flag disables fallback execution path', async () => {
+    process.env.FEATURE_CHAT_FALLBACK_MODE = '0';
+    let codexCalled = false;
+    codex.chat = ({ onDone }) => {
+      codexCalled = true;
+      onDone('codex');
+      return () => {};
+    };
 
-  assert.equal(res.status, 200);
-  const done = parseEvent(res.text, 'done');
-  assert.ok(done);
-  assert.equal(done.providerUsed, 'claude');
-  assert.equal(done.fallbackUsed, false);
-  assert.equal(codexCalled, false);
-});
+    const res = await agent
+      .post('/api/chat')
+      .send({
+        message: 'flag test',
+        mode: 'fallback',
+        primaryProvider: 'claude',
+        fallbackProvider: 'chatgpt-5.3-codex-high',
+      });
 
-test('provider parity flag forces legacy default provider path', async () => {
-  process.env.FEATURE_CHAT_PROVIDER_PARITY = '0';
-  let codexCalled = false;
-  codex.chat = ({ onDone }) => {
-    codexCalled = true;
-    onDone('codex');
-    return () => {};
-  };
-  claude.chat = ({ onDone }) => {
-    onDone('claude default');
-    return () => {};
-  };
+    assert.equal(res.status, 200);
+    const done = parseEvent(res.text, 'done');
+    assert.ok(done);
+    assert.equal(done.providerUsed, 'claude');
+    assert.equal(done.fallbackUsed, false);
+    assert.equal(codexCalled, false);
+  });
 
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      message: 'parity off',
-      provider: 'chatgpt-5.3-codex-high',
-      mode: 'fallback',
-      fallbackProvider: 'claude',
-    });
+  await t.test('provider parity flag forces legacy default provider path', async () => {
+    process.env.FEATURE_CHAT_PROVIDER_PARITY = '0';
+    let codexCalled = false;
+    codex.chat = ({ onDone }) => {
+      codexCalled = true;
+      onDone('codex');
+      return () => {};
+    };
+    claude.chat = ({ onDone }) => {
+      onDone('claude default');
+      return () => {};
+    };
 
-  assert.equal(res.status, 200);
-  const done = parseEvent(res.text, 'done');
-  assert.ok(done);
-  assert.equal(done.providerUsed, 'claude');
-  assert.equal(done.mode, 'single');
-  assert.equal(codexCalled, false);
-});
+    const res = await agent
+      .post('/api/chat')
+      .send({
+        message: 'parity off',
+        provider: 'chatgpt-5.3-codex-high',
+        mode: 'fallback',
+        fallbackProvider: 'claude',
+      });
 
-test('chat image guardrails reject requests exceeding max image count', async () => {
-  process.env.CHAT_MAX_IMAGES_PER_REQUEST = '1';
-  const beforeCount = await Conversation.countDocuments({});
+    assert.equal(res.status, 200);
+    const done = parseEvent(res.text, 'done');
+    assert.ok(done);
+    assert.equal(done.providerUsed, 'claude');
+    assert.equal(done.mode, 'single');
+    assert.equal(codexCalled, false);
+  });
 
-  const res = await agent
-    .post('/api/chat')
-    .send({
-      images: [SAMPLE_IMAGE, SAMPLE_IMAGE],
-    });
+  await t.test('chat image guardrails reject requests exceeding max image count', async () => {
+    process.env.CHAT_MAX_IMAGES_PER_REQUEST = '1';
+    const beforeCount = await Conversation.countDocuments({});
 
-  assert.equal(res.status, 400);
-  assert.equal(res.body.code, 'TOO_MANY_IMAGES');
+    const res = await agent
+      .post('/api/chat')
+      .send({
+        images: [SAMPLE_IMAGE, SAMPLE_IMAGE],
+      });
 
-  const afterCount = await Conversation.countDocuments({});
-  assert.equal(afterCount, beforeCount);
+    assert.equal(res.status, 400);
+    assert.equal(res.body.code, 'TOO_MANY_IMAGES');
+
+    const afterCount = await Conversation.countDocuments({});
+    assert.equal(afterCount, beforeCount);
+  });
 });

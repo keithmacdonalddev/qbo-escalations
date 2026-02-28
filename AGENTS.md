@@ -27,6 +27,15 @@
 - Keep prototype files and experiments out of core test/review paths by default.
 - Prefer separate branch for prototypes when feasible.
 
+### Testing Minimalism (Strict)
+
+- Treat all testing as **emergency-only**: rarely run tests, and only when failure risk is critical and cannot be mitigated another way.
+- Default to **no test execution** during normal implementation work.
+- Keep tests out of the codebase by default: do **not** add test files, test harnesses, or ad-hoc test scripts unless the user explicitly requests them.
+- Do **not** modify existing tests unless the user explicitly requests test changes.
+- If an emergency test is unavoidable, run the smallest possible scope once (single test file/case or targeted command), never broad/full-suite runs.
+- In final reports, state exactly what test command was run and why it qualified as an emergency. If none were run, state that explicitly.
+
 ### Process Control Safety (Strict)
 
 - Never start, restart, stop, kill, or otherwise manage server/client processes unless the user explicitly asks for it in the current prompt message.

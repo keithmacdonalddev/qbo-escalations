@@ -119,6 +119,9 @@ router.get('/summary', async (req, res) => {
           usageReportedCount: {
             $sum: { $cond: ['$usageAvailable', 1, 0] },
           },
+          usageCompleteCount: {
+            $sum: { $cond: ['$usageComplete', 1, 0] },
+          },
         },
       },
     ]),
@@ -134,10 +137,15 @@ router.get('/summary', async (req, res) => {
     inputCostNanos: 0,
     outputCostNanos: 0,
     usageReportedCount: 0,
+    usageCompleteCount: 0,
   };
 
   const usageCoveragePercent = d.totalRequests > 0
     ? Math.round((d.usageReportedCount / d.totalRequests) * 1000) / 10
+    : 0;
+
+  const usageCompleteCoveragePercent = d.totalRequests > 0
+    ? Math.round((d.usageCompleteCount / d.totalRequests) * 1000) / 10
     : 0;
 
   res.json({
@@ -150,6 +158,8 @@ router.get('/summary', async (req, res) => {
       ...costFields(d.totalCostNanos, d.inputCostNanos, d.outputCostNanos),
       usageReportedCount: d.usageReportedCount,
       usageCoveragePercent,
+      usageCompleteCount: d.usageCompleteCount,
+      usageCompleteCoveragePercent,
     },
     dataAvailableFrom,
   });
@@ -389,6 +399,7 @@ router.get('/recent', async (req, res) => {
       category: d.category,
       latencyMs: d.latencyMs,
       usageAvailable: d.usageAvailable,
+      usageComplete: d.usageComplete,
       createdAt: d.createdAt,
     })),
     pagination: {

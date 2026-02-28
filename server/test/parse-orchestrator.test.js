@@ -6,25 +6,26 @@ const codex = require('../src/services/codex');
 const { parseWithPolicy } = require('../src/services/parse-orchestrator');
 const { resetProviderHealth } = require('../src/services/provider-health');
 
-let originalClaudeParse;
-let originalCodexParse;
+test('parse-orchestrator suite', async (t) => {
+  let originalClaudeParse;
+  let originalCodexParse;
 
-test.before(() => {
-  originalClaudeParse = claude.parseEscalation;
-  originalCodexParse = codex.parseEscalation;
-});
+  t.before(() => {
+    originalClaudeParse = claude.parseEscalation;
+    originalCodexParse = codex.parseEscalation;
+  });
 
-test.after(() => {
-  claude.parseEscalation = originalClaudeParse;
-  codex.parseEscalation = originalCodexParse;
-  resetProviderHealth();
-});
+  t.after(() => {
+    claude.parseEscalation = originalClaudeParse;
+    codex.parseEscalation = originalCodexParse;
+    resetProviderHealth();
+  });
 
-test.beforeEach(() => {
-  resetProviderHealth();
-});
+  t.beforeEach(() => {
+    resetProviderHealth();
+  });
 
-test('single mode uses the primary provider parse result', async () => {
+  await t.test('single mode uses the primary provider parse result', async () => {
   claude.parseEscalation = async () => ({
     fields: {
       category: 'bank-feeds',
@@ -49,7 +50,7 @@ test('single mode uses the primary provider parse result', async () => {
   assert.ok(out.meta.validation.score > 0);
 });
 
-test('fallback mode switches providers when primary fails', async () => {
+await t.test('fallback mode switches providers when primary fails', async () => {
   claude.parseEscalation = async () => {
     const err = new Error('claude unavailable');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -82,7 +83,7 @@ test('fallback mode switches providers when primary fails', async () => {
   assert.equal(out.meta.attempts[1].status, 'ok');
 });
 
-test('parallel mode returns candidates and chooses deterministic winner', async () => {
+await t.test('parallel mode returns candidates and chooses deterministic winner', async () => {
   claude.parseEscalation = async () => ({
     fields: {
       category: 'technical',
@@ -124,7 +125,7 @@ test('parallel mode returns candidates and chooses deterministic winner', async 
   assert.equal(out.fields.coid, '45678');
 });
 
-test('uses regex terminal fallback when all providers fail and text looks like escalation', async () => {
+await t.test('uses regex terminal fallback when all providers fail and text looks like escalation', async () => {
   claude.parseEscalation = async () => {
     const err = new Error('claude failed');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -157,7 +158,7 @@ test('uses regex terminal fallback when all providers fail and text looks like e
   assert.equal(out.fields.coid, '12345');
 });
 
-test('parallel mode can regex-fallback when both providers fail on escalation text', async () => {
+await t.test('parallel mode can regex-fallback when both providers fail on escalation text', async () => {
   claude.parseEscalation = async () => {
     const err = new Error('claude failed');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -196,7 +197,7 @@ test('parallel mode can regex-fallback when both providers fail on escalation te
 
 // --- Phase 3: Usage threading through attempts and candidates ---
 
-test('single mode threads usage into meta.attempts on success', async () => {
+await t.test('single mode threads usage into meta.attempts on success', async () => {
   const mockUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
   claude.parseEscalation = async () => ({
     fields: {
@@ -223,7 +224,7 @@ test('single mode threads usage into meta.attempts on success', async () => {
   assert.deepStrictEqual(out.meta.attempts[0].usage, mockUsage);
 });
 
-test('fallback mode threads usage into meta.attempts for both success and failure', async () => {
+await t.test('fallback mode threads usage into meta.attempts for both success and failure', async () => {
   const failUsage = { inputTokens: 30, outputTokens: 0, model: 'claude-sonnet-4-6' };
   claude.parseEscalation = async () => {
     const err = new Error('claude unavailable');
@@ -263,7 +264,7 @@ test('fallback mode threads usage into meta.attempts for both success and failur
   assert.deepStrictEqual(out.meta.attempts[1].usage, successUsage);
 });
 
-test('parallel mode threads usage into meta.candidates', async () => {
+await t.test('parallel mode threads usage into meta.candidates', async () => {
   const claudeUsage = { inputTokens: 90, outputTokens: 30, model: 'claude-sonnet-4-6' };
   const codexUsage = { inputTokens: 80, outputTokens: 60, model: 'gpt-5.3-codex' };
   claude.parseEscalation = async () => ({
@@ -308,7 +309,7 @@ test('parallel mode threads usage into meta.candidates', async () => {
   assert.equal(out.meta.attempts[1].inputTokens !== undefined, true);
 });
 
-test('parse error with null err does not crash — safe err._usage dereference', async () => {
+await t.test('parse error with null err does not crash — safe err._usage dereference', async () => {
   claude.parseEscalation = async () => {
     throw null;
   };
@@ -327,7 +328,7 @@ test('parse error with null err does not crash — safe err._usage dereference',
   );
 });
 
-test('throws PARSE_FAILED when providers fail and there is no regex fallback path', async () => {
+await t.test('throws PARSE_FAILED when providers fail and there is no regex fallback path', async () => {
   claude.parseEscalation = async () => {
     const err = new Error('claude failed');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -349,7 +350,7 @@ test('throws PARSE_FAILED when providers fail and there is no regex fallback pat
   );
 });
 
-test('throws PARSE_FAILED when regex fallback exists but fails validation gate', async () => {
+await t.test('throws PARSE_FAILED when regex fallback exists but fails validation gate', async () => {
   claude.parseEscalation = async () => {
     const err = new Error('claude failed');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -381,4 +382,5 @@ test('throws PARSE_FAILED when regex fallback exists but fails validation gate',
       return true;
     }
   );
+});
 });

@@ -1,3 +1,4 @@
+// Indexes: updatedAt descending
 const mongoose = require('mongoose');
 
 const PROVIDERS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
@@ -36,5 +37,7 @@ const conversationSchema = new mongoose.Schema({
 }, {
   timestamps: true,
 });
+
+conversationSchema.index({ updatedAt: -1 });
 
 module.exports = mongoose.model('Conversation', conversationSchema);
