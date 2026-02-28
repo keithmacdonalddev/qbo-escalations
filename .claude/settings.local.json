@@ -1,0 +1,93 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(findstr:*)",
+      "Bash(git push:*)",
+      "Bash(dir /s /b)",
+      "Bash(node scripts/migrateNotesProcessed.js:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(git restore:*)",
+      "Bash(npm test)",
+      "Bash(timeout 5 node:*)",
+      "Bash(node -e:*)",
+      "Bash(node scripts/migrateUserRoles.js:*)",
+      "Bash(xargs:*)",
+      "Bash(node --check:*)",
+      "Bash(tasklist:*)",
+      "Bash(npm run dev:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(netstat:*)",
+      "Bash(taskkill //F //PID 38536)",
+      "Bash(curl:*)",
+      "WebFetch(domain:loggingsucks.com)",
+      "Bash(node scripts/migrateDefaultCategories.js:*)",
+      "Bash(node scripts/migrateDefaultTags.js:*)",
+      "Bash(node scripts/seedRoleConfigs.js:*)",
+      "Bash(grep:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(cd:*)",
+      "Bash(git checkout:*)"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/inject-context.mjs",
+            "timeout": 15,
+            "statusMessage": "Initializing memory system..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/capture-observation.mjs",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/finalize-session.mjs",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/generate-folder-context.mjs",
+            "timeout": 15,
+            "statusMessage": "Generating folder context..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/finalize-session.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { listConversations, deleteConversation, updateConversation } from '../api/chatApi.js';
 import ConfirmModal from './ConfirmModal.jsx';
+import Tooltip from './Tooltip.jsx';
+import { transitions, staggerContainer, staggerChild, fade } from '../utils/motion.js';
 
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', icon: IconChat },
@@ -11,7 +14,7 @@ const NAV_ITEMS = [
   { hash: '#/dev', label: 'Dev Mode', icon: IconTerminal },
 ];
 
-export default function Sidebar({ currentRoute, conversationId, isOpen, onClose }) {
+export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse }) {
   const [conversations, setConversations] = useState([]);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState(null);
@@ -30,7 +33,9 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
 
   useEffect(() => {
     loadConversations(search);
-    const interval = setInterval(() => loadConversations(search), 10000);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') loadConversations(search);
+    }, 10000);
     return () => clearInterval(interval);
   }, [loadConversations, search]);
 
@@ -88,7 +93,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
   }, [submitRename]);
 
   return (
-    <aside className={`sidebar${isOpen ? ' is-open' : ''}`}>
+    <aside className={`sidebar${isOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}`}>
       <div className="sidebar-header">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -96,6 +101,31 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
           <path d="M2 12l10 5 10-5" />
         </svg>
         <span>QBO Assist</span>
+        <button
+          className="sidebar-collapse-btn"
+          onClick={onToggleCollapse}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          type="button"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+            {/* Outer frame */}
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            {/* Sidebar divider */}
+            <line x1="9" y1="3" x2="9" y2="21" />
+            {collapsed ? (
+              /* Expand arrow in content area */
+              <polyline points="13 10 16 12 13 14" strokeWidth="2" />
+            ) : (
+              /* Three sidebar content lines */
+              <>
+                <line x1="5.5" y1="8" x2="7" y2="8" strokeWidth="2" />
+                <line x1="5.5" y1="12" x2="7" y2="12" strokeWidth="2" />
+                <line x1="5.5" y1="16" x2="7" y2="16" strokeWidth="2" />
+              </>
+            )}
+          </svg>
+        </button>
       </div>
 
       <nav className="sidebar-nav">
@@ -109,7 +139,15 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
               href={item.hash}
               className={`sidebar-nav-item${isActive ? ' is-active' : ''}`}
               onClick={onClose}
+              style={{ position: 'relative' }}
             >
+              {isActive && (
+                <motion.div
+                  layoutId="sidebar-nav-indicator"
+                  className="sidebar-nav-indicator-bg"
+                  transition={transitions.layout}
+                />
+              )}
               <Icon size={16} />
               <span>{item.label}</span>
             </a>
@@ -117,6 +155,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
         })}
       </nav>
 
+      <div className="sidebar-collapsible">
       {/* Search */}
       <div style={{ padding: '0 var(--sp-3)', marginTop: 'var(--sp-3)' }}>
         <div style={{ position: 'relative' }}>
@@ -150,135 +189,154 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose 
         {search ? `Results for "${search}"` : 'Recent Conversations'}
       </div>
 
-      <div className="sidebar-conversations">
+      <motion.div
+        className="sidebar-conversations"
+        variants={staggerContainer}
+        initial="initial"
+        animate="animate"
+        key={search}
+      >
         {!search && (
-          <a
-            href="#/chat"
-            className="sidebar-conv-item"
-            style={{ fontWeight: 600, color: 'var(--accent)', gap: 'var(--sp-2)' }}
-            onClick={onClose}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>New Conversation</span>
-          </a>
+          <Tooltip text="Start a fresh chat session" level="medium" position="right">
+            <a
+              href="#/chat"
+              className="sidebar-conv-item"
+              style={{ fontWeight: 600, color: 'var(--accent)', gap: 'var(--sp-2)' }}
+              onClick={onClose}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>New Conversation</span>
+            </a>
+          </Tooltip>
         )}
 
-        {conversations.map(conv => (
-          <div
-            key={conv._id}
-            className={`sidebar-conv-item${conversationId === conv._id ? ' is-active' : ''}`}
-            onClick={() => { if (!editingId) { window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !editingId) { window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
-            style={{ alignItems: 'flex-start', padding: 'var(--sp-2) var(--sp-4)' }}
-          >
-            {editingId === conv._id ? (
-              <input
-                ref={editInputRef}
-                type="text"
-                value={editTitle}
-                onChange={(e) => setEditTitle(e.target.value)}
-                onBlur={submitRename}
-                onKeyDown={handleEditKeyDown}
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  flex: 1,
-                  fontSize: 'var(--text-sm)',
-                  padding: '2px 4px',
-                  border: '1px solid var(--accent)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg-raised)',
-                  color: 'var(--ink)',
-                  minWidth: 0,
-                }}
-              />
-            ) : (
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
-                  {conv.title || 'Untitled'}
-                </div>
-                <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', marginTop: 1 }}>
-                  <span style={{ fontSize: '10px', color: 'var(--ink-tertiary)' }}>
-                    {relativeTime(conv.updatedAt)}
-                  </span>
-                  {conv.messageCount > 0 && (
-                    <span style={{
-                      fontSize: '10px',
-                      color: 'var(--ink-tertiary)',
-                      background: 'var(--bg-sunken)',
-                      padding: '0 4px',
-                      borderRadius: 'var(--radius-sm)',
-                      lineHeight: '16px',
-                    }}>
-                      {conv.messageCount} msg{conv.messageCount !== 1 ? 's' : ''}
-                    </span>
-                  )}
-                  {conv.escalationId && (
-                    <span
-                      title="Linked to escalation"
+        <AnimatePresence mode="popLayout">
+          {conversations.map(conv => (
+            <motion.div
+              key={conv._id}
+              variants={staggerChild}
+              exit={{ opacity: 0, x: -20 }}
+              transition={transitions.springGentle}
+              className={`sidebar-conv-item${conversationId === conv._id ? ' is-active' : ''}`}
+              onClick={() => { if (!editingId) { window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
+              role="button"
+              tabIndex={0}
+              aria-label={conv.title || 'Untitled conversation'}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !editingId) { window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
+              style={{ alignItems: 'flex-start', padding: 'var(--sp-2) var(--sp-4)' }}
+            >
+              <AnimatePresence mode="wait">
+                {editingId === conv._id ? (
+                  <motion.div key="edit" {...fade} transition={transitions.fast} style={{ flex: 1, minWidth: 0 }}>
+                    <input
+                      ref={editInputRef}
+                      type="text"
+                      value={editTitle}
+                      onChange={(e) => setEditTitle(e.target.value)}
+                      onBlur={submitRename}
+                      onKeyDown={handleEditKeyDown}
+                      onClick={(e) => e.stopPropagation()}
                       style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 2,
-                        fontSize: '10px',
-                        color: 'var(--accent)',
-                        background: 'var(--accent-subtle)',
-                        padding: '0 4px',
+                        width: '100%',
+                        fontSize: 'var(--text-sm)',
+                        padding: '2px 4px',
+                        border: '1px solid var(--accent)',
                         borderRadius: 'var(--radius-sm)',
-                        lineHeight: '16px',
-                        fontWeight: 600,
+                        background: 'var(--bg-raised)',
+                        color: 'var(--ink)',
+                        minWidth: 0,
                       }}
-                    >
-                      <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                        <polyline points="14 2 14 8 20 8" />
-                      </svg>
-                      ESC
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="sidebar-conv-actions" style={{ display: 'flex', gap: 2, flexShrink: 0, marginTop: 2 }}>
-              {editingId !== conv._id && (
+                    />
+                  </motion.div>
+                ) : (
+                  <motion.div key="display" {...fade} transition={transitions.fast} style={{ flex: 1, minWidth: 0 }}>
+                    <div className="truncate" style={{ fontSize: 'var(--text-sm)' }}>
+                      {conv.title || 'Untitled'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', marginTop: 1 }}>
+                      <span style={{ fontSize: '10px', color: 'var(--ink-tertiary)' }}>
+                        {relativeTime(conv.updatedAt)}
+                      </span>
+                      {conv.messageCount > 0 && (
+                        <span style={{
+                          fontSize: '10px',
+                          color: 'var(--ink-tertiary)',
+                          background: 'var(--bg-sunken)',
+                          padding: '0 4px',
+                          borderRadius: 'var(--radius-sm)',
+                          lineHeight: '16px',
+                        }}>
+                          {conv.messageCount} msg{conv.messageCount !== 1 ? 's' : ''}
+                        </span>
+                      )}
+                      {conv.escalationId && (
+                        <span
+                          title="Linked to escalation"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            fontSize: '10px',
+                            color: 'var(--accent)',
+                            background: 'var(--accent-subtle)',
+                            padding: '0 4px',
+                            borderRadius: 'var(--radius-sm)',
+                            lineHeight: '16px',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                          ESC
+                        </span>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <div className="sidebar-conv-actions" style={{ display: 'flex', gap: 2, flexShrink: 0, marginTop: 2 }}>
+                {editingId !== conv._id && (
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={(e) => startRename(e, conv)}
+                    title="Rename"
+                    aria-label="Rename conversation"
+                    style={{ padding: '2px 4px', minHeight: 'auto', opacity: 0.4 }}
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                  </button>
+                )}
                 <button
                   className="btn btn-ghost btn-sm"
-                  onClick={(e) => startRename(e, conv)}
-                  title="Rename"
-                  aria-label="Rename conversation"
+                  onClick={(e) => { e.stopPropagation(); setDeleteTarget(conv._id); }}
+                  title="Delete"
+                  aria-label="Delete conversation"
                   style={{ padding: '2px 4px', minHeight: 'auto', opacity: 0.4 }}
                 >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
                 </button>
-              )}
-              <button
-                className="btn btn-ghost btn-sm"
-                onClick={(e) => { e.stopPropagation(); setDeleteTarget(conv._id); }}
-                title="Delete"
-                aria-label="Delete conversation"
-                style={{ padding: '2px 4px', minHeight: 'auto', opacity: 0.4 }}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-          </div>
-        ))}
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
 
         {conversations.length === 0 && (
           <div style={{ padding: 'var(--sp-3) var(--sp-5)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
             {search ? 'No conversations match your search' : 'No conversations yet'}
           </div>
         )}
+      </motion.div>
       </div>
 
       <ConfirmModal
@@ -362,6 +420,15 @@ function IconTerminal({ size = 16 }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
+function IconSettings({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
     </svg>
   );
 }

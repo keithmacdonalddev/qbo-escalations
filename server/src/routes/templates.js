@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const Template = require('../models/Template');
 
+function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 // GET /api/templates -- List templates (filterable by category)
 router.get('/', async (req, res) => {
   const filter = {};
@@ -46,7 +48,7 @@ router.patch('/:id', async (req, res) => {
   const template = await Template.findByIdAndUpdate(
     req.params.id,
     { $set: updates },
-    { new: true, runValidators: true },
+    { returnDocument: 'after', runValidators: true },
   );
 
   if (!template) {
@@ -69,7 +71,7 @@ router.post('/:id/use', async (req, res) => {
   const template = await Template.findByIdAndUpdate(
     req.params.id,
     { $inc: { usageCount: 1 }, $set: { lastUsed: new Date() } },
-    { new: true },
+    { returnDocument: 'after' },
   );
 
   if (!template) {
@@ -89,8 +91,8 @@ router.post('/:id/render', async (req, res) => {
   let rendered = template.body;
   for (const [key, value] of Object.entries(vars)) {
     // Replace both {{VAR}} and [VAR] patterns
-    rendered = rendered.replace(new RegExp('\\{\\{' + key + '\\}\\}', 'gi'), value);
-    rendered = rendered.replace(new RegExp('\\[' + key + '\\]', 'gi'), value);
+    rendered = rendered.replace(new RegExp('\\{\\{' + escapeRegex(key) + '\\}\\}', 'gi'), value);
+    rendered = rendered.replace(new RegExp('\\[' + escapeRegex(key) + '\\]', 'gi'), value);
   }
 
   res.json({ ok: true, rendered, unresolvedVars: findUnresolvedVars(rendered) });

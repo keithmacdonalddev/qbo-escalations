@@ -218,4 +218,108 @@ router.get('/status-flow', async (req, res) => {
   res.json({ ok: true, total, flow });
 });
 
+// GET /api/analytics/model-performance -- Per-model win/loss stats from parallel decisions
+router.get('/model-performance', async (req, res) => {
+  const ModelPerformance = require('../models/ModelPerformance');
+  const df = {};
+  if (req.query.dateFrom || req.query.dateTo) {
+    df.decidedAt = {};
+    if (req.query.dateFrom) {
+      const d = new Date(req.query.dateFrom);
+      if (isNaN(d.getTime())) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: 'Invalid dateFrom' });
+      df.decidedAt.$gte = d;
+    }
+    if (req.query.dateTo) {
+      const d = new Date(req.query.dateTo);
+      if (isNaN(d.getTime())) return res.status(400).json({ ok: false, code: 'INVALID_DATE', error: 'Invalid dateTo' });
+      df.decidedAt.$lte = d;
+    }
+  }
+  const match = { ...df };
+  if (req.query.context) match.context = req.query.context;
+
+  const pipeline = [
+    { $match: match },
+    {
+      $facet: {
+        byWinner: [
+          { $group: {
+            _id: '$winnerProvider',
+            wins: { $sum: 1 },
+            avgLatencyMs: { $avg: '$winnerLatencyMs' },
+            avgWordCount: { $avg: '$winnerWordCount' },
+          }},
+          { $sort: { wins: -1 } },
+        ],
+        byLoser: [
+          { $group: {
+            _id: '$loserProvider',
+            losses: { $sum: 1 },
+            avgLatencyMs: { $avg: '$loserLatencyMs' },
+            avgWordCount: { $avg: '$loserWordCount' },
+          }},
+        ],
+        total: [{ $count: 'count' }],
+        byContext: [
+          { $group: { _id: '$context', count: { $sum: 1 } } },
+        ],
+        timeSeries: [
+          { $group: {
+            _id: {
+              date: { $dateToString: { format: '%Y-%m-%d', date: '$decidedAt' } },
+              winner: '$winnerProvider',
+            },
+            count: { $sum: 1 },
+          }},
+          { $sort: { '_id.date': 1 } },
+        ],
+      },
+    },
+  ];
+
+  const [result] = await ModelPerformance.aggregate(pipeline);
+
+  const providers = {};
+  for (const w of result.byWinner) {
+    providers[w._id] = {
+      provider: w._id,
+      wins: w.wins,
+      losses: 0,
+      winAvgLatencyMs: Math.round(w.avgLatencyMs || 0),
+      winAvgWordCount: Math.round(w.avgWordCount || 0),
+      lossAvgLatencyMs: 0,
+      lossAvgWordCount: 0,
+    };
+  }
+  for (const l of result.byLoser) {
+    if (!providers[l._id]) {
+      providers[l._id] = {
+        provider: l._id, wins: 0, losses: 0,
+        winAvgLatencyMs: 0, winAvgWordCount: 0,
+        lossAvgLatencyMs: 0, lossAvgWordCount: 0,
+      };
+    }
+    providers[l._id].losses = l.losses;
+    providers[l._id].lossAvgLatencyMs = Math.round(l.avgLatencyMs || 0);
+    providers[l._id].lossAvgWordCount = Math.round(l.avgWordCount || 0);
+  }
+  for (const p of Object.values(providers)) {
+    const total = p.wins + p.losses;
+    p.winRate = total > 0 ? Math.round((p.wins / total) * 1000) / 10 : 0;
+    p.totalDecisions = total;
+  }
+
+  res.json({
+    ok: true,
+    totalDecisions: result.total[0]?.count || 0,
+    providers: Object.values(providers),
+    byContext: result.byContext.map(c => ({ context: c._id, count: c.count })),
+    timeSeries: result.timeSeries.map(t => ({
+      date: t._id.date,
+      provider: t._id.winner,
+      wins: t.count,
+    })),
+  });
+});
+
 module.exports = router;

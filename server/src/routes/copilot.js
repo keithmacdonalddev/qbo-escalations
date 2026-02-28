@@ -1,12 +1,18 @@
 const express = require('express');
 const router = express.Router();
 const Escalation = require('../models/Escalation');
+
+function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const Template = require('../models/Template');
 const claude = require('../services/claude');
 const { getSystemPrompt, getCategories } = require('../lib/playbook-loader');
+const { createRateLimiter } = require('../middleware/rate-limit');
+const { logUsage } = require('../lib/usage-writer');
+const { randomUUID } = require('node:crypto');
 
 // All copilot endpoints return SSE streams for real-time feedback.
 // They use focused prompts for specific tasks rather than general chat.
+router.use(createRateLimiter({ name: 'copilot', limit: 18, windowMs: 60_000 }));
 
 // Helper: set up SSE response
 function initSSE(res) {
@@ -23,8 +29,9 @@ function initSSE(res) {
 }
 
 // Helper: stream a Claude call and handle lifecycle
-function streamClaude({ res, req, heartbeat, messages, systemPrompt, images }) {
+function streamClaude({ res, req, heartbeat, messages, systemPrompt, images, requestId, copilotAction }) {
   let cleanupFn = null;
+  let streamSettled = false;
 
   cleanupFn = claude.chat({
     messages,
@@ -33,17 +40,42 @@ function streamClaude({ res, req, heartbeat, messages, systemPrompt, images }) {
     onChunk: (text) => {
       try { res.write('event: chunk\ndata: ' + JSON.stringify({ text }) + '\n\n'); } catch { /* gone */ }
     },
-    onDone: (response) => {
+    onDone: (response, usageMeta) => {
+      streamSettled = true;
       clearInterval(heartbeat);
+      if (requestId) {
+        const u = usageMeta || {};
+        logUsage({
+          requestId, attemptIndex: 0, service: 'copilot', provider: 'claude',
+          model: u.model, inputTokens: u.inputTokens, outputTokens: u.outputTokens,
+          usageAvailable: !!usageMeta, usageComplete: u.usageComplete, rawUsage: u.rawUsage,
+          category: copilotAction, status: 'ok',
+        });
+      }
       try {
-        res.write('event: done\ndata: ' + JSON.stringify({ fullResponse: response }) + '\n\n');
+        res.write('event: done\ndata: ' + JSON.stringify({
+          fullResponse: response,
+          usage: usageMeta || null,
+          usageAvailable: !!usageMeta,
+        }) + '\n\n');
         res.end();
       } catch { /* gone */ }
     },
     onError: (err) => {
+      streamSettled = true;
       clearInterval(heartbeat);
+      if (requestId) {
+        const u = (err && err._usage) || {};
+        const isTimeout = err && err.message && /timed?\s*out/i.test(err.message);
+        logUsage({
+          requestId, attemptIndex: 0, service: 'copilot', provider: 'claude',
+          model: u.model, inputTokens: u.inputTokens, outputTokens: u.outputTokens,
+          usageAvailable: !!(err && err._usage), usageComplete: u.usageComplete, rawUsage: u.rawUsage,
+          category: copilotAction, status: isTimeout ? 'timeout' : 'error',
+        });
+      }
       try {
-        res.write('event: error\ndata: ' + JSON.stringify({ error: err.message }) + '\n\n');
+        res.write('event: error\ndata: ' + JSON.stringify({ error: (err && err.message) || 'Copilot request failed' }) + '\n\n');
         res.end();
       } catch { /* gone */ }
     },
@@ -51,7 +83,18 @@ function streamClaude({ res, req, heartbeat, messages, systemPrompt, images }) {
 
   req.on('close', () => {
     clearInterval(heartbeat);
-    if (cleanupFn) cleanupFn();
+    if (!streamSettled && cleanupFn) {
+      const abortData = cleanupFn();
+      if (requestId) {
+        const u = (abortData && abortData.usage) || {};
+        logUsage({
+          requestId, attemptIndex: 0, service: 'copilot', provider: 'claude',
+          model: u.model, inputTokens: u.inputTokens, outputTokens: u.outputTokens,
+          usageAvailable: !!(abortData && abortData.usage), usageComplete: u.usageComplete, rawUsage: u.rawUsage,
+          category: copilotAction, status: 'abort',
+        });
+      }
+    }
   });
 }
 
@@ -82,7 +125,7 @@ router.post('/analyze-escalation', async (req, res) => {
     '5. Similar known issues and their resolutions\n\n' +
     'Escalation details:\n' + JSON.stringify(escalation, null, 2);
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'analyze-escalation' });
 });
 
 // POST /api/copilot/find-similar -- Find similar past escalations
@@ -128,7 +171,7 @@ router.post('/find-similar', async (req, res) => {
       resolution: s.resolution,
     })), null, 2);
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'find-similar' });
 });
 
 // ──────────────────────────────────────────────
@@ -164,7 +207,7 @@ router.post('/suggest-template', async (req, res) => {
     '3. What customizations are needed for this specific case?\n' +
     '4. Draft the final customized response ready to send.';
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'suggest-template' });
 });
 
 // POST /api/copilot/generate-template -- Generate a new template from description
@@ -195,7 +238,7 @@ router.post('/generate-template', async (req, res) => {
     '   VARIABLES: [comma-separated list of variable names]\n' +
     '   BODY:\n   [template body]';
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'generate-template' });
 });
 
 // POST /api/copilot/improve-template -- Suggest improvements for an existing template
@@ -222,7 +265,7 @@ router.post('/improve-template', async (req, res) => {
     '5. Variables -- are the right fields parameterized?\n\n' +
     'Provide the improved version with explanation of changes.';
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'improve-template' });
 });
 
 // ──────────────────────────────────────────────
@@ -270,7 +313,7 @@ router.post('/explain-trends', async (req, res) => {
     '4. Prediction for next week based on current trends\n' +
     '5. Any concerning patterns that need immediate attention';
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'explain-trends' });
 });
 
 // ──────────────────────────────────────────────
@@ -303,7 +346,7 @@ router.post('/playbook-check', async (req, res) => {
     '4. Are there common troubleshooting steps missing from existing categories?\n' +
     '5. Rate the playbook coverage: what % of recent issues are well-covered?';
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'playbook-check' });
 });
 
 // ──────────────────────────────────────────────
@@ -326,14 +369,15 @@ router.post('/search', async (req, res) => {
       .lean();
   } catch {
     // If text index doesn't match, fall back to regex
+    const safeQuery = escapeRegex(query);
     candidates = await Escalation.find({
       $or: [
-        { attemptingTo: { $regex: query, $options: 'i' } },
-        { actualOutcome: { $regex: query, $options: 'i' } },
-        { tsSteps: { $regex: query, $options: 'i' } },
-        { resolution: { $regex: query, $options: 'i' } },
-        { clientContact: { $regex: query, $options: 'i' } },
-        { caseNumber: { $regex: query, $options: 'i' } },
+        { attemptingTo: { $regex: safeQuery, $options: 'i' } },
+        { actualOutcome: { $regex: safeQuery, $options: 'i' } },
+        { tsSteps: { $regex: safeQuery, $options: 'i' } },
+        { resolution: { $regex: safeQuery, $options: 'i' } },
+        { clientContact: { $regex: safeQuery, $options: 'i' } },
+        { caseNumber: { $regex: safeQuery, $options: 'i' } },
       ],
     }).limit(20).lean();
   }
@@ -363,7 +407,7 @@ router.post('/search', async (req, res) => {
       date: e.createdAt,
     })), null, 2);
 
-  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }] });
+  streamClaude({ res, req, heartbeat, messages: [{ role: 'user', content: prompt }], requestId: randomUUID(), copilotAction: 'search' });
 });
 
 module.exports = router;

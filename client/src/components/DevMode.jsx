@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import { useDevChat } from '../hooks/useDevChat.js';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import ChatMessage from './ChatMessage.jsx';
+import Tooltip from './Tooltip.jsx';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -9,28 +10,66 @@ const DEV_PROMPTS = [
   { label: 'Explain code', prompt: 'Explain how this code works: ' },
 ];
 
-export default function DevMode() {
-  const {
-    messages,
-    conversationId,
-    conversations,
-    isStreaming,
-    streamingText,
-    toolEvents,
-    error,
-    responseTime,
-    sendMessage,
-    abortStream,
-    selectConversation,
-    newConversation,
-    removeConversation,
-    setError,
-  } = useDevChat();
+const PROVIDER_OPTIONS = [
+  { value: 'claude', label: 'Claude' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'chatgpt-5.3-codex-high', label: 'ChatGPT 5.3 Codex (High)' },
+  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+];
+const MODE_OPTIONS = [
+  { value: 'single', label: 'Single' },
+  { value: 'fallback', label: 'Fallback' },
+];
+
+function getProviderLabel(provider) {
+  const option = PROVIDER_OPTIONS.find((p) => p.value === provider);
+  return option ? option.label : 'Claude';
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+export default function DevMode({
+  messages,
+  conversationId,
+  conversations,
+  provider,
+  mode,
+  fallbackProvider,
+  isStreaming,
+  streamingText,
+  streamProvider,
+  toolEvents,
+  fallbackNotice,
+  error,
+  responseTime,
+  sendMessage,
+  setProvider,
+  setMode,
+  setFallbackProvider,
+  dismissFallbackNotice,
+  abortStream,
+  selectConversation,
+  newConversation,
+  removeConversation,
+  setError,
+}) {
 
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
+  const [composeFocused, setComposeFocused] = useState(false);
+  const [showProviderPopover, setShowProviderPopover] = useState(false);
+  const [images, setImages] = useState([]);
   const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const imageInputRef = useRef(null);
+  const providerPopoverRef = useRef(null);
 
   // Auto-scroll
   useEffect(() => {
@@ -39,7 +78,7 @@ export default function DevMode() {
 
   // Auto-resize input
   useEffect(() => {
-    const el = inputRef.current;
+    const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
@@ -47,8 +86,19 @@ export default function DevMode() {
 
   // Focus input after streaming ends
   useEffect(() => {
-    if (!isStreaming) inputRef.current?.focus();
+    if (!isStreaming) textareaRef.current?.focus();
   }, [isStreaming]);
+
+  // Close provider popover on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (providerPopoverRef.current && !providerPopoverRef.current.contains(e.target)) {
+        setShowProviderPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -56,7 +106,7 @@ export default function DevMode() {
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
         newConversation();
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handler);
@@ -64,10 +114,12 @@ export default function DevMode() {
   }, [newConversation]);
 
   const handleSubmit = useCallback(() => {
-    if (!input.trim() || isStreaming) return;
-    sendMessage(input);
+    if ((!input.trim() && images.length === 0) || isStreaming) return;
+    const textToSend = input.trim() || 'Review the attached UI screenshot and identify the issue.';
+    sendMessage(textToSend, images.map((img) => img.src), provider);
     setInput('');
-  }, [input, isStreaming, sendMessage]);
+    setImages([]);
+  }, [input, images, isStreaming, sendMessage, provider]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -78,8 +130,55 @@ export default function DevMode() {
 
   const handleQuickPrompt = useCallback((prompt) => {
     setInput(prompt);
-    inputRef.current?.focus();
+    textareaRef.current?.focus();
   }, []);
+
+  const handleRerunCommand = useCallback((command) => {
+    if (isStreaming) return;
+    sendMessage(command, [], provider);
+  }, [isStreaming, sendMessage, provider]);
+
+  const appendImageFiles = useCallback((files) => {
+    const imageFiles = Array.from(files || []).filter((file) => file?.type?.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    Promise.all(imageFiles.map(async (file) => {
+      try {
+        const src = await readFileAsDataUrl(file);
+        return { src, key: `${file.name || 'img'}-${file.size || 0}-${file.lastModified || Date.now()}` };
+      } catch {
+        return null;
+      }
+    })).then((prepared) => {
+      const valid = prepared.filter(Boolean);
+      if (valid.length === 0) return;
+      setImages((prev) => [...prev, ...valid]);
+    });
+  }, []);
+
+  const removeImage = useCallback((index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handlePaste = useCallback((e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems = Array.from(items).filter((item) => item.type.startsWith('image/'));
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    const files = imageItems.map((item) => item.getAsFile()).filter(Boolean);
+    appendImageFiles(files);
+  }, [appendImageFiles]);
+
+  const handleAttachClick = useCallback(() => {
+    if (isStreaming) return;
+    imageInputRef.current?.click();
+  }, [isStreaming]);
+
+  const handleFilePickerChange = useCallback((e) => {
+    appendImageFiles(e.target.files);
+    e.target.value = '';
+  }, [appendImageFiles]);
 
   return (
     <div className="dev-container">
@@ -93,25 +192,30 @@ export default function DevMode() {
           <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>
             Dev Mode
           </span>
-          <span className="dev-badge">Claude Code</span>
+          <span className="dev-badge">{getProviderLabel(provider)}</span>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={() => setShowHistory(prev => !prev)}
-            type="button"
-          >
-            History
-          </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={newConversation}
-            type="button"
-          >
-            New
-          </button>
-        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-2)' }} />
       </div>
+
+      {fallbackNotice && (
+        <div className="chat-bubble chat-bubble-system" style={{ margin: 'var(--sp-3)', border: '1px solid var(--line)', background: 'var(--bg-sunken)' }}>
+          <strong style={{ marginRight: 'var(--sp-2)' }}>Fallback used:</strong>
+          {getProviderLabel(fallbackNotice.from)} &rarr; {getProviderLabel(fallbackNotice.to)}
+          {fallbackNotice.reason && (
+            <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-secondary)' }}>
+              ({fallbackNotice.reason})
+            </span>
+          )}
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={dismissFallbackNotice}
+            style={{ marginLeft: 'var(--sp-3)' }}
+            type="button"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* History sidebar */}
@@ -137,6 +241,8 @@ export default function DevMode() {
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={(e) => { e.stopPropagation(); removeConversation(conv._id); }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); } }}
+                    aria-label={`Delete session ${conv.title || 'Untitled session'}`}
                     style={{ padding: '1px 4px', minHeight: 'auto', fontSize: '10px', opacity: 0.5 }}
                     type="button"
                   >
@@ -161,52 +267,48 @@ export default function DevMode() {
               <div className="dev-welcome">
                 <div className="dev-welcome-title">Claude Code — Developer Mode</div>
                 <div className="dev-welcome-desc">
-                  Full Claude Code capabilities: file read/write, bash commands, code editing.
-                  Describe what you want to build or fix.
-                </div>
-                <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-5)' }}>
-                  {DEV_PROMPTS.map((dp, i) => (
-                    <button
-                      key={i}
-                      className="btn btn-sm dev-prompt-btn"
-                      onClick={() => handleQuickPrompt(dp.prompt)}
-                      type="button"
-                    >
-                      {dp.label}
-                    </button>
-                  ))}
+                  Full dev-mode capabilities: file read/write, bash commands, and code edits.
+                  You can also attach screenshots to debug UI issues.
                 </div>
               </div>
             )}
 
             {messages.map((msg, i) => (
-              <DevMessage key={i} msg={msg} />
+              <ChatMessage
+                key={msg._id || msg.timestamp || i}
+                role={msg.role}
+                content={msg.content}
+                images={msg.images}
+                provider={msg.provider || provider}
+                fallbackFrom={msg.fallbackFrom}
+                timestamp={msg.timestamp}
+                responseTimeMs={msg.responseTimeMs}
+                isStreaming={false}
+                variant="dev"
+                toolEvents={msg.toolEvents}
+                onRerunCommand={handleRerunCommand}
+              />
             ))}
 
             {/* Streaming response */}
             {isStreaming && (streamingText || toolEvents.length > 0) && (
-              <div className="dev-msg dev-msg-assistant">
-                <div className="dev-msg-label">claude</div>
-                {toolEvents.length > 0 && (
-                  <div className="dev-tool-events">
-                    {toolEvents.map((te, i) => (
-                      <ToolEventLine key={i} event={te} />
-                    ))}
-                  </div>
-                )}
-                {streamingText && (
-                  <div className="dev-msg-content">
-                    <DevMarkdown text={streamingText} />
-                  </div>
-                )}
-                <span className="dev-cursor" />
-              </div>
+              <ChatMessage
+                role="assistant"
+                content={streamingText || ''}
+                provider={streamProvider || provider}
+                isStreaming={true}
+                variant="dev"
+                toolEvents={toolEvents}
+                onRerunCommand={handleRerunCommand}
+              />
             )}
 
             {/* Streaming spinner */}
             {isStreaming && !streamingText && toolEvents.length === 0 && (
-              <div className="dev-msg dev-msg-assistant">
-                <div className="dev-msg-label">claude</div>
+              <div className="chat-bubble chat-bubble-assistant" style={{ alignSelf: 'flex-start' }}>
+                <div className="eyebrow eyebrow--dev" style={{ marginBottom: 'var(--sp-2)' }}>
+                  {getProviderLabel(streamProvider || provider)}
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
                   <span className="spinner spinner-sm" />
                   <span style={{ color: 'var(--ink-tertiary)', fontSize: 'var(--text-sm)', fontFamily: 'var(--font-mono)' }}>
@@ -235,215 +337,243 @@ export default function DevMode() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input area */}
-          <div className="dev-input-area">
-            <div className="dev-input-shell">
-              <span className="dev-prompt-symbol">$</span>
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Describe what you want to build, fix, or change..."
-                rows={1}
-                disabled={isStreaming}
-                className="dev-input"
-              />
-              {isStreaming ? (
+          {/* Input area — Compose Card */}
+          <div className="chat-input-area">
+            {/* Quick action chips — always visible */}
+            <div className="quick-action-chips">
+              {DEV_PROMPTS.map((dp, i) => (
                 <button
-                  className="btn btn-danger btn-sm"
-                  onClick={abortStream}
+                  key={i}
+                  className="quick-action-chip"
+                  onClick={() => handleQuickPrompt(dp.prompt)}
                   type="button"
+                  disabled={isStreaming}
                 >
-                  Stop
+                  {dp.label}
                 </button>
-              ) : (
-                <button
-                  className="btn btn-primary btn-sm"
-                  onClick={handleSubmit}
-                  disabled={!input.trim()}
-                  type="button"
-                >
-                  Run
-                </button>
-              )}
+              ))}
             </div>
-            <div style={{ fontSize: '10px', color: 'var(--ink-tertiary)', textAlign: 'center', marginTop: 'var(--sp-1)', fontFamily: 'var(--font-mono)' }}>
-              Enter to send &middot; Shift+Enter new line &middot; Ctrl+N new session
-              {responseTime && <span> &middot; Last: {(responseTime / 1000).toFixed(1)}s</span>}
+
+            {/* Compose card */}
+            <div className={`compose-card compose-card--dev${composeFocused ? ' is-focused' : ''}`}>
+              {/* Top strip: provider chip + help */}
+              <div className="compose-top-strip">
+                <div ref={providerPopoverRef} style={{ position: 'relative' }}>
+                  <button
+                    className={`provider-chip${showProviderPopover ? ' is-open' : ''}`}
+                    onClick={() => setShowProviderPopover(prev => !prev)}
+                    type="button"
+                    aria-label="Change model and mode settings"
+                    aria-expanded={showProviderPopover}
+                  >
+                    {getProviderLabel(provider)}
+                    {' \u00b7 '}
+                    {MODE_OPTIONS.find(m => m.value === mode)?.label || 'Single'}
+                    {mode !== 'single' && (
+                      <> + {getProviderLabel(fallbackProvider)}</>
+                    )}
+                    <span className="chevron">&#9662;</span>
+                  </button>
+
+                  {/* Provider/mode popover */}
+                  {showProviderPopover && (
+                    <div className="provider-popover">
+                      <Tooltip text="Choose which AI model to use" level="medium">
+                        <div className="provider-popover-label">Provider</div>
+                      </Tooltip>
+                      {PROVIDER_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
+                          onClick={() => setProvider(option.value)}
+                          type="button"
+                        >
+                          <span className="check">{provider === option.value ? '\u2713' : ''}</span>
+                          {option.label}
+                        </button>
+                      ))}
+                      <div className="provider-popover-divider" />
+                      <Tooltip text="Single: one model, Fallback: auto-retry with backup" level="medium">
+                        <div className="provider-popover-label">Mode</div>
+                      </Tooltip>
+                      {MODE_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={`provider-popover-option${mode === option.value ? ' is-selected' : ''}`}
+                          onClick={() => setMode(option.value)}
+                          type="button"
+                        >
+                          <span className="check">{mode === option.value ? '\u2713' : ''}</span>
+                          {option.label}
+                        </button>
+                      ))}
+                      {mode !== 'single' && (
+                        <>
+                          <div className="provider-popover-divider" />
+                          <div className="provider-popover-label">Fallback Provider</div>
+                          {PROVIDER_OPTIONS.filter((o) => o.value !== provider).map((option) => (
+                            <button
+                              key={option.value}
+                              className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
+                              onClick={() => setFallbackProvider(option.value)}
+                              type="button"
+                            >
+                              <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                              {option.label}
+                            </button>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                  <Tooltip text="Browse past dev sessions" level="medium">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setShowHistory(prev => !prev)}
+                      type="button"
+                      style={{ fontSize: 'var(--text-xs)' }}
+                    >
+                      History
+                    </button>
+                  </Tooltip>
+                  <Tooltip text="Start a fresh dev conversation" level="medium">
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={newConversation}
+                      type="button"
+                      style={{ fontSize: 'var(--text-xs)' }}
+                    >
+                      New
+                    </button>
+                  </Tooltip>
+                  {/* Help button */}
+                  <div className="compose-help-btn" aria-label="Keyboard shortcuts">
+                    ?
+                    <div className="compose-help-tooltip">
+                      <kbd>Enter</kbd> Send message<br />
+                      <kbd>Shift</kbd>+<kbd>Enter</kbd> New line<br />
+                      <kbd>Ctrl</kbd>+<kbd>V</kbd> Paste images<br />
+                      <kbd>Ctrl</kbd>+<kbd>N</kbd> New session
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Compose body — textarea with $ prompt */}
+              <div className="compose-body">
+                <div className="compose-body-inner">
+                  <span className="dev-prompt-symbol">$</span>
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    onPaste={handlePaste}
+                    onFocus={() => setComposeFocused(true)}
+                    onBlur={() => setComposeFocused(false)}
+                    placeholder="Describe what you want to build, fix, or change..."
+                    rows={2}
+                    disabled={isStreaming}
+                  />
+                </div>
+              </div>
+
+              {/* Compose footer — actions + send */}
+              <div className="compose-footer">
+                <div className="compose-actions">
+                  <button
+                    className={`compose-action-btn${images.length > 0 ? ' is-active' : ''}`}
+                    onClick={handleAttachClick}
+                    title="Attach images (Ctrl+V)"
+                    type="button"
+                    aria-label="Attach images"
+                    disabled={isStreaming}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                    </svg>
+                  </button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleFilePickerChange}
+                    style={{ display: 'none' }}
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+
+                  {responseTime && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--ink-tertiary)' }}>
+                      Last: {(responseTime / 1000).toFixed(1)}s
+                    </span>
+                  )}
+
+                  {images.length > 0 && (
+                    <div
+                      className="compose-attachments-inline"
+                      aria-live="polite"
+                      aria-label={`${images.length} image${images.length === 1 ? '' : 's'} attached`}
+                    >
+                      <span className="compose-attachments-title">
+                        {images.length} upload{images.length === 1 ? '' : 's'}
+                      </span>
+                      <div className="compose-attachments-list">
+                        {images.map((image, i) => (
+                          <div key={image.key || `${i}-${image.src.slice(0, 24)}`} className="compose-attachment">
+                            <img src={image.src} alt={`Attachment ${i + 1}`} />
+                            <button
+                              type="button"
+                              className="compose-attachment-remove"
+                              onClick={() => removeImage(i)}
+                              aria-label={`Remove attached image ${i + 1}`}
+                              title="Remove image"
+                            >
+                              x
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {isStreaming ? (
+                  <button
+                    className="compose-send-btn is-danger"
+                    onClick={abortStream}
+                    type="button"
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                      <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                  </button>
+                ) : (
+                  <button
+                    className="compose-send-btn"
+                    onClick={handleSubmit}
+                    disabled={!input.trim() && images.length === 0}
+                    type="button"
+                    aria-label="Send message"
+                    title="Send message"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="12" y1="19" x2="12" y2="5" />
+                      <polyline points="5 12 12 5 19 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
-  );
-}
-
-/** Render a single message */
-function DevMessage({ msg }) {
-  const isUser = msg.role === 'user';
-
-  return (
-    <div className={`dev-msg ${isUser ? 'dev-msg-user' : 'dev-msg-assistant'}`}>
-      <div className="dev-msg-label">
-        {isUser ? 'you' : 'claude'}
-        {msg.responseTimeMs && (
-          <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-tertiary)', fontWeight: 400 }}>
-            {(msg.responseTimeMs / 1000).toFixed(1)}s
-          </span>
-        )}
-      </div>
-
-      {/* Tool events for assistant messages */}
-      {!isUser && msg.toolEvents && msg.toolEvents.length > 0 && (
-        <ToolEventsBlock events={msg.toolEvents} />
-      )}
-
-      <div className="dev-msg-content">
-        {isUser ? (
-          <pre className="dev-user-text">{msg.content}</pre>
-        ) : (
-          <DevMarkdown text={msg.content} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** Collapsible tool events block */
-function ToolEventsBlock({ events }) {
-  const [expanded, setExpanded] = useState(false);
-  const displayEvents = expanded ? events : events.slice(0, 3);
-  const hasMore = events.length > 3;
-
-  return (
-    <div className="dev-tool-events">
-      {displayEvents.map((te, i) => (
-        <ToolEventLine key={i} event={te} />
-      ))}
-      {hasMore && !expanded && (
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={() => setExpanded(true)}
-          type="button"
-          style={{ fontSize: '10px', padding: '1px 6px', fontFamily: 'var(--font-mono)' }}
-        >
-          +{events.length - 3} more tool calls
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Single tool event line */
-function ToolEventLine({ event }) {
-  const [showDetails, setShowDetails] = useState(false);
-  const toolName = event.tool || event.name || 'tool';
-  const filePath = event.file || event.input?.file_path || event.input?.path || '';
-  const icon = getToolIcon(toolName);
-
-  return (
-    <div className="dev-tool-line">
-      <button
-        className="dev-tool-summary"
-        onClick={() => setShowDetails(prev => !prev)}
-        type="button"
-      >
-        <span className="dev-tool-icon">{icon}</span>
-        <span className="dev-tool-name">{toolName}</span>
-        {filePath && <span className="dev-tool-file">{filePath}</span>}
-        {event.status === 'success' && <span className="dev-tool-status-ok">OK</span>}
-        {event.status === 'error' && <span className="dev-tool-status-err">ERR</span>}
-      </button>
-      {showDetails && event.details && (
-        <pre className="dev-tool-details">{typeof event.details === 'string' ? event.details : JSON.stringify(event.details, null, 2)}</pre>
-      )}
-    </div>
-  );
-}
-
-function getToolIcon(tool) {
-  if (!tool) return '>';
-  if (tool.includes('read') || tool.includes('Read')) return 'R';
-  if (tool.includes('write') || tool.includes('Write')) return 'W';
-  if (tool.includes('edit') || tool.includes('Edit')) return 'E';
-  if (tool.includes('bash') || tool.includes('Bash')) return '$';
-  if (tool.includes('grep') || tool.includes('Grep')) return '?';
-  if (tool.includes('glob') || tool.includes('Glob')) return '*';
-  return '>';
-}
-
-/** Simple markdown-to-JSX for dev mode (code blocks, inline code, bold) */
-function DevMarkdown({ text }) {
-  const rendered = useMemo(() => {
-    if (!text) return null;
-    const blocks = text.split(/(```[\s\S]*?```)/g);
-    return blocks.map((block, i) => {
-      if (block.startsWith('```')) {
-        const match = block.match(/^```(\w*)\n?([\s\S]*?)```$/);
-        if (match) {
-          const lang = match[1];
-          const code = match[2];
-          return (
-            <div key={i} className="dev-code-block">
-              {lang && <div className="dev-code-lang">{lang}</div>}
-              <pre className="dev-code-pre"><code>{code}</code></pre>
-              <CopyBtn text={code} />
-            </div>
-          );
-        }
-      }
-      // Inline formatting
-      return <DevInlineBlock key={i} text={block} />;
-    });
-  }, [text]);
-
-  return <div className="dev-markdown">{rendered}</div>;
-}
-
-function DevInlineBlock({ text }) {
-  const lines = text.split('\n');
-  return (
-    <>
-      {lines.map((line, i) => {
-        if (!line.trim()) return <br key={i} />;
-        // Split on bold and inline code patterns, return safe React elements
-        const parts = line.split(/(\*\*.+?\*\*|`[^`]+`)/g);
-        return (
-          <div key={i}>
-            {parts.map((part, j) => {
-              if (part.startsWith('**') && part.endsWith('**')) {
-                return <b key={j}>{part.slice(2, -2)}</b>;
-              }
-              if (part.startsWith('`') && part.endsWith('`')) {
-                return <code key={j} className="dev-inline-code">{part.slice(1, -1)}</code>;
-              }
-              return <span key={j}>{part}</span>;
-            })}
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function CopyBtn({ text }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch { /* ignore */ }
-  }, [text]);
-
-  return (
-    <button
-      className="dev-copy-btn"
-      onClick={handleCopy}
-      type="button"
-    >
-      {copied ? 'Copied' : 'Copy'}
-    </button>
   );
 }

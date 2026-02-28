@@ -1,8 +1,9 @@
-const express = require('express');
 const mongoose = require('mongoose');
-const cors = require('cors');
 const dns = require('dns');
 const path = require('path');
+const { createApp } = require('./app');
+const UsageLog = require('./models/UsageLog');
+const { drainPendingWrites } = require('./lib/usage-writer');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -13,28 +14,9 @@ if (dnsServers.length) {
   console.log(`DNS override: ${dnsServers.join(', ')}`);
 }
 
-const app = express();
+const app = createApp();
 const PORT = process.env.PORT || 4000;
-
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, uptime: process.uptime() });
-});
-
-// Route mounts
-const { chatRouter, conversationsRouter } = require('./routes/chat');
-app.use('/api/chat', chatRouter);
-app.use('/api/conversations', conversationsRouter);
-app.use('/api/escalations', require('./routes/escalations'));
-app.use('/api/playbook', require('./routes/playbook'));
-app.use('/api/templates', require('./routes/templates'));
-app.use('/api/analytics', require('./routes/analytics'));
-app.use('/api/copilot', require('./routes/copilot'));
-app.use('/api/dev', require('./routes/dev'));
+let httpServer = null;
 
 // MongoDB connection + server start
 async function start() {
@@ -52,25 +34,56 @@ async function start() {
     process.exit(1);
   }
 
-  app.listen(PORT, () => {
+  // Ensure UsageLog indexes exist (dedup + TTL depend on them).
+  // Failure is non-fatal to avoid blocking startup, but dedup and TTL
+  // guarantees will be degraded until indexes are created manually.
+  try {
+    await UsageLog.syncIndexes();
+  } catch (err) {
+    console.error('UsageLog index sync failed (dedup/TTL may be degraded):', err.message);
+  }
+
+  httpServer = app.listen(PORT, () => {
     console.log(`QBO Escalation API listening on :${PORT}`);
 
-    // Warm up Claude CLI in background (non-blocking)
-    const { warmUp } = require('./services/claude');
-    warmUp().catch(() => { /* non-fatal */ });
+    // Warm up CLI providers in background (non-blocking)
+    const { warmUp: warmClaude } = require('./services/claude');
+    const { warmUp: warmCodex } = require('./services/codex');
+    warmClaude().catch(() => { /* non-fatal */ });
+    warmCodex().catch(() => { /* non-fatal */ });
   });
 }
+
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB disconnected');
+});
 
 // Graceful shutdown
 function shutdown(signal) {
   console.log(`\n${signal} received — shutting down`);
-  mongoose.connection.close().then(() => {
-    console.log('MongoDB disconnected');
-    process.exit(0);
-  });
+  if (httpServer) {
+    httpServer.close(async () => {
+      console.log('HTTP server closed');
+      await drainPendingWrites(5000);
+      await mongoose.connection.close();
+      process.exit(0);
+    });
+  } else {
+    drainPendingWrites(5000).then(() =>
+      mongoose.connection.close()
+    ).then(() => {
+      process.exit(0);
+    });
+  }
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
 
 start();

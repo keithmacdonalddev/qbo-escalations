@@ -1,0 +1,2 @@
+so far there is a chat for QBO Escalation Assistants, there is a dev_mode chat, I am looking
+to have an AI model whose responsible for managing the playbook. for editing, updating, removing duplicate, stale, incorrect items, adding new information, categorizing, indexing, prioritizing info. Everything related to knowledgebase and playbook. They should be automated for most tasks and able to update the site within it area of responsibiliity. They should be available in the playbook page via chat interface.

@@ -1,0 +1,1505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QBO Escalation Assistant — Implementation Review Report</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface-2: #232738;
+    --surface-3: #2d3148;
+    --border: #363b52;
+    --text: #e4e6f0;
+    --text-dim: #8b90a8;
+    --text-bright: #ffffff;
+    --accent: #6c8cff;
+    --accent-dim: #4a63b8;
+    --critical: #ff4d6a;
+    --critical-bg: rgba(255,77,106,0.08);
+    --critical-border: rgba(255,77,106,0.25);
+    --bug: #ff8c42;
+    --bug-bg: rgba(255,140,66,0.08);
+    --bug-border: rgba(255,140,66,0.25);
+    --warning: #ffc145;
+    --warning-bg: rgba(255,193,69,0.08);
+    --warning-border: rgba(255,193,69,0.25);
+    --info: #42b4ff;
+    --info-bg: rgba(66,180,255,0.08);
+    --info-border: rgba(66,180,255,0.25);
+    --success: #4ade80;
+    --success-bg: rgba(74,222,128,0.08);
+    --success-border: rgba(74,222,128,0.25);
+    --feature: #c084fc;
+    --feature-bg: rgba(192,132,252,0.08);
+    --feature-border: rgba(192,132,252,0.25);
+    --mono: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.6;
+    padding: 0;
+  }
+
+  /* Header */
+  .report-header {
+    background: linear-gradient(135deg, #1a1d27 0%, #232738 50%, #1a1d27 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 48px 40px 40px;
+    text-align: center;
+  }
+  .report-header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+  .report-header .subtitle {
+    font-size: 15px;
+    color: var(--text-dim);
+    margin-bottom: 24px;
+  }
+  .report-header .meta {
+    display: flex;
+    justify-content: center;
+    gap: 32px;
+    flex-wrap: wrap;
+  }
+  .meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .meta-item strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  /* Scorecard */
+  .scorecard {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+    padding: 32px 40px;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  .score-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: transform 0.15s;
+  }
+  .score-card:hover { transform: translateY(-2px); }
+  .score-card .number {
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 4px;
+  }
+  .score-card .label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  .score-card.critical .number { color: var(--critical); }
+  .score-card.bug .number { color: var(--bug); }
+  .score-card.security .number { color: var(--warning); }
+  .score-card.omission .number { color: var(--info); }
+  .score-card.ux .number { color: var(--accent); }
+  .score-card.feature .number { color: var(--feature); }
+  .score-card.total .number { color: var(--text-bright); }
+
+  /* Main content */
+  .content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 40px 60px;
+  }
+
+  /* Section headers */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 40px 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-header .icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+  .section-header h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-bright);
+    flex: 1;
+  }
+  .section-header .count {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    padding: 4px 12px;
+    border-radius: 20px;
+  }
+
+  /* Finding cards */
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: border-color 0.15s;
+  }
+  .finding:hover { border-color: var(--accent-dim); }
+  .finding.critical { border-left: 3px solid var(--critical); }
+  .finding.bug { border-left: 3px solid var(--bug); }
+  .finding.security { border-left: 3px solid var(--warning); }
+  .finding.omission { border-left: 3px solid var(--info); }
+  .finding.ux { border-left: 3px solid var(--accent); }
+  .finding.arch { border-left: 3px solid var(--feature); }
+  .finding.perf { border-left: 3px solid #14b8a6; }
+  .finding.feature { border-left: 3px solid var(--feature); }
+  .finding.test { border-left: 3px solid var(--success); }
+  .finding.a11y { border-left: 3px solid #f472b6; }
+
+  .finding-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px 20px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .finding-header:hover { background: var(--surface-2); }
+  .finding-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .finding.critical .finding-id { background: var(--critical-bg); color: var(--critical); border: 1px solid var(--critical-border); }
+  .finding.bug .finding-id { background: var(--bug-bg); color: var(--bug); border: 1px solid var(--bug-border); }
+  .finding.security .finding-id { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+  .finding.omission .finding-id { background: var(--info-bg); color: var(--info); border: 1px solid var(--info-border); }
+  .finding.ux .finding-id { background: rgba(108,140,255,0.1); color: var(--accent); border: 1px solid rgba(108,140,255,0.25); }
+  .finding.arch .finding-id { background: var(--feature-bg); color: var(--feature); border: 1px solid var(--feature-border); }
+  .finding.perf .finding-id { background: rgba(20,184,166,0.1); color: #14b8a6; border: 1px solid rgba(20,184,166,0.25); }
+  .finding.feature .finding-id { background: var(--feature-bg); color: var(--feature); border: 1px solid var(--feature-border); }
+  .finding.test .finding-id { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+  .finding.a11y .finding-id { background: rgba(244,114,182,0.1); color: #f472b6; border: 1px solid rgba(244,114,182,0.25); }
+
+  .finding-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    flex: 1;
+    line-height: 1.4;
+  }
+  .finding-source {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--surface-3);
+    color: var(--text-dim);
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .finding-body {
+    padding: 0 20px 16px;
+    display: none;
+  }
+  .finding.open .finding-body { display: block; }
+  .finding-body p {
+    color: var(--text);
+    margin-bottom: 10px;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+  .finding-body .file-ref {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    background: rgba(108,140,255,0.08);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+  .finding-body code {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--warning);
+    background: rgba(255,193,69,0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .finding-body .fix {
+    background: var(--success-bg);
+    border: 1px solid var(--success-border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .finding-body .fix strong {
+    color: var(--success);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  pre.code-block {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-x: auto;
+    color: var(--text);
+    margin: 10px 0;
+  }
+
+  /* Engineers */
+  .engineer-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .engineer-tag.backend { background: rgba(66,180,255,0.12); color: #42b4ff; }
+  .engineer-tag.frontend { background: rgba(74,222,128,0.12); color: #4ade80; }
+  .engineer-tag.both { background: rgba(192,132,252,0.12); color: #c084fc; }
+
+  /* Coverage table */
+  .coverage-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 13px;
+  }
+  .coverage-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .coverage-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  .coverage-table tr:hover td { background: var(--surface-2); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.yes { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+  .badge.no { background: var(--critical-bg); color: var(--critical); border: 1px solid var(--critical-border); }
+  .badge.partial { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+
+  /* Toggle all */
+  .toggle-all {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    font-family: var(--sans);
+    float: right;
+    margin-top: -4px;
+  }
+  .toggle-all:hover { background: var(--surface-3); }
+
+  /* Priority matrix */
+  .priority-matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 20px 0;
+  }
+  .priority-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+  }
+  .priority-box h3 {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .priority-box ul {
+    list-style: none;
+    padding: 0;
+  }
+  .priority-box li {
+    font-size: 13px;
+    padding: 6px 0;
+    color: var(--text);
+    border-bottom: 1px solid rgba(54,59,82,0.5);
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .priority-box li:last-child { border-bottom: none; }
+  .priority-box li::before {
+    content: '→';
+    color: var(--text-dim);
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  .p1 h3 { color: var(--critical); }
+  .p2 h3 { color: var(--bug); }
+  .p3 h3 { color: var(--warning); }
+  .p4 h3 { color: var(--info); }
+
+  /* Summary discussion */
+  .discussion {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    margin: 20px 0;
+  }
+  .discussion h3 {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 12px;
+  }
+  .discussion p {
+    font-size: 13px;
+    color: var(--text);
+    margin-bottom: 10px;
+    line-height: 1.65;
+  }
+  .discussion .speaker {
+    font-weight: 700;
+    font-size: 12px;
+    margin-right: 4px;
+  }
+  .discussion .speaker.be { color: #42b4ff; }
+  .discussion .speaker.fe { color: #4ade80; }
+
+  @media (max-width: 768px) {
+    .report-header { padding: 32px 20px; }
+    .content { padding: 0 20px 40px; }
+    .scorecard { padding: 20px; grid-template-columns: repeat(3, 1fr); }
+    .priority-matrix { grid-template-columns: 1fr; }
+    .report-header .meta { gap: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="report-header">
+  <h1>Implementation Review Report</h1>
+  <div class="subtitle">QBO Escalation Assistant — Phase 1 Provider Independence + Gap Matrix Implementation</div>
+  <div class="meta">
+    <div class="meta-item"><strong>Date:</strong> February 27, 2026</div>
+    <div class="meta-item"><strong>Reviewers:</strong> SR Eng #1 (Backend) + SR Eng #2 (Frontend)</div>
+    <div class="meta-item"><strong>Files Reviewed:</strong> 62+ files</div>
+    <div class="meta-item"><strong>Scope:</strong> Server (35 files) + Client (27 files)</div>
+  </div>
+</div>
+
+<!-- Scorecard -->
+<div class="scorecard">
+  <div class="score-card total">
+    <div class="number">82</div>
+    <div class="label">Total Findings</div>
+  </div>
+  <div class="score-card critical">
+    <div class="number">9</div>
+    <div class="label">Critical</div>
+  </div>
+  <div class="score-card bug">
+    <div class="number">17</div>
+    <div class="label">Bugs</div>
+  </div>
+  <div class="score-card security">
+    <div class="number">5</div>
+    <div class="label">Security</div>
+  </div>
+  <div class="score-card omission">
+    <div class="number">11</div>
+    <div class="label">Omissions</div>
+  </div>
+  <div class="score-card ux">
+    <div class="number">15</div>
+    <div class="label">UX / A11y</div>
+  </div>
+  <div class="score-card feature">
+    <div class="number">12</div>
+    <div class="label">Enhancements</div>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- Engineer Discussion -->
+  <div class="discussion">
+    <h3>Review Discussion Summary</h3>
+    <p><span class="speaker be">Backend Eng:</span> The server architecture is solid — clean route separation, proper model design, and the orchestrator pattern works well. But we have shell injection in every CLI spawn call, ReDoS in three places, and the copilot routes completely bypass provider independence. Those are show-stoppers.</p>
+    <p><span class="speaker fe">Frontend Eng:</span> Agreed on severity. On the client side, the "Warm Authority" design system is well-crafted, but there's a critical performance bug where <code>motionProps</code> invalidates useCallback on every render, messages use array index as keys (dangerous during retry), and both streaming hooks leak memory on unmount. The hooks share ~300 lines of duplicated code.</p>
+    <p><span class="speaker be">Backend Eng:</span> The biggest architectural gap we both see: Phase 1 shipped without feature flags, which means there's no rollback path. Plus, parallel mode was implemented even though it's Phase 4 scope — without the Phase 4 test framework. That's risky scope creep.</p>
+    <p><span class="speaker fe">Frontend Eng:</span> And neither side has provider health visibility in the UI. The health module exists on the server but isn't wired into routing decisions or surfaced to the user. For a provider independence phase, that's a significant omission.</p>
+    <p><span class="speaker be">Backend Eng:</span> Test coverage is also a concern. 50+ tests exist and cover the orchestrators well, but analytics (7 endpoints), copilot (8 endpoints), and playbook (7 endpoints) have zero tests. That's 22 untested endpoints.</p>
+  </div>
+
+  <!-- ===================== CRITICAL ISSUES ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--critical-bg);color:var(--critical);">!</div>
+    <h2>Critical Issues</h2>
+    <span class="count">9 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-01</span>
+      <span class="finding-title">Command injection via <code>shell: true</code> in all CLI spawn calls</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/services/claude.js:73-76</span> &nbsp; <span class="file-ref">server/src/services/codex.js:70-74</span> &nbsp; <span class="file-ref">server/src/routes/dev.js:288-293</span></p>
+      <p>All <code>spawn()</code> calls use <code>shell: true</code>. User-supplied message content is passed as positional CLI arguments. A prompt containing shell metacharacters (backticks, <code>$()</code>, <code>&&</code>, pipe) could be interpreted by the shell, enabling command injection.</p>
+      <pre class="code-block">const child = spawn('claude', args, {
+  stdio: ['pipe', 'pipe', 'pipe'],
+  shell: true,   // DANGEROUS — user input in args
+  env: { ...process.env },
+});</pre>
+      <div class="fix"><strong>Recommended Fix:</strong> Remove <code>shell: true</code> from all spawn calls. Provide the full path to the CLI binary if needed. For codex.js which uses stdin, shell: true is entirely unnecessary.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-02</span>
+      <span class="finding-title">ReDoS vulnerability in template rendering — user keys injected into RegExp</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/templates.js:92-93</span></p>
+      <p>User-controlled <code>key</code> values from <code>req.body.variables</code> are interpolated directly into <code>new RegExp()</code> without escaping. An attacker can craft a key like <code>(a+)+$</code> to trigger catastrophic backtracking, freezing the Node.js event loop.</p>
+      <pre class="code-block">rendered = rendered.replace(new RegExp('\\{\\{' + key + '\\}\\}', 'gi'), value);
+rendered = rendered.replace(new RegExp('\\[' + key + '\\]', 'gi'), value);</pre>
+      <div class="fix"><strong>Recommended Fix:</strong> Escape regex metacharacters from <code>key</code> before constructing the RegExp, or use <code>String.prototype.replaceAll()</code> with literal string matching.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-03</span>
+      <span class="finding-title">ReDoS in copilot search and escalation filtering via <code>$regex</code></span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/copilot.js:331-339</span> &nbsp; <span class="file-ref">server/src/routes/escalations.js:176</span></p>
+      <p>User-supplied search <code>query</code> is passed directly into MongoDB's <code>$regex</code> operator without sanitization. Malicious regex patterns can hang the MongoDB query engine.</p>
+      <pre class="code-block">{ attemptingTo: { $regex: query, $options: 'i' } }
+// and:
+if (req.query.agent) filter.agentName = { $regex: req.query.agent, $options: 'i' };</pre>
+      <div class="fix"><strong>Recommended Fix:</strong> Escape user input before using in <code>$regex</code>, or use MongoDB's <code>$text</code> search operator exclusively for text search operations.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-04</span>
+      <span class="finding-title">Copilot routes hardcoded to Claude — completely bypasses provider independence</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/copilot.js:5,28-58</span></p>
+      <p>All 8 copilot endpoints import <code>claude</code> directly and call <code>claude.chat()</code>. There is no provider parameter, no orchestrator usage, and no fallback. If Claude is down, all copilot features are completely unavailable — contradicting provider independence goals.</p>
+      <pre class="code-block">const claude = require('../services/claude');
+// All endpoints:
+cleanupFn = claude.chat({ ... });</pre>
+      <div class="fix"><strong>Recommended Fix:</strong> Route copilot through the chat orchestrator or a dedicated copilot orchestrator. Accept <code>provider</code>/<code>mode</code> params on copilot endpoints.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-05</span>
+      <span class="finding-title">Dead <code>parseEscalation</code> in chatApi.js with wrong signature — will crash if imported</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/api/chatApi.js:148-164</span></p>
+      <p>The <code>parseEscalation</code> function expects a raw string and calls <code>input.startsWith('data:image')</code>. But callers pass an object with <code>{ text, image, mode }</code> properties. The function is dead code (callers import from <code>escalationsApi.js</code> instead), but if anyone imports the wrong version, it will throw <code>TypeError: input.startsWith is not a function</code>.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Remove the dead <code>parseEscalation</code> export from <code>chatApi.js</code> to prevent accidental misuse.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-06</span>
+      <span class="finding-title"><code>motionProps</code> recreated every render — defeats useCallback memoization in App.jsx</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/App.jsx:49-56, 109</span></p>
+      <p><code>motionProps</code> is an object literal created on every render. It's in the dependency array of <code>useCallback</code> for <code>renderView</code>, so the callback is invalidated every render cycle. This defeats the entire memoization strategy and causes <code>AnimatePresence</code> to re-mount all view components on every state change, causing layout jank.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Move <code>motionProps</code> to a <code>useMemo</code> with empty deps, or define it outside the component as a module-level constant (since it doesn't depend on props/state).</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-07</span>
+      <span class="finding-title">No abort/cleanup on unmount in streaming hooks — memory leak during navigation</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/hooks/useChat.js:172-309</span> &nbsp; <span class="file-ref">client/src/hooks/useDevChat.js:172-297</span></p>
+      <p>When the Chat or DevMode component unmounts while an SSE stream is active, neither hook aborts the in-flight request. Callbacks continue updating unmounted component state, causing React warnings and memory leaks. The <code>abortRef.current</code> is set but never called on cleanup return from useEffect.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Add a cleanup function to the <code>useEffect</code> that manages streaming, or add an <code>unmountedRef</code> guard. Call <code>abortRef.current()</code> in the hook's cleanup.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-08</span>
+      <span class="finding-title">Array index as React key for messages — causes reconciliation bugs on retry</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/Chat.jsx:497-527</span></p>
+      <p>Messages use <code>key={i}</code> (array index). When <code>retryLastResponse</code> pops messages and inserts new ones, React incorrectly matches new messages to old keys. This causes stale content, wrong copy button targets, and incorrect fork indices.</p>
+      <pre class="code-block">{messages.map((msg, i) => (
+  &lt;ChatMessage key={i} ... /&gt;
+))}</pre>
+      <div class="fix"><strong>Recommended Fix:</strong> Use <code>key={msg._id || msg.timestamp || crypto.randomUUID()}</code> for stable message identity.</div>
+    </div>
+  </div>
+
+  <div class="finding critical" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">CRIT-09</span>
+      <span class="finding-title">~300 lines duplicated between useChat.js and useDevChat.js</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/hooks/useChat.js</span> (540 lines) &nbsp; <span class="file-ref">client/src/hooks/useDevChat.js</span> (350 lines)</p>
+      <p>60-70% identical logic: provider normalization, fallback resolution, localStorage persistence, streaming state management, abort handling, and conversation CRUD. Any bug fix to streaming or provider logic must be applied in both files, creating a maintenance hazard.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Extract shared logic into a <code>useStreamingChat</code> base hook. Specialized hooks only add their unique behavior (parallel for chat, tool events for dev).</div>
+    </div>
+  </div>
+
+  <!-- ===================== BUGS ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--bug-bg);color:var(--bug);">B</div>
+    <h2>Bugs</h2>
+    <span class="count">17 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-01</span>
+      <span class="finding-title">Race condition: conversation save in parallel chat <code>onDone</code> — Mongoose full-doc replace</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/chat.js:282-334</span></p>
+      <p>The <code>onDone</code> callback pushes multiple assistant messages and calls <code>conversation.save()</code>. The conversation was fetched earlier (line 140). If another request modifies the same conversation between fetch and save, messages are lost due to Mongoose's full-document replacement.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Use atomic <code>$push</code> operations: <code>Conversation.findByIdAndUpdate(id, { $push: { messages: newMsg } })</code></div>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-02</span>
+      <span class="finding-title">Graceful shutdown doesn't close HTTP server — SSE streams terminated abruptly</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/index.js:46-52</span></p>
+      <p>The shutdown handler only closes MongoDB but never calls <code>server.close()</code>. Active SSE streams will lose data. In-flight requests get abruptly terminated.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Store HTTP server ref from <code>app.listen()</code>, call <code>server.close()</code> first, then close MongoDB.</div>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-03</span>
+      <span class="finding-title">Playbook categories listing crashes if file deleted between cache and statSync</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/playbook.js:22-28</span></p>
+      <p><code>getCategories()</code> returns cached names. If a file was deleted since last cache build, <code>fs.statSync(filePath)</code> throws <code>ENOENT</code> and crashes the handler (Express returns 500).</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Wrap <code>statSync</code> in try/catch or verify file existence before stat.</div>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-04</span>
+      <span class="finding-title">Codex system prompt treated as user content — worse playbook adherence</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/services/codex.js:323-346</span></p>
+      <p>When <code>systemPrompt</code> is provided, <code>buildPrompt</code> prepends it as "System instructions:" in the prompt text. This means it counts against user token budget and may be treated as user-generated content by the model rather than as a system instruction — leading to worse QBO playbook adherence with Codex.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-05</span>
+      <span class="finding-title"><code>deriveSourceFromPayload</code> crashes on null payload properties</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/escalations.js:33-44</span></p>
+      <p>Line 40 accesses <code>payload.screenshotPaths</code> without a <code>payload &&</code> guard. If <code>payload</code> is null (broken content-type), this throws. Lines 34 and 37 have the guard, but line 40 does not.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-06</span>
+      <span class="finding-title">DevConversation model missing 'parallel' in CHAT_MODES enum</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/models/DevConversation.js:4</span></p>
+      <p><code>CHAT_MODES = ['single', 'fallback']</code> but <code>resolvePolicy()</code> can return <code>mode: 'parallel'</code>. If parallel is returned for a dev mode request, Mongoose will reject the save with a validation error.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-07</span>
+      <span class="finding-title">Dev mode <code>activeSessions</code> map entries can leak on long-lived connections</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/dev.js:542-579</span></p>
+      <p>The cleanup function is called on <code>req.on('close')</code> and on success, but there's a window between cleanup and endStream where state is inconsistent. If the client keeps the connection alive indefinitely, the map entry persists.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-08</span>
+      <span class="finding-title">Template picker modal <code>onKeyDown</code> will never fire — missing tabIndex</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/Chat.jsx:888-889</span></p>
+      <p>The modal overlay div has <code>onKeyDown</code> for Escape, but no <code>tabIndex</code>. Since div elements aren't focusable by default, Escape only works if a child element happens to bubble the event.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-09</span>
+      <span class="finding-title">No debounce on dashboard search — fires API request on every keystroke</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/EscalationDashboard.jsx:104-110</span></p>
+      <p>Each keystroke fires <code>listEscalations</code> and <code>getSummary</code> API requests. No debouncing, creating excessive API calls and potential race conditions where older results overwrite newer ones.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-10</span>
+      <span class="finding-title">Sidebar 10-second polling continues when tab is hidden</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/Sidebar.jsx:32-34</span></p>
+      <p>The sidebar polls conversations every 10 seconds via <code>setInterval</code> regardless of tab visibility. This wastes resources and creates unnecessary server load when the user is on another tab.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-11</span>
+      <span class="finding-title">Potential XSS via markdown link <code>javascript:</code> URLs in ChatMessage</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/ChatMessage.jsx:267-268</span></p>
+      <p>The <code>inlineFormat</code> function renders <code>&lt;a href={match[8]}&gt;</code> from parsed markdown. If an AI response contains <code>[click](javascript:alert(1))</code>, it creates a <code>javascript:</code> URL. React warns but does not block it.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Validate that <code>href</code> starts with <code>http://</code> or <code>https://</code> before rendering as a link.</div>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-12</span>
+      <span class="finding-title">Inconsistent use of <code>window.confirm()</code> vs <code>ConfirmModal</code></span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/PlaybookEditor.jsx:155</span> &nbsp; <span class="file-ref">client/src/components/TemplateLibrary.jsx:136</span></p>
+      <p>Both use <code>window.confirm()</code> for destructive deletes while the rest of the app uses the styled <code>ConfirmModal</code> component. Inconsistent UX and the native dialog blocks the main thread.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-13</span>
+      <span class="finding-title">Stale closure in CopilotPanel <code>handleRun</code> — double-click fires two requests</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/CopilotPanel.jsx:42-44</span></p>
+      <p><code>handleRun</code> is a plain function (not <code>useCallback</code>) that captures <code>streaming</code> state. Rapid double-clicks can fire two requests before <code>streaming</code> updates, because React batches state updates.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-14</span>
+      <span class="finding-title">Sidebar reads <code>window.location.hash</code> directly — can be stale after navigation</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/App.jsx:139</span></p>
+      <p><code>currentRoute={window.location.hash || '#/chat'}</code> reads the hash during render instead of using the <code>route</code> state. After a programmatic navigation, the currentRoute could be stale until the next hashchange event.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-15</span>
+      <span class="finding-title">Unhandled promise rejections in <code>onDone</code>/<code>onError</code> SSE callbacks</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/chat.js:282-384</span></p>
+      <p>The <code>onDone</code> callback is async and does <code>await conversation.save()</code>. If save throws (validation error, connection lost), the rejection is uncaught. The SSE stream hangs without sending done/error events.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Wrap <code>onDone</code> body in try/catch that sends an error SSE event on failure.</div>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-16</span>
+      <span class="finding-title"><code>conversationId</code> stale closure in <code>removeConversation</code></span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/hooks/useChat.js:455-463</span></p>
+      <p><code>removeConversation</code> depends on <code>conversationId</code> state value captured at callback creation time. If it changes between creation and invocation, it compares against a stale value. Should use <code>conversationIdRef.current</code>.</p>
+    </div>
+  </div>
+
+  <div class="finding bug" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">BUG-17</span>
+      <span class="finding-title">Memory leak: <code>setTimeout</code> callbacks in copy buttons never cleaned up on unmount</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">client/src/components/ChatMessage.jsx:315</span> &nbsp; <span class="file-ref">DevMode.jsx:523</span> &nbsp; <span class="file-ref">PlaybookEditor.jsx:342</span></p>
+      <p><code>setTimeout(() =&gt; setCopied(false), 2000)</code> is never cleaned up. If the component unmounts within 2 seconds, setState targets unmounted state.</p>
+    </div>
+  </div>
+
+  <!-- ===================== SECURITY ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--warning-bg);color:var(--warning);">S</div>
+    <h2>Security Concerns</h2>
+    <span class="count">5 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding security" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">SEC-01</span>
+      <span class="finding-title">No authentication on any endpoint — gap matrix claim of authz is inaccurate</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>The gap matrix states "Role-based API key auth exists for protected routes (server/src/middleware/authz.js)" but no <code>authz.js</code> middleware file was found. All endpoints (CRUD, delete, playbook editing, dev mode file access) are completely open. Acceptable for local-only use per CLAUDE.md, but the documentation is misleading.</p>
+    </div>
+  </div>
+
+  <div class="finding security" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">SEC-02</span>
+      <span class="finding-title">Dev mode file-read endpoint exposes .env files</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/dev.js:815-849</span></p>
+      <p><code>/api/dev/file</code> reads any file within <code>PROJECT_ROOT</code>. While <code>isPathWithinRoot</code> prevents directory traversal above the project, <code>.env</code>, <code>server/.env</code>, and other secrets within the project tree are fully accessible.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Add exclusion list for <code>.env*</code>, <code>*.key</code>, <code>*.pem</code> patterns in the file-read handler.</div>
+    </div>
+  </div>
+
+  <div class="finding security" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">SEC-03</span>
+      <span class="finding-title">CORS completely open — any origin can call the API</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/app.js:16</span></p>
+      <p><code>app.use(cors())</code> allows any origin. Acceptable for localhost but a vulnerability if the server is ever exposed to a network.</p>
+    </div>
+  </div>
+
+  <div class="finding security" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">SEC-04</span>
+      <span class="finding-title">Static uploads served without access control</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/app.js:17</span></p>
+      <p>All uploaded escalation screenshots are publicly accessible at <code>/uploads/escalations/&lt;id&gt;/&lt;hash&gt;.jpg</code>. No access control or authorization check.</p>
+    </div>
+  </div>
+
+  <div class="finding security" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">SEC-05</span>
+      <span class="finding-title">No global Express error handler — unhandled errors return HTML instead of JSON</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/app.js</span></p>
+      <p>Express 5 auto-catches async errors, but with no fallback error handler, unhandled errors return Express's default HTML 500 response instead of the <code>{ ok: false, code, error }</code> JSON format the app uses.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Add a final <code>app.use((err, req, res, next) =&gt; { ... })</code> middleware returning consistent JSON errors.</div>
+    </div>
+  </div>
+
+  <!-- ===================== OMISSIONS ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--info-bg);color:var(--info);">O</div>
+    <h2>Omissions vs Phase 1 Plan</h2>
+    <span class="count">11 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-01</span>
+      <span class="finding-title">Missing <code>chat-provider.js</code> formal adapter interface with validators</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 plan (line 55-58) specifies <code>server/src/services/providers/chat-provider.js</code> with a formal contract and validators. This file does not exist. The registry references <code>claude.chat</code> and <code>codex.chat</code> directly without contract validation.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-02</span>
+      <span class="finding-title">Missing feature flags — no rollback mechanism for provider independence</span>
+      <span class="engineer-tag both">Both</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 specifies <code>FEATURE_CHAT_PROVIDER_PARITY</code> and <code>FEATURE_CHAT_FALLBACK_MODE</code> flags. Neither exists in the codebase. Features are always-on with no way to disable provider independence features if they cause issues. This removes the planned rollback safety net.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-03</span>
+      <span class="finding-title">Missing structured server-side observability logging</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 plan (lines 179-191) calls for structured per-turn logging with <code>mode</code>, <code>providerUsed</code>, <code>fallbackUsed</code>, <code>latencyMs</code>, etc. Metadata is persisted in MongoDB but there is no structured logging to stdout/stderr. Only <code>console.log</code> for startup events.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-04</span>
+      <span class="finding-title">Provider health not integrated into routing decisions</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 plan: "Prefer healthy provider in fallback mode." The <code>provider-health.js</code> module tracks health and has a circuit breaker, but the chat and parse orchestrators never consult health state. An unhealthy provider is still tried first, wasting time on a known-bad path.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-05</span>
+      <span class="finding-title">No image size cap on chat endpoint</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 plan: "Cap images per request and image bytes." The escalation route has <code>MAX_RAW_IMAGE_BYTES = 20MB</code>, but the chat route passes images through to the CLI provider with no size validation.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-06</span>
+      <span class="finding-title">Missing dedicated chat fallback integration test file</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 plan specifies <code>server/test/chat-fallback-integration.test.js</code>. Integration tests exist in <code>integration-routes.test.js</code> but there's no dedicated fallback-focused test file with the scenarios listed in the plan.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-07</span>
+      <span class="finding-title">No provider health UI surface</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 specifies "Provider health visibility baseline." The frontend has no health indicator, no circuit-breaker status display, and no way for users to see if a provider is degraded before selecting it. The backend health endpoint exists but isn't consumed.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-08</span>
+      <span class="finding-title">No turn-level observability UI for provenance metadata</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 specifies per-turn observability: mode, requestedPrimaryProvider, providerUsed, fallbackUsed, fallbackReasonCode, latencyMs, errorCode. The UI shows provider label and response time but not attempt count, reason codes, or attemptMeta.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-09</span>
+      <span class="finding-title">Retry button doesn't support different provider/mode than current selection</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1: "Retry endpoint with fallback policy." The retry button passes the current <code>provider</code> but doesn't expose UI to retry with a different provider or mode. Uses implicit refs, which works but limits user control.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-10</span>
+      <span class="finding-title">Parallel mode implemented despite being Phase 4 scope — shipped without Phase 4 tests</span>
+      <span class="engineer-tag both">Both</span>
+    </div>
+    <div class="finding-body">
+      <p>Phase 1 explicitly lists "Parallel opinions" as out of scope. However, parallel mode is fully implemented in both UI and API. This scope creep shipped without the Phase 4 acceptance framework, test suite, or cost controls that were planned to accompany it.</p>
+    </div>
+  </div>
+
+  <div class="finding omission" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">OM-11</span>
+      <span class="finding-title">Gap matrix claims auth middleware exists — it doesn't</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Gap matrix states: "Role-based API key auth exists for protected routes (server/src/middleware/authz.js)." No <code>authz.js</code> file was found on disk. The documentation is inaccurate and gives a false sense of security.</p>
+    </div>
+  </div>
+
+  <!-- ===================== ARCHITECTURE ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--feature-bg);color:var(--feature);">A</div>
+    <h2>Architecture Issues</h2>
+    <span class="count">5 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding arch" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">ARCH-01</span>
+      <span class="finding-title">~250 lines duplicated between chat POST and chat retry handlers</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/routes/chat.js:108-392 vs 638-886</span></p>
+      <p>The retry handler is a near-complete copy of the main chat handler — identical SSE setup, orchestration callbacks, parallel turn creation, onDone/onError logic. Any bug fix must be applied in both places.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Extract shared orchestration-to-SSE logic into a <code>handleChatStream()</code> helper function used by both handlers.</div>
+    </div>
+  </div>
+
+  <div class="finding arch" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">ARCH-02</span>
+      <span class="finding-title">Duplicated utility functions across 5+ files</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><code>parsePositiveInt</code> in claude.js, codex.js, dev.js &bull; <code>isPathWithinRoot</code> in escalations.js, dev.js &bull; <code>didCliExitSuccessfully</code> in claude.js, codex.js, dev.js &bull; <code>normalizeProviderError</code> in chat-orchestrator.js, parse-orchestrator.js, dev.js</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Create <code>server/src/lib/utils.js</code> for shared helpers. Import everywhere.</div>
+    </div>
+  </div>
+
+  <div class="finding arch" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">ARCH-03</span>
+      <span class="finding-title">Provider registry constructs fresh objects on every <code>getProvider()</code> call</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p><span class="file-ref">server/src/services/providers/registry.js:47-58</span></p>
+      <p>Every <code>getProvider()</code> invocation calls <code>def.getChat()</code>, <code>def.getDefaultTimeoutMs()</code> etc. and creates a new object. The orchestrators call this multiple times per request. Not a crash bug but unnecessary overhead.</p>
+    </div>
+  </div>
+
+  <div class="finding arch" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">ARCH-04</span>
+      <span class="finding-title">No shared SSE helper between chat, copilot, and dev routes</span>
+      <span class="engineer-tag backend">Backend</span>
+    </div>
+    <div class="finding-body">
+      <p>Each route file independently implements SSE headers, heartbeats, and event writing. Copilot has its own <code>initSSE()</code> and <code>streamClaude()</code> helpers, but these aren't reused. Inconsistencies in heartbeat intervals and cleanup behavior across routes.</p>
+    </div>
+  </div>
+
+  <div class="finding arch" onclick="this.classList.toggle('open')">
+    <div class="finding-header">
+      <span class="finding-id">ARCH-05</span>
+      <span class="finding-title">~100 inline style objects across components instead of CSS classes</span>
+      <span class="engineer-tag frontend">Frontend</span>
+    </div>
+    <div class="finding-body">
+      <p>Chat.jsx (~30 inline styles), EscalationDetail.jsx (~20), Analytics.jsx (~15), and others define styles inline. This prevents hover states, media query overrides, and causes unnecessary re-renders (new object references each render). Inconsistent with the well-structured CSS design system in App.css.</p>
+    </div>
+  </div>
+
+  <!-- ===================== TEST COVERAGE ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--success-bg);color:var(--success);">T</div>
+    <h2>Test Coverage Analysis</h2>
+    <span class="count">Detailed breakdown</span>
+  </div>
+
+  <table class="coverage-table">
+    <thead>
+      <tr>
+        <th>Area</th>
+        <th>Endpoints / Functions</th>
+        <th>Test Coverage</th>
+        <th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Chat Orchestrator</td>
+        <td>single, fallback, parallel modes</td>
+        <td><span class="badge yes">7 tests</span></td>
+        <td>Good coverage of modes, timeout, failures</td>
+      </tr>
+      <tr>
+        <td>Parse Orchestrator</td>
+        <td>single, fallback, parallel, regex</td>
+        <td><span class="badge yes">7 tests</span></td>
+        <td>Good coverage including regex fallback</td>
+      </tr>
+      <tr>
+        <td>Integration Routes</td>
+        <td>templates, conversations, chat, parallel, screenshots</td>
+        <td><span class="badge yes">12 tests</span></td>
+        <td>Good breadth but some gaps</td>
+      </tr>
+      <tr>
+        <td>Escalation Parser</td>
+        <td>regex parsing, category classification</td>
+        <td><span class="badge yes">5 tests</span></td>
+        <td>Solid unit tests</td>
+      </tr>
+      <tr>
+        <td>Parse Validation</td>
+        <td>normalization, scoring</td>
+        <td><span class="badge yes">4 tests</span></td>
+        <td>Good coverage</td>
+      </tr>
+      <tr>
+        <td>Dev Route Helpers</td>
+        <td>event classification, text extraction</td>
+        <td><span class="badge yes">8 tests</span></td>
+        <td>Good unit coverage</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Analytics (7 endpoints)</td>
+        <td>summary, categories, volume, agents, etc.</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Complete blind spot</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Copilot (8 endpoints)</td>
+        <td>suggest, summarize, identify, draft, search, etc.</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Complete blind spot</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Playbook (7 endpoints)</td>
+        <td>list, get, update, delete, reload categories</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Complete blind spot (includes file write)</td>
+      </tr>
+      <tr>
+        <td style="color:var(--warning)">Provider Health</td>
+        <td>circuit breaker, failure tracking</td>
+        <td><span class="badge partial">Indirect only</span></td>
+        <td>Tested via orchestrator, no dedicated tests</td>
+      </tr>
+      <tr>
+        <td style="color:var(--warning)">Provider Registry</td>
+        <td>normalize, getProvider, getAlternate</td>
+        <td><span class="badge partial">Indirect only</span></td>
+        <td>No dedicated test file</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Conversation Fork/Export</td>
+        <td>fork, export endpoints</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Not tested</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Dev Mode Streaming</td>
+        <td>SSE + subprocess</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Complex to test, not attempted</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Image Handling</td>
+        <td>chat image upload + temp file</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>Not tested</td>
+      </tr>
+      <tr>
+        <td style="color:var(--critical)">Frontend Components</td>
+        <td>All React components</td>
+        <td><span class="badge no">0 tests</span></td>
+        <td>No React testing setup</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===================== UX / ACCESSIBILITY ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:rgba(108,140,255,0.1);color:var(--accent);">U</div>
+    <h2>UI/UX & Accessibility Issues</h2>
+    <span class="count">15 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-01</span><span class="finding-title">No loading indicator when selecting a conversation from sidebar</span></div>
+    <div class="finding-body"><p>Clicking a conversation triggers a fetch with no loading state shown. User sees nothing happen until fetch completes, which could take seconds.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-02</span><span class="finding-title">Empty state quick prompts ("Parse Escalation") confuse AI with no context</span></div>
+    <div class="finding-body"><p><span class="file-ref">Chat.jsx:453-462</span> — Quick prompts like "Parse Escalation" send parsing instructions with no content, confusing the AI. Should be disabled or replaced with contextual prompts when no conversation exists.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-03</span><span class="finding-title">No pagination — capped at 50 items with no "load more"</span></div>
+    <div class="finding-body"><p>EscalationDashboard and Sidebar fetch max 50 items. No pagination controls, no infinite scroll, no indication that more items exist.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-04</span><span class="finding-title">Two-column layouts not responsive on mobile/tablet</span></div>
+    <div class="finding-body"><p><span class="file-ref">EscalationDetail.jsx:180</span> — <code>gridTemplateColumns: '1fr 1fr'</code> hardcoded, won't collapse to single column on narrow screens. Content becomes unusable on mobile.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-05</span><span class="finding-title">No unsaved-changes warning when navigating away from PlaybookEditor</span></div>
+    <div class="finding-body"><p>PlaybookEditor tracks <code>hasUnsavedChanges</code> but never sets <code>beforeunload</code> or intercepts navigation. Users can lose edits by clicking a sidebar link.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-06</span><span class="finding-title">Template picker modal lacks focus trap and keyboard management</span></div>
+    <div class="finding-body"><p><span class="file-ref">Chat.jsx:885-980</span> — Tab key moves focus behind the overlay. No initial focus management. Not a proper <code>role="dialog"</code> with <code>aria-modal="true"</code>.</p></div>
+  </div>
+  <div class="finding ux" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">UX-07</span><span class="finding-title">No visual distinction between Quick Parse and AI Parse results</span></div>
+    <div class="finding-body"><p>Both parse paths show provider info in the parseMeta banner, but there's no clear quality indication to help users decide whether to re-parse with AI vs. accept the quick regex parse.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-01</span><span class="finding-title">No skip-to-content link for keyboard/screen reader navigation</span></div>
+    <div class="finding-body"><p>The app has a sidebar with multiple links but no "skip to main content" link, forcing keyboard users to tab through all navigation items on every page.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-02</span><span class="finding-title">Chat messages have no ARIA live region — new messages not announced</span></div>
+    <div class="finding-body"><p>New messages and streaming text updates are invisible to screen readers. The chat-messages div should have <code>aria-live="polite"</code>.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-03</span><span class="finding-title">Filter selects in EscalationDashboard missing labels</span></div>
+    <div class="finding-body"><p><span class="file-ref">EscalationDashboard.jsx:86-110</span> — Status and category <code>&lt;select&gt;</code> elements have no <code>aria-label</code> or associated <code>&lt;label&gt;</code>. Screen readers can't identify their purpose.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-04</span><span class="finding-title">Color-only differentiation for category badges</span></div>
+    <div class="finding-body"><p>Category badges use background color alone to differentiate categories. Users with color vision deficiency cannot distinguish between them. Should add icons or text patterns.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-05</span><span class="finding-title">Sidebar conversation items have button-within-button semantics</span></div>
+    <div class="finding-body"><p><span class="file-ref">Sidebar.jsx:169-275</span> — Each conversation item is <code>role="button"</code> with edit/delete buttons nested inside. This creates invalid ARIA semantics that confuse screen readers.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-06</span><span class="finding-title">No keyboard shortcut hints via <code>aria-keyshortcuts</code></span></div>
+    <div class="finding-body"><p>Ctrl+N and Enter shortcuts are described in visible text but not as <code>aria-keyshortcuts</code> attributes.</p></div>
+  </div>
+  <div class="finding a11y" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">A11Y-07</span><span class="finding-title">Template picker overlay not an accessible dialog</span></div>
+    <div class="finding-body"><p>Missing <code>role="dialog"</code> and <code>aria-modal="true"</code>. Compare with ConfirmModal which correctly uses these attributes.</p></div>
+  </div>
+
+  <!-- ===================== PERFORMANCE ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:rgba(20,184,166,0.1);color:#14b8a6;">P</div>
+    <h2>Performance Concerns</h2>
+    <span class="count">11 findings</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-01</span><span class="finding-title">Full conversation messages array loaded on every chat request</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p><span class="file-ref">server/src/routes/chat.js:140</span> — Every chat request loads the entire conversation document (all messages) with <code>Conversation.findById()</code>. For long conversations, this is hundreds of KB loaded, serialized to CLI, then re-saved.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-02</span><span class="finding-title">No cap on conversation message array growth — 16MB MongoDB doc limit</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p>Messages are an unbounded array in the conversation document. Hundreds of long messages could approach MongoDB's 16MB document size limit and cause write failures.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-03</span><span class="finding-title"><code>buildHashesFromPaths</code> reads all screenshot files synchronously</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p><span class="file-ref">server/src/routes/escalations.js:118-132</span> — Reads every existing screenshot file with <code>fs.readFileSync()</code>. For escalations with many screenshots, this blocks the event loop.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-04</span><span class="finding-title">Playbook loaded synchronously on first request — blocks event loop</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p><span class="file-ref">server/src/lib/playbook-loader.js:118-124</span> — First call to <code>getSystemPrompt()</code> synchronously reads all playbook files from disk. Blocks event loop during first request.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-05</span><span class="finding-title">Escalation text search query has no pagination cap on full-text scan</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p><span class="file-ref">server/src/routes/escalations.js:177-179</span> — <code>$text</code> search combined with sort and skip can cause full index scans on large datasets.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-06</span><span class="finding-title">Entire message list re-renders on every streaming chunk</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Every <code>setStreamingText</code> call re-renders the Chat component and all ChatMessage children (index keys prevent React from skipping any). For long conversations with streaming, this causes significant jank.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Wrap ChatMessage in <code>React.memo</code>. Use stable message keys.</div>
+    </div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-07</span><span class="finding-title">Markdown re-parsed on every streaming chunk (50+ times/second)</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p><span class="file-ref">ChatMessage.jsx:33-36</span> — <code>useMemo([role, content])</code> invalidates on every chunk during streaming, triggering full markdown reparse. For large responses, this is heavy computation every frame.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-08</span><span class="finding-title">Analytics fires 8 parallel API calls on every mount — no caching</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p><span class="file-ref">Analytics.jsx:46-70</span> — 8 parallel fetch calls on every mount. Navigate away and back = 8 more calls. No stale-while-revalidate or caching strategy.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-09</span><span class="finding-title">Large base64 images stored permanently in React state</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Base64-encoded images (several MB each) are kept in the messages array in React state. Over a long session with many image-attached messages, memory usage grows significantly with no cleanup.</p></div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-10</span><span class="finding-title">No code splitting / lazy loading — all views eagerly imported</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>All views imported eagerly in App.jsx. No <code>React.lazy</code> + <code>Suspense</code>. The initial bundle includes Analytics, PlaybookEditor, DevMode, etc. even if the user only needs Chat.</p>
+      <div class="fix"><strong>Recommended Fix:</strong> Add lazy loading for rarely-used views. Can cut initial bundle by 30-40%.</div>
+    </div>
+  </div>
+  <div class="finding perf" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">PERF-11</span><span class="finding-title">No request deduplication or caching across the API layer</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Sidebar polls every 10s, dashboard reloads on every filter change, analytics fires 8 calls on mount. Switching views and returning reloads everything from scratch. <code>http.js</code> is a bare passthrough with no caching layer.</p></div>
+  </div>
+
+  <!-- ===================== SPECIAL FEATURES ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--feature-bg);color:var(--feature);">+</div>
+    <h2>Special Features That Could Be Added</h2>
+    <span class="count">12 recommendations</span>
+    <button class="toggle-all" onclick="toggleSection(this)">Expand All</button>
+  </div>
+
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-01</span><span class="finding-title">Keyboard command palette (Ctrl+K) for quick actions</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>A command palette for: new conversation, search escalations, switch views, change provider, insert template. Would significantly speed up the escalation specialist workflow.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-02</span><span class="finding-title">Provider comparison dashboard for parallel mode quality analysis</span><span class="engineer-tag both">Both</span></div>
+    <div class="finding-body"><p>With parallel mode storing both provider responses, build a comparison view to evaluate which provider produces better QBO escalation guidance over time. Track acceptance rates per provider.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-03</span><span class="finding-title">Conversation summarization before trimming for long chats</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p>When conversations get long, use the AI to generate a summary of earlier messages, then trim originals. Preserves context while keeping token usage manageable.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-04</span><span class="finding-title">Toast notification system (CSS classes exist but no component)</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>The CSS defines <code>.toast-container</code> and <code>.toast</code> classes, but no toast component exists. Would replace scattered inline error/success messages with a consistent notification pattern.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-05</span><span class="finding-title">Auto-save drafts to localStorage</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Save the current input textarea content to localStorage so it survives page refreshes and accidental navigations. Critical for escalation specialists writing long messages.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-06</span><span class="finding-title">Escalation timeline view for workflow bottleneck identification</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Replace/supplement the table in EscalationDashboard with a timeline showing status transitions over time. Helps identify bottlenecks in the escalation workflow.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-07</span><span class="finding-title">Offline/connection status indicator</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Show a banner when the connection to the server is lost. Critical for escalation specialists who need to know if their work might not be saved.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-08</span><span class="finding-title">Webhook/notification on escalation status changes</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p>Notify when an escalation moves to "resolved" or "escalated-further". Valuable for team visibility even in a primarily single-user tool.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-09</span><span class="finding-title">Automated playbook gap detection from resolution data</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p>The copilot has a <code>playbook-check</code> endpoint. Automate it to run periodically and flag categories with low resolution rates, surfacing playbook content gaps.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-10</span><span class="finding-title">Provider cost tracking for parallel mode spend visibility</span><span class="engineer-tag backend">Backend</span></div>
+    <div class="finding-body"><p>The gap matrix mentions cost should be trackable. Adding estimated token counts per provider response enables cost visibility, especially important when parallel mode doubles API usage.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-11</span><span class="finding-title">Bulk operations on escalation dashboard (multi-select + batch actions)</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Add checkboxes for multi-select and bulk status changes (e.g., resolve all selected). Escalation specialists often process batches of similar cases.</p></div>
+  </div>
+  <div class="finding feature" onclick="this.classList.toggle('open')">
+    <div class="finding-header"><span class="finding-id">FEAT-12</span><span class="finding-title">Provider health indicator next to provider selectors in UI</span><span class="engineer-tag frontend">Frontend</span></div>
+    <div class="finding-body"><p>Show a small health dot (green/yellow/red) next to provider selectors based on <code>GET /api/health/providers</code>. Helps users avoid selecting a degraded provider.</p></div>
+  </div>
+
+  <!-- ===================== PRIORITY MATRIX ===================== -->
+  <div class="section-header">
+    <div class="icon" style="background:var(--surface-3);color:var(--text-bright);">!</div>
+    <h2>Recommended Fix Priority</h2>
+  </div>
+
+  <div class="priority-matrix">
+    <div class="priority-box p1">
+      <h3>P0 — Fix Immediately (Security/Data)</h3>
+      <ul>
+        <li>CRIT-01: Remove <code>shell: true</code> from all spawn calls</li>
+        <li>CRIT-02: Escape regex in template rendering</li>
+        <li>CRIT-03: Escape user input in MongoDB $regex</li>
+        <li>BUG-11: Sanitize markdown link URLs (XSS)</li>
+        <li>SEC-02: Exclude .env from dev file-read endpoint</li>
+        <li>SEC-05: Add global Express JSON error handler</li>
+      </ul>
+    </div>
+    <div class="priority-box p2">
+      <h3>P1 — Fix This Sprint (Stability)</h3>
+      <ul>
+        <li>CRIT-07: Add abort/cleanup on hook unmount</li>
+        <li>CRIT-08: Use stable message keys (not array index)</li>
+        <li>CRIT-06: Stabilize motionProps with useMemo</li>
+        <li>BUG-01: Use atomic $push for conversation saves</li>
+        <li>BUG-02: Close HTTP server on graceful shutdown</li>
+        <li>BUG-15: try/catch in onDone SSE callbacks</li>
+        <li>CRIT-05: Remove dead parseEscalation from chatApi.js</li>
+      </ul>
+    </div>
+    <div class="priority-box p3">
+      <h3>P2 — Fix Next Sprint (Quality)</h3>
+      <ul>
+        <li>CRIT-04: Route copilot through orchestrator</li>
+        <li>CRIT-09: Extract shared streaming hook</li>
+        <li>ARCH-01: Deduplicate chat POST/retry handlers</li>
+        <li>ARCH-02: Extract shared utility functions</li>
+        <li>OM-02: Implement feature flags</li>
+        <li>OM-04: Integrate health into routing decisions</li>
+        <li>BUG-09: Add search debouncing</li>
+        <li>PERF-06: Add React.memo to ChatMessage</li>
+      </ul>
+    </div>
+    <div class="priority-box p4">
+      <h3>P3 — Backlog (Enhancement)</h3>
+      <ul>
+        <li>OM-07: Add provider health UI surface</li>
+        <li>PERF-10: Add code splitting / lazy loading</li>
+        <li>ARCH-05: Move inline styles to CSS classes</li>
+        <li>UX-03: Add pagination for lists</li>
+        <li>A11Y-01 to A11Y-07: Accessibility improvements</li>
+        <li>FEAT-01 to FEAT-12: New features</li>
+        <li>Full test coverage expansion</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Final summary -->
+  <div class="discussion" style="margin-top:32px;">
+    <h3>Final Assessment</h3>
+    <p><span class="speaker be">Backend Eng:</span> The server architecture is fundamentally sound. Clean route separation, good model design, and the orchestrator pattern is the right abstraction. The critical issues are all fixable in a day — shell injection removal, regex escaping, and wiring copilot through the orchestrator. The biggest structural debt is the code duplication between chat POST and retry handlers.</p>
+    <p><span class="speaker fe">Frontend Eng:</span> The "Warm Authority" design system is well-crafted and the component architecture is logical. The critical fixes (motionProps, message keys, hook cleanup) are straightforward React patterns. The biggest win would be extracting the shared streaming hook — it eliminates the largest maintenance risk and makes both hooks more testable.</p>
+    <p><span class="speaker be">Backend Eng:</span> Agreed. For Phase 2-4 readiness: the provider registry and orchestrator patterns are solid foundations. But before proceeding, we need feature flags (OM-02), health integration into routing (OM-04), and the copilot routing fix (CRIT-04). Without those, the "provider independence" claim has gaps.</p>
+    <p><span class="speaker fe">Frontend Eng:</span> On the frontend, the parallel mode UI that was implemented ahead of Phase 4 actually works well — but it needs the proper test harness. I'd prioritize the P0 security fixes, then the P1 stability fixes, then the streaming hook extraction. That sequence gives the biggest reliability improvement with the least risk.</p>
+    <p><strong>Overall Rating: 7/10</strong> — Solid foundation with good patterns, but the security issues (shell injection, ReDoS) and stability bugs (memory leaks, race conditions) must be resolved before this is production-ready. The Phase 1 plan was 80% delivered; the remaining 20% (feature flags, health integration, observability) are necessary for the provider independence guarantee to hold.</p>
+  </div>
+
+</div>
+
+<script>
+function toggleSection(btn) {
+  const section = btn.closest('.section-header');
+  let el = section.nextElementSibling;
+  const isExpanding = btn.textContent === 'Expand All';
+
+  while (el && !el.classList.contains('section-header')) {
+    if (el.classList.contains('finding')) {
+      if (isExpanding) {
+        el.classList.add('open');
+      } else {
+        el.classList.remove('open');
+      }
+    }
+    el = el.nextElementSibling;
+  }
+  btn.textContent = isExpanding ? 'Collapse All' : 'Expand All';
+}
+
+// Click-to-expand is handled by inline onclick on .finding elements
+</script>
+
+</body>
+</html>

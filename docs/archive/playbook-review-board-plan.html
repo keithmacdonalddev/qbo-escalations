@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playbook Review Board — Synthesized Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf9f7; --bg-surface: #ffffff; --bg-elevated: #ffffff; --bg-recessed: #f3f1ee; --bg-code: #f8f6f3;
+    --ink: #1a1a1a; --ink-secondary: #5a5752; --ink-muted: #8a857e;
+    --line: #e5e2dc; --line-light: #f0ede8;
+    --accent: #1a7a6d; --accent-light: #e6f5f2; --accent-glow: rgba(26,122,109,0.08);
+    --danger: #c0392b; --danger-light: #fdf0ee; --danger-glow: rgba(192,57,43,0.08);
+    --warning: #d4940a; --warning-light: #fef9e8; --warning-glow: rgba(212,148,10,0.08);
+    --success: #1a7a6d; --success-light: #e6f5f2;
+    --info: #2a6987; --info-light: #e8f4f8; --info-glow: rgba(42,105,135,0.08);
+    --purple: #5e3d8a; --purple-light: #f3eef9; --purple-glow: rgba(94,61,138,0.08);
+    --amber: #b8860b; --amber-light: #fef6e0;
+    --font-body: 'DM Sans', system-ui, sans-serif; --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-10:40px; --sp-12:48px; --sp-16:64px;
+    --radius-sm:6px; --radius-md:10px; --radius-lg:16px;
+    --shadow-sm:0 1px 3px rgba(0,0,0,0.06); --shadow-md:0 4px 12px rgba(0,0,0,0.08); --shadow-lg:0 8px 24px rgba(0,0,0,0.1);
+  }
+  @media(prefers-color-scheme:dark){:root{
+    --bg:#1a1917; --bg-surface:#242320; --bg-elevated:#2d2c28; --bg-recessed:#151413; --bg-code:#1e1d1b;
+    --ink:#e8e4dc; --ink-secondary:#a8a49c; --ink-muted:#706c64;
+    --line:#3a3835; --line-light:#2a2826;
+    --accent:#4ec9b5; --accent-light:rgba(78,201,181,0.1); --accent-glow:rgba(78,201,181,0.06);
+    --danger:#e74c3c; --danger-light:rgba(231,76,60,0.1); --danger-glow:rgba(231,76,60,0.06);
+    --warning:#f0b429; --warning-light:rgba(240,180,41,0.1); --warning-glow:rgba(240,180,41,0.06);
+    --success:#4ec9b5; --success-light:rgba(78,201,181,0.1);
+    --info:#7cbcd4; --info-light:rgba(124,188,212,0.1); --info-glow:rgba(124,188,212,0.06);
+    --purple:#c5a8e8; --purple-light:rgba(197,168,232,0.1); --purple-glow:rgba(197,168,232,0.06);
+    --amber:#f0b429; --amber-light:rgba(240,180,41,0.1);
+    --shadow-sm:0 1px 3px rgba(0,0,0,0.2); --shadow-md:0 4px 12px rgba(0,0,0,0.3); --shadow-lg:0 8px 24px rgba(0,0,0,0.35);
+  }}
+  *{box-sizing:border-box;margin:0;padding:0} html{scroll-behavior:smooth}
+  body{font-family:var(--font-body);color:var(--ink);background:var(--bg);line-height:1.65;font-size:15px;-webkit-font-smoothing:antialiased}
+  .page{display:grid;grid-template-columns:250px 1fr;min-height:100vh}
+  @media(max-width:900px){.page{grid-template-columns:1fr} .toc{display:none}}
+
+  .toc{position:sticky;top:0;height:100vh;overflow-y:auto;background:var(--bg-surface);border-right:1px solid var(--line);padding:var(--sp-8) var(--sp-4);z-index:10}
+  .toc h3{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--ink-muted);margin-bottom:var(--sp-4);font-weight:600}
+  .toc a{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);margin-bottom:2px;border-radius:var(--radius-sm);color:var(--ink-secondary);text-decoration:none;font-size:12.5px;font-weight:500;transition:all 0.2s}
+  .toc a:hover,.toc a.active{background:var(--accent-light);color:var(--accent)}
+  .toc a.active{font-weight:600}
+  .toc .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+  .main{max-width:980px;margin:0 auto;padding:var(--sp-12) var(--sp-8)}
+  .hdr{margin-bottom:var(--sp-12);animation:fadeUp .6s ease-out}
+  .hdr h1{font-size:30px;font-weight:700;letter-spacing:-.5px;margin-bottom:var(--sp-3)}
+  .hdr .sub{font-size:15px;color:var(--ink-secondary);max-width:700px}
+  .meta{display:flex;gap:var(--sp-3);margin-top:var(--sp-4);flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:var(--sp-2);padding:2px 10px;border-radius:100px;font-size:11px;font-family:var(--font-mono);font-weight:600}
+  .chip-info{background:var(--info-light);color:var(--info)} .chip-purple{background:var(--purple-light);color:var(--purple)} .chip-danger{background:var(--danger-light);color:var(--danger)} .chip-accent{background:var(--accent-light);color:var(--accent)}
+
+  .sec{margin-bottom:var(--sp-12)}
+  .sec-hdr{display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-6);padding-bottom:var(--sp-3);border-bottom:2px solid var(--line)}
+  .sec-hdr .d{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+  .sec-hdr h2{font-size:19px;font-weight:700;letter-spacing:-.3px}
+  .sec-hdr .n{font-family:var(--font-mono);font-size:12px;color:var(--ink-muted);font-weight:600}
+  .d-danger{background:var(--danger)} .d-warning{background:var(--warning)} .d-success{background:var(--success)} .d-info{background:var(--info)} .d-accent{background:var(--accent)} .d-purple{background:var(--purple)} .d-amber{background:var(--amber)}
+
+  .card{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-6);margin-bottom:var(--sp-4);box-shadow:var(--shadow-sm)}
+  .card-el{box-shadow:var(--shadow-md)}
+  .card h3{font-size:15px;font-weight:600;margin-bottom:var(--sp-3)}
+  .card p,.card li{color:var(--ink-secondary);font-size:14px;line-height:1.6}
+  .card ul,.card ol{padding-left:var(--sp-5);margin-top:var(--sp-2)} .card li{margin-bottom:var(--sp-1)}
+
+  .tbl-wrap{overflow-x:auto;margin:var(--sp-4) 0;border-radius:var(--radius-md);border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead{background:var(--bg-recessed)}
+  th{text-align:left;padding:var(--sp-3) var(--sp-4);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--ink-muted);border-bottom:1px solid var(--line);white-space:nowrap}
+  td{padding:var(--sp-3) var(--sp-4);border-bottom:1px solid var(--line-light);color:var(--ink-secondary)}
+  tr:last-child td{border-bottom:none} tr:hover{background:var(--accent-glow)}
+
+  .badge{display:inline-flex;padding:2px 10px;border-radius:100px;font-size:11px;font-weight:600;font-family:var(--font-mono);white-space:nowrap}
+  .b-done{background:var(--success-light);color:var(--success)} .b-partial{background:var(--warning-light);color:var(--warning)} .b-missing{background:var(--danger-light);color:var(--danger)} .b-info{background:var(--info-light);color:var(--info)}
+  .b-crit{background:var(--danger-light);color:var(--danger);border:1px solid var(--danger)} .b-high{background:var(--warning-light);color:var(--warning);border:1px solid var(--warning)}
+
+  .callout{border-radius:var(--radius-md);padding:var(--sp-4) var(--sp-5);margin:var(--sp-4) 0;font-size:14px;display:flex;gap:var(--sp-3);align-items:flex-start}
+  .c-danger{background:var(--danger-light);border-left:3px solid var(--danger)} .c-warning{background:var(--warning-light);border-left:3px solid var(--warning)} .c-info{background:var(--info-light);border-left:3px solid var(--info)} .c-success{background:var(--success-light);border-left:3px solid var(--success)}
+  .c-icon{font-size:16px;flex-shrink:0;line-height:1.5}
+
+  code{font-family:var(--font-mono);font-size:12px;background:var(--bg-recessed);padding:1px 5px;border-radius:3px;color:var(--accent)}
+
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-4)}
+  .three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-4)}
+  @media(max-width:700px){.two-col,.three-col{grid-template-columns:1fr}}
+
+  .verdict{background:linear-gradient(135deg,var(--bg-elevated),var(--bg-surface));border:2px solid var(--line);border-radius:var(--radius-lg);padding:var(--sp-8);margin:var(--sp-6) 0;position:relative;overflow:hidden}
+  .verdict::before{content:'';position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,var(--danger),var(--warning),var(--accent))}
+  .verdict h3{font-size:18px;font-weight:700;margin-bottom:var(--sp-3)} .verdict p{color:var(--ink-secondary);font-size:14px}
+
+  .reviewer{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-5);position:relative;overflow:hidden}
+  .reviewer::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+  .reviewer.r-backend::before{background:var(--purple)} .reviewer.r-ux::before{background:var(--accent)} .reviewer.r-domain::before{background:var(--amber)}
+  .reviewer h4{font-size:14px;font-weight:600;margin-bottom:var(--sp-2)} .reviewer .role{font-size:11px;font-family:var(--font-mono);color:var(--ink-muted);margin-bottom:var(--sp-3)}
+
+  .bar-row{display:flex;align-items:center;gap:var(--sp-3);margin-bottom:var(--sp-3)}
+  .bar-label{font-size:13px;font-weight:500;width:200px;flex-shrink:0}
+  .bar-track{flex:1;height:22px;background:var(--bg-recessed);border-radius:var(--radius-sm);overflow:hidden}
+  .bar-fill{height:100%;border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:flex-end;padding-right:var(--sp-2);font-family:var(--font-mono);font-size:11px;font-weight:600;color:white}
+  .bar-green{background:var(--success)} .bar-blue{background:var(--info)} .bar-yellow{background:var(--warning)} .bar-red{background:var(--danger)}
+
+  .phase-card{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-6);margin-bottom:var(--sp-4)}
+  .phase-card h3{display:flex;align-items:center;gap:var(--sp-3)}
+  .phase-num{font-family:var(--font-mono);font-size:12px;font-weight:700;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;flex-shrink:0;color:white}
+  .pn-1{background:var(--danger)} .pn-2{background:var(--warning)} .pn-3{background:var(--info)} .pn-4{background:var(--accent)} .pn-5{background:var(--purple)} .pn-6{background:var(--amber)}
+
+  .checklist{list-style:none;padding:0} .checklist li{display:flex;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-2) 0;font-size:14px;color:var(--ink-secondary)}
+  .ck{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;margin-top:2px}
+  .ck-todo{background:var(--bg-recessed);color:var(--ink-muted);border:1px solid var(--line)}
+
+  .innovation-card{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-5);position:relative;overflow:hidden}
+  .innovation-card::before{content:'';position:absolute;top:0;left:0;bottom:0;width:3px}
+  .innovation-card.ic-1::before{background:var(--accent)} .innovation-card.ic-2::before{background:var(--purple)} .innovation-card.ic-3::before{background:var(--info)} .innovation-card.ic-4::before{background:var(--warning)} .innovation-card.ic-5::before{background:var(--danger)} .innovation-card.ic-6::before{background:var(--amber)}
+  .innovation-card h4{font-size:14px;font-weight:600;margin-bottom:var(--sp-2)}
+  .innovation-card p{font-size:13px;color:var(--ink-secondary)}
+
+  .stat-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp-3);margin:var(--sp-6) 0}
+  @media(max-width:700px){.stat-strip{grid-template-columns:repeat(2,1fr)}}
+  .stat-box{background:var(--bg-surface);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-4);text-align:center}
+  .stat-v{font-family:var(--font-mono);font-size:22px;font-weight:700;color:var(--accent)} .stat-v.bad{color:var(--danger)} .stat-v.mid{color:var(--warning)}
+  .stat-l{font-size:11px;color:var(--ink-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:var(--sp-1)}
+
+  .depth-meter{display:flex;flex-direction:column;gap:2px}
+  .depth-row{display:grid;grid-template-columns:130px 1fr 70px;gap:var(--sp-3);align-items:center;padding:var(--sp-2) var(--sp-3);border-radius:var(--radius-sm)}
+  .depth-row:nth-child(odd){background:var(--bg-recessed)}
+  .depth-label{font-family:var(--font-mono);font-size:12px;font-weight:500;color:var(--ink-muted)}
+  .depth-bar-track{height:16px;background:var(--line-light);border-radius:3px;overflow:hidden}
+  .depth-bar-fill{height:100%;border-radius:3px;transition:width 1s ease-out}
+  .depth-pct{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--ink-muted);text-align:right}
+
+  .kb-expansion{background:var(--bg-code);border:1px solid var(--line);border-radius:var(--radius-md);padding:var(--sp-5);font-size:13px;line-height:1.7}
+  .kb-expansion .topic{color:var(--accent);font-weight:600} .kb-expansion .missing{color:var(--danger);font-weight:500} .kb-expansion .has{color:var(--success);font-weight:500}
+
+  @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes fadeScale{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+  .fade-up{animation:fadeUp .5s ease-out both} .fade-sc{animation:fadeScale .4s ease-out both}
+  .d1{animation-delay:.1s} .d2{animation-delay:.2s} .d3{animation-delay:.3s} .d4{animation-delay:.4s} .d5{animation-delay:.5s} .d6{animation-delay:.6s} .d7{animation-delay:.7s} .d8{animation-delay:.8s} .d9{animation-delay:.9s} .d10{animation-delay:1s}
+  @media(prefers-reduced-motion:reduce){.fade-up,.fade-sc{animation:none}}
+</style>
+</head>
+<body>
+<div class="page">
+
+<nav class="toc" id="toc">
+  <h3>Review Board</h3>
+  <a href="#board"><span class="dot" style="background:var(--purple)"></span> The Board</a>
+  <a href="#verdict"><span class="dot" style="background:var(--danger)"></span> Verdict</a>
+  <a href="#depth"><span class="dot" style="background:var(--warning)"></span> Knowledge Depth</a>
+  <a href="#kb-expansion"><span class="dot" style="background:var(--danger)"></span> Content Gaps</a>
+  <a href="#backend"><span class="dot" style="background:var(--purple)"></span> Backend Findings</a>
+  <a href="#ux"><span class="dot" style="background:var(--accent)"></span> UX Findings</a>
+  <a href="#search"><span class="dot" style="background:var(--info)"></span> Search & Indexing</a>
+  <a href="#innovations"><span class="dot" style="background:var(--amber)"></span> Innovations</a>
+  <a href="#roadmap"><span class="dot" style="background:var(--accent)"></span> Build Roadmap</a>
+  <a href="#content-plan"><span class="dot" style="background:var(--danger)"></span> Content Expansion</a>
+</nav>
+
+<main class="main">
+
+<!-- HEADER -->
+<header class="hdr fade-up">
+  <h1>Playbook Review Board — Synthesized Plan</h1>
+  <p class="sub">Three senior reviewers audited the Playbook feature from backend architecture, UX design, and QBO domain expertise perspectives. This document synthesizes their findings into a unified assessment and phased build roadmap.</p>
+  <div class="meta">
+    <span class="chip chip-info">2026-02-27</span>
+    <span class="chip chip-purple">3 Senior Reviewers</span>
+    <span class="chip chip-danger">Current: Grade School Level</span>
+    <span class="chip chip-accent">Target: Expert Level</span>
+  </div>
+</header>
+
+<!-- SECTION: THE BOARD -->
+<section class="sec fade-up d1" id="board">
+  <div class="sec-hdr"><span class="d d-purple"></span><span class="n">01</span><h2>The Review Board</h2></div>
+  <div class="three-col">
+    <div class="reviewer r-backend">
+      <h4>Backend Architect</h4>
+      <div class="role">SENIOR BACKEND ENGINEER</div>
+      <p style="font-size:13px;color:var(--ink-secondary)">Reviewed all server code: routes, loader, context builder, Claude subprocess, copilot integration. Assessed search/indexing, scalability, API design, and data architecture for a KB that must grow 10-50x.</p>
+    </div>
+    <div class="reviewer r-ux">
+      <h4>UX Designer</h4>
+      <div class="role">SENIOR PRODUCT/UX DESIGNER</div>
+      <p style="font-size:13px;color:var(--ink-secondary)">Reviewed PlaybookEditor, API client, routing, styles, design system compliance. Compared to best-in-class KB tools. Assessed authoring workflow, navigation, discovery, and both AI and human consumer experiences.</p>
+    </div>
+    <div class="reviewer r-domain">
+      <h4>Domain Expert</h4>
+      <div class="role">QBO &amp; ACCOUNTING SPECIALIST</div>
+      <p style="font-size:13px;color:var(--ink-secondary)">Read all 22 playbook files line by line. Audited content depth per category, identified specific missing knowledge across accounting principles, QBO product features, escalation patterns, and institutional expertise.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: VERDICT -->
+<section class="sec fade-up d2" id="verdict">
+  <div class="sec-hdr"><span class="d d-danger"></span><span class="n">02</span><h2>Unanimous Verdict</h2></div>
+  <div class="verdict">
+    <h3>The Playbook is a Skeleton Wearing the Label "Knowledge Base"</h3>
+    <p>All three reviewers independently reached the same conclusion: the playbook has <strong>good structural bones</strong> (consistent category format, working inference pipeline, functional CRUD) but <strong>the content is a surface-level cheat sheet</strong> — the kind you'd give a new hire on day one, not what a senior escalation specialist relies on. The editor is a textarea wrapper that can only reach 10 of 22 files. The search exists in backend code but is invisible to users. There are zero tests. The system is architecturally sound but content-starved, management-crippled, and untested.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat-box"><div class="stat-v bad">~140</div><div class="stat-l">Avg Lines Per Category</div></div>
+    <div class="stat-box"><div class="stat-v bad">10/22</div><div class="stat-l">Files Editable In UI</div></div>
+    <div class="stat-box"><div class="stat-v bad">0</div><div class="stat-l">Automated Tests</div></div>
+    <div class="stat-box"><div class="stat-v bad">0</div><div class="stat-l">Known Bugs Documented</div></div>
+  </div>
+</section>
+
+<!-- SECTION: KNOWLEDGE DEPTH -->
+<section class="sec fade-up d3" id="depth">
+  <div class="sec-hdr"><span class="d d-warning"></span><span class="n">03</span><h2>Knowledge Depth Assessment</h2></div>
+
+  <div class="card card-el">
+    <h3>Category-by-Category Depth Grading</h3>
+    <p style="margin-bottom:var(--sp-4)">The Domain Expert graded each category from Grade School (shallow bullet lists) through Expert (institutional memory). Colors indicate the gap: red = barely started, yellow = partial, green = adequate.</p>
+
+    <div class="depth-meter">
+      <div class="depth-row"><span class="depth-label">Payroll</span><div class="depth-bar-track"><div class="depth-bar-fill bar-red" style="width:15%"></div></div><span class="depth-pct" style="color:var(--danger)">15%</span></div>
+      <div class="depth-row"><span class="depth-label">Bank Feeds</span><div class="depth-bar-track"><div class="depth-bar-fill bar-red" style="width:18%"></div></div><span class="depth-pct" style="color:var(--danger)">18%</span></div>
+      <div class="depth-row"><span class="depth-label">Reconciliation</span><div class="depth-bar-track"><div class="depth-bar-fill bar-red" style="width:14%"></div></div><span class="depth-pct" style="color:var(--danger)">14%</span></div>
+      <div class="depth-row"><span class="depth-label">Permissions</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:22%"></div></div><span class="depth-pct" style="color:var(--warning)">22%</span></div>
+      <div class="depth-row"><span class="depth-label">Billing</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:20%"></div></div><span class="depth-pct" style="color:var(--warning)">20%</span></div>
+      <div class="depth-row"><span class="depth-label">Tax</span><div class="depth-bar-track"><div class="depth-bar-fill bar-red" style="width:12%"></div></div><span class="depth-pct" style="color:var(--danger)">12%</span></div>
+      <div class="depth-row"><span class="depth-label">Invoicing</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:20%"></div></div><span class="depth-pct" style="color:var(--warning)">20%</span></div>
+      <div class="depth-row"><span class="depth-label">Reports</span><div class="depth-bar-track"><div class="depth-bar-fill bar-red" style="width:16%"></div></div><span class="depth-pct" style="color:var(--danger)">16%</span></div>
+      <div class="depth-row"><span class="depth-label">Technical</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:25%"></div></div><span class="depth-pct" style="color:var(--danger)">25%</span></div>
+      <div class="depth-row"><span class="depth-label">Templates</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:30%"></div></div><span class="depth-pct" style="color:var(--warning)">30%</span></div>
+      <div class="depth-row"><span class="depth-label">System Prompt</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:35%"></div></div><span class="depth-pct" style="color:var(--warning)">35%</span></div>
+      <div class="depth-row"><span class="depth-label">Reference Docs</span><div class="depth-bar-track"><div class="depth-bar-fill bar-yellow" style="width:28%"></div></div><span class="depth-pct" style="color:var(--warning)">28%</span></div>
+    </div>
+  </div>
+
+  <div class="callout c-danger">
+    <span class="c-icon">!</span>
+    <div><strong>The math:</strong> Average category has ~140 lines. Expert-level requires 700-1500+ lines per category with deep decision trees, exact QBO UI paths, version-specific behaviors, accounting principle explanations, real-world edge cases, and institutional knowledge. Current content is <strong>12-25% of target depth</strong>.</div>
+  </div>
+</section>
+
+<!-- SECTION: CONTENT GAPS -->
+<section class="sec fade-up d4" id="kb-expansion">
+  <div class="sec-hdr"><span class="d d-danger"></span><span class="n">04</span><h2>Domain Expert — Specific Content Gaps</h2></div>
+
+  <div class="card card-el">
+    <h3>Payroll — Missing Expert Knowledge</h3>
+    <ul>
+      <li><strong>Garnishment processing</strong> — federal tax levies, child support orders, creditor garnishments, priority rules when multiple garnishments exist, state-specific caps, employer liability for wrong calculations</li>
+      <li><strong>Retroactive adjustments</strong> — voiding/deleting vs adjusting prior-period paychecks, amended W-2 generation (W-2c), impact on 941 quarterly filing, SUI rate recalculation triggers</li>
+      <li><strong>Multi-state payroll</strong> — nexus rules, reciprocity agreements (e.g., PA/NJ, VA/DC/MD), SIT withholding for remote workers, state unemployment registration requirements, local tax jurisdictions (OH cities, PA LST)</li>
+      <li><strong>Year-end procedures</strong> — W-2/1099 deadline matrix, e-file vs paper thresholds, 940 reconciliation, state W-2 filing requirements, correction windows, employer penalties by violation type</li>
+      <li><strong>Payroll tax deep-dive</strong> — FICA ceiling mechanics, FUTA credit reduction states, SUI rate factors, tip credit calculations, S-Corp officer reasonable compensation rules, health insurance premium pre-tax handling</li>
+      <li><strong>QBO Payroll tier specifics</strong> — Core vs Premium vs Elite feature matrix with exact UI differences, auto-payroll eligibility rules, next-day vs 4-day direct deposit by tier, HR features per tier, time tracking integration per tier</li>
+    </ul>
+  </div>
+
+  <div class="card card-el">
+    <h3>Tax — Missing Expert Knowledge</h3>
+    <ul>
+      <li><strong>Sales tax deep-dive</strong> — AST (Automated Sales Tax) algorithm explanation, economic nexus thresholds by state, marketplace facilitator rules, tax-exempt certificate management, exempt org handling, use tax scenarios</li>
+      <li><strong>Multi-state sales tax</strong> — Origin vs destination sourcing by state, home rule states (CO, AL, LA, AK), district/county/city rate stacking, sourcing for digital goods vs physical goods vs services</li>
+      <li><strong>1099 compliance</strong> — $600 threshold rules, backup withholding (24% for missing TIN), TIN matching process, 1099-NEC vs 1099-MISC determination, electronic filing thresholds, correction procedures</li>
+      <li><strong>Tax reporting</strong> — Profit & Loss by tax line, Schedule C mapping, accrual-to-cash conversion for tax prep, depreciation (Section 179, MACRS) interaction with QBO Fixed Asset Manager, capitalization thresholds</li>
+      <li><strong>International considerations</strong> — VAT/GST for QBO international, reverse charge mechanisms, MOSS/OSS for digital services to EU, currency conversion for tax reporting</li>
+    </ul>
+  </div>
+
+  <div class="card card-el">
+    <h3>Reconciliation — Missing Expert Knowledge</h3>
+    <ul>
+      <li><strong>Accounting fundamentals</strong> — Double-entry bookkeeping theory behind reconciliation, why debits increase asset accounts, bank rec vs book rec distinction, outstanding items aging analysis</li>
+      <li><strong>Complex reconciliation</strong> — Credit card reconciliation (statement vs cleared balance), loan amortization reconciliation (principal vs interest split), petty cash reconciliation, payroll liability reconciliation, trust account reconciliation (legal/real estate)</li>
+      <li><strong>Forensic techniques</strong> — Finding transposition errors (divisible by 9), slide errors (divisible by 9 with specific patterns), duplicate detection methods, unrecorded bank fees/charges, stale checks policy, NSF check handling</li>
+      <li><strong>Period close procedures</strong> — Month-end close checklist, year-end close with adjusting entries, closing date password implications, post-closing adjustments, audit trail for period locks</li>
+      <li><strong>Multi-currency reconciliation</strong> — Unrealized gain/loss on foreign currency accounts, revaluation journal entries, exchange rate source configuration, home currency adjustment entries</li>
+    </ul>
+  </div>
+
+  <div class="card card-el">
+    <h3>Reports — Missing Expert Knowledge</h3>
+    <ul>
+      <li><strong>Financial statement analysis</strong> — Balance Sheet equation verification (A = L + E), common-size analysis, horizontal analysis (period comparison), vertical analysis, ratio analysis (current ratio, quick ratio, debt-to-equity)</li>
+      <li><strong>Cash vs accrual implications</strong> — Why P&L differs dramatically between bases, prepaid expense recognition, deferred revenue handling, accrued liabilities, when to use which for tax vs management vs investor</li>
+      <li><strong>Class/Location reporting</strong> — Multi-dimensional reporting setup, class vs location use cases, sub-class hierarchies, unassigned transaction identification, class P&L vs location P&L, elimination entries for inter-class transactions</li>
+      <li><strong>Custom report building</strong> — Filtering/grouping/sorting combinations, memorized reports, scheduled email reports, dashboard widget configuration, Excel export formatting, management report packets</li>
+      <li><strong>Budgets</strong> — Budget vs actual reporting, budget creation methods (manual, prior year, import), variance analysis, budget alerts, departmental budgets via class</li>
+    </ul>
+  </div>
+
+  <div class="card card-el">
+    <h3>Cross-Cutting Expert Knowledge — Not In Any Category</h3>
+    <ul>
+      <li><strong>Chart of Accounts design</strong> — Best practices, numbering conventions, sub-account vs class debate, when to create accounts vs use classes/locations, industry-specific CoA templates, migration considerations</li>
+      <li><strong>Journal entries</strong> — When to use JEs vs transactions, recurring JEs, adjusting entries for accruals/deferrals, reversing entries, reclassification entries, inter-company elimination entries</li>
+      <li><strong>QBO Advanced features</strong> — Custom roles, workflow approvals, smart reporting (Fathom), batch transactions, revenue recognition, enhanced custom fields, conditional smart rules</li>
+      <li><strong>Integration ecosystem</strong> — Top 50 app connection issues, OAuth token refresh failures, sync conflict resolution, Zapier/Make automation patterns, API rate limit troubleshooting, data mapping errors</li>
+      <li><strong>Data migration</strong> — QBD-to-QBO conversion issues, CSV import formatting, IIF file handling, opening balance equity cleanup, historical transaction import strategies, trial balance import</li>
+      <li><strong>Mobile app troubleshooting</strong> — QBO Mobile sync failures, receipt capture OCR accuracy, mileage tracking, mobile-specific permission differences, offline transaction handling, push notification configuration</li>
+      <li><strong>Customer psychology</strong> — De-escalation for angry accountants (their livelihood depends on this), fee-related frustration patterns, "my data is wrong" panic response, end-of-quarter/year pressure awareness, communicating with non-technical business owners vs CPAs</li>
+      <li><strong>Seasonal pattern awareness</strong> — January (W-2/1099 rush, new year payroll setup), April (tax filing surge, extension questions), quarterly 941/940 deadlines, month-end close patterns, Black Friday/holiday invoicing surges, year-end close and adjusting entries</li>
+    </ul>
+  </div>
+
+  <div class="callout c-warning">
+    <span class="c-icon">!</span>
+    <div><strong>Scale of the gap:</strong> The domain expert identified <strong>100+ specific missing topics</strong> across all categories. Current content would need to grow from ~2,600 lines to ~15,000-25,000 lines to reach expert level. This is not padding — each missing topic represents real support scenarios where the current playbook leaves the AI and human agents guessing.</div>
+  </div>
+</section>
+
+<!-- SECTION: BACKEND -->
+<section class="sec fade-up d5" id="backend">
+  <div class="sec-hdr"><span class="d d-purple"></span><span class="n">05</span><h2>Backend Architect — Critical Findings</h2></div>
+
+  <div class="two-col">
+    <div class="card">
+      <h3>Architecture Strengths</h3>
+      <ul>
+        <li><strong>Inference pipeline is solid</strong> — Loader → context builder → Claude subprocess → copilot is well-designed with token budgeting and 3 knowledge modes</li>
+        <li><strong>Semantic chunking</strong> — 1400-char paragraph-aware chunks with unique IDs</li>
+        <li><strong>File watching</strong> — Changes auto-reload without server restart</li>
+        <li><strong>Context builder flexibility</strong> — full-playbook, retrieval-only, core+retrieval modes with multi-stage budget enforcement</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Architecture Failures</h3>
+      <ul>
+        <li><strong>Won't scale</strong> — Entire playbook loaded into memory. At 25K lines (~150KB), system prompt becomes 37K+ tokens per request. No chunked retrieval strategy for large KB</li>
+        <li><strong>Lexical search only</strong> — No stemming, no synonyms, no fuzzy matching. "payment" won't match "payments". No semantic understanding</li>
+        <li><strong>No content versioning</strong> — Files on disk, no history, no rollback, no audit trail of who changed what</li>
+        <li><strong>13 of 22 files unreachable via API</strong> — Templates, system-prompt, and reference docs have no endpoints</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="card card-el">
+    <h3>Backend Architect's Required Changes</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Change</th><th>Why</th><th>Priority</th></tr></thead>
+        <tbody>
+          <tr><td>Add template CRUD routes</td><td>6 template files completely unreachable via API</td><td><span class="badge b-crit">P0</span></td></tr>
+          <tr><td>Add reference doc routes</td><td>system-prompt.md, triage.md, etc. unreachable</td><td><span class="badge b-crit">P0</span></td></tr>
+          <tr><td>Add <code>/api/playbook/search</code></td><td>Backend search exists but no endpoint exposes it</td><td><span class="badge b-crit">P0</span></td></tr>
+          <tr><td>Implement porter-stemmer</td><td>"payment" must match "payments", "reconciling" must match "reconciliation"</td><td><span class="badge b-high">P1</span></td></tr>
+          <tr><td>Add content metadata model</td><td>Track last-edited, editor, version, word count, token estimate per file</td><td><span class="badge b-high">P1</span></td></tr>
+          <tr><td>Implement watcher debouncing</td><td>Rapid edits cause N full rebuilds — debounce to 500ms</td><td><span class="badge b-high">P1</span></td></tr>
+          <tr><td>Add file size limits</td><td>No max on uploaded content — OOM risk</td><td><span class="badge b-high">P1</span></td></tr>
+          <tr><td>Add <code>/api/playbook/status</code></td><td>No visibility into KB health, size, chunk count, load status</td><td><span class="badge b-info">P2</span></td></tr>
+          <tr><td>Smart retrieval for large KB</td><td>At 25K+ lines, can't inject full playbook as system prompt. Need embedding-based retrieval or hybrid search</td><td><span class="badge b-info">P2</span></td></tr>
+          <tr><td>Write automated tests</td><td>7 routes, loader, context builder, search — all untested</td><td><span class="badge b-info">P2</span></td></tr>
+          <tr><td>Content validation endpoint</td><td>Validate markdown structure, detect broken cross-refs, flag stale content</td><td><span class="badge b-info">P2</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: UX -->
+<section class="sec fade-up d6" id="ux">
+  <div class="sec-hdr"><span class="d d-accent"></span><span class="n">06</span><h2>UX Designer — Critical Findings</h2></div>
+
+  <div class="card card-el">
+    <h3>Current UX Teardown</h3>
+    <p style="margin-bottom:var(--sp-4)">The PlaybookEditor is a <strong>functional but primitive content editor</strong>. It follows a pattern from 2015-era CMS tools: sidebar list → content pane → textarea edit mode. For a tool that escalation specialists will live in during high-pressure calls, this is inadequate.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>UX Dimension</th><th>Current</th><th>Target</th><th>Gap</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Information Discovery</strong></td><td>Browse 9 categories by clicking</td><td>Search, filters, tags, recently viewed, pinned articles, contextual suggestions</td><td><span class="badge b-crit">SEVERE</span></td></tr>
+          <tr><td><strong>Content Authoring</strong></td><td>Raw textarea, no formatting tools</td><td>Rich markdown editor with toolbar, live preview, auto-save, template insertion, snippet library</td><td><span class="badge b-crit">SEVERE</span></td></tr>
+          <tr><td><strong>Content Coverage</strong></td><td>10 of 22 files accessible</td><td>All files editable, organized by type (categories, templates, reference, system)</td><td><span class="badge b-crit">SEVERE</span></td></tr>
+          <tr><td><strong>Real-Time Agent Use</strong></td><td>No quick-lookup features</td><td>Command palette (Ctrl+K), quick-search overlay, pinned quick-answers, copy-to-clipboard cards</td><td><span class="badge b-crit">SEVERE</span></td></tr>
+          <tr><td><strong>AI Consumer Visibility</strong></td><td>Read-only "Full Prompt" view</td><td>Token count per section, retrieval preview ("how will AI see this?"), prompt size warnings</td><td><span class="badge b-high">MAJOR</span></td></tr>
+          <tr><td><strong>Content Quality</strong></td><td>No indicators</td><td>Depth scoring, freshness badges, coverage gaps, "needs expansion" flags</td><td><span class="badge b-high">MAJOR</span></td></tr>
+          <tr><td><strong>Navigation</strong></td><td>3 tabs (Category, Edge Cases, Full)</td><td>Tree view with collapsible sections, breadcrumbs, keyboard nav, back/forward history</td><td><span class="badge b-high">MAJOR</span></td></tr>
+          <tr><td><strong>Keyboard Shortcuts</strong></td><td>None</td><td>Ctrl+S save, Ctrl+E edit, Ctrl+K search, Ctrl+/ toggle preview, Esc cancel</td><td><span class="badge b-info">MODERATE</span></td></tr>
+          <tr><td><strong>Responsive Layout</strong></td><td>Fixed 280px sidebar, breaks on mobile</td><td>Collapsible sidebar, touch-friendly, responsive grid</td><td><span class="badge b-info">MODERATE</span></td></tr>
+          <tr><td><strong>Accessibility</strong></td><td>No ARIA, no semantic structure</td><td>Full ARIA labels, keyboard navigation, screen reader support, focus management</td><td><span class="badge b-info">MODERATE</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>UX Designer's Vision: Four-Panel KB Editor</h3>
+    <p style="margin-bottom:var(--sp-3)">Replace the current 3-tab textarea with a four-panel knowledge management workspace:</p>
+    <ol>
+      <li><strong>Navigation Tree</strong> (left) — Collapsible tree: Categories → Templates → Reference Docs → System Config. Shows file sizes, freshness badges, depth scores. Search bar with instant filter</li>
+      <li><strong>Content Editor</strong> (center) — Split-pane: markdown source on left, rendered preview on right. Toolbar with formatting, link insertion, cross-reference insertion, template snippet insertion. Auto-save with undo/redo</li>
+      <li><strong>AI Preview Panel</strong> (right, collapsible) — Shows how Claude will see this content: token count, retrieval ranking preview, related chunks, prompt composition visualization</li>
+      <li><strong>Quick Lookup Bar</strong> (top, Ctrl+K) — Command palette overlay for instant content search during live calls. Fuzzy search, copy-to-clipboard cards, recently viewed, pinned favorites</li>
+    </ol>
+  </div>
+</section>
+
+<!-- SECTION: SEARCH -->
+<section class="sec fade-up d7" id="search">
+  <div class="sec-hdr"><span class="d d-info"></span><span class="n">07</span><h2>Search &amp; Indexing — Backend Architect's Deep-Dive</h2></div>
+
+  <div class="card card-el">
+    <h3>Current Search vs. Best-in-Class</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Capability</th><th>Current</th><th>Best-in-Class</th></tr></thead>
+        <tbody>
+          <tr><td>Token matching</td><td>Exact word match, 3+ char tokens</td><td>Stemmed, lemmatized, synonym-expanded</td></tr>
+          <tr><td>Fuzzy matching</td><td>None</td><td>Levenshtein distance, typo tolerance</td></tr>
+          <tr><td>Semantic search</td><td>None — purely lexical</td><td>Embedding-based similarity (cosine) for concept matching</td></tr>
+          <tr><td>Scoring</td><td>Hand-tuned magic numbers</td><td>BM25 or TF-IDF with field boosting, recency weighting</td></tr>
+          <tr><td>Query understanding</td><td>Tokenize and match</td><td>Intent classification, query expansion, contextual boosting</td></tr>
+          <tr><td>Faceted filtering</td><td>Category/template/top-level type filter</td><td>Multi-facet: category, difficulty, freshness, audience, confidence</td></tr>
+          <tr><td>Result ranking</td><td>Score-sorted top-k</td><td>Score + recency + usage frequency + editorial boost</td></tr>
+          <tr><td>Chunk strategy</td><td>1400-char paragraph-aware</td><td>Hierarchical: section → subsection → paragraph with parent context preserved</td></tr>
+          <tr><td>Cross-reference</td><td>None</td><td>Knowledge graph linking related articles, prerequisite chains</td></tr>
+          <tr><td>Usage analytics</td><td>None</td><td>Track which chunks are retrieved most, which lead to resolved escalations</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="callout c-info">
+    <span class="c-icon">i</span>
+    <div><strong>Backend Architect's recommendation:</strong> For Phase 1, add porter-stemmer + BM25 scoring to the existing lexical search. For Phase 2, add embedding-based semantic search using a local model or Claude embeddings. The current lexical approach is a dead end at scale — "bank feed disconnected" should match content about "connection failures" even if the exact words don't appear.</div>
+  </div>
+</section>
+
+<!-- SECTION: INNOVATIONS -->
+<section class="sec fade-up d8" id="innovations">
+  <div class="sec-hdr"><span class="d d-amber"></span><span class="n">08</span><h2>Innovative Features — What Nobody Thought Of Yet</h2></div>
+  <p style="color:var(--ink-secondary);margin-bottom:var(--sp-6)">Cross-pollinated from all three reviewers — features that would make this KB system unlike anything else in the support tooling space.</p>
+
+  <div class="two-col">
+    <div class="innovation-card ic-1">
+      <h4>AI Content Gap Detector</h4>
+      <p>Analyze incoming escalation conversations against playbook content. When Claude struggles or falls back to generic advice, flag the topic as a <strong>knowledge gap</strong>. Auto-generate "gap cards" with: topic, frequency, example conversations, suggested content outline. The playbook grows organically from real support needs.</p>
+    </div>
+    <div class="innovation-card ic-2">
+      <h4>Resolution Confidence Scoring</h4>
+      <p>For each playbook article, track: how often it's retrieved, how often conversations using it reach resolution, customer satisfaction correlation. Display a <strong>confidence score</strong> (0-100%) on each article. Low-confidence articles get flagged for expert review and expansion. High-confidence articles get promoted in search ranking.</p>
+    </div>
+    <div class="innovation-card ic-3">
+      <h4>"How Will Claude See This?" Mode</h4>
+      <p>A preview mode showing exactly how the AI will process the content: token count, chunk boundaries, retrieval ranking simulation for sample queries, system prompt position. Lets authors <strong>optimize content for AI consumption</strong> — not just human readability. Shows which paragraphs are most likely to be retrieved for different question types.</p>
+    </div>
+    <div class="innovation-card ic-4">
+      <h4>Seasonal Intelligence Engine</h4>
+      <p>Auto-surface relevant KB sections based on calendar: W-2/1099 in January, quarterly tax in April/July/October, year-end close in December. <strong>Pre-brief specialists</strong> before predictable surges. Track historical escalation volume by topic by month to predict next surge.</p>
+    </div>
+    <div class="innovation-card ic-5">
+      <h4>Escalation-to-KB Pipeline</h4>
+      <p>When an escalation is resolved with a novel fix, offer a one-click <strong>"Add to Playbook"</strong> button. Auto-extracts: problem description, diagnosis steps, resolution, and generates a draft KB article in the right category. Closes the loop between field experience and documented knowledge.</p>
+    </div>
+    <div class="innovation-card ic-6">
+      <h4>Content Freshness Radar</h4>
+      <p>Track QBO product updates (release notes, changelogs) and cross-reference against playbook content. When a feature changes, <strong>auto-flag affected articles</strong> as potentially stale. Example: "QBO changed bank feed reconnection flow in Feb 2026 — bank-feeds.md may be outdated." Prevents stale advice.</p>
+    </div>
+  </div>
+
+  <div class="two-col" style="margin-top:var(--sp-4)">
+    <div class="innovation-card ic-3">
+      <h4>Quick-Answer Cards</h4>
+      <p>Distill each category into <strong>top-10 instant answer cards</strong> — one-screen answers to the most common questions. During live calls, agents can pull up a card in &lt;5 seconds, read the answer, and resolve without scrolling through full articles. Cards link to full articles for complex cases.</p>
+    </div>
+    <div class="innovation-card ic-1">
+      <h4>Knowledge Graph Visualization</h4>
+      <p>Visualize relationships between KB articles as an <strong>interactive graph</strong>. See how payroll connects to tax, how bank feeds connects to reconciliation, how permissions affects everything. Helps authors identify missing cross-references and helps specialists understand systemic issues.</p>
+    </div>
+    <div class="innovation-card ic-4">
+      <h4>Difficulty-Aware Content Layers</h4>
+      <p>Tag content as <strong>Beginner / Intermediate / Expert</strong>. In the UI, show appropriate depth based on the specialist's experience level. New hires see step-by-step guides; seniors see decision trees and edge cases. AI gets everything, but surfaces the right depth for context.</p>
+    </div>
+    <div class="innovation-card ic-2">
+      <h4>Comparative Diagnostics</h4>
+      <p>For complex issues, provide <strong>side-by-side comparisons</strong>: "If customer sees X, it could be Problem A, B, or C. Here's how to distinguish." Decision tables with yes/no diagnostic questions that narrow to the exact issue. Turn the KB into an interactive diagnostic tool, not just a reference.</p>
+    </div>
+  </div>
+</section>
+
+<!-- SECTION: ROADMAP -->
+<section class="sec fade-up d9" id="roadmap">
+  <div class="sec-hdr"><span class="d d-accent"></span><span class="n">09</span><h2>Unified Build Roadmap</h2></div>
+  <p style="color:var(--ink-secondary);margin-bottom:var(--sp-6)">Synthesized from all three reviews into a phased plan. Each phase builds on the previous and can be shipped independently.</p>
+
+  <div class="phase-card" style="border-left:3px solid var(--danger)">
+    <h3><span class="phase-num pn-1">1</span> Foundation — Make All Content Manageable</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">Unblock content work by making all 22 files editable through the UI. No content expansion possible until this is done.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>Backend: Template CRUD routes</strong> — GET/PUT for templates/*.md, mirroring category pattern</li>
+      <li><span class="ck ck-todo">2</span> <strong>Backend: Reference doc routes</strong> — GET/PUT for top-level .md files (system-prompt, triage, error-messages, decision-tree, qbo-urls, translations)</li>
+      <li><span class="ck ck-todo">3</span> <strong>Backend: Search endpoint</strong> — Expose searchPlaybookChunks() as GET /api/playbook/search?q=</li>
+      <li><span class="ck ck-todo">4</span> <strong>Backend: Status endpoint</strong> — GET /api/playbook/status with file count, total tokens, chunk count, last rebuild</li>
+      <li><span class="ck ck-todo">5</span> <strong>Frontend: Redesign PlaybookEditor</strong> — Replace 3-tab layout with tree-based navigation covering Categories, Templates, Reference Docs, System Config</li>
+      <li><span class="ck ck-todo">6</span> <strong>Frontend: Wire all new endpoints</strong> — API client + UI for templates, reference docs, search</li>
+      <li><span class="ck ck-todo">7</span> <strong>Backend: Fix error handling</strong> — try/catch on all file ops, specific error messages, watcher debouncing</li>
+    </ul>
+  </div>
+
+  <div class="phase-card" style="border-left:3px solid var(--warning)">
+    <h3><span class="phase-num pn-2">2</span> Content Expansion — Grade School → University Level</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">Massive content depth expansion across all 9 categories + new cross-cutting knowledge areas.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>Expand each category to 500-800+ lines</strong> with deep troubleshooting trees, exact QBO UI paths, accounting principles, version-specific behaviors</li>
+      <li><span class="ck ck-todo">2</span> <strong>Add accounting fundamentals layer</strong> — GAAP basics, double-entry theory, accrual vs cash, chart of accounts design, journal entry principles</li>
+      <li><span class="ck ck-todo">3</span> <strong>Add cross-cutting knowledge areas</strong> — Data migration, multi-entity, integrations, mobile app, QBO Advanced features</li>
+      <li><span class="ck ck-todo">4</span> <strong>Expand templates to dynamic templates</strong> — Conditional sections, tone variants, multi-audience versions</li>
+      <li><span class="ck ck-todo">5</span> <strong>Add diagnostic decision tables</strong> — Interactive "if X then Y" diagnostic flows for each common issue cluster</li>
+      <li><span class="ck ck-todo">6</span> <strong>Populate Known QBO Bugs sections</strong> — Research and document current known issues with workarounds</li>
+      <li><span class="ck ck-todo">7</span> <strong>Add seasonal awareness content</strong> — Monthly/quarterly calendar of predictable issue surges with pre-briefing content</li>
+    </ul>
+  </div>
+
+  <div class="phase-card" style="border-left:3px solid var(--info)">
+    <h3><span class="phase-num pn-3">3</span> Editor Excellence — Make Authoring a Pleasure</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">Transform the textarea into a world-class KB editor that authors want to use.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>Markdown split-pane editor</strong> — Source on left, rendered preview on right, with formatting toolbar</li>
+      <li><span class="ck ck-todo">2</span> <strong>Command palette (Ctrl+K)</strong> — Fuzzy search overlay for instant content lookup during live calls</li>
+      <li><span class="ck ck-todo">3</span> <strong>KB stats dashboard</strong> — Token counts per section, total prompt size, depth scores, freshness indicators, coverage gaps</li>
+      <li><span class="ck ck-todo">4</span> <strong>Auto-save + undo/redo</strong> — localStorage drafts, Ctrl+Z/Y history, "unsaved changes" protection on all navigation</li>
+      <li><span class="ck ck-todo">5</span> <strong>Keyboard shortcuts</strong> — Ctrl+S save, Ctrl+E edit, Ctrl+K search, Esc cancel, keyboard nav between sections</li>
+      <li><span class="ck ck-todo">6</span> <strong>Cross-reference insertion</strong> — When editing, autocomplete for linking to other articles (like wiki links)</li>
+      <li><span class="ck ck-todo">7</span> <strong>"How Will AI See This?" preview</strong> — Token count, chunk boundaries, retrieval ranking preview for sample queries</li>
+    </ul>
+  </div>
+
+  <div class="phase-card" style="border-left:3px solid var(--accent)">
+    <h3><span class="phase-num pn-4">4</span> Smart Search — From Keyword Matching to Knowledge Retrieval</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">Upgrade search from basic token matching to intelligent knowledge retrieval.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>Porter stemmer integration</strong> — "reconciling" matches "reconciliation", "payments" matches "payment"</li>
+      <li><span class="ck ck-todo">2</span> <strong>BM25 scoring</strong> — Replace hand-tuned magic numbers with proven information retrieval scoring</li>
+      <li><span class="ck ck-todo">3</span> <strong>Synonym expansion</strong> — "bank feed" = "bank connection" = "financial institution link"</li>
+      <li><span class="ck ck-todo">4</span> <strong>Hierarchical chunking</strong> — Preserve section → subsection → paragraph context in search results</li>
+      <li><span class="ck ck-todo">5</span> <strong>Usage-weighted ranking</strong> — Boost articles that led to successful resolutions, demote unused content</li>
+      <li><span class="ck ck-todo">6</span> <strong>Semantic search (stretch)</strong> — Embedding-based similarity for concept matching when exact words don't appear</li>
+    </ul>
+  </div>
+
+  <div class="phase-card" style="border-left:3px solid var(--purple)">
+    <h3><span class="phase-num pn-5">5</span> Content Expansion II — University → Expert Level</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">Push content depth to doctorate/expert level with institutional knowledge and advanced patterns.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>Expand each category to 1000-1500+ lines</strong> — Full diagnostic decision trees, every error code mapped, version history of UI changes</li>
+      <li><span class="ck ck-todo">2</span> <strong>Regulatory/compliance layer</strong> — State-specific tax rules, employment law basics for payroll, data privacy requirements</li>
+      <li><span class="ck ck-todo">3</span> <strong>Institutional memory</strong> — Historical patterns, "what broke in Q4 2025", customer psychology profiles, de-escalation scripts</li>
+      <li><span class="ck ck-todo">4</span> <strong>Root cause taxonomy</strong> — Classify every issue into: user error, product bug, configuration issue, data corruption, environmental, integration failure</li>
+      <li><span class="ck ck-todo">5</span> <strong>Difficulty-layered content</strong> — Tag content as Beginner/Intermediate/Expert, show appropriate depth based on agent experience</li>
+      <li><span class="ck ck-todo">6</span> <strong>Comparative diagnostic tables</strong> — "If X, could be A, B, or C — here's how to tell" for every common symptom</li>
+    </ul>
+  </div>
+
+  <div class="phase-card" style="border-left:3px solid var(--amber)">
+    <h3><span class="phase-num pn-6">6</span> Intelligence Layer — Self-Improving Knowledge Base</h3>
+    <p style="font-size:13px;color:var(--ink-muted);margin-bottom:var(--sp-4)">The playbook becomes a living, learning system that improves itself from real usage.</p>
+    <ul class="checklist">
+      <li><span class="ck ck-todo">1</span> <strong>AI Content Gap Detector</strong> — Analyze failed/weak AI responses to identify missing KB content</li>
+      <li><span class="ck ck-todo">2</span> <strong>Escalation-to-KB Pipeline</strong> — One-click "Add to Playbook" from resolved escalations</li>
+      <li><span class="ck ck-todo">3</span> <strong>Resolution Confidence Scoring</strong> — Track which articles correlate with successful resolutions</li>
+      <li><span class="ck ck-todo">4</span> <strong>Content Freshness Radar</strong> — Flag potentially stale content when QBO product updates occur</li>
+      <li><span class="ck ck-todo">5</span> <strong>Seasonal Intelligence</strong> — Auto-surface relevant content based on calendar patterns</li>
+      <li><span class="ck ck-todo">6</span> <strong>Knowledge Graph</strong> — Visualize and navigate article relationships, identify missing connections</li>
+    </ul>
+  </div>
+</section>
+
+<!-- SECTION: CONTENT PLAN -->
+<section class="sec fade-up d10" id="content-plan">
+  <div class="sec-hdr"><span class="d d-danger"></span><span class="n">10</span><h2>Content Expansion — Detailed Topic Map</h2></div>
+
+  <div class="card card-el">
+    <h3>Phase 2 Content Targets (Per Category)</h3>
+    <p style="margin-bottom:var(--sp-4)">Each category's current line count vs. Phase 2 target vs. Phase 5 (Expert) target:</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Category</th><th>Now</th><th>Phase 2</th><th>Phase 5</th><th>Key Additions</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Payroll</strong></td><td>143</td><td>600+</td><td>1200+</td><td>Garnishments, multi-state, year-end, tax deep-dive, tier matrix, retroactive adjustments</td></tr>
+          <tr><td><strong>Bank Feeds</strong></td><td>147</td><td>550+</td><td>1000+</td><td>Aggregator-specific errors (Yodlee/Finicity), OAuth token lifecycle, matching algorithm explanation, connectivity status matrix</td></tr>
+          <tr><td><strong>Reconciliation</strong></td><td>133</td><td>600+</td><td>1200+</td><td>Accounting fundamentals, complex reconciliation types, forensic techniques, period close procedures, multi-currency</td></tr>
+          <tr><td><strong>Permissions</strong></td><td>140</td><td>450+</td><td>800+</td><td>Custom roles (Advanced), QBOA deep-dive, row-level security, SSO/SAML, permission inheritance, audit trail</td></tr>
+          <tr><td><strong>Billing</strong></td><td>138</td><td>450+</td><td>800+</td><td>Proration edge cases, refund process, bundle billing (QBO+Payroll+Payments), plan migration paths, retention offers</td></tr>
+          <tr><td><strong>Tax</strong></td><td>139</td><td>700+</td><td>1500+</td><td>Multi-state nexus, AST algorithm, marketplace facilitator, 1099 deep-dive, international VAT/GST, tax reporting mappings</td></tr>
+          <tr><td><strong>Invoicing</strong></td><td>130</td><td>500+</td><td>1000+</td><td>Payment gateway integration, recurring invoice edge cases, progress invoicing deep-dive, batch invoicing, collections workflow</td></tr>
+          <tr><td><strong>Reports</strong></td><td>146</td><td>650+</td><td>1300+</td><td>Financial statement analysis, cash vs accrual deep-dive, class/location reporting, custom report building, budgets</td></tr>
+          <tr><td><strong>Technical</strong></td><td>176</td><td>700+</td><td>1400+</td><td>Mobile app troubleshooting, integration ecosystem (top 50 apps), API diagnostics, data migration, performance tuning</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card card-el">
+    <h3>New Content Areas Needed</h3>
+    <p style="margin-bottom:var(--sp-4)">Topics that don't fit in existing categories and require new files:</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>New File</th><th>Est. Lines</th><th>Content</th><th>Phase</th></tr></thead>
+        <tbody>
+          <tr><td><code>accounting-fundamentals.md</code></td><td>800+</td><td>GAAP basics, double-entry, debits/credits, chart of accounts design, journal entries, accrual vs cash, financial statement relationships</td><td>Phase 2</td></tr>
+          <tr><td><code>integrations.md</code></td><td>600+</td><td>Top 50 app connections, OAuth lifecycle, sync conflicts, Zapier/Make patterns, API rate limits, common integration failures</td><td>Phase 2</td></tr>
+          <tr><td><code>mobile-app.md</code></td><td>400+</td><td>QBO Mobile, QB Time, QB Payments app troubleshooting, sync failures, receipt capture, offline handling</td><td>Phase 2</td></tr>
+          <tr><td><code>data-migration.md</code></td><td>500+</td><td>QBD→QBO conversion, CSV import formatting, IIF handling, opening balance equity, historical transactions, trial balance import</td><td>Phase 2</td></tr>
+          <tr><td><code>qbo-advanced.md</code></td><td>500+</td><td>Custom roles, workflow approvals, smart reporting (Fathom), batch transactions, revenue recognition, custom fields, smart rules</td><td>Phase 2</td></tr>
+          <tr><td><code>customer-psychology.md</code></td><td>400+</td><td>De-escalation techniques, CPA vs business owner communication, seasonal stress patterns, fee sensitivity, data loss panic, "my accountant is furious"</td><td>Phase 5</td></tr>
+          <tr><td><code>known-bugs-registry.md</code></td><td>300+</td><td>Living document of confirmed QBO bugs with: status, workaround, affected versions, Intuit case #, customer impact</td><td>Phase 2</td></tr>
+          <tr><td><code>quick-answer-cards.md</code></td><td>500+</td><td>Top 10 instant-answer cards per category — one-screen answers for the most common questions during live calls</td><td>Phase 3</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="callout c-danger">
+    <span class="c-icon">!</span>
+    <div><strong>The content effort is massive.</strong> Going from ~2,600 lines to 15,000-25,000+ lines is not a one-sprint task. Phase 2 alone requires writing ~5,000-7,000 new lines of expert content across 9 categories + 5 new files. This is the hardest part of the entire plan — not because of code, but because quality knowledge is irreplaceable and requires genuine domain expertise to write.</div>
+  </div>
+</section>
+
+<footer style="margin-top:var(--sp-16);padding-top:var(--sp-6);border-top:1px solid var(--line);color:var(--ink-muted);font-size:12px;font-family:var(--font-mono);">
+  Playbook Review Board — Synthesized Plan &middot; 3 Senior Reviewers &middot; Backend Architecture + UX Design + QBO Domain Expertise &middot; 2026-02-27
+</footer>
+
+</main>
+</div>
+
+<script>
+const ss=document.querySelectorAll('.sec[id]'),tl=document.querySelectorAll('.toc a');
+const o=new IntersectionObserver(e=>{e.forEach(x=>{if(x.isIntersecting){tl.forEach(l=>l.classList.remove('active'));const a=document.querySelector(`.toc a[href="#${x.target.id}"]`);if(a)a.classList.add('active')}})},{rootMargin:'-20% 0px -70% 0px'});
+ss.forEach(s=>o.observe(s));
+</script>
+</body>
+</html>

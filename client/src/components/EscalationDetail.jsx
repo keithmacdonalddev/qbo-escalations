@@ -1,7 +1,16 @@
 import { useState, useEffect, useCallback } from 'react';
-import { getEscalation, updateEscalation, transitionEscalation } from '../api/escalationsApi.js';
+import {
+  getEscalation,
+  updateEscalation,
+  transitionEscalation,
+  uploadEscalationScreenshots,
+  deleteEscalationScreenshot,
+  listSimilarEscalations,
+} from '../api/escalationsApi.js';
 import { getConversation } from '../api/chatApi.js';
 import ChatMessage from './ChatMessage.jsx';
+import CopilotPanel from './CopilotPanel.jsx';
+import Tooltip from './Tooltip.jsx';
 
 const STATUS_LABELS = {
   'open': 'Open',
@@ -21,10 +30,13 @@ export default function EscalationDetail({ escalationId }) {
   const [escalation, setEscalation] = useState(null);
   const [conversation, setConversation] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [notes, setNotes] = useState('');
+  const [resolutionNotes, setResolutionNotes] = useState('');
   const [resolution, setResolution] = useState('');
   const [savingNotes, setSavingNotes] = useState(false);
   const [savedNotice, setSavedNotice] = useState('');
+  const [uploadingScreenshots, setUploadingScreenshots] = useState(false);
+  const [similarEscalations, setSimilarEscalations] = useState([]);
+  const [similarLoading, setSimilarLoading] = useState(false);
 
   // Load escalation and linked conversation
   useEffect(() => {
@@ -35,7 +47,7 @@ export default function EscalationDetail({ escalationId }) {
         const esc = await getEscalation(escalationId);
         if (cancelled) return;
         setEscalation(esc);
-        setNotes(esc.notes || '');
+        setResolutionNotes(esc.resolutionNotes || esc.notes || '');
         setResolution(esc.resolution || '');
 
         if (esc.conversationId) {
@@ -52,13 +64,13 @@ export default function EscalationDetail({ escalationId }) {
     if (!escalation || savingNotes) return;
     setSavingNotes(true);
     try {
-      const updated = await updateEscalation(escalation._id, { notes, resolution });
+      const updated = await updateEscalation(escalation._id, { resolutionNotes, resolution });
       setEscalation(updated);
       setSavedNotice('Saved');
       setTimeout(() => setSavedNotice(''), 2000);
     } catch { /* ignore */ }
     setSavingNotes(false);
-  }, [escalation, notes, resolution, savingNotes]);
+  }, [escalation, resolutionNotes, resolution, savingNotes]);
 
   const handleStatusChange = useCallback(async (newStatus) => {
     if (!escalation) return;
@@ -67,6 +79,52 @@ export default function EscalationDetail({ escalationId }) {
       setEscalation(updated);
     } catch { /* ignore */ }
   }, [escalation, resolution]);
+
+  const handleUploadScreenshots = useCallback(async (e) => {
+    if (!escalation) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploadingScreenshots(true);
+    try {
+      const images = await Promise.all(files.map((file) => new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('Failed to read image'));
+        reader.readAsDataURL(file);
+      })));
+      const updated = await uploadEscalationScreenshots(escalation._id, images);
+      setEscalation(updated);
+    } catch { /* ignore */ }
+    setUploadingScreenshots(false);
+    e.target.value = '';
+  }, [escalation]);
+
+  const handleDeleteScreenshot = useCallback(async (fileName) => {
+    if (!escalation || !fileName) return;
+    try {
+      const updated = await deleteEscalationScreenshot(escalation._id, fileName);
+      setEscalation(updated);
+    } catch { /* ignore */ }
+  }, [escalation]);
+
+  useEffect(() => {
+    if (!escalation?._id) {
+      setSimilarEscalations([]);
+      return;
+    }
+    let cancelled = false;
+    setSimilarLoading(true);
+    (async () => {
+      try {
+        const similar = await listSimilarEscalations({ escalationId: escalation._id, limit: 6 });
+        if (!cancelled) setSimilarEscalations(similar || []);
+      } catch {
+        if (!cancelled) setSimilarEscalations([]);
+      }
+      if (!cancelled) setSimilarLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [escalation?._id]);
 
   if (loading) {
     return (
@@ -120,7 +178,7 @@ export default function EscalationDetail({ escalationId }) {
       </div>
 
       {/* Two-column layout: escalation info + chat transcript */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--sp-5)', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: 'var(--sp-5)', alignItems: 'start' }}>
 
         {/* Left: Escalation details */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
@@ -164,14 +222,15 @@ export default function EscalationDetail({ escalationId }) {
               {['open', 'in-progress', 'resolved', 'escalated-further']
                 .filter(s => s !== escalation.status)
                 .map(s => (
-                  <button
-                    key={s}
-                    className={`btn btn-sm ${s === 'resolved' ? 'btn-primary' : 'btn-secondary'}`}
-                    onClick={() => handleStatusChange(s)}
-                    type="button"
-                  >
-                    {STATUS_LABELS[s]}
-                  </button>
+                  <Tooltip key={s} text={`Change status to ${STATUS_LABELS[s]}`} level="medium">
+                    <button
+                      className={`btn btn-sm ${s === 'resolved' ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => handleStatusChange(s)}
+                      type="button"
+                    >
+                      {STATUS_LABELS[s]}
+                    </button>
+                  </Tooltip>
                 ))}
             </div>
           </div>
@@ -202,8 +261,8 @@ export default function EscalationDetail({ escalationId }) {
               Notes &amp; Lessons Learned
             </h2>
             <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              value={resolutionNotes}
+              onChange={(e) => setResolutionNotes(e.target.value)}
               placeholder="Add annotations, lessons learned, or training notes..."
               rows={4}
               style={{
@@ -236,33 +295,136 @@ export default function EscalationDetail({ escalationId }) {
               </button>
             </div>
           </div>
+
+          <div className="card">
+            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Screenshots</h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+              <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                Attach screenshots for this escalation record.
+              </span>
+              <Tooltip text="Upload a screenshot of the issue" level="medium">
+                <label className="btn btn-secondary btn-sm" style={{ cursor: uploadingScreenshots ? 'default' : 'pointer' }}>
+                  {uploadingScreenshots ? 'Uploading...' : 'Upload'}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleUploadScreenshots}
+                    style={{ display: 'none' }}
+                    disabled={uploadingScreenshots}
+                  />
+                </label>
+              </Tooltip>
+            </div>
+
+            {Array.isArray(escalation.screenshotPaths) && escalation.screenshotPaths.length > 0 ? (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 'var(--sp-3)' }}>
+                {escalation.screenshotPaths.map((relativePath) => {
+                  const fileName = relativePath.split('/').pop();
+                  const src = `/uploads/${relativePath}`;
+                  return (
+                    <div key={relativePath} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                      <a href={src} target="_blank" rel="noopener noreferrer">
+                        <img
+                          src={src}
+                          alt={fileName}
+                          style={{
+                            width: '100%',
+                            aspectRatio: '1 / 1',
+                            objectFit: 'cover',
+                            borderRadius: 'var(--radius-md)',
+                            border: '1px solid var(--line)',
+                          }}
+                        />
+                      </a>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => handleDeleteScreenshot(fileName)}
+                        type="button"
+                        style={{ color: 'var(--danger)' }}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                No screenshots attached.
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Similar Cases</h2>
+            {similarLoading ? (
+              <div style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
+                <span className="spinner spinner-sm" />
+              </div>
+            ) : similarEscalations.length === 0 ? (
+              <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                No similar escalations found yet.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                {similarEscalations.map((item) => (
+                  <Tooltip key={item._id} text="Click to view a similar past escalation" level="high">
+                    <button
+                      type="button"
+                      className="card card-compact card-clickable"
+                      onClick={() => { window.location.hash = `#/escalations/${item._id}`; }}
+                      style={{ textAlign: 'left' }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                        <span className={`cat-badge cat-${item.category || 'general'}`}>
+                          {(item.category || 'general').replace('-', ' ')}
+                        </span>
+                        <span className={`badge ${STATUS_BADGE_MAP[item.status] || ''}`} style={{ fontSize: 'var(--text-xs)' }}>
+                          {STATUS_LABELS[item.status] || item.status}
+                        </span>
+                      </div>
+                      <div className="truncate" style={{ marginTop: 'var(--sp-1)', fontSize: 'var(--text-sm)' }}>
+                        {item.attemptingTo || item.actualOutcome || 'Untitled issue'}
+                      </div>
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Right: Chat transcript */}
-        <div className="card" style={{ maxHeight: 'calc(100vh - 160px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>
-            Chat Transcript
-          </h2>
-          {conversation && conversation.messages && conversation.messages.length > 0 ? (
-            <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-              {conversation.messages.map((msg, i) => (
-                <ChatMessage
-                  key={i}
-                  role={msg.role}
-                  content={msg.content}
-                  images={msg.images}
-                  timestamp={msg.timestamp}
-                  responseTimeMs={msg.responseTimeMs}
-                />
-              ))}
-            </div>
-          ) : (
-            <div style={{ textAlign: 'center', padding: 'var(--sp-6)', color: 'var(--ink-secondary)', fontSize: 'var(--text-sm)' }}>
-              {escalation.conversationId
-                ? 'No messages in the linked conversation.'
-                : 'No conversation linked to this escalation.'}
-            </div>
-          )}
+        {/* Right: Chat transcript + copilot */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+          <div className="card" style={{ maxHeight: 'calc(100vh - 320px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>
+              Chat Transcript
+            </h2>
+            {conversation && conversation.messages && conversation.messages.length > 0 ? (
+              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+                {conversation.messages.map((msg, i) => (
+                  <ChatMessage
+                    key={i}
+                    role={msg.role}
+                    content={msg.content}
+                    images={msg.images}
+                    provider={msg.provider || conversation.provider}
+                    timestamp={msg.timestamp}
+                    responseTimeMs={msg.responseTimeMs}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: 'var(--sp-6)', color: 'var(--ink-secondary)', fontSize: 'var(--text-sm)' }}>
+                {escalation.conversationId
+                  ? 'No messages in the linked conversation.'
+                  : 'No conversation linked to this escalation.'}
+              </div>
+            )}
+          </div>
+
+          <CopilotPanel escalationId={escalation._id} title="Escalation Co-pilot" />
         </div>
       </div>
     </div>

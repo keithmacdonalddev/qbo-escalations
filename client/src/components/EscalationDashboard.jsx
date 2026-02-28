@@ -2,10 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { listEscalations, updateEscalation, deleteEscalation } from '../api/escalationsApi.js';
 import { getSummary } from '../api/analyticsApi.js';
 import ConfirmModal from './ConfirmModal.jsx';
+import Tooltip from './Tooltip.jsx';
 
 const STATUSES = ['', 'open', 'in-progress', 'resolved', 'escalated-further'];
 const STATUS_LABELS = { '': 'All Statuses', 'open': 'Open', 'in-progress': 'In Progress', 'resolved': 'Resolved', 'escalated-further': 'Escalated' };
-const CATEGORIES = ['', 'payroll', 'bank-feeds', 'reconciliation', 'permissions', 'billing', 'tax', 'invoicing', 'reporting', 'general', 'unknown'];
+const CATEGORIES = ['', 'payroll', 'bank-feeds', 'reconciliation', 'permissions', 'billing', 'tax', 'invoicing', 'reporting', 'technical', 'general', 'unknown'];
 
 const STATUS_BADGE_MAP = {
   'open': 'badge-open',
@@ -21,13 +22,19 @@ export default function EscalationDashboard() {
   const [statusFilter, setStatusFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [escData, summaryData] = await Promise.all([
-        listEscalations({ status: statusFilter || undefined, category: categoryFilter || undefined, search: search || undefined }),
+        listEscalations({ status: statusFilter || undefined, category: categoryFilter || undefined, search: debouncedSearch || undefined }),
         getSummary(),
       ]);
       setEscalations(escData.escalations);
@@ -37,7 +44,7 @@ export default function EscalationDashboard() {
       // Fail gracefully — show empty
     }
     setLoading(false);
-  }, [statusFilter, categoryFilter, search]);
+  }, [statusFilter, categoryFilter, debouncedSearch]);
 
   useEffect(() => {
     loadData();
@@ -65,9 +72,11 @@ export default function EscalationDashboard() {
     <div className="app-content-constrained">
       <div className="page-header">
         <h1 className="page-title">Escalation Dashboard</h1>
-        <button className="btn btn-secondary" onClick={loadData} type="button">
-          Refresh
-        </button>
+        <Tooltip text="Reload escalation data" level="medium">
+          <button className="btn btn-secondary" onClick={loadData} type="button">
+            Refresh
+          </button>
+        </Tooltip>
       </div>
 
       {/* Summary stats */}
@@ -85,6 +94,7 @@ export default function EscalationDashboard() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
+            aria-label="Filter by status"
             style={{ width: 'auto', minWidth: 140 }}
           >
             {STATUSES.map(s => (
@@ -94,6 +104,7 @@ export default function EscalationDashboard() {
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
+            aria-label="Filter by category"
             style={{ width: 'auto', minWidth: 140 }}
           >
             <option value="">All Categories</option>
@@ -175,9 +186,11 @@ export default function EscalationDashboard() {
                     <td className="truncate" style={{ maxWidth: 250 }}>
                       {esc.attemptingTo || '--'}
                       {esc.conversationId && (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
-                          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                        </svg>
+                        <Tooltip text="This escalation has a linked conversation" level="medium">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
+                            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+                          </svg>
+                        </Tooltip>
                       )}
                     </td>
                     <td><span className="mono">{esc.coid || '--'}</span></td>

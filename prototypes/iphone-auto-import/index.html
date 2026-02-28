@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QBO Auto-Import Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">QA</div>
+          <div>
+            <h1>QBO Assist</h1>
+            <p>Prototype</p>
+          </div>
+        </div>
+
+        <nav class="nav">
+          <a href="#/chat" data-route="chat" class="nav-link">Chat</a>
+          <a href="#/dashboard" data-route="dashboard" class="nav-link">Dashboard</a>
+          <a href="#/settings" data-route="settings" class="nav-link">Settings</a>
+        </nav>
+
+        <div class="sidebar-foot">
+          <p>Branch: <code>prototype/iphone-auto-import</code></p>
+          <p>Standalone HTML/CSS/JS prototype</p>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <h2 id="pageTitle">Auto-Import Prototype</h2>
+            <p id="pageSubtitle">End-to-end interactive concept without touching production app code paths.</p>
+          </div>
+          <button id="clearDataBtn" class="btn btn-ghost" type="button">Reset Prototype Data</button>
+        </header>
+
+        <section id="globalNotice" class="notice hidden" role="status" aria-live="polite"></section>
+
+        <section id="chatView" class="view hidden">
+          <div class="card chat-demo-shell">
+            <div class="row row-between row-wrap">
+              <div>
+                <h3>Chat + Import Drawer</h3>
+                <p class="muted">
+                  Open the right sidebar popup, scroll imports, and add any screenshot to the chat composer.
+                </p>
+              </div>
+              <div class="row row-wrap">
+                <span id="chatAutoImportPill" class="pill">Auto-import OFF</span>
+                <button id="openImportDrawerBtn" class="btn btn-secondary" type="button">Open Imports</button>
+              </div>
+            </div>
+
+            <div id="chatToastHost" class="toast-host"></div>
+
+            <div id="chatWorkspace" class="chat-workspace">
+              <div class="chat-main">
+                <div id="chatMessageList" class="chat-message-list"></div>
+
+                <div class="chat-composer">
+                  <div class="row row-between">
+                    <strong>Composer</strong>
+                    <button id="clearChatBtn" class="btn btn-ghost btn-sm" type="button">Clear Chat</button>
+                  </div>
+                  <div id="chatAttachmentTray" class="attach-tray"></div>
+                  <textarea
+                    id="chatInput"
+                    rows="3"
+                    placeholder="Ask for escalation parsing guidance or next steps..."
+                  ></textarea>
+                  <div class="row row-between">
+                    <small class="muted">Tip: click Add on imports in the right panel.</small>
+                    <button id="chatSendBtn" class="btn btn-primary" type="button">Send</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Recent Import Events</h3>
+            <ul id="chatEvents" class="event-list"></ul>
+          </div>
+        </section>
+
+        <section id="dashboardView" class="view hidden">
+          <div class="stats">
+            <article class="stat">
+              <span>Imported</span>
+              <strong id="statImported">0</strong>
+            </article>
+            <article class="stat">
+              <span>Failed</span>
+              <strong id="statFailed">0</strong>
+            </article>
+            <article class="stat">
+              <span>Skipped</span>
+              <strong id="statSkipped">0</strong>
+            </article>
+            <article class="stat">
+              <span>Records</span>
+              <strong id="statRecords">0</strong>
+            </article>
+          </div>
+
+          <div class="card">
+            <div class="row row-wrap">
+              <input id="dashboardSearch" type="search" placeholder="Search case, COID, issue..." />
+              <select id="dashboardStatusFilter">
+                <option value="">All statuses</option>
+                <option value="open">Open</option>
+                <option value="in-progress">In progress</option>
+                <option value="resolved">Resolved</option>
+              </select>
+              <select id="dashboardSourceFilter">
+                <option value="">All sources</option>
+                <option value="auto-import">Auto-import</option>
+                <option value="manual">Manual</option>
+              </select>
+              <button id="dashboardRefreshBtn" class="btn btn-secondary" type="button">Refresh</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="row row-between">
+              <h3>Imported From iPhone</h3>
+              <span id="dashboardCountLabel" class="muted">0 results</span>
+            </div>
+            <div id="dashboardGrid" class="grid"></div>
+          </div>
+        </section>
+
+        <section id="settingsView" class="view hidden">
+          <div class="card">
+            <div class="row row-between">
+              <h3>Auto Import (iPhone)</h3>
+              <span id="watchStatusBadge" class="badge">Paused</span>
+            </div>
+            <p class="muted">
+              Connect your local folder and run scans. For your current test flow, use:
+              <code>C:\Users\NewAdmin\Pictures\Screenshots</code>
+            </p>
+
+            <div class="field-grid">
+              <label class="field">
+                <span>Enable Auto-Import</span>
+                <input id="cfgEnabled" type="checkbox" />
+              </label>
+
+              <label class="field field-wide">
+                <span>Watched Folder (display path)</span>
+                <input id="cfgWatchDir" type="text" />
+              </label>
+
+              <label class="field">
+                <span>Mode</span>
+                <select id="cfgMode">
+                  <option value="single">Single</option>
+                  <option value="fallback">Fallback</option>
+                  <option value="parallel">Parallel</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Primary Provider</span>
+                <select id="cfgPrimary">
+                  <option value="claude">Claude</option>
+                  <option value="chatgpt-5.3-codex-high">ChatGPT 5.3 Codex (High)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Fallback / Second Provider</span>
+                <select id="cfgFallback">
+                  <option value="claude">Claude</option>
+                  <option value="chatgpt-5.3-codex-high">ChatGPT 5.3 Codex (High)</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span>Scan Interval (ms)</span>
+                <input id="cfgInterval" type="number" min="3000" max="600000" />
+              </label>
+
+              <label class="field">
+                <span>Max Per Scan</span>
+                <input id="cfgMaxPerScan" type="number" min="1" max="25" />
+              </label>
+            </div>
+
+            <div class="row row-wrap">
+              <button id="connectFolderBtn" class="btn btn-secondary" type="button">Connect Folder</button>
+              <button id="saveConfigBtn" class="btn btn-primary" type="button">Save Settings</button>
+              <button id="importNowBtn" class="btn btn-primary" type="button">Import Latest Now</button>
+              <button id="demoDataBtn" class="btn btn-ghost" type="button">Load Demo Imports</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Runtime</h3>
+            <ul class="runtime-list">
+              <li><span>Folder Connected:</span> <strong id="rtConnected">No</strong></li>
+              <li><span>Last Scan:</span> <strong id="rtLastScan">Never</strong></li>
+              <li><span>Last Import:</span> <strong id="rtLastImport">Never</strong></li>
+              <li><span>Last File:</span> <strong id="rtLastFile">None</strong></li>
+            </ul>
+          </div>
+        </section>
+      </main>
+
+      <div id="importDrawerBackdrop" class="import-drawer-backdrop hidden" aria-hidden="true"></div>
+      <aside id="importDrawer" class="import-drawer-fullscreen hidden" aria-label="Imported screenshots drawer">
+        <div class="row row-between">
+          <h4>Imported Screenshots</h4>
+          <button id="closeImportDrawerBtn" class="btn btn-ghost btn-sm" type="button">Close</button>
+        </div>
+        <p class="muted">Vertically scrollable. Add any screenshot to the current chat draft.</p>
+        <div id="importDrawerList" class="import-drawer-list"></div>
+      </aside>
+    </div>
+
+    <template id="cardTemplate">
+      <article class="import-card">
+        <img class="import-thumb" alt="Imported screenshot preview" />
+        <div class="import-body">
+          <div class="row row-between">
+            <span class="status-chip"></span>
+            <small class="time-label"></small>
+          </div>
+          <h4 class="import-title"></h4>
+          <p class="import-issue"></p>
+          <p class="import-meta"></p>
+          <div class="row row-wrap">
+            <button class="btn btn-secondary btn-sm mark-review-btn" type="button">Mark Reviewed</button>
+            <button class="btn btn-ghost btn-sm retry-btn" type="button">Retry Parse</button>
+          </div>
+        </div>
+      </article>
+    </template>
+
+    <script src="./script.js"></script>
+  </body>
+  </html>

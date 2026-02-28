@@ -9,7 +9,7 @@
     "dev:server": "npm --prefix server run dev",
     "build": "npm --prefix client run build",
     "start": "node server/src/index.js",
-    "test": "echo \"Tests not yet configured\""
+    "test": "npm --prefix server test"
   },
   "devDependencies": {
     "concurrently": "^9.2.0"

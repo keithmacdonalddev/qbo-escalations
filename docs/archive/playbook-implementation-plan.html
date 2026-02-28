@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playbook v2 — Command Center Implementation Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--font-body:'DM Sans',system-ui,sans-serif;--font-mono:'JetBrains Mono','Cascadia Code',Consolas,monospace;--bg:#faf9f7;--surface:#fff;--surface2:#f3f1ee;--surface-elevated:#fff;--border:rgba(0,0,0,.07);--border-bright:rgba(0,0,0,.14);--text:#1a1a1a;--text-dim:#5a5752;--accent:#1a7a6d;--accent-dim:rgba(26,122,109,.07);--green:#1a7a6d;--green-dim:rgba(26,122,109,.08);--red:#c0392b;--red-dim:rgba(192,57,43,.07);--orange:#d4940a;--orange-dim:rgba(212,148,10,.07);--purple:#5e3d8a;--purple-dim:rgba(94,61,138,.07);--blue:#2a6987;--blue-dim:rgba(42,105,135,.07);--amber:#b8860b;--amber-dim:rgba(184,134,11,.07);--maple:#c0392b;--maple-dim:rgba(192,57,43,.06)}
+@media(prefers-color-scheme:dark){:root{--bg:#1a1917;--surface:#242320;--surface2:#2d2c28;--surface-elevated:#2d2c28;--border:rgba(255,255,255,.06);--border-bright:rgba(255,255,255,.12);--text:#e8e4dc;--text-dim:#a8a49c;--accent:#4ec9b5;--accent-dim:rgba(78,201,181,.1);--green:#4ec9b5;--green-dim:rgba(78,201,181,.1);--red:#e74c3c;--red-dim:rgba(231,76,60,.1);--orange:#f0b429;--orange-dim:rgba(240,180,41,.1);--purple:#c5a8e8;--purple-dim:rgba(197,168,232,.1);--blue:#7cbcd4;--blue-dim:rgba(124,188,212,.1);--amber:#f0b429;--amber-dim:rgba(240,180,41,.1);--maple:#e74c3c;--maple-dim:rgba(231,76,60,.08)}}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);background-image:radial-gradient(ellipse at 25% 0%,var(--accent-dim) 0%,transparent 50%),radial-gradient(ellipse at 75% 100%,var(--purple-dim) 0%,transparent 40%);color:var(--text);font-family:var(--font-body);padding:40px;min-height:100vh;overflow-wrap:break-word}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeScale{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+.a{animation:fadeUp .4s ease-out both;animation-delay:calc(var(--i,0)*.05s)}
+.as{animation:fadeScale .35s ease-out both;animation-delay:calc(var(--i,0)*.06s)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+.wrap{max-width:1400px;margin:0 auto;display:grid;grid-template-columns:180px 1fr;gap:0 40px}.main{min-width:0}
+.toc{position:sticky;top:24px;align-self:start;padding:14px 0;grid-row:1/-1;max-height:calc(100dvh - 48px);overflow-y:auto}
+.toc::-webkit-scrollbar{width:3px}.toc::-webkit-scrollbar-thumb{background:var(--surface-elevated);border-radius:2px}
+.toc-title{font-family:var(--font-mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:2px;color:var(--text-dim);padding:0 0 10px;margin-bottom:8px;border-bottom:1px solid var(--border)}
+.toc a{display:block;font-size:11px;color:var(--text-dim);text-decoration:none;padding:4px 8px;border-radius:5px;border-left:2px solid transparent;transition:all .15s;line-height:1.4;margin-bottom:1px}
+.toc a:hover{color:var(--text);background:var(--surface2)}.toc a.active{color:var(--text);border-left-color:var(--accent)}
+@media(max-width:1000px){.wrap{grid-template-columns:1fr;padding-top:0}body{padding-top:0}.toc{position:sticky;top:0;z-index:200;max-height:none;display:flex;gap:4px;align-items:center;overflow-x:auto;-webkit-overflow-scrolling:touch;background:var(--bg);border-bottom:1px solid var(--border);padding:10px 0;margin:0 -40px;padding-left:40px;padding-right:40px;grid-row:auto}.toc::-webkit-scrollbar{display:none}.toc-title{display:none}.toc a{white-space:nowrap;flex-shrink:0;border-left:none;border-bottom:2px solid transparent;border-radius:4px 4px 0 0;padding:6px 10px;font-size:10px}.toc a.active{border-left:none;border-bottom-color:var(--accent);background:var(--surface)}.main{padding-top:20px}.sec-head{scroll-margin-top:52px}}
+.sec-head{font-family:var(--font-mono);font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;padding:10px 0;margin:40px 0 20px;border-bottom:2px solid var(--border-bright);display:flex;align-items:center;gap:10px}
+.sec-head .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+h1{font-size:32px;font-weight:700;letter-spacing:-.5px;margin-bottom:6px}
+.subtitle{color:var(--text-dim);font-size:15px;margin-bottom:8px;max-width:700px;line-height:1.5}
+.meta-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:32px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:100px;font-size:11px;font-family:var(--font-mono);font-weight:600}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:16px;min-width:0}
+.card-el{box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.card h3{font-size:15px;font-weight:600;margin-bottom:10px}.card p,.card li{color:var(--text-dim);font-size:14px;line-height:1.6}
+.card ul{padding-left:18px;margin-top:6px}.card li{margin-bottom:3px;padding-left:4px;position:relative}
+code{font-family:var(--font-mono);font-size:11px;background:var(--accent-dim);color:var(--accent);padding:1px 5px;border-radius:3px}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:20px}
+.kpi-card{background:var(--surface-elevated);border:1px solid var(--border);border-radius:10px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.05)}
+.kpi-card__value{font-size:32px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi-card__label{font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);margin-top:6px}
+.table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:16px}
+.table-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.data-table{width:100%;border-collapse:collapse;font-size:13px;line-height:1.55}
+.data-table thead{position:sticky;top:0;z-index:2}
+.data-table th{background:var(--surface2);font-family:var(--font-mono);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:1.2px;color:var(--text-dim);text-align:left;padding:12px 16px;border-bottom:2px solid var(--border-bright);white-space:nowrap}
+.data-table td{padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:top}
+.data-table tbody tr:last-child td{border-bottom:none}
+.data-table .wide{min-width:200px;max-width:500px}
+.data-table tbody tr:nth-child(even){background:var(--accent-dim)}
+.data-table tbody tr{transition:background .15s ease;animation:fadeUp .35s ease-out both;animation-delay:calc(var(--i,0)*.04s)}
+.data-table tbody tr:hover{background:var(--border)}
+.data-table code{font-family:var(--font-mono);font-size:11px;background:var(--accent-dim);color:var(--accent);padding:1px 5px;border-radius:3px}
+.data-table small{display:block;color:var(--text-dim);font-size:11px;margin-top:3px}
+.data-table tfoot td{background:var(--surface2);font-weight:600;font-family:var(--font-mono);font-size:12px;border-top:2px solid var(--border-bright);border-bottom:none}
+.data-table td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--font-mono)}
+.status{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10px;font-weight:600;padding:3px 10px;border-radius:6px;white-space:nowrap}
+.status::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.status--match{background:var(--green-dim);color:var(--green)}.status--gap{background:var(--red-dim);color:var(--red)}.status--partial{background:var(--orange-dim);color:var(--orange)}.status--new{background:var(--purple-dim);color:var(--purple)}.status--info{background:var(--blue-dim);color:var(--blue)}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:768px){.two-col,.three-col{grid-template-columns:1fr}body{padding:16px}}
+.phase{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px;position:relative;overflow:hidden}
+.phase::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.phase.p1::before{background:var(--accent)}.phase.p2::before{background:var(--maple)}.phase.p3::before{background:var(--blue)}.phase.p4::before{background:var(--green)}.phase.p5::before{background:var(--purple)}.phase.p6::before{background:var(--amber)}
+.phase h3{display:flex;align-items:center;gap:10px;font-size:16px;margin-bottom:4px}
+.phase .phase-sub{color:var(--text-dim);font-size:13px;margin-bottom:14px}
+.phase-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:12px;font-weight:700;color:white;flex-shrink:0}
+.canada-callout{background:var(--maple-dim);border:1px solid color-mix(in srgb,var(--maple) 30%,transparent);border-left:3px solid var(--maple);border-radius:10px;padding:20px;margin-bottom:20px}
+.canada-callout h4{font-size:15px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.canada-callout p,.canada-callout li{font-size:13px;color:var(--text-dim);line-height:1.6}.canada-callout ul{padding-left:18px;margin-top:6px}
+.vision-box{background:color-mix(in srgb,var(--surface) 92%,var(--accent) 8%);border:1px solid color-mix(in srgb,var(--border) 50%,var(--accent) 50%);border-radius:12px;padding:24px;margin-bottom:20px;box-shadow:0 4px 20px rgba(0,0,0,.06)}
+.vision-box h3{font-size:18px;margin-bottom:10px}
+.vision-box p{color:var(--text-dim);font-size:14px;line-height:1.6}
+.mockup{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:20px;font-family:var(--font-mono);font-size:12px;line-height:1.8;margin:12px 0;overflow-x:auto;white-space:pre}
+.flow-layer{display:grid;grid-template-columns:130px 1fr;gap:12px;align-items:center;margin-bottom:4px}
+.flow-label{font-family:var(--font-mono);font-size:11px;font-weight:600;color:var(--text-dim);text-align:right}
+.flow-bar{padding:10px 16px;border-radius:6px;font-size:13px;font-weight:500;min-width:0}
+.flow-bar.done{background:var(--green-dim);border-left:3px solid var(--green);color:var(--green)}
+.flow-bar.new-feat{background:var(--accent-dim);border-left:3px solid var(--accent);color:var(--accent)}
+.flow-bar.partial{background:var(--orange-dim);border-left:3px solid var(--orange);color:var(--orange)}
+.flow-bar.missing{background:var(--red-dim);border-left:3px solid var(--red);color:var(--red)}
+.checklist{list-style:none;padding:0}.checklist li{padding:4px 0 4px 24px;position:relative;font-size:14px;color:var(--text-dim)}.checklist li::before{content:'';width:16px;height:16px;border:2px solid var(--border-bright);border-radius:4px;position:absolute;left:0;top:6px}
+details.collapsible{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}details.collapsible summary{padding:14px 20px;background:var(--surface);font-family:var(--font-mono);font-size:12px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;color:var(--text);transition:background .15s ease}details.collapsible summary:hover{background:var(--surface-elevated)}details.collapsible summary::-webkit-details-marker{display:none}details.collapsible summary::before{content:'>';font-size:11px;color:var(--text-dim);transition:transform .15s ease}details.collapsible[open] summary::before{transform:rotate(90deg)}details.collapsible .collapsible__body{padding:16px 20px;border-top:1px solid var(--border);font-size:13px;line-height:1.6;color:var(--text-dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" id="toc">
+  <div class="toc-title">Plan v2</div>
+  <a href="#s0">Design Philosophy</a>
+  <a href="#s1">Phase 1: Command Center</a>
+  <a href="#s2">Phase 2: Canada Content</a>
+  <a href="#s3">Phase 3: Context + Editor</a>
+  <a href="#s4">Phase 4: Smart Search</a>
+  <a href="#s5">Phase 5: Expert + Intel</a>
+  <a href="#s6">Phase 6: Self-Improving</a>
+  <a href="#s7">Verification</a>
+</nav>
+<div class="main">
+
+<h1 class="a" style="--i:0">Playbook v2 — Command Center Plan</h1>
+<p class="subtitle a" style="--i:1">The playbook is not a documentation tool. It's a <strong>command center for live escalation calls</strong>. Every UI decision optimizes for speed-of-access, not authoring comfort. Lookup Mode is the default. Edit Mode is secondary.</p>
+<div class="meta-row a" style="--i:2">
+  <span class="chip" style="background:var(--blue-dim);color:var(--blue)">2026-02-27</span>
+  <span class="chip" style="background:var(--maple-dim);color:var(--maple)">Canada-First</span>
+  <span class="chip" style="background:var(--accent-dim);color:var(--accent)">Command Center</span>
+  <span class="chip" style="background:var(--purple-dim);color:var(--purple)">6 Phases &middot; Approved</span>
+</div>
+
+<div class="kpi-row a" style="--i:3">
+  <div class="kpi-card as" style="--i:0"><div class="kpi-card__value" style="color:var(--accent)">3s</div><div class="kpi-card__label">Target Lookup Time</div></div>
+  <div class="kpi-card as" style="--i:1"><div class="kpi-card__value" style="color:var(--red)">~60s</div><div class="kpi-card__label">Current Lookup Time</div></div>
+  <div class="kpi-card as" style="--i:2"><div class="kpi-card__value" style="color:var(--accent)">25K</div><div class="kpi-card__label">Content Target</div></div>
+  <div class="kpi-card as" style="--i:3"><div class="kpi-card__value" style="color:var(--red)">2.6K</div><div class="kpi-card__label">Content Now</div></div>
+</div>
+
+<!-- S0: PHILOSOPHY -->
+<div id="s0" class="sec-head a" style="--i:4"><span class="dot" style="background:var(--accent)"></span> Design Philosophy</div>
+
+<div class="vision-box a" style="--i:5">
+  <h3>Filing Cabinet &rarr; Command Center</h3>
+  <p>The old plan built a tree nav + split-pane editor. That's what <strong>authors</strong> need. But the primary users aren't authors — they're escalation specialists on live calls with 3 more queued, hearing "my bank won't connect" while a frustrated CPA waits. They need <strong>answers in 3 seconds</strong>, not a file browser.</p>
+  <p style="margin-top:12px">The new plan puts <strong>Lookup Mode</strong> first — a rapid-response console with Answer Cards. <strong>Edit Mode</strong> becomes secondary. A persistent <strong>Call Companion</strong> bar follows you everywhere. A <strong>Chat Sidebar</strong> shows what KB content Claude is reading in real-time. The tool works at the speed of conversation.</p>
+</div>
+
+<div class="two-col a" style="--i:6">
+  <div class="card card-el">
+    <h3>Before (Filing Cabinet)</h3>
+    <p>"I know the answer is somewhere in the playbook. Let me navigate to bank-feeds... scroll down... find the right section... okay, here it is. Let me copy this and go back to chat."</p>
+    <p style="margin-top:8px;color:var(--red);font-weight:600;font-size:13px">30-60 seconds. Tab switching. Scrolling. Stress.</p>
+  </div>
+  <div class="card card-el">
+    <h3>After (Command Center)</h3>
+    <p>Type "bank won't connect" in the bottom bar while Claude is still streaming. Answer card pops up. Click "Copy Steps." Paste. Done.</p>
+    <p style="margin-top:8px;color:var(--accent);font-weight:600;font-size:13px">3 seconds. No tab switching. Never left Chat.</p>
+  </div>
+</div>
+
+<!-- S1: PHASE 1 -->
+<div id="s1" class="sec-head a" style="--i:7"><span class="dot" style="background:var(--accent)"></span> Phase 1 &mdash; Command Center Foundation</div>
+
+<div class="phase p1 a" style="--i:8">
+  <h3><span class="phase-num" style="background:var(--accent)">1</span> Lookup Mode + Answer Cards + Call Companion + Full API</h3>
+  <p class="phase-sub">Build the rapid-response console, persistent bottom bar, and backend API for all 22 files. The phase that transforms the tool.</p>
+</div>
+
+<div class="three-col a" style="--i:9">
+  <div class="card card-el">
+    <h3>Lookup Mode</h3>
+    <p>Default playbook view. Single dominant search input: <em>"What's the issue?"</em> Results appear as Answer Cards — not file links. Each card: heading, category badge, numbered steps (max 6), "Copy Steps" button, "Agent Script" button, cross-refs. One screen per card. Sub-200ms, no AI call.</p>
+  </div>
+  <div class="card card-el">
+    <h3>Call Companion Bar</h3>
+    <p>Persistent bottom bar on <strong>every screen</strong> — Chat, Dashboard, everywhere. Quick lookup input with flyout popup. Clipboard history (last 3 copies). Call timer. Active escalation badge. The specialist never leaves their current view to search the KB.</p>
+  </div>
+  <div class="card card-el">
+    <h3>Edit Mode</h3>
+    <p>Refactored PlaybookEditor as secondary mode. Tree nav with 4 sections (Categories, Templates, Reference, System). All 22 files viewable and editable. Metadata bar with word count, token estimate, last modified. Toggled from Lookup Mode.</p>
+  </div>
+</div>
+
+<div class="card a" style="--i:10">
+  <h3>Answer Card Anatomy</h3>
+  <div class="mockup">┌─────────────────────────────────────────────────┐
+│ <span style="color:var(--accent)">●</span> bank-feeds                    <span style="color:var(--green)">● Direct Match</span>  │
+│                                                 │
+│ <strong>Bank Feed Disconnected / Won't Reconnect</strong>       │
+│                                                 │
+│ 1. Go to Banking (left nav)                     │
+│ 2. Click the bank name → Edit sign-in info      │
+│ 3. Re-enter credentials at the bank's site      │
+│ 4. Wait 15-30 min for initial transaction pull   │
+│ 5. If still failing → Banking → disconnect →    │
+│    reconnect from scratch                       │
+│                                                 │
+│ ┌──────────┐ ┌──────────────┐                   │
+│ │Copy Steps│ │ Agent Script │  → reconciliation  │
+│ └──────────┘ └──────────────┘  → technical       │
+└─────────────────────────────────────────────────┘</div>
+</div>
+
+<div class="card a" style="--i:11">
+  <h3>New API Routes (Phase 1)</h3>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Method</th><th>Route</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td><code>GET</code></td><td><code>/api/playbook/lookup?q=</code></td><td>Rapid lookup — returns pre-formatted Answer Cards (chunks + error table + translations)</td></tr>
+        <tr style="--i:1"><td><code>GET</code></td><td><code>/api/playbook/tree</code></td><td>All files grouped by type for Edit Mode tree nav</td></tr>
+        <tr style="--i:2"><td><code>GET</code></td><td><code>/api/playbook/templates/:name</code></td><td>Get template content</td></tr>
+        <tr style="--i:3"><td><code>PUT</code></td><td><code>/api/playbook/templates/:name</code></td><td>Update template</td></tr>
+        <tr style="--i:4"><td><code>GET</code></td><td><code>/api/playbook/reference/:name</code></td><td>Get reference doc</td></tr>
+        <tr style="--i:5"><td><code>PUT</code></td><td><code>/api/playbook/reference/:name</code></td><td>Update reference doc</td></tr>
+        <tr style="--i:6"><td><code>GET</code></td><td><code>/api/playbook/system-config</code></td><td>Get system-prompt.md</td></tr>
+        <tr style="--i:7"><td><code>PUT</code></td><td><code>/api/playbook/system-config</code></td><td>Update system-prompt.md</td></tr>
+        <tr style="--i:8"><td><code>GET</code></td><td><code>/api/playbook/search?q=</code></td><td>Raw chunk search for Edit Mode</td></tr>
+        <tr style="--i:9"><td><code>GET</code></td><td><code>/api/playbook/status</code></td><td>KB health metrics</td></tr>
+      </tbody>
+    </table>
+  </div></div>
+</div>
+
+<details class="collapsible a" style="--i:12">
+  <summary>Phase 1 — File Manifest (11 files)</summary>
+  <div class="collapsible__body">
+    <strong>New files:</strong><br>
+    <code>client/src/components/PlaybookLookup.jsx</code> — Lookup Mode (default view)<br>
+    <code>client/src/components/AnswerCard.jsx</code> — Reusable answer card component<br>
+    <code>client/src/components/CallCompanion.jsx</code> — Persistent bottom bar<br>
+    <code>client/src/components/PlaybookTreeNav.jsx</code> — Edit Mode tree nav<br><br>
+    <strong>Modified files:</strong><br>
+    <code>server/src/routes/playbook.js</code> — 10 new routes, error handling<br>
+    <code>server/src/lib/playbook-loader.js</code> — 7 new exports, lookup cards, error/translation parsing, debouncing<br>
+    <code>client/src/api/playbookApi.js</code> — 8 new API functions<br>
+    <code>client/src/components/PlaybookEditor.jsx</code> — Refactor to Edit Mode<br>
+    <code>client/src/App.jsx</code> — Add CallCompanion, Playbook mode toggle<br>
+    <code>client/src/App.css</code> — ~200 lines new styles<br>
+  </div>
+</details>
+
+<!-- S2: PHASE 2 -->
+<div id="s2" class="sec-head a" style="--i:13"><span class="dot" style="background:var(--maple)"></span> Phase 2 &mdash; Canada-First Content</div>
+
+<div class="phase p2 a" style="--i:14">
+  <h3><span class="phase-num" style="background:var(--maple)">2</span> Knowledge Base Expansion: 2.6K &rarr; 15K Lines</h3>
+  <p class="phase-sub">Rewrite all categories Canada-first. Create 7 new files. Directly improves Answer Card quality.</p>
+</div>
+
+<div class="canada-callout a" style="--i:15">
+  <h4>Every Line Must Be Canada-First</h4>
+  <p>CRA not IRS. GST/HST/PST/QST not US sales tax. CPP/EI not FICA/FUTA. T4/T4A not W-2. ROE not termination letter. Quebec gets special treatment: RRQ, QPIP, CNESST, RL-1, QST. Know US features only to say "that's US-only."</p>
+</div>
+
+<div class="card a" style="--i:16">
+  <h3>Content Expansion Targets</h3>
+  <div class="table-wrap"><div class="table-scroll">
+    <table class="data-table">
+      <thead><tr><th>Category</th><th class="num">Now</th><th class="num">Target</th><th class="wide">Key Canada Additions</th></tr></thead>
+      <tbody>
+        <tr style="--i:0"><td><strong>Payroll</strong></td><td class="num">143</td><td class="num">800+</td><td class="wide">CPP/CPP2, EI, ROE, T4/T4A/RL-1, CRA remittances, PIER, Quebec (RRQ, QPIP, CNESST)</td></tr>
+        <tr style="--i:1"><td><strong>Tax</strong></td><td class="num">139</td><td class="num">900+</td><td class="wide">GST/HST/PST/QST, Input Tax Credits, place of supply, Netfile, T2125, provincial registration</td></tr>
+        <tr style="--i:2"><td><strong>Reconciliation</strong></td><td class="num">133</td><td class="num">700+</td><td class="wide">ASPE/IFRS, CRA trust exam, CAD/USD multi-currency, forensic techniques</td></tr>
+        <tr style="--i:3"><td><strong>Reports</strong></td><td class="num">146</td><td class="num">700+</td><td class="wide">CRA-aligned reports, T2125 mapping, GST/HST returns, ASPE statements</td></tr>
+        <tr style="--i:4"><td><strong>Technical</strong></td><td class="num">176</td><td class="num">800+</td><td class="wide">QBO Canada vs US features, Canadian locale, mobile app Canada</td></tr>
+        <tr style="--i:5"><td><strong>Bank Feeds</strong></td><td class="num">147</td><td class="num">600+</td><td class="wide">Big 5 + credit unions, Interac, CSA</td></tr>
+        <tr style="--i:6"><td><strong>Invoicing</strong></td><td class="num">130</td><td class="num">550+</td><td class="wide">Bilingual EN/FR, GST/HST# display, Canadian processors</td></tr>
+        <tr style="--i:7"><td><strong>Permissions</strong></td><td class="num">140</td><td class="num">500+</td><td class="wide">QBO Canada roles, CRA authorized rep, QBOA Canada</td></tr>
+        <tr style="--i:8"><td><strong>Billing</strong></td><td class="num">138</td><td class="num">500+</td><td class="wide">CAD pricing tiers, HST on subscription</td></tr>
+      </tbody>
+      <tfoot><tr><td><strong>Total</strong></td><td class="num">1,292</td><td class="num">6,050+</td><td></td></tr></tfoot>
+    </table>
+  </div></div>
+  <p style="font-size:13px;color:var(--text-dim);margin-top:8px">Plus 7 new files: <code>cra-compliance.md</code>, <code>accounting-fundamentals.md</code>, <code>integrations.md</code>, <code>data-migration.md</code>, <code>mobile-app.md</code>, <code>qbo-canada-vs-us.md</code>, <code>known-bugs-registry.md</code></p>
+</div>
+
+<!-- S3: PHASE 3 -->
+<div id="s3" class="sec-head a" style="--i:17"><span class="dot" style="background:var(--blue)"></span> Phase 3 &mdash; Context Integration + Editor</div>
+
+<div class="phase p3 a" style="--i:18">
+  <h3><span class="phase-num" style="background:var(--blue)">3</span> Chat KB Sidebar + Diagnostic Wizards + Editor Polish</h3>
+  <p class="phase-sub">The KB actively helps during conversations. Interactive diagnosis flows replace reading markdown trees.</p>
+</div>
+
+<div class="three-col a" style="--i:19">
+  <div class="card card-el">
+    <h3>Chat KB Sidebar</h3>
+    <p>Collapsible right panel in Chat. Auto-surfaces relevant Answer Cards based on the conversation. Specialist sees what KB content Claude is reading — can verify AI responses against source. Updates per message. No manual search.</p>
+  </div>
+  <div class="card card-el">
+    <h3>Diagnostic Wizards</h3>
+    <p>Click-through guided flows: "Bank issue" &rarr; "Which bank?" &rarr; [TD] &rarr; "Disconnected or wrong txns?" &rarr; resolution card. Defined in <code>playbook/diagnostics/*.yaml</code>. Wizard updates when playbook content is edited.</p>
+  </div>
+  <div class="card card-el">
+    <h3>Editor Polish</h3>
+    <p>Split-pane markdown editor. Ctrl+K command palette. Ctrl+S save. Auto-save drafts to localStorage. Unsaved changes warning on sidebar nav. Stats dashboard with token counts.</p>
+  </div>
+</div>
+
+<div class="card a" style="--i:20">
+  <h3>Chat KB Sidebar — Interaction</h3>
+  <div class="mockup">┌─ Chat View ──────────────────┬─ KB Context ─────────┐
+│                              │                      │
+│ Agent: "customer says bank   │ <span style="color:var(--accent)">●</span> bank-feeds          │
+│ won't connect, been calling  │                      │
+│ for weeks"                   │ <strong>Bank Feed Disconnected</strong>│
+│                              │ 1. Go to Banking...  │
+│ Claude: "Based on the        │ 2. Click bank name...│
+│ playbook, here are the       │ [Copy Steps]         │
+│ steps..."                    │                      │
+│                              │ <span style="color:var(--orange)">●</span> edge-cases          │
+│                              │ <strong>Bank Feed + Recon</strong>    │
+│                              │ <strong>Death Spiral</strong>         │
+│ [Type a message...]          │ Watch for overlap...  │
+└──────────────────────────────┴──────────────────────┘</div>
+</div>
+
+<details class="collapsible a" style="--i:21">
+  <summary>Phase 3 — New Files (7)</summary>
+  <div class="collapsible__body">
+    <code>client/src/components/KbContextPanel.jsx</code> — Chat KB sidebar<br>
+    <code>client/src/components/DiagnosticWizard.jsx</code> — Interactive diagnosis flows<br>
+    <code>client/src/components/PlaybookSplitEditor.jsx</code> — Split-pane editor<br>
+    <code>client/src/components/CommandPalette.jsx</code> — Ctrl+K overlay<br>
+    <code>client/src/hooks/useKeyboardShortcuts.js</code> — Keyboard shortcut hook<br>
+    <code>playbook/diagnostics/*.yaml</code> — Diagnostic flow definitions per category<br><br>
+    <strong>Modified:</strong> <code>Chat.jsx</code> (sidebar layout), <code>PlaybookEditor.jsx</code> (split editor), <code>Sidebar.jsx</code> (unsaved warning), <code>App.jsx</code> (refs)
+  </div>
+</details>
+
+<!-- S4: PHASE 4 -->
+<div id="s4" class="sec-head a" style="--i:22"><span class="dot" style="background:var(--green)"></span> Phase 4 &mdash; Smart Search</div>
+
+<div class="phase p4 a" style="--i:23">
+  <h3><span class="phase-num" style="background:var(--green)">4</span> Stemming + BM25 + Canadian Synonyms</h3>
+  <p class="phase-sub">Directly improves Lookup Mode, Chat sidebar, and Call Companion quality. Backend-only changes.</p>
+</div>
+
+<div class="two-col a" style="--i:24">
+  <div class="card"><h3>Current Search</h3><ul><li>Exact word match only</li><li>Hand-tuned magic numbers</li><li>"payment" misses "payments"</li><li>"GST" misses "goods and services tax"</li></ul></div>
+  <div class="card"><h3>After Phase 4</h3><ul><li>Porter stemmer — inflection-aware</li><li>BM25 scoring (k1=1.5, b=0.75)</li><li>Synonym map — Canadian terms expanded</li><li>Answer Cards get noticeably better</li></ul></div>
+</div>
+
+<!-- S5: PHASE 5 -->
+<div id="s5" class="sec-head a" style="--i:25"><span class="dot" style="background:var(--purple)"></span> Phase 5 &mdash; Expert Content + Shift Intelligence</div>
+
+<div class="phase p5 a" style="--i:26">
+  <h3><span class="phase-num" style="background:var(--purple)">5</span> 25K+ Lines + Operational Dashboard</h3>
+  <p class="phase-sub">Doctorate-level content. Shift forecast. KB health scores. Difficulty badges.</p>
+</div>
+
+<div class="two-col a" style="--i:27">
+  <div class="card card-el">
+    <h3>Expert Content</h3>
+    <ul><li>1000-1500+ lines per category</li><li>Full diagnostic decision trees</li><li>Every QBO Canada error code mapped</li><li>Root cause taxonomy per issue</li><li>Customer psychology + de-escalation</li><li>Quick-answer cards for live calls</li><li>YAML frontmatter (difficulty, audience, freshness)</li></ul>
+  </div>
+  <div class="card card-el">
+    <h3>Shift Intelligence</h3>
+    <ul><li><strong>Today's Forecast:</strong> "Late Feb — expect elevated Payroll/Tax (T4/ROE season)"</li><li><strong>Hot Categories:</strong> Rising escalation-to-resolution ratio</li><li><strong>KB Health Scores:</strong> Per-category A/B/C/D grades — coverage, freshness, resolution rate</li><li>Displayed on Analytics or standalone Shift view</li></ul>
+  </div>
+</div>
+
+<!-- S6: PHASE 6 -->
+<div id="s6" class="sec-head a" style="--i:28"><span class="dot" style="background:var(--amber)"></span> Phase 6 &mdash; Self-Improving KB</div>
+
+<div class="phase p6 a" style="--i:29">
+  <h3><span class="phase-num" style="background:var(--amber)">6</span> Learning Loop + Gap Detection + Confidence Scoring</h3>
+  <p class="phase-sub">The KB grows from every resolved escalation. Gaps surface automatically. Knowledge compounds.</p>
+</div>
+
+<div class="three-col a" style="--i:30">
+  <div class="card"><h3>Learning Loop</h3><p>After resolving an escalation: "This fix isn't in the playbook." One-click "Propose Addition" opens editor pre-filled at the right section. Knowledge flows from field to KB.</p></div>
+  <div class="card"><h3>Gap Detection</h3><p>AI analyzes conversations where Claude fell back to generic advice. Generates gap cards: topic, frequency, suggested content. "14 resolutions this month aren't in the playbook."</p></div>
+  <div class="card"><h3>Confidence Scoring</h3><p>Track retrieval frequency × resolution correlation per article. Low-confidence flagged for expansion. High-confidence boosted in search. KB quality becomes measurable.</p></div>
+</div>
+
+<!-- S7: VERIFICATION -->
+<div id="s7" class="sec-head a" style="--i:31"><span class="dot" style="background:var(--green)"></span> Verification</div>
+
+<div class="two-col a" style="--i:32">
+  <div class="card">
+    <h3>Phase 1 — Command Center</h3>
+    <ul class="checklist">
+      <li>Playbook opens in Lookup Mode — search dominant</li>
+      <li>"bank won't connect" &rarr; answer cards &lt;300ms</li>
+      <li>"Copy Steps" copies resolution to clipboard</li>
+      <li>Call Companion bar visible on Chat view</li>
+      <li>Bottom bar lookup returns cards in flyout</li>
+      <li>Toggle to Edit Mode &rarr; all 22 files editable</li>
+      <li>/api/playbook/status returns metrics</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Phase 2 — Canada Content</h3>
+    <ul class="checklist">
+      <li>Each category has CRA/GST/HST/CPP/EI/ROE content</li>
+      <li>Zero US-only features presented as available</li>
+      <li>Total exceeds 12,000 lines</li>
+      <li>Lookup returns Canada-specific answer cards</li>
+      <li>Ask Claude about Canadian payroll — response is correct</li>
+    </ul>
+  </div>
+</div>
+
+<div class="two-col a" style="--i:33">
+  <div class="card">
+    <h3>Phase 3 — Context + Editor</h3>
+    <ul class="checklist">
+      <li>Chat sidebar auto-shows relevant KB per message</li>
+      <li>Specialist can verify Claude vs KB source</li>
+      <li>Diagnostic wizard: 4 clicks &rarr; resolution</li>
+      <li>Split-pane editor renders live preview</li>
+      <li>Ctrl+K/S/E/Escape shortcuts work</li>
+      <li>Auto-save restores draft</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Phases 4-6</h3>
+    <ul class="checklist">
+      <li>"reconciling" matches "reconciliation"</li>
+      <li>"GST" matches "goods and services tax"</li>
+      <li>Shift Intelligence shows seasonal forecast</li>
+      <li>KB Health shows per-category grades</li>
+      <li>Resolved escalation shows "Contribute to Playbook"</li>
+      <li>Analytics shows knowledge gap count</li>
+    </ul>
+  </div>
+</div>
+
+<div style="margin-top:48px;padding-top:20px;border-top:1px solid var(--border);color:var(--text-dim);font-size:11px;font-family:var(--font-mono)">
+  Playbook v2 — Command Center Implementation Plan &middot; QBO Canada Escalation Assistant &middot; 6 Phases &middot; Approved 2026-02-27
+</div>
+
+</div></div>
+<script>
+(function(){const toc=document.getElementById('toc');const links=toc.querySelectorAll('a');const sections=[];links.forEach(link=>{const id=link.getAttribute('href').slice(1);const el=document.getElementById(id);if(el)sections.push({id,el,link})});const observer=new IntersectionObserver(entries=>{entries.forEach(entry=>{if(entry.isIntersecting){links.forEach(l=>l.classList.remove('active'));const match=sections.find(s=>s.el===entry.target);if(match){match.link.classList.add('active');if(window.innerWidth<=1000)match.link.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'})}}})},{rootMargin:'-10% 0px -80% 0px'});sections.forEach(s=>observer.observe(s.el));links.forEach(link=>{link.addEventListener('click',e=>{e.preventDefault();const id=link.getAttribute('href').slice(1);const el=document.getElementById(id);if(el){el.scrollIntoView({behavior:'smooth',block:'start'});history.replaceState(null,'','#'+id)}})})})();
+</script>
+</body>
+</html>

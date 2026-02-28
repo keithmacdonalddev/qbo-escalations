@@ -1,81 +1,244 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import Tooltip from './Tooltip.jsx';
 import { useChat } from '../hooks/useChat.js';
+import { transitions, fadeSlideUp, fadeSlideDown, fade, popover } from '../utils/motion.js';
 import { exportConversation, getConversation, forkConversation } from '../api/chatApi.js';
-import { createEscalation, linkEscalation, getEscalation, transitionEscalation } from '../api/escalationsApi.js';
+import {
+  parseEscalation,
+  getEscalation,
+  transitionEscalation,
+  linkEscalation,
+} from '../api/escalationsApi.js';
 import { listTemplates, trackTemplateUsage } from '../api/templatesApi.js';
 import ChatMessage from './ChatMessage.jsx';
-import ImageUpload from './ImageUpload.jsx';
+import ParallelResponsePair from './ParallelResponsePair.jsx';
+import TriageCard from './TriageCard.jsx';
+import { computeGhostText } from '../data/smartComposeSuggestions.js';
+
+/**
+ * Group messages for rendering: parallel messages with the same turnId become a single group.
+ */
+function groupMessagesForRendering(messages) {
+  const groups = [];
+  const seenTurnIds = new Set();
+
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i];
+    const turnId = msg.attemptMeta?.turnId;
+
+    if (msg.role === 'assistant' && msg.mode === 'parallel' && turnId) {
+      if (seenTurnIds.has(turnId)) continue;
+      seenTurnIds.add(turnId);
+
+      const turnMessages = messages
+        .map((m, idx) => ({ ...m, _index: idx }))
+        .filter(m => m.role === 'assistant' && m.mode === 'parallel' && m.attemptMeta?.turnId === turnId);
+
+      groups.push({
+        type: 'parallel-pair',
+        turnId,
+        responses: turnMessages,
+        firstIndex: turnMessages[0]._index,
+      });
+    } else {
+      groups.push({ type: 'single', message: msg, index: i });
+    }
+  }
+  return groups;
+}
+
+/**
+ * Detect if a parallel turn was triggered by an image upload (template parsing).
+ */
+function detectImageParseTurn(messages, parallelIndex) {
+  for (let i = parallelIndex - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') {
+      return Array.isArray(messages[i].images) && messages[i].images.length > 0;
+    }
+  }
+  return false;
+}
+
+const PARSE_ESCALATION_PROMPT = [
+  'Parse this escalation screenshot for backend capture, but keep the on-screen response concise for quick action.',
+  '',
+  'Output ONLY these sections in this exact order:',
+  '1) What the Agent Is Attempting',
+  '2) Expected vs Actual Outcome',
+  '3) Troubleshooting Steps Taken',
+  '4) Diagnosis',
+  '5) Steps for Agent',
+  '6) Customer-Facing Explanation',
+  '',
+  'Response requirements:',
+  '- Do not include structured summary tables or field/value metadata blocks.',
+  '- Do not show COID, MID, case number, agent name, client contact, severity, environment, or source/citation notes unless needed to explain action.',
+  '- Do not include Recommended Template, Resolution Note, Similar Symptoms Flag, or extra headers.',
+  '- Keep it tight and actionable.',
+  '- Do not repeat content.',
+].join('\n');
 
 const QUICK_PROMPTS = [
-  { label: 'Parse Escalation', prompt: 'Parse this escalation and identify: COID, MID, case number, client contact, agent name, what they\'re attempting, expected vs actual outcome, troubleshooting steps taken, and the QBO category. Then recommend next steps.' },
+  { label: 'Parse Escalation', prompt: PARSE_ESCALATION_PROMPT },
   { label: 'Draft Response', prompt: 'Based on our conversation, draft a professional response I can send back to the phone agent. Include specific resolution steps.' },
   { label: 'Categorize Issue', prompt: 'What QBO category does this issue fall under? Explain your reasoning and list related known issues in that category.' },
   { label: 'Suggest Troubleshooting', prompt: 'Based on the issue described, what troubleshooting steps should the agent try next? List them in order of likelihood to resolve.' },
 ];
 
-/** Check if an assistant message looks like it contains parsed escalation data */
-function detectEscalationFields(text) {
-  if (!text || text.length < 50) return null;
-  const fields = {};
-  const coidMatch = text.match(/\bCOID[:\s]*(\d{5,})/i);
-  if (coidMatch) fields.coid = coidMatch[1];
-  const caseMatch = text.match(/\bcase\s*(?:#|number|num)?[:\s]*(\d{6,})/i);
-  if (caseMatch) fields.caseNumber = caseMatch[1];
-  const agentMatch = text.match(/\bagent(?:\s+name)?[:\s]*([A-Z][a-z]+ [A-Z][a-z]+)/);
-  if (agentMatch) fields.agentName = agentMatch[1];
-  const categoryMap = [
-    { pattern: /payroll/i, category: 'payroll' },
-    { pattern: /bank.?feed/i, category: 'bank-feeds' },
-    { pattern: /reconciliation/i, category: 'reconciliation' },
-    { pattern: /permission/i, category: 'permissions' },
-    { pattern: /billing/i, category: 'billing' },
-    { pattern: /\btax\b/i, category: 'tax' },
-    { pattern: /invoic/i, category: 'invoicing' },
-    { pattern: /report/i, category: 'reporting' },
-  ];
-  for (const { pattern, category } of categoryMap) {
-    if (pattern.test(text)) {
-      fields.category = category;
-      break;
-    }
-  }
-  const attemptMatch = text.match(/(?:attempting|trying|issue|problem)[:\s]*(.{10,80}?)(?:\.|$)/im);
-  if (attemptMatch) fields.attemptingTo = attemptMatch[1].trim();
-  // Need at least 2 recognized fields to consider it an escalation parse
-  return Object.keys(fields).length >= 2 ? fields : null;
+const PROVIDER_OPTIONS = [
+  { value: 'claude', label: 'Claude' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { value: 'chatgpt-5.3-codex-high', label: 'ChatGPT 5.3 Codex (High)' },
+  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
+];
+const MODE_OPTIONS = [
+  { value: 'single', label: 'Single' },
+  { value: 'fallback', label: 'Fallback' },
+  { value: 'parallel', label: 'Parallel' },
+];
+
+function formatTokenEstimate(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(Math.round(n));
 }
 
-export default function Chat({ conversationIdFromRoute }) {
+function getProviderLabel(provider) {
+  if (provider === 'regex') return 'Regex Parser';
+  const option = PROVIDER_OPTIONS.find((p) => p.value === provider);
+  return option ? option.label : 'Claude';
+}
+
+function formatProcessEventTime(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function createFileMetaKey(file) {
+  const name = file?.name || '';
+  const size = Number.isFinite(file?.size) ? file.size : 0;
+  const lastModified = Number.isFinite(file?.lastModified) ? file.lastModified : 0;
+  return `${name}::${size}::${lastModified}`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function computeFileHash(file) {
+  if (!globalThis.crypto?.subtle) {
+    return null;
+  }
+  const buffer = await file.arrayBuffer();
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (const byte of bytes) {
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+export function ChatView({ conversationIdFromRoute, chat }) {
   const {
     messages,
     conversationId,
+    provider,
+    mode,
+    fallbackProvider,
     isStreaming,
     streamingText,
+    parallelStreaming,
+    streamProvider,
+    fallbackNotice,
+    runtimeWarnings,
+    contextDebug,
+    parallelAcceptingKey,
     error,
+    errorDetails,
     responseTime,
+    processEvents,
     sendMessage,
+    retryLastResponse,
+    setProvider,
+    setMode,
+    setFallbackProvider,
+    dismissFallbackNotice,
+    dismissRuntimeWarnings,
+    acceptParallelTurn,
+    unacceptParallelTurn,
+    triageCard,
     abortStream,
     selectConversation,
     newConversation,
     setError,
-  } = useChat();
+    appendProcessEvent,
+    clearProcessEvents,
+  } = chat;
 
   const [exportCopied, setExportCopied] = useState(false);
   const [savedEscalationId, setSavedEscalationId] = useState(null);
-  const [savingEscalation, setSavingEscalation] = useState(false);
+  const [parseMeta, setParseMeta] = useState(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templateCategory, setTemplateCategory] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
+  const [showProviderPopover, setShowProviderPopover] = useState(false);
+  const [composeFocused, setComposeFocused] = useState(false);
+  const [discardedProviders, setDiscardedProviders] = useState({});
+  const providerPopoverRef = useRef(null);
+
+  const handleDiscardProvider = useCallback((turnId, discardedProvider) => {
+    setDiscardedProviders(prev => ({ ...prev, [turnId]: discardedProvider }));
+  }, []);
+  const handleReEnableProvider = useCallback((turnId) => {
+    setDiscardedProviders(prev => {
+      const next = { ...prev };
+      delete next[turnId];
+      return next;
+    });
+  }, []);
+
+  // Compose settings popover
+  const [showSettingsPopover, setShowSettingsPopover] = useState(false);
+  const settingsPopoverRef = useRef(null);
+
+  // Feature B: Smart Compose
+  const [smartComposeEnabled, setSmartComposeEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem('qbo-smart-compose-enabled');
+    return stored === null ? true : stored === 'true';
+  });
+  const [ghostText, setGhostText] = useState('');
+
+  // Feature C: Context Pill
+  const [contextPillEnabled, setContextPillEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    const stored = window.localStorage.getItem('qbo-context-pill-enabled');
+    return stored === null ? true : stored === 'true';
+  });
+  const [copiedField, setCopiedField] = useState(null);
 
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [resolvingEscalation, setResolvingEscalation] = useState(false);
 
   const [input, setInput] = useState('');
   const [images, setImages] = useState([]);
-  const [showUpload, setShowUpload] = useState(false);
+  const [isComposeDragOver, setIsComposeDragOver] = useState(false);
+  const pendingImageParseRef = useRef(false);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+  const imageInputRef = useRef(null);
 
   // Check if current conversation has a linked escalation
   useEffect(() => {
@@ -102,20 +265,24 @@ export default function Chat({ conversationIdFromRoute }) {
   useEffect(() => {
     if (conversationIdFromRoute && conversationIdFromRoute !== conversationId) {
       selectConversation(conversationIdFromRoute);
+      return;
     }
-  }, [conversationIdFromRoute, conversationId, selectConversation]);
+    if (conversationIdFromRoute === null && conversationId) {
+      newConversation();
+    }
+  }, [conversationIdFromRoute, conversationId, selectConversation, newConversation]);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingText]);
+  }, [messages, streamingText, parallelStreaming]);
 
   // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }, [input]);
 
   // Global keyboard shortcuts
@@ -139,20 +306,143 @@ export default function Chat({ conversationIdFromRoute }) {
     }
   }, [isStreaming]);
 
+  // Close provider popover on outside click
+  useEffect(() => {
+    if (!showProviderPopover) return;
+    const handler = (e) => {
+      if (providerPopoverRef.current && !providerPopoverRef.current.contains(e.target)) {
+        setShowProviderPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showProviderPopover]);
+
+  // Close settings popover on outside click
+  useEffect(() => {
+    if (!showSettingsPopover) return;
+    const handler = (e) => {
+      if (settingsPopoverRef.current && !settingsPopoverRef.current.contains(e.target)) {
+        setShowSettingsPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showSettingsPopover]);
+
+  // Toggle callbacks
+  const toggleSmartCompose = useCallback((enabled) => {
+    setSmartComposeEnabled(enabled);
+    window.localStorage.setItem('qbo-smart-compose-enabled', String(enabled));
+    if (!enabled) setGhostText('');
+  }, []);
+
+  const toggleContextPill = useCallback((enabled) => {
+    setContextPillEnabled(enabled);
+    window.localStorage.setItem('qbo-context-pill-enabled', String(enabled));
+  }, []);
+
+  // Copy field handler for context pill
+  const handleCopyField = useCallback(async (fieldName, value) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedField(fieldName);
+      setTimeout(() => setCopiedField(null), 1500);
+    } catch { /* silent */ }
+  }, []);
+
+  const appendImageFiles = useCallback((files) => {
+    const imageFiles = Array.from(files || []).filter((file) => file?.type?.startsWith('image/'));
+    if (imageFiles.length === 0) return;
+
+    Promise.all(imageFiles.map(async (file) => {
+      try {
+        const [src, hash] = await Promise.all([
+          readFileAsDataUrl(file),
+          computeFileHash(file).catch(() => null),
+        ]);
+        return {
+          src,
+          hash,
+          metaKey: createFileMetaKey(file),
+        };
+      } catch {
+        return null;
+      }
+    })).then((prepared) => {
+      const preparedCount = prepared.filter(Boolean).length;
+      setImages((prev) => {
+        const seenHashes = new Set(prev.map((img) => img.hash).filter(Boolean));
+        const seenMetaKeys = new Set(prev.map((img) => img.metaKey));
+        const next = [...prev];
+
+        for (const item of prepared) {
+          if (!item) continue;
+          if ((item.hash && seenHashes.has(item.hash)) || seenMetaKeys.has(item.metaKey)) {
+            continue;
+          }
+          if (item.hash) {
+            seenHashes.add(item.hash);
+          }
+          seenMetaKeys.add(item.metaKey);
+          next.push(item);
+        }
+        return next;
+      });
+      if (preparedCount > 0) {
+        appendProcessEvent({
+          level: 'info',
+          title: 'Image attached',
+          message: `${preparedCount} image${preparedCount === 1 ? '' : 's'} added to this message.`,
+          code: 'IMAGE_ATTACHED',
+          imageCount: preparedCount,
+        });
+      }
+    });
+  }, [appendProcessEvent]);
+
+  const removeImage = useCallback((index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+    appendProcessEvent({
+      level: 'info',
+      title: 'Image removed',
+      message: `Removed attachment ${index + 1}.`,
+      code: 'IMAGE_REMOVED',
+    });
+  }, [appendProcessEvent]);
+
+  const hasImageItems = useCallback((dataTransfer) => {
+    if (!dataTransfer) return false;
+    const items = Array.from(dataTransfer.items || []);
+    if (items.some((item) => item.kind === 'file' && item.type.startsWith('image/'))) return true;
+    const files = Array.from(dataTransfer.files || []);
+    return files.some((file) => file?.type?.startsWith('image/'));
+  }, []);
+
   const handleSubmit = useCallback(() => {
     if ((!input.trim() && images.length === 0) || isStreaming) return;
-    sendMessage(input, images);
+    setParseMeta(null);
+    // Auto-inject parse prompt when sending images with no text
+    const textToSend = !input.trim() && images.length > 0 ? PARSE_ESCALATION_PROMPT : input;
+    pendingImageParseRef.current = !input.trim() && images.length > 0;
+    sendMessage(textToSend, images.map((img) => img.src), provider);
     setInput('');
     setImages([]);
-    setShowUpload(false);
-  }, [input, images, isStreaming, sendMessage]);
+    setGhostText('');
+  }, [input, images, isStreaming, sendMessage, provider]);
 
   const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Tab' && ghostText) {
+      e.preventDefault();
+      setInput(prev => prev + ghostText);
+      setGhostText('');
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  }, [handleSubmit]);
+  }, [handleSubmit, ghostText]);
 
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items;
@@ -160,37 +450,56 @@ export default function Chat({ conversationIdFromRoute }) {
     const imageItems = Array.from(items).filter(item => item.type.startsWith('image/'));
     if (imageItems.length > 0) {
       e.preventDefault();
-      setShowUpload(true);
       const files = imageItems.map(item => item.getAsFile()).filter(Boolean);
-      const readers = files.map(file => new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(file);
-      }));
-      Promise.all(readers).then(results => {
-        setImages(prev => [...prev, ...results]);
-      });
+      appendImageFiles(files);
     }
+  }, [appendImageFiles]);
+
+  const handleAttachClick = useCallback(() => {
+    if (isStreaming) return;
+    imageInputRef.current?.click();
+  }, [isStreaming]);
+
+  const handleFilePickerChange = useCallback((e) => {
+    appendImageFiles(e.target.files);
+    e.target.value = '';
+  }, [appendImageFiles]);
+
+  const handleComposeDragEnter = useCallback((e) => {
+    if (isStreaming || !hasImageItems(e.dataTransfer)) return;
+    e.preventDefault();
+    setIsComposeDragOver(true);
+  }, [isStreaming, hasImageItems]);
+
+  const handleComposeDragOver = useCallback((e) => {
+    if (isStreaming || !hasImageItems(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    if (!isComposeDragOver) {
+      setIsComposeDragOver(true);
+    }
+  }, [isStreaming, hasImageItems, isComposeDragOver]);
+
+  const handleComposeDragLeave = useCallback((e) => {
+    if (e.currentTarget.contains(e.relatedTarget)) return;
+    setIsComposeDragOver(false);
   }, []);
+
+  const handleComposeDrop = useCallback((e) => {
+    if (!hasImageItems(e.dataTransfer)) return;
+    e.preventDefault();
+    setIsComposeDragOver(false);
+    if (isStreaming) return;
+    appendImageFiles(e.dataTransfer.files);
+  }, [isStreaming, hasImageItems, appendImageFiles]);
 
   const handleQuickPrompt = useCallback((prompt) => {
     if (isStreaming) return;
-    sendMessage(prompt, images);
+    setParseMeta(null);
+    sendMessage(prompt, images.map((img) => img.src), provider);
     setImages([]);
-    setShowUpload(false);
-  }, [isStreaming, images, sendMessage]);
+  }, [isStreaming, images, sendMessage, provider]);
 
-  // Save parsed escalation from the last assistant message
-  const handleSaveEscalation = useCallback(async (fields) => {
-    if (!conversationId || savingEscalation) return;
-    setSavingEscalation(true);
-    try {
-      const esc = await createEscalation({ ...fields, source: 'chat' });
-      await linkEscalation(esc._id, conversationId);
-      setSavedEscalationId(esc._id);
-    } catch { /* ignore */ }
-    setSavingEscalation(false);
-  }, [conversationId, savingEscalation]);
 
   // Mark linked escalation as resolved
   const handleResolveEscalation = useCallback(async () => {
@@ -203,15 +512,83 @@ export default function Chat({ conversationIdFromRoute }) {
     setResolvingEscalation(false);
   }, [linkedEscalation, resolvingEscalation]);
 
+  // Auto-save escalation after image parse completes
+  useEffect(() => {
+    if (isStreaming || !pendingImageParseRef.current || !conversationId || savedEscalationId) return;
+    pendingImageParseRef.current = false;
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    if (!lastUser || !Array.isArray(lastUser.images) || lastUser.images.length === 0) return;
+    // Use first image (most likely the escalation template); parse API accepts a single image
+    const primaryImage = lastUser.images[0];
+    let cancelled = false;
+    (async () => {
+      try {
+        appendProcessEvent({
+          level: 'info',
+          title: 'Escalation parse started',
+          message: 'Running structured extraction on the uploaded screenshot.',
+          code: 'PARSE_STARTED',
+        });
+        const parsed = await parseEscalation({
+          image: primaryImage,
+          mode,
+          primaryProvider: provider,
+          fallbackProvider: mode !== 'single' ? fallbackProvider : undefined,
+        });
+        if (cancelled) return;
+        setParseMeta(parsed?._meta || null);
+        appendProcessEvent({
+          level: 'success',
+          title: 'Escalation parse complete',
+          message: `Parser selected ${getProviderLabel(parsed?._meta?.providerUsed || provider)}.`,
+          code: 'PARSE_COMPLETE',
+          provider: parsed?._meta?.providerUsed || provider,
+        });
+        if (parsed?.escalation?._id) {
+          appendProcessEvent({
+            level: 'info',
+            title: 'Linking escalation',
+            message: `Linking escalation ${parsed.escalation._id} to this conversation.`,
+            code: 'ESCALATION_LINKING',
+          });
+          await linkEscalation(parsed.escalation._id, conversationId);
+          if (!cancelled) {
+            setSavedEscalationId(parsed.escalation._id);
+            appendProcessEvent({
+              level: 'success',
+              title: 'Escalation linked',
+              message: `Escalation ${parsed.escalation._id} is now linked to this thread.`,
+              code: 'ESCALATION_LINKED',
+            });
+          }
+        }
+      } catch (err) {
+        appendProcessEvent({
+          level: 'error',
+          title: 'Escalation parse failed',
+          message: err?.message || 'The post-chat parse/link step failed.',
+          code: err?.code || 'PARSE_FAILED',
+        });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [
+    isStreaming,
+    conversationId,
+    savedEscalationId,
+    messages,
+    mode,
+    provider,
+    fallbackProvider,
+    appendProcessEvent,
+  ]);
+
   // Reset saved escalation when conversation changes
   useEffect(() => {
     setSavedEscalationId(null);
+    setParseMeta(null);
+    pendingImageParseRef.current = false;
   }, [conversationId]);
-
-  // Detect escalation fields in the last assistant message
-  const lastAssistantMsg = messages.length > 0 ? [...messages].reverse().find(m => m.role === 'assistant') : null;
-  const detectedFields = lastAssistantMsg ? detectEscalationFields(lastAssistantMsg.content) : null;
-  const showEscalationAction = detectedFields && !savedEscalationId && !isStreaming && conversationId;
 
   // Template picker
   const openTemplatePicker = useCallback(async () => {
@@ -251,7 +628,12 @@ export default function Chat({ conversationIdFromRoute }) {
     } catch { /* ignore */ }
   }, [conversationId]);
 
-  const hasImages = images.length > 0;
+  const canRetryLastResponse = Boolean(
+    conversationId
+      && !isStreaming
+      && messages.length > 1
+      && messages.some((m) => m.role === 'user')
+  );
 
   return (
     <div className="chat-container">
@@ -299,31 +681,126 @@ export default function Chat({ conversationIdFromRoute }) {
       )}
 
       {/* Messages area */}
-      <div className="chat-messages">
-        {messages.length === 0 && !isStreaming && (
-          <div className="empty-state" style={{ marginTop: 'var(--sp-10)' }}>
-            <div className="empty-state-title">QBO Escalation Assistant</div>
-            <div className="empty-state-desc">
-              Paste an escalation screenshot (Ctrl+V) or describe the issue. Claude will help diagnose and draft a response.
+      <div className="chat-messages" aria-live="polite">
+        {runtimeWarnings.length > 0 && (
+          <div className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--warning)', background: 'var(--warning-subtle)' }}>
+            <strong style={{ marginRight: 'var(--sp-2)', color: 'var(--warning)' }}>Budget Notice:</strong>
+            {runtimeWarnings[0]?.message || 'A runtime guardrail warning was raised.'}
+            <button
+              className="btn btn-sm btn-ghost"
+              onClick={dismissRuntimeWarnings}
+              style={{ marginLeft: 'var(--sp-3)' }}
+              type="button"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {contextDebug?.budgets && (
+          <div className="parallel-context-line">
+            <span className="ctx-dot" style={{ background: 'var(--accent)' }} />
+            <span>
+              Context {contextDebug.knowledgeMode} • {formatTokenEstimate(contextDebug.budgets.estimatedInputTokens)} est input tokens
+            </span>
+            <span className="ctx-hints">
+              S {formatTokenEstimate(contextDebug.budgets.systemChars / 4)} | H {formatTokenEstimate(contextDebug.budgets.historyChars / 4)} | R {formatTokenEstimate(contextDebug.budgets.retrievalChars / 4)}
+            </span>
+          </div>
+        )}
+
+        {processEvents.length > 0 && (
+          <div className="chat-process-panel" role="status" aria-live="polite">
+            <div className="chat-process-header">
+              <span>Request Activity</span>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={clearProcessEvents}
+                type="button"
+              >
+                Clear
+              </button>
             </div>
-            <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', justifyContent: 'center', marginTop: 'var(--sp-7)' }}>
-              {QUICK_PROMPTS.slice(0, 2).map((qp, i) => (
-                <button
-                  key={i}
-                  className="btn btn-secondary"
-                  onClick={() => handleQuickPrompt(qp.prompt)}
-                  type="button"
-                >
-                  {qp.label}
-                </button>
+            <div className="chat-process-list">
+              {processEvents.slice(-14).map((event) => (
+                <div key={event.id} className={`chat-process-item is-${event.level || 'info'}`}>
+                  <span className="chat-process-dot" />
+                  <div className="chat-process-body">
+                    <div className="chat-process-title">
+                      <strong>{event.title || 'Event'}</strong>
+                      <span>{formatProcessEventTime(event.at)}</span>
+                    </div>
+                    <div className="chat-process-message">{event.message}</div>
+                    {(event.code || event.provider || Number.isFinite(event.latencyMs)) && (
+                      <div className="chat-process-meta">
+                        {event.code && <span className="mono">{event.code}</span>}
+                        {event.provider && <span>{getProviderLabel(event.provider)}</span>}
+                        {Number.isFinite(event.latencyMs) && <span>{event.latencyMs}ms</span>}
+                      </div>
+                    )}
+                    {event.detail && (
+                      <details className="chat-process-detail">
+                        <summary>Details</summary>
+                        <pre>{event.detail}</pre>
+                      </details>
+                    )}
+                  </div>
+                </div>
               ))}
             </div>
           </div>
         )}
 
+        <AnimatePresence>
+          {fallbackNotice && (
+            <motion.div key="fallback-notice" {...fadeSlideDown} transition={transitions.normal}
+              className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--line)', background: 'var(--bg-sunken)' }}>
+              <strong style={{ marginRight: 'var(--sp-2)' }}>Fallback used:</strong>
+              {getProviderLabel(fallbackNotice.from)} &rarr; {getProviderLabel(fallbackNotice.to)}
+              {fallbackNotice.reason && (
+                <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-secondary)' }}>
+                  ({fallbackNotice.reason})
+                </span>
+              )}
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={dismissFallbackNotice}
+                style={{ marginLeft: 'var(--sp-3)' }}
+                type="button"
+              >
+                Dismiss
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {messages.length === 0 && !isStreaming && (
+          <motion.div
+            className="empty-state"
+            style={{ marginTop: 'var(--sp-10)' }}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={transitions.emphasis}
+          >
+            <div className="empty-state-title">QBO Escalation Assistant</div>
+            <div className="empty-state-desc">
+              Paste escalation screenshots (Ctrl+V) and hit Send. {getProviderLabel(provider)} will parse, save, and recommend next steps.
+            </div>
+          </motion.div>
+        )}
+
         {/* Export button when conversation has messages */}
         {messages.length > 1 && !isStreaming && conversationId && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '0 var(--sp-2)' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', padding: '0 var(--sp-2)' }}>
+            {canRetryLastResponse && (
+              <button
+                className="copy-btn"
+                onClick={() => retryLastResponse(provider)}
+                type="button"
+              >
+                Retry Last Response
+              </button>
+            )}
             <button
               className={`copy-btn${exportCopied ? ' is-copied' : ''}`}
               onClick={async () => {
@@ -341,83 +818,197 @@ export default function Chat({ conversationIdFromRoute }) {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <ChatMessage
-            key={i}
-            role={msg.role}
-            content={msg.content}
-            images={msg.images}
-            timestamp={msg.timestamp}
-            responseTimeMs={msg.responseTimeMs}
-            onFork={msg.role === 'assistant' && conversationId && !isStreaming ? () => handleFork(i) : undefined}
-          />
-        ))}
+        <AnimatePresence initial={false}>
+          {groupMessagesForRendering(messages).map((group) => {
+            if (group.type === 'parallel-pair') {
+              const { turnId, responses: turnResponses, firstIndex } = group;
+              const hasAccepted = turnResponses.some(r => r.attemptMeta?.accepted);
+              const isImageParse = detectImageParseTurn(messages, firstIndex);
 
-        {/* Streaming response */}
-        {isStreaming && streamingText && (
-          <ChatMessage
-            role="assistant"
-            content={streamingText}
-            isStreaming={true}
-          />
+              return (
+                <motion.div key={`pair-${turnId}`} {...fadeSlideUp} transition={transitions.springGentle}>
+                  <ParallelResponsePair
+                    responses={turnResponses.map(r => ({
+                      provider: r.provider,
+                      content: r.content,
+                      isStreaming: false,
+                      responseTimeMs: r.responseTimeMs,
+                      turnId,
+                      isAccepted: Boolean(r.attemptMeta?.accepted),
+                      isRejected: Boolean(r.attemptMeta?.rejected),
+                    }))}
+                    onAccept={hasAccepted ? undefined : (tid, prov) => acceptParallelTurn(tid, prov)}
+                    onUnaccept={(tid) => unacceptParallelTurn(tid)}
+                    onDiscard={(tid, prov) => handleDiscardProvider(tid, prov)}
+                    onReEnable={(tid) => handleReEnableProvider(tid)}
+                    onFork={conversationId && !isStreaming ? (idx) => handleFork(idx) : undefined}
+                    accepting={parallelAcceptingKey}
+                    isImageParseTurn={isImageParse}
+                    discardedProvider={discardedProviders[turnId] || null}
+                  />
+                </motion.div>
+              );
+            }
+
+            const msg = group.message;
+            const i = group.index;
+            return (
+              <motion.div key={msg._id || msg.timestamp || `msg-${i}`} {...fadeSlideUp} transition={transitions.springGentle}>
+                <ChatMessage
+                  role={msg.role}
+                  content={msg.content}
+                  images={msg.images}
+                  provider={msg.provider}
+                  mode={msg.mode}
+                  fallbackFrom={msg.fallbackFrom}
+                  timestamp={msg.timestamp}
+                  responseTimeMs={msg.responseTimeMs}
+                  onFork={msg.role === 'assistant' && conversationId && !isStreaming ? () => handleFork(i) : undefined}
+                />
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+
+        {/* Triage card — appears instantly before streaming text */}
+        {triageCard && (
+          <TriageCard triageCard={triageCard} />
         )}
 
-        {/* Streaming but no text yet */}
-        {isStreaming && !streamingText && (
-          <div className="chat-bubble chat-bubble-assistant" style={{ alignSelf: 'flex-start' }}>
-            <div className="eyebrow" style={{ marginBottom: 'var(--sp-2)' }}>Claude</div>
-            <span className="spinner spinner-sm" />
-            <span className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginLeft: 'var(--sp-2)' }}>
-              Thinking...
-            </span>
-          </div>
-        )}
+        {/* Streaming response (single/fallback) */}
+        <AnimatePresence>
+          {isStreaming && mode !== 'parallel' && streamingText && (
+            <motion.div key="streaming-single" {...fadeSlideUp} transition={transitions.normal}>
+              <ChatMessage
+                role="assistant"
+                content={streamingText}
+                provider={streamProvider}
+                isStreaming={true}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Streaming response (parallel) — split-column layout */}
+        <AnimatePresence>
+          {isStreaming && mode === 'parallel' && (
+            <motion.div key="streaming-parallel" {...fadeSlideUp} transition={transitions.normal}>
+              <ParallelResponsePair
+                responses={[...new Set([provider, fallbackProvider])].filter(Boolean).map(p => ({
+                  provider: p,
+                  content: parallelStreaming[p] || '',
+                  isStreaming: true,
+                  responseTimeMs: null,
+                  turnId: null,
+                  isAccepted: false,
+                  isRejected: false,
+                }))}
+                accepting={null}
+                isImageParseTurn={false}
+                discardedProvider={null}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Streaming but no text yet (single/fallback) */}
+        <AnimatePresence>
+          {isStreaming && mode !== 'parallel' && !streamingText && (
+            <motion.div key="streaming-thinking" {...fadeSlideUp} transition={transitions.normal}>
+              <div className="chat-bubble chat-bubble-assistant" style={{ alignSelf: 'flex-start' }}>
+                <div className="eyebrow" style={{ marginBottom: 'var(--sp-2)' }}>{getProviderLabel(streamProvider || provider)}</div>
+                <span className="spinner spinner-sm" />
+                <span className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginLeft: 'var(--sp-2)' }}>
+                  Thinking...
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Error */}
+        <AnimatePresence>
         {error && (
-          <div className="chat-bubble chat-bubble-system" style={{ borderColor: 'var(--danger)', border: '1px solid var(--danger)' }}>
-            <span className="text-danger">{error}</span>
-            <button
-              className="btn btn-sm btn-ghost"
-              onClick={() => setError(null)}
-              style={{ marginLeft: 'var(--sp-3)' }}
-              type="button"
-            >
-              Dismiss
-            </button>
-          </div>
+          <motion.div key="error-card" {...fadeSlideDown} transition={transitions.springGentle} className="chat-error-card">
+            <div className="chat-error-title">Request failed</div>
+            <div className="chat-error-message text-danger">{errorDetails?.message || error}</div>
+            {(errorDetails?.code || errorDetails?.detail) && (
+              <div className="chat-error-meta">
+                {errorDetails?.code && <span className="mono">{errorDetails.code}</span>}
+                {errorDetails?.detail && <span>technical detail available</span>}
+              </div>
+            )}
+            {Array.isArray(errorDetails?.attempts) && errorDetails.attempts.length > 0 && (
+              <div className="chat-error-attempts">
+                {errorDetails.attempts.map((attempt, idx) => (
+                  <div key={`${attempt.provider || 'provider'}-${idx}`} className={`chat-error-attempt${attempt.status === 'ok' ? ' is-ok' : ' is-error'}`}>
+                    <span>{getProviderLabel(attempt.provider)}</span>
+                    <span>{attempt.status || 'unknown'}</span>
+                    {Number.isFinite(attempt.latencyMs) && <span>{attempt.latencyMs}ms</span>}
+                    {attempt.errorCode && <span className="mono">{attempt.errorCode}</span>}
+                    {attempt.errorMessage && <span>{attempt.errorMessage}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+            {errorDetails?.detail && (
+              <details className="chat-error-detail">
+                <summary>Technical details</summary>
+                <pre>{errorDetails.detail}</pre>
+              </details>
+            )}
+            <div className="chat-error-actions">
+              {canRetryLastResponse && (
+                <button
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => retryLastResponse(provider)}
+                  type="button"
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setError(null)}
+                type="button"
+              >
+                Dismiss
+              </button>
+            </div>
+          </motion.div>
         )}
+        </AnimatePresence>
 
-        {/* Save as Escalation action bar */}
-        {showEscalationAction && (
+        {parseMeta && !isStreaming && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 'var(--sp-3)',
+            gap: 'var(--sp-2)',
             padding: 'var(--sp-3) var(--sp-5)',
             margin: '0 var(--sp-3)',
-            background: 'var(--accent-subtle)',
+            background: 'var(--bg-sunken)',
             borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--accent)',
+            border: '1px solid var(--line-subtle)',
+            flexWrap: 'wrap',
           }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="12" y1="18" x2="12" y2="12" />
-              <line x1="9" y1="15" x2="15" y2="15" />
-            </svg>
-            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--accent)', fontWeight: 600, flex: 1 }}>
-              Escalation data detected
-              {detectedFields.coid && <span style={{ fontWeight: 400, marginLeft: 'var(--sp-2)' }}>(COID: {detectedFields.coid})</span>}
+            <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-secondary)' }}>
+              Parsed by <strong>{getProviderLabel(parseMeta.providerUsed)}</strong>
             </span>
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={() => handleSaveEscalation(detectedFields)}
-              disabled={savingEscalation}
-              type="button"
-            >
-              {savingEscalation ? 'Saving...' : 'Save as Escalation'}
-            </button>
+            {parseMeta.validation?.score !== undefined && parseMeta.validation?.score !== null && (
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-secondary)' }}>
+                Score: {Number(parseMeta.validation.score).toFixed(2)} ({parseMeta.validation.confidence || parseMeta.confidence || 'unknown'})
+              </span>
+            )}
+            {parseMeta.usedRegexFallback && (
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--warning, #9a6b00)' }}>
+                Regex fallback used
+              </span>
+            )}
+            {Array.isArray(parseMeta.validation?.issues) && parseMeta.validation.issues.length > 0 && (
+              <span style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-tertiary)' }}>
+                Issues: {parseMeta.validation.issues.slice(0, 3).join(', ')}
+              </span>
+            )}
           </div>
         )}
 
@@ -452,126 +1043,403 @@ export default function Chat({ conversationIdFromRoute }) {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Quick action bar — show when images are attached */}
-      {hasImages && !isStreaming && (
-        <div style={{
-          display: 'flex',
-          gap: 'var(--sp-2)',
-          padding: 'var(--sp-3) var(--sp-5)',
-          borderTop: '1px solid var(--line-subtle)',
-          overflowX: 'auto',
-        }}>
+      {/* Input area — Compose Card */}
+      <div className="chat-input-area">
+        {/* Quick action chips — always visible */}
+        <div className="quick-action-chips">
           {QUICK_PROMPTS.map((qp, i) => (
             <button
               key={i}
-              className="btn btn-sm btn-secondary"
+              className="quick-action-chip"
               onClick={() => handleQuickPrompt(qp.prompt)}
               type="button"
-              style={{ whiteSpace: 'nowrap' }}
+              disabled={isStreaming}
             >
               {qp.label}
             </button>
           ))}
         </div>
-      )}
 
-      {/* Input area */}
-      <div className="chat-input-area" style={{ flexDirection: 'column', gap: 'var(--sp-3)' }}>
-        {showUpload && (
-          <ImageUpload
-            images={images}
-            onImagesChange={setImages}
-            disabled={isStreaming}
-          />
+        {/* Escalation context pill */}
+        {contextPillEnabled && linkedEscalation && (linkedEscalation.coid || linkedEscalation.caseNumber || linkedEscalation.category || linkedEscalation.status) && (
+          <div className="context-pill">
+            {linkedEscalation.coid && (
+              <>
+                <button
+                  className={`context-pill-field${copiedField === 'coid' ? ' is-copied' : ''}`}
+                  onClick={() => handleCopyField('coid', linkedEscalation.coid)}
+                  title="Click to copy COID"
+                  type="button"
+                >
+                  <span className="field-label">COID</span>
+                  <span className="field-value">{linkedEscalation.coid}</span>
+                </button>
+                <span className="context-pill-divider" />
+              </>
+            )}
+            {linkedEscalation.caseNumber && (
+              <>
+                <button
+                  className={`context-pill-field${copiedField === 'case' ? ' is-copied' : ''}`}
+                  onClick={() => handleCopyField('case', linkedEscalation.caseNumber)}
+                  title="Click to copy case number"
+                  type="button"
+                >
+                  <span className="field-label">Case</span>
+                  <span className="field-value">#{linkedEscalation.caseNumber}</span>
+                </button>
+                <span className="context-pill-divider" />
+              </>
+            )}
+            {linkedEscalation.category && linkedEscalation.category !== 'unknown' && (
+              <>
+                <button
+                  className={`context-pill-field${copiedField === 'category' ? ' is-copied' : ''}`}
+                  onClick={() => handleCopyField('category', linkedEscalation.category)}
+                  title="Click to copy category"
+                  type="button"
+                >
+                  <span className={`cat-badge cat-${linkedEscalation.category}`} style={{ fontSize: 'var(--text-xs)' }}>
+                    {linkedEscalation.category.replace('-', ' ')}
+                  </span>
+                </button>
+                <span className="context-pill-divider" />
+              </>
+            )}
+            {linkedEscalation.status && (
+              <button
+                className={`context-pill-field${copiedField === 'status' ? ' is-copied' : ''}`}
+                onClick={() => handleCopyField('status', linkedEscalation.status)}
+                title="Click to copy status"
+                type="button"
+              >
+                <span className={`badge badge-${linkedEscalation.status === 'open' ? 'open' : linkedEscalation.status === 'in-progress' ? 'progress' : linkedEscalation.status === 'resolved' ? 'resolved' : 'escalated'}`} style={{ fontSize: 'var(--text-xs)' }}>
+                  {linkedEscalation.status}
+                </span>
+              </button>
+            )}
+          </div>
         )}
 
-        <div style={{ display: 'flex', gap: 'var(--sp-3)', alignItems: 'flex-end', width: '100%' }}>
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={() => setShowUpload(prev => !prev)}
-            title="Attach images (or press Ctrl+V to paste)"
-            type="button"
-            aria-label="Toggle image upload"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
-            </svg>
-          </button>
+        {/* Compose card */}
+        <div
+          className={`compose-card${composeFocused ? ' is-focused' : ''}${isComposeDragOver ? ' is-dragover' : ''}`}
+          onDragEnter={handleComposeDragEnter}
+          onDragOver={handleComposeDragOver}
+          onDragLeave={handleComposeDragLeave}
+          onDrop={handleComposeDrop}
+        >
+          {/* Top strip: provider chip + help */}
+          <div className="compose-top-strip">
+            <div ref={providerPopoverRef} style={{ position: 'relative' }}>
+              <button
+                className={`provider-chip${showProviderPopover ? ' is-open' : ''}`}
+                onClick={() => setShowProviderPopover(prev => !prev)}
+                type="button"
+                aria-label="Change model and mode settings"
+                aria-expanded={showProviderPopover}
+              >
+                {getProviderLabel(provider)}
+                {' \u00b7 '}
+                {MODE_OPTIONS.find(m => m.value === mode)?.label || 'Single'}
+                {mode !== 'single' && (
+                  <> + {getProviderLabel(fallbackProvider)}</>
+                )}
+                <span className="chevron">&#9662;</span>
+              </button>
 
-          <button
-            className="btn btn-ghost btn-icon"
-            onClick={openTemplatePicker}
-            title="Insert a response template"
-            type="button"
-            aria-label="Insert template"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-              <line x1="3" y1="9" x2="21" y2="9" />
-              <line x1="9" y1="21" x2="9" y2="9" />
-            </svg>
-          </button>
+              {/* Provider/mode popover */}
+              <AnimatePresence>
+              {showProviderPopover && (
+                <motion.div key="provider-popover" className="provider-popover" {...popover} transition={transitions.fast}>
+                  <div className="provider-popover-label">Provider</div>
+                  {PROVIDER_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
+                      onClick={() => { setProvider(option.value); }}
+                      type="button"
+                    >
+                      <span className="check">{provider === option.value ? '\u2713' : ''}</span>
+                      {option.label}
+                    </button>
+                  ))}
+                  <div className="provider-popover-divider" />
+                  <div className="provider-popover-label">Mode</div>
+                  {MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`provider-popover-option${mode === option.value ? ' is-selected' : ''}`}
+                      onClick={() => { setMode(option.value); }}
+                      type="button"
+                    >
+                      <span className="check">{mode === option.value ? '\u2713' : ''}</span>
+                      {option.label}
+                    </button>
+                  ))}
+                  {mode !== 'single' && (
+                    <>
+                      <div className="provider-popover-divider" />
+                      <div className="provider-popover-label">
+                        {mode === 'parallel' ? 'Second Provider' : 'Fallback Provider'}
+                      </div>
+                      {PROVIDER_OPTIONS.filter((o) => o.value !== provider).map((option) => (
+                        <button
+                          key={option.value}
+                          className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
+                          onClick={() => { setFallbackProvider(option.value); }}
+                          type="button"
+                        >
+                          <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                          {option.label}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </motion.div>
+              )}
+              </AnimatePresence>
+            </div>
 
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder="Describe the escalation or paste a screenshot (Ctrl+V)..."
-            rows={1}
-            disabled={isStreaming}
-            style={{
-              flex: 1,
-              minHeight: 40,
-              maxHeight: 160,
-              resize: 'none',
-              background: 'var(--bg-sunken)',
-              border: '1px solid var(--line)',
-              borderRadius: 'var(--radius-md)',
-              padding: '8px 12px',
-              fontFamily: 'var(--font-sans)',
-              fontSize: 'var(--text-base)',
-              color: 'var(--ink)',
-              lineHeight: 1.5,
-            }}
-          />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+              {/* Settings gear */}
+              <div ref={settingsPopoverRef} style={{ position: 'relative' }}>
+                <button
+                  className={`compose-settings-btn${showSettingsPopover ? ' is-open' : ''}`}
+                  onClick={() => setShowSettingsPopover(prev => !prev)}
+                  type="button"
+                  aria-label="Compose settings"
+                  aria-expanded={showSettingsPopover}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                  </svg>
+                </button>
 
-          {isStreaming ? (
-            <button
-              className="btn btn-danger"
-              onClick={abortStream}
-              type="button"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              className="btn btn-primary"
-              onClick={handleSubmit}
-              disabled={!input.trim() && images.length === 0}
-              type="button"
-            >
-              Send
-            </button>
-          )}
-        </div>
+                <AnimatePresence>
+                {showSettingsPopover && (
+                  <motion.div key="settings-popover" className="compose-settings-popover" {...popover} transition={transitions.fast}>
+                    <div className="provider-popover-label">Compose Settings</div>
+                    <button
+                      className="compose-settings-toggle"
+                      onClick={() => toggleSmartCompose(!smartComposeEnabled)}
+                      type="button"
+                    >
+                      <span className={`compose-toggle-indicator${smartComposeEnabled ? ' is-on' : ''}`} />
+                      <span className="compose-settings-toggle-text">
+                        <span className="compose-settings-toggle-title">Smart Compose</span>
+                        <span className="compose-settings-toggle-desc">Ghost-text suggestions as you type</span>
+                      </span>
+                    </button>
+                    <button
+                      className="compose-settings-toggle"
+                      onClick={() => toggleContextPill(!contextPillEnabled)}
+                      type="button"
+                    >
+                      <span className={`compose-toggle-indicator${contextPillEnabled ? ' is-on' : ''}`} />
+                      <span className="compose-settings-toggle-text">
+                        <span className="compose-settings-toggle-title">Context Pill</span>
+                        <span className="compose-settings-toggle-desc">Show COID, case, category above input</span>
+                      </span>
+                    </button>
+                  </motion.div>
+                )}
+                </AnimatePresence>
+              </div>
 
-        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', textAlign: 'center' }}>
-          Enter to send &middot; Shift+Enter for new line &middot; Ctrl+V to paste images &middot; Ctrl+N new conversation
+              {/* Help button */}
+              <div className="compose-help-btn" aria-label="Keyboard shortcuts">
+                ?
+                <div className="compose-help-tooltip">
+                  <kbd>Enter</kbd> Send message<br />
+                  <kbd>Shift</kbd>+<kbd>Enter</kbd> New line<br />
+                  <kbd>Ctrl</kbd>+<kbd>V</kbd> Paste images<br />
+                  <kbd>Ctrl</kbd>+<kbd>N</kbd> New conversation<br />
+                  <kbd>Tab</kbd> Accept suggestion
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Compose body — textarea + ghost text */}
+          <div className="compose-body" style={{ position: 'relative' }}>
+            <div className="compose-body-inner">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInput(val);
+                  if (smartComposeEnabled) {
+                    setGhostText(computeGhostText(val));
+                  }
+                }}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                onFocus={() => setComposeFocused(true)}
+                onBlur={() => setComposeFocused(false)}
+                placeholder="What's the escalation?"
+                rows={2}
+                disabled={isStreaming}
+              />
+              {smartComposeEnabled && ghostText && (
+                <div className="compose-ghost-overlay" aria-hidden="true">
+                  <span style={{ visibility: 'hidden' }}>{input}</span>
+                  <span className="compose-ghost-text">{ghostText}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Compose footer — actions + send */}
+          <div className="compose-footer">
+            <div className="compose-actions">
+              <Tooltip text="Attach a screenshot or image (Ctrl+V)" level="low">
+                <button
+                  className={`compose-action-btn${images.length > 0 ? ' is-active' : ''}`}
+                  onClick={handleAttachClick}
+                  type="button"
+                  aria-label="Attach images"
+                  disabled={isStreaming}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
+              </Tooltip>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFilePickerChange}
+                style={{ display: 'none' }}
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+
+              <Tooltip text="Insert a response template" level="medium">
+                <button
+                  className="compose-action-btn"
+                  onClick={openTemplatePicker}
+                  type="button"
+                  aria-label="Insert template"
+                  disabled={isStreaming}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                    <line x1="9" y1="21" x2="9" y2="9" />
+                  </svg>
+                </button>
+              </Tooltip>
+
+              {images.length > 0 && (
+                <div
+                  className="compose-attachments-inline"
+                  aria-live="polite"
+                  aria-label={`${images.length} image${images.length === 1 ? '' : 's'} attached`}
+                >
+                  <span className="compose-attachments-title">
+                    {images.length} upload{images.length === 1 ? '' : 's'}
+                  </span>
+                  <div className="compose-attachments-list">
+                    <AnimatePresence>
+                      {images.map((image, i) => (
+                        <motion.div
+                          key={image.hash || image.metaKey || `img-${i}`}
+                          className="compose-attachment"
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={transitions.springSnappy}
+                          layout
+                        >
+                          <img src={image.src} alt={`Attachment ${i + 1}`} />
+                          <button
+                            type="button"
+                            className="compose-attachment-remove"
+                            onClick={() => removeImage(i)}
+                            aria-label={`Remove attached image ${i + 1}`}
+                            title="Remove image"
+                          >
+                            x
+                          </button>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <span className="compose-footer-hint">Drag and drop images into this box</span>
+
+            <AnimatePresence mode="wait" initial={false}>
+              {isStreaming ? (
+                <motion.button
+                  key="stop"
+                  className="compose-send-btn is-danger"
+                  onClick={abortStream}
+                  type="button"
+                  aria-label="Stop generating"
+                  title="Stop generating"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={transitions.springSnappy}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                </motion.button>
+              ) : (
+                <motion.button
+                  key="send"
+                  className="compose-send-btn"
+                  onClick={handleSubmit}
+                  disabled={!input.trim() && images.length === 0}
+                  type="button"
+                  aria-label="Send message"
+                  title="Send message"
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.8 }}
+                  transition={transitions.springSnappy}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="5 12 12 5 19 12" />
+                  </svg>
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
       {/* Template picker overlay */}
+      <AnimatePresence>
       {showTemplatePicker && (
-        <div
+        <motion.div
+          key="template-overlay"
           className="modal-overlay"
           onClick={() => setShowTemplatePicker(false)}
           onKeyDown={(e) => { if (e.key === 'Escape') setShowTemplatePicker(false); }}
+          tabIndex={0}
+          role="dialog"
+          aria-modal="true"
+          {...fade}
+          transition={transitions.fast}
         >
-          <div
+          <motion.div
             className="card"
             onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, y: 12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.97 }}
+            transition={transitions.emphasis}
             style={{
               width: 'min(600px, 90vw)',
               maxHeight: '70vh',
@@ -656,9 +1524,15 @@ export default function Chat({ conversationIdFromRoute }) {
                 </div>
               )}
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
+}
+
+export default function Chat(props) {
+  const chat = useChat();
+  return <ChatView {...props} chat={chat} />;
 }

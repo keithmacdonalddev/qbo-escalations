@@ -1,0 +1,1485 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Playbook Feature — Deep Review</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf9f7;
+    --bg-surface: #ffffff;
+    --bg-elevated: #ffffff;
+    --bg-recessed: #f3f1ee;
+    --bg-code: #f8f6f3;
+    --ink: #1a1a1a;
+    --ink-secondary: #5a5752;
+    --ink-muted: #8a857e;
+    --line: #e5e2dc;
+    --line-light: #f0ede8;
+    --accent: #1a7a6d;
+    --accent-light: #e6f5f2;
+    --accent-glow: rgba(26, 122, 109, 0.08);
+    --danger: #c0392b;
+    --danger-light: #fdf0ee;
+    --danger-glow: rgba(192, 57, 43, 0.08);
+    --warning: #d4940a;
+    --warning-light: #fef9e8;
+    --warning-glow: rgba(212, 148, 10, 0.08);
+    --success: #1a7a6d;
+    --success-light: #e6f5f2;
+    --info: #2a6987;
+    --info-light: #e8f4f8;
+    --info-glow: rgba(42, 105, 135, 0.08);
+    --purple: #5e3d8a;
+    --purple-light: #f3eef9;
+    --purple-glow: rgba(94, 61, 138, 0.08);
+    --amber: #b8860b;
+    --amber-light: #fef6e0;
+    --font-body: 'DM Sans', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'Cascadia Code', monospace;
+    --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+    --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px;
+    --sp-12: 48px; --sp-16: 64px;
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.1);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1917;
+      --bg-surface: #242320;
+      --bg-elevated: #2d2c28;
+      --bg-recessed: #151413;
+      --bg-code: #1e1d1b;
+      --ink: #e8e4dc;
+      --ink-secondary: #a8a49c;
+      --ink-muted: #706c64;
+      --line: #3a3835;
+      --line-light: #2a2826;
+      --accent: #4ec9b5;
+      --accent-light: rgba(78, 201, 181, 0.1);
+      --accent-glow: rgba(78, 201, 181, 0.06);
+      --danger: #e74c3c;
+      --danger-light: rgba(231, 76, 60, 0.1);
+      --danger-glow: rgba(231, 76, 60, 0.06);
+      --warning: #f0b429;
+      --warning-light: rgba(240, 180, 41, 0.1);
+      --warning-glow: rgba(240, 180, 41, 0.06);
+      --success: #4ec9b5;
+      --success-light: rgba(78, 201, 181, 0.1);
+      --info: #7cbcd4;
+      --info-light: rgba(124, 188, 212, 0.1);
+      --info-glow: rgba(124, 188, 212, 0.06);
+      --purple: #c5a8e8;
+      --purple-light: rgba(197, 168, 232, 0.1);
+      --purple-glow: rgba(197, 168, 232, 0.06);
+      --amber: #f0b429;
+      --amber-light: rgba(240, 180, 41, 0.1);
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+      --shadow-lg: 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--ink);
+    background: var(--bg);
+    line-height: 1.65;
+    font-size: 15px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* === LAYOUT === */
+  .page-wrapper {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    min-height: 100vh;
+  }
+
+  @media (max-width: 900px) {
+    .page-wrapper { grid-template-columns: 1fr; }
+    .toc-sidebar { display: none; }
+  }
+
+  /* === TOC SIDEBAR === */
+  .toc-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--line);
+    padding: var(--sp-8) var(--sp-5);
+    z-index: 10;
+  }
+
+  .toc-sidebar h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--ink-muted);
+    margin-bottom: var(--sp-4);
+    font-weight: 600;
+  }
+
+  .toc-sidebar a {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3);
+    margin-bottom: 2px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-secondary);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+
+  .toc-sidebar a:hover {
+    background: var(--accent-light);
+    color: var(--accent);
+  }
+
+  .toc-sidebar a.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .toc-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* === MAIN CONTENT === */
+  .main-content {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: var(--sp-12) var(--sp-8);
+  }
+
+  /* === HEADER === */
+  .page-header {
+    margin-bottom: var(--sp-12);
+    animation: fadeUp 0.6s ease-out;
+  }
+
+  .page-header h1 {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: var(--sp-3);
+  }
+
+  .page-header .subtitle {
+    font-size: 16px;
+    color: var(--ink-secondary);
+    max-width: 640px;
+  }
+
+  .header-meta {
+    display: flex;
+    gap: var(--sp-4);
+    margin-top: var(--sp-4);
+    flex-wrap: wrap;
+  }
+
+  .meta-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-3);
+    border-radius: 100px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+
+  .meta-chip.date { background: var(--info-light); color: var(--info); }
+  .meta-chip.scope { background: var(--purple-light); color: var(--purple); }
+  .meta-chip.verdict { background: var(--danger-light); color: var(--danger); }
+
+  /* === SECTIONS === */
+  .section {
+    margin-bottom: var(--sp-12);
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-6);
+    padding-bottom: var(--sp-3);
+    border-bottom: 2px solid var(--line);
+  }
+
+  .section-header .dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .section-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
+  .section-header .section-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-muted);
+    font-weight: 600;
+  }
+
+  .dot-danger { background: var(--danger); }
+  .dot-warning { background: var(--warning); }
+  .dot-success { background: var(--success); }
+  .dot-info { background: var(--info); }
+  .dot-accent { background: var(--accent); }
+  .dot-purple { background: var(--purple); }
+
+  /* === CARDS === */
+  .card {
+    background: var(--bg-surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--sp-6);
+    margin-bottom: var(--sp-4);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-elevated {
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+  }
+
+  .card h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: var(--sp-3);
+  }
+
+  .card p, .card li {
+    color: var(--ink-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
+  .card ul, .card ol {
+    padding-left: var(--sp-5);
+    margin-top: var(--sp-2);
+  }
+
+  .card li { margin-bottom: var(--sp-1); }
+
+  /* === GRADE CARDS === */
+  .grade-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--sp-4);
+  }
+
+  .grade-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--sp-5);
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .grade-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+
+  .grade-card.grade-a::before { background: var(--success); }
+  .grade-card.grade-b::before { background: var(--info); }
+  .grade-card.grade-c::before { background: var(--warning); }
+  .grade-card.grade-d::before { background: var(--danger); }
+  .grade-card.grade-f::before { background: var(--danger); }
+
+  .grade-letter {
+    font-family: var(--font-mono);
+    font-size: 28px;
+    font-weight: 700;
+    margin-bottom: var(--sp-2);
+  }
+
+  .grade-a .grade-letter { color: var(--success); }
+  .grade-b .grade-letter { color: var(--info); }
+  .grade-c .grade-letter { color: var(--warning); }
+  .grade-d .grade-letter { color: var(--danger); }
+  .grade-f .grade-letter { color: var(--danger); }
+
+  .grade-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: var(--sp-1);
+  }
+
+  .grade-desc {
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+
+  /* === TABLES === */
+  .table-wrap {
+    overflow-x: auto;
+    margin: var(--sp-4) 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--line);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  thead {
+    background: var(--bg-recessed);
+  }
+
+  th {
+    text-align: left;
+    padding: var(--sp-3) var(--sp-4);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--ink-muted);
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line-light);
+    color: var(--ink-secondary);
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  tr:hover { background: var(--accent-glow); }
+
+  /* === BADGES === */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    white-space: nowrap;
+  }
+
+  .badge-done { background: var(--success-light); color: var(--success); }
+  .badge-partial { background: var(--warning-light); color: var(--warning); }
+  .badge-missing { background: var(--danger-light); color: var(--danger); }
+  .badge-info { background: var(--info-light); color: var(--info); }
+  .badge-critical { background: var(--danger-light); color: var(--danger); border: 1px solid var(--danger); }
+  .badge-high { background: var(--warning-light); color: var(--warning); border: 1px solid var(--warning); }
+  .badge-medium { background: var(--info-light); color: var(--info); }
+  .badge-low { background: var(--bg-recessed); color: var(--ink-muted); }
+
+  /* === FILE TREE === */
+  .file-tree {
+    background: var(--bg-code);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--sp-5);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+
+  .file-tree .dir { color: var(--accent); font-weight: 600; }
+  .file-tree .file { color: var(--ink-secondary); }
+  .file-tree .size { color: var(--ink-muted); font-size: 11px; }
+  .file-tree .highlight { color: var(--warning); font-weight: 600; }
+
+  /* === SCORECARD === */
+  .scorecard {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--sp-4);
+    margin: var(--sp-6) 0;
+  }
+
+  @media (max-width: 700px) {
+    .scorecard { grid-template-columns: 1fr; }
+  }
+
+  .score-item {
+    background: var(--bg-surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--sp-5);
+    text-align: center;
+  }
+
+  .score-num {
+    font-family: var(--font-mono);
+    font-size: 36px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: var(--sp-2);
+  }
+
+  .score-num.good { color: var(--success); }
+  .score-num.mid { color: var(--warning); }
+  .score-num.bad { color: var(--danger); }
+
+  .score-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  /* === VERDICT BANNER === */
+  .verdict-banner {
+    background: linear-gradient(135deg, var(--bg-elevated), var(--bg-surface));
+    border: 2px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: var(--sp-8);
+    margin: var(--sp-8) 0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .verdict-banner::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, var(--danger), var(--warning), var(--accent));
+  }
+
+  .verdict-banner h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: var(--sp-3);
+  }
+
+  .verdict-banner p {
+    color: var(--ink-secondary);
+    font-size: 14px;
+    max-width: 700px;
+  }
+
+  /* === ISSUE ROW === */
+  .issue-row {
+    display: grid;
+    grid-template-columns: 80px 1fr 100px;
+    gap: var(--sp-4);
+    align-items: start;
+    padding: var(--sp-4);
+    border-bottom: 1px solid var(--line-light);
+  }
+
+  .issue-row:last-child { border-bottom: none; }
+
+  .issue-id {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-muted);
+  }
+
+  .issue-title {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: var(--sp-1);
+  }
+
+  .issue-desc {
+    font-size: 13px;
+    color: var(--ink-secondary);
+  }
+
+  .issue-file {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    margin-top: var(--sp-1);
+  }
+
+  /* === COMPARISON BARS === */
+  .comparison-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-3);
+  }
+
+  .bar-label {
+    font-size: 13px;
+    font-weight: 500;
+    width: 160px;
+    flex-shrink: 0;
+  }
+
+  .bar-track {
+    flex: 1;
+    height: 24px;
+    background: var(--bg-recessed);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+  }
+
+  .bar-fill {
+    height: 100%;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: var(--sp-2);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    transition: width 1s ease-out;
+  }
+
+  .bar-fill.green { background: var(--success); }
+  .bar-fill.blue { background: var(--info); }
+  .bar-fill.yellow { background: var(--warning); }
+  .bar-fill.red { background: var(--danger); }
+
+  /* === LAYER DIAGRAM === */
+  .layer-diagram {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: var(--sp-6) 0;
+  }
+
+  .layer-row {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: var(--sp-4);
+    align-items: center;
+  }
+
+  .layer-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    text-align: right;
+  }
+
+  .layer-bar {
+    padding: var(--sp-3) var(--sp-4);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+  }
+
+  .layer-bar.complete {
+    background: var(--success-light);
+    border-left: 3px solid var(--success);
+    color: var(--success);
+  }
+
+  .layer-bar.partial {
+    background: var(--warning-light);
+    border-left: 3px solid var(--warning);
+    color: var(--warning);
+  }
+
+  .layer-bar.missing {
+    background: var(--danger-light);
+    border-left: 3px solid var(--danger);
+    color: var(--danger);
+  }
+
+  /* === ANIMATIONS === */
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes fadeScale {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  .fade-up { animation: fadeUp 0.5s ease-out both; }
+  .fade-scale { animation: fadeScale 0.4s ease-out both; }
+
+  .delay-1 { animation-delay: 0.1s; }
+  .delay-2 { animation-delay: 0.2s; }
+  .delay-3 { animation-delay: 0.3s; }
+  .delay-4 { animation-delay: 0.4s; }
+  .delay-5 { animation-delay: 0.5s; }
+  .delay-6 { animation-delay: 0.6s; }
+  .delay-7 { animation-delay: 0.7s; }
+  .delay-8 { animation-delay: 0.8s; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fade-up, .fade-scale { animation: none; }
+  }
+
+  /* === CALLOUT === */
+  .callout {
+    border-radius: var(--radius-md);
+    padding: var(--sp-4) var(--sp-5);
+    margin: var(--sp-4) 0;
+    font-size: 14px;
+    display: flex;
+    gap: var(--sp-3);
+    align-items: flex-start;
+  }
+
+  .callout-danger { background: var(--danger-light); border-left: 3px solid var(--danger); }
+  .callout-warning { background: var(--warning-light); border-left: 3px solid var(--warning); }
+  .callout-info { background: var(--info-light); border-left: 3px solid var(--info); }
+  .callout-success { background: var(--success-light); border-left: 3px solid var(--success); }
+
+  .callout-icon { font-size: 16px; flex-shrink: 0; line-height: 1.5; }
+
+  code {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    background: var(--bg-recessed);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  /* === STAT STRIP === */
+  .stat-strip {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: var(--sp-3);
+    margin: var(--sp-6) 0;
+  }
+
+  @media (max-width: 700px) {
+    .stat-strip { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .stat-box {
+    background: var(--bg-surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    padding: var(--sp-4);
+    text-align: center;
+  }
+
+  .stat-value {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-top: var(--sp-1);
+  }
+
+  /* === TWO COL === */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-4);
+  }
+
+  @media (max-width: 700px) {
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  /* === CHECKLIST === */
+  .checklist {
+    list-style: none;
+    padding: 0;
+  }
+
+  .checklist li {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    padding: var(--sp-2) 0;
+    font-size: 14px;
+    color: var(--ink-secondary);
+  }
+
+  .check-icon {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .check-done { background: var(--success-light); color: var(--success); }
+  .check-missing { background: var(--danger-light); color: var(--danger); }
+  .check-partial { background: var(--warning-light); color: var(--warning); }
+</style>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- TOC SIDEBAR -->
+  <nav class="toc-sidebar" id="toc">
+    <h3>Review Sections</h3>
+    <a href="#verdict"><span class="toc-dot" style="background:var(--danger)"></span> Verdict</a>
+    <a href="#scorecard"><span class="toc-dot" style="background:var(--warning)"></span> Scorecard</a>
+    <a href="#architecture"><span class="toc-dot" style="background:var(--info)"></span> Architecture Map</a>
+    <a href="#content"><span class="toc-dot" style="background:var(--success)"></span> Knowledge Base</a>
+    <a href="#backend"><span class="toc-dot" style="background:var(--purple)"></span> Backend API</a>
+    <a href="#frontend"><span class="toc-dot" style="background:var(--accent)"></span> Frontend UI</a>
+    <a href="#inference"><span class="toc-dot" style="background:var(--info)"></span> Inference Wiring</a>
+    <a href="#security"><span class="toc-dot" style="background:var(--danger)"></span> Security</a>
+    <a href="#gaps"><span class="toc-dot" style="background:var(--warning)"></span> Gap Matrix</a>
+    <a href="#roadmap"><span class="toc-dot" style="background:var(--accent)"></span> Roadmap</a>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- HEADER -->
+    <header class="page-header fade-up">
+      <h1>Playbook Feature &mdash; Deep Review</h1>
+      <p class="subtitle">Comprehensive audit of the knowledge-base management system: content, backend, frontend, inference wiring, security, and gap analysis.</p>
+      <div class="header-meta">
+        <span class="meta-chip date">2026-02-27</span>
+        <span class="meta-chip scope">22 files &middot; 7 endpoints &middot; 2,589 LOC content</span>
+        <span class="meta-chip verdict">BELOW BASELINE</span>
+      </div>
+    </header>
+
+    <!-- ============================== -->
+    <!-- SECTION 1: VERDICT -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-1" id="verdict">
+      <div class="verdict-banner">
+        <h3>Overall Verdict: Solid Engine, Unfinished Cockpit</h3>
+        <p>The playbook's <strong>inference wiring is complete and well-designed</strong> &mdash; content loads into memory, injects as system prompt, feeds search retrieval and copilot analysis. The <strong>knowledge base content is mature</strong> (22 files, 2,589 lines, 9 categories, 6 templates). But the <strong>authoring UI is barebones</strong>, the <strong>backend has zero test coverage and security gaps</strong>, and critical management features (search, markdown preview, template editing, system-prompt editing) are missing entirely. Users today can browse and edit categories &mdash; but that's it. To exceed expectations, the playbook editor needs to become a first-class knowledge management tool, not a textarea wrapper.</p>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 2: SCORECARD -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-2" id="scorecard">
+      <div class="section-header">
+        <span class="dot dot-warning"></span>
+        <span class="section-num">01</span>
+        <h2>Feature Scorecard</h2>
+      </div>
+
+      <div class="grade-grid">
+        <div class="grade-card grade-a">
+          <div class="grade-letter">A</div>
+          <div class="grade-label">Knowledge Content</div>
+          <div class="grade-desc">22 files, 9 categories, 6 templates, comprehensive coverage</div>
+        </div>
+        <div class="grade-card grade-a">
+          <div class="grade-letter">A</div>
+          <div class="grade-label">Inference Wiring</div>
+          <div class="grade-desc">System prompt injection, search retrieval, copilot integration</div>
+        </div>
+        <div class="grade-card grade-b">
+          <div class="grade-letter">B</div>
+          <div class="grade-label">Backend API</div>
+          <div class="grade-desc">Full CRUD for categories; missing template & system-prompt routes</div>
+        </div>
+        <div class="grade-card grade-c">
+          <div class="grade-letter">C</div>
+          <div class="grade-label">Frontend UI</div>
+          <div class="grade-desc">Basic category editor; no search, no preview, no templates UI</div>
+        </div>
+        <div class="grade-card grade-d">
+          <div class="grade-letter">D</div>
+          <div class="grade-label">Test Coverage</div>
+          <div class="grade-desc">Zero automated tests for all 7 playbook endpoints</div>
+        </div>
+        <div class="grade-card grade-c">
+          <div class="grade-letter">C</div>
+          <div class="grade-label">Security</div>
+          <div class="grade-desc">No auth, weak path sanitization, no file size limits</div>
+        </div>
+      </div>
+
+      <div class="stat-strip">
+        <div class="stat-box">
+          <div class="stat-value">22</div>
+          <div class="stat-label">Content Files</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">2,589</div>
+          <div class="stat-label">Lines of Content</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">7</div>
+          <div class="stat-label">API Endpoints</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">0</div>
+          <div class="stat-label">Tests Written</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value">3/22</div>
+          <div class="stat-label">Files Editable in UI</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 3: ARCHITECTURE MAP -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-3" id="architecture">
+      <div class="section-header">
+        <span class="dot dot-info"></span>
+        <span class="section-num">02</span>
+        <h2>Architecture &amp; Data Flow</h2>
+      </div>
+
+      <div class="card card-elevated">
+        <h3>Playbook Data Flow</h3>
+        <div class="layer-diagram">
+          <div class="layer-row">
+            <div class="layer-label">Disk Files</div>
+            <div class="layer-bar complete">22 markdown files in <code>playbook/</code> directory &mdash; git-tracked, offline-editable</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Loader</div>
+            <div class="layer-bar complete"><code>playbook-loader.js</code> &mdash; reads, caches, chunks, builds search index, watches for changes</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Context Builder</div>
+            <div class="layer-bar complete"><code>chat-context-builder.js</code> &mdash; injects playbook as system prompt with token budgeting</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Claude CLI</div>
+            <div class="layer-bar complete"><code>claude.js</code> &mdash; pipes system prompt + messages to <code>claude -p</code> subprocess</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Copilot</div>
+            <div class="layer-bar complete"><code>copilot.js</code> &mdash; playbook-check, analyze-escalation, suggest-template endpoints</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">API Routes</div>
+            <div class="layer-bar partial"><code>playbook.js</code> &mdash; CRUD for categories + edge-cases only (13/22 files unreachable)</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Frontend UI</div>
+            <div class="layer-bar partial"><code>PlaybookEditor.jsx</code> &mdash; category browse/edit, edge-cases edit, full-prompt read-only</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Search UI</div>
+            <div class="layer-bar missing">Backend search exists in loader &mdash; NOT exposed to frontend at all</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Template Mgmt</div>
+            <div class="layer-bar missing">6 template files on disk &mdash; no UI or API to view/edit/create templates</div>
+          </div>
+          <div class="layer-row">
+            <div class="layer-label">Test Coverage</div>
+            <div class="layer-bar missing">0 tests across all playbook code (routes, loader, context builder)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="callout callout-warning">
+        <span class="callout-icon">!</span>
+        <div><strong>Key insight:</strong> The runtime inference pipeline (loader &rarr; context builder &rarr; Claude &rarr; copilot) is complete and works well. The management layer (API + UI for authoring content) is where the feature falls short. Only 9 of 22 files are editable through the UI.</div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 4: KNOWLEDGE BASE -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-4" id="content">
+      <div class="section-header">
+        <span class="dot dot-success"></span>
+        <span class="section-num">03</span>
+        <h2>Knowledge Base Content</h2>
+      </div>
+
+      <div class="card">
+        <h3>File Tree</h3>
+        <div class="file-tree">
+<span class="dir">playbook/</span>
+├── <span class="file">system-prompt.md</span>         <span class="size">(168 lines)</span> <span class="highlight">← NOT editable in UI</span>
+├── <span class="file">escalation-decision-tree.md</span> <span class="size">(137 lines)</span> <span class="highlight">← NOT editable in UI</span>
+├── <span class="file">triage.md</span>                 <span class="size">(107 lines)</span> <span class="highlight">← NOT editable in UI</span>
+├── <span class="file">error-messages.md</span>         <span class="size">(90 lines)</span>  <span class="highlight">← NOT editable in UI</span>
+├── <span class="file">qbo-urls.md</span>               <span class="size">(114 lines)</span> <span class="highlight">← NOT editable in UI</span>
+├── <span class="file">edge-cases.md</span>             <span class="size">(155 lines)</span> ← Editable
+├── <span class="file">translations.md</span>           <span class="size">(109 lines)</span> <span class="highlight">← NOT editable in UI</span>
+├── <span class="dir">categories/</span>               ← All 9 editable via UI
+│   ├── <span class="file">payroll.md</span>            <span class="size">(143 lines)</span>
+│   ├── <span class="file">bank-feeds.md</span>         <span class="size">(147 lines)</span>
+│   ├── <span class="file">reconciliation.md</span>     <span class="size">(133 lines)</span>
+│   ├── <span class="file">permissions.md</span>        <span class="size">(140 lines)</span>
+│   ├── <span class="file">billing.md</span>            <span class="size">(138 lines)</span>
+│   ├── <span class="file">tax.md</span>                <span class="size">(139 lines)</span>
+│   ├── <span class="file">invoicing.md</span>          <span class="size">(130 lines)</span>
+│   ├── <span class="file">reports.md</span>            <span class="size">(146 lines)</span>
+│   └── <span class="file">technical.md</span>          <span class="size">(176 lines)</span>
+└── <span class="dir">templates/</span>                <span class="highlight">← NONE editable in UI</span>
+    ├── <span class="file">escalation-response.md</span>  <span class="size">(48 lines)</span>
+    ├── <span class="file">needs-investigation.md</span>  <span class="size">(54 lines)</span>
+    ├── <span class="file">known-bug.md</span>            <span class="size">(60 lines)</span>
+    ├── <span class="file">workaround.md</span>           <span class="size">(53 lines)</span>
+    ├── <span class="file">not-reproducible.md</span>     <span class="size">(62 lines)</span>
+    └── <span class="file">chat-responses.md</span>       <span class="size">(140 lines)</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Content Quality Assessment</h3>
+        <p style="margin-bottom: var(--sp-4)">The knowledge base is mature and well-structured. Every category follows a consistent template with diagnosis, resolution, escalation criteria, and cross-references.</p>
+
+        <div class="comparison-bar">
+          <span class="bar-label">Category Coverage</span>
+          <div class="bar-track"><div class="bar-fill green" style="width: 90%">90%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Template Quality</span>
+          <div class="bar-track"><div class="bar-fill green" style="width: 85%">85%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Reference Material</span>
+          <div class="bar-track"><div class="bar-fill green" style="width: 92%">92%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Cross-References</span>
+          <div class="bar-track"><div class="bar-fill green" style="width: 88%">88%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Known Bug Data</span>
+          <div class="bar-track"><div class="bar-fill red" style="width: 5%">0%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Mobile App Coverage</span>
+          <div class="bar-track"><div class="bar-fill yellow" style="width: 15%">15%</div></div>
+        </div>
+        <div class="comparison-bar">
+          <span class="bar-label">Integration Guides</span>
+          <div class="bar-track"><div class="bar-fill yellow" style="width: 25%">25%</div></div>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <span class="callout-icon">i</span>
+        <div><strong>Content strength:</strong> 9 categories with consistent structure (diagnosis &rarr; resolution &rarr; escalation paths), 6 response templates covering all outcome types, 40+ mapped error messages, escalation decision tree, and cross-category edge case patterns. The playbook is ready for production inference. The gap is management tooling, not content.</div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 5: BACKEND API -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-5" id="backend">
+      <div class="section-header">
+        <span class="dot dot-purple"></span>
+        <span class="section-num">04</span>
+        <h2>Backend API Review</h2>
+      </div>
+
+      <div class="card">
+        <h3>Endpoint Coverage</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Method</th><th>Route</th><th>Purpose</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/categories</code></td><td>List all category files with size/date</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/categories/:name</code></td><td>Get single category content</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>PUT</code></td><td><code>/api/playbook/categories/:name</code></td><td>Update category content</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>POST</code></td><td><code>/api/playbook/categories</code></td><td>Create new category</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>DELETE</code></td><td><code>/api/playbook/categories/:name</code></td><td>Delete category</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/edge-cases</code></td><td>Get edge-cases.md</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>PUT</code></td><td><code>/api/playbook/edge-cases</code></td><td>Update edge-cases.md</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/full</code></td><td>Concatenated prompt (read-only)</td><td><span class="badge badge-done">DONE</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/templates</code></td><td>List response templates</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/templates/:name</code></td><td>Get template content</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>PUT</code></td><td><code>/api/playbook/templates/:name</code></td><td>Update template content</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/system-prompt</code></td><td>Get system-prompt.md</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>PUT</code></td><td><code>/api/playbook/system-prompt</code></td><td>Update system-prompt.md</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/reference/:name</code></td><td>Get top-level reference docs</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>PUT</code></td><td><code>/api/playbook/reference/:name</code></td><td>Update top-level reference docs</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/search</code></td><td>Search playbook chunks</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+              <tr><td><code>GET</code></td><td><code>/api/playbook/status</code></td><td>Health check &amp; metrics</td><td><span class="badge badge-missing">MISSING</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="two-col">
+        <div class="card">
+          <h3>What Works</h3>
+          <ul class="checklist">
+            <li><span class="check-icon check-done">&#10003;</span> Full CRUD for 9 category files</li>
+            <li><span class="check-icon check-done">&#10003;</span> Edge-cases read/write</li>
+            <li><span class="check-icon check-done">&#10003;</span> Path traversal sanitization via <code>safeName()</code></li>
+            <li><span class="check-icon check-done">&#10003;</span> Auto-reload on file write (triggers watcher)</li>
+            <li><span class="check-icon check-done">&#10003;</span> Category size &amp; modified date in listings</li>
+            <li><span class="check-icon check-done">&#10003;</span> Proper 201 status on POST create</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>What's Broken or Missing</h3>
+          <ul class="checklist">
+            <li><span class="check-icon check-missing">&#10007;</span> No API for templates (6 files unreachable)</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No API for system-prompt.md</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No API for reference docs (triage, URLs, etc.)</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No search endpoint (backend search exists!)</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No status/health endpoint</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No try/catch on <code>writeFileSync</code>/<code>unlinkSync</code></li>
+            <li><span class="check-icon check-missing">&#10007;</span> No file size limits on uploads</li>
+            <li><span class="check-icon check-missing">&#10007;</span> No authentication on any endpoint</li>
+            <li><span class="check-icon check-missing">&#10007;</span> Zero automated tests</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 6: FRONTEND UI -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-6" id="frontend">
+      <div class="section-header">
+        <span class="dot dot-accent"></span>
+        <span class="section-num">05</span>
+        <h2>Frontend UI Review</h2>
+      </div>
+
+      <div class="card card-elevated">
+        <h3>PlaybookEditor.jsx — Current Capabilities</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Feature</th><th>Status</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Category List View</td><td><span class="badge badge-done">DONE</span></td><td>Shows all 9 categories with color-coded badges and file sizes</td></tr>
+              <tr><td>Category Read</td><td><span class="badge badge-done">DONE</span></td><td>Click to load content in read-only preview pane</td></tr>
+              <tr><td>Category Edit</td><td><span class="badge badge-done">DONE</span></td><td>Edit button toggles textarea, Save button persists to disk</td></tr>
+              <tr><td>Category Create</td><td><span class="badge badge-done">DONE</span></td><td>Inline form creates new .md file with boilerplate header</td></tr>
+              <tr><td>Category Delete</td><td><span class="badge badge-done">DONE</span></td><td>Confirmation modal, then disk delete</td></tr>
+              <tr><td>Edge Cases Edit</td><td><span class="badge badge-done">DONE</span></td><td>Separate tab for edge-cases.md, same read/edit flow</td></tr>
+              <tr><td>Full Prompt View</td><td><span class="badge badge-done">DONE</span></td><td>Read-only concatenated system prompt (copy-to-clipboard)</td></tr>
+              <tr><td>Copy to Clipboard</td><td><span class="badge badge-done">DONE</span></td><td>Works on all content views</td></tr>
+              <tr><td>Unsaved Changes Warning</td><td><span class="badge badge-partial">PARTIAL</span></td><td><code>beforeunload</code> event fires, but sidebar nav doesn't warn</td></tr>
+              <tr><td>Template Browsing</td><td><span class="badge badge-missing">MISSING</span></td><td>6 template files exist on disk but no UI to view them</td></tr>
+              <tr><td>Template Editing</td><td><span class="badge badge-missing">MISSING</span></td><td>No way to edit response templates in the UI</td></tr>
+              <tr><td>System Prompt Editing</td><td><span class="badge badge-missing">MISSING</span></td><td>Can view in "Full" tab but cannot edit</td></tr>
+              <tr><td>Reference Doc Editing</td><td><span class="badge badge-missing">MISSING</span></td><td>triage.md, qbo-urls.md, error-messages.md, etc. unreachable</td></tr>
+              <tr><td>Markdown Preview</td><td><span class="badge badge-missing">MISSING</span></td><td>Content displayed as plain text, no syntax formatting</td></tr>
+              <tr><td>Playbook Search</td><td><span class="badge badge-missing">MISSING</span></td><td>Backend search exists but not wired to UI</td></tr>
+              <tr><td>Keyboard Shortcuts</td><td><span class="badge badge-missing">MISSING</span></td><td>No Ctrl+S for save, no keyboard navigation</td></tr>
+              <tr><td>Mobile Layout</td><td><span class="badge badge-missing">MISSING</span></td><td>280px sidebar hardcoded, no responsive collapse</td></tr>
+              <tr><td>Diff View / History</td><td><span class="badge badge-missing">MISSING</span></td><td>No version tracking or change comparison</td></tr>
+              <tr><td>Draft Auto-Save</td><td><span class="badge badge-missing">MISSING</span></td><td>No localStorage backup of in-progress edits</td></tr>
+              <tr><td>Accessibility</td><td><span class="badge badge-missing">MISSING</span></td><td>No ARIA labels, no semantic structure, no focus management</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="callout callout-danger">
+        <span class="callout-icon">!</span>
+        <div><strong>Critical UX gap:</strong> Only <strong>10 of 22</strong> playbook files are reachable through the UI (9 categories + edge-cases). The 6 response templates and 6 reference documents (system-prompt, triage, error-messages, decision-tree, qbo-urls, translations) can only be edited by opening files on disk. This defeats the purpose of a knowledge management tool.</div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 7: INFERENCE WIRING -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-7" id="inference">
+      <div class="section-header">
+        <span class="dot dot-info"></span>
+        <span class="section-num">06</span>
+        <h2>Inference Wiring (The Strong Part)</h2>
+      </div>
+
+      <div class="card card-elevated">
+        <h3>How Playbook Feeds Claude</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Component</th><th>File</th><th>Role</th><th>Grade</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Loader</strong></td>
+                <td><code>playbook-loader.js</code></td>
+                <td>Reads all .md files recursively, caches in memory, builds search chunks (1400-char semantic blocks), watches filesystem for changes</td>
+                <td><span class="badge badge-done">A</span></td>
+              </tr>
+              <tr>
+                <td><strong>Context Builder</strong></td>
+                <td><code>chat-context-builder.js</code></td>
+                <td>Injects playbook as system prompt with 3 knowledge modes: full-playbook, retrieval-only, core+retrieval. Token budgeting with multi-stage enforcement</td>
+                <td><span class="badge badge-done">A</span></td>
+              </tr>
+              <tr>
+                <td><strong>Claude Subprocess</strong></td>
+                <td><code>claude.js</code></td>
+                <td>Pipes system prompt via stdin to <code>claude -p --output-format stream-json</code>. Robust subprocess lifecycle, timeout handling, temp file cleanup</td>
+                <td><span class="badge badge-done">A</span></td>
+              </tr>
+              <tr>
+                <td><strong>Search</strong></td>
+                <td><code>playbook-loader.js</code></td>
+                <td>Lexical search with scoring over semantic chunks. Supports category/template/top-level filtering, top-k results. Missing stemming</td>
+                <td><span class="badge badge-info">B+</span></td>
+              </tr>
+              <tr>
+                <td><strong>Copilot</strong></td>
+                <td><code>copilot.js</code></td>
+                <td>Playbook-check (compares escalations against playbook adequacy), analyze-escalation (uses full system prompt), suggest-template (lists templates)</td>
+                <td><span class="badge badge-done">A</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Knowledge Modes in Context Builder</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Mode</th><th>Behavior</th><th>Use Case</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>full-playbook</code></td>
+                <td>Inject entire concatenated playbook as system prompt, truncate to budget</td>
+                <td>Short conversations where full context helps</td>
+              </tr>
+              <tr>
+                <td><code>retrieval-only</code></td>
+                <td>Search playbook for relevant chunks only, minimal core instructions</td>
+                <td>Long conversations to conserve tokens</td>
+              </tr>
+              <tr>
+                <td><code>core+retrieval</code></td>
+                <td>Core system-prompt.md + retrieved excerpts from search</td>
+                <td>Balance of context and efficiency</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="callout callout-success">
+        <span class="callout-icon">&#10003;</span>
+        <div><strong>This is the playbook's strength.</strong> The inference pipeline is well-architected with flexible knowledge modes, token budgeting, semantic chunking, and file-watching for live reload. No major changes needed here &mdash; the focus should be on the management layer.</div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 8: SECURITY -->
+    <!-- ============================== -->
+    <section class="section fade-up delay-8" id="security">
+      <div class="section-header">
+        <span class="dot dot-danger"></span>
+        <span class="section-num">07</span>
+        <h2>Security &amp; Reliability Issues</h2>
+      </div>
+
+      <div class="card">
+        <div class="issue-row">
+          <div><span class="badge badge-critical">CRIT</span></div>
+          <div>
+            <div class="issue-title">No authentication on playbook endpoints</div>
+            <div class="issue-desc">All 7 <code>/api/playbook/*</code> routes accept unauthenticated requests. Anyone with network access can read, modify, or delete playbook content. Acceptable for local-only use, but docs incorrectly claim auth exists.</div>
+            <div class="issue-file">server/src/routes/playbook.js &middot; server/src/app.js:35</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-high">HIGH</span></div>
+          <div>
+            <div class="issue-title">Weak path traversal protection</div>
+            <div class="issue-desc"><code>safeName()</code> strips special characters but doesn't enforce a strict allowlist. While the <code>.md</code> extension mitigates most attacks, the principle is weak. Should use UUID or <code>[a-z0-9-]</code> only.</div>
+            <div class="issue-file">server/src/routes/playbook.js:16-18</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-high">HIGH</span></div>
+          <div>
+            <div class="issue-title">No file size limit on uploads</div>
+            <div class="issue-desc"><code>readMarkdownFiles()</code> has no max file size check. A malformed or malicious file could cause OOM. The 50MB Express body limit exists, but the loader reads from disk with no bounds.</div>
+            <div class="issue-file">server/src/lib/playbook-loader.js:25-43</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-medium">MED</span></div>
+          <div>
+            <div class="issue-title">File operations lack error handling</div>
+            <div class="issue-desc"><code>writeFileSync()</code> and <code>unlinkSync()</code> in PUT/DELETE handlers have no try/catch. Disk errors crash with unstructured 500 response.</div>
+            <div class="issue-file">server/src/routes/playbook.js:59, 94</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-medium">MED</span></div>
+          <div>
+            <div class="issue-title">Filesystem watcher never closed</div>
+            <div class="issue-desc"><code>fs.watch()</code> handle is never closed on server shutdown. On Windows, this can prevent directory deletion and accumulate file handles over time.</div>
+            <div class="issue-file">server/src/lib/playbook-loader.js:304-325</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-medium">MED</span></div>
+          <div>
+            <div class="issue-title">No watcher debouncing</div>
+            <div class="issue-desc">File watcher triggers <code>buildSystemPrompt()</code> on every change event. Rapid edits (10 saves in 1 second) cause 10 full rebuilds. Should debounce by 500ms.</div>
+            <div class="issue-file">server/src/lib/playbook-loader.js:311-318</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-low">LOW</span></div>
+          <div>
+            <div class="issue-title">Silent error in category stat</div>
+            <div class="issue-desc">Empty catch block on line 29 swallows all stat errors. Permission errors cause categories to silently disappear from listings with no indication to the user.</div>
+            <div class="issue-file">server/src/routes/playbook.js:29</div>
+          </div>
+          <div></div>
+        </div>
+
+        <div class="issue-row">
+          <div><span class="badge badge-low">LOW</span></div>
+          <div>
+            <div class="issue-title">No recursive depth limit</div>
+            <div class="issue-desc"><code>readMarkdownFiles()</code> recursively reads with no depth limit. Circular symlinks could hang the server indefinitely.</div>
+            <div class="issue-file">server/src/lib/playbook-loader.js:25-43</div>
+          </div>
+          <div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 9: GAP MATRIX -->
+    <!-- ============================== -->
+    <section class="section fade-up" id="gaps">
+      <div class="section-header">
+        <span class="dot dot-warning"></span>
+        <span class="section-num">08</span>
+        <h2>Gap Matrix: Current vs. Target</h2>
+      </div>
+
+      <div class="card card-elevated">
+        <h3>What "Exceeding Expectations" Looks Like</h3>
+        <p style="margin-bottom: var(--sp-4); color: var(--ink-secondary)">Side-by-side comparison of current state vs. what a best-in-class knowledge management feature should deliver.</p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th style="width: 220px">Capability</th><th>Current State</th><th>Target State</th><th>Gap</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Content coverage</strong></td>
+                <td>9 categories, 6 templates, 7 reference docs (22 total, 2,589 lines)</td>
+                <td>Same + Known Bugs section populated + mobile/integration guides</td>
+                <td><span class="badge badge-low">SMALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>Category CRUD</strong></td>
+                <td>Full create/read/update/delete</td>
+                <td>Same + bulk operations + import/export</td>
+                <td><span class="badge badge-low">SMALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>Template management</strong></td>
+                <td>Files exist on disk; no API or UI</td>
+                <td>Full CRUD in UI with preview and copy-to-clipboard</td>
+                <td><span class="badge badge-critical">LARGE</span></td>
+              </tr>
+              <tr>
+                <td><strong>System prompt editing</strong></td>
+                <td>Read-only in "Full" tab</td>
+                <td>Dedicated edit view with token count preview</td>
+                <td><span class="badge badge-critical">LARGE</span></td>
+              </tr>
+              <tr>
+                <td><strong>Reference doc editing</strong></td>
+                <td>Not accessible in UI</td>
+                <td>All top-level .md files editable with dedicated section</td>
+                <td><span class="badge badge-critical">LARGE</span></td>
+              </tr>
+              <tr>
+                <td><strong>Playbook search</strong></td>
+                <td>Backend search exists; not exposed to UI</td>
+                <td>Search bar in editor, filtered by section, instant results</td>
+                <td><span class="badge badge-high">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td><strong>Markdown preview</strong></td>
+                <td>Plain text only</td>
+                <td>Toggle between raw editor and rendered markdown preview</td>
+                <td><span class="badge badge-high">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td><strong>Playbook stats</strong></td>
+                <td>File sizes shown; no token count or coverage metrics</td>
+                <td>Dashboard with total token count, category sizes, search quality, last-edited dates</td>
+                <td><span class="badge badge-high">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td><strong>Keyboard shortcuts</strong></td>
+                <td>None</td>
+                <td>Ctrl+S save, Ctrl+F search, Ctrl+E toggle edit, keyboard nav between sections</td>
+                <td><span class="badge badge-medium">SMALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>Error handling</strong></td>
+                <td>Generic "Failed to load" messages</td>
+                <td>Specific error codes, retry buttons, validation feedback</td>
+                <td><span class="badge badge-high">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td><strong>Test coverage</strong></td>
+                <td>0 tests</td>
+                <td>Unit tests for loader/search, integration tests for all routes</td>
+                <td><span class="badge badge-critical">LARGE</span></td>
+              </tr>
+              <tr>
+                <td><strong>Security hardening</strong></td>
+                <td>No auth, weak sanitization</td>
+                <td>Auth middleware, strict input validation, file size limits</td>
+                <td><span class="badge badge-high">MEDIUM</span></td>
+              </tr>
+              <tr>
+                <td><strong>Inference wiring</strong></td>
+                <td>Complete: loader &rarr; context builder &rarr; Claude &rarr; copilot</td>
+                <td>Same (no changes needed)</td>
+                <td><span class="badge badge-done">NONE</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== -->
+    <!-- SECTION 10: ROADMAP -->
+    <!-- ============================== -->
+    <section class="section fade-up" id="roadmap">
+      <div class="section-header">
+        <span class="dot dot-accent"></span>
+        <span class="section-num">09</span>
+        <h2>Recommended Build Roadmap</h2>
+      </div>
+
+      <div class="callout callout-info">
+        <span class="callout-icon">i</span>
+        <div><strong>Priority philosophy:</strong> The inference pipeline works. The management layer is what's broken. Focus all effort on making the editor a complete knowledge management tool that covers all 22 files, not just 10.</div>
+      </div>
+
+      <div class="card card-elevated" style="border-left: 3px solid var(--danger);">
+        <h3>Phase 1 — Unblock Full Content Management (Critical)</h3>
+        <p style="color: var(--ink-muted); font-size: 13px; margin-bottom: var(--sp-4);">Close the biggest gap: make all 22 playbook files reachable through the UI.</p>
+        <ul class="checklist">
+          <li><span class="check-icon check-missing">1</span> <strong>Template CRUD API</strong> &mdash; Add <code>GET/PUT</code> routes for <code>templates/*.md</code> files (mirror category pattern)</li>
+          <li><span class="check-icon check-missing">2</span> <strong>Reference docs API</strong> &mdash; Add routes for top-level .md files (system-prompt, triage, error-messages, decision-tree, qbo-urls, translations)</li>
+          <li><span class="check-icon check-missing">3</span> <strong>Redesign PlaybookEditor UI</strong> &mdash; Replace 3-tab layout with proper section-based navigation: Categories, Templates, Reference Docs, Full Prompt</li>
+          <li><span class="check-icon check-missing">4</span> <strong>Wire template + reference UI</strong> &mdash; Add template and reference doc browsing/editing to the redesigned editor</li>
+          <li><span class="check-icon check-missing">5</span> <strong>Fix error handling</strong> &mdash; try/catch on all file ops, specific error messages with retry, better save feedback</li>
+        </ul>
+      </div>
+
+      <div class="card card-elevated" style="border-left: 3px solid var(--warning);">
+        <h3>Phase 2 — Editor Quality (High Value)</h3>
+        <p style="color: var(--ink-muted); font-size: 13px; margin-bottom: var(--sp-4);">Make the editor a pleasure to use, not just functional.</p>
+        <ul class="checklist">
+          <li><span class="check-icon check-missing">1</span> <strong>Playbook search</strong> &mdash; Expose <code>searchPlaybookChunks()</code> to a <code>/api/playbook/search</code> endpoint, wire to search bar in UI</li>
+          <li><span class="check-icon check-missing">2</span> <strong>Markdown preview</strong> &mdash; Toggle between raw text and rendered markdown with syntax highlighting</li>
+          <li><span class="check-icon check-missing">3</span> <strong>Playbook stats dashboard</strong> &mdash; Total token estimate, per-section sizes, last modified dates, search chunk count</li>
+          <li><span class="check-icon check-missing">4</span> <strong>Keyboard shortcuts</strong> &mdash; Ctrl+S save, Ctrl+E toggle edit, keyboard nav</li>
+          <li><span class="check-icon check-missing">5</span> <strong>Draft auto-save</strong> &mdash; localStorage backup of in-progress edits to prevent data loss</li>
+          <li><span class="check-icon check-missing">6</span> <strong>Unsaved changes protection</strong> &mdash; Warn on sidebar nav, not just page close</li>
+        </ul>
+      </div>
+
+      <div class="card card-elevated" style="border-left: 3px solid var(--info);">
+        <h3>Phase 3 — Hardening &amp; Polish</h3>
+        <p style="color: var(--ink-muted); font-size: 13px; margin-bottom: var(--sp-4);">Backend reliability, security, and testing.</p>
+        <ul class="checklist">
+          <li><span class="check-icon check-missing">1</span> <strong>Backend hardening</strong> &mdash; File size limits, watcher debouncing, watcher cleanup on shutdown, recursive depth limit</li>
+          <li><span class="check-icon check-missing">2</span> <strong>Security</strong> &mdash; Strict path sanitization (<code>[a-z0-9-]</code> allowlist), input validation, content length limits</li>
+          <li><span class="check-icon check-missing">3</span> <strong>Automated tests</strong> &mdash; Route integration tests, loader unit tests, search accuracy tests</li>
+          <li><span class="check-icon check-missing">4</span> <strong>Accessibility</strong> &mdash; ARIA labels, semantic HTML, focus management, reduced motion support</li>
+          <li><span class="check-icon check-missing">5</span> <strong>Mobile layout</strong> &mdash; Responsive sidebar collapse, touch-friendly edit controls</li>
+        </ul>
+      </div>
+    </section>
+
+    <footer style="margin-top: var(--sp-16); padding-top: var(--sp-6); border-top: 1px solid var(--line); color: var(--ink-muted); font-size: 12px; font-family: var(--font-mono);">
+      Generated by Claude Code &middot; Deep Review &middot; 2026-02-27
+    </footer>
+
+  </main>
+</div>
+
+<!-- SCROLL SPY -->
+<script>
+  const sections = document.querySelectorAll('.section[id]');
+  const tocLinks = document.querySelectorAll('.toc-sidebar a');
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        tocLinks.forEach(link => link.classList.remove('active'));
+        const activeLink = document.querySelector(`.toc-sidebar a[href="#${entry.target.id}"]`);
+        if (activeLink) activeLink.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+
+  sections.forEach(section => observer.observe(section));
+</script>
+
+</body>
+</html>

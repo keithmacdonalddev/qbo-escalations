@@ -1,6 +1,31 @@
-import { useState, useCallback, useMemo } from 'react';
+import React, { useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ToolEventsBlock } from './ToolEvents.jsx';
+import TerminalPreview, { parseBashEvent } from './TerminalPreview.jsx';
+import { renderMarkdown, CopyButton, formatResponseTime, getProviderLabel } from '../utils/markdown.jsx';
+import Tooltip from './Tooltip.jsx';
+import { transitions } from '../utils/motion.js';
 
-export default function ChatMessage({ role, content, images, timestamp, isStreaming, responseTimeMs, onFork }) {
+function ChatMessage({
+  role,
+  content,
+  images,
+  provider,
+  mode,
+  fallbackFrom,
+  timestamp,
+  isStreaming,
+  responseTimeMs,
+  onFork,
+  onAccept,
+  accepting = false,
+  isAccepted = false,
+  variant,
+  toolEvents,
+  onRerunCommand,
+}) {
+  const isDev = variant === 'dev';
+
   const bubbleClass = role === 'user'
     ? 'chat-bubble chat-bubble-user'
     : role === 'system'
@@ -12,27 +37,103 @@ export default function ChatMessage({ role, content, images, timestamp, isStream
     return renderMarkdown(content);
   }, [role, content]);
 
+  // Separate bash events (for terminal preview) from other tool events
+  const { bashEvents, otherEvents } = useMemo(() => {
+    if (!toolEvents || toolEvents.length === 0) return { bashEvents: [], otherEvents: [] };
+    const bash = [];
+    const other = [];
+    for (const te of toolEvents) {
+      const parsed = parseBashEvent(te);
+      if (parsed) {
+        bash.push({ ...parsed, original: te });
+      } else {
+        other.push(te);
+      }
+    }
+    return { bashEvents: bash, otherEvents: other };
+  }, [toolEvents]);
+
   return (
     <div className={bubbleClass}>
       {role === 'assistant' && (
         <div className="chat-bubble-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
-          <span className="eyebrow">Claude</span>
-          {!isStreaming && content && (
-            <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}>
-              {onFork && (
-                <button
-                  className="copy-btn"
-                  onClick={onFork}
-                  type="button"
-                  title="Fork conversation from this point"
-                  style={{ fontSize: 'var(--text-xs)' }}
-                >
-                  Fork
-                </button>
+          <Tooltip text="AI model that generated this response" level="high">
+            <span className={isDev ? 'eyebrow eyebrow--dev' : 'eyebrow'}>
+              {getProviderLabel(provider)}
+              {fallbackFrom && (
+                <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-tertiary)', fontWeight: 400 }}>
+                  (fallback from {getProviderLabel(fallbackFrom)})
+                </span>
               )}
-              <CopyButton text={content} />
-            </div>
-          )}
+            </span>
+          </Tooltip>
+          <AnimatePresence>
+            {!isStreaming && content && (
+              <motion.div
+                key="actions"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={transitions.fast}
+                style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center' }}
+              >
+                {isAccepted && (
+                  <motion.span
+                    className="badge badge-resolved"
+                    title="Accepted parallel winner"
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={transitions.springSnappy}
+                  >
+                    Accepted
+                  </motion.span>
+                )}
+                {onAccept && !isAccepted && (
+                  <button
+                    className="copy-btn"
+                    onClick={onAccept}
+                    type="button"
+                    disabled={accepting}
+                    title="Accept this response"
+                    style={{ fontSize: 'var(--text-xs)' }}
+                  >
+                    {accepting ? 'Accepting...' : 'Accept'}
+                  </button>
+                )}
+                {onFork && (
+                  <button
+                    className="copy-btn"
+                    onClick={onFork}
+                    type="button"
+                    title="Fork conversation from this point"
+                    style={{ fontSize: 'var(--text-xs)' }}
+                  >
+                    Fork
+                  </button>
+                )}
+                <CopyButton text={content} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      )}
+
+      {/* Tool events (dev variant only) */}
+      {role === 'assistant' && otherEvents.length > 0 && (
+        <ToolEventsBlock events={otherEvents} />
+      )}
+
+      {/* Terminal previews for bash commands (dev variant only) */}
+      {role === 'assistant' && bashEvents.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
+          {bashEvents.map((be, i) => (
+            <TerminalPreview
+              key={i}
+              command={be.command}
+              output={be.output}
+              exitCode={be.exitCode}
+              onRerun={onRerunCommand}
+            />
+          ))}
         </div>
       )}
 
@@ -70,9 +171,11 @@ export default function ChatMessage({ role, content, images, timestamp, isStream
         <div className="chat-bubble-meta">
           {timestamp && new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           {responseTimeMs && role === 'assistant' && (
-            <span style={{ marginLeft: timestamp ? 'var(--sp-3)' : 0 }}>
-              {formatResponseTime(responseTimeMs)}
-            </span>
+            <Tooltip text="Time to first response from the AI" level="high">
+              <span style={{ marginLeft: timestamp ? 'var(--sp-3)' : 0 }}>
+                {formatResponseTime(responseTimeMs)}
+              </span>
+            </Tooltip>
           )}
         </div>
       )}
@@ -80,212 +183,4 @@ export default function ChatMessage({ role, content, images, timestamp, isStream
   );
 }
 
-function formatResponseTime(ms) {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = (ms / 1000).toFixed(1);
-  return `${seconds}s`;
-}
-
-/**
- * Minimal markdown renderer — converts markdown text to React elements.
- * Handles: headings, bold, italic, inline code, code blocks, lists, tables, links.
- */
-function renderMarkdown(text) {
-  if (!text) return null;
-
-  const blocks = [];
-  const lines = text.split('\n');
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Code block
-    if (line.startsWith('```')) {
-      const lang = line.slice(3).trim();
-      const codeLines = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith('```')) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      blocks.push(
-        <pre key={blocks.length} style={{ position: 'relative' }}>
-          <CopyButton text={codeLines.join('\n')} style={{ position: 'absolute', top: 4, right: 4 }} />
-          <code>{codeLines.join('\n')}</code>
-        </pre>
-      );
-      continue;
-    }
-
-    // Table detection
-    if (line.includes('|') && i + 1 < lines.length && /^\s*\|[\s\-:|]+\|\s*$/.test(lines[i + 1])) {
-      const tableLines = [];
-      while (i < lines.length && lines[i].includes('|')) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-      blocks.push(renderTable(tableLines, blocks.length));
-      continue;
-    }
-
-    // Heading
-    const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
-    if (headingMatch) {
-      const level = headingMatch[1].length;
-      const Tag = `h${level}`;
-      blocks.push(<Tag key={blocks.length}>{inlineFormat(headingMatch[2])}</Tag>);
-      i++;
-      continue;
-    }
-
-    // Unordered list
-    if (/^\s*[-*]\s/.test(line)) {
-      const listItems = [];
-      while (i < lines.length && /^\s*[-*]\s/.test(lines[i])) {
-        listItems.push(lines[i].replace(/^\s*[-*]\s/, ''));
-        i++;
-      }
-      blocks.push(
-        <ul key={blocks.length}>
-          {listItems.map((item, j) => <li key={j}>{inlineFormat(item)}</li>)}
-        </ul>
-      );
-      continue;
-    }
-
-    // Ordered list
-    if (/^\s*\d+\.\s/.test(line)) {
-      const listItems = [];
-      while (i < lines.length && /^\s*\d+\.\s/.test(lines[i])) {
-        listItems.push(lines[i].replace(/^\s*\d+\.\s/, ''));
-        i++;
-      }
-      blocks.push(
-        <ol key={blocks.length}>
-          {listItems.map((item, j) => <li key={j}>{inlineFormat(item)}</li>)}
-        </ol>
-      );
-      continue;
-    }
-
-    // Empty line
-    if (!line.trim()) {
-      i++;
-      continue;
-    }
-
-    // Paragraph — collect contiguous non-empty, non-special lines
-    const paraLines = [];
-    while (i < lines.length && lines[i].trim() && !lines[i].startsWith('#') && !lines[i].startsWith('```') && !/^\s*[-*]\s/.test(lines[i]) && !/^\s*\d+\.\s/.test(lines[i])) {
-      paraLines.push(lines[i]);
-      i++;
-    }
-    if (paraLines.length > 0) {
-      blocks.push(<p key={blocks.length}>{inlineFormat(paraLines.join(' '))}</p>);
-    }
-  }
-
-  return blocks;
-}
-
-/**
- * Inline formatting: bold, italic, code, links
- */
-function inlineFormat(text) {
-  if (!text) return text;
-
-  const parts = [];
-  // Split on inline patterns
-  const regex = /(\*\*(.+?)\*\*|__(.+?)__|`(.+?)`|\*(.+?)\*|_(.+?)_|\[([^\]]+)\]\(([^)]+)\))/g;
-  let lastIndex = 0;
-  let match;
-
-  while ((match = regex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-
-    if (match[2] || match[3]) {
-      // Bold
-      parts.push(<strong key={parts.length}>{match[2] || match[3]}</strong>);
-    } else if (match[4]) {
-      // Inline code
-      parts.push(<code key={parts.length}>{match[4]}</code>);
-    } else if (match[5] || match[6]) {
-      // Italic
-      parts.push(<em key={parts.length}>{match[5] || match[6]}</em>);
-    } else if (match[7] && match[8]) {
-      // Link
-      parts.push(<a key={parts.length} href={match[8]} target="_blank" rel="noopener noreferrer">{match[7]}</a>);
-    }
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : parts;
-}
-
-/**
- * Render a markdown table from lines.
- */
-function renderTable(lines, key) {
-  const parseRow = (line) =>
-    line.split('|').map(cell => cell.trim()).filter(Boolean);
-
-  const headers = parseRow(lines[0]);
-  // Skip separator line (index 1)
-  const rows = lines.slice(2).map(parseRow);
-
-  return (
-    <div key={key} style={{ overflowX: 'auto', margin: 'var(--sp-3) 0' }}>
-      <table className="table" style={{ fontSize: 'var(--text-sm)' }}>
-        <thead>
-          <tr>{headers.map((h, i) => <th key={i}>{inlineFormat(h)}</th>)}</tr>
-        </thead>
-        <tbody>
-          {rows.map((row, ri) => (
-            <tr key={ri}>{row.map((cell, ci) => <td key={ci}>{inlineFormat(cell)}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function CopyButton({ text, style = {} }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  }, [text]);
-
-  return (
-    <button
-      className={`copy-btn${copied ? ' is-copied' : ''}`}
-      onClick={handleCopy}
-      type="button"
-      style={style}
-    >
-      {copied ? 'Copied' : 'Copy'}
-    </button>
-  );
-}
+export default React.memo(ChatMessage);

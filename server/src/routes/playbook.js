@@ -20,11 +20,16 @@ function safeName(name) {
 // GET /api/playbook/categories -- List all category files
 router.get('/categories', (req, res) => {
   const categories = getCategories();
-  const items = categories.map((name) => {
+  const items = [];
+  for (const name of categories) {
     const filePath = path.join(CATEGORIES_DIR, name + '.md');
-    const stats = fs.statSync(filePath);
-    return { name, size: stats.size, modified: stats.mtime };
-  });
+    try {
+      const stats = fs.statSync(filePath);
+      items.push({ name, size: stats.size, modified: stats.mtime });
+    } catch {
+      // File was deleted between getCategories() and statSync(); skip it
+    }
+  }
   res.json({ ok: true, categories: items });
 });
 

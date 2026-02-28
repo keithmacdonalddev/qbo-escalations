@@ -7,6 +7,7 @@ const templateSchema = new mongoose.Schema({
       'payroll', 'bank-feeds', 'reconciliation', 'permissions',
       'billing', 'tax', 'invoicing', 'reporting', 'inventory',
       'payments', 'integrations', 'general',
+      'technical',
       'acknowledgment', 'follow-up', 'escalation-up',
     ],
     required: true,

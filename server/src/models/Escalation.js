@@ -22,6 +22,7 @@ const escalationSchema = new mongoose.Schema({
       'payroll', 'bank-feeds', 'reconciliation', 'permissions',
       'billing', 'tax', 'invoicing', 'reporting', 'inventory',
       'payments', 'integrations', 'general', 'unknown',
+      'technical',
     ],
     default: 'unknown',
     index: true,
@@ -47,10 +48,31 @@ const escalationSchema = new mongoose.Schema({
   // Source
   source: {
     type: String,
-    enum: ['screenshot', 'manual', 'cli'],
+    enum: ['screenshot', 'manual', 'cli', 'chat'],
     default: 'manual',
   },
+  parseMeta: {
+    mode: { type: String, default: '' },
+    providerUsed: { type: String, default: '' },
+    fallbackUsed: { type: Boolean, default: false },
+    fallbackFrom: { type: String, default: '' },
+    winner: { type: String, default: '' },
+    validationScore: { type: Number, default: null },
+    validationConfidence: { type: String, default: '' },
+    validationIssues: [{ type: String }],
+    usedRegexFallback: { type: Boolean, default: false },
+    attempts: [{
+      provider: { type: String, default: '' },
+      status: { type: String, default: '' },
+      errorCode: { type: String, default: '' },
+      errorMessage: { type: String, default: '' },
+      latencyMs: { type: Number, default: 0 },
+      validationScore: { type: Number, default: null },
+      validationIssues: [{ type: String }],
+    }],
+  },
   screenshotPaths: [{ type: String }],
+  screenshotHashes: [{ type: String, index: true }],
 
   resolvedAt: { type: Date, default: null },
 }, {

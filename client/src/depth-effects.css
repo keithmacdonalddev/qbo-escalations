@@ -1,0 +1,394 @@
+/* ============================================================
+   Depth Effects — 3D, Shadows, and Visual Enhancements
+
+   Layered depth system for the QBO Escalation Assistant.
+   Adds subtle 3D perception, advanced shadows, and two
+   special design improvements:
+   1. Glassmorphism (frosted glass) on key surfaces
+   2. Soft inner glow on interactive elements (cards, buttons)
+   ============================================================ */
+
+/* ----- Enhanced Shadow System (Elevation Layers) ----- */
+
+/* Override the base shadow tokens with richer multi-layer shadows */
+:root {
+  /* Elevation 1 — subtle lift (cards at rest) */
+  --shadow-e1:
+    0 1px 2px rgba(44, 38, 32, 0.04),
+    0 2px 4px rgba(44, 38, 32, 0.03);
+
+  /* Elevation 2 — raised (hovered cards, dropdowns) */
+  --shadow-e2:
+    0 2px 4px rgba(44, 38, 32, 0.04),
+    0 4px 12px rgba(44, 38, 32, 0.06),
+    0 1px 2px rgba(44, 38, 32, 0.03);
+
+  /* Elevation 3 — floating (modals, popovers) */
+  --shadow-e3:
+    0 4px 8px rgba(44, 38, 32, 0.04),
+    0 8px 24px rgba(44, 38, 32, 0.08),
+    0 16px 48px rgba(44, 38, 32, 0.06);
+
+  /* Elevation 4 — dramatic (toasts, notifications) */
+  --shadow-e4:
+    0 8px 16px rgba(44, 38, 32, 0.06),
+    0 16px 40px rgba(44, 38, 32, 0.1),
+    0 24px 64px rgba(44, 38, 32, 0.08);
+
+  /* Soft inner glow for interactive elements */
+  --glow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --glow-inner-accent: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+
+  /* 3D perspective for card tilt effects */
+  --perspective: 800px;
+
+  /* Glass blur intensity */
+  --glass-blur: 12px;
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --shadow-e1:
+      0 1px 2px rgba(0, 0, 0, 0.15),
+      0 2px 4px rgba(0, 0, 0, 0.12);
+
+    --shadow-e2:
+      0 2px 4px rgba(0, 0, 0, 0.18),
+      0 4px 12px rgba(0, 0, 0, 0.2),
+      0 1px 2px rgba(0, 0, 0, 0.15);
+
+    --shadow-e3:
+      0 4px 8px rgba(0, 0, 0, 0.2),
+      0 8px 24px rgba(0, 0, 0, 0.25),
+      0 16px 48px rgba(0, 0, 0, 0.2);
+
+    --shadow-e4:
+      0 8px 16px rgba(0, 0, 0, 0.25),
+      0 16px 40px rgba(0, 0, 0, 0.3),
+      0 24px 64px rgba(0, 0, 0, 0.25);
+
+    --glow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    --glow-inner-accent: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+    --glass-bg: rgba(30, 27, 23, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.06);
+  }
+}
+
+/* =============================================
+   1. CARD DEPTH — 3D lift on hover
+   ============================================= */
+
+.card {
+  box-shadow: var(--shadow-e1);
+  transition:
+    box-shadow var(--duration-normal) var(--ease-standard),
+    transform var(--duration-normal) var(--ease-standard);
+}
+
+.card-clickable {
+  box-shadow: var(--shadow-e1);
+}
+
+.card-clickable:hover {
+  box-shadow: var(--shadow-e2);
+  transform: translateY(-2px);
+}
+
+.card-clickable:active {
+  box-shadow: var(--shadow-e1);
+  transform: translateY(0);
+  transition-duration: var(--duration-micro);
+}
+
+/* =============================================
+   2. BUTTON DEPTH — layered shadow + inner glow
+   ============================================= */
+
+.btn-primary {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 1px 3px rgba(44, 38, 32, 0.12),
+    0 2px 6px rgba(44, 38, 32, 0.06);
+  transition:
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.btn-primary:hover {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 2px 6px rgba(44, 38, 32, 0.15),
+    0 4px 12px rgba(44, 38, 32, 0.08);
+  transform: translateY(-1px);
+}
+
+.btn-primary:active {
+  box-shadow:
+    var(--glow-inner),
+    0 1px 2px rgba(44, 38, 32, 0.1);
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  box-shadow: var(--glow-inner);
+  transition:
+    box-shadow var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard);
+}
+
+.btn-secondary:hover {
+  box-shadow:
+    var(--glow-inner),
+    0 1px 4px rgba(44, 38, 32, 0.06);
+  transform: translateY(-1px);
+}
+
+.btn-danger {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 1px 3px rgba(192, 57, 43, 0.15);
+}
+
+.btn-danger:hover {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 2px 8px rgba(192, 57, 43, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 1px 3px rgba(58, 138, 92, 0.15);
+}
+
+.btn-success:hover {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 2px 8px rgba(58, 138, 92, 0.2);
+  transform: translateY(-1px);
+}
+
+/* =============================================
+   3. SIDEBAR DEPTH — subtle 3D edge
+   ============================================= */
+
+.sidebar {
+  box-shadow:
+    1px 0 0 var(--line-subtle),
+    2px 0 8px rgba(44, 38, 32, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    box-shadow:
+      1px 0 0 var(--line-subtle),
+      2px 0 12px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* =============================================
+   4. MODAL DEPTH — dramatic elevation
+   ============================================= */
+
+.modal-content,
+.confirm-modal-content {
+  box-shadow: var(--shadow-e4);
+}
+
+/* =============================================
+   5. INPUT DEPTH — subtle inset shadow
+   ============================================= */
+
+input[type="text"],
+input[type="search"],
+input[type="email"],
+input[type="password"],
+input[type="number"],
+input[type="url"],
+textarea,
+select {
+  box-shadow: inset 0 1px 2px rgba(44, 38, 32, 0.04);
+  transition:
+    box-shadow var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  box-shadow:
+    inset 0 1px 2px rgba(44, 38, 32, 0.02),
+    var(--shadow-focus);
+}
+
+@media (prefers-color-scheme: dark) {
+  input[type="text"],
+  input[type="search"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="url"],
+  textarea,
+  select {
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* =============================================
+   6. STAT CARDS — gradient depth
+   ============================================= */
+
+.stat-card {
+  box-shadow: var(--shadow-e1);
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent-muted) 100%
+  );
+  opacity: 0.6;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* =============================================
+   7. TABLE ROW DEPTH — hover lift
+   ============================================= */
+
+.table tbody tr {
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.table tbody tr:hover {
+  box-shadow:
+    0 1px 4px rgba(44, 38, 32, 0.04),
+    0 2px 8px rgba(44, 38, 32, 0.03);
+  position: relative;
+  z-index: 1;
+}
+
+/* =============================================
+   8. CHAT BUBBLE DEPTH
+   ============================================= */
+
+.chat-bubble-assistant {
+  box-shadow: var(--shadow-e1);
+}
+
+.chat-bubble-user {
+  box-shadow:
+    0 1px 3px rgba(44, 38, 32, 0.03);
+}
+
+/* =============================================
+   9. TOAST DEPTH — dramatic floating
+   ============================================= */
+
+.toast {
+  box-shadow: var(--shadow-e3);
+}
+
+/* =============================================
+   SPECIAL DESIGN 1: GLASSMORPHISM
+   Frosted glass effect on sidebar header and
+   compose toolbar for visual depth layering.
+   ============================================= */
+
+.sidebar-header {
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  background: var(--glass-bg);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.compose-settings-bar {
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+  background: var(--glass-bg);
+  border-top: 1px solid var(--glass-border);
+}
+
+/* Settings filter bar gets glass effect with solid fallback */
+.settings-filter-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: var(--sp-3) 0;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
+}
+
+/* =============================================
+   SPECIAL DESIGN 2: SOFT INNER GLOW
+   Subtle top-edge highlight on interactive
+   elements creates a "lit from above" effect,
+   adding perceived physicality and tactility.
+   ============================================= */
+
+.sidebar-nav-item {
+  box-shadow: var(--glow-inner);
+}
+
+.sidebar-nav-item.is-active {
+  box-shadow:
+    var(--glow-inner-accent),
+    0 1px 4px rgba(44, 38, 32, 0.04);
+}
+
+.badge,
+.status-badge {
+  box-shadow: var(--glow-inner);
+}
+
+/* Settings theme cards get enhanced 3D */
+.settings-theme-card {
+  box-shadow: var(--shadow-e1);
+}
+
+.settings-theme-card:hover {
+  box-shadow: var(--shadow-e2);
+}
+
+.settings-theme-card.is-active {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    var(--shadow-e2);
+}
+
+.settings-slider-group {
+  box-shadow: var(--shadow-e1);
+}
+
+/* =============================================
+   REDUCED MOTION — respect user preference
+   ============================================= */
+
+@media (prefers-reduced-motion: reduce) {
+  .card-clickable:hover,
+  .btn-primary:hover,
+  .btn-secondary:hover,
+  .btn-danger:hover,
+  .btn-success:hover,
+  .settings-theme-card:hover {
+    transform: none;
+  }
+}

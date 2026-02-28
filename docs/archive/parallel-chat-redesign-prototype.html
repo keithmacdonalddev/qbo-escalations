@@ -1,0 +1,1778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Parallel Chat Redesign — QBO Escalation Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   WARM AUTHORITY DESIGN SYSTEM — Prototype Stylesheet
+   ============================================================ */
+:root {
+  --bg: #f6f4f1;
+  --surface: #ffffff;
+  --surface2: #edeae5;
+  --surface-elevated: #fff;
+  --surface-recessed: #e8e4df;
+  --border: rgba(44, 38, 32, 0.08);
+  --border-bright: rgba(44, 38, 32, 0.16);
+  --text: #2c2620;
+  --text-dim: #6b5f53;
+  --text-faint: #9e9184;
+  --accent: #1a7a6d;
+  --accent-hover: #145f55;
+  --accent-dim: rgba(26, 122, 109, 0.08);
+  --accent-light: #e5f3f0;
+  --danger: #c0392b;
+  --success: #3a8a5c;
+  --warning: #c47c1e;
+  --info: #2a6987;
+  --provider-a: #1a7a6d;
+  --provider-a-bg: #e5f3f0;
+  --provider-a-glow: rgba(26, 122, 109, 0.25);
+  --provider-b: #5e3d8a;
+  --provider-b-bg: #ede5f5;
+  --provider-b-glow: rgba(94, 61, 138, 0.25);
+  --font-sans: 'DM Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px; --sp-10: 40px; --sp-12: 48px;
+  --shadow-e1: 0 1px 3px rgba(44,38,32,0.06), 0 1px 2px rgba(44,38,32,0.04);
+  --shadow-e2: 0 4px 12px rgba(44,38,32,0.08), 0 2px 4px rgba(44,38,32,0.04), 0 0 0 1px rgba(44,38,32,0.02);
+  --shadow-e3: 0 12px 32px rgba(44,38,32,0.12), 0 4px 8px rgba(44,38,32,0.06), 0 0 0 1px rgba(44,38,32,0.03);
+  --shadow-e4: 0 24px 56px rgba(44,38,32,0.16), 0 8px 16px rgba(44,38,32,0.08), 0 0 0 1px rgba(44,38,32,0.04);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1714;
+    --surface: #242019;
+    --surface2: #13110e;
+    --surface-elevated: #2e2922;
+    --surface-recessed: #1a1714;
+    --border: rgba(237, 232, 225, 0.06);
+    --border-bright: rgba(237, 232, 225, 0.14);
+    --text: #ede8e1;
+    --text-dim: #a89d91;
+    --text-faint: #6e6358;
+    --accent: #4ec9b5;
+    --accent-hover: #6fd9c8;
+    --accent-dim: rgba(78, 201, 181, 0.1);
+    --accent-light: #1a2f2b;
+    --danger: #e74c3c;
+    --success: #5ab87a;
+    --warning: #e8a33a;
+    --info: #5da3c2;
+    --provider-a: #4ec9b5;
+    --provider-a-bg: rgba(78, 201, 181, 0.08);
+    --provider-a-glow: rgba(78, 201, 181, 0.3);
+    --provider-b: #c5a8e8;
+    --provider-b-bg: rgba(197, 168, 232, 0.08);
+    --provider-b-glow: rgba(197, 168, 232, 0.3);
+    --shadow-e1: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.14);
+    --shadow-e2: 0 4px 12px rgba(0,0,0,0.24), 0 2px 4px rgba(0,0,0,0.16), 0 0 0 1px rgba(255,255,255,0.03);
+    --shadow-e3: 0 12px 32px rgba(0,0,0,0.32), 0 4px 8px rgba(0,0,0,0.2), 0 0 0 1px rgba(255,255,255,0.04);
+    --shadow-e4: 0 24px 56px rgba(0,0,0,0.4), 0 8px 16px rgba(0,0,0,0.24), 0 0 0 1px rgba(255,255,255,0.05);
+  }
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; font-size: 16px; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================================
+   LAYOUT
+   ============================================================ */
+.page-grid {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  min-height: 100vh;
+  gap: 0;
+}
+@media (max-width: 1000px) {
+  .page-grid { grid-template-columns: 1fr; }
+  .toc { display: none; }
+}
+
+/* ============================================================
+   TABLE OF CONTENTS — Sticky Sidebar
+   ============================================================ */
+.toc {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: var(--sp-8) var(--sp-4);
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  z-index: 10;
+}
+.toc h3 {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  margin-bottom: var(--sp-4);
+}
+.toc a {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  transition: all 150ms ease;
+  margin-bottom: 2px;
+}
+.toc a:hover { color: var(--text); background: var(--accent-dim); }
+.toc a.active { color: var(--accent); background: var(--accent-dim); font-weight: 600; }
+.toc a .dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-danger { background: var(--danger); }
+.dot-accent { background: var(--accent); }
+.dot-success { background: var(--success); }
+.dot-info { background: var(--info); }
+.dot-warning { background: var(--warning); }
+.dot-purple { background: var(--provider-b); }
+
+/* ============================================================
+   CONTENT AREA
+   ============================================================ */
+.content {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--sp-10) var(--sp-6) var(--sp-12);
+}
+@media (max-width: 1000px) {
+  .content { padding: var(--sp-6) var(--sp-4) var(--sp-10); }
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+.page-header {
+  text-align: center;
+  margin-bottom: var(--sp-12);
+  animation: fadeUp 600ms var(--ease-out) backwards;
+}
+.page-header .badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--radius-full);
+  background: var(--accent-dim);
+  color: var(--accent);
+  margin-bottom: var(--sp-4);
+}
+.page-header h1 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: var(--sp-3);
+}
+.page-header .subtitle {
+  font-size: 1.05rem;
+  color: var(--text-dim);
+  max-width: 600px;
+  margin: 0 auto;
+}
+.team-credits {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-4);
+  margin-top: var(--sp-6);
+  flex-wrap: wrap;
+}
+.team-credit {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 500;
+}
+.team-credit .role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ============================================================
+   SECTIONS
+   ============================================================ */
+section {
+  margin-bottom: var(--sp-12);
+  animation: fadeUp 600ms var(--ease-out) backwards;
+}
+section:nth-child(2) { animation-delay: 100ms; }
+section:nth-child(3) { animation-delay: 200ms; }
+section:nth-child(4) { animation-delay: 300ms; }
+section:nth-child(5) { animation-delay: 400ms; }
+section:nth-child(6) { animation-delay: 500ms; }
+section:nth-child(7) { animation-delay: 600ms; }
+section:nth-child(8) { animation-delay: 700ms; }
+section:nth-child(9) { animation-delay: 800ms; }
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+.section-header .section-dot {
+  width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.section-header h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.section-subtitle {
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  margin-bottom: var(--sp-6);
+}
+
+/* ============================================================
+   CARDS
+   ============================================================ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+  margin-bottom: var(--sp-4);
+  box-shadow: var(--shadow-e1);
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+.card:hover {
+  box-shadow: var(--shadow-e2);
+}
+.card-elevated {
+  box-shadow: var(--shadow-e2);
+}
+.card-elevated:hover {
+  box-shadow: var(--shadow-e3);
+  transform: translateY(-1px);
+}
+.card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: var(--sp-3);
+}
+.card p, .card li {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+.card ul { padding-left: var(--sp-5); }
+.card li { margin-bottom: var(--sp-1); }
+
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--sp-4);
+}
+
+/* ============================================================
+   COMPARISON TABLE
+   ============================================================ */
+.comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-bottom: var(--sp-4);
+}
+.comparison-table th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  text-align: left;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 2px solid var(--border-bright);
+}
+.comparison-table td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.comparison-table tr:hover td {
+  background: var(--accent-dim);
+}
+.score-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.score-bar .fill {
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  display: inline-block;
+}
+.score-bar .label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.verdict-win {
+  color: var(--success);
+  font-weight: 600;
+}
+.verdict-lose {
+  color: var(--danger);
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+.verdict-ok {
+  color: var(--warning);
+  font-weight: 500;
+}
+
+/* ============================================================
+   STATUS BADGES
+   ============================================================ */
+.badge-sm {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+.badge-winner { background: rgba(58, 138, 92, 0.12); color: var(--success); }
+.badge-rejected { background: rgba(192, 57, 43, 0.1); color: var(--danger); }
+.badge-recommended { background: var(--accent-dim); color: var(--accent); }
+
+/* ============================================================
+   INTERACTIVE MOCKUPS
+   ============================================================ */
+
+/* --- Current (Before) Mockup --- */
+.mockup-container {
+  background: var(--surface-recessed);
+  border-radius: var(--radius-xl);
+  padding: var(--sp-6);
+  border: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.mockup-label {
+  position: absolute;
+  top: var(--sp-3);
+  right: var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  z-index: 2;
+}
+.mockup-label-before { background: rgba(192, 57, 43, 0.12); color: var(--danger); }
+.mockup-label-after { background: rgba(58, 138, 92, 0.12); color: var(--success); }
+
+/* Chat mockup inner styling */
+.chat-mock {
+  max-width: 700px;
+  margin: 0 auto;
+}
+.chat-mock-user {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--sp-4);
+}
+.chat-mock-user .bubble {
+  background: var(--accent);
+  color: #fff;
+  padding: var(--sp-3) var(--sp-5);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  max-width: 80%;
+  font-size: 0.9rem;
+}
+.chat-mock-assistant {
+  margin-bottom: var(--sp-4);
+}
+.chat-mock-assistant .bubble {
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  padding: var(--sp-4) var(--sp-5);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-e1);
+}
+.chat-mock-assistant .provider-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: var(--sp-2);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.chat-mock-assistant .provider-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+.chat-mock-assistant .bubble p {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  margin-bottom: var(--sp-2);
+}
+.chat-mock-assistant .bubble p:last-child { margin-bottom: 0; }
+.mini-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.mini-btn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-bright);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 150ms;
+}
+.mini-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+/* --- Proposed (After) Mockup --- Side-by-side */
+.parallel-turn-mock {
+  max-width: 100%;
+  margin: 0 auto;
+}
+.context-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) 0;
+  margin-bottom: var(--sp-3);
+}
+.context-line .context-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+.context-line .ctx-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+}
+
+.split-responses {
+  display: grid;
+  grid-template-columns: 1fr 16px 1fr;
+  gap: 0;
+  align-items: stretch;
+}
+@media (max-width: 700px) {
+  .split-responses { grid-template-columns: 1fr; }
+  .conviction-gutter { display: none; }
+}
+
+.response-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-e2);
+  transition: all 250ms var(--ease-out);
+  cursor: pointer;
+  position: relative;
+}
+.response-card:hover {
+  box-shadow: var(--shadow-e3);
+  transform: translateY(-2px);
+}
+.response-card.card-a:hover {
+  box-shadow: var(--shadow-e3), 0 0 0 2px var(--provider-a-glow);
+}
+.response-card.card-b:hover {
+  box-shadow: var(--shadow-e3), 0 0 0 2px var(--provider-b-glow);
+}
+.response-card.accepted {
+  box-shadow: var(--shadow-e3);
+}
+.response-card.accepted.card-a {
+  box-shadow: var(--shadow-e3), 0 0 0 2px var(--provider-a);
+}
+.response-card.accepted.card-b {
+  box-shadow: var(--shadow-e3), 0 0 0 2px var(--provider-b);
+}
+.response-card.rejected {
+  opacity: 0.4;
+  transform: scale(0.97);
+  filter: grayscale(0.3);
+}
+
+.card-header {
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.card-a .card-header {
+  background: var(--provider-a-bg);
+  border-bottom: 2px solid var(--provider-a);
+}
+.card-b .card-header {
+  background: var(--provider-b-bg);
+  border-bottom: 2px solid var(--provider-b);
+}
+
+.card-header .provider-name {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.card-a .provider-name { color: var(--provider-a); }
+.card-b .provider-name { color: var(--provider-b); }
+
+.card-header .meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.card-header .hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-bright);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  background: var(--surface);
+}
+
+.card-body {
+  padding: var(--sp-4) var(--sp-5);
+}
+.card-body p {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+  margin-bottom: var(--sp-3);
+}
+.card-body p:last-child { margin-bottom: 0; }
+.card-body ul {
+  padding-left: var(--sp-5);
+  margin-bottom: var(--sp-3);
+}
+.card-body li {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+  margin-bottom: var(--sp-1);
+}
+
+.card-footer {
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.accept-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--sp-2) var(--sp-4);
+  border-radius: var(--radius-full);
+  border: none;
+  cursor: pointer;
+  transition: all 200ms var(--ease-out);
+}
+.card-a .accept-btn {
+  background: var(--provider-a);
+  color: #fff;
+}
+.card-a .accept-btn:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 8px var(--provider-a-glow);
+}
+.card-b .accept-btn {
+  background: var(--provider-b);
+  color: #fff;
+}
+.card-b .accept-btn:hover {
+  box-shadow: 0 2px 8px var(--provider-b-glow);
+}
+.accepted-badge {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: rgba(58, 138, 92, 0.12);
+  color: var(--success);
+}
+.response-card.accepted .accepted-badge { display: inline-block; }
+.response-card.accepted .accept-btn { display: none; }
+.response-card.rejected .accept-btn { display: none; }
+
+/* Conviction Strip (Gutter) */
+.conviction-gutter {
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  padding: var(--sp-6) 0;
+}
+.conviction-strip {
+  width: 8px;
+  border-radius: var(--radius-full);
+  background: linear-gradient(to bottom,
+    var(--success) 0%, var(--success) 30%,
+    var(--warning) 30%, var(--warning) 55%,
+    var(--danger) 55%, var(--danger) 70%,
+    var(--success) 70%, var(--success) 100%
+  );
+  opacity: 0.6;
+  transition: opacity 200ms;
+  position: relative;
+}
+.conviction-strip:hover { opacity: 1; }
+.conviction-strip::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+/* Spotlight Diff Highlights */
+.highlight-a {
+  background: var(--provider-a-bg);
+  border-left: 2px solid var(--provider-a);
+  padding-left: var(--sp-2);
+  border-radius: 2px;
+}
+.highlight-b {
+  background: var(--provider-b-bg);
+  border-left: 2px solid var(--provider-b);
+  padding-left: var(--sp-2);
+  border-radius: 2px;
+}
+.highlight-conflict {
+  background: rgba(196, 124, 30, 0.1);
+  border-left: 2px solid var(--warning);
+  padding-left: var(--sp-2);
+  border-radius: 2px;
+}
+
+/* Snap Decision Mode */
+.snap-decision {
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4) var(--sp-5);
+  box-shadow: var(--shadow-e3);
+  position: relative;
+}
+.snap-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+.snap-header svg {
+  width: 16px; height: 16px;
+}
+.snap-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--sp-2);
+  cursor: pointer;
+  transition: all 150ms;
+  border: 1px solid var(--border);
+}
+.snap-row:hover { background: var(--accent-dim); border-color: var(--accent); }
+.snap-row .snap-key {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 700;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-bright);
+  flex-shrink: 0;
+}
+.snap-row-a .snap-key { color: var(--provider-a); }
+.snap-row-b .snap-key { color: var(--provider-b); }
+.snap-row .snap-summary {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.snap-row .snap-summary strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.snap-tags {
+  display: flex;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+.snap-tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+.snap-footer {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  text-align: center;
+  margin-top: var(--sp-3);
+}
+
+/* Undo Toast */
+.undo-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-full);
+  padding: var(--sp-2) var(--sp-4);
+  box-shadow: var(--shadow-e3);
+  font-size: 0.85rem;
+}
+.undo-toast .undo-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ============================================================
+   FEATURE SHOWCASE
+   ============================================================ */
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  box-shadow: var(--shadow-e2);
+  transition: all 300ms var(--ease-out);
+}
+.feature-card:hover {
+  box-shadow: var(--shadow-e3);
+  transform: translateY(-2px);
+}
+.feature-card-header {
+  padding: var(--sp-5) var(--sp-6);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.feature-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.feature-icon-teal { background: var(--accent-dim); color: var(--accent); }
+.feature-icon-purple { background: var(--provider-b-bg); color: var(--provider-b); }
+.feature-icon-amber { background: rgba(196, 124, 30, 0.1); color: var(--warning); }
+.feature-card-header h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+.feature-card-header .feature-by {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.feature-card-body {
+  padding: 0 var(--sp-6) var(--sp-5);
+}
+.feature-card-body p {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+  margin-bottom: var(--sp-3);
+}
+.feature-demo {
+  background: var(--surface-recessed);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-5);
+  margin-top: var(--sp-3);
+  border: 1px solid var(--border);
+}
+
+/* ============================================================
+   INTERACTION TABLE
+   ============================================================ */
+.shortcut-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--sp-2) var(--sp-4);
+  align-items: center;
+}
+.shortcut-key {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  text-align: center;
+  min-width: 42px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+.shortcut-desc {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+}
+.shortcut-speed {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ============================================================
+   TIMELINE / ANIMATION SEQUENCE
+   ============================================================ */
+.timeline {
+  position: relative;
+  padding-left: var(--sp-8);
+}
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 14px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(to bottom, var(--accent), var(--provider-b), var(--warning));
+  border-radius: var(--radius-full);
+}
+.timeline-step {
+  position: relative;
+  padding-bottom: var(--sp-5);
+}
+.timeline-step:last-child { padding-bottom: 0; }
+.timeline-step::before {
+  content: '';
+  position: absolute;
+  left: calc(-1 * var(--sp-8) + 10px);
+  top: 4px;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.timeline-step .time-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.timeline-step .time-desc {
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+
+/* ============================================================
+   BEFORE/AFTER TOGGLE
+   ============================================================ */
+.ba-toggle {
+  display: flex;
+  background: var(--surface-recessed);
+  border-radius: var(--radius-full);
+  padding: 3px;
+  width: fit-content;
+  margin: 0 auto var(--sp-6);
+  border: 1px solid var(--border);
+}
+.ba-toggle button {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--sp-2) var(--sp-5);
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 200ms var(--ease-out);
+}
+.ba-toggle button.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-e1);
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 700px) {
+  .split-responses { grid-template-columns: 1fr; gap: var(--sp-3); }
+  .card-grid { grid-template-columns: 1fr; }
+  .team-credits { flex-direction: column; align-items: center; }
+  .page-header h1 { font-size: 1.6rem; }
+  .shortcut-grid { grid-template-columns: auto 1fr; }
+  .shortcut-speed { display: none; }
+}
+
+/* Scrollspy active highlight transition */
+.toc a { transition: color 200ms, background 200ms; }
+
+/* Separator */
+hr.section-sep {
+  border: none;
+  height: 1px;
+  background: var(--border);
+  margin: var(--sp-8) 0;
+}
+</style>
+</head>
+<body>
+
+<div class="page-grid">
+
+  <!-- ============================================================
+       TABLE OF CONTENTS
+       ============================================================ -->
+  <nav class="toc" id="toc">
+    <h3>Contents</h3>
+    <a href="#problem"><span class="dot dot-danger"></span> The Problem</a>
+    <a href="#before-after"><span class="dot dot-accent"></span> Before / After</a>
+    <a href="#layout"><span class="dot dot-success"></span> Layout Decision</a>
+    <a href="#interactions"><span class="dot dot-info"></span> Interaction Model</a>
+    <a href="#animation"><span class="dot dot-warning"></span> Animation Sequence</a>
+    <a href="#feature-spotlight"><span class="dot dot-accent"></span> Spotlight Diff</a>
+    <a href="#feature-conviction"><span class="dot dot-purple"></span> Conviction Strip</a>
+    <a href="#feature-snap"><span class="dot dot-warning"></span> Snap Decision</a>
+    <a href="#shortcuts"><span class="dot dot-info"></span> Keyboard Shortcuts</a>
+    <a href="#summary"><span class="dot dot-success"></span> Summary</a>
+  </nav>
+
+  <!-- ============================================================
+       CONTENT
+       ============================================================ -->
+  <main class="content">
+
+    <!-- HEADER -->
+    <header class="page-header">
+      <span class="badge">Design Prototype</span>
+      <h1>Parallel Chat Redesign</h1>
+      <p class="subtitle">A faster, more readable comparison UI for multi-provider AI responses — optimized for QBO escalation specialists on live phone calls.</p>
+      <div class="team-credits">
+        <div class="team-credit">
+          <span class="dot" style="background: var(--provider-a); width:8px; height:8px; border-radius:50%;"></span>
+          <span><strong>Mika</strong></span>
+          <span class="role">UX Research</span>
+        </div>
+        <div class="team-credit">
+          <span class="dot" style="background: var(--provider-b); width:8px; height:8px; border-radius:50%;"></span>
+          <span><strong>Sora</strong></span>
+          <span class="role">Visual Design</span>
+        </div>
+        <div class="team-credit">
+          <span class="dot" style="background: var(--warning); width:8px; height:8px; border-radius:50%;"></span>
+          <span><strong>Kai</strong></span>
+          <span class="role">Interaction Design</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============================================================
+         SECTION 1: THE PROBLEM
+         ============================================================ -->
+    <section id="problem">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--danger);"></span>
+        <h2>The Problem</h2>
+      </div>
+      <p class="section-subtitle">The current parallel chat UI stacks responses vertically with poor visual separation. Specialists on live calls can't quickly scan, compare, or accept responses.</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>Poor Readability</h3>
+          <p>Responses blend together visually. No color-coded provider identity. The bordered boxes all look the same, forcing the specialist to read provider labels to know which response is which.</p>
+        </div>
+        <div class="card">
+          <h3>Hard to Compare</h3>
+          <p>Vertical stacking forces scrolling between responses. No visual connection between competing answers. The specialist must hold Response A in memory while scrolling to read Response B.</p>
+        </div>
+        <div class="card">
+          <h3>Tiny Action Buttons</h3>
+          <p>Accept, Fork, and Copy buttons are small and positioned inconsistently. Under time pressure, Fitts's Law penalizes small targets — the specialist wastes precious seconds aiming.</p>
+        </div>
+        <div class="card">
+          <h3>No Difference Visibility</h3>
+          <p>Both responses may agree on 80% of content. The specialist has no way to quickly see where they differ — they must read both fully, even when differences are minor.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 2: BEFORE / AFTER
+         ============================================================ -->
+    <section id="before-after">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--accent);"></span>
+        <h2>Before / After</h2>
+      </div>
+      <p class="section-subtitle">Toggle between the current stacked layout and the proposed side-by-side comparison.</p>
+
+      <div class="ba-toggle" id="baToggle">
+        <button class="active" data-view="before" onclick="toggleBA('before')">Before</button>
+        <button data-view="after" onclick="toggleBA('after')">After</button>
+      </div>
+
+      <!-- BEFORE -->
+      <div class="mockup-container" id="mockBefore">
+        <span class="mockup-label mockup-label-before">Current</span>
+        <div class="chat-mock">
+          <div class="chat-mock-user">
+            <div class="bubble">Customer says their payroll deadline is tomorrow and direct deposit hasn't posted. What do I tell them?</div>
+          </div>
+          <div class="chat-mock-assistant">
+            <div class="bubble">
+              <div class="provider-label">
+                <span class="provider-dot" style="background: var(--provider-a);"></span>
+                CLAUDE
+                <span style="flex:1"></span>
+                <span class="mini-btn">Accept</span>
+                <span class="mini-btn">Fork</span>
+                <span class="mini-btn">Copy</span>
+              </div>
+              <p>The payroll deadline concern is urgent. Here's what to tell the customer: First, confirm the payroll submission date and check if the direct deposit was initiated before the cutoff time. Most banks require 2 business days for ACH processing. If submitted on time, the deposit should post by end of business tomorrow. If it was submitted late, recommend the customer consider same-day payroll options or manual check printing as a backup.</p>
+            </div>
+          </div>
+          <div class="chat-mock-assistant">
+            <div class="bubble">
+              <div class="provider-label">
+                <span class="provider-dot" style="background: var(--provider-b);"></span>
+                CHATGPT 5.3 CODEX (HIGH)
+                <span style="flex:1"></span>
+                <span class="mini-btn">Accept</span>
+                <span class="mini-btn">Fork</span>
+                <span class="mini-btn">Copy</span>
+              </div>
+              <p>To address the payroll deadline urgency:</p>
+              <p><strong>Immediate steps:</strong></p>
+              <ul style="padding-left:20px; margin:8px 0;">
+                <li>Check payroll status in QBO under Payroll &gt; Overview</li>
+                <li>Verify the direct deposit submission timestamp</li>
+                <li>Confirm bank processing window (typically 2 business days for ACH)</li>
+              </ul>
+              <p><strong>If deposit is delayed:</strong> The customer can switch to paper checks as an emergency measure. Navigate to Payroll &gt; Employees &gt; Payment Method to change the pay type temporarily.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AFTER -->
+      <div class="mockup-container" id="mockAfter" style="display:none;">
+        <span class="mockup-label mockup-label-after">Proposed</span>
+        <div class="parallel-turn-mock">
+          <div class="chat-mock" style="max-width:100%; margin-bottom:var(--sp-4);">
+            <div class="chat-mock-user">
+              <div class="bubble">Customer says their payroll deadline is tomorrow and direct deposit hasn't posted. What do I tell them?</div>
+            </div>
+          </div>
+
+          <div class="context-line">
+            <span class="ctx-dot" style="background: var(--provider-a);"></span>
+            <span class="ctx-dot" style="background: var(--provider-b);"></span>
+            <span class="context-text">2 responses — compare and accept one</span>
+            <span style="flex:1"></span>
+            <span class="context-text" style="opacity:0.5;">Press D for diff &middot; S for snap</span>
+          </div>
+
+          <div class="split-responses">
+            <!-- Response A -->
+            <div class="response-card card-a" id="cardA" onclick="acceptCard('a')">
+              <div class="card-header">
+                <span class="provider-name">
+                  <span class="provider-dot" style="background: var(--provider-a); width:8px; height:8px; border-radius:50%;"></span>
+                  Claude
+                </span>
+                <div class="meta">
+                  <span>~62 words &middot; 8s</span>
+                  <span class="hotkey">1</span>
+                </div>
+              </div>
+              <div class="card-body">
+                <p>The payroll deadline concern is urgent. Here's what to tell the customer:</p>
+                <p>First, confirm the payroll submission date and check if the direct deposit was initiated before the cutoff time. Most banks require <strong>2 business days</strong> for ACH processing.</p>
+                <p class="highlight-a">If submitted on time, the deposit should post by end of business tomorrow. If it was submitted late, recommend the customer consider <strong>same-day payroll options</strong> or manual check printing as a backup.</p>
+              </div>
+              <div class="card-footer">
+                <span class="accepted-badge">Accepted</span>
+                <span></span>
+                <button class="accept-btn" onclick="event.stopPropagation(); acceptCard('a')">Accept</button>
+              </div>
+            </div>
+
+            <!-- Conviction Strip -->
+            <div class="conviction-gutter">
+              <div class="conviction-strip" title="Green = agreement, Amber = different emphasis, Red = different recommendation"></div>
+            </div>
+
+            <!-- Response B -->
+            <div class="response-card card-b" id="cardB" onclick="acceptCard('b')">
+              <div class="card-header">
+                <span class="provider-name">
+                  <span class="provider-dot" style="background: var(--provider-b); width:8px; height:8px; border-radius:50%;"></span>
+                  ChatGPT 5.3 Codex
+                </span>
+                <div class="meta">
+                  <span>~78 words &middot; 11s</span>
+                  <span class="hotkey">2</span>
+                </div>
+              </div>
+              <div class="card-body">
+                <p>To address the payroll deadline urgency:</p>
+                <p><strong>Immediate steps:</strong></p>
+                <ul>
+                  <li>Check payroll status in QBO under Payroll &gt; Overview</li>
+                  <li>Verify the direct deposit submission timestamp</li>
+                  <li>Confirm bank processing window (typically <strong>2 business days</strong> for ACH)</li>
+                </ul>
+                <p class="highlight-b"><strong>If deposit is delayed:</strong> The customer can switch to paper checks as an emergency measure. Navigate to <strong>Payroll &gt; Employees &gt; Payment Method</strong> to change the pay type temporarily.</p>
+              </div>
+              <div class="card-footer">
+                <span class="accepted-badge">Accepted</span>
+                <span></span>
+                <button class="accept-btn" onclick="event.stopPropagation(); acceptCard('b')">Accept</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Undo Toast (shown after acceptance) -->
+          <div id="undoToast" style="display:none; text-align:center; margin-top: var(--sp-4); animation: slideUp 200ms var(--ease-out);">
+            <span class="undo-toast">
+              <span id="undoText">Response A accepted</span>
+              <span class="undo-link" onclick="resetCards()">Undo (Ctrl+Z)</span>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 3: LAYOUT DECISION
+         ============================================================ -->
+    <section id="layout">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--success);"></span>
+        <h2>Layout Decision: Hybrid Split-to-Tab</h2>
+      </div>
+      <p class="section-subtitle">We evaluated 7 layout approaches. The unanimous recommendation is a <strong>Hybrid Split-to-Tab</strong> — side-by-side columns on desktop, segmented tabs on mobile.</p>
+
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Approach</th>
+            <th>Scannability</th>
+            <th>Readability</th>
+            <th>Mobile</th>
+            <th>Verdict</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Side-by-Side Columns</strong></td>
+            <td><span class="score-bar"><span class="fill" style="width:72px"></span><span class="label">9/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:56px"></span><span class="label">7/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:24px"></span><span class="label">3/10</span></span></td>
+            <td><span class="badge-sm badge-recommended">Desktop pick</span></td>
+          </tr>
+          <tr>
+            <td><strong>Tabbed / Segmented</strong></td>
+            <td><span class="score-bar"><span class="fill" style="width:32px"></span><span class="label">4/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:80px"></span><span class="label">10/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:80px"></span><span class="label">10/10</span></span></td>
+            <td><span class="badge-sm badge-recommended">Mobile pick</span></td>
+          </tr>
+          <tr>
+            <td>Card Carousel</td>
+            <td><span class="score-bar"><span class="fill" style="width:24px"></span><span class="label">3/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:72px"></span><span class="label">9/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:72px"></span><span class="label">9/10</span></span></td>
+            <td><span class="verdict-lose">Primacy bias</span></td>
+          </tr>
+          <tr>
+            <td>Stacked + Peek</td>
+            <td><span class="score-bar"><span class="fill" style="width:40px"></span><span class="label">5/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:56px"></span><span class="label">7/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:56px"></span><span class="label">7/10</span></span></td>
+            <td><span class="verdict-lose">Front-card bias</span></td>
+          </tr>
+          <tr>
+            <td>Master-Detail</td>
+            <td><span class="score-bar"><span class="fill" style="width:48px"></span><span class="label">6/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:64px"></span><span class="label">8/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:40px"></span><span class="label">5/10</span></span></td>
+            <td><span class="verdict-lose">Inherently biased</span></td>
+          </tr>
+          <tr>
+            <td>Accordion</td>
+            <td><span class="score-bar"><span class="fill" style="width:40px"></span><span class="label">5/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:48px"></span><span class="label">6/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:64px"></span><span class="label">8/10</span></span></td>
+            <td><span class="verdict-lose">Extra clicks</span></td>
+          </tr>
+          <tr>
+            <td>Overlay Slider</td>
+            <td><span class="score-bar"><span class="fill" style="width:16px"></span><span class="label">2/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:16px"></span><span class="label">2/10</span></span></td>
+            <td><span class="score-bar"><span class="fill" style="width:32px"></span><span class="label">4/10</span></span></td>
+            <td><span class="verdict-lose">Incompatible with text</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="card card-elevated" style="border-left: 3px solid var(--success);">
+        <h3>Why Hybrid Wins</h3>
+        <ul>
+          <li><strong>Desktop (>900px):</strong> Side-by-side columns with synchronized scroll — instant visual comparison, no interaction required. Proven by LMSYS Chatbot Arena at 1M+ evaluations.</li>
+          <li><strong>Mobile (&lt;900px):</strong> Segmented control tabs — full-width readability with easy provider switching. Native to iOS/Android patterns.</li>
+          <li><strong>Context Line bridge:</strong> A slim header between the user message and dual responses anchors the comparison in the chat flow: "2 responses — compare and accept one".</li>
+          <li><strong>Provider color identity:</strong> Teal (Provider A) and purple (Provider B) top-borders + header tints make each response instantly identifiable without reading labels.</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 4: INTERACTION MODEL
+         ============================================================ -->
+    <section id="interactions">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--info);"></span>
+        <h2>Interaction Model</h2>
+      </div>
+      <p class="section-subtitle">Keyboard-first design with full-card click as mouse fallback. Optimized for sub-3-second decision time on live calls.</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>Primary: Keyboard Accept</h3>
+          <p>Press <strong>1</strong> or <strong>2</strong> to accept left or right response. Number keys map spatially to position. Only active when parallel responses are displayed.</p>
+          <p style="margin-top:8px;"><strong>Speed:</strong> ~0.3 seconds</p>
+        </div>
+        <div class="card">
+          <h3>Secondary: Full-Card Click</h3>
+          <p>Click <strong>anywhere on the card</strong> to accept it. Hover shows a provider-colored border glow as preview. Massive hit target eliminates Fitts's Law penalty.</p>
+          <p style="margin-top:8px;"><strong>Speed:</strong> ~0.8 seconds</p>
+        </div>
+        <div class="card">
+          <h3>Safety Net: 5s Undo</h3>
+          <p>Gmail-style undo toast appears for 5 seconds after acceptance. Press <strong>Ctrl+Z</strong> or click "Undo" to reverse. Action isn't committed until the window expires.</p>
+          <p style="margin-top:8px;"><strong>Recovery:</strong> ~0.5 seconds</p>
+        </div>
+        <div class="card">
+          <h3>Post-Accept: Collapse + Integrate</h3>
+          <p>Winner expands into a standard chat bubble. Loser collapses to a 36px bar: "[Provider] response — click to view". No information is lost.</p>
+          <p style="margin-top:8px;"><strong>Resolved in:</strong> 500ms total</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 5: ANIMATION SEQUENCE
+         ============================================================ -->
+    <section id="animation">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--warning);"></span>
+        <h2>Animation Sequence</h2>
+      </div>
+      <p class="section-subtitle">500ms total from click to resolved state. Every millisecond is accounted for.</p>
+
+      <div class="card card-elevated">
+        <div class="timeline">
+          <div class="timeline-step">
+            <div class="time-label">0ms — Trigger</div>
+            <div class="time-desc">User presses <strong>1</strong>/<strong>2</strong> or clicks a card</div>
+          </div>
+          <div class="timeline-step">
+            <div class="time-label">0–100ms — Flash Confirm</div>
+            <div class="time-desc">Winner card gets provider-color border glow (2px). Loser fades to 40% opacity. Instant visual confirmation that the action registered.</div>
+          </div>
+          <div class="timeline-step">
+            <div class="time-label">100–350ms — Resolve Layout</div>
+            <div class="time-desc">Winner card smoothly expands (ease-out). Loser collapses to a 36px bar: "[Provider] response — click to view". The conviction strip fades out.</div>
+          </div>
+          <div class="timeline-step">
+            <div class="time-label">350–500ms — Integrate</div>
+            <div class="time-desc">Winner card's glow fades, transitions to a standard chat bubble. Undo toast slides up from bottom. The response is now part of the conversation thread.</div>
+          </div>
+          <div class="timeline-step">
+            <div class="time-label">5000ms — Commit</div>
+            <div class="time-desc">Undo window expires. Toast fades out. The acceptance is persisted to the database. The collapsed loser bar remains accessible.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <hr class="section-sep">
+
+    <!-- ============================================================
+         SECTION 6: FEATURE — SPOTLIGHT DIFF
+         ============================================================ -->
+    <section id="feature-spotlight">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--accent);"></span>
+        <h2>Feature 1: Spotlight Diff</h2>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card-header">
+          <div class="feature-icon feature-icon-teal">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><path d="M12 3v18M3 12h18M5.5 5.5l13 13M18.5 5.5l-13 13"/></svg>
+          </div>
+          <div>
+            <h3>Spotlight Diff</h3>
+            <span class="feature-by">Proposed by Mika — UX Researcher</span>
+          </div>
+        </div>
+        <div class="feature-card-body">
+          <p><strong>Semantic difference highlighting that saves 60–80% of reading time.</strong> Instead of reading both responses fully, the specialist sees at a glance where the responses diverge.</p>
+
+          <div class="feature-demo">
+            <p style="font-family: var(--font-mono); font-size:11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--sp-3);">How differences are color-coded:</p>
+
+            <div style="display:grid; gap: var(--sp-3);">
+              <div class="highlight-a" style="padding: var(--sp-3); border-radius: var(--radius-sm);">
+                <strong style="color: var(--provider-a); font-size: 0.8rem;">UNIQUE TO PROVIDER A</strong>
+                <p style="font-size: 0.85rem; margin-top:4px;">Content that only appears in Provider A's response (e.g., "same-day payroll options"). Teal highlight draws attention to A's unique recommendations.</p>
+              </div>
+              <div class="highlight-b" style="padding: var(--sp-3); border-radius: var(--radius-sm);">
+                <strong style="color: var(--provider-b); font-size: 0.8rem;">UNIQUE TO PROVIDER B</strong>
+                <p style="font-size: 0.85rem; margin-top:4px;">Content that only appears in Provider B's response (e.g., specific QBO navigation path "Payroll > Employees > Payment Method"). Purple highlight for B's unique value.</p>
+              </div>
+              <div class="highlight-conflict" style="padding: var(--sp-3); border-radius: var(--radius-sm);">
+                <strong style="color: var(--warning); font-size: 0.8rem;">FACTUAL DISAGREEMENT</strong>
+                <p style="font-size: 0.85rem; margin-top:4px;">Content where providers contradict each other (e.g., different processing timelines). Amber flags where the specialist must apply judgment — the most critical information.</p>
+              </div>
+              <div style="padding: var(--sp-3); background: var(--surface); border-radius: var(--radius-sm); border: 1px dashed var(--border);">
+                <strong style="color: var(--text-faint); font-size: 0.8rem;">AGREEMENT (NO HIGHLIGHT)</strong>
+                <p style="font-size: 0.85rem; margin-top:4px; color: var(--text-faint);">~80% of content where both providers agree. Unhighlighted = safe to skip. The specialist focuses only on the colored sections.</p>
+              </div>
+            </div>
+          </div>
+
+          <p style="margin-top: var(--sp-4);"><strong>Toggle:</strong> Press <strong>D</strong> key or click "Show Diff" in the context line header. Highlights fade in over 300ms.</p>
+          <p><strong>Implementation:</strong> Sentence-level semantic similarity computed server-side, or by prompting Claude to identify key differences as structured data.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 7: FEATURE — CONVICTION STRIP
+         ============================================================ -->
+    <section id="feature-conviction">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--provider-b);"></span>
+        <h2>Feature 2: The Conviction Strip</h2>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card-header">
+          <div class="feature-icon feature-icon-purple">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><rect x="10" y="2" width="4" height="20" rx="2"/></svg>
+          </div>
+          <div>
+            <h3>The Conviction Strip</h3>
+            <span class="feature-by">Proposed by Sora — Visual Designer</span>
+          </div>
+        </div>
+        <div class="feature-card-body">
+          <p><strong>A narrow vertical gutter between the two response panels that visualizes agreement, overlap, and contradiction at a glance.</strong></p>
+
+          <div class="feature-demo">
+            <div style="display: grid; grid-template-columns: 1fr 40px 1fr; gap: var(--sp-4); align-items: stretch; min-height: 240px;">
+              <!-- Left panel mockup -->
+              <div style="background: var(--surface); border-radius: var(--radius-md); padding: var(--sp-4); border-top: 3px solid var(--provider-a);">
+                <div style="font-family: var(--font-mono); font-size:10px; color: var(--provider-a); margin-bottom: var(--sp-3);">PROVIDER A</div>
+                <div style="background: rgba(58,138,92,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">ACH takes 2 business days...</div>
+                <div style="background: rgba(196,124,30,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">Recommend same-day payroll...</div>
+                <div style="background: rgba(192,57,43,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">Check printing as backup...</div>
+                <div style="background: rgba(58,138,92,0.08); padding:6px 8px; border-radius:4px; font-size:0.8rem; color: var(--text-dim);">Contact bank for timeline...</div>
+              </div>
+
+              <!-- Strip -->
+              <div style="display:flex; align-items:stretch; justify-content:center; padding: var(--sp-4) 0;">
+                <div style="width:10px; border-radius: var(--radius-full); background: linear-gradient(to bottom, var(--success) 0%, var(--success) 30%, var(--warning) 30%, var(--warning) 55%, var(--danger) 55%, var(--danger) 72%, var(--success) 72%, var(--success) 100%); opacity: 0.8;"></div>
+              </div>
+
+              <!-- Right panel mockup -->
+              <div style="background: var(--surface); border-radius: var(--radius-md); padding: var(--sp-4); border-top: 3px solid var(--provider-b);">
+                <div style="font-family: var(--font-mono); font-size:10px; color: var(--provider-b); margin-bottom: var(--sp-3);">PROVIDER B</div>
+                <div style="background: rgba(58,138,92,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">ACH takes 2 business days...</div>
+                <div style="background: rgba(196,124,30,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">Navigate to Payroll > Employees...</div>
+                <div style="background: rgba(192,57,43,0.08); padding:6px 8px; border-radius:4px; margin-bottom:6px; font-size:0.8rem; color: var(--text-dim);">Switch to paper checks...</div>
+                <div style="background: rgba(58,138,92,0.08); padding:6px 8px; border-radius:4px; font-size:0.8rem; color: var(--text-dim);">Contact bank for timeline...</div>
+              </div>
+            </div>
+
+            <div style="display:flex; gap: var(--sp-5); justify-content: center; margin-top: var(--sp-4);">
+              <div style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color: var(--text-dim);">
+                <span style="width:10px; height:10px; border-radius:50%; background: var(--success);"></span> Agreement
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color: var(--text-dim);">
+                <span style="width:10px; height:10px; border-radius:50%; background: var(--warning);"></span> Different emphasis
+              </div>
+              <div style="display:flex; align-items:center; gap:6px; font-size:0.8rem; color: var(--text-dim);">
+                <span style="width:10px; height:10px; border-radius:50%; background: var(--danger);"></span> Contradiction
+              </div>
+            </div>
+          </div>
+
+          <p style="margin-top: var(--sp-4);"><strong>Sub-second orientation:</strong> The specialist glances at the strip — "mostly green with one red zone" — and immediately knows where to focus reading.</p>
+          <p><strong>Hover interaction:</strong> Hovering over a strip segment highlights the corresponding sections in both panels with a subtle pulse.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 8: FEATURE — SNAP DECISION
+         ============================================================ -->
+    <section id="feature-snap">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--warning);"></span>
+        <h2>Feature 3: Snap Decision</h2>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card-header">
+          <div class="feature-icon feature-icon-amber">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          </div>
+          <div>
+            <h3>Snap Decision</h3>
+            <span class="feature-by">Proposed by Kai — Interaction Designer</span>
+          </div>
+        </div>
+        <div class="feature-card-body">
+          <p><strong>When under extreme time pressure, press S to collapse parallel responses into a single-line summary for instant acceptance.</strong> No other chat interface offers a speed mode for comparison.</p>
+
+          <div class="feature-demo">
+            <div class="snap-decision">
+              <div class="snap-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                SNAP DECISION
+              </div>
+
+              <div class="snap-row snap-row-a">
+                <span class="snap-key">1</span>
+                <div>
+                  <div class="snap-summary"><strong>Claude:</strong> "The payroll deadline concern is urgent. First, confirm the payroll submission date..."</div>
+                  <div class="snap-tags">
+                    <span class="snap-tag">62 words</span>
+                    <span class="snap-tag">same-day payroll</span>
+                    <span class="snap-tag">manual checks</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="snap-row snap-row-b">
+                <span class="snap-key">2</span>
+                <div>
+                  <div class="snap-summary"><strong>ChatGPT 5.3 Codex:</strong> "To address the payroll deadline urgency: Check payroll status in QBO..."</div>
+                  <div class="snap-tags">
+                    <span class="snap-tag">78 words</span>
+                    <span class="snap-tag">step-by-step</span>
+                    <span class="snap-tag">QBO navigation</span>
+                    <span class="snap-tag">paper checks</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="snap-footer">Press 1 or 2 to accept &middot; Esc to expand full view</div>
+            </div>
+          </div>
+
+          <p style="margin-top: var(--sp-4);"><strong>Total interaction time:</strong> Under 2 seconds from activation (<strong>S</strong>) to acceptance (<strong>1</strong>/<strong>2</strong>).</p>
+          <p><strong>Edge case:</strong> If responses are >80% similar, shows "Responses are very similar — key difference: [auto-detected]"</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 9: KEYBOARD SHORTCUTS
+         ============================================================ -->
+    <section id="shortcuts">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--info);"></span>
+        <h2>Keyboard Shortcuts</h2>
+      </div>
+      <p class="section-subtitle">Keyboard-first design for one-handed operation. All shortcuts only activate when parallel responses are displayed.</p>
+
+      <div class="card card-elevated">
+        <div class="shortcut-grid">
+          <span class="shortcut-key">1</span>
+          <span class="shortcut-desc">Accept Response A (left / teal)</span>
+          <span class="shortcut-speed">~0.3s</span>
+
+          <span class="shortcut-key">2</span>
+          <span class="shortcut-desc">Accept Response B (right / purple)</span>
+          <span class="shortcut-speed">~0.3s</span>
+
+          <span class="shortcut-key">Ctrl+1</span>
+          <span class="shortcut-desc">Copy Response A to clipboard (no accept)</span>
+          <span class="shortcut-speed">~0.3s</span>
+
+          <span class="shortcut-key">Ctrl+2</span>
+          <span class="shortcut-desc">Copy Response B to clipboard (no accept)</span>
+          <span class="shortcut-speed">~0.3s</span>
+
+          <span class="shortcut-key">D</span>
+          <span class="shortcut-desc">Toggle Spotlight Diff (highlight differences)</span>
+          <span class="shortcut-speed">toggle</span>
+
+          <span class="shortcut-key">S</span>
+          <span class="shortcut-desc">Activate Snap Decision compressed view</span>
+          <span class="shortcut-speed">~1.5s total</span>
+
+          <span class="shortcut-key">Ctrl+Z</span>
+          <span class="shortcut-desc">Undo last acceptance (5s window)</span>
+          <span class="shortcut-speed">~0.5s</span>
+
+          <span class="shortcut-key">Tab</span>
+          <span class="shortcut-desc">Switch keyboard focus between cards</span>
+          <span class="shortcut-speed">—</span>
+
+          <span class="shortcut-key">Esc</span>
+          <span class="shortcut-desc">Dismiss Snap Decision / collapse without accepting</span>
+          <span class="shortcut-speed">—</span>
+
+          <span class="shortcut-key">?</span>
+          <span class="shortcut-desc">Show shortcut cheat sheet overlay</span>
+          <span class="shortcut-speed">—</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SECTION 10: SUMMARY
+         ============================================================ -->
+    <section id="summary">
+      <div class="section-header">
+        <span class="section-dot" style="background: var(--success);"></span>
+        <h2>Recommendation Summary</h2>
+      </div>
+
+      <div class="card card-elevated" style="border-left: 3px solid var(--accent);">
+        <h3>The Design Team's Unified Proposal</h3>
+        <ul>
+          <li><strong>Layout:</strong> Hybrid Split-to-Tab — side-by-side columns on desktop (>900px), segmented tabs on mobile. Provider-colored headers (teal A, purple B) for instant identification.</li>
+          <li><strong>Context Line:</strong> A slim bridge between user message and dual responses: "2 responses — compare and accept one" with provider color dots.</li>
+          <li><strong>Interaction:</strong> Keyboard-first (<strong>1</strong>/<strong>2</strong> to accept) with full-card click as mouse fallback. 5-second Gmail-style undo with Ctrl+Z.</li>
+          <li><strong>Post-Accept:</strong> Winner expands into chat thread, loser collapses to a 36px "Show other" bar. 500ms total animation.</li>
+          <li><strong>Feature 1 — Spotlight Diff (Mika):</strong> Semantic highlighting of unique content (teal/purple) and contradictions (amber). Saves 60-80% reading time.</li>
+          <li><strong>Feature 2 — Conviction Strip (Sora):</strong> Vertical agreement/disagreement gradient gutter between panels. Sub-second orientation for where responses diverge.</li>
+          <li><strong>Feature 3 — Snap Decision (Kai):</strong> Speed mode (<strong>S</strong> key) that compresses responses to one-line summaries for under-2-second acceptance.</li>
+        </ul>
+      </div>
+
+      <div style="text-align: center; margin-top: var(--sp-8); padding: var(--sp-6); background: var(--surface); border-radius: var(--radius-xl); border: 1px solid var(--border);">
+        <p style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-faint); margin-bottom: var(--sp-2);">Design Team</p>
+        <p style="font-size: 0.9rem; color: var(--text-dim);">Mika (UX Research) &middot; Sora (Visual Design) &middot; Kai (Interaction Design)</p>
+        <p style="font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); margin-top: var(--sp-3);">QBO Escalation Assistant &middot; February 2026</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============================================================
+     SCRIPTS
+     ============================================================ -->
+<script>
+// Before/After toggle
+function toggleBA(view) {
+  const before = document.getElementById('mockBefore');
+  const after = document.getElementById('mockAfter');
+  const btns = document.querySelectorAll('#baToggle button');
+
+  btns.forEach(b => b.classList.remove('active'));
+  document.querySelector(`[data-view="${view}"]`).classList.add('active');
+
+  if (view === 'before') {
+    before.style.display = '';
+    after.style.display = 'none';
+  } else {
+    before.style.display = 'none';
+    after.style.display = '';
+    resetCards();
+  }
+}
+
+// Accept card interaction
+function acceptCard(which) {
+  const cardA = document.getElementById('cardA');
+  const cardB = document.getElementById('cardB');
+  const toast = document.getElementById('undoToast');
+  const toastText = document.getElementById('undoText');
+
+  if (cardA.classList.contains('accepted') || cardB.classList.contains('accepted')) return;
+
+  if (which === 'a') {
+    cardA.classList.add('accepted');
+    cardB.classList.add('rejected');
+    toastText.textContent = 'Claude response accepted';
+  } else {
+    cardB.classList.add('accepted');
+    cardA.classList.add('rejected');
+    toastText.textContent = 'ChatGPT 5.3 Codex response accepted';
+  }
+  toast.style.display = '';
+}
+
+function resetCards() {
+  const cardA = document.getElementById('cardA');
+  const cardB = document.getElementById('cardB');
+  const toast = document.getElementById('undoToast');
+  cardA.classList.remove('accepted', 'rejected');
+  cardB.classList.remove('accepted', 'rejected');
+  toast.style.display = 'none';
+}
+
+// Keyboard shortcuts for the demo
+document.addEventListener('keydown', (e) => {
+  const after = document.getElementById('mockAfter');
+  if (after.style.display === 'none') return;
+
+  if (e.key === '1') acceptCard('a');
+  if (e.key === '2') acceptCard('b');
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey)) resetCards();
+});
+
+// Scroll-spy for TOC
+const tocLinks = document.querySelectorAll('.toc a');
+const sections = document.querySelectorAll('section[id]');
+
+function updateScrollSpy() {
+  let current = '';
+  sections.forEach(section => {
+    const rect = section.getBoundingClientRect();
+    if (rect.top <= 120) current = section.id;
+  });
+  tocLinks.forEach(link => {
+    link.classList.toggle('active', link.getAttribute('href') === '#' + current);
+  });
+}
+window.addEventListener('scroll', updateScrollSpy, { passive: true });
+updateScrollSpy();
+</script>
+
+</body>
+</html>
