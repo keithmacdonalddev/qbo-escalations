@@ -5,6 +5,11 @@ import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import { transitions, staggerContainer, staggerChild, fade } from '../utils/motion.js';
 
+// Adaptive poll intervals — fast after mutations, slow when idle
+const POLL_ACTIVE_MS = 5_000;
+const POLL_IDLE_MS = 30_000;
+const POLL_ACTIVE_WINDOW_MS = 60_000;
+
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', icon: IconChat },
   { hash: '#/dashboard', label: 'Dashboard', icon: IconDashboard },
@@ -23,13 +28,26 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   const [deleteTarget, setDeleteTarget] = useState(null);
   const editInputRef = useRef(null);
   const loadingRef = useRef(false);
+  const fetchGenRef = useRef(0);
+  const lastMutationRef = useRef(Date.now());
+
+  const getPollInterval = useCallback(() => {
+    return (Date.now() - lastMutationRef.current) < POLL_ACTIVE_WINDOW_MS
+      ? POLL_ACTIVE_MS
+      : POLL_IDLE_MS;
+  }, []);
 
   const loadConversations = useCallback(async (searchTerm = '') => {
+    // Generation counter — suppresses stale responses when search changes
+    // mid-flight so an old response never overwrites newer state.
+    const gen = ++fetchGenRef.current;
     if (loadingRef.current) return;          // skip if prior request still pending
     loadingRef.current = true;
     try {
       const list = await listConversations(50, 0, searchTerm);
-      setConversations(list);
+      if (gen === fetchGenRef.current) {
+        setConversations(list);
+      }
     } catch {
       // Non-critical
     } finally {
@@ -37,8 +55,10 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
     }
   }, []);
 
-  // Backpressure-safe polling: next tick only after prior request settles.
-  // Prevents unbounded pending-request accumulation when backend is slow.
+  // Backpressure-safe polling with adaptive interval:
+  // - 5 s after recent mutations (delete, rename, navigation)
+  // - 30 s when idle (no mutations in the last 60 s)
+  // Next tick only schedules after prior request settles.
   useEffect(() => {
     let cancelled = false;
     let tid = null;
@@ -46,22 +66,24 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
     const poll = async () => {
       if (cancelled) return;
       if (document.visibilityState !== 'visible') {
-        // Tab hidden — skip fetch, schedule next check
-        tid = setTimeout(poll, 10_000);
+        tid = setTimeout(poll, getPollInterval());
         return;
       }
       await loadConversations(search);
-      if (!cancelled) tid = setTimeout(poll, 10_000);
+      if (!cancelled) tid = setTimeout(poll, getPollInterval());
     };
 
-    loadConversations(search);                 // initial fetch
-    tid = setTimeout(poll, 10_000);            // first poll after 10 s
+    loadConversations(search);                     // initial fetch
+    tid = setTimeout(poll, getPollInterval());      // first poll
 
     return () => { cancelled = true; clearTimeout(tid); };
-  }, [loadConversations, search]);
+  }, [loadConversations, search, getPollInterval]);
 
   useEffect(() => {
-    if (conversationId) loadConversations(search);
+    if (conversationId) {
+      lastMutationRef.current = Date.now();        // speed up polling after navigation
+      loadConversations(search);
+    }
   }, [conversationId, loadConversations, search]);
 
   useEffect(() => {
@@ -79,6 +101,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
     } catch {
       // Ignore
     }
+    lastMutationRef.current = Date.now();      // speed up polling after delete
     setDeleteTarget(null);
   }, [deleteTarget, conversationId]);
 
@@ -101,6 +124,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
     } catch {
       // Ignore
     }
+    lastMutationRef.current = Date.now();      // speed up polling after rename
     setEditingId(null);
   }, [editingId, editTitle]);
 
