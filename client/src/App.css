@@ -5304,53 +5304,101 @@ textarea {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--success, #34a853);
-  box-shadow: 0 0 4px var(--success, #34a853);
+  background: radial-gradient(circle at 40% 35%, #fff 0%, #34d058 60%);
+  box-shadow:
+    0 0 3px 1px rgba(52, 208, 88, 0.8),
+    0 0 8px 2px rgba(52, 208, 88, 0.4);
   flex-shrink: 0;
+  animation: led-breathe 2s ease-in-out infinite;
 }
 .network-edge-tooltip .tooltip-dot--idle {
   background: var(--ink-tertiary);
   box-shadow: none;
+  animation: none;
 }
 
-/* Activity dot — glowing light effect */
+/* Activity dot — bright LED light effect with 3D lens ─────────────── */
 .network-edge-dot {
   position: absolute;
-  top: 5px;
-  left: 5px;
-  width: 7px;
-  height: 7px;
+  top: 4px;
+  left: 4px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--success, #34a853);
+  /* Radial gradient: white-hot core → saturated green edge */
+  background: radial-gradient(circle at 40% 35%,
+    #fff 0%,
+    #a0ffc0 20%,
+    #34d058 50%,
+    #2ea44f 100%
+  );
+  /* Multi-layer glow: tight bright → medium → wide diffuse */
   box-shadow:
-    0 0 4px var(--success, #34a853),
-    0 0 8px color-mix(in srgb, var(--success, #34a853) 60%, transparent),
-    0 0 14px color-mix(in srgb, var(--success, #34a853) 30%, transparent);
-  animation: network-dot-glow 2s ease-in-out infinite;
+    0 0 3px 1px #34d058,
+    0 0 8px 2px rgba(52, 208, 88, 0.7),
+    0 0 16px 4px rgba(52, 208, 88, 0.35),
+    0 0 28px 6px rgba(52, 208, 88, 0.15);
+  animation: led-breathe 2s ease-in-out infinite;
 }
 
-@keyframes network-dot-glow {
+/* Diffuse halo underneath — wider ambient light spill */
+.network-edge-dot::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 208, 88, 0.3) 0%, transparent 70%);
+  pointer-events: none;
+  animation: led-halo 2s ease-in-out infinite;
+}
+
+/* Specular highlight — tiny white crescent for 3D glass lens */
+.network-edge-dot::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 2px;
+  width: 3px;
+  height: 2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  filter: blur(0.5px);
+  pointer-events: none;
+}
+
+@keyframes led-breathe {
   0%, 100% {
-    opacity: 1;
+    transform: scale(1);
     box-shadow:
-      0 0 4px var(--success, #34a853),
-      0 0 8px color-mix(in srgb, var(--success, #34a853) 60%, transparent),
-      0 0 14px color-mix(in srgb, var(--success, #34a853) 30%, transparent);
+      0 0 3px 1px #34d058,
+      0 0 8px 2px rgba(52, 208, 88, 0.7),
+      0 0 16px 4px rgba(52, 208, 88, 0.35),
+      0 0 28px 6px rgba(52, 208, 88, 0.15);
   }
   50% {
-    opacity: 0.85;
+    transform: scale(1.15);
     box-shadow:
-      0 0 6px var(--success, #34a853),
-      0 0 12px color-mix(in srgb, var(--success, #34a853) 70%, transparent),
-      0 0 20px color-mix(in srgb, var(--success, #34a853) 40%, transparent);
+      0 0 4px 2px #5ae87a,
+      0 0 12px 4px rgba(52, 208, 88, 0.8),
+      0 0 24px 8px rgba(52, 208, 88, 0.45),
+      0 0 40px 12px rgba(52, 208, 88, 0.2);
   }
 }
 
-/* Edge tab icon pulse when active */
+@keyframes led-halo {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.3); }
+}
+
+/* Edge tab icon pulse when dot active */
 .network-edge-tab:has(.network-edge-dot) svg {
   animation: network-icon-pulse 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 3px rgba(52, 208, 88, 0.3));
 }
 @keyframes network-icon-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
+  50% { opacity: 0.65; }
 }
