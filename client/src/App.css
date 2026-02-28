@@ -570,7 +570,8 @@ a:hover {
   padding: var(--sp-4) var(--sp-2);
 }
 
-.sidebar.is-collapsed .sidebar-header span {
+.sidebar.is-collapsed .sidebar-header span,
+.sidebar.is-collapsed .sidebar-header > svg {
   display: none;
 }
 
@@ -5009,35 +5010,43 @@ textarea {
   overflow-x: hidden;
 }
 
-/* Dev topbar — network toggle button */
-.dev-topbar-btn {
-  position: relative;
+/* ── Network edge tab (right viewport edge, vertically centered) ── */
+
+.network-edge-tab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 899;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 28px;
-  height: 28px;
+  height: 48px;
   border: 1px solid var(--border, color-mix(in srgb, var(--ink) 12%, transparent));
-  border-radius: var(--radius-sm, 4px);
-  background: transparent;
+  border-right: none;
+  border-radius: var(--radius-sm, 4px) 0 0 var(--radius-sm, 4px);
+  background: var(--bg-raised, #faf9f6);
   color: var(--ink-secondary);
   cursor: pointer;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.06);
   transition: all var(--duration-fast, 150ms) ease;
 }
-.dev-topbar-btn:hover {
-  background: color-mix(in srgb, var(--ink) 8%, transparent);
+.network-edge-tab:hover {
+  background: var(--bg, #fff);
   color: var(--ink);
+  width: 32px;
 }
-.dev-topbar-btn.is-active {
+.network-edge-tab.is-active {
   background: color-mix(in srgb, var(--accent) 15%, transparent);
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.dev-topbar-dot {
+.network-edge-dot {
   position: absolute;
-  top: 3px;
-  right: 3px;
+  top: 6px;
+  left: 6px;
   width: 6px;
   height: 6px;
   border-radius: 50%;

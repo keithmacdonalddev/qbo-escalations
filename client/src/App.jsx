@@ -13,6 +13,8 @@ import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
 import Settings from './components/Settings.jsx';
+import RightSidebar from './components/RightSidebar.jsx';
+import RequestWaterfall from './components/RequestWaterfall.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import { useChat } from './hooks/useChat.js';
@@ -50,6 +52,11 @@ function App() {
   const chat = useChat({ aiSettings: aiProps.aiSettings });
   const devChat = useDevChat();
   const waterfall = useRequestWaterfall();
+  const [networkOpen, setNetworkOpen] = useState(false);
+  const networkActiveCount = useMemo(
+    () => waterfall.requests.filter(r => r.state === 'pending' || r.state === 'streaming' || r.state === 'headers').length,
+    [waterfall.requests],
+  );
   const previousHashRef = useRef('#/chat');
   const settingsOpen = route.view === 'settings';
 
@@ -186,7 +193,7 @@ function App() {
 
         {/* DevMode — always mounted, hidden when not the active view */}
         <div style={{ display: route.view === 'dev' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <DevMode {...devChat} waterfall={waterfall} />
+          <DevMode {...devChat} />
         </div>
 
         {/* All other views use AnimatePresence for transitions */}
@@ -250,6 +257,39 @@ function App() {
           <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
         </motion.svg>
       </motion.button>
+
+      {/* Network waterfall — edge tab + right sidebar overlay */}
+      <button
+        className={`network-edge-tab${networkOpen ? ' is-active' : ''}`}
+        onClick={() => setNetworkOpen(o => !o)}
+        type="button"
+        title="Network waterfall"
+        aria-label="Toggle network waterfall"
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+        </svg>
+        {networkActiveCount > 0 && <span className="network-edge-dot" />}
+      </button>
+
+      <RightSidebar
+        open={networkOpen}
+        onClose={() => setNetworkOpen(false)}
+        title="Network"
+        width={380}
+        badge={
+          <>
+            {waterfall.requests.length > 0 && (
+              <span className="wf-count">{waterfall.requests.length}</span>
+            )}
+            {networkActiveCount > 0 && (
+              <span className="wf-active-badge">{networkActiveCount} active</span>
+            )}
+          </>
+        }
+      >
+        <RequestWaterfall {...waterfall} />
+      </RightSidebar>
     </div>
     </MotionConfig>
   );
