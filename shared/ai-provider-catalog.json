@@ -1,0 +1,86 @@
+[
+  {
+    "id": "claude",
+    "label": "Claude Default (CLI)",
+    "shortLabel": "Claude",
+    "family": "claude",
+    "transport": "claude",
+    "model": null,
+    "selectable": true,
+    "order": 10,
+    "default": true
+  },
+  {
+    "id": "claude-sonnet-4-6",
+    "label": "Claude Sonnet 4.6",
+    "shortLabel": "Sonnet 4.6",
+    "family": "claude",
+    "transport": "claude",
+    "model": "claude-sonnet-4-6",
+    "selectable": true,
+    "order": 20
+  },
+  {
+    "id": "claude-opus-4-6",
+    "label": "Claude Opus 4.6",
+    "shortLabel": "Opus 4.6",
+    "family": "claude",
+    "transport": "claude",
+    "model": "claude-opus-4-6",
+    "selectable": true,
+    "order": 25
+  },
+  {
+    "id": "chatgpt-5.3-codex-high",
+    "label": "GPT-5.3-Codex",
+    "shortLabel": "5.3 Codex",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5.3-codex",
+    "selectable": true,
+    "order": 30
+  },
+  {
+    "id": "gpt-5.4",
+    "label": "GPT-5.4",
+    "shortLabel": "GPT-5.4",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5.4",
+    "selectable": true,
+    "order": 40
+  },
+  {
+    "id": "gpt-5.4-pro",
+    "label": "GPT-5.4 Pro",
+    "shortLabel": "5.4 Pro",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5.4-pro",
+    "selectable": false,
+    "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
+    "order": 50
+  },
+  {
+    "id": "gpt-5-mini",
+    "label": "GPT-5 Mini",
+    "shortLabel": "GPT-5 Mini",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5-mini",
+    "selectable": false,
+    "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
+    "order": 60
+  },
+  {
+    "id": "gpt-5-nano",
+    "label": "GPT-5 Nano",
+    "shortLabel": "GPT-5 Nano",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5-nano",
+    "selectable": false,
+    "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
+    "order": 70
+  }
+]

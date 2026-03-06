@@ -9,6 +9,7 @@ import TemplateLibrary from './components/TemplateLibrary.jsx';
 import Analytics from './components/Analytics.jsx';
 import UsageDashboard from './components/UsageDashboard.jsx';
 import DevMode from './components/DevMode.jsx';
+import PolicyLab from './components/PolicyLab.jsx';
 import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
@@ -18,12 +19,12 @@ import RequestWaterfall from './components/RequestWaterfall.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import { useChat } from './hooks/useChat.js';
-import { useDevChat } from './hooks/useDevChat.js';
+import { DevAgentProvider } from './context/DevAgentContext.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import FlameBar from './components/FlameBar.jsx';
 
-function parseHashRoute() {
+function parseHashRoute(policyLabEnabled) {
   const hash = window.location.hash || '#/chat';
   if (hash.startsWith('#/chat/')) {
     return { view: 'chat', conversationId: hash.slice(7) };
@@ -40,12 +41,16 @@ function parseHashRoute() {
   if (hash === '#/analytics') return { view: 'analytics' };
   if (hash === '#/usage') return { view: 'usage' };
   if (hash === '#/dev') return { view: 'dev' };
+  if (policyLabEnabled && hash === '#/policy-lab') return { view: 'policy-lab' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'chat', conversationId: null };
 }
 
 function App() {
-  const [route, setRoute] = useState(parseHashRoute);
+  const [policyLabEnabled, setPolicyLabEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('policyLabEnabled')) ?? true; } catch { return true; }
+  });
+  const [route, setRoute] = useState(() => parseHashRoute(policyLabEnabled));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarHoverExpand, setSidebarHoverExpand] = useState(() => {
@@ -64,16 +69,20 @@ function App() {
   const [ledSpeed, setLedSpeed] = useState(() => {
     try { return JSON.parse(localStorage.getItem('ledSpeed')) ?? 2; } catch { return 2; }
   });
-  useEffect(() => { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); }, [sidebarHoverExpand]);
-  useEffect(() => { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); }, [sidebarShowLabels]);
-  useEffect(() => { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); }, [ledIntensity]);
-  useEffect(() => { localStorage.setItem('ledMode', ledMode); }, [ledMode]);
-  useEffect(() => { localStorage.setItem('ledSpeed', JSON.stringify(ledSpeed)); }, [ledSpeed]);
+  const [waterfallView, setWaterfallView] = useState(() => {
+    try { return localStorage.getItem('waterfallDefaultView') || 'timeline'; } catch { return 'timeline'; }
+  });
+  useEffect(() => { try { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); } catch {} }, [sidebarHoverExpand]);
+  useEffect(() => { try { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); } catch {} }, [sidebarShowLabels]);
+  useEffect(() => { try { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); } catch {} }, [ledIntensity]);
+  useEffect(() => { try { localStorage.setItem('ledMode', ledMode); } catch {} }, [ledMode]);
+  useEffect(() => { try { localStorage.setItem('ledSpeed', JSON.stringify(ledSpeed)); } catch {} }, [ledSpeed]);
+  useEffect(() => { try { localStorage.setItem('waterfallDefaultView', waterfallView); } catch {} }, [waterfallView]);
+  useEffect(() => { try { localStorage.setItem('policyLabEnabled', JSON.stringify(policyLabEnabled)); } catch {} }, [policyLabEnabled]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
   const aiProps = useAiSettings();
   const chat = useChat({ aiSettings: aiProps.aiSettings });
-  const devChat = useDevChat();
   const waterfall = useRequestWaterfall();
   const flame = useRenderFlame();
   const [networkOpen, setNetworkOpen] = useState(false);
@@ -94,10 +103,10 @@ function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    const onHashChange = () => setRoute(parseHashRoute());
+    const onHashChange = () => setRoute(parseHashRoute(policyLabEnabled));
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+  }, [policyLabEnabled]);
 
   // Set default hash if empty
   useEffect(() => {
@@ -105,6 +114,14 @@ function App() {
       window.location.hash = '#/chat';
     }
   }, []);
+
+  useEffect(() => {
+    if (!policyLabEnabled && route.view === 'policy-lab') {
+      window.location.hash = '#/chat';
+      return;
+    }
+    setRoute(parseHashRoute(policyLabEnabled));
+  }, [policyLabEnabled, route.view]);
 
   const motionProps = useMemo(() => shouldReduceMotion
     ? {}
@@ -153,10 +170,16 @@ function App() {
             <UsageDashboard />
           </motion.div>
         );
+      case 'policy-lab':
+        return (
+          <motion.div key="policy-lab" {...motionProps}>
+            <PolicyLab />
+          </motion.div>
+        );
       case 'settings':
         return (
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled }} />
           </motion.div>
         );
       default:
@@ -169,6 +192,7 @@ function App() {
   return (
     <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
+    <DevAgentProvider aiSettings={aiProps.aiSettings}>
     <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
       {/* Render flame bar — dev only */}
       {import.meta.env.DEV && <FlameBar {...flame} />}
@@ -210,6 +234,7 @@ function App() {
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         hoverExpand={sidebarHoverExpand}
         showLabels={sidebarShowLabels}
+        extraNavItems={policyLabEnabled ? [{ hash: '#/policy-lab', label: 'Policy Lab', short: 'Eval' }] : []}
       />
 
       <main
@@ -218,12 +243,12 @@ function App() {
       >
         {/* Chat — always mounted so streaming persists when navigating away */}
         <div style={{ display: route.view === 'chat' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <ChatView conversationIdFromRoute={route.conversationId} chat={chat} />
+          <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} />
         </div>
 
         {/* DevMode — always mounted, hidden when not the active view */}
         <div style={{ display: route.view === 'dev' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <DevMode {...devChat} />
+          <DevMode />
         </div>
 
         {/* All other views use AnimatePresence for transitions */}
@@ -251,15 +276,7 @@ function App() {
 
       {/* Floating mini widget — visible on non-dev tabs when dev mode is streaming */}
       {route.view !== 'dev' && (
-        <DevMiniWidget
-          isStreaming={devChat.isStreaming}
-          streamingText={devChat.streamingText}
-          streamProvider={devChat.streamProvider}
-          provider={devChat.provider}
-          toolEvents={devChat.toolEvents}
-          error={devChat.error}
-          abortStream={devChat.abortStream}
-        />
+        <DevMiniWidget />
       )}
       {/* Floating settings gear — top right, no layout impact */}
       <motion.button
@@ -335,9 +352,10 @@ function App() {
           </>
         }
       >
-        <RequestWaterfall {...waterfall} />
+        <RequestWaterfall {...waterfall} defaultView={waterfallView} />
       </RightSidebar>
     </div>
+    </DevAgentProvider>
     </MotionConfig>
     </Profiler>
   );

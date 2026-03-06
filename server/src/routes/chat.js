@@ -261,7 +261,7 @@ function applyImageResponseCompliance(data, triageContext) {
   return next;
 }
 
-async function buildImageTriageContext({ images, mode, primaryProvider, fallbackProvider, timeoutMs }) {
+async function buildImageTriageContext({ images, mode, primaryProvider, fallbackProvider, reasoningEffort, timeoutMs }) {
   if (!Array.isArray(images) || images.length === 0) return null;
 
   const triageMode = mode === 'parallel' ? 'fallback' : (mode === 'fallback' ? 'fallback' : 'single');
@@ -277,6 +277,7 @@ async function buildImageTriageContext({ images, mode, primaryProvider, fallback
       mode: triageMode,
       primaryProvider,
       fallbackProvider,
+      reasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       allowRegexFallback: false,
     });
@@ -417,6 +418,14 @@ const DEFAULT_CHAT_MAX_TOTAL_IMAGE_BYTES = 30 * 1024 * 1024;
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeReasoningEffort(value, fallback = 'high') {
+  const normalized = safeString(value, '').trim().toLowerCase();
+  if (normalized === 'low' || normalized === 'medium' || normalized === 'high' || normalized === 'xhigh') {
+    return normalized;
+  }
+  return fallback;
 }
 
 function isValidMode(mode) {
@@ -716,6 +725,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
+  const reasoningEffort = req.body?.reasoningEffort;
   const runtimeSettings = normalizeChatRuntimeSettings(rawSettings);
   const normalizedImagesResult = normalizeChatImages(requestedImages);
   const normalizedImages = normalizedImagesResult.ok ? normalizedImagesResult.images : [];
@@ -802,6 +812,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   const requestedFallback = fallbackProvider || runtimeSettings.providerStrategy.defaultFallbackProvider;
   const explicitTimeoutMs = parsePositiveInt(timeoutMs, 0);
   const effectiveTimeoutMs = explicitTimeoutMs || runtimeSettings.providerStrategy.timeoutMs || undefined;
+  const effectiveReasoningEffort = normalizeReasoningEffort(
+    reasoningEffort,
+    runtimeSettings.providerStrategy.reasoningEffort || 'high'
+  );
   const requestedPrimaryProvider = normalizeProvider(requestedPrimary);
   let policy = applyChatFeatureFlags(resolvePolicy({
     mode: requestedMode,
@@ -891,6 +905,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       mode: policy.mode,
       primaryProvider: policy.primaryProvider,
       fallbackProvider: policy.fallbackProvider,
+      reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
     });
   }
@@ -938,6 +953,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   // Send start event with conversation ID
   res.write('event: start\ndata: ' + JSON.stringify({
     conversationId: conversation._id.toString(),
+    requestId: req.requestId,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
@@ -953,7 +969,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     } catch { /* client disconnected */ }
   }
   const turnStartedAt = Date.now();
-  const requestId = randomUUID();
+  const requestId = req.requestId;
   let streamSettled = false;
 
   // Set up heartbeat
@@ -969,6 +985,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     messages: contextBundle.messagesForModel,
     systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
+    reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
       try {
@@ -1207,6 +1224,7 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
       mode: resolvedMode,
       primaryProvider: primaryProvider || provider || DEFAULT_PROVIDER,
       fallbackProvider,
+      reasoningEffort,
       timeoutMs,
       allowRegexFallback: true,
     });
@@ -1477,6 +1495,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
+  const reasoningEffort = req.body?.reasoningEffort;
   const runtimeSettings = normalizeChatRuntimeSettings(rawSettings);
 
   if (!conversationId) {
@@ -1542,6 +1561,10 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   const requestedFallback = fallbackProvider || runtimeSettings.providerStrategy.defaultFallbackProvider;
   const explicitTimeoutMs = parsePositiveInt(timeoutMs, 0);
   const effectiveTimeoutMs = explicitTimeoutMs || runtimeSettings.providerStrategy.timeoutMs || undefined;
+  const effectiveReasoningEffort = normalizeReasoningEffort(
+    reasoningEffort,
+    runtimeSettings.providerStrategy.reasoningEffort || 'high'
+  );
   const requestedPrimaryProvider = normalizeProvider(requestedPrimary);
   let policy = applyChatFeatureFlags(resolvePolicy({
     mode: requestedMode,
@@ -1639,6 +1662,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       mode: policy.mode,
       primaryProvider: policy.primaryProvider,
       fallbackProvider: policy.fallbackProvider,
+      reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
     });
   }
@@ -1695,6 +1719,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
 
   res.write('event: start\ndata: ' + JSON.stringify({
     conversationId: conversation._id.toString(),
+    requestId: req.requestId,
     retry: true,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
@@ -1727,6 +1752,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     messages: contextBundle.messagesForModel,
     systemPrompt: effectiveSystemPrompt,
     images: normalizedImages,
+    reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
       try { res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n'); } catch { /* gone */ }
@@ -2061,7 +2087,8 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
 
   // Record model performance metrics — one entry per losing provider (non-blocking)
   try {
-    const ModelPerformance = require('../models/ModelPerformance');
+const ModelPerformance = require('../models/ModelPerformance');
+const { getAlternateProvider } = require('../services/providers/registry');
     const turnDoc2 = await ParallelCandidateTurn.findOne({ turnId, conversationId: conversation._id }).lean();
     const candidates = turnDoc2 ? turnDoc2.candidates : [];
     const winnerCandidate = candidates.find(c => c.provider === provider);
@@ -2092,7 +2119,7 @@ chatRouter.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (re
         turnId,
         conversationId: conversation._id,
         winnerProvider: provider,
-        loserProvider: provider === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude',
+        loserProvider: getAlternateProvider(provider),
         winnerLatencyMs: winnerCandidate ? winnerCandidate.latencyMs : 0,
         loserLatencyMs: 0,
         winnerWordCount: wc(resolvedContent),

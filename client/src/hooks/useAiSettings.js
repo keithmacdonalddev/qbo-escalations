@@ -1,4 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
+import {
+  DEFAULT_PROVIDER,
+  DEFAULT_REASONING_EFFORT,
+  PROVIDER_IDS,
+  getAlternateProvider,
+  normalizeReasoningEffort,
+} from '../lib/providerCatalog.js';
 
 const STORAGE_KEY = 'qbo-ai-runtime-settings-v1';
 
@@ -31,8 +38,9 @@ export const DEFAULT_AI_SETTINGS = Object.freeze({
   },
   providerStrategy: {
     defaultMode: 'single',
-    defaultPrimaryProvider: 'claude',
-    defaultFallbackProvider: 'chatgpt-5.3-codex-high',
+    defaultPrimaryProvider: DEFAULT_PROVIDER,
+    defaultFallbackProvider: getAlternateProvider(DEFAULT_PROVIDER),
+    reasoningEffort: DEFAULT_REASONING_EFFORT,
     timeoutMs: 0,
   },
   debug: {
@@ -135,12 +143,13 @@ function normalizeAiSettings(raw) {
       defaultMode: ['single', 'fallback', 'parallel'].includes(providerRaw.defaultMode)
         ? providerRaw.defaultMode
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultMode,
-      defaultPrimaryProvider: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'].includes(providerRaw.defaultPrimaryProvider)
+      defaultPrimaryProvider: PROVIDER_IDS.includes(providerRaw.defaultPrimaryProvider)
         ? providerRaw.defaultPrimaryProvider
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultPrimaryProvider,
-      defaultFallbackProvider: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'].includes(providerRaw.defaultFallbackProvider)
+      defaultFallbackProvider: PROVIDER_IDS.includes(providerRaw.defaultFallbackProvider)
         ? providerRaw.defaultFallbackProvider
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultFallbackProvider,
+      reasoningEffort: normalizeReasoningEffort(providerRaw.reasoningEffort),
       timeoutMs: clampInt(providerRaw.timeoutMs, 0, 900000, DEFAULT_AI_SETTINGS.providerStrategy.timeoutMs),
     },
     debug: {
@@ -188,7 +197,7 @@ export default function useAiSettings() {
         : nextValueOrUpdater;
       const normalized = normalizeAiSettings(nextRaw);
       if (typeof window !== 'undefined') {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized)); } catch {}
       }
       return normalized;
     });

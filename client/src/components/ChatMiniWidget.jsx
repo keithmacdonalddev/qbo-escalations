@@ -1,17 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { transitions, widgetSlideUp, scalePop } from '../utils/motion.js';
-
-const PROVIDER_LABELS = {
-  claude: 'Claude',
-  'claude-sonnet-4-6': 'Sonnet 4.6',
-  'chatgpt-5.3-codex-high': 'Codex',
-  'gpt-5-mini': 'GPT-5 Mini',
-};
-
-function getLabel(provider) {
-  return PROVIDER_LABELS[provider] || 'Model';
-}
+import { getProviderShortLabel } from '../lib/providerCatalog.js';
 
 function tailLines(text, count = 8) {
   return (text || '').split('\n').slice(-count).join('\n');
@@ -122,7 +112,7 @@ export default function ChatMiniWidget({
 
   const previewLines = isParallel ? '' : tailLines(streamingText, 8);
   const collapsedPreview = isParallel
-    ? parallelChunks.map((chunk) => getLabel(chunk.provider)).join(' + ')
+    ? parallelChunks.map((chunk) => getProviderShortLabel(chunk.provider)).join(' + ')
     : lastNonEmptyLine(streamingText);
 
   return (
@@ -167,7 +157,7 @@ export default function ChatMiniWidget({
                     </motion.svg>
                   )}
                 </AnimatePresence>
-                <span className="chat-mini-badge">{isParallel ? 'Parallel' : getLabel(activeProvider)}</span>
+                <span className="chat-mini-badge">{isParallel ? 'Parallel' : getProviderShortLabel(activeProvider)}</span>
                 <span className="chat-mini-status">
                   {isStreaming && 'Streaming...'}
                   {isComplete && 'Done'}
@@ -198,7 +188,7 @@ export default function ChatMiniWidget({
                 <div className="chat-mini-header">
                   <div className="chat-mini-header-left">
                     <span className="chat-mini-spinner" />
-                    <span className="chat-mini-badge">{isParallel ? 'Parallel' : getLabel(activeProvider)}</span>
+                    <span className="chat-mini-badge">{isParallel ? 'Parallel' : getProviderShortLabel(activeProvider)}</span>
                     <span className="chat-mini-elapsed">{elapsed}s</span>
                   </div>
                   <div className="chat-mini-header-actions">
@@ -226,7 +216,7 @@ export default function ChatMiniWidget({
                     <div className="chat-mini-lanes">
                       {parallelChunks.map((chunk) => (
                         <div key={chunk.provider} className="chat-mini-lane">
-                          <div className="chat-mini-lane-head">{getLabel(chunk.provider)}</div>
+                          <div className="chat-mini-lane-head">{getProviderShortLabel(chunk.provider)}</div>
                           <div className="chat-mini-lane-text">
                             {tailLines(chunk.text, 4)}
                             {isStreaming && <span className="chat-mini-cursor" />}

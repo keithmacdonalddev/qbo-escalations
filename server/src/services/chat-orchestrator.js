@@ -110,6 +110,7 @@ function runAttempt({
   messages,
   systemPrompt,
   images,
+  reasoningEffort,
   timeoutMs,
   onChunk,
   onThinkingChunk,
@@ -135,6 +136,7 @@ function runAttempt({
       messages,
       systemPrompt,
       images,
+      reasoningEffort,
       onChunk: (text) => {
         if (settled) return;
         onChunk({
@@ -274,6 +276,7 @@ function startChatOrchestration({
   messages,
   systemPrompt,
   images = [],
+  reasoningEffort,
   timeoutMs,
   onChunk,
   onThinkingChunk,
@@ -305,6 +308,7 @@ function startChatOrchestration({
         messages,
         systemPrompt,
         images,
+        reasoningEffort,
         timeoutMs: getEffectiveTimeoutMs(providerId),
         onChunk: onChunk || (() => {}),
         onThinkingChunk: onThinkingChunk || null,

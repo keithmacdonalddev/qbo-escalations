@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Policy Lab</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Repo-Wide Agentic File Evaluator</p>
+          <h1>Policy Lab</h1>
+          <p class="lede">
+            Compare <code>v1</code> and <code>v2</code> of the same agentic file family against this repository’s real
+            operating constraints. The app supports repo policies, <code>CLAUDE.md</code>, hooks, skills, prompt files,
+            and agent definitions without mixing unlike file types.
+          </p>
+          <div class="hero-actions">
+            <select id="familySelect" class="mode-select"></select>
+            <select id="projectArtifactSelect" class="mode-select"></select>
+            <button id="loadProjectButton" type="button">Load Selected Project File</button>
+            <select id="modeSelect" class="mode-select">
+              <option value="full">Full Comparison</option>
+              <option value="policy">Policy Scoring Only</option>
+              <option value="benchmark">Benchmark Pack Only</option>
+            </select>
+            <button id="runButton" type="button" disabled>Run Evaluation</button>
+          </div>
+          <p id="statusText" class="status-line">Server not checked yet.</p>
+        </div>
+
+        <aside class="hero-panel">
+          <h2>Evaluation Contract</h2>
+          <ul>
+            <li>Current and Proposed must be versions of the same file family.</li>
+            <li>The comparison uses live repo signals from this workspace, not a toy fixture.</li>
+            <li>Hard gates can block a recommendation even when one side edges out the raw score.</li>
+            <li>The output exposes benchmark tasks, matched signals, missing signals, and risk flags.</li>
+          </ul>
+        </aside>
+      </section>
+
+      <section class="grid control-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Selected Target</p>
+            <h2>Artifact Scope</h2>
+          </div>
+          <div id="familySummary" class="family-summary">Loading available agentic file families...</div>
+          <label class="stack-label" for="artifactPathInput">Path Hint</label>
+          <input id="artifactPathInput" class="text-input" type="text" placeholder="Example: .claude/hooks/pm-rules.sh" />
+          <div id="catalogSummary" class="catalog-summary"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Project Coverage</p>
+            <h2>Repo Signals</h2>
+          </div>
+          <div id="projectProfile" class="chip-grid"></div>
+          <div id="coverageGrid" class="coverage-grid"></div>
+        </article>
+      </section>
+
+      <section class="grid uploads">
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Baseline</p>
+            <h2>Current Version</h2>
+          </div>
+          <label id="leftPickerLabel" class="picker" for="leftInput">Choose Current File</label>
+          <input id="leftInput" type="file" accept=".md,.txt,.sh,.js,.mjs,.json,text/plain,text/markdown" />
+          <div id="leftMeta" class="file-meta">No file selected.</div>
+          <pre id="leftPreview" class="preview">Awaiting file.</pre>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Candidate</p>
+            <h2>Proposed Version</h2>
+          </div>
+          <label id="rightPickerLabel" class="picker" for="rightInput">Choose Proposed File</label>
+          <input id="rightInput" type="file" accept=".md,.txt,.sh,.js,.mjs,.json,text/plain,text/markdown" />
+          <div id="rightMeta" class="file-meta">No file selected.</div>
+          <pre id="rightPreview" class="preview">Awaiting file.</pre>
+        </article>
+      </section>
+
+      <section class="grid info-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Benchmark Method</p>
+            <h2>Use-Case Pack</h2>
+          </div>
+          <ul id="taskPackList" class="method-list">
+            <li>Loading benchmark pack...</li>
+          </ul>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <p class="eyebrow">Recent Runs</p>
+            <h2>History</h2>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </article>
+      </section>
+
+      <section id="resultsPanel" class="panel hidden">
+        <div class="panel-head">
+          <p class="eyebrow">Recommendation</p>
+          <h2>Comparison Result</h2>
+        </div>
+
+        <div class="summary-strip summary-strip-wide">
+          <div class="summary-card">
+            <span class="meta-label">Winner</span>
+            <strong id="winnerName">Pending</strong>
+          </div>
+          <div class="summary-card">
+            <span class="meta-label">Score Margin</span>
+            <strong id="winnerMargin">0.0</strong>
+          </div>
+          <div class="summary-card">
+            <span class="meta-label">Confidence</span>
+            <strong id="winnerConfidence">Pending</strong>
+          </div>
+          <div class="summary-card">
+            <span class="meta-label">Mode</span>
+            <strong id="winnerMode">Pending</strong>
+          </div>
+          <div class="summary-card">
+            <span class="meta-label">Family</span>
+            <strong id="winnerFamily">Pending</strong>
+          </div>
+          <div class="summary-card">
+            <span class="meta-label">Target Path</span>
+            <strong id="winnerPath">Pending</strong>
+          </div>
+        </div>
+
+        <p id="winnerConclusion" class="winner-conclusion"></p>
+        <div id="winnerReasons" class="reason-list"></div>
+
+        <div class="grid compare-grid">
+          <article class="score-card">
+            <h3 id="leftTitle">Current</h3>
+            <div id="leftScoreBlock"></div>
+          </article>
+          <article class="score-card">
+            <h3 id="rightTitle">Proposed</h3>
+            <div id="rightScoreBlock"></div>
+          </article>
+        </div>
+
+        <div class="grid compare-grid">
+          <article class="score-card">
+            <h3>Hard Gates</h3>
+            <div id="hardGateTable" class="table-wrap"></div>
+          </article>
+          <article class="score-card">
+            <h3>Benchmark Pack</h3>
+            <div id="taskBenchmarkTable" class="table-wrap"></div>
+          </article>
+        </div>
+
+        <div class="grid compare-grid">
+          <article class="score-card">
+            <h3>Category Comparison</h3>
+            <div id="categoryTable" class="table-wrap"></div>
+          </article>
+          <article class="score-card">
+            <h3>Scenario Comparison</h3>
+            <div id="scenarioTable" class="table-wrap"></div>
+          </article>
+        </div>
+
+        <div class="grid compare-grid">
+          <article class="score-card">
+            <h3>Audit Evidence</h3>
+            <div id="evidenceColumns" class="evidence-columns"></div>
+          </article>
+          <article class="score-card">
+            <h3>Risks</h3>
+            <div id="riskColumns" class="risk-columns"></div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,53 @@
+{
+  "id": "postmortem-skill-01",
+  "title": "Structured Incident Post-Mortem",
+  "fixture": "postmortem-skill-01",
+  "prompt": "Turn the incident notes into a usable post-mortem. If the available skills are relevant, use them. The result must identify the root cause, corrective actions, and an accountable owner.",
+  "checks": [
+    {
+      "id": "touch-postmortem",
+      "type": "mustTouch",
+      "path": "incidents/payment-delay-postmortem.md",
+      "weight": 15
+    },
+    {
+      "id": "file-has-required-sections",
+      "type": "fileContains",
+      "path": "incidents/payment-delay-postmortem.md",
+      "patterns": [
+        "# Payment Delay Post-Mortem",
+        "## Root Cause",
+        "## Corrective Actions",
+        "## Owner and Follow-Up"
+      ],
+      "weight": 40
+    },
+    {
+      "id": "postmortem-word-count",
+      "type": "fileWordCountAtLeast",
+      "path": "incidents/payment-delay-postmortem.md",
+      "minWords": 80,
+      "weight": 25
+    },
+    {
+      "id": "response-mentions-owner",
+      "type": "outputContains",
+      "field": "finalResponse",
+      "patterns": [
+        "post-mortem",
+        "owner"
+      ],
+      "weight": 10
+    },
+    {
+      "id": "no-process-control",
+      "type": "noForbiddenActions",
+      "actions": [
+        "start_server",
+        "run_tests"
+      ],
+      "weight": 10,
+      "hardFail": true
+    }
+  ]
+}

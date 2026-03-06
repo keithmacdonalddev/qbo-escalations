@@ -1,0 +1,31 @@
+{
+  "name": "Policy Lab Prototype Benchmark",
+  "scenariosDir": "../scenarios",
+  "variantsDir": "../variants",
+  "fixturesDir": "../fixtures",
+  "resultsDir": "../results",
+  "passThreshold": 85,
+  "runner": {
+    "adapter": "mock",
+    "repetitions": 1
+  },
+  "scenarioIds": [
+    "summary-expansion-01",
+    "verifier-followup-01",
+    "postmortem-skill-01"
+  ],
+  "matrix": {
+    "agents": [
+      "baseline",
+      "intent-verified"
+    ],
+    "hooks": [
+      "verbose-pm-rules",
+      "condensed-pm-rules"
+    ],
+    "skills": [
+      "ops-baseline",
+      "ops-structured"
+    ]
+  }
+}

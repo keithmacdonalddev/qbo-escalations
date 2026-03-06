@@ -16,11 +16,13 @@ export async function getCategoryContent(name) {
   return data.content;
 }
 
-export async function updateCategoryContent(name, content) {
+export async function updateCategoryContent(name, content, label) {
+  const body = { content };
+  if (label) body.label = label;
   const res = await apiFetch(`${BASE}/categories/${encodeURIComponent(name)}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to update');
@@ -52,11 +54,13 @@ export async function getEdgeCases() {
   return data.content;
 }
 
-export async function updateEdgeCases(content) {
+export async function updateEdgeCases(content, label) {
+  const body = { content };
+  if (label) body.label = label;
   const res = await apiFetch(`${BASE}/edge-cases`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify(body),
   });
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to update edge cases');
@@ -67,4 +71,52 @@ export async function getFullPlaybook() {
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Failed to fetch full playbook');
   return data.content;
+}
+
+// ---------------------------------------------------------------------------
+// Version history API
+// ---------------------------------------------------------------------------
+
+export async function listCategoryVersions(name) {
+  const res = await apiFetch(`${BASE}/categories/${encodeURIComponent(name)}/versions`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to list versions');
+  return data.versions;
+}
+
+export async function getCategoryVersion(name, ts) {
+  const res = await apiFetch(`${BASE}/categories/${encodeURIComponent(name)}/versions/${ts}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Version not found');
+  return data.content;
+}
+
+export async function restoreCategoryVersion(name, ts) {
+  const res = await apiFetch(`${BASE}/categories/${encodeURIComponent(name)}/restore/${ts}`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to restore version');
+}
+
+export async function listEdgeCaseVersions() {
+  const res = await apiFetch(`${BASE}/edge-cases/versions`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to list versions');
+  return data.versions;
+}
+
+export async function getEdgeCaseVersion(ts) {
+  const res = await apiFetch(`${BASE}/edge-cases/versions/${ts}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Version not found');
+  return data.content;
+}
+
+export async function restoreEdgeCaseVersion(ts) {
+  const res = await apiFetch(`${BASE}/edge-cases/restore/${ts}`, {
+    method: 'POST',
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to restore version');
 }

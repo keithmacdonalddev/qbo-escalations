@@ -8,6 +8,7 @@ import {
   listSimilarEscalations,
 } from '../api/escalationsApi.js';
 import { getConversation } from '../api/chatApi.js';
+import { useToast } from '../hooks/useToast.jsx';
 import ChatMessage from './ChatMessage.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
@@ -27,6 +28,7 @@ const STATUS_BADGE_MAP = {
 };
 
 export default function EscalationDetail({ escalationId }) {
+  const toast = useToast();
   const [escalation, setEscalation] = useState(null);
   const [conversation, setConversation] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +70,7 @@ export default function EscalationDetail({ escalationId }) {
       setEscalation(updated);
       setSavedNotice('Saved');
       setTimeout(() => setSavedNotice(''), 2000);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to save notes'); }
     setSavingNotes(false);
   }, [escalation, resolutionNotes, resolution, savingNotes]);
 
@@ -77,7 +79,7 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const updated = await transitionEscalation(escalation._id, newStatus, newStatus === 'resolved' ? resolution : undefined);
       setEscalation(updated);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to update status'); }
   }, [escalation, resolution]);
 
   const handleUploadScreenshots = useCallback(async (e) => {
@@ -94,7 +96,7 @@ export default function EscalationDetail({ escalationId }) {
       })));
       const updated = await uploadEscalationScreenshots(escalation._id, images);
       setEscalation(updated);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to upload screenshots'); }
     setUploadingScreenshots(false);
     e.target.value = '';
   }, [escalation]);
@@ -104,7 +106,7 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const updated = await deleteEscalationScreenshot(escalation._id, fileName);
       setEscalation(updated);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to delete screenshot'); }
   }, [escalation]);
 
   useEffect(() => {

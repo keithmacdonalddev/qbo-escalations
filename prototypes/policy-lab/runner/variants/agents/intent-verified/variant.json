@@ -1,0 +1,15 @@
+{
+  "id": "intent-verified",
+  "type": "agents",
+  "label": "Intent Verified",
+  "attributes": {
+    "intentDepth": "deep",
+    "verifyClaims": "strict"
+  },
+  "overlays": [
+    {
+      "source": "AGENTS.md",
+      "target": "AGENTS.md"
+    }
+  ]
+}

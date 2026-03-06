@@ -170,6 +170,9 @@ export default function TemplateLibrary() {
     <div className="app-content-constrained">
       <div className="page-header">
         <h1 className="page-title">Response Templates</h1>
+        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+          Pre-written responses for common escalation scenarios — copy, customize, and send.
+        </span>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
           <Tooltip text="Reload templates from server" level="medium"><button className="btn btn-secondary" onClick={load} type="button">Refresh</button></Tooltip>
           <button className="btn btn-primary" onClick={openCreateForm} type="button">New Template</button>
@@ -208,7 +211,7 @@ export default function TemplateLibrary() {
                 <div className="empty-state-desc">
                   {category
                     ? `No templates in "${category.replace('-', ' ')}" yet.`
-                    : 'Create your first template to speed up escalations.'}
+                    : 'Templates are pre-written messages you can copy into escalation responses. Click "New Template" to create one with placeholders like {{clientName}} for quick personalization.'}
                 </div>
               </div>
             </div>

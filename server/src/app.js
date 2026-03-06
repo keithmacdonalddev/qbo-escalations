@@ -3,8 +3,68 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { listProviderHealth } = require('./services/provider-health');
+const requestId = require('./middleware/request-id');
+const responseTimeout = require('./middleware/response-timeout');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+function parseBool(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
+  return fallback;
+}
+
+function getAllowedCorsOrigins() {
+  const raw = (process.env.CORS_ALLOWED_ORIGINS || '').trim();
+  if (!raw) return null;
+  return new Set(
+    raw.split(',')
+      .map((value) => value.trim())
+      .filter(Boolean)
+  );
+}
+
+function isLoopbackOrigin(origin) {
+  try {
+    const parsed = new URL(origin);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
+      && LOOPBACK_HOSTS.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isAllowedOrigin(origin, allowedOrigins) {
+  if (!origin) return true;
+  if (allowedOrigins && allowedOrigins.size > 0) return allowedOrigins.has(origin);
+  return isLoopbackOrigin(origin);
+}
+
+function buildCorsOptions() {
+  const allowedOrigins = getAllowedCorsOrigins();
+  return {
+    origin(origin, callback) {
+      callback(null, isAllowedOrigin(origin, allowedOrigins));
+    },
+  };
+}
+
+function isDevModeEnabled() {
+  // Default on for local-only usage; set ENABLE_DEV_MODE=false to disable.
+  return parseBool(process.env.ENABLE_DEV_MODE, true);
+}
+
+function requireDevModeEnabled(req, res, next) {
+  if (isDevModeEnabled()) return next();
+  res.status(403).json({
+    ok: false,
+    code: 'DEV_MODE_DISABLED',
+    error: 'Developer mode is disabled',
+  });
+}
 
 function createApp() {
   if (!fs.existsSync(UPLOADS_DIR)) {
@@ -12,7 +72,15 @@ function createApp() {
   }
 
   const app = express();
-  app.use(cors());
+  app.use(cors(buildCorsOptions()));
+  app.use(requestId);
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api/policy-lab')) {
+      req.responseTimeoutMs = 180_000;
+    }
+    next();
+  });
+  app.use(responseTimeout(30_000));
   app.use(express.json({ limit: '50mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
 
@@ -36,8 +104,9 @@ function createApp() {
   app.use('/api/templates', require('./routes/templates'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/copilot', require('./routes/copilot'));
-  app.use('/api/dev', require('./routes/dev'));
+  app.use('/api/dev', requireDevModeEnabled, require('./routes/dev'));
   app.use('/api/usage', require('./routes/usage'));
+  app.use('/api/policy-lab', require('./routes/policy-lab'));
 
   app.use((err, req, res, next) => {
     console.error('Unhandled error:', err);

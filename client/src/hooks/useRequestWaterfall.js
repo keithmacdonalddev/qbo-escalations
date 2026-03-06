@@ -1,11 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { setRequestTracker, apiFetch } from '../api/http.js';
+import { setRequestTracker, apiFetch, onBudgetChange, resetBudgetCounters } from '../api/http.js';
 
 const MAX_REQUESTS = 500;
 const STORAGE_KEY = 'qbo-waterfall-requests';
 const THRESHOLD_KEY = 'qbo-waterfall-slow-ms';
 const PERSIST_KEY = 'qbo-waterfall-persist';
 const DEFAULT_SLOW_MS = 500;
+const DUPLICATE_WINDOW_MS = 100;
+const DUPLICATE_BADGE_DURATION_MS = 3000;
 
 // ── localStorage helpers (silent on quota errors) ────────────
 
@@ -48,6 +50,7 @@ export function useRequestWaterfall() {
   const [persist, setPersist] = useState(() => loadJSON(PERSIST_KEY, false));
   const [slowThreshold, setSlowThreshold] = useState(() => loadJSON(THRESHOLD_KEY, DEFAULT_SLOW_MS));
   const [enabled, setEnabled] = useState(true);
+  const [budget, setBudget] = useState({ inFlight: 0, dedupSaves: 0, circuit: 'closed', failures: 0, threshold: 5 });
 
   // Restore persisted requests on mount (only completed ones — in-flight state is meaningless)
   const restoredRef = useRef(null);
@@ -58,7 +61,14 @@ export function useRequestWaterfall() {
 
   const requestsRef = useRef(restoredRef.current);
   const [requests, setRequests] = useState(restoredRef.current);
-  const nextIdRef = useRef(restoredRef.current.length + 1);
+  const nextIdRef = useRef((() => {
+    if (restoredRef.current.length === 0) return 1;
+    const maxId = Math.max(...restoredRef.current.map(r => {
+      const num = parseInt(r.id.slice(4), 10);
+      return isNaN(num) ? 0 : num;
+    }));
+    return maxId + 1;
+  })());
   const rafRef = useRef(null);
   const dirtyRef = useRef(false);
   const slowThresholdRef = useRef(slowThreshold);
@@ -96,6 +106,7 @@ export function useRequestWaterfall() {
     start({ url, method, startTime, options }) {
       const id = `req-${nextIdRef.current++}`;
       const shortUrl = url.split('?')[0].replace('/api/', '');
+      const endpoint = url.split('?')[0]; // full endpoint without query params
       const entry = {
         id,
         url,
@@ -110,11 +121,43 @@ export function useRequestWaterfall() {
         error: null,
         label: `${method} ${shortUrl}`,
         _options: options || null, // kept in memory only, stripped before persist
+        isDuplicate: false,
+        duplicateClearTimer: null,
       };
+
+      // Check for duplicates within 100ms window
       const arr = requestsRef.current;
-      requestsRef.current = arr.length >= MAX_REQUESTS
+      for (let i = arr.length - 1; i >= 0 && arr.length > 0; i--) {
+        const prev = arr[i];
+        if (prev.method === method && prev.url.split('?')[0] === endpoint) {
+          const timeDiff = startTime - prev.startTime;
+          if (timeDiff >= 0 && timeDiff <= DUPLICATE_WINDOW_MS) {
+            entry.isDuplicate = true;
+            break;
+          }
+        }
+        // Stop checking once we're outside the time window
+        if (startTime - prev.startTime > DUPLICATE_WINDOW_MS) {
+          break;
+        }
+      }
+
+      const updatedArr = arr.length >= MAX_REQUESTS
         ? [...arr.slice(-(MAX_REQUESTS - 1)), entry]
         : [...arr, entry];
+      requestsRef.current = updatedArr;
+
+      // Set timer to clear duplicate flag after 3 seconds
+      if (entry.isDuplicate) {
+        entry.duplicateClearTimer = setTimeout(() => {
+          const req = requestsRef.current.find(r => r.id === id);
+          if (req) {
+            req.isDuplicate = false;
+            scheduleFlush();
+          }
+        }, DUPLICATE_BADGE_DURATION_MS);
+      }
+
       scheduleFlush();
       return id;
     },
@@ -170,14 +213,30 @@ export function useRequestWaterfall() {
     return () => {
       setRequestTracker(null);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      // Clean up all duplicate timers on unmount
+      for (const req of requestsRef.current) {
+        if (req.duplicateClearTimer) {
+          clearTimeout(req.duplicateClearTimer);
+        }
+      }
     };
   }, [enabled, tracker]);
 
+  // Subscribe to budget state (in-flight, dedup, circuit)
+  useEffect(() => onBudgetChange(setBudget), []);
+
   const clearRequests = useCallback(() => {
+    // Clear all duplicate timers before clearing requests
+    for (const req of requestsRef.current) {
+      if (req.duplicateClearTimer) {
+        clearTimeout(req.duplicateClearTimer);
+      }
+    }
     requestsRef.current = [];
     nextIdRef.current = 1;
     _notifiedIds.clear();
     setRequests([]);
+    resetBudgetCounters();
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* ok */ }
   }, []);
 
@@ -202,5 +261,6 @@ export function useRequestWaterfall() {
     slowThreshold, setSlowThreshold,
     persist, setPersist,
     replayRequest,
+    budget,
   };
 }

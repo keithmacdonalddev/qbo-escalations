@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
+const { getProviderIds, getDefaultProvider } = require('../services/providers/registry');
 
-const PROVIDERS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
+const PROVIDERS = getProviderIds();
 const CHAT_MODES = ['single', 'fallback', 'parallel'];
 
 const devToolEventSchema = new mongoose.Schema({
@@ -12,6 +13,7 @@ const devToolEventSchema = new mongoose.Schema({
 const devMessageSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'assistant', 'system'], required: true },
   content: { type: String, required: true, default: '' },
+  images: [{ type: String }],
   toolEvents: [devToolEventSchema],
   provider: { type: String, enum: PROVIDERS },
   mode: { type: String, enum: CHAT_MODES },
@@ -28,10 +30,19 @@ const devMessageSchema = new mongoose.Schema({
   timestamp: { type: Date, default: Date.now },
 }, { _id: false });
 
+const CHANNEL_TYPES = ['user', 'auto-errors', 'code-reviews', 'quality-scans'];
+
 const devConversationSchema = new mongoose.Schema({
   title: { type: String, default: 'New Dev Session' },
   sessionId: { type: String, default: '' },
-  provider: { type: String, enum: PROVIDERS, default: 'claude' },
+  contextHash: { type: String, default: '' },
+  provider: { type: String, enum: PROVIDERS, default: getDefaultProvider() },
+  channelType: {
+    type: String,
+    enum: CHANNEL_TYPES,
+    default: 'user',
+    index: true,
+  },
   messages: [devMessageSchema],
 }, {
   timestamps: true,

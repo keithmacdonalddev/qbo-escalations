@@ -1,0 +1,15 @@
+{
+  "id": "condensed-pm-rules",
+  "type": "hooks",
+  "label": "Condensed PM Rules",
+  "attributes": {
+    "promptLoad": "low",
+    "verifierDiscipline": "high"
+  },
+  "overlays": [
+    {
+      "source": "pm-rules.sh",
+      "target": ".claude/hooks/pm-rules.sh"
+    }
+  ]
+}

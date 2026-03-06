@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   getSummary,
   getCategoryBreakdown,
@@ -12,13 +12,7 @@ import {
 } from '../api/analyticsApi.js';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
-
-const ANALYTICS_PROVIDER_LABELS = {
-  claude: 'Claude',
-  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-  'chatgpt-5.3-codex-high': 'ChatGPT 5.3 Codex',
-  'gpt-5-mini': 'GPT-5 Mini',
-};
+import { getProviderLabel, isClaudeProvider } from '../lib/providerCatalog.js';
 
 const CAT_BADGE_MAP = {
   payroll: 'cat-payroll',
@@ -52,37 +46,44 @@ export default function Analytics() {
   const [statusFlow, setStatusFlow] = useState({ total: 0, flow: {} });
   const [modelPerf, setModelPerf] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(null);
   const fetchedRef = useRef(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setFetchError(null);
+    try {
+      const [sum, cats, ags, rec, resTime, trendData, todayData, flowData, modelPerfData] = await Promise.all([
+        getSummary(),
+        getCategoryBreakdown(),
+        getTopAgents(10),
+        getRecurringIssues(8),
+        getResolutionTimes(),
+        getTrends('daily'),
+        getTodaySnapshot(),
+        getStatusFlow(),
+        getModelPerformance().catch(() => null),
+      ]);
+      setSummary(sum);
+      setCategories(cats);
+      setAgents(ags);
+      setRecurring(rec);
+      setResolutionTimes(resTime);
+      setTrends(trendData);
+      setToday(todayData);
+      setStatusFlow(flowData || { total: 0, flow: {} });
+      setModelPerf(modelPerfData);
+    } catch {
+      setFetchError('Failed to load analytics data');
+    }
+    setLoading(false);
+  }, []);
 
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
-    (async () => {
-      try {
-        const [sum, cats, ags, rec, resTime, trendData, todayData, flowData, modelPerfData] = await Promise.all([
-          getSummary(),
-          getCategoryBreakdown(),
-          getTopAgents(10),
-          getRecurringIssues(8),
-          getResolutionTimes(),
-          getTrends('daily'),
-          getTodaySnapshot(),
-          getStatusFlow(),
-          getModelPerformance().catch(() => null),
-        ]);
-        setSummary(sum);
-        setCategories(cats);
-        setAgents(ags);
-        setRecurring(rec);
-        setResolutionTimes(resTime);
-        setTrends(trendData);
-        setToday(todayData);
-        setStatusFlow(flowData || { total: 0, flow: {} });
-        setModelPerf(modelPerfData);
-      } catch { /* graceful */ }
-      setLoading(false);
-    })();
-  }, []);
+    loadData();
+  }, [loadData]);
 
   if (loading) {
     return (
@@ -99,7 +100,17 @@ export default function Analytics() {
     <div className="app-content-constrained">
       <div className="page-header">
         <h1 className="page-title">Analytics</h1>
+        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+          Escalation patterns, resolution metrics, and AI model performance.
+        </span>
       </div>
+
+      {fetchError && (
+        <div className="error-banner">
+          <span>{fetchError}</span>
+          <button onClick={() => { fetchedRef.current = false; loadData(); }} type="button">Retry</button>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
         <StatCard label="Total Escalations" value={summary?.total ?? '--'} />
@@ -274,11 +285,11 @@ export default function Analytics() {
               <StatCard label="Total Parallel Decisions" value={modelPerf.totalDecisions} />
               {modelPerf.providers.map(p => (
                 <div key={p.provider} className="stat-card">
-                  <div className="stat-card-value" style={{ color: ['claude', 'claude-sonnet-4-6'].includes(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)' }}>
+                  <div className="stat-card-value" style={{ color: isClaudeProvider(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)' }}>
                     {p.winRate}%
                   </div>
                   <div className="stat-card-label">
-                    {ANALYTICS_PROVIDER_LABELS[p.provider] || p.provider} Win Rate
+                    {getProviderLabel(p.provider) || p.provider} Win Rate
                   </div>
                   <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 'var(--sp-2)', fontFamily: 'var(--font-mono)' }}>
                     {p.wins}W / {p.losses}L &middot; Avg {(p.winAvgLatencyMs / 1000).toFixed(1)}s
@@ -305,9 +316,9 @@ export default function Analytics() {
                 <tbody>
                   {modelPerf.providers.map(p => (
                     <tr key={p.provider}>
-                      <td style={{ fontWeight: 600, color: ['claude', 'claude-sonnet-4-6'].includes(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)' }}>
+                      <td style={{ fontWeight: 600, color: isClaudeProvider(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)' }}>
                         <Tooltip text="Performance metrics for this AI provider" level="high">
-                          {ANALYTICS_PROVIDER_LABELS[p.provider] || p.provider}
+                          {getProviderLabel(p.provider) || p.provider}
                         </Tooltip>
                       </td>
                       <td style={{ color: 'var(--success)' }}>{p.wins}</td>

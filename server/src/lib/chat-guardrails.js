@@ -1,8 +1,10 @@
 const UsageLog = require('../models/UsageLog');
 const { calculateCost, microsToUsd, getRates } = require('./pricing');
 const { getAlternateProvider } = require('../services/providers/registry');
+const { getDefaultProvider } = require('../services/providers/registry');
+const { getSelectableProviderIds } = require('../services/providers/catalog');
 
-const SUPPORTED_PROVIDERS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
+const SUPPORTED_PROVIDERS = getSelectableProviderIds();
 
 function toMicrosFromUsd(value) {
   const parsed = Number(value);
@@ -73,7 +75,7 @@ async function evaluateChatGuardrails({
 }) {
   const guardrails = settings.guardrails || {};
   const action = guardrails.onBudgetExceeded || 'warn';
-  const primaryProvider = policy.primaryProvider || 'claude';
+  const primaryProvider = policy.primaryProvider || getDefaultProvider();
   const estimateCost = calculateCost(estimatedInputTokens, 0, '', primaryProvider);
   const estimatedInputCostMicros = Number(estimateCost.inputCostMicros) || 0;
 

@@ -42,6 +42,7 @@ async function runParseAttempt({
   providerId,
   image,
   text,
+  reasoningEffort,
   timeoutMs,
   minScore,
 }) {
@@ -64,7 +65,7 @@ async function runParseAttempt({
   }
 
   try {
-    const rawResult = await provider.parseEscalation(image || text || '', { timeoutMs });
+    const rawResult = await provider.parseEscalation(image || text || '', { timeoutMs, reasoningEffort });
     // Phase 2 compat: providers now return { fields, usage } wrapper
     const raw = rawResult && rawResult.fields ? rawResult.fields : rawResult;
     const providerUsage = rawResult && rawResult.usage ? rawResult.usage : null;
@@ -211,6 +212,7 @@ async function parseWithPolicy({
   mode,
   primaryProvider,
   fallbackProvider,
+  reasoningEffort,
   timeoutMs,
   minScore,
   allowRegexFallback = true,
@@ -232,6 +234,7 @@ async function parseWithPolicy({
         providerId,
         image,
         text,
+        reasoningEffort,
         timeoutMs: effectiveTimeoutMs,
         minScore,
       });
@@ -366,6 +369,7 @@ async function parseWithPolicy({
       providerId,
       image,
       text,
+      reasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       minScore,
     });

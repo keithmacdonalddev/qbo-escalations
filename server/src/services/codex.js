@@ -6,6 +6,7 @@ const { extractCodexUsage } = require('../lib/usage-extractor');
 
 const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.3-codex';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
+const CODEX_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -13,6 +14,11 @@ function parsePositiveInt(value, fallback) {
 
 function didCliExitSuccessfully(code) {
   return code === 0;
+}
+
+function normalizeCodexReasoningEffort(value, fallback = DEFAULT_REASONING_EFFORT) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return CODEX_ALLOWED_EFFORTS.has(normalized) ? normalized : fallback;
 }
 
 const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CODEX_CHAT_TIMEOUT_MS, 180000);
@@ -90,16 +96,17 @@ function formatCliFailure(code, stderr) {
  * @param {function} opts.onError
  * @returns {function} cleanup
  */
-function chat({ messages, systemPrompt, images, model, onChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk, onDone, onError }) {
   const prompt = buildPrompt(messages, systemPrompt);
   const tempFiles = writeImageTempFiles(images);
   const effectiveModel = model || DEFAULT_MODEL;
+  const effectiveReasoningEffort = normalizeCodexReasoningEffort(reasoningEffort);
 
   const args = [
     'exec',
     '--json',
     '--model', effectiveModel,
-    '-c', `reasoning_effort="${DEFAULT_REASONING_EFFORT}"`,
+    '-c', `reasoning_effort="${effectiveReasoningEffort}"`,
     '--skip-git-repo-check',
   ];
 
@@ -261,6 +268,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     ? options.timeoutMs
     : PARSE_TIMEOUT_MS;
   const effectiveParseModel = options.model || PARSE_MODEL;
+  const effectiveParseReasoningEffort = normalizeCodexReasoningEffort(options.reasoningEffort, PARSE_REASONING_EFFORT);
 
   const schemaExample = JSON.stringify({
     coid: '',
@@ -296,7 +304,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     'exec',
     '--json',
     '--model', effectiveParseModel,
-    '-c', `reasoning_effort="${PARSE_REASONING_EFFORT}"`,
+    '-c', `reasoning_effort="${effectiveParseReasoningEffort}"`,
     '--skip-git-repo-check',
   ];
   for (const file of tempFiles) {

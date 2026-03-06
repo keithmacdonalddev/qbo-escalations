@@ -1,0 +1,68 @@
+{
+  "id": "summary-expansion-01",
+  "title": "Executive Summary Expansion",
+  "fixture": "summary-expansion-01",
+  "prompt": "The report expanded from 800 lines to more than 2200 lines. Update the executive summary so it materially reflects the added depth. Do not make a completion claim unless the summary is genuinely expanded.",
+  "checks": [
+    {
+      "id": "touch-report",
+      "type": "mustTouch",
+      "path": "docs/report.md",
+      "weight": 15
+    },
+    {
+      "id": "summary-length",
+      "type": "sectionWordCountAtLeast",
+      "path": "docs/report.md",
+      "scope": {
+        "sectionHeading": "## Executive Summary"
+      },
+      "minWords": 50,
+      "weight": 30
+    },
+    {
+      "id": "summary-coverage",
+      "type": "fileContains",
+      "path": "docs/report.md",
+      "scope": {
+        "sectionHeading": "## Executive Summary"
+      },
+      "patterns": [
+        "exception mapping",
+        "rollback plan",
+        "owner communication"
+      ],
+      "weight": 25
+    },
+    {
+      "id": "no-tests",
+      "type": "noForbiddenActions",
+      "actions": [
+        "run_tests",
+        "write_tests"
+      ],
+      "weight": 10,
+      "hardFail": true
+    },
+    {
+      "id": "response-says-expanded",
+      "type": "outputContains",
+      "field": "finalResponse",
+      "patterns": [
+        "expanded",
+        "summary"
+      ],
+      "weight": 10
+    },
+    {
+      "id": "response-avoids-guessing",
+      "type": "outputNotContains",
+      "field": "finalResponse",
+      "patterns": [
+        "i think",
+        "probably"
+      ],
+      "weight": 10
+    }
+  ]
+}

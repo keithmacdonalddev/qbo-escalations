@@ -177,7 +177,62 @@ function ChatMessage({
 
       {(timestamp || responseTimeMs || usage) && (
         <div className="chat-bubble-meta">
-          {timestamp && new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          {timestamp && (
+            <span className="timestamp-hover-anchor">
+              {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <span className="timestamp-hover-card">
+                <span className="timestamp-hover-row">
+                  <span className="timestamp-hover-label">Time</span>
+                  <span>{new Date(timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'medium' })}</span>
+                </span>
+                {provider && (
+                  <span className="timestamp-hover-row">
+                    <span className="timestamp-hover-label">Provider</span>
+                    <span>{getProviderLabel(provider)}</span>
+                  </span>
+                )}
+                {responseTimeMs && role === 'assistant' && (
+                  <span className="timestamp-hover-row">
+                    <span className="timestamp-hover-label">Latency</span>
+                    <span>{formatResponseTime(responseTimeMs)}</span>
+                  </span>
+                )}
+                {role === 'assistant' && usage && usage.usageAvailable !== false && usage.totalTokens > 0 && (
+                  <>
+                    <span className="timestamp-hover-row">
+                      <span className="timestamp-hover-label">Tokens</span>
+                      <span>
+                        {formatTokenCount(usage.totalTokens)}
+                        {(usage.inputTokens || usage.outputTokens) ? (
+                          <span style={{ color: 'var(--ink-tertiary)', marginLeft: 4 }}>
+                            ({formatTokenCount(usage.inputTokens || 0)} in / {formatTokenCount(usage.outputTokens || 0)} out)
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                    {usage.totalCostMicros > 0 && (
+                      <span className="timestamp-hover-row">
+                        <span className="timestamp-hover-label">Cost</span>
+                        <span>${(usage.totalCostMicros / 1_000_000).toFixed(4)}</span>
+                      </span>
+                    )}
+                    {usage.model && (
+                      <span className="timestamp-hover-row">
+                        <span className="timestamp-hover-label">Model</span>
+                        <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{usage.model}</span>
+                      </span>
+                    )}
+                  </>
+                )}
+                {fallbackFrom && (
+                  <span className="timestamp-hover-row">
+                    <span className="timestamp-hover-label">Fallback</span>
+                    <span>from {getProviderLabel(fallbackFrom)}</span>
+                  </span>
+                )}
+              </span>
+            </span>
+          )}
           {responseTimeMs && role === 'assistant' && (
             <Tooltip text="Time to first response from the AI" level="high">
               <span style={{ marginLeft: timestamp ? 'var(--sp-3)' : 0 }}>

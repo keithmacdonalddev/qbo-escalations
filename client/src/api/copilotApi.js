@@ -1,5 +1,6 @@
 import { apiFetch } from './http.js';
 import { consumeSSEStream } from './sse.js';
+import { normalizeError } from '../utils/normalizeError.js';
 const BASE = '/api/copilot';
 
 function streamRequest(url, body, { onStart, onChunk, onDone, onError }) {
@@ -16,7 +17,7 @@ function streamRequest(url, body, { onStart, onChunk, onDone, onError }) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(err.error || 'Request failed');
+        onError?.(normalizeError(err));
         return;
       }
 
@@ -24,10 +25,10 @@ function streamRequest(url, body, { onStart, onChunk, onDone, onError }) {
         if (eventType === 'start') onStart?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(data.error);
+        else if (eventType === 'error') onError?.(normalizeError(data));
       });
     } catch (err) {
-      if (err.name !== 'AbortError') onError?.(err.message);
+      if (err.name !== 'AbortError') onError?.(normalizeError(err));
     }
   })();
 

@@ -1,0 +1,15 @@
+{
+  "id": "baseline",
+  "type": "agents",
+  "label": "Baseline Control",
+  "attributes": {
+    "intentDepth": "shallow",
+    "verifyClaims": "medium"
+  },
+  "overlays": [
+    {
+      "source": "AGENTS.md",
+      "target": "AGENTS.md"
+    }
+  ]
+}

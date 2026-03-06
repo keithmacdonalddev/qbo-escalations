@@ -31,6 +31,7 @@ function validateChatRequest(providerId, opts) {
   ensureArray(opts.messages, 'messages', providerId);
   ensureArray(opts.images || [], 'images', providerId);
   ensureString(opts.systemPrompt, 'systemPrompt', providerId);
+  ensureString(opts.reasoningEffort, 'reasoningEffort', providerId);
   ensureFunction(opts.onChunk, 'onChunk', providerId);
   ensureFunction(opts.onDone, 'onDone', providerId);
   ensureFunction(opts.onError, 'onError', providerId);

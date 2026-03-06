@@ -1,0 +1,1127 @@
+{
+  "runId": "2026-03-06T15-49-26-370Z",
+  "generatedAt": "2026-03-06T15:49:26.370Z",
+  "mode": "full",
+  "projectProfile": {
+    "projectRoot": "C:\\Users\\NewAdmin\\Desktop\\PROJECTS\\qbo-escalations",
+    "hasClient": true,
+    "hasServer": true,
+    "hasPrototypes": true,
+    "hasHooks": true,
+    "hasRootAgents": true,
+    "hasFeaturesFile": true,
+    "testScriptPresent": true,
+    "devScriptPresent": true,
+    "prototypeNames": [
+      "flame-bar",
+      "iphone-auto-import",
+      "policy-lab",
+      "_template"
+    ]
+  },
+  "scenarioPack": [
+    {
+      "id": "prototype-request",
+      "title": "Prototype Request",
+      "categories": [
+        "prototype-isolation",
+        "edit-safety",
+        "communication"
+      ],
+      "dimensions": [
+        "repoFit",
+        "consistency"
+      ],
+      "weight": 1.3
+    },
+    {
+      "id": "production-edit",
+      "title": "Production App Edit",
+      "categories": [
+        "codebase-awareness",
+        "edit-safety",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "specificity",
+        "consistency"
+      ],
+      "weight": 1.2
+    },
+    {
+      "id": "review-request",
+      "title": "Code Review",
+      "categories": [
+        "review-quality",
+        "truthfulness",
+        "communication"
+      ],
+      "dimensions": [
+        "clarity"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "no-tests",
+      "title": "Testing Restraint",
+      "categories": [
+        "testing-restraint",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "weight": 1.25
+    },
+    {
+      "id": "process-safety",
+      "title": "Process Safety",
+      "categories": [
+        "process-control",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "weight": 1.25
+    },
+    {
+      "id": "intent-heavy",
+      "title": "Ambiguous User Intent",
+      "categories": [
+        "intent",
+        "truthfulness",
+        "communication"
+      ],
+      "dimensions": [
+        "specificity",
+        "clarity"
+      ],
+      "weight": 1.2
+    },
+    {
+      "id": "delegation",
+      "title": "Delegation and Skills",
+      "categories": [
+        "delegation-skills",
+        "codebase-awareness"
+      ],
+      "dimensions": [
+        "repoFit"
+      ],
+      "weight": 0.95
+    },
+    {
+      "id": "long-term-maintenance",
+      "title": "Long-Term Maintenance",
+      "categories": [
+        "truthfulness",
+        "edit-safety",
+        "prototype-isolation"
+      ],
+      "dimensions": [
+        "longTermResilience",
+        "consistency"
+      ],
+      "weight": 1.15
+    }
+  ],
+  "taskPack": [
+    {
+      "id": "prototype-contained",
+      "title": "Prototype Containment",
+      "weight": 1.25,
+      "requiredCategories": [
+        "prototype-isolation",
+        "edit-safety",
+        "truthfulness"
+      ],
+      "requiredDimensions": [
+        "repoFit",
+        "consistency"
+      ],
+      "requiredGates": [
+        "prototype-isolation",
+        "truthfulness",
+        "consistency"
+      ],
+      "passThreshold": 72
+    },
+    {
+      "id": "production-edit",
+      "title": "Production Multi-File Edit",
+      "weight": 1.2,
+      "requiredCategories": [
+        "codebase-awareness",
+        "edit-safety",
+        "truthfulness",
+        "intent"
+      ],
+      "requiredDimensions": [
+        "specificity",
+        "consistency"
+      ],
+      "requiredGates": [
+        "truthfulness",
+        "consistency"
+      ],
+      "passThreshold": 72
+    },
+    {
+      "id": "review-findings",
+      "title": "Review Findings-First",
+      "weight": 1,
+      "requiredCategories": [
+        "review-quality",
+        "truthfulness",
+        "communication"
+      ],
+      "requiredDimensions": [
+        "clarity"
+      ],
+      "requiredGates": [
+        "truthfulness"
+      ],
+      "passThreshold": 70
+    },
+    {
+      "id": "test-restraint",
+      "title": "Testing Restraint",
+      "weight": 1.2,
+      "requiredCategories": [
+        "testing-restraint",
+        "truthfulness"
+      ],
+      "requiredDimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "requiredGates": [
+        "testing-restraint",
+        "truthfulness"
+      ],
+      "passThreshold": 74
+    },
+    {
+      "id": "process-safety",
+      "title": "Process Safety",
+      "weight": 1.25,
+      "requiredCategories": [
+        "process-control",
+        "truthfulness"
+      ],
+      "requiredDimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "requiredGates": [
+        "process-control",
+        "truthfulness"
+      ],
+      "passThreshold": 76
+    },
+    {
+      "id": "stale-state-verification",
+      "title": "Stale-State Verification",
+      "weight": 1.15,
+      "requiredCategories": [
+        "truthfulness",
+        "codebase-awareness"
+      ],
+      "requiredDimensions": [
+        "specificity",
+        "consistency"
+      ],
+      "requiredGates": [
+        "truthfulness",
+        "consistency"
+      ],
+      "passThreshold": 74
+    },
+    {
+      "id": "delegation-skill-use",
+      "title": "Delegation and Skill Use",
+      "weight": 0.95,
+      "requiredCategories": [
+        "delegation-skills",
+        "codebase-awareness",
+        "intent"
+      ],
+      "requiredDimensions": [
+        "repoFit"
+      ],
+      "requiredGates": [
+        "consistency"
+      ],
+      "passThreshold": 68
+    },
+    {
+      "id": "long-term-stability",
+      "title": "Long-Term Stability",
+      "weight": 1.3,
+      "requiredCategories": [
+        "truthfulness",
+        "prototype-isolation",
+        "edit-safety"
+      ],
+      "requiredDimensions": [
+        "longTermResilience",
+        "consistency"
+      ],
+      "requiredGates": [
+        "truthfulness",
+        "consistency"
+      ],
+      "passThreshold": 75
+    }
+  ],
+  "left": {
+    "slotLabel": "Current",
+    "fileName": "AGENTS.md",
+    "displayName": "Current (AGENTS.md)",
+    "summary": "# AGENTS.md\n## Project Agent Rules\n### Prototype Isolation (Default)\n- Build prototypes as standalone files in `prototypes/<prototype-name>/`.",
+    "metrics": {
+      "lineCount": 59,
+      "wordCount": 434,
+      "headingCount": 9,
+      "directiveCount": 34,
+      "bulletCount": 34
+    },
+    "categoryScores": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness and Verification",
+        "weight": 1.25,
+        "score": 43,
+        "matchedSignals": [
+          "verify",
+          "fresh",
+          "status claim"
+        ],
+        "missingSignals": [
+          "re-check",
+          "correct",
+          "never assume",
+          "on disk"
+        ]
+      },
+      {
+        "id": "intent",
+        "title": "User Intent Handling",
+        "weight": 1.2,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "intent",
+          "actual need",
+          "underlying",
+          "direct question",
+          "real problem"
+        ]
+      },
+      {
+        "id": "codebase-awareness",
+        "title": "Codebase Awareness",
+        "weight": 1.05,
+        "score": 17,
+        "matchedSignals": [
+          "rg\\b"
+        ],
+        "missingSignals": [
+          "inspect",
+          "read the codebase",
+          "build context",
+          "understand",
+          "search"
+        ]
+      },
+      {
+        "id": "edit-safety",
+        "title": "Edit Safety",
+        "weight": 1.1,
+        "score": 20,
+        "matchedSignals": [
+          "git"
+        ],
+        "missingSignals": [
+          "apply_patch",
+          "do not revert",
+          "dirty worktree",
+          "non-destructive"
+        ]
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype Isolation",
+        "weight": 1.25,
+        "score": 100,
+        "matchedSignals": [
+          "prototype",
+          "prototypes\\/",
+          "feature flag",
+          "client\\/src",
+          "server\\/src"
+        ],
+        "missingSignals": []
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 40,
+        "matchedSignals": [
+          "emergency-only",
+          "smallest possible scope"
+        ],
+        "missingSignals": [
+          "no tests",
+          "never run",
+          "do not modify existing tests"
+        ]
+      },
+      {
+        "id": "process-control",
+        "title": "Process Control",
+        "weight": 1.25,
+        "score": 83,
+        "matchedSignals": [
+          "never start",
+          "kill",
+          "process",
+          "server",
+          "unless the user explicitly asks"
+        ],
+        "missingSignals": [
+          "never stop"
+        ]
+      },
+      {
+        "id": "delegation-skills",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "delegate",
+          "subagent",
+          "team",
+          "skill",
+          "skills"
+        ]
+      },
+      {
+        "id": "review-quality",
+        "title": "Review Quality",
+        "weight": 0.95,
+        "score": 20,
+        "matchedSignals": [
+          "review"
+        ],
+        "missingSignals": [
+          "findings",
+          "severity",
+          "bugs",
+          "risks"
+        ]
+      },
+      {
+        "id": "communication",
+        "title": "Communication Discipline",
+        "weight": 0.85,
+        "score": 20,
+        "matchedSignals": [
+          "update"
+        ],
+        "missingSignals": [
+          "concise",
+          "clear",
+          "final answer",
+          "intermediary"
+        ]
+      }
+    ],
+    "dimensions": {
+      "clarity": 100,
+      "specificity": 100,
+      "enforceability": 100,
+      "consistency": 92,
+      "repoFit": 43,
+      "longTermResilience": 89.85000000000001
+    },
+    "hardGates": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 43,
+        "passed": false,
+        "failure": "Verification language is too weak for reliable completion claims."
+      },
+      {
+        "id": "consistency",
+        "title": "Consistency gate",
+        "required": true,
+        "threshold": 68,
+        "actual": 92,
+        "passed": true,
+        "failure": "Internal instruction consistency is too weak for stable behavior."
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype isolation gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 100,
+        "passed": true,
+        "failure": "Prototype isolation is too weak for this repo."
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing restraint gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 40,
+        "passed": false,
+        "failure": "Testing restraint is too weak for a repo with available test scripts."
+      },
+      {
+        "id": "process-control",
+        "title": "Process control gate",
+        "required": true,
+        "threshold": 58,
+        "actual": 83,
+        "passed": true,
+        "failure": "Process-control language is too weak for this repo."
+      }
+    ],
+    "hardGateFailures": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 43,
+        "passed": false,
+        "failure": "Verification language is too weak for reliable completion claims."
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing restraint gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 40,
+        "passed": false,
+        "failure": "Testing restraint is too weak for a repo with available test scripts."
+      }
+    ],
+    "scenarioScores": [
+      {
+        "id": "prototype-request",
+        "title": "Prototype Request",
+        "weight": 1.3,
+        "score": 37.9
+      },
+      {
+        "id": "production-edit",
+        "title": "Production App Edit",
+        "weight": 1.2,
+        "score": 32.5
+      },
+      {
+        "id": "review-request",
+        "title": "Code Review",
+        "weight": 1,
+        "score": 34.4
+      },
+      {
+        "id": "no-tests",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 27.8
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 57.9
+      },
+      {
+        "id": "intent-heavy",
+        "title": "Ambiguous User Intent",
+        "weight": 1.2,
+        "score": 29.7
+      },
+      {
+        "id": "delegation",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 3.9
+      },
+      {
+        "id": "long-term-maintenance",
+        "title": "Long-Term Maintenance",
+        "weight": 1.15,
+        "score": 50.3
+      }
+    ],
+    "taskScores": [
+      {
+        "id": "prototype-contained",
+        "title": "Prototype Containment",
+        "weight": 1.25,
+        "score": 40,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "production-edit",
+        "title": "Production Multi-File Edit",
+        "weight": 1.2,
+        "score": 23.3,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "review-findings",
+        "title": "Review Findings-First",
+        "weight": 1,
+        "score": 29.9,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "test-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.2,
+        "score": 20.8,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate",
+          "Testing restraint gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate, Testing restraint gate"
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 54.2,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "stale-state-verification",
+        "title": "Stale-State Verification",
+        "weight": 1.15,
+        "score": 30.5,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "delegation-skill-use",
+        "title": "Delegation and Skill Use",
+        "weight": 0.95,
+        "score": 16.1,
+        "passed": false,
+        "failedGates": [],
+        "notes": "Below pass threshold 68."
+      },
+      {
+        "id": "long-term-stability",
+        "title": "Long-Term Stability",
+        "weight": 1.3,
+        "score": 46.6,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      }
+    ],
+    "conflicts": [],
+    "riskFlags": [
+      "Weak verification language for factual claims.",
+      "Testing restraint is under-specified for a repo with existing test scripts.",
+      "Verification language is too weak for reliable completion claims.",
+      "Testing restraint is too weak for a repo with available test scripts."
+    ],
+    "overallScore": 43.4,
+    "scenarioAverage": 35.2,
+    "categoryAverage": 36.8,
+    "taskAverage": 33.5
+  },
+  "right": {
+    "slotLabel": "Proposed",
+    "fileName": "test_AGENTS.md",
+    "displayName": "Proposed (test_AGENTS.md)",
+    "summary": "# AGENTS.md\n## Project Agent Rules\n### 1) Scope and precedence\n- Treat this file as the default instruction set for the whole repository.",
+    "metrics": {
+      "lineCount": 144,
+      "wordCount": 838,
+      "headingCount": 16,
+      "directiveCount": 98,
+      "bulletCount": 98
+    },
+    "categoryScores": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness and Verification",
+        "weight": 1.25,
+        "score": 43,
+        "matchedSignals": [
+          "verify",
+          "fresh",
+          "correct"
+        ],
+        "missingSignals": [
+          "re-check",
+          "never assume",
+          "on disk",
+          "status claim"
+        ]
+      },
+      {
+        "id": "intent",
+        "title": "User Intent Handling",
+        "weight": 1.2,
+        "score": 20,
+        "matchedSignals": [
+          "intent"
+        ],
+        "missingSignals": [
+          "actual need",
+          "underlying",
+          "direct question",
+          "real problem"
+        ]
+      },
+      {
+        "id": "codebase-awareness",
+        "title": "Codebase Awareness",
+        "weight": 1.05,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "inspect",
+          "read the codebase",
+          "build context",
+          "understand",
+          "search",
+          "rg\\b"
+        ]
+      },
+      {
+        "id": "edit-safety",
+        "title": "Edit Safety",
+        "weight": 1.1,
+        "score": 20,
+        "matchedSignals": [
+          "git"
+        ],
+        "missingSignals": [
+          "apply_patch",
+          "do not revert",
+          "dirty worktree",
+          "non-destructive"
+        ]
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype Isolation",
+        "weight": 1.25,
+        "score": 100,
+        "matchedSignals": [
+          "prototype",
+          "prototypes\\/",
+          "feature flag",
+          "client\\/src",
+          "server\\/src"
+        ],
+        "missingSignals": []
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 40,
+        "matchedSignals": [
+          "no tests",
+          "emergency-only"
+        ],
+        "missingSignals": [
+          "never run",
+          "smallest possible scope",
+          "do not modify existing tests"
+        ]
+      },
+      {
+        "id": "process-control",
+        "title": "Process Control",
+        "weight": 1.25,
+        "score": 67,
+        "matchedSignals": [
+          "kill",
+          "process",
+          "server",
+          "unless the user explicitly asks"
+        ],
+        "missingSignals": [
+          "never start",
+          "never stop"
+        ]
+      },
+      {
+        "id": "delegation-skills",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "delegate",
+          "subagent",
+          "team",
+          "skill",
+          "skills"
+        ]
+      },
+      {
+        "id": "review-quality",
+        "title": "Review Quality",
+        "weight": 0.95,
+        "score": 40,
+        "matchedSignals": [
+          "review",
+          "risks"
+        ],
+        "missingSignals": [
+          "findings",
+          "severity",
+          "bugs"
+        ]
+      },
+      {
+        "id": "communication",
+        "title": "Communication Discipline",
+        "weight": 0.85,
+        "score": 40,
+        "matchedSignals": [
+          "concise",
+          "update"
+        ],
+        "missingSignals": [
+          "clear",
+          "final answer",
+          "intermediary"
+        ]
+      }
+    ],
+    "dimensions": {
+      "clarity": 100,
+      "specificity": 100,
+      "enforceability": 100,
+      "consistency": 72,
+      "repoFit": 43.1,
+      "longTermResilience": 85.86500000000001
+    },
+    "hardGates": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 43,
+        "passed": false,
+        "failure": "Verification language is too weak for reliable completion claims."
+      },
+      {
+        "id": "consistency",
+        "title": "Consistency gate",
+        "required": true,
+        "threshold": 68,
+        "actual": 72,
+        "passed": true,
+        "failure": "Internal instruction consistency is too weak for stable behavior."
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype isolation gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 100,
+        "passed": true,
+        "failure": "Prototype isolation is too weak for this repo."
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing restraint gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 40,
+        "passed": false,
+        "failure": "Testing restraint is too weak for a repo with available test scripts."
+      },
+      {
+        "id": "process-control",
+        "title": "Process control gate",
+        "required": true,
+        "threshold": 58,
+        "actual": 67,
+        "passed": true,
+        "failure": "Process-control language is too weak for this repo."
+      }
+    ],
+    "hardGateFailures": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 43,
+        "passed": false,
+        "failure": "Verification language is too weak for reliable completion claims."
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing restraint gate",
+        "required": true,
+        "threshold": 55,
+        "actual": 40,
+        "passed": false,
+        "failure": "Testing restraint is too weak for a repo with available test scripts."
+      }
+    ],
+    "scenarioScores": [
+      {
+        "id": "prototype-request",
+        "title": "Prototype Request",
+        "weight": 1.3,
+        "score": 39.6
+      },
+      {
+        "id": "production-edit",
+        "title": "Production App Edit",
+        "weight": 1.2,
+        "score": 25.5
+      },
+      {
+        "id": "review-request",
+        "title": "Code Review",
+        "weight": 1,
+        "score": 43.7
+      },
+      {
+        "id": "no-tests",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 24.8
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 49.3
+      },
+      {
+        "id": "intent-heavy",
+        "title": "Ambiguous User Intent",
+        "weight": 1.2,
+        "score": 39
+      },
+      {
+        "id": "delegation",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 0
+      },
+      {
+        "id": "long-term-maintenance",
+        "title": "Long-Term Maintenance",
+        "weight": 1.15,
+        "score": 46.7
+      }
+    ],
+    "taskScores": [
+      {
+        "id": "prototype-contained",
+        "title": "Prototype Containment",
+        "weight": 1.25,
+        "score": 37.2,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "production-edit",
+        "title": "Production Multi-File Edit",
+        "weight": 1.2,
+        "score": 21,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "review-findings",
+        "title": "Review Findings-First",
+        "weight": 1,
+        "score": 39.5,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "test-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.2,
+        "score": 18,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate",
+          "Testing restraint gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate, Testing restraint gate"
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 45.7,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "stale-state-verification",
+        "title": "Stale-State Verification",
+        "weight": 1.15,
+        "score": 21.6,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      },
+      {
+        "id": "delegation-skill-use",
+        "title": "Delegation and Skill Use",
+        "weight": 0.95,
+        "score": 16.9,
+        "passed": false,
+        "failedGates": [],
+        "notes": "Below pass threshold 68."
+      },
+      {
+        "id": "long-term-stability",
+        "title": "Long-Term Stability",
+        "weight": 1.3,
+        "score": 43.2,
+        "passed": false,
+        "failedGates": [
+          "Truthfulness gate"
+        ],
+        "notes": "Failed hard gates: Truthfulness gate"
+      }
+    ],
+    "conflicts": [
+      "Testing conflict"
+    ],
+    "riskFlags": [
+      "Weak verification language for factual claims.",
+      "Testing restraint is under-specified for a repo with existing test scripts.",
+      "Detected 1 contradiction signal(s).",
+      "Verification language is too weak for reliable completion claims.",
+      "Testing restraint is too weak for a repo with available test scripts."
+    ],
+    "overallScore": 41.4,
+    "scenarioAverage": 34.3,
+    "categoryAverage": 38.8,
+    "taskAverage": 30.9
+  },
+  "policyComparison": {
+    "winner": "left",
+    "recommendedLabel": "Current",
+    "scoreMargin": 2,
+    "confidence": {
+      "level": "Low",
+      "score": 50
+    },
+    "reasons": [
+      "Current scores 2.0 points higher on policy scoring.",
+      "Current is stronger on codebase awareness (+17 points).",
+      "Current is stronger on process control (+16 points).",
+      "Current is more robust on process safety use cases (+8.6).",
+      "Current is more robust on production app edit use cases (+7.0)."
+    ],
+    "leftPassesHardGates": false,
+    "rightPassesHardGates": false,
+    "conclusion": "Current is stronger on weighted policy scoring for this repository, especially around long-term prototype isolation discipline. Confidence is Low."
+  },
+  "taskBenchmark": {
+    "winner": "left",
+    "recommendedLabel": "Current",
+    "leftAverage": 33.5,
+    "rightAverage": 30.9,
+    "margin": 2.6,
+    "leftPassCount": 0,
+    "rightPassCount": 0,
+    "totalTasks": 8,
+    "reasons": [
+      "Current performs better across the task benchmark pack.",
+      "Current passes 0 of 8 benchmark tasks."
+    ]
+  },
+  "comparison": {
+    "mode": "full",
+    "winner": "left",
+    "recommendedLabel": "No clear winner",
+    "recommendedFileName": "No clear winner",
+    "scoreMargin": 2.2,
+    "confidence": {
+      "score": 53.6,
+      "level": "Low"
+    },
+    "reasons": [
+      "Current is the stronger recommendation for this repository.",
+      "Current scores 2.0 points higher on policy scoring.",
+      "Current is stronger on codebase awareness (+17 points).",
+      "Current performs better across the task benchmark pack.",
+      "Current passes 0 of 8 benchmark tasks."
+    ],
+    "hardGateSummary": {
+      "leftFailures": [
+        "Truthfulness gate",
+        "Testing restraint gate"
+      ],
+      "rightFailures": [
+        "Truthfulness gate",
+        "Testing restraint gate"
+      ]
+    },
+    "conclusion": "No file is being recommended yet because the separation is weak or a required hard gate is still failing. Tighten the candidate and rerun."
+  }
+}

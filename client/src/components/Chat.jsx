@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useChat } from '../hooks/useChat.js';
+import { useToast } from '../hooks/useToast.jsx';
 import { transitions, fadeSlideUp, fadeSlideDown, fade, popover } from '../utils/motion.js';
 import { exportConversation, getConversation, forkConversation } from '../api/chatApi.js';
 import {
@@ -18,6 +19,7 @@ import CopilotPanel from './CopilotPanel.jsx';
 import ThinkingSidebar from './ThinkingSidebar.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
 import { getProviderLabel } from '../utils/markdown.jsx';
+import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
 
 /**
  * Group messages for rendering: parallel messages with the same turnId become a single group.
@@ -72,17 +74,15 @@ const QUICK_PROMPTS = [
   { label: 'Suggest Troubleshooting', prompt: 'Based on the issue described, what troubleshooting steps should the agent try next? List them in order of likelihood to resolve.' },
 ];
 
-const PROVIDER_OPTIONS = [
-  { value: 'claude', label: 'Claude' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'chatgpt-5.3-codex-high', label: 'ChatGPT 5.3 Codex (High)' },
-  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-];
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
   { value: 'fallback', label: 'Fallback' },
   { value: 'parallel', label: 'Parallel' },
 ];
+
+function getReasoningEffortLabel(value) {
+  return REASONING_EFFORT_OPTIONS.find((option) => option.value === value)?.label || 'High';
+}
 
 function formatTokenEstimate(value) {
   const n = Number(value);
@@ -129,13 +129,14 @@ async function computeFileHash(file) {
   return hex;
 }
 
-export function ChatView({ conversationIdFromRoute, chat }) {
+export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   const {
     messages,
     conversationId,
     provider,
     mode,
     fallbackProvider,
+    reasoningEffort,
     isStreaming,
     streamingText,
     parallelStreaming,
@@ -153,6 +154,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     setProvider,
     setMode,
     setFallbackProvider,
+    setReasoningEffort,
     parallelProviders,
     setParallelProviders,
     dismissFallbackNotice,
@@ -186,6 +188,9 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   const [composeFocused, setComposeFocused] = useState(false);
   const [discardedProviders, setDiscardedProviders] = useState({});
   const providerPopoverRef = useRef(null);
+  const selectionIncludesClaude = PROVIDER_FAMILY[provider] === 'claude'
+    || (mode === 'fallback' && PROVIDER_FAMILY[fallbackProvider] === 'claude')
+    || (mode === 'parallel' && parallelProviders.some((providerId) => PROVIDER_FAMILY[providerId] === 'claude'));
 
   const handleDiscardProvider = useCallback((turnId, discardedProvider) => {
     setDiscardedProviders(prev => {
@@ -228,10 +233,18 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [resolvingEscalation, setResolvingEscalation] = useState(false);
 
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => {
+    if (!import.meta.env.DEV) return '';
+    try {
+      const saved = sessionStorage.getItem('qbo-draft-input');
+      if (saved) { sessionStorage.removeItem('qbo-draft-input'); return saved; }
+    } catch {}
+    return '';
+  });
   const [images, setImages] = useState([]);
   const [isComposeDragOver, setIsComposeDragOver] = useState(false);
   const pendingImageParseRef = useRef(false);
+  const toast = useToast();
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -272,6 +285,19 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingText, parallelStreaming]);
+
+  // Restore scroll position after HMR safe-reload (dev only, runs once)
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    try {
+      const raw = sessionStorage.getItem('qbo-draft-scroll');
+      if (raw) {
+        sessionStorage.removeItem('qbo-draft-scroll');
+        const el = document.querySelector('.chat-messages');
+        if (el) requestAnimationFrame(() => { el.scrollTop = Number(raw); });
+      }
+    } catch {}
+  }, []);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -329,13 +355,13 @@ export function ChatView({ conversationIdFromRoute, chat }) {
   // Toggle callbacks
   const toggleSmartCompose = useCallback((enabled) => {
     setSmartComposeEnabled(enabled);
-    window.localStorage.setItem('qbo-smart-compose-enabled', String(enabled));
+    try { window.localStorage.setItem('qbo-smart-compose-enabled', String(enabled)); } catch {}
     if (!enabled) setGhostText('');
   }, []);
 
   const toggleContextPill = useCallback((enabled) => {
     setContextPillEnabled(enabled);
-    window.localStorage.setItem('qbo-context-pill-enabled', String(enabled));
+    try { window.localStorage.setItem('qbo-context-pill-enabled', String(enabled)); } catch {}
   }, []);
 
   // Copy field handler for context pill
@@ -504,7 +530,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     try {
       const updated = await transitionEscalation(linkedEscalation._id, 'resolved');
       setLinkedEscalation(updated);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to resolve escalation'); }
     setResolvingEscalation(false);
   }, [linkedEscalation, resolvingEscalation]);
 
@@ -530,6 +556,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
           mode,
           primaryProvider: provider,
           fallbackProvider: mode !== 'single' ? fallbackProvider : undefined,
+          reasoningEffort: aiSettings?.providerStrategy?.reasoningEffort || undefined,
         });
         if (cancelled) return;
         setParseMeta(parsed?._meta || null);
@@ -576,6 +603,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     mode,
     provider,
     fallbackProvider,
+    aiSettings,
     appendProcessEvent,
   ]);
 
@@ -593,7 +621,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     try {
       const list = await listTemplates(templateCategory || undefined);
       setTemplates(list);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to load templates'); }
     setLoadingTemplates(false);
   }, [templateCategory]);
 
@@ -610,7 +638,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
     try {
       const list = await listTemplates(cat || undefined);
       setTemplates(list);
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to load templates'); }
     setLoadingTemplates(false);
   }, []);
 
@@ -621,7 +649,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
       const forked = await forkConversation(conversationId, messageIndex);
       // Navigate to the new forked conversation
       window.location.hash = `#/chat/${forked._id}`;
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to fork conversation'); }
   }, [conversationId]);
 
   const canRetryLastResponse = Boolean(
@@ -814,7 +842,7 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                   await navigator.clipboard.writeText(text);
                   setExportCopied(true);
                   setTimeout(() => setExportCopied(false), 2000);
-                } catch { /* ignore */ }
+                } catch { toast.error('Failed to copy conversation'); }
               }}
               type="button"
             >
@@ -1201,6 +1229,8 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                 {getProviderLabel(provider)}
                 {' \u00b7 '}
                 {MODE_OPTIONS.find(m => m.value === mode)?.label || 'Single'}
+                {' \u00b7 '}
+                {getReasoningEffortLabel(reasoningEffort)}
                 {mode === 'fallback' && (
                   <> + {getProviderLabel(fallbackProvider)}</>
                 )}
@@ -1311,6 +1341,24 @@ export function ChatView({ conversationIdFromRoute, chat }) {
                         )}
                       </div>
                     </>
+                  )}
+                  <div className="provider-popover-divider" />
+                  <div className="provider-popover-label">Reasoning Effort</div>
+                  {REASONING_EFFORT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`provider-popover-option${reasoningEffort === option.value ? ' is-selected' : ''}`}
+                      onClick={() => { setReasoningEffort(option.value); }}
+                      type="button"
+                    >
+                      <span className="check">{reasoningEffort === option.value ? '\u2713' : ''}</span>
+                      {option.label}
+                    </button>
+                  ))}
+                  {selectionIncludesClaude && reasoningEffort === 'xhigh' && (
+                    <div style={{ fontSize: '0.7rem', color: 'var(--ink-tertiary)', padding: '2px 8px 0' }}>
+                      Claude providers use High when Extra High is selected.
+                    </div>
                   )}
                 </motion.div>
               )}

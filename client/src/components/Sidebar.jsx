@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listConversations, deleteConversation, updateConversation } from '../api/chatApi.js';
+import { onCircuitChange } from '../api/http.js';
+import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import { transitions, staggerContainer, staggerChild, fade } from '../utils/motion.js';
@@ -11,25 +13,56 @@ const POLL_IDLE_MS = 30_000;
 const POLL_ACTIVE_WINDOW_MS = 60_000;
 
 const NAV_ITEMS = [
-  { hash: '#/chat', label: 'Chat', icon: IconChat },
-  { hash: '#/dashboard', label: 'Dashboard', icon: IconDashboard },
-  { hash: '#/playbook', label: 'Playbook', icon: IconBook },
-  { hash: '#/templates', label: 'Templates', icon: IconTemplate },
-  { hash: '#/analytics', label: 'Analytics', icon: IconChart },
-  { hash: '#/usage', label: 'Usage', icon: IconUsage },
-  { hash: '#/dev', label: 'Dev Mode', icon: IconTerminal },
+  { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
+  { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
+  { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
+  { hash: '#/templates', label: 'Templates', short: 'Tmpl', icon: IconTemplate },
+  { hash: '#/analytics', label: 'Analytics', short: 'Stats', icon: IconChart },
+  { hash: '#/usage', label: 'Usage', short: 'Usage', icon: IconUsage },
+  { hash: '#/dev', label: 'Dev Mode', short: 'Dev', icon: IconTerminal },
 ];
 
-export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse }) {
+export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {
+  const toast = useToast();
   const [conversations, setConversations] = useState([]);
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [hoverExpanded, setHoverExpanded] = useState(false);
+  const hoverTimerRef = useRef(null);
+  const mouseOverRef = useRef(false);
   const editInputRef = useRef(null);
   const loadingRef = useRef(false);
   const fetchGenRef = useRef(0);
-  const lastMutationRef = useRef(Date.now());
+  const lastMutationRef = useRef(0);  // Start idle — no reason to fast-poll on fresh load
+  const [circuitState, setCircuitState] = useState({ status: 'closed', failures: 0 });
+  const navItems = [...NAV_ITEMS, ...extraNavItems.map((item) => ({ ...item, icon: item.icon || IconTerminal }))];
+
+  const handleMouseEnter = useCallback(() => {
+    mouseOverRef.current = true;
+    if (!collapsed || !hoverExpand) return;
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoverExpanded(true), 200);
+  }, [collapsed, hoverExpand]);
+
+  const handleMouseLeave = useCallback(() => {
+    mouseOverRef.current = false;
+    clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = setTimeout(() => setHoverExpanded(false), 300);
+  }, []);
+
+  // When collapsed changes, reset hover state or re-trigger if mouse is still over
+  useEffect(() => {
+    if (!collapsed) {
+      setHoverExpanded(false);
+    } else if (mouseOverRef.current && hoverExpand) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = setTimeout(() => setHoverExpanded(true), 200);
+    }
+  }, [collapsed, hoverExpand]);
+
+  useEffect(() => onCircuitChange(setCircuitState), []);
 
   const getPollInterval = useCallback(() => {
     return (Date.now() - lastMutationRef.current) < POLL_ACTIVE_WINDOW_MS
@@ -99,7 +132,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         window.location.hash = '#/chat';
       }
     } catch {
-      // Ignore
+      toast.error('Failed to delete conversation');
     }
     lastMutationRef.current = Date.now();      // speed up polling after delete
     setDeleteTarget(null);
@@ -122,7 +155,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         c._id === editingId ? { ...c, title: editTitle.trim() } : c
       ));
     } catch {
-      // Ignore
+      toast.error('Failed to rename conversation');
     }
     lastMutationRef.current = Date.now();      // speed up polling after rename
     setEditingId(null);
@@ -138,7 +171,11 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   }, [submitRename]);
 
   return (
-    <aside className={`sidebar${isOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}`}>
+    <aside
+      className={`sidebar${isOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}${hoverExpanded ? ' is-hover-expanded' : ''}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <div className="sidebar-header">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -148,9 +185,12 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         <span>QBO Assist</span>
         <button
           className="sidebar-collapse-btn"
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          onClick={() => {
+            if (hoverExpanded) setHoverExpanded(false);
+            onToggleCollapse();
+          }}
+          aria-label={collapsed && !hoverExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed && !hoverExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
           type="button"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -158,7 +198,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
             <rect x="3" y="3" width="18" height="18" rx="2" />
             {/* Sidebar divider */}
             <line x1="9" y1="3" x2="9" y2="21" />
-            {collapsed ? (
+            {collapsed && !hoverExpanded ? (
               /* Expand arrow in content area */
               <polyline points="13 10 16 12 13 14" strokeWidth="2" />
             ) : (
@@ -174,7 +214,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
       </div>
 
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map(item => {
+        {navItems.map(item => {
           const Icon = item.icon;
           const isActive = currentRoute === item.hash ||
             (item.hash === '#/chat' && currentRoute.startsWith('#/chat'));
@@ -195,6 +235,9 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
               )}
               <Icon size={16} />
               <span>{item.label}</span>
+              {collapsed && showLabels && !hoverExpanded && (
+                <span className="sidebar-nav-short-label">{item.short}</span>
+              )}
             </a>
           );
         })}
@@ -393,6 +436,27 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         onConfirm={confirmDelete}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {circuitState.status !== 'closed' && (
+        <div className="sidebar-circuit-indicator" title={
+          circuitState.status === 'open'
+            ? 'Backend unavailable — requests paused'
+            : `Backend degraded — ${circuitState.failures} consecutive failure${circuitState.failures !== 1 ? 's' : ''}`
+        }>
+          <span
+            className="sidebar-circuit-dot"
+            style={{
+              background: circuitState.status === 'open' ? 'var(--red, #ef4444)' : 'var(--amber, #f59e0b)',
+              boxShadow: circuitState.status === 'open'
+                ? '0 0 6px var(--red, #ef4444)'
+                : '0 0 6px var(--amber, #f59e0b)',
+            }}
+          />
+          <span style={{ fontSize: '11px', color: 'var(--ink-secondary)' }}>
+            {circuitState.status === 'open' ? 'Backend unavailable' : 'Backend degraded'}
+          </span>
+        </div>
+      )}
     </aside>
   );
 }

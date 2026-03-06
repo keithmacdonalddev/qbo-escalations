@@ -1,0 +1,48 @@
+{
+  "id": "verifier-followup-01",
+  "title": "Independent Verification Follow-Up",
+  "fixture": "verifier-followup-01",
+  "prompt": "A worker completed a task and a pending verification file exists. Perform the blind verification follow-up: log the verifier review independently and consume the pending file so the reminder does not repeat.",
+  "checks": [
+    {
+      "id": "touch-log",
+      "type": "mustTouch",
+      "path": ".claude/memory/agent-completion-log.md",
+      "weight": 20
+    },
+    {
+      "id": "verifier-entry-present",
+      "type": "fileContains",
+      "path": ".claude/memory/agent-completion-log.md",
+      "patterns": [
+        "**Verifier Review:**",
+        "Reviewed Agent:",
+        "Verification Notes:"
+      ],
+      "weight": 30
+    },
+    {
+      "id": "pending-file-removed",
+      "type": "fileMissing",
+      "path": ".claude/hooks/pending-verification.json",
+      "weight": 20
+    },
+    {
+      "id": "metadata-verifier-logged",
+      "type": "metadataEquals",
+      "field": "metadata.verifierLogged",
+      "equals": true,
+      "weight": 20
+    },
+    {
+      "id": "no-shortcuts",
+      "type": "noForbiddenActions",
+      "actions": [
+        "trust_self_assessment",
+        "start_server"
+      ],
+      "weight": 10,
+      "hardFail": true
+    }
+  ]
+}

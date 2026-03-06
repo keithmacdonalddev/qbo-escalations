@@ -1,10 +1,9 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 const DevConversation = require('../models/DevConversation');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const {
@@ -13,28 +12,135 @@ const {
   getDefaultProvider,
   getProviderFamily,
 } = require('../services/providers/registry');
+const { getProviderModelId } = require('../services/providers/catalog');
 const {
   VALID_MODES,
   resolvePolicy,
 } = require('../services/chat-orchestrator');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
 const { extractUsageFromMessage } = require('../lib/usage-extractor');
 const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const UPLOADS_ROOT = path.resolve(__dirname, '..', '..', 'uploads');
+const DEV_MODE_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'dev-mode');
 const DEFAULT_PROVIDER = getDefaultProvider();
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseBoundedPositiveInt(value, fallback, max) {
+  const parsed = parsePositiveInt(value, fallback);
+  if (!Number.isFinite(max) || max <= 0) return parsed;
+  return Math.min(parsed, max);
+}
+
 const DEV_CHAT_TIMEOUT_MS = parsePositiveInt(process.env.DEV_CHAT_TIMEOUT_MS, 600000);
+const DEV_CHAT_MAX_TIMEOUT_MS = parsePositiveInt(process.env.DEV_CHAT_MAX_TIMEOUT_MS, 1800000);
 const CODEX_DEV_MODEL = process.env.CODEX_DEV_MODEL || process.env.CODEX_CHAT_MODEL || 'gpt-5.3-codex';
 const CODEX_DEV_REASONING_EFFORT = process.env.CODEX_DEV_REASONING_EFFORT || process.env.CODEX_REASONING_EFFORT || 'high';
+const CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS, 5000);
 const DEFAULT_DEV_MAX_IMAGES = 6;
 const DEFAULT_DEV_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const DEFAULT_DEV_MAX_TOTAL_IMAGE_BYTES = 30 * 1024 * 1024;
+let supportsClaudeDevImageFlagCache = null;
+const CLAUDE_DEV_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
+const DEV_ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function normalizeDevReasoningEffort(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return DEV_ALLOWED_REASONING_EFFORTS.has(normalized) ? normalized : CODEX_DEV_REASONING_EFFORT;
+}
+
+function normalizeClaudeDevEffort(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'xhigh') return 'high';
+  return CLAUDE_DEV_ALLOWED_EFFORTS.has(normalized) ? normalized : 'high';
+}
+
+if (!fs.existsSync(DEV_MODE_UPLOADS_DIR)) {
+  fs.mkdirSync(DEV_MODE_UPLOADS_DIR, { recursive: true });
+}
+
+// ---------------------------------------------------------------------------
+// Dev Agent system prompt / role identity
+// ---------------------------------------------------------------------------
+
+const CLAUDE_ROLE = [
+  'You are the Dev Agent for the QBO Escalations project. You are always on — monitoring, fixing, and improving this codebase autonomously.',
+  '',
+  'CORE BEHAVIORS:',
+  '- When you receive an error report: investigate the source file, determine root cause, and FIX IT directly. Don\'t explain — act. If you can\'t fix with confidence, explain why.',
+  '- When asked to review code changes: read the files, check for bugs/edge cases/missing error handling, fix what you find. Report what you changed.',
+  '- When asked about the codebase: use your tools to explore before answering. Never guess.',
+  '- Make changes directly to files. Don\'t describe what to do — do it.',
+  '',
+  'TOOLS: Full filesystem access via Read, Write, Edit, Bash, Glob, Grep.',
+  '',
+  'PROJECT:',
+  '- Stack: React 19 + Vite (ESM client), Express 5 + Mongoose 9 (CommonJS server), MongoDB Atlas',
+  '- Convention: CommonJS server (require), ESM client (import), Express 5 async errors auto-caught',
+  '- API shape: { ok: true/false, ... } with code and error on failures',
+  '- Root: ' + PROJECT_ROOT,
+  '',
+  'MESSAGES PREFIXED WITH [AUTO-ERROR], [AUTO-REVIEW], OR [IDLE-SCAN]:',
+  'System-generated. Act on them immediately and autonomously. Fix what you can, report what you did.',
+].join('\n');
+
+const CODEX_ROLE = [
+  'You are the Dev Agent for the QBO Escalations project — always on, monitoring and fixing this codebase autonomously.',
+  '',
+  'BEHAVIORS:',
+  '- Error reports: investigate source, find root cause, fix it directly. Explain only if you cannot fix with confidence.',
+  '- Code review: read files, find bugs/edge cases, fix them, report changes.',
+  '- Codebase questions: explore first, never guess.',
+  '- You can execute code and read/write files.',
+  '',
+  'PROJECT: React 19 + Vite (ESM client), Express 5 + Mongoose 9 (CommonJS server), MongoDB Atlas.',
+  'Convention: CommonJS server (require), ESM client (import). API shape: { ok: true/false }.',
+  '',
+  '[AUTO-ERROR], [AUTO-REVIEW], [IDLE-SCAN] prefixed messages are system-generated — act immediately.',
+].join('\n');
+
+const DEV_SYSTEM_PROMPT_FALLBACK = 'You are the Dev Agent for the QBO Escalations project. Fix errors, review code, and improve the codebase.';
+
+/**
+ * Build the system prompt for a dev agent spawn.
+ * Synchronous, cannot fail — returns a fallback string on any unexpected condition.
+ *
+ * @param {string} providerFamily - 'claude' | 'codex' | other
+ * @returns {string} System prompt text
+ */
+function buildDevSystemPrompt(providerFamily) {
+  try {
+    if (providerFamily === 'codex') return CODEX_ROLE;
+    if (providerFamily === 'claude') return CLAUDE_ROLE;
+    // Unknown provider family — use the shorter Codex variant as a safe default
+    return CODEX_ROLE;
+  } catch {
+    return DEV_SYSTEM_PROMPT_FALLBACK;
+  }
+}
+
+/**
+ * Compute a short hash of all system-prompt inputs.
+ * When the hash differs from the stored value the session must be invalidated
+ * so the CLI subprocess starts fresh with the updated context.
+ *
+ * Fields beyond `rolePrompt` (claudeMdContent, treeGeneratedAt, memorySelectionBasis)
+ * are placeholders for later phases and default to empty strings for now.
+ */
+function computeContextHash({ rolePrompt, claudeMdContent, treeGeneratedAt, memorySelectionBasis } = {}) {
+  const input = [
+    rolePrompt || '',
+    claudeMdContent || '',
+    treeGeneratedAt || '',
+    memorySelectionBasis || '',
+  ].join('|');
+  return createHash('sha256').update(input).digest('hex').slice(0, 16);
+}
 
 // Active dev sessions: sessionKey -> { child, killed, provider, conversationId }
 const activeSessions = new Map();
@@ -44,8 +150,16 @@ function isValidMode(mode) {
   return mode === undefined || VALID_MODES.has(mode);
 }
 
-function shouldResumeClaudeSession(primaryProvider, previousProvider) {
-  return getProviderFamily(primaryProvider) === 'claude' && getProviderFamily(previousProvider) === 'claude';
+function shouldResumeClaudeSession(primaryProvider, previousProvider, currentContextHash, storedContextHash) {
+  if (getProviderFamily(primaryProvider) !== 'claude' || getProviderFamily(previousProvider) !== 'claude') {
+    return false;
+  }
+  // If we have a current hash and it differs from the stored one, the system
+  // prompt inputs changed — force a fresh session so the CLI picks up the new context.
+  if (currentContextHash && currentContextHash !== storedContextHash) {
+    return false;
+  }
+  return true;
 }
 
 function didCliExitSuccessfully(code) {
@@ -84,12 +198,201 @@ function normalizeProviderError(provider, err, defaultCode = 'PROVIDER_EXEC_FAIL
   };
 }
 
-function buildCodexPrompt(messages) {
+function supportsClaudeDevImageFlag() {
+  if (supportsClaudeDevImageFlagCache !== null) return supportsClaudeDevImageFlagCache;
+
+  if (process.env.CLAUDE_SUPPORTS_IMAGE_INPUT !== undefined) {
+    const normalized = String(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT).trim().toLowerCase();
+    supportsClaudeDevImageFlagCache = normalized === '1'
+      || normalized === 'true'
+      || normalized === 'yes'
+      || normalized === 'on';
+    return supportsClaudeDevImageFlagCache;
+  }
+
+  try {
+    const help = spawnSync('claude', ['--help'], {
+      shell: true,
+      cwd: PROJECT_ROOT,
+      env: { ...process.env, CLAUDECODE: undefined },
+      encoding: 'utf8',
+      timeout: CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS,
+    });
+    const text = `${help.stdout || ''}\n${help.stderr || ''}`.toLowerCase();
+    supportsClaudeDevImageFlagCache = text.includes('--image');
+  } catch {
+    supportsClaudeDevImageFlagCache = false;
+  }
+  return supportsClaudeDevImageFlagCache;
+}
+
+function appendImagePathsToPrompt(prompt, imagePaths) {
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) return prompt;
+  const lines = [
+    'Attached image files are available at these local paths:',
+    ...imagePaths.map((filePath, index) => `${index + 1}. ${filePath}`),
+    'Inspect these files as part of the task.',
+  ];
+  return `${prompt}\n\n${lines.join('\n')}`;
+}
+
+function addCompatibilityImageAccessArgs(args, filePaths) {
+  args.push('--permission-mode', 'bypassPermissions');
+  const directories = new Set(
+    (Array.isArray(filePaths) ? filePaths : [])
+      .map((filePath) => path.dirname(filePath))
+      .filter(Boolean)
+  );
+  for (const directory of directories) {
+    args.push('--add-dir', directory);
+  }
+}
+
+function publicDevImagePathToRelative(publicPath) {
+  if (typeof publicPath !== 'string') return null;
+  const trimmed = publicPath.trim();
+  if (!trimmed.startsWith('/uploads/dev-mode/')) return null;
+  return trimmed.replace(/^\/uploads\//, '');
+}
+
+function resolveStoredDevImageRef(imageRef) {
+  const relativePath = publicDevImagePathToRelative(imageRef);
+  if (!relativePath) return null;
+  const absolutePath = path.resolve(UPLOADS_ROOT, relativePath);
+  if (!isPathWithinRoot(DEV_MODE_UPLOADS_DIR, absolutePath)) return null;
+  if (!fs.existsSync(absolutePath)) return null;
+  return {
+    publicPath: `/uploads/${relativePath.replace(/\\/g, '/')}`,
+    relativePath: relativePath.replace(/\\/g, '/'),
+    filePath: absolutePath,
+  };
+}
+
+function mimeSubtypeToExtension(subtype) {
+  const normalized = String(subtype || '').toLowerCase();
+  if (!normalized) return 'png';
+  if (normalized === 'jpeg' || normalized === 'pjpeg') return 'jpg';
+  if (normalized === 'svg+xml') return 'svg';
+  if (normalized === 'x-icon' || normalized === 'vnd.microsoft.icon') return 'ico';
+  const clean = normalized.replace(/[^a-z0-9]/g, '');
+  return clean || 'png';
+}
+
+function decodeDevImageInput(imageInput) {
+  const input = typeof imageInput === 'string' ? imageInput.trim() : '';
+  if (!input) {
+    const err = new Error('Image payload is empty');
+    err.code = 'INVALID_IMAGE';
+    throw err;
+  }
+
+  const dataUrlMatch = input.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,([\s\S]+)$/);
+  const subtype = dataUrlMatch ? dataUrlMatch[1] : '';
+  const payload = (dataUrlMatch ? dataUrlMatch[2] : input).replace(/\s+/g, '');
+
+  if (!payload || !/^[A-Za-z0-9+/=]+$/.test(payload)) {
+    const err = new Error('Unable to decode image payload');
+    err.code = 'INVALID_IMAGE';
+    throw err;
+  }
+
+  const buffer = Buffer.from(payload, 'base64');
+  if (!buffer.length) {
+    const err = new Error('Unable to decode image payload');
+    err.code = 'INVALID_IMAGE';
+    throw err;
+  }
+
+  return {
+    buffer,
+    extension: mimeSubtypeToExtension(subtype),
+  };
+}
+
+function persistDevImages(conversationId, images) {
+  const conversationDir = path.join(DEV_MODE_UPLOADS_DIR, String(conversationId));
+  if (!fs.existsSync(conversationDir)) {
+    fs.mkdirSync(conversationDir, { recursive: true });
+  }
+
+  const storedImages = [];
+  const localPaths = [];
+  const writtenFiles = [];
+
+  try {
+    for (const image of images) {
+      const existing = resolveStoredDevImageRef(image);
+      if (existing) {
+        storedImages.push(existing.publicPath);
+        localPaths.push(existing.filePath);
+        continue;
+      }
+
+      const decoded = decodeDevImageInput(image);
+      const fileName = `${Date.now()}-${randomUUID()}.${decoded.extension}`;
+      const filePath = path.join(conversationDir, fileName);
+      fs.writeFileSync(filePath, decoded.buffer);
+      writtenFiles.push(filePath);
+      storedImages.push(`/uploads/dev-mode/${conversationId}/${fileName}`);
+      localPaths.push(filePath);
+    }
+
+    return { storedImages, localPaths };
+  } catch (err) {
+    for (const filePath of writtenFiles) {
+      try { fs.unlinkSync(filePath); } catch { /* ignore */ }
+    }
+    throw err;
+  }
+}
+
+function collectConversationImageRefs(conversation) {
+  if (!conversation || !Array.isArray(conversation.messages)) return [];
+  const refs = [];
+  for (const message of conversation.messages) {
+    if (!Array.isArray(message.images)) continue;
+    for (const imageRef of message.images) {
+      if (typeof imageRef === 'string' && imageRef.trim()) refs.push(imageRef.trim());
+    }
+  }
+  return refs;
+}
+
+function cleanupStoredDevImages(imageRefs) {
+  const touchedDirs = new Set();
+  for (const imageRef of imageRefs) {
+    const resolved = resolveStoredDevImageRef(imageRef);
+    if (!resolved) continue;
+    try {
+      if (fs.existsSync(resolved.filePath)) fs.unlinkSync(resolved.filePath);
+      touchedDirs.add(path.dirname(resolved.filePath));
+    } catch { /* ignore */ }
+  }
+
+  for (const dirPath of touchedDirs) {
+    try {
+      if (!fs.existsSync(dirPath)) continue;
+      const entries = fs.readdirSync(dirPath);
+      if (entries.length === 0) fs.rmdirSync(dirPath);
+    } catch { /* ignore */ }
+  }
+}
+
+function buildConversationPrompt(messages) {
   if (!Array.isArray(messages) || messages.length === 0) return '';
   const lines = [];
   for (const msg of messages) {
     const prefix = msg.role === 'user' ? 'User' : msg.role === 'assistant' ? 'Assistant' : 'System';
     lines.push(prefix + ': ' + (msg.content || ''));
+    if (Array.isArray(msg.images) && msg.images.length > 0) {
+      const filePaths = msg.images
+        .map((imageRef) => resolveStoredDevImageRef(imageRef))
+        .filter(Boolean)
+        .map((image) => image.filePath);
+      if (filePaths.length > 0) {
+        lines.push(`${prefix} attached image files:\n${filePaths.map((filePath, index) => `${index + 1}. ${filePath}`).join('\n')}`);
+      }
+    }
   }
   lines.push('Assistant:');
   return lines.join('\n\n');
@@ -253,7 +556,7 @@ function normalizeDevImages(images) {
     return { ok: true, images: [], totalBytes: 0 };
   }
   if (!Array.isArray(images)) {
-    return { ok: false, code: 'INVALID_IMAGES', error: 'images must be an array of base64 strings' };
+    return { ok: false, code: 'INVALID_IMAGES', error: 'images must be an array of base64 strings or stored dev upload paths' };
   }
   if (images.length > getDevChatMaxImages()) {
     return {
@@ -270,11 +573,34 @@ function normalizeDevImages(images) {
 
   for (const rawImage of images) {
     if (typeof rawImage !== 'string') {
-      return { ok: false, code: 'INVALID_IMAGE', error: 'Each image must be a base64 string' };
+      return { ok: false, code: 'INVALID_IMAGE', error: 'Each image must be a string' };
     }
     const trimmed = rawImage.trim();
     if (!trimmed) {
-      return { ok: false, code: 'INVALID_IMAGE', error: 'Each image must be a non-empty base64 string' };
+      return { ok: false, code: 'INVALID_IMAGE', error: 'Each image must be a non-empty string' };
+    }
+
+    const stored = resolveStoredDevImageRef(trimmed);
+    if (stored) {
+      const bytes = fs.statSync(stored.filePath).size;
+      if (bytes > maxImageBytes) {
+        return {
+          ok: false,
+          code: 'IMAGE_TOO_LARGE',
+          error: `Image exceeds ${maxImageBytes} bytes`,
+        };
+      }
+
+      totalBytes += bytes;
+      if (totalBytes > maxTotalBytes) {
+        return {
+          ok: false,
+          code: 'IMAGES_TOO_LARGE',
+          error: `Total image payload exceeds ${maxTotalBytes} bytes`,
+        };
+      }
+      normalizedImages.push(stored.publicPath);
+      continue;
     }
 
     const payload = extractBase64Payload(trimmed);
@@ -308,43 +634,24 @@ function normalizeDevImages(images) {
   return { ok: true, images: normalizedImages, totalBytes };
 }
 
-/** Write base64 images to temp files, return paths for CLI --image flags */
-function writeImageTempFiles(images) {
-  const tempFiles = [];
-  if (!Array.isArray(images) || images.length === 0) return tempFiles;
-  for (let i = 0; i < images.length; i++) {
-    const raw = typeof images[i] === 'string' ? images[i] : '';
-    if (!raw) continue;
-    const base64Data = extractBase64Payload(raw);
-    if (!base64Data) continue;
-    const tmpPath = path.join(os.tmpdir(), `qbo-dev-img-${Date.now()}-${i}.png`);
-    fs.writeFileSync(tmpPath, Buffer.from(base64Data, 'base64'));
-    tempFiles.push(tmpPath);
-  }
-  return tempFiles;
-}
-
-function cleanupTempFiles(tempFiles) {
-  for (const f of tempFiles) {
-    try { fs.unlinkSync(f); } catch { /* ignore */ }
-  }
-}
-
 function buildProviderCommand({
   providerId,
   message,
   resumeSessionId,
   historyMessages,
   imagePaths,
+  reasoningEffort,
+  systemPrompt,
 }) {
   const family = getProviderFamily(providerId);
   if (family === 'codex') {
-    const codexModel = providerId === 'gpt-5-mini' ? 'gpt-5-mini' : CODEX_DEV_MODEL;
+    const codexModel = getProviderModelId(providerId) || CODEX_DEV_MODEL;
+    const effectiveReasoningEffort = normalizeDevReasoningEffort(reasoningEffort);
     const args = [
       'exec',
       '--json',
       '--model', codexModel,
-      '-c', `reasoning_effort="${CODEX_DEV_REASONING_EFFORT}"`,
+      '-c', `reasoning_effort="${effectiveReasoningEffort}"`,
       '--skip-git-repo-check',
     ];
     if (Array.isArray(imagePaths)) {
@@ -353,10 +660,14 @@ function buildProviderCommand({
       }
     }
     args.push('-');
+    let codexStdin = buildConversationPrompt(historyMessages);
+    if (systemPrompt) {
+      codexStdin = `System instructions:\n${systemPrompt}\n\n${codexStdin}`;
+    }
     return {
       command: 'codex',
       args,
-      stdinText: buildCodexPrompt(historyMessages),
+      stdinText: codexStdin,
       supportsSessionResume: false,
     };
   }
@@ -367,17 +678,29 @@ function buildProviderCommand({
     '--verbose',
     '--include-partial-messages',
   ];
-  if (providerId === 'claude-sonnet-4-6') args.push('--model', 'claude-sonnet-4-6');
+  const claudeModel = getProviderModelId(providerId);
+  if (claudeModel) args.push('--model', claudeModel);
+  args.push('--effort', normalizeClaudeDevEffort(reasoningEffort));
   if (resumeSessionId) args.push('--resume', resumeSessionId);
-  if (Array.isArray(imagePaths)) {
-    for (const imgPath of imagePaths) {
-      args.push('--image', imgPath);
+  let stdinText = resumeSessionId ? message : buildConversationPrompt(historyMessages);
+  // Prepend system prompt only for non-resume spawns (resume sessions already have it)
+  if (systemPrompt && !resumeSessionId) {
+    stdinText = `System instructions:\n${systemPrompt}\n\n${stdinText}`;
+  }
+  if (Array.isArray(imagePaths) && imagePaths.length > 0) {
+    if (supportsClaudeDevImageFlag()) {
+      for (const imgPath of imagePaths) {
+        args.push('--image', imgPath);
+      }
+    } else {
+      stdinText = appendImagePathsToPrompt(stdinText, imagePaths);
+      addCompatibilityImageAccessArgs(args, imagePaths);
     }
   }
   return {
     command: 'claude',
     args,
-    stdinText: message,           // pipe user content via stdin, never as a CLI argument
+    stdinText,
     supportsSessionResume: true,
   };
 }
@@ -388,6 +711,8 @@ function runDevAttempt({
   resumeSessionId,
   historyMessages,
   imagePaths,
+  reasoningEffort,
+  systemPrompt,
   timeoutMs,
   sessionEntry,
   writeEvent,
@@ -401,6 +726,8 @@ function runDevAttempt({
     resumeSessionId,
     historyMessages,
     imagePaths,
+    reasoningEffort,
+    systemPrompt,
   });
 
   return new Promise((resolve) => {
@@ -588,6 +915,7 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
     mode,
     fallbackProvider,
     timeoutMs,
+    reasoningEffort,
   } = req.body || {};
 
   if (message !== undefined && typeof message !== 'string') {
@@ -656,21 +984,46 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
   if (getProviderFamily(policy.primaryProvider) !== 'claude') {
     conversation.sessionId = '';
   }
+
+  // Compute context hash from the system-prompt inputs for this request.
+  // For Phase 1 only rolePrompt has a value; the other fields will be populated by later phases.
+  const currentSystemPrompt = buildDevSystemPrompt(getProviderFamily(policy.primaryProvider));
+  const currentContextHash = computeContextHash({ rolePrompt: currentSystemPrompt });
+
+  const persistedImages = persistDevImages(conversation._id, normalizedImages);
   conversation.messages.push({
     role: 'user',
     content: normalizedMessage || '(image attached)',
+    images: persistedImages.storedImages,
     timestamp: new Date(),
   });
+
+  // Check for context drift BEFORE mutating conversation.contextHash.
+  const storedContextHash = conversation.contextHash || '';
+  const hashChanged = currentContextHash !== storedContextHash;
+
+  // Store contextHash on new conversations or when hash changes (context drift).
+  if (!conversationId || hashChanged) {
+    conversation.contextHash = currentContextHash;
+    // Hash mismatch on an existing conversation means context inputs changed —
+    // clear the sessionId so the CLI starts fresh with the new system prompt.
+    if (conversationId && hashChanged) {
+      conversation.sessionId = '';
+    }
+  }
   await conversation.save();
 
-  const resumeSessionId = shouldResumeClaudeSession(policy.primaryProvider, previousProvider)
+  const resumeSessionId = shouldResumeClaudeSession(
+    policy.primaryProvider, previousProvider, currentContextHash, storedContextHash
+  )
     ? (sessionId || conversation.sessionId || null)
     : null;
   const historyMessages = conversation.messages.map((m) => ({
     role: m.role,
     content: m.content || '',
+    images: Array.isArray(m.images) ? m.images : [],
   }));
-  const imagePaths = writeImageTempFiles(normalizedImages);
+  const imagePaths = persistedImages.localPaths;
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -715,13 +1068,14 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
   writeEvent('start', {
     sessionKey,
     conversationId: conversation._id.toString(),
+    requestId: req.requestId,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
     mode: policy.mode,
   });
 
-  const devRequestId = randomUUID();
+  const devRequestId = req.requestId;
   let devStreamSettled = false;
 
   const heartbeat = setInterval(() => {
@@ -731,7 +1085,6 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
   const cleanup = () => {
     clearInterval(heartbeat);
     sessionEntry.killed = true;
-    cleanupTempFiles(imagePaths);
     if (sessionEntry.child) {
       try { sessionEntry.child.kill('SIGTERM'); } catch { /* ignore */ }
       sessionEntry.child = null;
@@ -749,7 +1102,13 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
         if (sessionEntry.killed || streamClosed) return;
 
         const providerId = sequence[i];
-        const effectiveTimeoutMs = parsePositiveInt(timeoutMs, DEV_CHAT_TIMEOUT_MS);
+        const effectiveTimeoutMs = parseBoundedPositiveInt(timeoutMs, DEV_CHAT_TIMEOUT_MS, DEV_CHAT_MAX_TIMEOUT_MS);
+
+        // System prompt: inject on first spawn, skip on resume (session already has it).
+        // For fallback attempts (i > 0), recompute for the new provider family.
+        const attemptSystemPrompt = finalSessionId
+          ? null
+          : buildDevSystemPrompt(getProviderFamily(providerId));
 
         const attemptResult = await runDevAttempt({
           providerId,
@@ -757,6 +1116,8 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
           resumeSessionId: finalSessionId,
           historyMessages,
           imagePaths,
+          reasoningEffort,
+          systemPrompt: attemptSystemPrompt,
           timeoutMs: effectiveTimeoutMs,
           sessionEntry,
           writeEvent,
@@ -1019,12 +1380,27 @@ router.patch('/conversations/:id', async (req, res) => {
   res.json({ ok: true, conversation });
 });
 
+// DELETE /api/dev/conversations/:id/messages/last -- Remove the last message from a conversation
+router.delete('/conversations/:id/messages/last', async (req, res) => {
+  const conversation = await DevConversation.findById(req.params.id);
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Dev conversation not found' });
+  }
+  if (!conversation.messages || conversation.messages.length === 0) {
+    return res.status(400).json({ ok: false, code: 'NO_MESSAGES', error: 'Conversation has no messages' });
+  }
+  conversation.messages.pop();
+  await conversation.save();
+  res.json({ ok: true, messageCount: conversation.messages.length });
+});
+
 // DELETE /api/dev/conversations/:id -- Delete persistent dev conversation
 router.delete('/conversations/:id', async (req, res) => {
   const deleted = await DevConversation.findByIdAndDelete(req.params.id);
   if (!deleted) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Dev conversation not found' });
   }
+  cleanupStoredDevImages(collectConversationImageRefs(deleted));
   res.json({ ok: true });
 });
 
@@ -1123,6 +1499,8 @@ module.exports._internal = {
   extractBase64Payload,
   normalizeDevImages,
   buildProviderCommand,
+  buildDevSystemPrompt,
+  computeContextHash,
   parsePositiveInt,
   isPathWithinRoot,
   shouldResumeClaudeSession,

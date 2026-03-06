@@ -4,35 +4,36 @@ import {
   listDevConversations,
   getDevConversation,
   deleteDevConversation,
+  deleteLastDevMessage,
 } from '../api/devApi.js';
+import {
+  DEFAULT_PROVIDER,
+  DEFAULT_REASONING_EFFORT,
+  PROVIDER_IDS,
+  PROVIDER_FAMILY,
+  getAlternateProvider,
+  normalizeProvider as normalizeCatalogProvider,
+  normalizeReasoningEffort,
+} from '../lib/providerCatalog.js';
 
-const DEFAULT_PROVIDER = 'claude';
 const DEFAULT_MODE = 'single';
-const PROVIDERS = new Set(['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
+const PROVIDERS = new Set(PROVIDER_IDS);
 const MODES = new Set(['single', 'fallback']);
 
 function normalizeProvider(provider) {
-  return PROVIDERS.has(provider) ? provider : DEFAULT_PROVIDER;
+  return PROVIDERS.has(provider) ? provider : normalizeCatalogProvider(provider);
 }
 
 function normalizeMode(mode) {
   return MODES.has(mode) ? mode : DEFAULT_MODE;
 }
 
-const PROVIDER_FAMILY = {
-  claude: 'claude',
-  'claude-sonnet-4-6': 'claude',
-  'chatgpt-5.3-codex-high': 'codex',
-  'gpt-5-mini': 'codex',
-};
-
 function isClaudeFamily(provider) {
   return (PROVIDER_FAMILY[provider] || 'claude') === 'claude';
 }
 
 function alternateProvider(provider) {
-  const family = PROVIDER_FAMILY[provider] || 'claude';
-  return family === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude';
+  return getAlternateProvider(provider);
 }
 
 function normalizeFallback(primary, fallback) {
@@ -42,7 +43,8 @@ function normalizeFallback(primary, fallback) {
   return normalizedFallback;
 }
 
-export function useDevChat() {
+export function useDevChat(options = {}) {
+  const { aiSettings = null } = options;
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -59,6 +61,13 @@ export function useDevChat() {
     if (typeof window === 'undefined') return alternateProvider(DEFAULT_PROVIDER);
     const savedProvider = normalizeProvider(window.localStorage.getItem('qbo-dev-provider'));
     return normalizeFallback(savedProvider, window.localStorage.getItem('qbo-dev-fallback-provider'));
+  });
+  const [reasoningEffort, setReasoningEffortState] = useState(() => {
+    if (typeof window === 'undefined') {
+      return normalizeReasoningEffort(aiSettings?.providerStrategy?.reasoningEffort || DEFAULT_REASONING_EFFORT);
+    }
+    const stored = window.localStorage.getItem('qbo-dev-reasoning-effort');
+    return normalizeReasoningEffort(stored || aiSettings?.providerStrategy?.reasoningEffort || DEFAULT_REASONING_EFFORT);
   });
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamingText, setStreamingText] = useState('');
@@ -78,6 +87,16 @@ export function useDevChat() {
   const providerRef = useRef(provider);
   const modeRef = useRef(mode);
   const fallbackProviderRef = useRef(fallbackProvider);
+  const aiSettingsRef = useRef(aiSettings);
+  const reasoningEffortRef = useRef(reasoningEffort);
+
+  useEffect(() => {
+    aiSettingsRef.current = aiSettings;
+  }, [aiSettings]);
+
+  useEffect(() => {
+    reasoningEffortRef.current = reasoningEffort;
+  }, [reasoningEffort]);
 
   const setProvider = useCallback((nextProvider) => {
     const normalized = normalizeProvider(nextProvider);
@@ -94,8 +113,8 @@ export function useDevChat() {
     setFallbackProviderState(fallback);
 
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-dev-provider', normalized);
-      window.localStorage.setItem('qbo-dev-fallback-provider', fallback);
+      try { window.localStorage.setItem('qbo-dev-provider', normalized); } catch {}
+      try { window.localStorage.setItem('qbo-dev-fallback-provider', fallback); } catch {}
     }
   }, []);
 
@@ -104,7 +123,7 @@ export function useDevChat() {
     modeRef.current = normalized;
     setModeState(normalized);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-dev-mode', normalized);
+      try { window.localStorage.setItem('qbo-dev-mode', normalized); } catch {}
     }
   }, []);
 
@@ -113,7 +132,16 @@ export function useDevChat() {
     fallbackProviderRef.current = normalized;
     setFallbackProviderState(normalized);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-dev-fallback-provider', normalized);
+      try { window.localStorage.setItem('qbo-dev-fallback-provider', normalized); } catch {}
+    }
+  }, []);
+
+  const setReasoningEffort = useCallback((nextEffort) => {
+    const normalized = normalizeReasoningEffort(nextEffort);
+    reasoningEffortRef.current = normalized;
+    setReasoningEffortState(normalized);
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem('qbo-dev-reasoning-effort', normalized); } catch {}
     }
   }, []);
 
@@ -227,6 +255,7 @@ export function useDevChat() {
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode === 'fallback' ? selectedFallback : undefined,
+        reasoningEffort: reasoningEffortRef.current,
       },
       {
         onInit: (data) => {
@@ -311,7 +340,7 @@ export function useDevChat() {
           loadConversations();
         },
         onError: (errMsg) => {
-          setError(errMsg);
+          setError(typeof errMsg === 'string' ? errMsg : (errMsg?.message || 'Request failed'));
           setIsStreaming(false);
           isStreamingRef.current = false;
           setStreamingText('');
@@ -345,6 +374,20 @@ export function useDevChat() {
     }
   }, [conversationId, newConversation, loadConversations]);
 
+  const deleteLastMessage = useCallback(async () => {
+    if (isStreamingRef.current) return;
+    if (!conversationIdRef.current) {
+      setMessages((prev) => prev.length > 0 ? prev.slice(0, -1) : prev);
+      return;
+    }
+    try {
+      await deleteLastDevMessage(conversationIdRef.current);
+      setMessages((prev) => prev.length > 0 ? prev.slice(0, -1) : prev);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
   const dismissFallbackNotice = useCallback(() => {
     setFallbackNotice(null);
   }, []);
@@ -357,6 +400,7 @@ export function useDevChat() {
     provider,
     mode,
     fallbackProvider,
+    reasoningEffort,
     isStreaming,
     streamingText,
     streamProvider,
@@ -368,11 +412,13 @@ export function useDevChat() {
     setProvider,
     setMode,
     setFallbackProvider,
+    setReasoningEffort,
     dismissFallbackNotice,
     abortStream,
     selectConversation,
     newConversation,
     removeConversation,
+    deleteLastMessage,
     setError,
   };
 }

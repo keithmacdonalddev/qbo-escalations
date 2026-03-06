@@ -7,30 +7,30 @@ import {
   acceptParallelTurn as acceptParallelTurnApi,
   unacceptParallelTurn as unacceptParallelTurnApi,
 } from '../api/chatApi.js';
+import { normalizeError } from '../utils/normalizeError.js';
+import {
+  DEFAULT_PROVIDER,
+  DEFAULT_REASONING_EFFORT,
+  PROVIDER_IDS,
+  getAlternateProvider,
+  normalizeProvider as normalizeCatalogProvider,
+  normalizeReasoningEffort,
+} from '../lib/providerCatalog.js';
 
-const DEFAULT_PROVIDER = 'claude';
 const DEFAULT_MODE = 'single';
-const PROVIDERS = new Set(['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
+const PROVIDERS = new Set(PROVIDER_IDS);
 const MODES = new Set(['single', 'fallback', 'parallel']);
 
 // Stable empty array returned for `conversations` — Sidebar is the single
 // source of truth for conversation list. Kept for API compatibility.
 const EMPTY_CONVERSATIONS = Object.freeze([]);
 
-const PROVIDER_FAMILY = {
-  claude: 'claude',
-  'claude-sonnet-4-6': 'claude',
-  'chatgpt-5.3-codex-high': 'codex',
-  'gpt-5-mini': 'codex',
-};
-
 function alternateProvider(provider) {
-  const family = PROVIDER_FAMILY[provider] || 'claude';
-  return family === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude';
+  return getAlternateProvider(provider);
 }
 
 function normalizeProvider(provider) {
-  return PROVIDERS.has(provider) ? provider : DEFAULT_PROVIDER;
+  return PROVIDERS.has(provider) ? provider : normalizeCatalogProvider(provider);
 }
 
 function normalizeMode(mode) {
@@ -44,37 +44,6 @@ function normalizeFallback(primary, fallback) {
   return normalizedFallback;
 }
 
-function normalizeChatError(input) {
-  if (!input) return null;
-  if (typeof input === 'string') {
-    return {
-      message: input,
-      error: input,
-      code: 'REQUEST_FAILED',
-      detail: '',
-      attempts: [],
-    };
-  }
-  if (typeof input === 'object') {
-    const message = input.message || input.error || 'Request failed';
-    return {
-      ...input,
-      message,
-      error: message,
-      code: input.code || 'REQUEST_FAILED',
-      detail: input.detail || '',
-      attempts: Array.isArray(input.attempts) ? input.attempts : [],
-    };
-  }
-  const fallback = String(input);
-  return {
-    message: fallback,
-    error: fallback,
-    code: 'REQUEST_FAILED',
-    detail: '',
-    attempts: [],
-  };
-}
 
 function createProcessEvent(event) {
   const now = new Date().toISOString();
@@ -104,6 +73,13 @@ export function useChat(options = {}) {
     if (typeof window === 'undefined') return alternateProvider(DEFAULT_PROVIDER);
     const savedProvider = normalizeProvider(window.localStorage.getItem('qbo-chat-provider'));
     return normalizeFallback(savedProvider, window.localStorage.getItem('qbo-chat-fallback-provider'));
+  });
+  const [reasoningEffort, setReasoningEffortState] = useState(() => {
+    if (typeof window === 'undefined') {
+      return normalizeReasoningEffort(aiSettings?.providerStrategy?.reasoningEffort || DEFAULT_REASONING_EFFORT);
+    }
+    const stored = window.localStorage.getItem('qbo-chat-reasoning-effort');
+    return normalizeReasoningEffort(stored || aiSettings?.providerStrategy?.reasoningEffort || DEFAULT_REASONING_EFFORT);
   });
   const [parallelProviders, setParallelProvidersState] = useState([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -136,6 +112,7 @@ export function useChat(options = {}) {
   const fallbackProviderRef = useRef(fallbackProvider);
   const parallelProvidersRef = useRef([]);
   const aiSettingsRef = useRef(aiSettings);
+  const reasoningEffortRef = useRef(reasoningEffort);
   const processEventsRef = useRef([]);
   const chunkStartedProvidersRef = useRef(new Set());
   const thinkingTextRef = useRef('');
@@ -151,7 +128,7 @@ export function useChat(options = {}) {
       setErrorDetails(null);
       return;
     }
-    const normalized = normalizeChatError(nextError);
+    const normalized = normalizeError(nextError);
     setErrorState(normalized.message);
     setErrorDetails(normalized);
   }, []);
@@ -181,8 +158,8 @@ export function useChat(options = {}) {
     setFallbackProviderState(fallback);
 
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-chat-provider', normalized);
-      window.localStorage.setItem('qbo-chat-fallback-provider', fallback);
+      try { window.localStorage.setItem('qbo-chat-provider', normalized); } catch {}
+      try { window.localStorage.setItem('qbo-chat-fallback-provider', fallback); } catch {}
     }
   }, []);
 
@@ -191,7 +168,7 @@ export function useChat(options = {}) {
     modeRef.current = normalized;
     setModeState(normalized);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-chat-mode', normalized);
+      try { window.localStorage.setItem('qbo-chat-mode', normalized); } catch {}
     }
   }, []);
 
@@ -200,7 +177,7 @@ export function useChat(options = {}) {
     fallbackProviderRef.current = normalized;
     setFallbackProviderState(normalized);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('qbo-chat-fallback-provider', normalized);
+      try { window.localStorage.setItem('qbo-chat-fallback-provider', normalized); } catch {}
     }
   }, []);
 
@@ -211,6 +188,15 @@ export function useChat(options = {}) {
     const unique = [...new Set(valid)].slice(0, 4);
     parallelProvidersRef.current = unique;
     setParallelProvidersState(unique);
+  }, []);
+
+  const setReasoningEffort = useCallback((nextEffort) => {
+    const normalized = normalizeReasoningEffort(nextEffort);
+    reasoningEffortRef.current = normalized;
+    setReasoningEffortState(normalized);
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem('qbo-chat-reasoning-effort', normalized); } catch {}
+    }
   }, []);
 
   useEffect(() => {
@@ -228,6 +214,10 @@ export function useChat(options = {}) {
   useEffect(() => {
     aiSettingsRef.current = aiSettings;
   }, [aiSettings]);
+
+  useEffect(() => {
+    reasoningEffortRef.current = reasoningEffort;
+  }, [reasoningEffort]);
 
   useEffect(() => {
     if (!aiSettings?.debug?.showContextDebug) {
@@ -374,6 +364,7 @@ export function useChat(options = {}) {
         parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
           ? parallelProvidersRef.current
           : undefined,
+        reasoningEffort: reasoningEffortRef.current,
         settings: aiSettingsRef.current || undefined,
       },
       {
@@ -455,7 +446,7 @@ export function useChat(options = {}) {
           setStreamingText(streamingTextRef.current);
         },
         onProviderError: (data) => {
-          const normalized = normalizeChatError(data);
+          const normalized = normalizeError(data);
           pushProcessEvent({
             level: 'error',
             title: 'Provider attempt failed',
@@ -575,7 +566,7 @@ export function useChat(options = {}) {
           conversationIdRef.current = data.conversationId;
         },
         onError: (errPayload) => {
-          const normalized = normalizeChatError(errPayload);
+          const normalized = normalizeError(errPayload);
           setError(normalized);
           pushProcessEvent({
             level: 'error',
@@ -670,6 +661,7 @@ export function useChat(options = {}) {
         parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
           ? parallelProvidersRef.current
           : undefined,
+        reasoningEffort: reasoningEffortRef.current,
         settings: aiSettingsRef.current || undefined,
       },
       {
@@ -751,7 +743,7 @@ export function useChat(options = {}) {
           setStreamingText(streamingTextRef.current);
         },
         onProviderError: (data) => {
-          const normalized = normalizeChatError(data);
+          const normalized = normalizeError(data);
           pushProcessEvent({
             level: 'error',
             title: 'Provider attempt failed',
@@ -864,7 +856,7 @@ export function useChat(options = {}) {
           setThinkingStartTime(null);
         },
         onError: (errPayload) => {
-          const normalized = normalizeChatError(errPayload);
+          const normalized = normalizeError(errPayload);
           setError(normalized);
           pushProcessEvent({
             level: 'error',
@@ -1021,6 +1013,7 @@ export function useChat(options = {}) {
     provider,
     mode,
     fallbackProvider,
+    reasoningEffort,
     parallelProviders,
     isStreaming,
     streamingText,
@@ -1039,6 +1032,7 @@ export function useChat(options = {}) {
     setProvider,
     setMode,
     setFallbackProvider,
+    setReasoningEffort,
     setParallelProviders,
     dismissFallbackNotice,
     dismissRuntimeWarnings,

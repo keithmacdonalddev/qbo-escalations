@@ -59,7 +59,7 @@ function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePau
         ))}
       </div>
 
-      {/* Stats overlay */}
+      {/* Stats + controls unified strip */}
       <div className={`flame-stats${expanded ? ' flame-stats--shifted' : ''}`}>
         <span>
           <span className="flame-dot flame-dot--green" />
@@ -78,37 +78,36 @@ function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePau
         </span>
         {paused && <span className="flame-paused-badge">PAUSED</span>}
         {hmrAge && <span className="flame-hmr-badge" title="Last HMR auto-reload">reloaded {hmrAge}</span>}
-      </div>
 
-      {/* Controls */}
-      <div className={`flame-controls${expanded ? ' flame-controls--shifted' : ''}`}>
-        <button
-          className={`flame-ctrl-btn${paused ? ' flame-ctrl-btn--active' : ''}`}
-          onClick={togglePaused}
-          type="button"
-          title={paused ? 'Resume recording' : 'Pause recording'}
-        >
-          {paused ? '\u25B6' : '\u2759\u2759'}
-        </button>
-        <button
-          className="flame-ctrl-btn"
-          onClick={clearAll}
-          type="button"
-          title="Clear all segments and reset stats"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="3 6 5 6 21 6" />
-            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-          </svg>
-        </button>
-        <button
-          className="flame-ctrl-btn"
-          onClick={toggleExpanded}
-          type="button"
-          title={expanded ? 'Collapse flame bar' : 'Expand flame bar'}
-        >
-          {expanded ? '\u25BE' : '\u25B8'}
-        </button>
+        <span className="flame-controls-inline">
+          <button
+            className={`flame-ctrl-btn${paused ? ' flame-ctrl-btn--active' : ''}`}
+            onClick={togglePaused}
+            type="button"
+            title={paused ? 'Resume recording' : 'Pause recording'}
+          >
+            {paused ? '\u25B6' : '\u2759\u2759'}
+          </button>
+          <button
+            className="flame-ctrl-btn"
+            onClick={clearAll}
+            type="button"
+            title="Clear all segments and reset stats"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" />
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            </svg>
+          </button>
+          <button
+            className="flame-ctrl-btn"
+            onClick={toggleExpanded}
+            type="button"
+            title={expanded ? 'Collapse flame bar' : 'Expand flame bar'}
+          >
+            {expanded ? '\u25BE' : '\u25B8'}
+          </button>
+        </span>
       </div>
     </>
   );

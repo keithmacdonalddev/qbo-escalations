@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ChatMessage from './ChatMessage.jsx';
 import Tooltip from './Tooltip.jsx';
+import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel } from '../lib/providerCatalog.js';
+import { useDevAgent } from '../context/DevAgentContext.jsx';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -10,20 +12,13 @@ const DEV_PROMPTS = [
   { label: 'Explain code', prompt: 'Explain how this code works: ' },
 ];
 
-const PROVIDER_OPTIONS = [
-  { value: 'claude', label: 'Claude' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
-  { value: 'chatgpt-5.3-codex-high', label: 'ChatGPT 5.3 Codex (High)' },
-  { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-];
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
   { value: 'fallback', label: 'Fallback' },
 ];
 
-function getProviderLabel(provider) {
-  const option = PROVIDER_OPTIONS.find((p) => p.value === provider);
-  return option ? option.label : 'Claude';
+function getReasoningEffortLabel(value) {
+  return REASONING_EFFORT_OPTIONS.find((option) => option.value === value)?.label || 'High';
 }
 
 function readFileAsDataUrl(file) {
@@ -35,31 +30,35 @@ function readFileAsDataUrl(file) {
   });
 }
 
-export default function DevMode({
-  messages,
-  conversationId,
-  conversations,
-  provider,
-  mode,
-  fallbackProvider,
-  isStreaming,
-  streamingText,
-  streamProvider,
-  toolEvents,
-  fallbackNotice,
-  error,
-  responseTime,
-  sendMessage,
-  setProvider,
-  setMode,
-  setFallbackProvider,
-  dismissFallbackNotice,
-  abortStream,
-  selectConversation,
-  newConversation,
-  removeConversation,
-  setError,
-}) {
+export default function DevMode() {
+  const {
+    messages,
+    conversationId,
+    conversations,
+    provider,
+    mode,
+    fallbackProvider,
+    reasoningEffort,
+    isStreaming,
+    streamingText,
+    streamProvider,
+    toolEvents,
+    fallbackNotice,
+    error,
+    responseTime,
+    sendMessage,
+    setProvider,
+    setMode,
+    setFallbackProvider,
+    setReasoningEffort,
+    dismissFallbackNotice,
+    abortStream,
+    selectConversation,
+    newConversation,
+    removeConversation,
+    deleteLastMessage,
+    setError,
+  } = useDevAgent();
 
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -70,6 +69,8 @@ export default function DevMode({
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const providerPopoverRef = useRef(null);
+  const selectionIncludesClaude = PROVIDER_FAMILY[provider] === 'claude'
+    || (mode !== 'single' && PROVIDER_FAMILY[fallbackProvider] === 'claude');
 
   // Auto-scroll
   useEffect(() => {
@@ -100,6 +101,10 @@ export default function DevMode({
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  // Detect orphaned user message (last msg is user + not streaming)
+  const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
+  const hasOrphanedUser = lastMsg && lastMsg.role === 'user' && !isStreaming;
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
@@ -112,6 +117,33 @@ export default function DevMode({
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [newConversation]);
+
+  // Orphaned message keyboard shortcuts: R=Retry, E=Edit, D/Escape=Delete
+  useEffect(() => {
+    if (!hasOrphanedUser) return;
+    const handler = (e) => {
+      // Skip if user is typing in textarea or any input
+      const tag = e.target.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT' || e.target.isContentEditable) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        deleteLastMessage();
+        sendMessage(lastMsg.content, lastMsg.images || [], provider);
+      } else if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        setInput(lastMsg.content === '(image attached)' ? '' : lastMsg.content);
+        deleteLastMessage();
+        textareaRef.current?.focus();
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'Escape') {
+        e.preventDefault();
+        deleteLastMessage();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [hasOrphanedUser, lastMsg, deleteLastMessage, sendMessage, provider]);
 
   const handleSubmit = useCallback(() => {
     if ((!input.trim() && images.length === 0) || isStreaming) return;
@@ -265,31 +297,73 @@ export default function DevMode({
           <div className="dev-messages">
             {messages.length === 0 && !isStreaming && (
               <div className="dev-welcome">
-                <div className="dev-welcome-title">Claude Code — Developer Mode</div>
+                <div className="dev-welcome-title">Developer Mode</div>
                 <div className="dev-welcome-desc">
-                  Full dev-mode capabilities: file read/write, bash commands, and code edits.
+                  Full dev-mode capabilities: file read/write, bash commands, code edits, and screenshot debugging.
                   You can also attach screenshots to debug UI issues.
                 </div>
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <ChatMessage
-                key={msg._id || msg.timestamp || i}
-                role={msg.role}
-                content={msg.content}
-                images={msg.images}
-                provider={msg.provider || provider}
-                fallbackFrom={msg.fallbackFrom}
-                timestamp={msg.timestamp}
-                responseTimeMs={msg.responseTimeMs}
-                usage={msg.usage}
-                isStreaming={false}
-                variant="dev"
-                toolEvents={msg.toolEvents}
-                onRerunCommand={handleRerunCommand}
-              />
-            ))}
+            {messages.map((msg, i) => {
+              const isOrphanedUser = i === messages.length - 1 && msg.role === 'user' && !isStreaming;
+              return (
+                <div key={msg._id || msg.timestamp || i} style={{ position: 'relative' }}>
+                  <ChatMessage
+                    role={msg.role}
+                    content={msg.content}
+                    images={msg.images}
+                    provider={msg.provider || provider}
+                    fallbackFrom={msg.fallbackFrom}
+                    timestamp={msg.timestamp}
+                    responseTimeMs={msg.responseTimeMs}
+                    usage={msg.usage}
+                    isStreaming={false}
+                    variant="dev"
+                    toolEvents={msg.toolEvents}
+                    onRerunCommand={handleRerunCommand}
+                  />
+                  {isOrphanedUser && (
+                    <div style={{ display: 'flex', gap: 'var(--sp-2)', justifyContent: 'flex-end', marginTop: 'var(--sp-1)', paddingRight: 'var(--sp-2)' }}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          deleteLastMessage();
+                          sendMessage(msg.content, msg.images || [], provider);
+                        }}
+                        type="button"
+                        title="Retry — re-send the same prompt (R)"
+                        style={{ fontSize: 'var(--text-xs)', color: 'var(--accent)' }}
+                      >
+                        Retry
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => {
+                          setInput(msg.content === '(image attached)' ? '' : msg.content);
+                          deleteLastMessage();
+                          textareaRef.current?.focus();
+                        }}
+                        type="button"
+                        title="Edit — move back to input and delete (E)"
+                        style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={deleteLastMessage}
+                        type="button"
+                        title="Delete this message (D)"
+                        style={{ fontSize: 'var(--text-xs)', color: 'var(--red, #e53e3e)' }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Streaming response */}
             {isStreaming && (streamingText || toolEvents.length > 0) && (
@@ -370,6 +444,8 @@ export default function DevMode({
                     {getProviderLabel(provider)}
                     {' \u00b7 '}
                     {MODE_OPTIONS.find(m => m.value === mode)?.label || 'Single'}
+                    {' \u00b7 '}
+                    {getReasoningEffortLabel(reasoningEffort)}
                     {mode !== 'single' && (
                       <> + {getProviderLabel(fallbackProvider)}</>
                     )}
@@ -425,6 +501,24 @@ export default function DevMode({
                           ))}
                         </>
                       )}
+                      <div className="provider-popover-divider" />
+                      <div className="provider-popover-label">Reasoning Effort</div>
+                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={`provider-popover-option${reasoningEffort === option.value ? ' is-selected' : ''}`}
+                          onClick={() => setReasoningEffort(option.value)}
+                          type="button"
+                        >
+                          <span className="check">{reasoningEffort === option.value ? '\u2713' : ''}</span>
+                          {option.label}
+                        </button>
+                      ))}
+                      {selectionIncludesClaude && reasoningEffort === 'xhigh' && (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--ink-tertiary)', padding: '2px 8px 0' }}>
+                          Claude providers use High when Extra High is selected.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -457,7 +551,9 @@ export default function DevMode({
                       <kbd>Enter</kbd> Send message<br />
                       <kbd>Shift</kbd>+<kbd>Enter</kbd> New line<br />
                       <kbd>Ctrl</kbd>+<kbd>V</kbd> Paste images<br />
-                      <kbd>Ctrl</kbd>+<kbd>N</kbd> New session
+                      <kbd>Ctrl</kbd>+<kbd>N</kbd> New session<br />
+                      <span style={{ color: 'var(--ink-tertiary)', fontSize: '10px' }}>When aborted:</span><br />
+                      <kbd>R</kbd> Retry &middot; <kbd>E</kbd> Edit &middot; <kbd>D</kbd> Delete
                     </div>
                   </div>
                 </div>

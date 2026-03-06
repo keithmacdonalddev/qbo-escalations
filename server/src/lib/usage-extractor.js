@@ -1,5 +1,7 @@
 'use strict';
 
+const { getCodexProviderIds } = require('../services/providers/catalog');
+
 /**
  * Shared extraction of token usage from CLI JSON events.
  *
@@ -134,9 +136,8 @@ function extractCodexUsage(event, opts) {
  * Explicit set avoids prefix heuristic drift.
  */
 const CODEX_PROVIDERS = new Set([
-  'chatgpt-5.3-codex-high',
+  ...getCodexProviderIds(),
   'gpt-5.3-codex-high',
-  'gpt-5-mini',
   'codex',
   'openai',
 ]);

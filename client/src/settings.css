@@ -24,11 +24,96 @@
   padding: var(--sp-6) var(--sp-6) var(--sp-4);
 }
 
+.settings-sidebar-title-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+  height: 32px;
+}
+
 .settings-sidebar-title {
   font-size: var(--text-lg);
   font-weight: 700;
   color: var(--ink);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  margin: 0;
+}
+
+/* ── Search field — expands right-to-left over title ────────────── */
+
+.settings-search-field-wrap {
+  position: absolute;
+  right: 40px; /* sits left of the icon button */
+  top: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.settings-sidebar-search {
+  width: 100%;
+  height: 100%;
+  padding: 0 var(--sp-3);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  border: 1.5px solid var(--line-subtle);
+  border-radius: 8px;
+  background: var(--bg-input, var(--bg-raised));
+  color: var(--ink);
+  outline: none;
+  transition: border-color 200ms ease, box-shadow 200ms ease;
+}
+
+.settings-sidebar-search::placeholder {
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+.settings-sidebar-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* ── Search icon button ─────────────────────────────────────────── */
+
+.settings-search-icon-btn {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1.5px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+  transition: color 200ms ease, background 200ms ease, border-color 200ms ease;
+}
+
+.settings-search-icon-btn:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.settings-search-icon-btn.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.settings-search-icon-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .settings-sidebar-nav {
@@ -648,6 +733,11 @@
     height: 0;
   }
 
+  .settings-search-field-wrap,
+  .settings-search-icon-btn {
+    display: none;
+  }
+
   .settings-sidebar-item {
     justify-content: center;
     padding: var(--sp-3);
@@ -802,21 +892,21 @@
 }
 .led-mode-card.is-active::before { opacity: 1; }
 
-/* Check indicator for active card */
+/* Check indicator for active card — subtle, not the loudest element */
 .led-mode-card.is-active::after {
   content: '';
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 18px;
-  height: 18px;
+  top: 6px;
+  right: 6px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: var(--accent);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 10px;
-  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 30%, transparent);
+  background-size: 8px;
+  opacity: 0.85;
   animation: led-check-pop 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 @keyframes led-check-pop {
@@ -934,4 +1024,167 @@
 }
 .led-mode-card:hover .led-mode-desc {
   color: var(--ink-secondary);
+}
+
+/* ─── Network Indicator Section — single-column vertical layout ─── */
+
+.ni-section-desc {
+  font-size: var(--text-xs);
+  color: var(--ink-tertiary);
+  line-height: 1.5;
+  margin-bottom: var(--sp-4);
+}
+
+.ni-section {
+  margin-bottom: var(--sp-4);
+}
+
+.ni-label {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+  margin-bottom: var(--sp-2);
+}
+
+.ni-label-sm {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ni-hint {
+  font-size: var(--text-xs);
+  color: var(--ink-tertiary);
+}
+
+.ni-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-tertiary);
+  min-width: 36px;
+  text-align: right;
+}
+
+/* ─── Tuning group: sliders for intensity + speed ─────────────── */
+
+.ni-tuning-group {
+  display: flex;
+  gap: var(--sp-4);
+  padding: var(--sp-3);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  margin-bottom: var(--sp-4);
+}
+
+.ni-slider-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.ni-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--sp-1, 4px);
+}
+
+.ni-range {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.ni-range-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--ink-faint, color-mix(in srgb, var(--ink) 30%, transparent));
+  margin-top: 2px;
+  user-select: none;
+}
+
+/* ─── Divider ─────────────────────────────────────────────────── */
+
+.ni-divider {
+  height: 1px;
+  background: var(--line-subtle, color-mix(in srgb, var(--ink) 8%, transparent));
+  margin: var(--sp-1, 4px) 0 var(--sp-4);
+}
+
+/* ─── Inline control row (label + control side by side) ───────── */
+
+.ni-inline-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ni-inline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─── Pill toggle — iOS-style segmented control ───────────────── */
+
+.ni-pill-toggle {
+  position: relative;
+  display: flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  flex-shrink: 0;
+}
+
+.ni-pill {
+  position: relative;
+  z-index: 1;
+  padding: 6px 16px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--ink-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 200ms ease;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ni-pill:hover:not(.is-active) {
+  color: var(--ink);
+}
+
+.ni-pill.is-active {
+  color: var(--accent);
+}
+
+/* Sliding background indicator */
+.ni-pill-slider {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  height: calc(100% - 6px);
+  border-radius: 8px;
+  background: var(--bg-raised, #faf9f6);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.06);
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+/* ─── Responsive: stack tuning group on narrow viewports ───────── */
+@media (max-width: 480px) {
+  .ni-tuning-group {
+    flex-direction: column;
+  }
+  .ni-inline-control {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

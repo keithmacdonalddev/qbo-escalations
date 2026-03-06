@@ -16,6 +16,7 @@ if (dnsServers.length) {
 
 const app = createApp();
 const PORT = process.env.PORT || 4000;
+const HOST = process.env.HOST || '127.0.0.1';
 let httpServer = null;
 
 // MongoDB connection + server start
@@ -43,8 +44,8 @@ async function start() {
     console.error('UsageLog index sync failed (dedup/TTL may be degraded):', err.message);
   }
 
-  httpServer = app.listen(PORT, () => {
-    console.log(`QBO Escalation API listening on :${PORT}`);
+  httpServer = app.listen(PORT, HOST, () => {
+    console.log(`QBO Escalation API listening on http://${HOST}:${PORT}`);
 
     // Warm up CLI providers in background (non-blocking)
     const { warmUp: warmClaude } = require('./services/claude');

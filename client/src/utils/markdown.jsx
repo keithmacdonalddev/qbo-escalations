@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { DEFAULT_PROVIDER, PROVIDER_FAMILY, PROVIDER_LABELS } from '../lib/providerCatalog.js';
 
 /**
  * Shared markdown rendering utilities.
@@ -224,25 +225,12 @@ export function CopyButton({ text, style = {} }) {
 /**
  * Provider label mapping — shared across parallel and single message components.
  */
-export const PROVIDER_LABELS = {
-  claude: 'Claude',
-  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
-  'chatgpt-5.3-codex-high': 'ChatGPT 5.3 Codex (High)',
-  'gpt-5-mini': 'GPT-5 Mini',
-};
-
-const PROVIDER_CLASS_MAP = {
-  claude: 'provider-a',
-  'claude-sonnet-4-6': 'provider-c',
-  'chatgpt-5.3-codex-high': 'provider-b',
-  'gpt-5-mini': 'provider-d',
-};
-
 export function getProviderLabel(provider) {
   if (provider === 'regex') return 'Regex Parser';
-  return PROVIDER_LABELS[provider] || PROVIDER_LABELS.claude;
+  return PROVIDER_LABELS[provider] || PROVIDER_LABELS[DEFAULT_PROVIDER];
 }
 
 export function getProviderClass(provider) {
-  return PROVIDER_CLASS_MAP[provider] || 'provider-a';
+  const family = PROVIDER_FAMILY[provider] || PROVIDER_FAMILY[DEFAULT_PROVIDER] || 'claude';
+  return family === 'claude' ? 'provider-a' : 'provider-b';
 }

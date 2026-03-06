@@ -1,0 +1,15 @@
+{
+  "id": "verbose-pm-rules",
+  "type": "hooks",
+  "label": "Verbose PM Rules",
+  "attributes": {
+    "promptLoad": "high",
+    "verifierDiscipline": "medium"
+  },
+  "overlays": [
+    {
+      "source": "pm-rules.sh",
+      "target": ".claude/hooks/pm-rules.sh"
+    }
+  ]
+}

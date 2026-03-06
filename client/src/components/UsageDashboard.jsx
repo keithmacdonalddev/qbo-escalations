@@ -8,6 +8,7 @@ import {
   getUsageRecent,
   getUsageModels,
 } from '../api/usageApi.js';
+import { getProviderLabel, isClaudeProvider } from '../lib/providerCatalog.js';
 
 // ── Formatting helpers ─────────────────────────────────────────────────
 
@@ -50,15 +51,7 @@ function daysAgoISO(n) {
 
 // ── Provider / service / status display ────────────────────────────────
 
-const PROVIDER_LABELS = {
-  claude: 'Claude (CLI)',
-  'claude-sonnet-4-6': 'Claude Sonnet',
-  'chatgpt-5.3-codex-high': 'Codex',
-  'gpt-5-mini': 'GPT-5 Mini',
-  codex: 'Codex',
-};
-
-function providerLabel(p) { return PROVIDER_LABELS[p] || p; }
+function providerLabel(p) { return getProviderLabel(p) || p; }
 
 function providerBadgeClass(p) {
   if (!p) return 'badge-provider';
@@ -215,6 +208,9 @@ export default function UsageDashboard() {
     <div className="app-content-constrained">
       <div className="page-header">
         <h1 className="page-title">Usage Monitor</h1>
+        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+          AI token consumption, costs, and provider breakdown.
+        </span>
       </div>
 
       {errorBanner}
@@ -295,7 +291,7 @@ export default function UsageDashboard() {
                   <div key={p.provider + '-tok'} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-2)' }}>
                     <span className={providerBadgeClass(p.provider)} style={{ minWidth: 70 }}>{providerLabel(p.provider)}</span>
                     <div style={{ flex: 1, height: 8, background: 'var(--bg-sunken)', borderRadius: 'var(--radius-pill)', overflow: 'hidden' }}>
-                      <div style={{ width: `${(p.totalTokens / maxProviderTokens) * 100}%`, height: '100%', background: p.provider.includes('claude') ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
+                      <div style={{ width: `${(p.totalTokens / maxProviderTokens) * 100}%`, height: '100%', background: isClaudeProvider(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
                     </div>
                     <span className="mono" style={{ fontSize: 'var(--text-xs)', minWidth: 60, textAlign: 'right' }}>{formatTokens(p.totalTokens)}</span>
                   </div>
@@ -307,7 +303,7 @@ export default function UsageDashboard() {
                   <div key={p.provider + '-cost'} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-2)' }}>
                     <span className={providerBadgeClass(p.provider)} style={{ minWidth: 70 }}>{providerLabel(p.provider)}</span>
                     <div style={{ flex: 1, height: 8, background: 'var(--bg-sunken)', borderRadius: 'var(--radius-pill)', overflow: 'hidden' }}>
-                      <div style={{ width: `${(p.totalCostMicros / maxProviderCost) * 100}%`, height: '100%', background: p.provider.includes('claude') ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
+                      <div style={{ width: `${(p.totalCostMicros / maxProviderCost) * 100}%`, height: '100%', background: isClaudeProvider(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
                     </div>
                     <span className="mono" style={{ fontSize: 'var(--text-xs)', minWidth: 70, textAlign: 'right' }}>{formatCost(p.totalCostMicros)}</span>
                   </div>
@@ -348,7 +344,7 @@ export default function UsageDashboard() {
                 <div key={m.model + m.provider} style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
                   <span className="mono" style={{ fontSize: 'var(--text-xs)', minWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.model}>{m.model || '(unknown)'}</span>
                   <div style={{ flex: 1, height: 8, background: 'var(--bg-sunken)', borderRadius: 'var(--radius-pill)', overflow: 'hidden' }}>
-                    <div style={{ width: `${(m.requests / maxModelReq) * 100}%`, height: '100%', background: (m.provider || '').includes('claude') ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
+                    <div style={{ width: `${(m.requests / maxModelReq) * 100}%`, height: '100%', background: isClaudeProvider(m.provider) ? 'var(--provider-a)' : 'var(--provider-b)', borderRadius: 'var(--radius-pill)' }} />
                   </div>
                   <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, minWidth: 40, textAlign: 'right' }}>{m.requests}</span>
                 </div>

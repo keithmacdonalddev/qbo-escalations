@@ -1,0 +1,19 @@
+{
+  "id": "ops-baseline",
+  "type": "skills",
+  "label": "Ops Baseline",
+  "attributes": {
+    "summaryWorkflow": "shallow",
+    "postmortemWorkflow": "minimal"
+  },
+  "overlays": [
+    {
+      "source": "skills/summary-audit/SKILL.md",
+      "target": ".codex/skills/summary-audit/SKILL.md"
+    },
+    {
+      "source": "skills/postmortem/SKILL.md",
+      "target": ".codex/skills/postmortem/SKILL.md"
+    }
+  ]
+}

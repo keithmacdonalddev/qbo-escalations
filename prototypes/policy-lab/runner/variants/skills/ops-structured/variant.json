@@ -1,0 +1,19 @@
+{
+  "id": "ops-structured",
+  "type": "skills",
+  "label": "Ops Structured",
+  "attributes": {
+    "summaryWorkflow": "deep",
+    "postmortemWorkflow": "structured"
+  },
+  "overlays": [
+    {
+      "source": "skills/summary-audit/SKILL.md",
+      "target": ".codex/skills/summary-audit/SKILL.md"
+    },
+    {
+      "source": "skills/postmortem/SKILL.md",
+      "target": ".codex/skills/postmortem/SKILL.md"
+    }
+  ]
+}

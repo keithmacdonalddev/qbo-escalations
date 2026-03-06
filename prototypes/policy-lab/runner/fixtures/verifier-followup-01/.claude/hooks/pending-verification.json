@@ -1,0 +1,5 @@
+{
+  "agent_id": "worker-opus",
+  "task_summary": "Expanded the reconciliation notes and touched the billing report.",
+  "files_touched": "docs/report.md"
+}

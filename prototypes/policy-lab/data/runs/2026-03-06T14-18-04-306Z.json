@@ -1,0 +1,610 @@
+{
+  "runId": "2026-03-06T14-18-04-306Z",
+  "generatedAt": "2026-03-06T14:18:04.307Z",
+  "projectProfile": {
+    "projectRoot": "C:\\Users\\NewAdmin\\Desktop\\PROJECTS\\qbo-escalations",
+    "hasClient": true,
+    "hasServer": true,
+    "hasPrototypes": true,
+    "hasHooks": true,
+    "hasRootAgents": true,
+    "hasFeaturesFile": true,
+    "testScriptPresent": true,
+    "devScriptPresent": true,
+    "prototypeNames": [
+      "flame-bar",
+      "iphone-auto-import",
+      "policy-lab",
+      "_template"
+    ]
+  },
+  "scenarioPack": [
+    {
+      "id": "prototype-request",
+      "title": "Prototype Request",
+      "categories": [
+        "prototype-isolation",
+        "edit-safety",
+        "communication"
+      ],
+      "dimensions": [
+        "repoFit",
+        "consistency"
+      ],
+      "weight": 1.3
+    },
+    {
+      "id": "production-edit",
+      "title": "Production App Edit",
+      "categories": [
+        "codebase-awareness",
+        "edit-safety",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "specificity",
+        "consistency"
+      ],
+      "weight": 1.2
+    },
+    {
+      "id": "review-request",
+      "title": "Code Review",
+      "categories": [
+        "review-quality",
+        "truthfulness",
+        "communication"
+      ],
+      "dimensions": [
+        "clarity"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "no-tests",
+      "title": "Testing Restraint",
+      "categories": [
+        "testing-restraint",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "weight": 1.25
+    },
+    {
+      "id": "process-safety",
+      "title": "Process Safety",
+      "categories": [
+        "process-control",
+        "truthfulness"
+      ],
+      "dimensions": [
+        "enforceability",
+        "consistency"
+      ],
+      "weight": 1.25
+    },
+    {
+      "id": "intent-heavy",
+      "title": "Ambiguous User Intent",
+      "categories": [
+        "intent",
+        "truthfulness",
+        "communication"
+      ],
+      "dimensions": [
+        "specificity",
+        "clarity"
+      ],
+      "weight": 1.2
+    },
+    {
+      "id": "delegation",
+      "title": "Delegation and Skills",
+      "categories": [
+        "delegation-skills",
+        "codebase-awareness"
+      ],
+      "dimensions": [
+        "repoFit"
+      ],
+      "weight": 0.95
+    },
+    {
+      "id": "long-term-maintenance",
+      "title": "Long-Term Maintenance",
+      "categories": [
+        "truthfulness",
+        "edit-safety",
+        "prototype-isolation"
+      ],
+      "dimensions": [
+        "longTermResilience",
+        "consistency"
+      ],
+      "weight": 1.15
+    }
+  ],
+  "left": {
+    "name": "AGENTS.md",
+    "summary": "# AGENTS.md\n## Project Agent Rules\n### Prototype Isolation (Default)\n- Build prototypes as standalone files in `prototypes/<prototype-name>/`.",
+    "metrics": {
+      "lineCount": 59,
+      "wordCount": 434,
+      "headingCount": 9,
+      "directiveCount": 34,
+      "bulletCount": 34
+    },
+    "categoryScores": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness and Verification",
+        "weight": 1.25,
+        "score": 43,
+        "matchedSignals": [
+          "verify",
+          "fresh",
+          "status claim"
+        ],
+        "missingSignals": [
+          "re-check",
+          "correct",
+          "never assume",
+          "on disk"
+        ]
+      },
+      {
+        "id": "intent",
+        "title": "User Intent Handling",
+        "weight": 1.2,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "intent",
+          "actual need",
+          "underlying",
+          "direct question",
+          "real problem"
+        ]
+      },
+      {
+        "id": "codebase-awareness",
+        "title": "Codebase Awareness",
+        "weight": 1.05,
+        "score": 17,
+        "matchedSignals": [
+          "rg\\b"
+        ],
+        "missingSignals": [
+          "inspect",
+          "read the codebase",
+          "build context",
+          "understand",
+          "search"
+        ]
+      },
+      {
+        "id": "edit-safety",
+        "title": "Edit Safety",
+        "weight": 1.1,
+        "score": 20,
+        "matchedSignals": [
+          "git"
+        ],
+        "missingSignals": [
+          "apply_patch",
+          "do not revert",
+          "dirty worktree",
+          "non-destructive"
+        ]
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype Isolation",
+        "weight": 1.25,
+        "score": 100,
+        "matchedSignals": [
+          "prototype",
+          "prototypes\\/",
+          "feature flag",
+          "client\\/src",
+          "server\\/src"
+        ],
+        "missingSignals": []
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 40,
+        "matchedSignals": [
+          "emergency-only",
+          "smallest possible scope"
+        ],
+        "missingSignals": [
+          "no tests",
+          "never run",
+          "do not modify existing tests"
+        ]
+      },
+      {
+        "id": "process-control",
+        "title": "Process Control",
+        "weight": 1.25,
+        "score": 83,
+        "matchedSignals": [
+          "never start",
+          "kill",
+          "process",
+          "server",
+          "unless the user explicitly asks"
+        ],
+        "missingSignals": [
+          "never stop"
+        ]
+      },
+      {
+        "id": "delegation-skills",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "delegate",
+          "subagent",
+          "team",
+          "skill",
+          "skills"
+        ]
+      },
+      {
+        "id": "review-quality",
+        "title": "Review Quality",
+        "weight": 0.95,
+        "score": 20,
+        "matchedSignals": [
+          "review"
+        ],
+        "missingSignals": [
+          "findings",
+          "severity",
+          "bugs",
+          "risks"
+        ]
+      },
+      {
+        "id": "communication",
+        "title": "Communication Discipline",
+        "weight": 0.85,
+        "score": 20,
+        "matchedSignals": [
+          "update"
+        ],
+        "missingSignals": [
+          "concise",
+          "clear",
+          "final answer",
+          "intermediary"
+        ]
+      }
+    ],
+    "dimensions": {
+      "clarity": 100,
+      "specificity": 100,
+      "enforceability": 100,
+      "consistency": 92,
+      "repoFit": 43,
+      "longTermResilience": 89.85000000000001
+    },
+    "scenarioScores": [
+      {
+        "id": "prototype-request",
+        "title": "Prototype Request",
+        "weight": 1.3,
+        "score": 52.9
+      },
+      {
+        "id": "production-edit",
+        "title": "Production App Edit",
+        "weight": 1.2,
+        "score": 47.5
+      },
+      {
+        "id": "review-request",
+        "title": "Code Review",
+        "weight": 1,
+        "score": 49.4
+      },
+      {
+        "id": "no-tests",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 57.9
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 72.9
+      },
+      {
+        "id": "intent-heavy",
+        "title": "Ambiguous User Intent",
+        "weight": 1.2,
+        "score": 44.7
+      },
+      {
+        "id": "delegation",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 18.9
+      },
+      {
+        "id": "long-term-maintenance",
+        "title": "Long-Term Maintenance",
+        "weight": 1.15,
+        "score": 65.3
+      }
+    ],
+    "conflicts": [],
+    "riskFlags": [
+      "Weak verification language for factual claims.",
+      "Testing restraint is under-specified for a repo with existing test scripts."
+    ],
+    "overallScore": 58.7,
+    "scenarioAverage": 52.2,
+    "categoryAverage": 36.8
+  },
+  "right": {
+    "name": "test_AGENTS.md",
+    "summary": "# AGENTS.md\n## Project Agent Rules\n### 1) Scope and precedence\n- Treat this file as the default instruction set for the whole repository.",
+    "metrics": {
+      "lineCount": 144,
+      "wordCount": 838,
+      "headingCount": 16,
+      "directiveCount": 98,
+      "bulletCount": 98
+    },
+    "categoryScores": [
+      {
+        "id": "truthfulness",
+        "title": "Truthfulness and Verification",
+        "weight": 1.25,
+        "score": 43,
+        "matchedSignals": [
+          "verify",
+          "fresh",
+          "correct"
+        ],
+        "missingSignals": [
+          "re-check",
+          "never assume",
+          "on disk",
+          "status claim"
+        ]
+      },
+      {
+        "id": "intent",
+        "title": "User Intent Handling",
+        "weight": 1.2,
+        "score": 20,
+        "matchedSignals": [
+          "intent"
+        ],
+        "missingSignals": [
+          "actual need",
+          "underlying",
+          "direct question",
+          "real problem"
+        ]
+      },
+      {
+        "id": "codebase-awareness",
+        "title": "Codebase Awareness",
+        "weight": 1.05,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "inspect",
+          "read the codebase",
+          "build context",
+          "understand",
+          "search",
+          "rg\\b"
+        ]
+      },
+      {
+        "id": "edit-safety",
+        "title": "Edit Safety",
+        "weight": 1.1,
+        "score": 20,
+        "matchedSignals": [
+          "git"
+        ],
+        "missingSignals": [
+          "apply_patch",
+          "do not revert",
+          "dirty worktree",
+          "non-destructive"
+        ]
+      },
+      {
+        "id": "prototype-isolation",
+        "title": "Prototype Isolation",
+        "weight": 1.25,
+        "score": 100,
+        "matchedSignals": [
+          "prototype",
+          "prototypes\\/",
+          "feature flag",
+          "client\\/src",
+          "server\\/src"
+        ],
+        "missingSignals": []
+      },
+      {
+        "id": "testing-restraint",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 40,
+        "matchedSignals": [
+          "no tests",
+          "emergency-only"
+        ],
+        "missingSignals": [
+          "never run",
+          "smallest possible scope",
+          "do not modify existing tests"
+        ]
+      },
+      {
+        "id": "process-control",
+        "title": "Process Control",
+        "weight": 1.25,
+        "score": 67,
+        "matchedSignals": [
+          "kill",
+          "process",
+          "server",
+          "unless the user explicitly asks"
+        ],
+        "missingSignals": [
+          "never start",
+          "never stop"
+        ]
+      },
+      {
+        "id": "delegation-skills",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 0,
+        "matchedSignals": [],
+        "missingSignals": [
+          "delegate",
+          "subagent",
+          "team",
+          "skill",
+          "skills"
+        ]
+      },
+      {
+        "id": "review-quality",
+        "title": "Review Quality",
+        "weight": 0.95,
+        "score": 40,
+        "matchedSignals": [
+          "review",
+          "risks"
+        ],
+        "missingSignals": [
+          "findings",
+          "severity",
+          "bugs"
+        ]
+      },
+      {
+        "id": "communication",
+        "title": "Communication Discipline",
+        "weight": 0.85,
+        "score": 40,
+        "matchedSignals": [
+          "concise",
+          "update"
+        ],
+        "missingSignals": [
+          "clear",
+          "final answer",
+          "intermediary"
+        ]
+      }
+    ],
+    "dimensions": {
+      "clarity": 100,
+      "specificity": 100,
+      "enforceability": 100,
+      "consistency": 72,
+      "repoFit": 43.1,
+      "longTermResilience": 85.86500000000001
+    },
+    "scenarioScores": [
+      {
+        "id": "prototype-request",
+        "title": "Prototype Request",
+        "weight": 1.3,
+        "score": 54.6
+      },
+      {
+        "id": "production-edit",
+        "title": "Production App Edit",
+        "weight": 1.2,
+        "score": 40.5
+      },
+      {
+        "id": "review-request",
+        "title": "Code Review",
+        "weight": 1,
+        "score": 58.7
+      },
+      {
+        "id": "no-tests",
+        "title": "Testing Restraint",
+        "weight": 1.25,
+        "score": 54.9
+      },
+      {
+        "id": "process-safety",
+        "title": "Process Safety",
+        "weight": 1.25,
+        "score": 64.3
+      },
+      {
+        "id": "intent-heavy",
+        "title": "Ambiguous User Intent",
+        "weight": 1.2,
+        "score": 54
+      },
+      {
+        "id": "delegation",
+        "title": "Delegation and Skills",
+        "weight": 0.95,
+        "score": 12.9
+      },
+      {
+        "id": "long-term-maintenance",
+        "title": "Long-Term Maintenance",
+        "weight": 1.15,
+        "score": 61.7
+      }
+    ],
+    "conflicts": [
+      "Testing conflict"
+    ],
+    "riskFlags": [
+      "Weak verification language for factual claims.",
+      "Testing restraint is under-specified for a repo with existing test scripts.",
+      "Detected 1 contradiction signal(s)."
+    ],
+    "overallScore": 55.9,
+    "scenarioAverage": 51.1,
+    "categoryAverage": 38.8
+  },
+  "comparison": {
+    "winner": "left",
+    "recommendedFileName": "AGENTS.md",
+    "scoreMargin": 2.8,
+    "confidence": {
+      "level": "Low",
+      "score": 52.4
+    },
+    "reasons": [
+      "AGENTS.md scores 2.8 points higher overall.",
+      "AGENTS.md is stronger on codebase awareness (+17 points).",
+      "AGENTS.md is stronger on process control (+16 points).",
+      "AGENTS.md is more robust on process safety use cases (+8.6).",
+      "AGENTS.md is more robust on production app edit use cases (+7.0)."
+    ],
+    "conclusion": "AGENTS.md is the stronger default for this repository because it scores better across the weighted scenario pack, carries fewer high-risk gaps, and holds up better on long-term prototype isolation discipline. Confidence is Low."
+  }
+}

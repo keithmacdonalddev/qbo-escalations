@@ -1,11 +1,12 @@
 // ---------------------------------------------------------------------------
-// apiFetch — thin wrapper around fetch with five mechanisms:
+// apiFetch — thin wrapper around fetch with six mechanisms:
 //
 // 1. Single-flight dedupe for GET requests
 // 2. Auto-timeout for GET requests (default 15 s)
 // 3. Bounded retries with exponential backoff + jitter (GET only, max 2)
 // 4. Circuit breaker — stops sending requests after consecutive failures
 // 5. Request tracking for the waterfall visualizer (optional)
+// 6. Single retry for mutations (POST/PATCH/DELETE) on 5xx server errors
 // ---------------------------------------------------------------------------
 
 /** @type {Map<string, Promise<Response>>} */
@@ -13,6 +14,7 @@ const _inFlight = new Map();
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_GET_RETRIES = 2;
+const MAX_MUTATION_RETRIES = 1;
 
 // ---- Circuit breaker --------------------------------------------------------
 // After THRESHOLD consecutive GET failures, the circuit opens for RESET_MS.
@@ -66,6 +68,7 @@ function _getCircuitStatus() {
 function _notifyCircuit() {
   const state = { status: _getCircuitStatus(), failures: _circuit.failures };
   for (const fn of _circuitListeners) fn(state);
+  _notifyBudget();
 }
 
 /**
@@ -77,6 +80,46 @@ export function onCircuitChange(fn) {
   _circuitListeners.add(fn);
   fn({ status: _getCircuitStatus(), failures: _circuit.failures }); // immediate sync
   return () => _circuitListeners.delete(fn);
+}
+
+// ---- Budget tracking (in-flight + dedup + circuit snapshot) ------------------
+// Lets the waterfall observe request containment mechanisms in real time.
+
+let _dedupSaves = 0;
+
+/** @type {Set<(state: object) => void>} */
+const _budgetListeners = new Set();
+
+function _getBudgetState() {
+  return {
+    inFlight: _inFlight.size,
+    dedupSaves: _dedupSaves,
+    circuit: _getCircuitStatus(),
+    failures: _circuit.failures,
+    threshold: _circuit.THRESHOLD,
+  };
+}
+
+function _notifyBudget() {
+  const state = _getBudgetState();
+  for (const fn of _budgetListeners) fn(state);
+}
+
+/**
+ * Subscribe to request budget state changes.
+ * Callback receives `{ inFlight, dedupSaves, circuit, failures, threshold }`.
+ * Returns an unsubscribe function.
+ */
+export function onBudgetChange(fn) {
+  _budgetListeners.add(fn);
+  fn(_getBudgetState());
+  return () => _budgetListeners.delete(fn);
+}
+
+/** Reset dedup counter (called when waterfall is cleared). */
+export function resetBudgetCounters() {
+  _dedupSaves = 0;
+  _notifyBudget();
 }
 
 /** Exponential backoff with full jitter: base * 2^(attempt-1) + random */
@@ -113,17 +156,22 @@ export function apiFetch(url, options = {}) {
 
   // --- Single-flight dedupe for GETs ---
   if (method === 'GET') {
-    if (_inFlight.has(url)) return _inFlight.get(url);
+    if (_inFlight.has(url)) {
+      _dedupSaves++;
+      _notifyBudget();
+      return _inFlight.get(url).then(r => r.clone());
+    }
 
     const p = _trackedFetch(url, method, options, _fetchWithRetry(url, options))
-      .finally(() => _inFlight.delete(url));
+      .finally(() => { _inFlight.delete(url); _notifyBudget(); });
     _inFlight.set(url, p);
-    return p;
+    _notifyBudget();
+    return p.then(r => r.clone());
   }
 
-  // Non-GET requests (POST, PATCH, DELETE) pass through directly.
+  // Non-GET requests (POST, PATCH, DELETE) get a single retry on 5xx.
   // SSE / streaming callers already attach their own AbortController signal.
-  return _trackedFetch(url, method, options, fetch(url, options));
+  return _trackedFetch(url, method, options, _fetchMutationWithRetry(url, options));
 }
 
 // ---- internal ---------------------------------------------------------------
@@ -155,6 +203,29 @@ async function _fetchWithRetry(url, options) {
       lastError = err;
       _recordFailure();
       if (err.name === 'AbortError') break; // Timeout — don't retry
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * Single retry for mutation requests (POST/PATCH/DELETE) on 5xx.
+ * Does NOT retry on 4xx (client errors) or AbortError (timeout/cancel).
+ * Does NOT participate in the circuit breaker.
+ */
+async function _fetchMutationWithRetry(url, options) {
+  let lastError;
+  for (let attempt = 0; attempt <= MAX_MUTATION_RETRIES; attempt++) {
+    if (attempt > 0) {
+      await new Promise(r => setTimeout(r, _jitteredDelay(attempt)));
+    }
+    try {
+      const res = await _fetchWithTimeout(url, options);
+      if (res.ok || res.status < 500) return res;
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastError = err;
+      if (err.name === 'AbortError') break;
     }
   }
   throw lastError;
@@ -223,12 +294,12 @@ function _trackedFetch(url, method, options, fetchPromise) {
         );
       }
 
-      // Non-SSE: clone and consume in background to detect body completion.
-      // The original response passes through untouched.
-      res.clone().text().then(
-        () => tracker.complete(id, { endTime: performance.now() }),
-        () => tracker.complete(id, { endTime: performance.now() }),
-      );
+      // Non-SSE: mark complete immediately after headers.
+      // Body download for JSON API responses is negligible (<5ms), and
+      // the previous approach (res.clone().text()) silently hung when the
+      // tee'd body stream stalled, leaving entries stuck in 'headers' state
+      // with endlessly-growing durations.
+      tracker.complete(id, { endTime: performance.now() });
 
       return res;
     },

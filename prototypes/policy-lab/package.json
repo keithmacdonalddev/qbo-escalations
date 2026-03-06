@@ -1,0 +1,11 @@
+{
+  "name": "policy-lab-prototype",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "app": "node ./server.mjs",
+    "benchmark": "node ./runner/run-benchmark.mjs ./runner/config/benchmark-config.json",
+    "benchmark:mock": "node ./runner/run-benchmark.mjs ./runner/config/benchmark-config.json --adapter=mock",
+    "benchmark:manual": "node ./runner/run-benchmark.mjs ./runner/config/benchmark-config.json --adapter=manual"
+  }
+}

@@ -1,35 +1,7 @@
 import { apiFetch } from './http.js';
 import { consumeSSEStream } from './sse.js';
+import { normalizeError } from '../utils/normalizeError.js';
 const BASE = '/api';
-
-function normalizeErrorPayload(payload, fallbackMessage = 'Request failed') {
-  if (typeof payload === 'string') {
-    return {
-      message: payload,
-      error: payload,
-      code: 'REQUEST_FAILED',
-      attempts: [],
-    };
-  }
-
-  if (payload && typeof payload === 'object') {
-    const message = payload.message || payload.error || fallbackMessage;
-    return {
-      ...payload,
-      message,
-      error: message,
-      code: payload.code || 'REQUEST_FAILED',
-      attempts: Array.isArray(payload.attempts) ? payload.attempts : [],
-    };
-  }
-
-  return {
-    message: fallbackMessage,
-    error: fallbackMessage,
-    code: 'REQUEST_FAILED',
-    attempts: [],
-  };
-}
 
 /**
  * Send a chat message and consume SSE stream.
@@ -51,7 +23,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(normalizeErrorPayload(err, err.error || 'Request failed'));
+        onError?.(normalizeError(err, err.error || 'Request failed'));
         return;
       }
 
@@ -63,11 +35,11 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
         else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeErrorPayload(data, data?.error || 'Request failed'));
+        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Request failed'));
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
-        onError?.(normalizeErrorPayload({ message: err.message }, err.message));
+        onError?.(normalizeError({ message: err.message }, err.message));
       }
     }
   })();
@@ -95,7 +67,7 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(normalizeErrorPayload(err, err.error || 'Request failed'));
+        onError?.(normalizeError(err, err.error || 'Request failed'));
         return;
       }
 
@@ -107,11 +79,11 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
         else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeErrorPayload(data, data?.error || 'Request failed'));
+        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Request failed'));
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
-        onError?.(normalizeErrorPayload({ message: err.message }, err.message));
+        onError?.(normalizeError({ message: err.message }, err.message));
       }
     }
   })();

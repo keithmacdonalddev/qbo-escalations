@@ -1,13 +1,6 @@
 import { apiFetch } from './http.js';
+import { toApiError } from '../utils/normalizeError.js';
 const BASE = '/api/escalations';
-
-function toApiError(data, fallbackMessage) {
-  const err = new Error((data && data.error) || fallbackMessage || 'Request failed');
-  if (data && data.code) err.code = data.code;
-  if (data && data.detail) err.detail = data.detail;
-  if (data && Array.isArray(data.attempts)) err.attempts = data.attempts;
-  return err;
-}
 
 export async function listEscalations({ status, category, search, agent, limit = 50, offset = 0, sort = '-createdAt' } = {}) {
   const params = new URLSearchParams({ limit, offset, sort });
@@ -89,6 +82,7 @@ export async function parseEscalation({
   provider,
   primaryProvider,
   fallbackProvider,
+  reasoningEffort,
   timeoutMs,
 } = {}) {
   const res = await apiFetch(`${BASE}/parse`, {
@@ -101,6 +95,7 @@ export async function parseEscalation({
       provider,
       primaryProvider,
       fallbackProvider,
+      reasoningEffort,
       timeoutMs,
     }),
   });

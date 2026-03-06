@@ -1,9 +1,21 @@
 const claude = require('../claude');
 const codex = require('../codex');
 const { createChatAdapter } = require('./chat-provider');
+const {
+  PROVIDER_IDS,
+  DEFAULT_PROVIDER_ID,
+  getProviderMeta,
+  getProviderFamily: getCatalogProviderFamily,
+  getProviderLabel: getCatalogProviderLabel,
+  getProviderTransport: getCatalogProviderTransport,
+  getProviderModelId,
+  isValidProvider: catalogIsValidProvider,
+  normalizeProvider: normalizeCatalogProvider,
+  getAlternateProvider: getCatalogAlternateProvider,
+  getProviderOptions,
+} = require('./catalog');
 
-const DEFAULT_PROVIDER = 'claude';
-const PROVIDER_IDS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
+const DEFAULT_PROVIDER = DEFAULT_PROVIDER_ID;
 
 function toInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -18,55 +30,51 @@ function toBool(value, fallback) {
   return fallback;
 }
 
-const PROVIDER_FAMILIES = {
-  claude: 'claude',
-  'claude-sonnet-4-6': 'claude',
-  'chatgpt-5.3-codex-high': 'codex',
-  'gpt-5-mini': 'codex',
-};
-
-const PROVIDER_DEFS = {
-  claude: {
-    id: 'claude',
-    label: 'Claude',
-    family: 'claude',
-    supportsImageInput: toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
-    getChat: () => claude.chat,
-    getDefaultTimeoutMs: () => toInt(process.env.CLAUDE_CHAT_TIMEOUT_MS, 120_000),
-    getParse: () => claude.parseEscalation,
-    getDefaultParseTimeoutMs: () => toInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 120_000),
-  },
-  'chatgpt-5.3-codex-high': {
-    id: 'chatgpt-5.3-codex-high',
-    label: 'ChatGPT 5.3 Codex (High)',
-    family: 'codex',
-    supportsImageInput: toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true),
-    getChat: () => codex.chat,
-    getDefaultTimeoutMs: () => toInt(process.env.CODEX_CHAT_TIMEOUT_MS, 120_000),
-    getParse: () => codex.parseEscalation,
-    getDefaultParseTimeoutMs: () => toInt(process.env.CODEX_PARSE_TIMEOUT_MS, 120_000),
-  },
-  'claude-sonnet-4-6': {
-    id: 'claude-sonnet-4-6',
-    label: 'Claude Sonnet 4.6',
-    family: 'claude',
-    supportsImageInput: toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
-    getChat: () => (opts) => claude.chat({ ...opts, model: 'claude-sonnet-4-6' }),
-    getDefaultTimeoutMs: () => toInt(process.env.CLAUDE_CHAT_TIMEOUT_MS, 120_000),
-    getParse: () => (input, options) => claude.parseEscalation(input, { ...options, model: 'claude-sonnet-4-6' }),
-    getDefaultParseTimeoutMs: () => toInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 120_000),
-  },
-  'gpt-5-mini': {
-    id: 'gpt-5-mini',
-    label: 'GPT-5 Mini',
-    family: 'codex',
-    supportsImageInput: toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true),
-    getChat: () => (opts) => codex.chat({ ...opts, model: 'gpt-5-mini' }),
-    getDefaultTimeoutMs: () => toInt(process.env.CODEX_CHAT_TIMEOUT_MS, 120_000),
-    getParse: () => (input, options) => codex.parseEscalation(input, { ...options, model: 'gpt-5-mini' }),
-    getDefaultParseTimeoutMs: () => toInt(process.env.CODEX_PARSE_TIMEOUT_MS, 120_000),
-  },
-};
+const PROVIDER_DEFS = Object.freeze(
+  PROVIDER_IDS.reduce((acc, id) => {
+    const meta = getProviderMeta(id);
+    const transport = meta?.transport || 'claude';
+    const model = getProviderModelId(id);
+    const isCodex = transport === 'codex';
+    acc[id] = {
+      id,
+      label: getCatalogProviderLabel(id),
+      family: getCatalogProviderFamily(id),
+      supportsImageInput: isCodex
+        ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
+        : toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
+      getChat: () => {
+        if (isCodex) {
+          return model
+            ? (opts) => codex.chat({ ...opts, model })
+            : codex.chat;
+        }
+        return model
+          ? (opts) => claude.chat({ ...opts, model })
+          : claude.chat;
+      },
+      getDefaultTimeoutMs: () => toInt(
+        isCodex ? process.env.CODEX_CHAT_TIMEOUT_MS : process.env.CLAUDE_CHAT_TIMEOUT_MS,
+        120_000
+      ),
+      getParse: () => {
+        if (isCodex) {
+          return model
+            ? (input, options) => codex.parseEscalation(input, { ...options, model })
+            : codex.parseEscalation;
+        }
+        return model
+          ? (input, options) => claude.parseEscalation(input, { ...options, model })
+          : claude.parseEscalation;
+      },
+      getDefaultParseTimeoutMs: () => toInt(
+        isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS,
+        120_000
+      ),
+    };
+    return acc;
+  }, {})
+);
 
 function getProviderIds() {
   return [...PROVIDER_IDS];
@@ -77,13 +85,13 @@ function getDefaultProvider() {
 }
 
 function isValidProvider(provider) {
-  return Boolean(provider && typeof provider === 'string' && Object.prototype.hasOwnProperty.call(PROVIDER_DEFS, provider));
+  return catalogIsValidProvider(provider);
 }
 
 function normalizeProvider(provider) {
   if (isValidProvider(provider)) return provider;
   console.warn(`[registry] Unknown provider "${provider}", falling back to "${DEFAULT_PROVIDER}"`);
-  return DEFAULT_PROVIDER;
+  return normalizeCatalogProvider(provider);
 }
 
 function getProvider(provider) {
@@ -101,17 +109,19 @@ function getProvider(provider) {
 }
 
 function getProviderLabel(provider) {
-  return getProvider(provider).label;
+  return getCatalogProviderLabel(provider);
 }
 
 function getProviderFamily(provider) {
-  return PROVIDER_FAMILIES[provider] || PROVIDER_FAMILIES[normalizeProvider(provider)] || 'claude';
+  return getCatalogProviderFamily(provider);
+}
+
+function getProviderTransport(provider) {
+  return getCatalogProviderTransport(provider);
 }
 
 function getAlternateProvider(provider) {
-  const normalized = normalizeProvider(provider);
-  const family = getProviderFamily(normalized);
-  return family === 'claude' ? 'chatgpt-5.3-codex-high' : 'claude';
+  return getCatalogAlternateProvider(normalizeProvider(provider));
 }
 
 function providerSupportsImageInput(provider) {
@@ -127,6 +137,9 @@ module.exports = {
   getProvider,
   getProviderLabel,
   getProviderFamily,
+  getProviderTransport,
+  getProviderModelId,
   getAlternateProvider,
   providerSupportsImageInput,
+  getProviderOptions,
 };

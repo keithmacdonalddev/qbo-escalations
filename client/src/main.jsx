@@ -1,14 +1,18 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { ErrorBoundary } from 'react-error-boundary';
 import { TooltipProvider } from './hooks/useTooltipLevel.jsx';
+import { ToastProvider } from './hooks/useToast.jsx';
+import ErrorFallback from './components/ErrorFallback.jsx';
 import App from './App.jsx';
 import './App.css';
 import './settings.css';
 import './depth-effects.css';
 
 // ── HMR desync detection ─────────────────────────────────────
-// Catches React hook invariant violations caused by Vite HMR
-// getting out of sync after file edits, and shows a refresh toast.
+// Catches React hook invariant violations caused by Vite HMR.
+// Shows a non-intrusive toast with refresh button — does NOT auto-reload
+// because that would kill active AI chat streams.
 if (import.meta.env.DEV) {
   const HMR_PATTERNS = [
     'Rendered fewer hooks than expected',
@@ -19,68 +23,61 @@ if (import.meta.env.DEV) {
     'Hooks conditionally',
   ];
 
-  let toastShown = false;
+  let toastEl = null;
 
-  const showHmrToast = () => {
-    if (toastShown) return;
-    toastShown = true;
+  const showDesyncToast = () => {
+    if (toastEl) return;
 
     const toast = document.createElement('div');
-    toast.innerHTML = `
-      <span style="margin-right:10px">HMR desync detected</span>
-      <button id="hmr-refresh" style="
-        background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25);
-        color:#fff; padding:4px 12px; border-radius:6px; cursor:pointer;
-        font-size:12px; font-weight:600;
-      ">Refresh</button>
-      <button id="hmr-dismiss" style="
-        background:none; border:none; color:rgba(255,255,255,0.5);
-        cursor:pointer; font-size:16px; margin-left:6px; padding:2px 6px;
-      ">&times;</button>
-    `;
+    toast.innerHTML = '<span>HMR desync</span>'
+      + '<button id="hmr-refresh" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:11px;margin-left:8px">Reload</button>';
     Object.assign(toast.style, {
-      position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
-      zIndex: '99999', background: 'rgba(30,30,30,0.95)', color: '#fff',
-      padding: '10px 16px', borderRadius: '10px', fontSize: '13px',
-      display: 'flex', alignItems: 'center', gap: '4px',
-      boxShadow: '0 4px 24px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08)',
-      backdropFilter: 'blur(12px)', fontFamily: 'system-ui, sans-serif',
-      animation: 'hmr-toast-in 0.25s ease-out',
+      position: 'fixed', bottom: '16px', right: '16px',
+      zIndex: '99999', background: 'rgba(30,30,30,0.9)', color: 'rgba(255,255,255,0.7)',
+      padding: '6px 12px', borderRadius: '8px', fontSize: '11px',
+      display: 'flex', alignItems: 'center',
+      fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
+      transition: 'opacity 300ms ease',
     });
-
-    // Inject keyframe once
-    if (!document.getElementById('hmr-toast-style')) {
-      const style = document.createElement('style');
-      style.id = 'hmr-toast-style';
-      style.textContent = `
-        @keyframes hmr-toast-in {
-          from { opacity: 0; transform: translateX(-50%) translateY(12px); }
-          to   { opacity: 1; transform: translateX(-50%) translateY(0); }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
     document.body.appendChild(toast);
-    toast.querySelector('#hmr-refresh').onclick = () => location.reload();
-    toast.querySelector('#hmr-dismiss').onclick = () => { toast.remove(); toastShown = false; };
+    toastEl = toast;
+
+    toast.querySelector('#hmr-refresh').onclick = () => {
+      try {
+        sessionStorage.setItem('qbo-hmr-reload-at', String(Date.now()));
+        // Save draft input + scroll position for safe reload
+        const textarea = document.querySelector('.compose-body textarea');
+        if (textarea?.value) sessionStorage.setItem('qbo-draft-input', textarea.value);
+        const msgBox = document.querySelector('.chat-messages');
+        if (msgBox) sessionStorage.setItem('qbo-draft-scroll', String(msgBox.scrollTop));
+      } catch {}
+      location.reload();
+    };
+
+    // Auto-dismiss after 8s — it's just informational
+    setTimeout(() => { if (toastEl === toast) { toast.style.opacity = '0'; setTimeout(() => { toast.remove(); toastEl = null; }, 300); } }, 8000);
   };
 
   window.addEventListener('error', (e) => {
-    if (e.message && HMR_PATTERNS.some(p => e.message.includes(p))) showHmrToast();
+    if (e.message && HMR_PATTERNS.some(p => e.message.includes(p))) showDesyncToast();
   });
 
   window.addEventListener('unhandledrejection', (e) => {
     const msg = e.reason?.message || String(e.reason || '');
-    if (HMR_PATTERNS.some(p => msg.includes(p))) showHmrToast();
+    if (HMR_PATTERNS.some(p => msg.includes(p))) showDesyncToast();
   });
 }
 
 // ── App mount ────────────────────────────────────────────────
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <TooltipProvider>
-      <App />
-    </TooltipProvider>
+    <ErrorBoundary FallbackComponent={ErrorFallback}>
+      <TooltipProvider>
+        <ToastProvider>
+          <App />
+        </ToastProvider>
+      </TooltipProvider>
+    </ErrorBoundary>
   </StrictMode>
 );

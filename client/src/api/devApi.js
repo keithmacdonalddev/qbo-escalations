@@ -1,5 +1,6 @@
 import { apiFetch } from './http.js';
 import { consumeSSEStream } from './sse.js';
+import { normalizeError } from '../utils/normalizeError.js';
 const BASE = '/api';
 
 /**
@@ -7,6 +8,7 @@ const BASE = '/api';
  * Dev mode supports provider policy (single/fallback) and streams tool events.
  *
  * @param {{ message: string, images?: string[], conversationId?: string, sessionId?: string, provider?: string, mode?: string, fallbackProvider?: string }} body
+ * `images` may contain fresh data URLs or persisted `/uploads/dev-mode/...` references.
  * @param {{ onInit: Function, onChunk: Function, onToolUse: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function }} handlers
  * @returns {{ abort: Function }}
  */
@@ -27,7 +29,7 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(err.error || 'Request failed');
+        onError?.(normalizeError(err));
         return;
       }
 
@@ -63,7 +65,7 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
         }
 
         if (eventType === 'error') {
-          onError?.(data.error);
+          onError?.(normalizeError(data));
           return;
         }
         if (eventType === 'provider_error') {
@@ -87,7 +89,7 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
-        onError?.(err.message);
+        onError?.(normalizeError(err));
       }
     }
   })();
@@ -155,6 +157,14 @@ export async function getDevConversation(id) {
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Conversation not found');
   return data.conversation;
+}
+
+/** Delete the last message from a dev conversation */
+export async function deleteLastDevMessage(conversationId) {
+  const res = await apiFetch(`${BASE}/dev/conversations/${conversationId}/messages/last`, { method: 'DELETE' });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Failed to delete message');
+  return data;
 }
 
 /** Delete a persisted dev conversation */

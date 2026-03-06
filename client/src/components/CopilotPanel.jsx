@@ -84,7 +84,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
         streamingRef.current = false;
       },
       onError: (msg) => {
-        setError(msg || 'Copilot request failed');
+        setError(typeof msg === 'string' ? msg : (msg?.message || 'Copilot request failed'));
         setStreaming(false);
         streamingRef.current = false;
       },

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { listEscalations, updateEscalation, deleteEscalation } from '../api/escalationsApi.js';
 import { getSummary } from '../api/analyticsApi.js';
+import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 
@@ -16,6 +17,7 @@ const STATUS_BADGE_MAP = {
 };
 
 export default function EscalationDashboard() {
+  const toast = useToast();
   const [escalations, setEscalations] = useState([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
@@ -24,6 +26,7 @@ export default function EscalationDashboard() {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
@@ -40,8 +43,9 @@ export default function EscalationDashboard() {
       setEscalations(escData.escalations);
       setTotal(escData.total);
       setSummary(summaryData);
+      setLoadError(null);
     } catch {
-      // Fail gracefully — show empty
+      setLoadError('Failed to load escalations');
     }
     setLoading(false);
   }, [statusFilter, categoryFilter, debouncedSearch]);
@@ -54,7 +58,7 @@ export default function EscalationDashboard() {
     try {
       await updateEscalation(id, { status: newStatus });
       loadData();
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to update status'); }
   }, [loadData]);
 
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -64,7 +68,7 @@ export default function EscalationDashboard() {
     try {
       await deleteEscalation(deleteTarget);
       loadData();
-    } catch { /* ignore */ }
+    } catch { toast.error('Failed to delete escalation'); }
     setDeleteTarget(null);
   }, [deleteTarget, loadData]);
 
@@ -72,12 +76,22 @@ export default function EscalationDashboard() {
     <div className="app-content-constrained">
       <div className="page-header">
         <h1 className="page-title">Escalation Dashboard</h1>
+        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+          All parsed escalations — filter, search, and track resolution status.
+        </span>
         <Tooltip text="Reload escalation data" level="medium">
           <button className="btn btn-secondary" onClick={loadData} type="button">
             Refresh
           </button>
         </Tooltip>
       </div>
+
+      {loadError && (
+        <div className="error-banner">
+          <span>{loadError}</span>
+          <button onClick={loadData} type="button">Retry</button>
+        </div>
+      )}
 
       {/* Summary stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
@@ -137,7 +151,7 @@ export default function EscalationDashboard() {
             <div className="empty-state-desc">
               {search || statusFilter || categoryFilter
                 ? 'Try adjusting your filters.'
-                : 'Escalations will appear here when you parse screenshots or create them in chat.'}
+                : 'Escalations appear here when you paste a screenshot into the chat — the AI parses it automatically. You can also create them manually in conversation.'}
             </div>
           </div>
         ) : (

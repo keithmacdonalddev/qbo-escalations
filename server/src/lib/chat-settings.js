@@ -1,9 +1,11 @@
 const { normalizeProvider, getAlternateProvider } = require('../services/providers/registry');
+const { DEFAULT_PROVIDER_ID } = require('../services/providers/catalog');
 
 const KNOWLEDGE_MODES = new Set(['full-playbook', 'hybrid', 'retrieval-only']);
 const MEMORY_POLICIES = new Set(['recent-only', 'summary-recent', 'full-history']);
 const BUDGET_ACTIONS = new Set(['warn', 'fallback', 'block']);
 const PROVIDER_MODES = new Set(['single', 'fallback', 'parallel']);
+const REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 
 const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   context: Object.freeze({
@@ -34,8 +36,9 @@ const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   }),
   providerStrategy: Object.freeze({
     defaultMode: 'single',
-    defaultPrimaryProvider: 'claude',
-    defaultFallbackProvider: 'chatgpt-5.3-codex-high',
+    defaultPrimaryProvider: DEFAULT_PROVIDER_ID,
+    defaultFallbackProvider: getAlternateProvider(DEFAULT_PROVIDER_ID),
+    reasoningEffort: 'high',
     timeoutMs: 0,
   }),
   debug: Object.freeze({
@@ -174,6 +177,9 @@ function normalizeChatRuntimeSettings(rawSettings) {
       defaultMode,
       defaultPrimaryProvider,
       defaultFallbackProvider,
+      reasoningEffort: REASONING_EFFORTS.has(providerStrategyInput.reasoningEffort)
+        ? providerStrategyInput.reasoningEffort
+        : DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,
       timeoutMs: clampInteger(providerStrategyInput.timeoutMs, 0, 900000, DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.timeoutMs),
     },
     debug: {

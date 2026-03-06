@@ -10,7 +10,7 @@ const path = require('path');
  * To convert from vendor pricing ($/MTok): rate_nanos = price_per_MTok * 1000
  * Example: $3/MTok input = 3000 nanos/token
  *
- * PRICING_VERSION: 2026-02-27
+ * PRICING_VERSION: 2026-03-06
  * Sources:
  *   Anthropic: https://docs.anthropic.com/en/docs/about-claude/pricing
  *   OpenAI:    https://openai.com/api/pricing/
@@ -29,16 +29,19 @@ const DEFAULT_PRICING = {
   'claude-3-5-haiku-20241022':    { inputNanosPerToken: 800,   outputNanosPerToken: 4000   }, // $0.80/$4 per MTok
   'claude-3-haiku-20240307':      { inputNanosPerToken: 250,   outputNanosPerToken: 1250   }, // $0.25/$1.25 per MTok
 
-  // OpenAI / Codex models — pricing as of 2026-02-27
+  // OpenAI / Codex models — pricing as of 2026-03-06
+  'gpt-5.4':                      { inputNanosPerToken: 2500,  outputNanosPerToken: 15000  }, // $2.50/$15 per MTok
+  'gpt-5.4-pro':                  { inputNanosPerToken: 30000, outputNanosPerToken: 180000 }, // $30/$180 per MTok
   'gpt-5.3-codex':                { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
   'gpt-4o':                       { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
   'gpt-4o-mini':                  { inputNanosPerToken: 150,   outputNanosPerToken: 600    }, // $0.15/$0.60 per MTok
-  'gpt-5-mini':                   { inputNanosPerToken: 150,   outputNanosPerToken: 600    }, // $0.15/$0.60 per MTok (estimate, gpt-4o-mini tier)
+  'gpt-5-mini':                   { inputNanosPerToken: 250,   outputNanosPerToken: 2000   }, // $0.25/$2 per MTok
+  'gpt-5-nano':                   { inputNanosPerToken: 50,    outputNanosPerToken: 400    }, // $0.05/$0.40 per MTok
   'o3':                           { inputNanosPerToken: 2000,  outputNanosPerToken: 8000   }, // $2/$8 per MTok
   'o3-mini':                      { inputNanosPerToken: 1100,  outputNanosPerToken: 4400   }, // $1.10/$4.40 per MTok
 };
 
-const PRICING_VERSION = '2026-02-27';
+const PRICING_VERSION = '2026-03-06';
 
 /**
  * Provider-level fallback rates (nanodollars) when the exact model is unknown.
@@ -48,9 +51,12 @@ const PROVIDER_FALLBACKS = {
   'claude-sonnet-4-6':          { inputNanosPerToken: 3000,  outputNanosPerToken: 15000 },
   'chatgpt-5.3-codex-high':    { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
   'gpt-5.3-codex-high':        { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
-  'gpt-5-mini':                 { inputNanosPerToken: 150,   outputNanosPerToken: 600   },
-  codex:                        { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
-  openai:                       { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
+  'gpt-5.4':                    { inputNanosPerToken: 2500,  outputNanosPerToken: 15000 },
+  'gpt-5.4-pro':                { inputNanosPerToken: 30000, outputNanosPerToken: 180000 },
+  'gpt-5-mini':                 { inputNanosPerToken: 250,   outputNanosPerToken: 2000  },
+  'gpt-5-nano':                 { inputNanosPerToken: 50,    outputNanosPerToken: 400   },
+  codex:                        { inputNanosPerToken: 2500,  outputNanosPerToken: 15000 },
+  openai:                       { inputNanosPerToken: 2500,  outputNanosPerToken: 15000 },
 };
 
 /**

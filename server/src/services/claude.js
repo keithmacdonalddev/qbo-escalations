@@ -18,6 +18,13 @@ const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_CHAT_TIMEOUT_MS, 180
 const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 120000);
 const CLAUDE_IMAGE_HELP_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_IMAGE_HELP_TIMEOUT_MS, 5000);
 let supportsClaudeImageFlagCache = null;
+const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
+
+function normalizeClaudeEffort(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'xhigh') return 'high';
+  return CLAUDE_ALLOWED_EFFORTS.has(normalized) ? normalized : null;
+}
 
 function cleanupTempFiles(paths) {
   for (const f of paths) {
@@ -163,11 +170,13 @@ function writeTempImageFile(imageInput, prefix, index) {
  * @param {function} opts.onError - Called on failure
  * @returns {function} cleanup - Call to kill the subprocess
  */
-function chat({ messages, systemPrompt, images, model, onChunk, onThinkingChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk, onThinkingChunk, onDone, onError }) {
   const prompt = buildPrompt(messages);
   const tempFiles = [];
   const args = ['-p', '--output-format', 'stream-json', '--verbose'];
   if (model) args.push('--model', model);
+  const normalizedEffort = normalizeClaudeEffort(reasoningEffort);
+  if (normalizedEffort) args.push('--effort', normalizedEffort);
   let stdinPrompt = systemPrompt
     ? `System instructions:\n${systemPrompt}\n\n${prompt}`
     : prompt;
@@ -330,6 +339,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     /^[A-Za-z0-9+/=]{100,}/.test(source);
 
   const modelOverride = options.model || null;
+  const effortOverride = normalizeClaudeEffort(options.reasoningEffort);
 
   const schema = JSON.stringify({
     type: 'object',
@@ -376,6 +386,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
 
   const args = ['-p', '--output-format', 'json', '--json-schema', schema];
   if (modelOverride) args.push('--model', modelOverride);
+  if (effortOverride) args.push('--effort', effortOverride);
   if (tmpPath) {
     if (supportsClaudeImageFlag()) {
       args.push('--image', tmpPath);

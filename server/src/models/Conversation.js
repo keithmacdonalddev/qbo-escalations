@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
+const { getProviderIds, getDefaultProvider } = require('../services/providers/registry');
 
-const PROVIDERS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
+const PROVIDERS = getProviderIds();
 const CHAT_MODES = ['single', 'fallback', 'parallel'];
 
 const messageSchema = new mongoose.Schema({
@@ -25,7 +26,7 @@ const messageSchema = new mongoose.Schema({
 const conversationSchema = new mongoose.Schema({
   title:    { type: String, default: 'New Conversation' },
   messages: [messageSchema],
-  provider: { type: String, enum: PROVIDERS, default: 'claude' },
+  provider: { type: String, enum: PROVIDERS, default: getDefaultProvider() },
   escalationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Escalation',

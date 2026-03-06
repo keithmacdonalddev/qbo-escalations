@@ -2,6 +2,8 @@
 
 ## Project Agent Rules
 
+The user is not a professional developer. The user has minimal programming experience who knows some technical context but very little. Keep that in mind when conversing and providing explanations.
+
 ### Prototype Isolation (Default)
 
 - Build prototypes as standalone files in `prototypes/<prototype-name>/`.

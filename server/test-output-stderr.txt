@@ -1,0 +1,4 @@
+[usage-writer] write failed: Client must be connected before running operations
+[usage-writer] write failed: Client must be connected before running operations
+[usage-writer] write failed: Client must be connected before running operations
+[usage-writer] write failed: Client must be connected before running operations

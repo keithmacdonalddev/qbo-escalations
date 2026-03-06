@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
+const { getProviderIds } = require('../services/providers/registry');
 
-const PROVIDERS = ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'];
+const PROVIDERS = getProviderIds();
 
 const modelPerformanceSchema = new mongoose.Schema({
   turnId: { type: String, required: true, unique: true, index: true },

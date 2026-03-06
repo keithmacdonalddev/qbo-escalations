@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
+import { motion } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
+import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
 
 // --- SVG Icons (must be above SETTINGS_SECTIONS for Vite HMR) ---
 
@@ -72,6 +74,14 @@ function IconInfo({ size = 16 }) {
   );
 }
 
+function IconSearch({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+    </svg>
+  );
+}
+
 const SETTINGS_SECTIONS = [
   { id: 'about', label: 'About', icon: IconInfo, desc: 'App information' },
   { id: 'assistant', label: 'AI Assistant', icon: IconCpu, desc: 'Context, retrieval, budget controls' },
@@ -103,7 +113,17 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
   const { level: tooltipLevel, setLevel: setTooltipLevel } = useTooltipLevel();
   const [activeSection, setActiveSection] = useState('about');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchInputRef = useRef(null);
   const liveRegionRef = useRef(null);
+
+  const filteredSections = searchQuery.trim() === ''
+    ? SETTINGS_SECTIONS
+    : SETTINGS_SECTIONS.filter(section =>
+        section.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        section.desc.toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
   const handleThemeSelect = useCallback((id, name) => {
     stopPreview();
@@ -126,11 +146,81 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       {/* Settings Sidebar */}
       <nav className="settings-sidebar" aria-label="Settings navigation">
         <div className="settings-sidebar-header">
-          <h1 className="settings-sidebar-title">Settings</h1>
+          <div className="settings-sidebar-title-row">
+            {/* Title — fades out when search opens */}
+            <motion.h1
+              className="settings-sidebar-title"
+              animate={{ opacity: searchOpen ? 0 : 1, x: searchOpen ? -8 : 0 }}
+              transition={{ duration: 0.25, ease: 'easeInOut' }}
+            >
+              Settings
+            </motion.h1>
+
+            {/* Search input — expands right-to-left over title */}
+            <motion.div
+              className="settings-search-field-wrap"
+              initial={false}
+              animate={{
+                width: searchOpen ? 'calc(100% - 40px)' : '0px',
+                opacity: searchOpen ? 1 : 0,
+              }}
+              transition={{ duration: 0.35, ease: [0.34, 1.56, 0.64, 1] }}
+            >
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Search..."
+                className="settings-sidebar-search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onBlur={() => {
+                  if (searchQuery.trim() === '') {
+                    setSearchOpen(false);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearchQuery('');
+                    setSearchOpen(false);
+                  }
+                }}
+                aria-label="Search settings"
+                tabIndex={searchOpen ? 0 : -1}
+              />
+            </motion.div>
+
+            {/* Search icon — rotates clockwise to open, counter-clockwise to close */}
+            <button
+              className={`settings-search-icon-btn${searchOpen ? ' is-active' : ''}`}
+              onClick={() => {
+                const next = !searchOpen;
+                setSearchOpen(next);
+                if (next) {
+                  setTimeout(() => searchInputRef.current?.focus(), 200);
+                } else {
+                  setSearchQuery('');
+                }
+              }}
+              aria-label={searchOpen ? 'Close search' : 'Search settings'}
+              aria-expanded={searchOpen}
+              type="button"
+            >
+              <motion.div
+                animate={{ rotate: searchOpen ? 90 : 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                {searchOpen
+                  ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18" /><path d="m6 6 12 12" /></svg>
+                  : <IconSearch size={16} />
+                }
+              </motion.div>
+            </button>
+          </div>
         </div>
 
         <div className="settings-sidebar-nav">
-          {SETTINGS_SECTIONS.map(section => {
+          {filteredSections.map(section => {
             const Icon = section.icon;
             const isActive = activeSection === section.id;
             return (
@@ -409,10 +499,9 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                       value={aiSettings.providerStrategy.defaultPrimaryProvider}
                       onChange={(e) => updateAiSetting('providerStrategy.defaultPrimaryProvider', e.target.value)}
                     >
-                      <option value="claude">Claude</option>
-                      <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                      <option value="chatgpt-5.3-codex-high">ChatGPT 5.3 Codex (High)</option>
-                      <option value="gpt-5-mini">GPT-5 Mini</option>
+                      {PROVIDER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
                     </select>
                   </label>
                   <label className="settings-ai-field">
@@ -421,10 +510,20 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                       value={aiSettings.providerStrategy.defaultFallbackProvider}
                       onChange={(e) => updateAiSetting('providerStrategy.defaultFallbackProvider', e.target.value)}
                     >
-                      <option value="chatgpt-5.3-codex-high">ChatGPT 5.3 Codex (High)</option>
-                      <option value="claude">Claude</option>
-                      <option value="claude-sonnet-4-6">Claude Sonnet 4.6</option>
-                      <option value="gpt-5-mini">GPT-5 Mini</option>
+                      {PROVIDER_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="settings-ai-field">
+                    <span>Reasoning Effort</span>
+                    <select
+                      value={aiSettings.providerStrategy.reasoningEffort}
+                      onChange={(e) => updateAiSetting('providerStrategy.reasoningEffort', e.target.value)}
+                    >
+                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
                     </select>
                   </label>
                   <label className="settings-ai-field">
@@ -569,11 +668,22 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
             <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
               <h3 className="settings-ai-title">Sidebar</h3>
-              <div className="settings-ai-fields">
-                <label className="settings-ai-toggle">
-                  <input
-                    type="checkbox"
-                    checked={layoutProps.sidebarHoverExpand}
+                <div className="settings-ai-fields">
+                  <label className="settings-ai-toggle">
+                    <input
+                      type="checkbox"
+                      checked={layoutProps.policyLabEnabled}
+                      onChange={(e) => layoutProps.setPolicyLabEnabled(e.target.checked)}
+                    />
+                    <span>Show Policy Lab in app navigation</span>
+                  </label>
+                  <p className="settings-section-desc" style={{ margin: 0 }}>
+                    Controls visibility of the integrated repo-aware evaluation UI. This now defaults to on and no longer depends on environment flags.
+                  </p>
+                  <label className="settings-ai-toggle">
+                    <input
+                      type="checkbox"
+                      checked={layoutProps.sidebarHoverExpand}
                     onChange={(e) => layoutProps.setSidebarHoverExpand(e.target.checked)}
                   />
                   <span>Expand sidebar on hover when collapsed</span>
@@ -596,110 +706,114 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
               </div>
             </div>
 
-            {/* Network Indicator */}
+            {/* Network Indicator — single-column vertical scan layout */}
             <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
               <h3 className="settings-ai-title">Network Indicator</h3>
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', lineHeight: 1.5, marginBottom: 'var(--sp-3)' }}>
-                The edge tab on the right side of the viewport shows a live activity indicator when API requests are in flight.
+              <p className="ni-section-desc">
+                Live activity LED on the edge tab when API requests are in flight.
               </p>
-              <div className="settings-ai-fields">
-                {/* Mode toggle — visual preview cards */}
-                <div style={{ marginBottom: 'var(--sp-3)' }}>
-                  <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Indicator style</span>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
-                    Choose how active requests are indicated on the network tab.
-                  </div>
-                  <div className="led-mode-cards" role="group" aria-label="LED indicator style">
-                    {/* LED Dot card */}
-                    <button
-                      className={`led-mode-card${layoutProps.ledMode === 'dot' ? ' is-active' : ''}`}
-                      onClick={() => layoutProps.setLedMode('dot')}
-                      type="button"
-                    >
-                      <div className="led-mode-preview">
-                        <div className="led-mode-tab-mock">
-                          <span className="led-mode-dot-preview" />
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                          </svg>
-                        </div>
-                      </div>
-                      <div className="led-mode-info">
-                        <span className="led-mode-name">LED Dot</span>
-                        <span className="led-mode-desc">Glowing dot above icon</span>
-                      </div>
-                    </button>
 
-                    {/* Icon Glow card */}
-                    <button
-                      className={`led-mode-card${layoutProps.ledMode === 'icon' ? ' is-active' : ''}`}
-                      onClick={() => layoutProps.setLedMode('icon')}
-                      type="button"
-                    >
-                      <div className="led-mode-preview">
-                        <div className="led-mode-tab-mock led-mode-tab-mock--glow">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                          </svg>
-                        </div>
+              {/* ── Primary: Indicator style (visual choice — earns card treatment) ── */}
+              <div className="ni-section">
+                <span className="ni-label">Indicator style</span>
+                <div className="led-mode-cards" role="group" aria-label="LED indicator style">
+                  <button
+                    className={`led-mode-card${layoutProps.ledMode === 'dot' ? ' is-active' : ''}`}
+                    onClick={() => layoutProps.setLedMode('dot')}
+                    type="button"
+                  >
+                    <div className="led-mode-preview">
+                      <div className="led-mode-tab-mock">
+                        <span className="led-mode-dot-preview" />
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                        </svg>
                       </div>
-                      <div className="led-mode-info">
-                        <span className="led-mode-name">Icon Glow</span>
-                        <span className="led-mode-desc">Waveform icon lights up</span>
+                    </div>
+                    <div className="led-mode-info">
+                      <span className="led-mode-name">LED Dot</span>
+                      <span className="led-mode-desc">Glowing dot above icon</span>
+                    </div>
+                  </button>
+                  <button
+                    className={`led-mode-card${layoutProps.ledMode === 'icon' ? ' is-active' : ''}`}
+                    onClick={() => layoutProps.setLedMode('icon')}
+                    type="button"
+                  >
+                    <div className="led-mode-preview">
+                      <div className="led-mode-tab-mock led-mode-tab-mock--glow">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                        </svg>
                       </div>
-                    </button>
-                  </div>
+                    </div>
+                    <div className="led-mode-info">
+                      <span className="led-mode-name">Icon Glow</span>
+                      <span className="led-mode-desc">Waveform icon lights up</span>
+                    </div>
+                  </button>
                 </div>
+              </div>
 
-                {/* Intensity slider */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Glow intensity</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
-                      {layoutProps.ledIntensity}%
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
-                    Controls the brightness of the glow and shadow radius. Lower values give a subtle hint, higher values make it unmissable.
+              {/* ── Secondary: Tuning controls (grouped as related sub-controls) ── */}
+              <div className="ni-tuning-group">
+                <div className="ni-slider-row">
+                  <div className="ni-slider-header">
+                    <span className="ni-label-sm">Intensity</span>
+                    <span className="ni-value">{layoutProps.ledIntensity}%</span>
                   </div>
                   <input
-                    type="range"
-                    min="10"
-                    max="100"
-                    step="5"
+                    type="range" min="10" max="100" step="5"
                     value={layoutProps.ledIntensity}
                     onChange={(e) => layoutProps.setLedIntensity(Number(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--accent)' }}
+                    className="ni-range"
                   />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 2 }}>
-                    <span>Subtle</span>
-                    <span>Bright</span>
-                  </div>
+                  <div className="ni-range-labels"><span>Subtle</span><span>Bright</span></div>
                 </div>
 
-                {/* Pulse speed slider */}
-                <div style={{ marginTop: 'var(--sp-3)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--ink)' }}>Pulse speed</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
-                      {layoutProps.ledSpeed}s
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)', marginTop: 2, marginBottom: 'var(--sp-2)', lineHeight: 1.5 }}>
-                    How long one full breathe cycle takes. Shorter = more urgent, longer = calm ambient glow.
+                <div className="ni-slider-row">
+                  <div className="ni-slider-header">
+                    <span className="ni-label-sm">Speed</span>
+                    <span className="ni-value">{layoutProps.ledSpeed}s</span>
                   </div>
                   <input
-                    type="range"
-                    min="0.5"
-                    max="6"
-                    step="0.5"
+                    type="range" min="0.5" max="6" step="0.5"
                     value={layoutProps.ledSpeed}
                     onChange={(e) => layoutProps.setLedSpeed(Number(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--accent)' }}
+                    className="ni-range"
                   />
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 2 }}>
-                    <span>Fast (0.5s)</span>
-                    <span>Slow (6s)</span>
+                  <div className="ni-range-labels"><span>Fast</span><span>Slow</span></div>
+                </div>
+              </div>
+
+              {/* ── Tertiary: Waterfall default view (simple toggle, not a card) ── */}
+              <div className="ni-divider" />
+              <div className="ni-section">
+                <div className="ni-inline-control">
+                  <div className="ni-inline-label">
+                    <span className="ni-label-sm">Default view</span>
+                    <span className="ni-hint">Waterfall opens to this tab</span>
+                  </div>
+                  <div className="ni-pill-toggle" role="radiogroup" aria-label="Default waterfall view">
+                    <button
+                      className={`ni-pill${layoutProps.waterfallView === 'timeline' ? ' is-active' : ''}`}
+                      onClick={() => layoutProps.setWaterfallView('timeline')}
+                      type="button"
+                      role="radio"
+                      aria-checked={layoutProps.waterfallView === 'timeline'}
+                    >
+                      Timeline
+                    </button>
+                    <button
+                      className={`ni-pill${layoutProps.waterfallView === 'grouped' ? ' is-active' : ''}`}
+                      onClick={() => layoutProps.setWaterfallView('grouped')}
+                      type="button"
+                      role="radio"
+                      aria-checked={layoutProps.waterfallView === 'grouped'}
+                    >
+                      Grouped
+                    </button>
+                    <div className="ni-pill-slider" style={{ transform: `translateX(${layoutProps.waterfallView === 'grouped' ? '100%' : '0%'})` }} />
                   </div>
                 </div>
               </div>

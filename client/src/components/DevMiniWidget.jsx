@@ -1,31 +1,23 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { transitions, widgetSlideUp, scalePop, staggerContainer, staggerChild } from '../utils/motion.js';
-
-const PROVIDER_LABELS = {
-  claude: 'Claude',
-  'claude-sonnet-4-6': 'Sonnet 4.6',
-  'chatgpt-5.3-codex-high': 'Codex',
-  'gpt-5-mini': 'GPT-5 Mini',
-};
-
-function getLabel(provider) {
-  return PROVIDER_LABELS[provider] || 'Claude';
-}
+import { getProviderShortLabel } from '../lib/providerCatalog.js';
+import { useDevAgent } from '../context/DevAgentContext.jsx';
 
 /**
  * Floating mini widget that shows Dev Mode streaming progress
  * when the user is on another tab. Appears bottom-right.
  */
-export default function DevMiniWidget({
-  isStreaming,
-  streamingText,
-  streamProvider,
-  provider,
-  toolEvents,
-  error,
-  abortStream,
-}) {
+export default function DevMiniWidget() {
+  const {
+    isStreaming,
+    streamingText,
+    streamProvider,
+    provider,
+    toolEvents,
+    error,
+    abortStream,
+  } = useDevAgent();
   const [expanded, setExpanded] = useState(false);
   const [visible, setVisible] = useState(false);
   const [completedAt, setCompletedAt] = useState(null);
@@ -157,7 +149,7 @@ export default function DevMiniWidget({
                     </motion.svg>
                   )}
                 </AnimatePresence>
-                <span className="dev-mini-badge">{getLabel(activeProvider)}</span>
+                <span className="dev-mini-badge">{getProviderShortLabel(activeProvider)}</span>
                 <span className="dev-mini-status">
                   {isStreaming && 'Streaming...'}
                   {isComplete && 'Done'}
@@ -187,7 +179,7 @@ export default function DevMiniWidget({
                 <div className="dev-mini-header">
                   <div className="dev-mini-header-left">
                     <span className="dev-mini-spinner" />
-                    <span className="dev-mini-badge">{getLabel(activeProvider)}</span>
+                    <span className="dev-mini-badge">{getProviderShortLabel(activeProvider)}</span>
                     <span className="dev-mini-elapsed">{elapsed}s</span>
                   </div>
                   <div className="dev-mini-header-actions">
