@@ -23,6 +23,7 @@ import { DevAgentProvider } from './context/DevAgentContext.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import FlameBar from './components/FlameBar.jsx';
+import { tel, TEL } from './lib/devTelemetry.js';
 
 function parseHashRoute(policyLabEnabled) {
   const hash = window.location.hash || '#/chat';
@@ -72,12 +73,16 @@ function App() {
   const [waterfallView, setWaterfallView] = useState(() => {
     try { return localStorage.getItem('waterfallDefaultView') || 'timeline'; } catch { return 'timeline'; }
   });
+  const [flameBarEnabled, setFlameBarEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('flameBarEnabled')) ?? true; } catch { return true; }
+  });
   useEffect(() => { try { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); } catch {} }, [sidebarHoverExpand]);
   useEffect(() => { try { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); } catch {} }, [sidebarShowLabels]);
   useEffect(() => { try { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); } catch {} }, [ledIntensity]);
   useEffect(() => { try { localStorage.setItem('ledMode', ledMode); } catch {} }, [ledMode]);
   useEffect(() => { try { localStorage.setItem('ledSpeed', JSON.stringify(ledSpeed)); } catch {} }, [ledSpeed]);
   useEffect(() => { try { localStorage.setItem('waterfallDefaultView', waterfallView); } catch {} }, [waterfallView]);
+  useEffect(() => { try { localStorage.setItem('flameBarEnabled', JSON.stringify(flameBarEnabled)); } catch {} }, [flameBarEnabled]);
   useEffect(() => { try { localStorage.setItem('policyLabEnabled', JSON.stringify(policyLabEnabled)); } catch {} }, [policyLabEnabled]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
@@ -103,13 +108,18 @@ function App() {
   }, [settingsOpen]);
 
   useEffect(() => {
-    const onHashChange = () => setRoute(parseHashRoute(policyLabEnabled));
+    const onHashChange = () => {
+      const next = parseHashRoute(policyLabEnabled);
+      tel(TEL.ROUTE_CHANGE, `Navigated to ${next.view}`, { from: route.view, to: next.view });
+      setRoute(next);
+    };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [policyLabEnabled]);
+  }, [policyLabEnabled, route.view]);
 
-  // Set default hash if empty
+  // App mount telemetry + set default hash if empty
   useEffect(() => {
+    tel(TEL.MOUNT, 'App mounted');
     if (!window.location.hash) {
       window.location.hash = '#/chat';
     }
@@ -136,9 +146,11 @@ function App() {
     switch (route.view) {
       case 'dashboard':
         return (
+          <Profiler id="Dashboard" onRender={flame.onRender}>
           <motion.div key="dashboard" {...motionProps}>
             <EscalationDashboard />
           </motion.div>
+          </Profiler>
         );
       case 'escalation-detail':
         return (
@@ -148,44 +160,56 @@ function App() {
         );
       case 'playbook':
         return (
+          <Profiler id="Playbook" onRender={flame.onRender}>
           <motion.div key="playbook" {...motionProps}>
             <PlaybookEditor />
           </motion.div>
+          </Profiler>
         );
       case 'templates':
         return (
+          <Profiler id="Templates" onRender={flame.onRender}>
           <motion.div key="templates" {...motionProps}>
             <TemplateLibrary />
           </motion.div>
+          </Profiler>
         );
       case 'analytics':
         return (
+          <Profiler id="Analytics" onRender={flame.onRender}>
           <motion.div key="analytics" {...motionProps}>
             <Analytics />
           </motion.div>
+          </Profiler>
         );
       case 'usage':
         return (
+          <Profiler id="Usage" onRender={flame.onRender}>
           <motion.div key="usage" {...motionProps}>
             <UsageDashboard />
           </motion.div>
+          </Profiler>
         );
       case 'policy-lab':
         return (
+          <Profiler id="PolicyLab" onRender={flame.onRender}>
           <motion.div key="policy-lab" {...motionProps}>
             <PolicyLab />
           </motion.div>
+          </Profiler>
         );
       case 'settings':
         return (
+          <Profiler id="Settings" onRender={flame.onRender}>
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled }} />
           </motion.div>
+          </Profiler>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels]);
+  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, flame.onRender]);
 
   const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings';
 
@@ -194,8 +218,8 @@ function App() {
     <MotionConfig reducedMotion="user">
     <DevAgentProvider aiSettings={aiProps.aiSettings}>
     <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
-      {/* Render flame bar — dev only */}
-      {import.meta.env.DEV && <FlameBar {...flame} />}
+      {/* Render flame bar — dev only, toggleable in Settings */}
+      {import.meta.env.DEV && flameBarEnabled && <FlameBar {...flame} />}
 
       {/* Mobile sidebar toggle */}
       <button
@@ -242,14 +266,18 @@ function App() {
         style={isFullHeightView ? { padding: 0, display: 'flex', flexDirection: 'column' } : {}}
       >
         {/* Chat — always mounted so streaming persists when navigating away */}
+        <Profiler id="Chat" onRender={flame.onRender}>
         <div style={{ display: route.view === 'chat' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
           <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} />
         </div>
+        </Profiler>
 
         {/* DevMode — always mounted, hidden when not the active view */}
+        <Profiler id="DevMode" onRender={flame.onRender}>
         <div style={{ display: route.view === 'dev' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
           <DevMode />
         </div>
+        </Profiler>
 
         {/* All other views use AnimatePresence for transitions */}
         {route.view !== 'chat' && route.view !== 'dev' && (

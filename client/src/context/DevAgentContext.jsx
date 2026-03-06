@@ -1,30 +1,106 @@
-import { createContext, useContext, useMemo } from 'react';
+import { createContext, useContext, useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { useDevChat } from '../hooks/useDevChat.js';
 import { useBackgroundAgent } from '../hooks/useBackgroundAgent.js';
 import { useTabLeadership } from '../hooks/useTabLeadership.js';
+import { useAgentActivityLog } from '../hooks/useAgentActivityLog.js';
+import { useAgentSelfCheck } from '../hooks/useAgentSelfCheck.js';
+import { useServerReachability } from '../hooks/useServerReachability.js';
+import { useEmergencyMode } from '../hooks/useEmergencyMode.js';
+import { initTelemetry } from '../lib/devTelemetry.js';
+import { DevAgentMonitorBoundary } from './DevAgentMonitors.jsx';
 
 const DevAgentContext = createContext(null);
 
 /**
- * Centralizes all dev agent state so DevMode and DevMiniWidget
- * can consume via useDevAgent() instead of prop-drilling from App.
+ * Core dev agent provider -- MUST NEVER CRASH.
  *
- * Provides three layers:
+ * Contains only the foundation hooks that the app depends on:
  * - devChat: foreground conversation (messages, streaming, provider, etc.)
  * - bgAgent: background execution (sendBackground, bgStreaming, channels)
  * - tabLeadership: cross-tab coordination (isLeader, broadcastStatus)
+ * - activityLog: central event log for real-time UI
+ *
+ * All optional monitoring hooks (error capture, health monitors, task queue,
+ * code review, waterfall insights) are in DevAgentMonitorBoundary, wrapped
+ * in its own ErrorBoundary. If ANY monitor crashes, the core provider and
+ * the rest of the app continue unaffected.
  *
  * @param {object} props
  * @param {object} [props.aiSettings] - AI settings forwarded to useDevChat
  * @param {import('react').ReactNode} props.children
  */
 export function DevAgentProvider({ aiSettings, children }) {
-  const devChat = useDevChat({ aiSettings });
-  const bgAgent = useBackgroundAgent();
-  const tabLeadership = useTabLeadership();
+  // Layer 0: Foundation -- these MUST work
+  const activityLog = useAgentActivityLog();
+  const tabLeadership = useTabLeadership({ log: activityLog.log });
+  const devChat = useDevChat({ aiSettings, log: activityLog.log });
+  const selfCheck = useAgentSelfCheck({ isLeader: tabLeadership.isLeader, log: activityLog.log });
+  const bgAgent = useBackgroundAgent({ log: activityLog.log, onSuccess: selfCheck.recordBgSuccess });
+  const serverReachability = useServerReachability({ log: activityLog.log });
+  const emergency = useEmergencyMode({ log: activityLog.log });
 
-  const value = useMemo(() => ({
-    // Foreground state (all existing useDevChat fields)
+  // Wrap sendBackground with server-state gate: when unreachable, silently
+  // queue the message instead of attempting a request that will fail.
+  const safeSendBackground = useCallback(async (channel, message, options) => {
+    if (serverReachability.serverState === serverReachability.STATES.UNREACHABLE) {
+      serverReachability.queueForLater(channel, message);
+      activityLog.log?.({
+        type: 'server-status',
+        message: `Queued message for ${channel} (server unreachable)`,
+        severity: 'warning',
+      });
+      return null;
+    }
+    return bgAgent.sendBackground(channel, message, options);
+  }, [serverReachability.serverState, serverReachability.STATES.UNREACHABLE, serverReachability.queueForLater, bgAgent.sendBackground, activityLog.log]);
+
+  // When server comes back from degraded/unreachable, drain the offline queue
+  // and send a single batched summary to the auto-errors channel.
+  useEffect(() => {
+    if (serverReachability.serverState === serverReachability.STATES.REACHABLE) {
+      const queued = serverReachability.drainQueue();
+      if (queued.length > 0) {
+        const summary = queued
+          .map(q => `- [${q.channel}] ${typeof q.message === 'string' ? q.message.slice(0, 100) : '(non-string)'}`)
+          .join('\n');
+        bgAgent.sendBackground(
+          'auto-errors',
+          `[AUTO-ERROR] ${queued.length} queued errors from server downtime:\n\n${summary}`
+        );
+        activityLog.log?.({
+          type: 'server-status',
+          message: `Drained ${queued.length} queued errors after server recovery`,
+          severity: 'info',
+        });
+      }
+    }
+  }, [serverReachability.serverState]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Wire telemetry system into the provider so tel() calls route here
+  useEffect(() => {
+    initTelemetry(activityLog.log, bgAgent.sendBackground);
+  }, [activityLog.log, bgAgent.sendBackground]);
+
+  // Mini-widget quick-chat expansion state (controlled from App via Ctrl+Shift+D)
+  const [miniWidgetOpen, setMiniWidgetOpen] = useState(false);
+  const miniWidgetInputRef = useRef(null);
+  const toggleMiniWidget = useCallback(() => {
+    setMiniWidgetOpen(prev => {
+      const next = !prev;
+      if (next) {
+        setTimeout(() => miniWidgetInputRef.current?.focus(), 50);
+      }
+      return next;
+    });
+  }, []);
+  const focusMiniWidget = useCallback(() => {
+    setMiniWidgetOpen(true);
+    setTimeout(() => miniWidgetInputRef.current?.focus(), 50);
+  }, []);
+
+  // Core context value -- always available regardless of monitor health
+  const coreValue = useMemo(() => ({
+    // Foreground state (all useDevChat fields)
     ...devChat,
     // Background execution
     sendBackground: bgAgent.sendBackground,
@@ -37,11 +113,49 @@ export function DevAgentProvider({ aiSettings, children }) {
     tabId: tabLeadership.tabId,
     broadcastStatus: tabLeadership.broadcastStatus,
     onStatusUpdate: tabLeadership.onStatusUpdate,
-  }), [devChat, bgAgent, tabLeadership]);
+    // Mini-widget quick-chat state
+    miniWidgetOpen,
+    setMiniWidgetOpen,
+    miniWidgetInputRef,
+    toggleMiniWidget,
+    focusMiniWidget,
+    // Activity log
+    activityLog,
+    // Self-monitoring heartbeat
+    agentHealthy: selfCheck.agentHealthy,
+    healthDetails: selfCheck.healthDetails,
+    recordBgSuccess: selfCheck.recordBgSuccess,
+    // Server reachability (tri-state)
+    serverState: serverReachability.serverState,
+    // Emergency mode (backpressure triage)
+    emergencyActive: emergency.emergencyActive,
+    resetEmergency: emergency.resetEmergency,
+  }), [
+    devChat,
+    bgAgent.sendBackground, bgAgent.bgStreaming, bgAgent.bgQueue, bgAgent.lastResults, bgAgent.channels,
+    tabLeadership.isLeader, tabLeadership.tabId, tabLeadership.broadcastStatus, tabLeadership.onStatusUpdate,
+    miniWidgetOpen, toggleMiniWidget, focusMiniWidget,
+    activityLog,
+    selfCheck.agentHealthy, selfCheck.healthDetails, selfCheck.recordBgSuccess,
+    serverReachability.serverState,
+    emergency.emergencyActive, emergency.resetEmergency,
+  ]);
 
   return (
-    <DevAgentContext.Provider value={value}>
-      {children}
+    <DevAgentContext.Provider value={coreValue}>
+      <DevAgentMonitorBoundary
+        sendBackground={safeSendBackground}
+        isLeader={tabLeadership.isLeader}
+        log={activityLog.log}
+        isStreaming={devChat.isStreaming}
+        bgStreaming={bgAgent.bgStreaming}
+        sendMessage={devChat.sendMessage}
+        serverState={serverReachability.serverState}
+        emergencyActive={emergency.emergencyActive}
+        recordError={emergency.recordError}
+      >
+        {children}
+      </DevAgentMonitorBoundary>
     </DevAgentContext.Provider>
   );
 }

@@ -4,6 +4,8 @@ const path = require('path');
 const { createApp } = require('./app');
 const UsageLog = require('./models/UsageLog');
 const { drainPendingWrites } = require('./lib/usage-writer');
+const { reportServerError } = require('./lib/server-error-pipeline');
+const { startCleanupSchedule, stopCleanupSchedule } = require('./lib/cleanup');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -52,16 +54,50 @@ async function start() {
     const { warmUp: warmCodex } = require('./services/codex');
     warmClaude().catch(() => { /* non-fatal */ });
     warmCodex().catch(() => { /* non-fatal */ });
+
+    // Start periodic DB cleanup (30s delay, then every 6h)
+    startCleanupSchedule();
   });
 }
 
 mongoose.connection.on('disconnected', () => {
   console.log('MongoDB disconnected');
+  reportServerError({
+    message: 'MongoDB disconnected',
+    detail: 'The database connection was lost. Queries will fail until reconnection.',
+    source: 'mongodb',
+    category: 'runtime-error',
+    severity: 'error',
+  });
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err.message);
+  reportServerError({
+    message: `MongoDB error: ${err.message}`,
+    detail: 'A database-level error occurred on the active connection.',
+    stack: err.stack || '',
+    source: 'mongodb',
+    category: 'runtime-error',
+    severity: 'error',
+  });
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('MongoDB reconnected');
+  reportServerError({
+    message: 'MongoDB reconnected',
+    detail: 'Database connection restored after a disconnect.',
+    source: 'mongodb',
+    category: 'other',
+    severity: 'info',
+  });
 });
 
 // Graceful shutdown
 function shutdown(signal) {
   console.log(`\n${signal} received — shutting down`);
+  stopCleanupSchedule();
   if (httpServer) {
     httpServer.close(async () => {
       console.log('HTTP server closed');
@@ -82,9 +118,25 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err);
+  reportServerError({
+    message: `Uncaught exception: ${err.message}`,
+    detail: 'A synchronous exception was not caught by any try/catch. This could crash the server.',
+    stack: err.stack || '',
+    source: 'process',
+    category: 'runtime-error',
+    severity: 'error',
+  });
 });
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled promise rejection:', reason);
+  reportServerError({
+    message: `Unhandled rejection: ${reason?.message || String(reason)}`,
+    detail: 'A promise was rejected but no .catch() handled it.',
+    stack: reason?.stack || '',
+    source: 'process',
+    category: 'runtime-error',
+    severity: 'error',
+  });
 });
 
 start();

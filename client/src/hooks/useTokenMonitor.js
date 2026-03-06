@@ -1,0 +1,118 @@
+import { useMemo, useRef, useEffect } from 'react';
+
+/**
+ * Format a token count into a human-readable abbreviated string.
+ * Shared between the monitor bar and mini widget.
+ *
+ * @param {number} n - Token count
+ * @returns {string}
+ */
+export function formatTokenCount(n) {
+  if (n == null || n === 0) return '0';
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+/**
+ * Format a dollar cost to a sensible precision.
+ * Shows 4 decimal places for costs < $1, 2 for >= $1.
+ *
+ * @param {number} cost - Cost in dollars
+ * @returns {string}
+ */
+export function formatCost(cost) {
+  if (!cost || cost <= 0) return '$0';
+  if (cost >= 1) return '$' + cost.toFixed(2);
+  return '$' + cost.toFixed(4);
+}
+
+/**
+ * Computes running token usage stats from dev chat messages and
+ * cumulative background channel results.
+ *
+ * Background usage is tracked cumulatively via a ref because
+ * bgLastResults only stores the LAST result per channel (not a
+ * running total). Each time a new background result appears for
+ * a channel, its usage is added to the accumulator.
+ *
+ * @param {object} options
+ * @param {Array} options.messages - Dev chat messages array
+ * @param {object} options.bgLastResults - { channel: { usage, ... } }
+ * @returns {{ foreground, background, combined }}
+ */
+export function useTokenMonitor({ messages, bgLastResults }) {
+  // --- Cumulative background usage tracking ---
+  // bgLastResults overwrites per channel on each response, so we
+  // detect changes by comparing object identity of each channel's result.
+  const bgSeenRef = useRef(new Map()); // channel -> last result object reference
+  const bgAccRef = useRef({ input: 0, output: 0, total: 0, costMicros: 0, count: 0 });
+
+  // Detect new background results and accumulate their usage
+  useEffect(() => {
+    if (!bgLastResults) return;
+    const seen = bgSeenRef.current;
+    const acc = bgAccRef.current;
+
+    for (const [channel, result] of Object.entries(bgLastResults)) {
+      if (!result || result === seen.get(channel)) continue;
+      // New result for this channel -- accumulate usage
+      seen.set(channel, result);
+      if (result.usage) {
+        acc.input += result.usage.inputTokens || 0;
+        acc.output += result.usage.outputTokens || 0;
+        acc.total += result.usage.totalTokens || 0;
+        acc.costMicros += result.usage.totalCostMicros || 0;
+        acc.count++;
+      }
+    }
+  }, [bgLastResults]);
+
+  return useMemo(() => {
+    // --- Foreground usage from dev chat messages ---
+    let fgInput = 0;
+    let fgOutput = 0;
+    let fgTotal = 0;
+    let fgCostMicros = 0;
+    let fgCount = 0;
+
+    for (const msg of messages || []) {
+      if (msg.role !== 'assistant' || !msg.usage || msg.usage.usageAvailable === false) continue;
+      fgInput += msg.usage.inputTokens || 0;
+      fgOutput += msg.usage.outputTokens || 0;
+      fgTotal += msg.usage.totalTokens || 0;
+      fgCostMicros += msg.usage.totalCostMicros || 0;
+      fgCount++;
+    }
+
+    // --- Background usage (read from cumulative ref) ---
+    const bg = bgAccRef.current;
+
+    const combinedTotal = fgTotal + bg.total;
+    const combinedCostMicros = fgCostMicros + bg.costMicros;
+
+    return {
+      foreground: {
+        input: fgInput,
+        output: fgOutput,
+        total: fgTotal,
+        cost: fgCostMicros / 1_000_000,
+        messages: fgCount,
+      },
+      background: {
+        input: bg.input,
+        output: bg.output,
+        total: bg.total,
+        cost: bg.costMicros / 1_000_000,
+        messages: bg.count,
+      },
+      combined: {
+        input: fgInput + bg.input,
+        output: fgOutput + bg.output,
+        total: combinedTotal,
+        cost: combinedCostMicros / 1_000_000,
+        messages: fgCount + bg.count,
+      },
+    };
+  }, [messages, bgLastResults]);
+}

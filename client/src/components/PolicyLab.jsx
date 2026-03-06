@@ -22,7 +22,7 @@ const FAMILY_OPTIONS = [
 ];
 
 function findById(entries, id) {
-  return entries.find((entry) => entry.id === id) || { score: 0, title: id };
+  return entries.find((entry) => entry.id === id) || { score: 0, title: id, passed: false, notes: '' };
 }
 
 function humanize(value) {
@@ -145,111 +145,159 @@ function buildEvaluatorMethodologyText(result) {
   ].join('\n');
 }
 
-function buildClipboardReport({ result, leftFile, rightFile, leftModel, rightModel, leftReasoningEffort, rightReasoningEffort }) {
+function sideToLabel(side) {
+  if (side === 'left') return 'Current';
+  if (side === 'right') return 'Proposed';
+  return 'Neither';
+}
+
+function getSidePayload(result, side) {
+  if (side === 'left') {
+    return {
+      analysis: result.left,
+      modelEval: result.modelEvaluations.left,
+      agenticEval: result.agenticEvaluations.left,
+      feedback: result.feedback.left,
+    };
+  }
+  if (side === 'right') {
+    return {
+      analysis: result.right,
+      modelEval: result.modelEvaluations.right,
+      agenticEval: result.agenticEvaluations.right,
+      feedback: result.feedback.right,
+    };
+  }
+  return {
+    analysis: null,
+    modelEval: null,
+    agenticEval: null,
+    feedback: null,
+  };
+}
+
+function getFailedHardGates(analysis) {
+  return (analysis?.hardGates || []).filter((entry) => entry.required && !entry.passed).map((entry) => entry.title);
+}
+
+function getPassedTaskCount(analysis) {
+  return (analysis?.taskScores || []).filter((entry) => entry.passed).length;
+}
+
+function getTaskCount(analysis) {
+  return Array.isArray(analysis?.taskScores) ? analysis.taskScores.length : 0;
+}
+
+function getTopCategoryNames(analysis, direction = 'top', limit = 3) {
+  const scores = Array.isArray(analysis?.categoryScores) ? [...analysis.categoryScores] : [];
+  const sorted = scores.sort((left, right) => direction === 'top' ? right.score - left.score : left.score - right.score);
+  return sorted.slice(0, limit).map((entry) => `${entry.title} (${toFixed(entry.score)})`);
+}
+
+function buildDecisionSummary(result) {
+  const strongerSide = result?.comparison?.winner === 'left' || result?.comparison?.winner === 'right'
+    ? result.comparison.winner
+    : 'tie';
+  const strongerLabel = sideToLabel(strongerSide);
+  const stronger = getSidePayload(result, strongerSide);
+  const weakerSide = strongerSide === 'left' ? 'right' : strongerSide === 'right' ? 'left' : 'tie';
+  const weakerLabel = sideToLabel(weakerSide);
+  const staticBlocked = result?.comparison?.recommendedLabel === 'No clear winner';
+  const failedGates = getFailedHardGates(stronger.analysis);
+  const passCount = getPassedTaskCount(stronger.analysis);
+  const totalTasks = getTaskCount(stronger.analysis);
+  const modelWinner = sideToLabel(result?.modelEvaluations?.comparison?.winner);
+  const modelDisagrees = (result?.modelEvaluations?.comparison?.winner === 'left' || result?.modelEvaluations?.comparison?.winner === 'right')
+    && result.modelEvaluations.comparison.winner !== strongerSide;
+
+  let blockedReason = 'The static evaluator did not find a stronger file.';
+  if (strongerSide !== 'tie') {
+    if (failedGates.length > 0) {
+      blockedReason = `${strongerLabel} is stronger, but it still fails required hard gates: ${failedGates.join(', ')}.`;
+    } else if (passCount < totalTasks) {
+      blockedReason = `${strongerLabel} is stronger, but it only passes ${passCount}/${totalTasks} benchmark tasks, so it is still not ready for default use.`;
+    } else if (staticBlocked) {
+      blockedReason = `${strongerLabel} is stronger, but the evaluator still blocked recommendation because the separation was not durable enough.`;
+    } else {
+      blockedReason = `${strongerLabel} is both stronger and recommendable.`;
+    }
+  }
+
+  let modelNote = 'Static and model signals are aligned closely enough.';
+  if (modelDisagrees) {
+    modelNote = `The model lens preferred ${modelWinner}, but the static evaluator still treats ${strongerLabel} as better. Use the static result as primary because it enforces repo-specific hard gates and benchmark thresholds.`;
+  }
+
+  const agenticNote = result?.agenticEvaluations?.comparison?.conclusion
+    || 'No agentic conclusion available.';
+
+  return {
+    strongerSide,
+    strongerLabel,
+    weakerSide,
+    weakerLabel,
+    adoptable: !staticBlocked,
+    blockedReason,
+    failedGates,
+    passCount,
+    totalTasks,
+    modelNote,
+    agenticNote,
+  };
+}
+
+function buildCondensedClipboardReport({ result, leftModel, rightModel, leftReasoningEffort, rightReasoningEffort }) {
+  const summary = buildDecisionSummary(result);
+  const stronger = getSidePayload(result, summary.strongerSide);
+  const weaker = getSidePayload(result, summary.weakerSide);
+
   return [
-    'You are reviewing a Policy Lab evaluation from the qbo-escalations repository.',
-    'Your job is to interpret the verdict, explain any contradictions in the output, identify why the stronger file still may not be recommendable, and propose concrete edits to improve the weaker or blocked file.',
-    'Treat the static evaluator as the primary signal unless you find a clear methodology flaw in the report below.',
-    '',
-    '=== POLICY LAB EVALUATION REPORT ===',
+    '=== POLICY LAB SUMMARY ===',
     `Run ID: ${result.runId}`,
     `Generated at: ${result.generatedAt}`,
-    `Mode: ${result.mode}`,
     `Family: ${result.familyLabel}`,
     `Artifact path: ${result.artifactPath || '(uploaded pair)'}`,
     '',
-    'Static verdict summary:',
-    `- Recommended label: ${result.comparison.recommendedLabel}`,
-    `- Winner slot: ${result.comparison.winner}`,
-    `- Score margin: ${toFixed(result.comparison.scoreMargin)}`,
-    `- Confidence: ${result.comparison.confidence.level} (${toFixed(result.comparison.confidence.score)})`,
-    `- Conclusion: ${result.comparison.conclusion}`,
-    'Reasons:',
-    formatBulletList(result.comparison.reasons),
-    'Hard gate summary:',
-    formatBulletList([
-      `Current failures: ${(result.comparison.hardGateSummary?.leftFailures || []).join(', ') || 'none'}`,
-      `Proposed failures: ${(result.comparison.hardGateSummary?.rightFailures || []).join(', ') || 'none'}`,
-    ]),
+    'Decision:',
+    `- Better version: ${summary.strongerLabel}`,
+    `- Adopt now: ${summary.adoptable ? 'yes' : 'no'}`,
+    `- Static confidence: ${result.comparison.confidence.level} (${toFixed(result.comparison.confidence.score)})`,
+    `- Why blocked: ${summary.blockedReason}`,
     '',
-    'Policy-only comparison:',
-    `- Winner: ${result.policyComparison.winner}`,
-    `- Margin: ${toFixed(result.policyComparison.scoreMargin)}`,
-    'Reasons:',
-    formatBulletList(result.policyComparison.reasons),
+    'Why this call:',
+    formatBulletList(result.comparison.reasons?.slice(0, 5)),
     '',
-    'Benchmark-only comparison:',
-    `- Winner: ${result.taskBenchmark.winner}`,
-    `- Margin: ${toFixed(result.taskBenchmark.margin)}`,
-    `- Current passes: ${result.taskBenchmark.leftPassCount} of ${result.taskBenchmark.totalTasks}`,
-    `- Proposed passes: ${result.taskBenchmark.rightPassCount} of ${result.taskBenchmark.totalTasks}`,
-    'Reasons:',
-    formatBulletList(result.taskBenchmark.reasons),
-    '',
-    'Model evaluation summary:',
+    'Model and agentic notes:',
     `- Current model: ${leftModel} @ ${leftReasoningEffort}`,
     `- Proposed model: ${rightModel} @ ${rightReasoningEffort}`,
-    `- AI comparison winner: ${result.modelEvaluations.comparison.winner}`,
-    `- AI score margin: ${toFixed(result.modelEvaluations.comparison.scoreMargin)}`,
-    `- Same model: ${result.modelEvaluations.comparison.sameModel ? 'yes' : 'no'}`,
-    result.modelEvaluations.comparison.caution ? `- Caution: ${result.modelEvaluations.comparison.caution}` : null,
+    `- Model note: ${summary.modelNote}`,
+    `- Agentic note: ${summary.agenticNote}`,
     '',
-    buildModelAssessmentText(result.modelEvaluations.left),
+    `${summary.strongerLabel}: keep as the base? ${summary.adoptable ? 'yes' : 'not yet'}`,
+    'Top blockers:',
+    formatBulletList(stronger.feedback?.topBlockers?.slice(0, 5)),
+    'Best edits next:',
+    formatBulletList(stronger.feedback?.priorityFixes?.slice(0, 6)),
     '',
-    buildModelAssessmentText(result.modelEvaluations.right),
-    '',
-    'Full agentic evaluation summary:',
-    `- Winner: ${result.agenticEvaluations.comparison.winner}`,
-    `- Recommended label: ${result.agenticEvaluations.comparison.recommendedLabel}`,
-    `- Score margin: ${toFixed(result.agenticEvaluations.comparison.scoreMargin)}`,
-    `- Confidence: ${result.agenticEvaluations.comparison.confidence.level} (${toFixed(result.agenticEvaluations.comparison.confidence.score)})`,
-    `- Conclusion: ${result.agenticEvaluations.comparison.conclusion}`,
-    'Reasons:',
-    formatBulletList(result.agenticEvaluations.comparison.reasons),
-    '',
-    buildAgenticAssessmentText(result.agenticEvaluations.left),
-    '',
-    buildAgenticAssessmentText(result.agenticEvaluations.right),
-    '',
-    'Evaluator feedback and meanings:',
-    `- Static meaning: ${result.feedback.staticMeaning.strongerButBlocked}`,
-    `- Benchmark meaning: ${result.feedback.staticMeaning.benchmarkMeaning}`,
-    `- Current model meaning: ${result.feedback.staticMeaning.modelMeaningLeft}`,
-    `- Proposed model meaning: ${result.feedback.staticMeaning.modelMeaningRight}`,
-    '',
-    `Current feedback benchmark meaning: ${result.feedback.left.benchmarkMeaning}`,
-    'Current top blockers:',
-    formatBulletList(result.feedback.left.topBlockers),
-    'Current priority fixes:',
-    formatBulletList(result.feedback.left.priorityFixes),
-    '',
-    `Proposed feedback benchmark meaning: ${result.feedback.right.benchmarkMeaning}`,
-    'Proposed top blockers:',
-    formatBulletList(result.feedback.right.topBlockers),
-    'Proposed priority fixes:',
-    formatBulletList(result.feedback.right.priorityFixes),
-    '',
-    buildArtifactAnalysisText(result.left),
-    '',
-    buildArtifactAnalysisText(result.right),
-    '',
-    buildEvaluatorMethodologyText(result),
-    '',
-    'Agentic evaluator methodology:',
-    `- Version: ${result.agenticEvaluations.methodology.version}`,
-    `- Scenario pack size: ${result.agenticEvaluations.methodology.scenarioPackSize}`,
-    `- Task pack size: ${result.agenticEvaluations.methodology.taskPackSize}`,
-    ...((result.agenticEvaluations.methodology.process || []).map((entry) => `- ${entry}`)),
-    '',
-    'Compared file contents:',
-    '--- CURRENT FILE START ---',
-    leftFile?.content || '',
-    '--- CURRENT FILE END ---',
-    '--- PROPOSED FILE START ---',
-    rightFile?.content || '',
-    '--- PROPOSED FILE END ---',
-    '=== END POLICY LAB EVALUATION REPORT ===',
+    `${summary.weakerLabel}: why it loses`,
+    'Top blockers:',
+    formatBulletList(weaker.feedback?.topBlockers?.slice(0, 5)),
+    'Best edits next:',
+    formatBulletList(weaker.feedback?.priorityFixes?.slice(0, 6)),
+    '=== END POLICY LAB SUMMARY ===',
   ].filter(Boolean).join('\n');
+}
+
+function buildClipboardReport({ result, leftFile, rightFile, leftModel, rightModel, leftReasoningEffort, rightReasoningEffort }) {
+  return buildCondensedClipboardReport({
+    result,
+    leftFile,
+    rightFile,
+    leftModel,
+    rightModel,
+    leftReasoningEffort,
+    rightReasoningEffort,
+  });
 }
 
 async function copyTextToClipboard(text) {
@@ -314,6 +362,10 @@ export default function PolicyLab() {
   }, []);
 
   const familyCatalog = useMemo(() => artifactCatalog.filter((entry) => entry.family === family), [artifactCatalog, family]);
+  const decisionSummary = useMemo(() => {
+    if (!result || result.preflight?.passed === false) return null;
+    return buildDecisionSummary(result);
+  }, [result]);
 
   useEffect(() => {
     const firstPath = familyCatalog[0]?.path || '';
@@ -452,7 +504,7 @@ export default function PolicyLab() {
               {busy ? 'Running Checks...' : 'Run Evaluation'}
             </button>
             <button className="btn btn-secondary" type="button" disabled={!result} onClick={copyEvaluationPrompt}>
-              {result?.preflight?.passed === false ? 'Copy Failure Report' : 'Copy Prompt Report'}
+              {result?.preflight?.passed === false ? 'Copy Failure Report' : 'Copy Condensed Report'}
             </button>
           </div>
           <label className="policy-lab-inlinecheck">
@@ -598,75 +650,57 @@ export default function PolicyLab() {
 
       {result && result.preflight?.passed !== false && (
         <>
-          <section className="policy-lab-results">
+          <section className="policy-lab-results policy-lab-results--summary">
             <article className="card">
               <div className="policy-lab-cardhead">
-                <span className="badge">Static Verdict</span>
-                <h3>{result.comparison.recommendedLabel}</h3>
+                <span className="badge">Decision</span>
+                <h3>{decisionSummary?.strongerLabel || 'No stronger file yet'}</h3>
               </div>
-              <div className="policy-lab-summarygrid">
-                <div><span>Margin</span><strong>{result.comparison.scoreMargin.toFixed(1)} pts</strong></div>
-                <div><span>Confidence</span><strong>{result.comparison.confidence.level} ({result.comparison.confidence.score})</strong></div>
+              <div className="policy-lab-summarygrid policy-lab-summarygrid--five">
+                <div><span>Better version</span><strong>{decisionSummary?.strongerLabel || 'Neither'}</strong></div>
+                <div><span>Adopt now</span><strong>{decisionSummary?.adoptable ? 'yes' : 'no'}</strong></div>
+                <div><span>Static confidence</span><strong>{result.comparison.confidence.level} ({toFixed(result.comparison.confidence.score)})</strong></div>
+                <div><span>Benchmark passes</span><strong>{decisionSummary ? `${decisionSummary.passCount}/${decisionSummary.totalTasks}` : '--'}</strong></div>
                 <div><span>Family</span><strong>{result.familyLabel}</strong></div>
-                <div><span>Path</span><strong>{result.artifactPath || 'uploaded pair'}</strong></div>
               </div>
-              <p className="policy-lab-conclusion">{result.comparison.conclusion}</p>
+              <p className="policy-lab-conclusion">{decisionSummary?.blockedReason || result.comparison.conclusion}</p>
               <div className="policy-lab-reasons">
-                {result.comparison.reasons.map((reason) => <p key={reason}>{reason}</p>)}
+                {(result.comparison.reasons || []).slice(0, 4).map((reason) => <p key={reason}>{reason}</p>)}
               </div>
               <p className="policy-lab-hint">
-                `Copy Prompt Report` includes the full verdict, hard gates, scenario/task packs, model outcomes, and both compared file contents for pasting into Codex or Claude Code.
+                `Copy Condensed Report` now copies the short human-readable decision memo instead of the full raw evaluator dump.
               </p>
             </article>
 
             <article className="card">
               <div className="policy-lab-cardhead">
-                <span className="badge badge-accent">Agentic Verdict</span>
-                <h3>{result.agenticEvaluations.comparison.recommendedLabel}</h3>
+                <span className="badge badge-accent">Why This Call</span>
+                <h3>Static First, Other Lenses Secondary</h3>
               </div>
               <div className="policy-lab-summarygrid">
-                <div><span>Winner</span><strong>{result.agenticEvaluations.comparison.winner}</strong></div>
-                <div><span>Margin</span><strong>{result.agenticEvaluations.comparison.scoreMargin.toFixed(1)} pts</strong></div>
-                <div><span>Confidence</span><strong>{result.agenticEvaluations.comparison.confidence.level} ({result.agenticEvaluations.comparison.confidence.score})</strong></div>
-                <div><span>Same model</span><strong>{result.agenticEvaluations.comparison.sameModel ? 'yes' : 'no'}</strong></div>
+                <div><span>Static winner</span><strong>{decisionSummary?.strongerLabel || 'Neither'}</strong></div>
+                <div><span>Static margin</span><strong>{toFixed(result.comparison.scoreMargin)} pts</strong></div>
+                <div><span>Model winner</span><strong>{sideToLabel(result.modelEvaluations.comparison.winner)}</strong></div>
+                <div><span>Agentic winner</span><strong>{sideToLabel(result.agenticEvaluations.comparison.winner)}</strong></div>
               </div>
-              <p className="policy-lab-conclusion">{result.agenticEvaluations.comparison.conclusion}</p>
+              <p className="policy-lab-conclusion">{decisionSummary?.modelNote}</p>
               <div className="policy-lab-reasons">
-                {result.agenticEvaluations.comparison.reasons.map((reason) => <p key={reason}>{reason}</p>)}
-              </div>
-              {result.agenticEvaluations.comparison.caution && (
-                <p className="policy-lab-warning">{result.agenticEvaluations.comparison.caution}</p>
-              )}
-            </article>
-
-            <article className="card">
-              <div className="policy-lab-cardhead">
-                <span className="badge badge-accent">Model Lens</span>
-                <h3>{result.modelEvaluations.comparison.winner === 'tie' ? 'No clear AI winner' : result.modelEvaluations.comparison.winner === 'left' ? 'Current' : 'Proposed'}</h3>
-              </div>
-              <div className="policy-lab-summarygrid">
-                <div><span>Current model</span><strong>{result.modelEvaluations.left.providerLabel}</strong></div>
-                <div><span>Proposed model</span><strong>{result.modelEvaluations.right.providerLabel}</strong></div>
-                <div><span>AI margin</span><strong>{result.modelEvaluations.comparison.scoreMargin.toFixed(1)} pts</strong></div>
-                <div><span>Same model</span><strong>{result.modelEvaluations.comparison.sameModel ? 'yes' : 'no'}</strong></div>
+                <p>{result.feedback.staticMeaning.strongerButBlocked}</p>
+                <p>{result.feedback.staticMeaning.benchmarkMeaning}</p>
+                <p>{decisionSummary?.agenticNote}</p>
               </div>
               {result.modelEvaluations.comparison.caution && (
                 <p className="policy-lab-warning">{result.modelEvaluations.comparison.caution}</p>
               )}
             </article>
-          </section>
 
-          <section className="policy-lab-results">
             <article className="card">
               <div className="policy-lab-cardhead">
-                <span className="badge">What This Means</span>
-                <h3>Evaluator Interpretation</h3>
+                <span className="badge badge-accent">Next Action</span>
+                <h3>{decisionSummary?.strongerLabel ? `Keep improving ${decisionSummary.strongerLabel}` : 'Revise both files'}</h3>
               </div>
               <div className="policy-lab-reasons">
-                <p>{result.feedback.staticMeaning.strongerButBlocked}</p>
-                <p>{result.feedback.staticMeaning.benchmarkMeaning}</p>
-                <p>{result.feedback.staticMeaning.modelMeaningLeft}</p>
-                <p>{result.feedback.staticMeaning.modelMeaningRight}</p>
+                {(getSidePayload(result, decisionSummary?.strongerSide).feedback?.priorityFixes || []).slice(0, 5).map((item) => <p key={item}>{item}</p>)}
               </div>
             </article>
           </section>
@@ -676,50 +710,50 @@ export default function PolicyLab() {
               const modelEval = index === 0 ? result.modelEvaluations.left : result.modelEvaluations.right;
               const agenticEval = index === 0 ? result.agenticEvaluations.left : result.agenticEvaluations.right;
               const feedback = index === 0 ? result.feedback.left : result.feedback.right;
+              const side = index === 0 ? 'left' : 'right';
+              const failedGates = getFailedHardGates(analysis);
+              const benchmarkPassCount = getPassedTaskCount(analysis);
+              const totalTasks = getTaskCount(analysis);
+              const stronger = decisionSummary?.strongerSide === side;
               return (
                 <article key={analysis.slotLabel} className="card">
                   <div className="policy-lab-cardhead">
-                    <span className="badge">{analysis.slotLabel}</span>
+                    <span className={`badge ${stronger ? '' : 'badge-accent'}`}>{analysis.slotLabel}</span>
                     <h3>{analysis.displayName}</h3>
                   </div>
                   <div className="policy-lab-summarygrid">
-                    <div><span>Overall</span><strong>{analysis.overallScore.toFixed(1)}</strong></div>
-                    <div><span>Policy Avg</span><strong>{analysis.scenarioAverage.toFixed(1)}</strong></div>
-                    <div><span>Benchmark Avg</span><strong>{analysis.taskAverage.toFixed(1)}</strong></div>
-                    <div><span>Model Score</span><strong>{modelEval.overallScore.toFixed(1)}</strong></div>
-                  </div>
-                  <div className="policy-lab-dimensions">
-                    {Object.entries(analysis.dimensions).map(([label, value]) => (
-                      <div key={label} className="policy-lab-barrow">
-                        <span>{humanize(label)}</span>
-                        <div className="policy-lab-bar"><div style={{ width: `${value}%` }} /></div>
-                        <strong>{value.toFixed(1)}</strong>
-                      </div>
-                    ))}
+                    <div><span>Role</span><strong>{stronger ? 'Better base' : 'Weaker candidate'}</strong></div>
+                    <div><span>Adopt now</span><strong>{stronger && decisionSummary?.adoptable ? 'yes' : 'no'}</strong></div>
+                    <div><span>Hard gate failures</span><strong>{failedGates.length || 0}</strong></div>
+                    <div><span>Benchmark passes</span><strong>{benchmarkPassCount}/{totalTasks}</strong></div>
                   </div>
                   <div className="policy-lab-listgrid">
                     <div>
-                      <h4>Static Risks</h4>
-                      <ul>{analysis.riskFlags.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <h4>{stronger ? 'Why keep this file' : 'Why this file loses'}</h4>
+                      <p className="muted">
+                        {stronger
+                          ? (decisionSummary?.adoptable
+                            ? `${analysis.slotLabel} is the stronger file and is ready to adopt.`
+                            : `${analysis.slotLabel} is the stronger file, but it is still blocked from recommendation.`)
+                          : `${analysis.slotLabel} is weaker than ${decisionSummary?.strongerLabel || 'the stronger file'} and should not replace it yet.`}
+                      </p>
+                      <ul>{getTopCategoryNames(analysis, 'top', 3).map((item) => <li key={item}>{item}</li>)}</ul>
                     </div>
                     <div>
-                      <h4>{modelEval.providerLabel}</h4>
-                      <p className="muted">{modelEval.recommendation}</p>
-                      <ul>{modelEval.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
-                      <ul>{modelEval.risks.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <h4>Top blockers</h4>
+                      <ul>{(feedback.topBlockers || []).slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul>
                     </div>
                     <div>
-                      <h4>Full Agentic Review</h4>
-                      <p className="muted">{agenticEval.summary}</p>
-                      <ul><li>Verdict: {agenticEval.verdict}</li></ul>
-                      <ul><li>{agenticEval.benchmarkMeaning}</li></ul>
-                      <ul>{agenticEval.priorityFixes.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <h4>Best edits next</h4>
+                      <ul>{(feedback.priorityFixes || []).slice(0, 6).map((item) => <li key={item}>{item}</li>)}</ul>
                     </div>
                     <div>
-                      <h4>Improve This File</h4>
-                      <p className="muted">{feedback.benchmarkMeaning}</p>
-                      <ul>{feedback.topBlockers.map((item) => <li key={item}>{item}</li>)}</ul>
-                      <ul>{feedback.priorityFixes.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <h4>Why still blocked</h4>
+                      <ul>
+                        <li>{feedback.benchmarkMeaning}</li>
+                        {failedGates.length > 0 ? <li>Failed hard gates: {failedGates.join(', ')}</li> : null}
+                        <li>Weakest categories: {getTopCategoryNames(analysis, 'bottom', 3).join(', ') || 'none'}</li>
+                      </ul>
                     </div>
                   </div>
                 </article>
@@ -727,98 +761,82 @@ export default function PolicyLab() {
             })}
           </section>
 
-          <section className="policy-lab-results">
-            <article className="card">
-              <div className="policy-lab-cardhead">
-                <span className="badge">Categories</span>
-                <h3>Static Comparison</h3>
+          <section className="policy-lab-results policy-lab-results--details">
+            <details className="card policy-lab-detailcard">
+              <summary className="policy-lab-detailsummary">
+                <span className="badge">Deep Dive</span>
+                <strong>Static comparison tables</strong>
+              </summary>
+              <div className="policy-lab-detailbody">
+                <div className="policy-lab-tablewrap">
+                  <table className="policy-lab-table">
+                    <thead>
+                      <tr><th>Category</th><th>Current</th><th>Proposed</th></tr>
+                    </thead>
+                    <tbody>
+                      {result.left.categoryScores.map((entry) => (
+                        <tr key={entry.id}>
+                          <td>{entry.title}</td>
+                          <td>{entry.score.toFixed(1)}</td>
+                          <td>{findById(result.right.categoryScores, entry.id).score.toFixed(1)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="policy-lab-tablewrap">
+                  <table className="policy-lab-table">
+                    <thead>
+                      <tr><th>Task</th><th>Current</th><th>Proposed</th></tr>
+                    </thead>
+                    <tbody>
+                      {result.left.taskScores.map((entry) => (
+                        <tr key={entry.id}>
+                          <td>{entry.title}</td>
+                          <td>{entry.score.toFixed(1)} | {entry.passed ? 'pass' : 'fail'} | {entry.notes}</td>
+                          <td>{findById(result.right.taskScores, entry.id).score.toFixed(1)} | {findById(result.right.taskScores, entry.id).passed ? 'pass' : 'fail'} | {findById(result.right.taskScores, entry.id).notes}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="policy-lab-tablewrap">
-                <table className="policy-lab-table">
-                  <thead>
-                    <tr><th>Category</th><th>Current</th><th>Proposed</th></tr>
-                  </thead>
-                  <tbody>
-                    {result.left.categoryScores.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>{entry.title}</td>
-                        <td>{entry.score.toFixed(1)}</td>
-                        <td>{findById(result.right.categoryScores, entry.id).score.toFixed(1)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
+            </details>
 
-            <article className="card">
-              <div className="policy-lab-cardhead">
-                <span className="badge">Benchmark Tasks</span>
-                <h3>Static Task Breakdown</h3>
+            <details className="card policy-lab-detailcard">
+              <summary className="policy-lab-detailsummary">
+                <span className="badge badge-accent">Deep Dive</span>
+                <strong>Model and agentic details</strong>
+              </summary>
+              <div className="policy-lab-detailbody policy-lab-listgrid">
+                {[result.left, result.right].map((analysis, index) => {
+                  const modelEval = index === 0 ? result.modelEvaluations.left : result.modelEvaluations.right;
+                  const agenticEval = index === 0 ? result.agenticEvaluations.left : result.agenticEvaluations.right;
+                  return (
+                    <div key={`${analysis.slotLabel}-details`}>
+                      <h4>{analysis.slotLabel}</h4>
+                      <p className="muted">{modelEval.recommendation}</p>
+                      <ul>{modelEval.strengths.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <ul>{modelEval.risks.map((item) => <li key={item}>{item}</li>)}</ul>
+                      <p className="muted">{agenticEval.summary}</p>
+                      <ul><li>Verdict: {agenticEval.verdict}</li></ul>
+                      <ul><li>{agenticEval.benchmarkMeaning}</li></ul>
+                      <ul>{agenticEval.priorityFixes.map((item) => <li key={item}>{item}</li>)}</ul>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="policy-lab-tablewrap">
-                <table className="policy-lab-table">
-                  <thead>
-                    <tr><th>Task</th><th>Current</th><th>Proposed</th></tr>
-                  </thead>
-                  <tbody>
-                    {result.left.taskScores.map((entry) => (
-                      <tr key={entry.id}>
-                        <td>{entry.title}</td>
-                        <td>{entry.score.toFixed(1)} | {entry.passed ? 'pass' : 'fail'} | {entry.notes}</td>
-                        <td>{findById(result.right.taskScores, entry.id).score.toFixed(1)} | {findById(result.right.taskScores, entry.id).passed ? 'pass' : 'fail'} | {findById(result.right.taskScores, entry.id).notes}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
+            </details>
 
-            <article className="card">
-              <div className="policy-lab-cardhead">
-                <span className="badge badge-accent">Agentic Tasks</span>
-                <h3>Full Agentic Task Breakdown</h3>
+            <details className="card policy-lab-detailcard">
+              <summary className="policy-lab-detailsummary">
+                <span className="badge">Methodology</span>
+                <strong>How Policy Lab scored this run</strong>
+              </summary>
+              <div className="policy-lab-detailbody">
+                <pre className="policy-lab-reporttext">{buildEvaluatorMethodologyText(result)}</pre>
               </div>
-              <div className="policy-lab-tablewrap">
-                <table className="policy-lab-table">
-                  <thead>
-                    <tr><th>Task</th><th>Current</th><th>Proposed</th></tr>
-                  </thead>
-                  <tbody>
-                    {(result.agenticEvaluations.left.benchmarkTasks || []).map((entry) => (
-                      <tr key={entry.id}>
-                        <td>{entry.title}</td>
-                        <td>{entry.status} | {entry.reason || 'no reason'} | {entry.improvement || 'no improvement given'}</td>
-                        <td>{findById(result.agenticEvaluations.right.benchmarkTasks || [], entry.id).status || 'fail'} | {findById(result.agenticEvaluations.right.benchmarkTasks || [], entry.id).reason || 'no reason'} | {findById(result.agenticEvaluations.right.benchmarkTasks || [], entry.id).improvement || 'no improvement given'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
-
-            <article className="card">
-              <div className="policy-lab-cardhead">
-                <span className="badge">Model Categories</span>
-                <h3>Per-File Model Scores</h3>
-              </div>
-              <div className="policy-lab-tablewrap">
-                <table className="policy-lab-table">
-                  <thead>
-                    <tr><th>Category</th><th>Current</th><th>Proposed</th></tr>
-                  </thead>
-                  <tbody>
-                    {(result.modelEvaluations.left.categoryScores || []).map((entry) => (
-                      <tr key={entry.id}>
-                        <td>{entry.label}</td>
-                        <td>{entry.score.toFixed(1)}</td>
-                        <td>{findById(result.modelEvaluations.right.categoryScores || [], entry.id).score.toFixed(1)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </article>
+            </details>
           </section>
         </>
       )}

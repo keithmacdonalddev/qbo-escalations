@@ -25,7 +25,7 @@ function generateTabId() {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function useTabLeadership() {
+export function useTabLeadership({ log } = {}) {
   const [isLeader, setIsLeader] = useState(false);
   const tabIdRef = useRef(generateTabId());
   const bcRef = useRef(null);
@@ -34,6 +34,8 @@ export function useTabLeadership() {
   const visibilityTimerRef = useRef(null);
   const isLeaderRef = useRef(false);
   const statusListenersRef = useRef(new Set());
+  const logRef = useRef(log);
+  logRef.current = log;
 
   const broadcastStatus = useCallback((payload) => {
     try {
@@ -65,6 +67,7 @@ export function useTabLeadership() {
     function claimLeadership() {
       setIsLeader(true);
       isLeaderRef.current = true;
+      logRef.current?.({ type: 'leader-change', message: 'This tab is now the leader' });
       // Start heartbeat
       heartbeatRef.current = setInterval(() => {
         try {
@@ -76,6 +79,7 @@ export function useTabLeadership() {
     function relinquish() {
       setIsLeader(false);
       isLeaderRef.current = false;
+      logRef.current?.({ type: 'leader-change', message: 'This tab relinquished leadership' });
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
         heartbeatRef.current = null;
@@ -123,6 +127,11 @@ export function useTabLeadership() {
       if (msg.type === 'relinquish' && msg.tabId !== tabId) {
         // Leader gone — start a new election
         if (!isLeaderRef.current) {
+          // Clear any pending election timer before starting a new one
+          if (electionTimerRef.current) {
+            clearTimeout(electionTimerRef.current);
+            electionTimerRef.current = null;
+          }
           bc.postMessage({ type: 'candidacy', tabId, ts: Date.now() });
           electionTimerRef.current = setTimeout(() => {
             electionTimerRef.current = null;
@@ -160,6 +169,11 @@ export function useTabLeadership() {
         }
         // If we're not the leader and tab is now visible, try to claim
         if (!isLeaderRef.current) {
+          // Clear any pending election timer before starting a new one
+          if (electionTimerRef.current) {
+            clearTimeout(electionTimerRef.current);
+            electionTimerRef.current = null;
+          }
           bc.postMessage({ type: 'candidacy', tabId, ts: Date.now() });
           electionTimerRef.current = setTimeout(() => {
             electionTimerRef.current = null;

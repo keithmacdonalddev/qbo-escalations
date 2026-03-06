@@ -26,6 +26,16 @@ export default function ErrorFallback({ error, resetErrorBoundary }) {
           </>
         )}
 
+        {isDev && (
+          <p style={{
+            fontSize: 13, color: '#888', marginTop: 12, marginBottom: 4,
+            lineHeight: 1.5, textAlign: 'center',
+          }}>
+            The dev agent has been notified and is investigating.
+            Use the chat widget in the bottom-right corner to communicate with it.
+          </p>
+        )}
+
         <div className="error-fallback-actions">
           <button
             className="error-fallback-btn error-fallback-btn--primary"

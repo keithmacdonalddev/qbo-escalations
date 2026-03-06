@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   DEFAULT_PROVIDER,
   DEFAULT_REASONING_EFFORT,
@@ -204,6 +205,7 @@ export default function useAiSettings() {
   }, []);
 
   const updateAiSetting = useCallback((path, value) => {
+    tel(TEL.USER_ACTION, `AI setting changed: ${path}`, { setting: path, value });
     setAiSettings((prev) => deepSet(prev, path, value));
   }, [setAiSettings]);
 

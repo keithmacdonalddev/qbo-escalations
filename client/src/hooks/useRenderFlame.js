@@ -88,7 +88,7 @@ export function useRenderFlame() {
 
   // onRender: ONLY mutates refs. Never calls setState. Never schedules rAF.
   // This is the key to avoiding the feedback loop.
-  const onRender = useCallback((_profilerId, phase, actualDuration) => {
+  const onRender = useCallback((profilerId, phase, actualDuration) => {
     if (!isDev) return;
     if (pausedRef.current) return;
     // Skip counting the render caused by our own setSegments flush
@@ -100,7 +100,7 @@ export function useRenderFlame() {
 
     const buf = bufferRef.current;
     // Mutate in place — push + shift, no spread copies
-    buf.push({ id, duration: actualDuration, phase, tier, width, fading: false, createdAt: now });
+    buf.push({ id, duration: actualDuration, phase, tier, width, fading: false, createdAt: now, source: profilerId });
     while (buf.length > MAX_SEGMENTS) buf.shift();
 
     const c = countsRef.current;

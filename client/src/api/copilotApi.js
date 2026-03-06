@@ -28,7 +28,12 @@ function streamRequest(url, body, { onStart, onChunk, onDone, onError }) {
         else if (eventType === 'error') onError?.(normalizeError(data));
       });
     } catch (err) {
-      if (err.name !== 'AbortError') onError?.(normalizeError(err));
+      if (err.name !== 'AbortError') {
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: err.message },
+        }));
+        onError?.(normalizeError(err));
+      }
     }
   })();
 

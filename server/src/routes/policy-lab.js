@@ -42,6 +42,54 @@ const STATIC_IMPROVEMENT_HINTS = Object.freeze({
   'review-quality': 'Define review output expectations clearly: findings first, severity ordering, and concrete file-backed evidence.',
 });
 const PREFLIGHT_RETRY_LIMIT = 2;
+const PREFLIGHT_JSON_SMOKE_EXAMPLE = Object.freeze({
+  ok: true,
+  check: 'json_smoke',
+  provider: 'claude',
+  notes: ['Strict JSON path operational.'],
+});
+const PREFLIGHT_STRUCTURED_AGENTIC_EXAMPLE = Object.freeze({
+  ok: true,
+  check: 'structured_agentic',
+  status: 'ready',
+  summary: 'Structured output contract satisfied.',
+  findings: [{ id: 'f1', status: 'pass', detail: 'Nested schema parsed correctly.' }],
+  nested: { parseable: true, count: 1 },
+});
+const PREFLIGHT_STRUCTURED_AGENTIC_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ok: { const: true },
+    check: { const: 'structured_agentic' },
+    status: { type: 'string', minLength: 1 },
+    summary: { type: 'string', minLength: 1 },
+    findings: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          status: { type: 'string', minLength: 1 },
+          detail: { type: 'string', minLength: 1 },
+        },
+        required: ['id', 'status', 'detail'],
+      },
+    },
+    nested: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        parseable: { const: true },
+        count: { type: 'integer', minimum: 1 },
+      },
+      required: ['parseable', 'count'],
+    },
+  },
+  required: ['ok', 'check', 'status', 'summary', 'findings', 'nested'],
+});
 
 router.get('/bootstrap', async (req, res, next) => {
   try {
@@ -328,7 +376,7 @@ async function runProviderPreflightChecks(provider, reasoningEffort) {
       prompt: buildPreflightJsonPrompt(provider.id),
       timeoutMs: Math.min(provider.defaultTimeoutMs || 45000, 45000),
       systemPrompt: 'Return JSON only. No markdown. No prose outside JSON.',
-      validator: (parsed) => parsed && parsed.ok === true && parsed.check === 'json_smoke',
+      validator: (parsed) => validatePreflightJsonSmokePayload(parsed, provider.id),
       successDetail: 'Provider returned valid parseable JSON for a strict smoke prompt.',
       schemaDetail: 'Provider responded, but the JSON payload did not match the expected smoke schema.',
     }),
@@ -340,28 +388,49 @@ async function runProviderPreflightChecks(provider, reasoningEffort) {
       prompt: buildPreflightStructuredPrompt(provider.id),
       timeoutMs: Math.min(provider.defaultTimeoutMs || 60000, 60000),
       systemPrompt: 'You are a strict structured-output evaluator. Return JSON only.',
-      validator: (parsed) => parsed
-        && parsed.ok === true
-        && parsed.check === 'structured_agentic'
-        && Array.isArray(parsed.findings)
-        && parsed.summary
-        && parsed.status,
+      validator: validatePreflightStructuredAgenticPayload,
+      invoke: getProviderTransport(provider.id) === 'claude'
+        ? ({ provider: currentProvider, prompt, reasoningEffort: currentEffort, timeoutMs, systemPrompt }) => callClaudeStructuredPreflightResponse(
+          currentProvider,
+          prompt,
+          currentEffort,
+          {
+            timeoutMs,
+            systemPrompt,
+          },
+        )
+        : null,
       successDetail: 'Provider returned parseable structured JSON with nested arrays/objects similar to evaluation prompts.',
       schemaDetail: 'Provider responded, but the structured agentic schema was incomplete or malformed.',
     }),
   ]);
 }
 
-async function executePreflightCheck({ provider, reasoningEffort, checkId, title, prompt, timeoutMs, systemPrompt, validator, successDetail, schemaDetail }) {
+async function executePreflightCheck({
+  provider,
+  reasoningEffort,
+  checkId,
+  title,
+  prompt,
+  timeoutMs,
+  systemPrompt,
+  validator,
+  successDetail,
+  schemaDetail,
+  invoke = null,
+}) {
   let lastFailure = null;
 
   for (let attempt = 1; attempt <= PREFLIGHT_RETRY_LIMIT; attempt += 1) {
     try {
-      const responseText = await callProvider(provider, prompt, reasoningEffort, {
-        timeoutMs,
-        systemPrompt,
-        strictJson: true,
-      });
+      const responseText = invoke
+        ? await invoke({ provider, prompt, reasoningEffort, timeoutMs, systemPrompt })
+        : await callProvider(provider, prompt, reasoningEffort, {
+          timeoutMs,
+          systemPrompt,
+          strictJson: true,
+          rawResponse: true,
+        });
       const parsed = parseStrictJsonOnly(responseText);
       const passed = Boolean(validator(parsed));
       return {
@@ -398,11 +467,12 @@ async function executePreflightCheck({ provider, reasoningEffort, checkId, title
 }
 
 function buildPreflightJsonPrompt(providerId) {
+  const example = { ...PREFLIGHT_JSON_SMOKE_EXAMPLE, provider: providerId };
   return [
     `Provider under test: ${providerId}`,
     'Return JSON only.',
     'Use exactly this shape:',
-    '{"ok":true,"check":"json_smoke","provider":"","notes":[""]}',
+    JSON.stringify(example),
     'Set provider to the provider under test and include one short note.',
   ].join('\n');
 }
@@ -412,7 +482,8 @@ function buildPreflightStructuredPrompt(providerId) {
     `Provider under test: ${providerId}`,
     'Return JSON only.',
     'Use exactly this shape:',
-    '{"ok":true,"check":"structured_agentic","status":"ready","summary":"","findings":[{"id":"f1","status":"pass","detail":""}],"nested":{"parseable":true,"count":1}}',
+    JSON.stringify(PREFLIGHT_STRUCTURED_AGENTIC_EXAMPLE),
+    'All string fields shown in the example must stay non-empty.',
     'Keep the response concise. No markdown. No prose outside JSON.',
   ].join('\n');
 }
@@ -487,21 +558,25 @@ async function readHistory() {
     const history = [];
 
     for (const file of files) {
-      const parsed = JSON.parse(await fs.readFile(path.join(RUNS_DIR, file), 'utf8'));
-      history.push({
-        runId: parsed.runId,
-        generatedAt: parsed.generatedAt,
-        mode: parsed.mode || 'full',
-        family: parsed.family || 'agents',
-        familyLabel: parsed.familyLabel || 'AGENTS.md',
-        artifactPath: parsed.artifactPath || '',
-        winner: parsed.comparison?.recommendedLabel || 'unknown',
-        agenticWinner: parsed.agenticEvaluations?.comparison?.recommendedLabel || 'unknown',
-        confidence: parsed.comparison?.confidence?.level || 'Unknown',
-        margin: parsed.comparison?.scoreMargin || 0,
-        leftModel: parsed.modelEvaluations?.left?.providerId || '',
-        rightModel: parsed.modelEvaluations?.right?.providerId || '',
-      });
+      try {
+        const parsed = JSON.parse(await fs.readFile(path.join(RUNS_DIR, file), 'utf8'));
+        history.push({
+          runId: parsed.runId,
+          generatedAt: parsed.generatedAt,
+          mode: parsed.mode || 'full',
+          family: parsed.family || 'agents',
+          familyLabel: parsed.familyLabel || 'AGENTS.md',
+          artifactPath: parsed.artifactPath || '',
+          winner: parsed.comparison?.recommendedLabel || 'unknown',
+          agenticWinner: parsed.agenticEvaluations?.comparison?.recommendedLabel || 'unknown',
+          confidence: parsed.comparison?.confidence?.level || 'Unknown',
+          margin: parsed.comparison?.scoreMargin || 0,
+          leftModel: parsed.modelEvaluations?.left?.providerId || '',
+          rightModel: parsed.modelEvaluations?.right?.providerId || '',
+        });
+      } catch {
+        // Skip malformed or unreadable run files instead of breaking the entire history
+      }
     }
 
     return history;
@@ -815,7 +890,8 @@ async function callClaudeEvaluator(provider, prompt, reasoningEffort, options = 
         return;
       }
 
-      resolve(normalizeEvaluatorResponse(resultResponse || assistantResponse));
+      const finalResponse = resultResponse || assistantResponse;
+      resolve(options.rawResponse ? String(finalResponse || '') : normalizeEvaluatorResponse(finalResponse));
     });
 
     child.on('error', (error) => {
@@ -826,6 +902,114 @@ async function callClaudeEvaluator(provider, prompt, reasoningEffort, options = 
       reject(error);
     });
   });
+}
+
+async function callClaudeJsonSchemaEvaluator(provider, prompt, reasoningEffort, options = {}) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'policy-lab-claude-'));
+  const model = getProviderModelId(provider.id);
+  const schema = JSON.stringify(options.jsonSchema || {});
+  const args = ['-p', '--output-format', 'json', '--json-schema', schema];
+  if (model) args.push('--model', model);
+  if (reasoningEffort) args.push('--effort', normalizeClaudeEvalEffort(reasoningEffort));
+
+  const stdinPrompt = options.systemPrompt
+    ? `System instructions:\n${options.systemPrompt}\n\n${prompt}`
+    : prompt;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let stdout = '';
+    let stderr = '';
+    let child;
+
+    try {
+      child = spawn('claude', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: true,
+        cwd: tempDir,
+        env: {
+          ...process.env,
+          CLAUDECODE: undefined,
+          CLAUDE_PROJECT_DIR: tempDir,
+        },
+      });
+    } catch (error) {
+      void cleanupClaudeEvalTempDir(tempDir);
+      reject(error);
+      return;
+    }
+
+    try {
+      child.stdin.end(stdinPrompt);
+    } catch {
+      // Let the process error handler/reporting path deal with broken stdin cases.
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill('SIGTERM'); } catch {}
+      void cleanupClaudeEvalTempDir(tempDir);
+      reject(new Error(`Model evaluation timed out for ${provider.id}.`));
+    }, options.timeoutMs || provider.defaultTimeoutMs || 120_000);
+
+    child.stdout.on('data', (chunk) => {
+      if (settled) return;
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      if (settled) return;
+      stderr += chunk.toString();
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+
+      void cleanupClaudeEvalTempDir(tempDir);
+
+      if (code !== 0 && !stdout) {
+        reject(new Error(formatClaudeEvalFailure(code, stderr)));
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(String(stdout || '').trim());
+        const structured = parsed?.structured_output ?? parsed?.result ?? parsed;
+        resolve(typeof structured === 'string' ? structured : JSON.stringify(structured));
+      } catch (error) {
+        const enriched = new Error(`Claude schema evaluator did not return valid JSON: ${error.message}`);
+        enriched.code = 'STRICT_JSON_PARSE_FAILED';
+        reject(enriched);
+      }
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeoutId);
+      if (settled) return;
+      settled = true;
+      void cleanupClaudeEvalTempDir(tempDir);
+      reject(error);
+    });
+  });
+}
+
+async function callClaudeStructuredPreflightResponse(provider, prompt, reasoningEffort, options = {}) {
+  try {
+    return await callClaudeJsonSchemaEvaluator(provider, prompt, reasoningEffort, {
+      ...options,
+      jsonSchema: PREFLIGHT_STRUCTURED_AGENTIC_SCHEMA,
+    });
+  } catch {
+    return callProvider(provider, prompt, reasoningEffort, {
+      timeoutMs: options.timeoutMs,
+      systemPrompt: options.systemPrompt,
+      strictJson: true,
+      rawResponse: true,
+    });
+  }
 }
 
 function normalizeClaudeEvalEffort(value) {
@@ -888,19 +1072,20 @@ function parseModelJson(text) {
 }
 
 function parseStrictJsonOnly(text) {
-  const trimmed = normalizeEvaluatorResponse(text);
+  const rawText = String(text || '').trim();
+  const trimmed = stripJsonCodeFence(rawText);
   if (!trimmed) throw new Error('Model returned an empty response.');
   try {
     return JSON.parse(trimmed);
   } catch (error) {
-    const enriched = new Error(buildStrictJsonFailureMessage(trimmed, error));
+    const enriched = new Error(buildStrictJsonFailureMessage(rawText, error));
     enriched.code = 'STRICT_JSON_PARSE_FAILED';
     enriched.preflightDiagnostics = {
-      classification: classifyJsonParseFailure(trimmed, error),
-      responseLength: trimmed.length,
-      responsePreview: safePreview(trimmed),
-      firstNonWhitespace: trimmed[0] || '',
-      hasJsonObject: /\{[\s\S]*\}/.test(trimmed),
+      classification: classifyJsonParseFailure(rawText, error),
+      responseLength: rawText.length,
+      responsePreview: safePreview(rawText),
+      firstNonWhitespace: rawText[0] || '',
+      hasJsonObject: /\{[\s\S]*\}/.test(rawText),
       parseError: error.message || 'Invalid JSON',
     };
     throw enriched;
@@ -995,6 +1180,41 @@ function normalizeEvaluatorResponse(value) {
   return text;
 }
 
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function validatePreflightJsonSmokePayload(parsed, providerId) {
+  return parsed
+    && typeof parsed === 'object'
+    && !Array.isArray(parsed)
+    && parsed.ok === true
+    && parsed.check === 'json_smoke'
+    && parsed.provider === providerId
+    && Array.isArray(parsed.notes)
+    && parsed.notes.length > 0
+    && parsed.notes.every(isNonEmptyString);
+}
+
+function validatePreflightStructuredAgenticPayload(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+  if (parsed.ok !== true || parsed.check !== 'structured_agentic') return false;
+  if (!isNonEmptyString(parsed.status) || !isNonEmptyString(parsed.summary)) return false;
+  if (!Array.isArray(parsed.findings) || parsed.findings.length === 0) return false;
+  if (!parsed.findings.every((entry) => entry
+    && typeof entry === 'object'
+    && !Array.isArray(entry)
+    && isNonEmptyString(entry.id)
+    && isNonEmptyString(entry.status)
+    && isNonEmptyString(entry.detail))) {
+    return false;
+  }
+  if (!parsed.nested || typeof parsed.nested !== 'object' || Array.isArray(parsed.nested)) return false;
+  if (parsed.nested.parseable !== true) return false;
+  if (!Number.isInteger(parsed.nested.count) || parsed.nested.count < 1) return false;
+  return parsed.nested.count === parsed.findings.length;
+}
+
 function stripJsonCodeFence(text) {
   let current = String(text || '').trim();
   let changed = true;
@@ -1013,19 +1233,33 @@ function stripJsonCodeFence(text) {
 
 function extractFirstJsonObject(text) {
   const source = String(text || '');
+  const MAX_START_INDICES = 10;
   const startIndices = [];
   for (let i = 0; i < source.length; i += 1) {
     const char = source[i];
-    if (char === '{' || char === '[') startIndices.push(i);
+    if (char === '{' || char === '[') {
+      startIndices.push(i);
+      if (startIndices.length >= MAX_START_INDICES) break;
+    }
   }
 
   for (const start of startIndices) {
-    for (let end = source.length; end > start; end -= 1) {
-      const candidate = source.slice(start, end).trim();
-      if (!candidate) continue;
+    // Try longest candidate first — most likely to be the complete JSON
+    const candidate = source.slice(start).trim();
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      // Try trimming from end
+    }
+    // Shrink from end: try the closest matching bracket first
+    const opener = source[start];
+    const closer = opener === '{' ? '}' : ']';
+    for (let end = source.lastIndexOf(closer, source.length); end > start; end = source.lastIndexOf(closer, end - 1)) {
+      const sub = source.slice(start, end + 1);
       try {
-        JSON.parse(candidate);
-        return candidate;
+        JSON.parse(sub);
+        return sub;
       } catch {
         // keep scanning
       }

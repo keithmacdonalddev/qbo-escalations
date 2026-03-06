@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
+import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   listCategories,
   getCategoryContent,
@@ -134,6 +135,7 @@ export default function PlaybookEditor() {
   }, []);
 
   const loadCategory = useCallback(async (name) => {
+    tel(TEL.USER_ACTION, `Selected playbook: ${name}`, { category: name });
     setSelectedCategory(name);
     setViewMode('category');
     setIsEditing(false);
@@ -144,9 +146,11 @@ export default function PlaybookEditor() {
       const text = await getCategoryContent(name);
       setContent(text);
       setDraftContent(text);
+      tel(TEL.DATA_LOAD, `Loaded playbook content (${text.length} chars)`, { category: name, size: text.length });
     } catch {
       setContent('Failed to load content.');
       setDraftContent('Failed to load content.');
+      tel(TEL.DATA_ERROR, `Failed to load playbook: ${name}`, { category: name });
     }
     setContentLoading(false);
   }, [resetPanels]);
@@ -225,6 +229,7 @@ export default function PlaybookEditor() {
       setShowDiff(false);
       setSaveLabel('');
       setSaveNotice('Saved');
+      tel(TEL.FORM_SUBMIT, `Saved playbook: ${viewMode === 'category' ? selectedCategory : viewMode}`, { viewMode, category: selectedCategory });
       setTimeout(() => setSaveNotice(''), 2000);
     } catch {
       toast.error('Failed to save playbook changes');

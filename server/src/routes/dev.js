@@ -21,6 +21,10 @@ const { randomUUID, createHash } = require('node:crypto');
 const { extractUsageFromMessage } = require('../lib/usage-extractor');
 const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
+const { normalizeToolEvent, extractFilesFromNormalized } = require('../lib/tool-normalizer');
+const { logAgentAction, retrieveRelevantMemory, addToRecentAgentFiles } = require('../lib/agent-memory');
+const DevAgentLog = require('../models/DevAgentLog');
+const { reportServerError, subscribe: subscribeServerErrors, getRecentErrors } = require('../lib/server-error-pipeline');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const UPLOADS_ROOT = path.resolve(__dirname, '..', '..', 'uploads');
@@ -110,17 +114,38 @@ const DEV_SYSTEM_PROMPT_FALLBACK = 'You are the Dev Agent for the QBO Escalation
  * Build the system prompt for a dev agent spawn.
  * Synchronous, cannot fail — returns a fallback string on any unexpected condition.
  *
+ * Delegates to dev-context-builder for the full prompt (role + CLAUDE.md + file tree + memory).
+ * Falls back to bare role text if the builder module is unavailable.
+ *
  * @param {string} providerFamily - 'claude' | 'codex' | other
+ * @param {Array} [memoryEntries] - Optional memory entries from agent-memory module
  * @returns {string} System prompt text
  */
-function buildDevSystemPrompt(providerFamily) {
+function buildDevSystemPrompt(providerFamily, memoryEntries) {
   try {
-    if (providerFamily === 'codex') return CODEX_ROLE;
-    if (providerFamily === 'claude') return CLAUDE_ROLE;
-    // Unknown provider family — use the shorter Codex variant as a safe default
-    return CODEX_ROLE;
+    const { buildFullSystemPrompt } = require('../lib/dev-context-builder');
+
+    const roleText = providerFamily === 'codex' ? CODEX_ROLE : CLAUDE_ROLE;
+
+    // Agent-memory module may not exist yet (parallel phase) — graceful fallback
+    let memoryText = '';
+    try {
+      const { formatMemoryForPrompt } = require('../lib/agent-memory');
+      if (formatMemoryForPrompt) {
+        memoryText = formatMemoryForPrompt(memoryEntries || []);
+      }
+    } catch { /* agent-memory not available yet */ }
+
+    return buildFullSystemPrompt(roleText, memoryText);
   } catch {
-    return DEV_SYSTEM_PROMPT_FALLBACK;
+    // dev-context-builder not available — bare role fallback
+    try {
+      if (providerFamily === 'codex') return CODEX_ROLE;
+      if (providerFamily === 'claude') return CLAUDE_ROLE;
+      return CODEX_ROLE;
+    } catch {
+      return DEV_SYSTEM_PROMPT_FALLBACK;
+    }
   }
 }
 
@@ -738,6 +763,7 @@ function runDevAttempt({
     let stderrRaw = '';
     let assistantText = '';
     const capturedToolEvents = [];
+    const capturedNormalizedToolEvents = [];
     let capturedSessionId = resumeSessionId || null;
     let capturedUsage = null;
 
@@ -783,6 +809,7 @@ function runDevAttempt({
       const toolEvents = toToolEvents(msg, { provider: providerId });
       for (const toolEvent of toolEvents) {
         capturedToolEvents.push(toolEvent);
+        capturedNormalizedToolEvents.push(normalizeToolEvent(toolEvent, providerId));
         const eventName = toolEvent.status === 'started' ? 'tool_use' : 'tool_result';
         writeEvent(eventName, { provider: providerId, ...toolEvent });
       }
@@ -796,6 +823,12 @@ function runDevAttempt({
         code: 'TIMEOUT',
         message: `Dev attempt timed out after ${timeoutMs}ms`,
       }, 'TIMEOUT');
+      reportServerError({
+        message: `Dev CLI timeout: ${providerId} after ${timeoutMs}ms`,
+        detail: 'The dev agent CLI subprocess did not complete within the allowed time limit.',
+        source: 'dev.js',
+        category: 'runtime-error',
+      });
       finalize({
         ok: false,
         provider: providerId,
@@ -866,6 +899,12 @@ function runDevAttempt({
           code: 'PROVIDER_EXEC_FAILED',
           message: assistantText ? `${baseMessage} (partial output discarded)` : baseMessage,
         });
+        reportServerError({
+          message: `Dev CLI failed: ${providerId} exit ${code}`,
+          detail: `stderr: ${(stderrRaw || stderrBuffer || '').slice(0, 500)}`,
+          source: 'dev.js',
+          category: 'runtime-error',
+        });
         finalize({
           ok: false,
           provider: providerId,
@@ -882,6 +921,7 @@ function runDevAttempt({
         sessionId: cmd.supportsSessionResume ? capturedSessionId : null,
         assistantText,
         toolEvents: capturedToolEvents,
+        normalizedToolEvents: capturedNormalizedToolEvents,
         usage: capturedUsage,
         latencyMs: Date.now() - startedAt,
       });
@@ -892,6 +932,13 @@ function runDevAttempt({
       if (settled) return;
       sessionEntry.child = null;
       const error = normalizeProviderError(providerId, err);
+      reportServerError({
+        message: `Dev CLI spawn error: ${err.message}`,
+        detail: `The ${providerId} CLI process emitted an error event.`,
+        stack: err.stack || '',
+        source: 'dev.js',
+        category: 'runtime-error',
+      });
       finalize({
         ok: false,
         provider: providerId,
@@ -952,6 +999,9 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
 
   let conversation = null;
   if (conversationId) {
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_ID', error: 'Invalid conversation ID format' });
+    }
     conversation = await DevConversation.findById(conversationId);
     if (!conversation) {
       return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Dev conversation not found' });
@@ -985,10 +1035,20 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
     conversation.sessionId = '';
   }
 
-  // Compute context hash from the system-prompt inputs for this request.
-  // For Phase 1 only rolePrompt has a value; the other fields will be populated by later phases.
-  const currentSystemPrompt = buildDevSystemPrompt(getProviderFamily(policy.primaryProvider));
-  const currentContextHash = computeContextHash({ rolePrompt: currentSystemPrompt });
+  // Retrieve relevant agent memory with a 500ms timeout (non-blocking fallback)
+  let memoryEntries = [];
+  try {
+    const memoryPromise = retrieveRelevantMemory(normalizedMessage, { topK: 5 });
+    const memoryTimeout = new Promise((_, reject) => setTimeout(() => reject(new Error('memory timeout')), 500));
+    memoryEntries = await Promise.race([memoryPromise, memoryTimeout]).catch(() => []);
+  } catch { memoryEntries = []; }
+
+  // Build system prompt with memory entries and compute context hash
+  const memorySelectionBasis = memoryEntries.length > 0
+    ? memoryEntries.map(e => e._id ? String(e._id) : '').filter(Boolean).join(',')
+    : '';
+  const currentSystemPrompt = buildDevSystemPrompt(getProviderFamily(policy.primaryProvider), memoryEntries);
+  const currentContextHash = computeContextHash({ rolePrompt: currentSystemPrompt, memorySelectionBasis });
 
   const persistedImages = persistDevImages(conversation._id, normalizedImages);
   conversation.messages.push({
@@ -1181,6 +1241,29 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
           });
           await conversation.save();
 
+          // Agent memory: log action + track files (async fire-and-forget)
+          const normalizedEvents = attemptResult.normalizedToolEvents || [];
+          const filesAffected = extractFilesFromNormalized(normalizedEvents);
+          const actionType = normalizedMessage.startsWith('[AUTO-ERROR]') ? 'error-fix'
+            : normalizedMessage.startsWith('[AUTO-REVIEW]') ? 'code-review'
+            : normalizedMessage.startsWith('[IDLE-SCAN]') ? 'idle-scan'
+            : 'user-request';
+          logAgentAction({
+            type: actionType,
+            summary: (normalizedMessage || '(image attached)').slice(0, 500),
+            detail: (attemptResult.assistantText || '').slice(0, 5000),
+            filesAffected,
+            conversationId: conversation._id,
+            provider: providerId,
+            tokens: attemptResult.usage ? {
+              input: attemptResult.usage.inputTokens || 0,
+              output: attemptResult.usage.outputTokens || 0,
+            } : undefined,
+          }).catch(() => {}); // fire-and-forget
+          if (filesAffected.length > 0) {
+            addToRecentAgentFiles(filesAffected);
+          }
+
           devStreamSettled = true;
           writeEvent('done', {
             sessionId: getProviderFamily(providerId) === 'claude' ? (finalSessionId || null) : null,
@@ -1247,6 +1330,15 @@ router.post('/chat', devChatRateLimit, async (req, res) => {
       cleanup();
     }
   })();
+});
+
+// GET /api/dev/memory -- Browse agent memory entries
+router.get('/memory', async (req, res) => {
+  const { type, limit = 20 } = req.query;
+  const filter = type ? { type } : {};
+  const maxLimit = Math.min(Math.max(1, Number(limit) || 20), 100);
+  const entries = await DevAgentLog.find(filter).sort({ createdAt: -1 }).limit(maxLimit).lean();
+  res.json({ ok: true, count: entries.length, entries });
 });
 
 // POST /api/dev/abort -- Abort a running dev session
@@ -1352,6 +1444,14 @@ router.get('/conversations', async (req, res) => {
   }
 });
 
+// Validate ObjectId format for all :id param routes
+router.param('id', (req, res, next, id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ID', error: 'Invalid ID format' });
+  }
+  next();
+});
+
 // GET /api/dev/conversations/:id -- Get full persistent dev conversation
 router.get('/conversations/:id', async (req, res) => {
   const conversation = await DevConversation.findById(req.params.id).lean();
@@ -1446,6 +1546,57 @@ router.get('/file', (req, res) => {
   res.json({ ok: true, type: 'file', path: filePath, content, ext, size: stat.size });
 });
 
+// GET /api/dev/health -- Server-observable health state for dev mode dashboard
+router.get('/health', async (req, res) => {
+  // Context health from the builder module
+  let contextHealth = { prompt: {}, tree: {} };
+  try {
+    const { getContextHealth } = require('../lib/dev-context-builder');
+    contextHealth = getContextHealth();
+  } catch { /* builder not available */ }
+
+  // Memory stats — agent-memory module may not exist yet (parallel phase)
+  let memoryHealth = { totalEntries: 0, byType: {} };
+  try {
+    const { getMemoryStats } = require('../lib/agent-memory');
+    if (getMemoryStats) {
+      const rawStats = await getMemoryStats();
+      // rawStats is an aggregation array: [{_id: 'type', count: N}, ...]
+      // Normalize into a structured object for the health endpoint
+      const byType = {};
+      let totalEntries = 0;
+      for (const entry of rawStats) {
+        byType[entry._id] = entry.count;
+        totalEntries += entry.count;
+      }
+      memoryHealth = { totalEntries, byType };
+    }
+  } catch { /* agent-memory not available yet */ }
+
+  // Active session info
+  let sessionHealth = { activeSessions: activeSessions.size, sessions: [] };
+  for (const [key, session] of activeSessions) {
+    sessionHealth.sessions.push({
+      sessionKey: key,
+      provider: session.provider || null,
+      conversationId: session.conversationId || null,
+      alive: !!(session.child && !session.killed),
+    });
+  }
+
+  res.json({
+    ok: true,
+    ...contextHealth,
+    memory: memoryHealth,
+    session: sessionHealth,
+    server: {
+      uptime: Math.floor(process.uptime()),
+      pid: process.pid,
+      nodeVersion: process.version,
+    },
+  });
+});
+
 // GET /api/dev/tree -- Project file tree (for navigation)
 router.get('/tree', (req, res) => {
   const fs = require('fs');
@@ -1488,6 +1639,82 @@ router.get('/tree', (req, res) => {
   }
 
   res.json({ ok: true, root: PROJECT_ROOT, tree: buildTree(PROJECT_ROOT, 0) });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/dev/server-errors — SSE stream of server-side errors for dev agent
+// ---------------------------------------------------------------------------
+router.get('/server-errors', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // Send recent errors on connect (last 10)
+  const recent = getRecentErrors();
+  if (recent.length > 0) {
+    res.write(`data: ${JSON.stringify({ type: 'history', errors: recent.slice(-10) })}\n\n`);
+  }
+
+  // Immediate flush so the client sees the connection open
+  res.write(': connected\n\n');
+
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { /* client disconnected */ }
+  }, 30_000);
+
+  const unsubscribe = subscribeServerErrors((entry) => {
+    try {
+      res.write(`data: ${JSON.stringify(entry)}\n\n`);
+    } catch {
+      /* connection may have been closed mid-write */
+    }
+  });
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/dev/watch — SSE stream of external file changes detected by git polling
+// ---------------------------------------------------------------------------
+router.get('/watch', (req, res) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no', // disable nginx buffering if behind proxy
+  });
+
+  // Immediate flush so the client sees the connection open
+  res.write(': connected\n\n');
+
+  // Heartbeat every 30s to keep the connection alive through proxies
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch { /* client disconnected */ }
+  }, 30_000);
+
+  const { getChangeDetector } = require('../services/change-detector');
+  const detector = getChangeDetector();
+
+  const callback = (event) => {
+    try {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      /* connection may have been closed mid-write */
+    }
+  };
+
+  const unsubscribe = detector.subscribe(callback);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
 });
 
 module.exports = router;

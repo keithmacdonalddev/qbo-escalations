@@ -46,6 +46,87 @@ Tag each post-mortem entry with the root cause number (1-5) so patterns emerge o
 ## Entries
 
 **Agent Claim:**
+- Date/Time: 2026-03-06 16:49 EST
+- Agent ID: worker-isolation-resilience
+- Model: claude-opus-4-6[1m]
+- Task Title: Section A -- Isolation & Resilience for Dev Agent System
+- Files Touched:
+  - CREATED: `client/src/context/DevAgentMonitors.jsx` (172 lines -- ErrorBoundary-wrapped monitor hooks, DevAgentMonitorContext, useDevAgentMonitors())
+  - REWRITTEN: `client/src/context/DevAgentContext.jsx` (119 lines -- stripped to core-only provider: devChat, bgAgent, tabLeadership, activityLog)
+  - MODIFIED: `client/src/hooks/useDevToolsBridge.js` (try/catch around setup, cleanups array, independent console.error/warn restoration)
+  - MODIFIED: `client/src/hooks/useClientHealthMonitor.js` (try/catch around setup, cleanups array for intervals/observers)
+  - MODIFIED: `client/src/hooks/useClientHealthExtended.js` (try/catch around setup, independent restoration of 7 patched globals)
+  - MODIFIED: `client/src/hooks/useServerErrors.js` (try/catch around EventSource setup, safe cleanup)
+  - MODIFIED: `client/src/hooks/useCodeReview.js` (try/catch around EventSource setup, safe cleanup)
+  - MODIFIED: `client/src/hooks/useWaterfallInsights.js` (try/catch around subscription + interval, safe cleanup)
+  - MODIFIED: `client/src/hooks/useDevTaskQueue.js` (try/catch around process + idle scan effects, safe cleanup)
+- Self-Assessment: done
+- Status: DONE
+- Feature Suggestion: Monitor health dashboard -- a small status indicator in DevMode that shows which monitors are healthy/degraded/crashed (green/yellow/red dots), so when the ErrorBoundary catches a monitor crash the user can see exactly which monitoring surface failed rather than silently losing observability.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 20:13 UTC
+- Agent ID: worker-client-fixes
+- Model: claude-opus-4-6
+- Task: Fix 9 bugs found during auto-review (useEffect loops, stale closures, perf issues, missing backoff, missing fields)
+- Status: IN PROGRESS
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 20:08 UTC
+- Agent ID: worker-server-review
+- Model: claude-opus-4-6
+- Task Title: Server-side code review for bugs, edge cases, and missing error handling
+- Files Reviewed: server/src/app.js, server/src/index.js, server/src/routes/dev.js, server/src/routes/policy-lab.js, server/src/services/claude.js, server/src/lib/agent-memory.js, server/src/lib/dev-context-builder.js, server/src/lib/server-error-pipeline.js, server/src/lib/tool-normalizer.js, server/src/models/DevAgentLog.js
+- Status: done
+- Feature Suggestion: Add a /api/dev/review-snapshot endpoint that serializes the current review findings into a DevAgentLog entry with category "code-review", so past reviews are queryable in agent memory and the dev agent can track which issues were fixed over time.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 16:06 (completed 16:13)
+- Agent ID: worker-opus-4-6-telemetry
+- Model: Claude Opus 4.6 (1M context)
+- Task Title: Dev Agent Telemetry — Purposeful Instrumentation Throughout the App
+- Files Touched:
+  - CREATED: `client/src/lib/devTelemetry.js` (107 lines — telemetry utility with tel(), telAlert(), getBreadcrumbs(), initTelemetry(), TEL constants)
+  - MODIFIED: `client/src/context/DevAgentContext.jsx` (added initTelemetry wiring via useEffect)
+  - MODIFIED: `client/src/hooks/useAutoErrorReporter.js` (appended breadcrumb trail to auto-error messages)
+  - MODIFIED: `client/src/hooks/useChat.js` (7 tel points: send, response, error, provider switch, stream start/end for both send and retry)
+  - MODIFIED: `client/src/hooks/useDevChat.js` (5 tel points: send, response, error, stream start/end)
+  - MODIFIED: `client/src/hooks/useAiSettings.js` (1 tel point: AI setting changes)
+  - MODIFIED: `client/src/components/AgentActivityLog.jsx` (added 'telemetry' type to TYPE_COLORS, TYPE_CATEGORIES, FILTER_OPTIONS)
+  - MODIFIED: `client/src/App.jsx` (2 tel points: route change + app mount)
+  - MODIFIED: `client/src/components/Chat.jsx` (6 tel points: mount, conversation switch, send, image upload, 2 state anomaly detectors)
+  - MODIFIED: `client/src/components/EscalationDashboard.jsx` (6 tel points: data load, empty state, data error, status change, status filter, category filter)
+  - MODIFIED: `client/src/components/Settings.jsx` (1 tel point: theme change)
+  - MODIFIED: `client/src/components/PlaybookEditor.jsx` (4 tel points: category select, data load, data error, save)
+  - MODIFIED: `client/src/components/Sidebar.jsx` (3 tel points: conversation list load, conversation select, conversation delete)
+- Self-Assessment: done
+- Status: DONE
+- Feature Suggestion: Telemetry heatmap overlay -- a visual panel in DevMode that renders a color-coded heatmap of which components are emitting the most telemetry events over time (a "hot zones" display), letting you instantly see where user activity and errors cluster without reading log lines.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:37 (completed 15:39)
+- Agent ID: worker-opus-4-6-phase5
+- Model: claude-opus-4-6[1m]
+- Task Title: Phase 5 - Codebase Change Detection + Auto-Review
+- Files Touched:
+  - `server/src/services/change-detector.js` (created, ~195 lines)
+  - `server/src/routes/dev.js` (modified -- added GET /api/dev/watch SSE endpoint, ~35 lines)
+  - `client/src/hooks/useCodeReview.js` (created, ~85 lines)
+  - `client/src/context/DevAgentContext.jsx` (modified -- imported + wired useCodeReview)
+- Self-Assessment: done
+- All checklist items met: singleton pattern, 15s polling, 30s stability, self-exclusion via getRecentAgentFiles(), 10 file cap, subscriber lifecycle, SSE heartbeat, EventSource coalescing, medium priority enqueue, leader-only subscription, [AUTO-REVIEW] message format with file list + diff summary + unified diff
+- Bonus beyond spec: source-code file filter in _parsePorcelain (skips binaries/lockfiles), rename handling in git status parsing, unified diff included in change events for richer review context, X-Accel-Buffering header for nginx compatibility, immediate `: connected` flush on SSE open
+- Feature Suggestion: Add a **Change Detection Dashboard Widget** in the Dev Mode panel -- a compact timeline strip that visualizes detected file change events as colored dots (green=reviewed, yellow=pending, red=issues found) plotted on a scrolling 1-hour axis. Hovering a dot shows the file list and review result. Clicking opens the full diff. This gives the developer instant visual awareness of what the auto-review pipeline is processing without checking logs.
+
+---
+
+**Agent Claim:**
 - Date/Time: 2026-03-06
 - Agent ID: worker-sonnet-4-6
 - Model: claude-sonnet-4-6
@@ -730,3 +811,850 @@ All findings delivered as complete markdown sections with source URLs, ready for
   - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\server\src\models\DevConversation.js` (MODIFIED)
 - **Self-Assessment:** Done
 - **Feature Suggestion:** Add a **Background Channel Dashboard** -- a collapsible panel in the Dev Mode sidebar showing each background channel's status (conversation ID, turn count, last activity, leader tab indicator). Clicking a channel opens its conversation in read-only mode for reviewing autonomous work.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:21 -> 15:26
+- Agent ID: worker-opus-4-6-memory
+- Model: claude-opus-4-6
+- Task Title: Phase 1.5a Part 2 -- Agent Memory: Write + Retrieval + Tool Normalization
+- Files Touched:
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\server\src\lib\tool-normalizer.js` (CREATED) -- canonical tool event normalization with classifyToolFamily, normalizePath, extractFilesFromNormalized
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\server\src\models\DevAgentLog.js` (CREATED) -- Mongoose model with type/summary/detail/filesAffected/resolution/category/tokens, 3 indexes
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\server\src\lib\agent-memory.js` (CREATED) -- logAgentAction, retrieveRelevantMemory (keyword + recency scoring, 60s cache), formatMemoryForPrompt (2000 char cap), addToRecentAgentFiles (60s TTL)
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\server\src\routes\dev.js` (MODIFIED) -- imports, normalizeToolEvent in processParsedMessage, memory retrieval with 500ms timeout, buildDevSystemPrompt with memoryEntries, logAgentAction fire-and-forget after save, addToRecentAgentFiles, GET /api/dev/memory endpoint, memorySelectionBasis in computeContextHash
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\.claude\memory\agent-completion-log.md` (MODIFIED) -- this entry
+- Self-Assessment: Done
+- Feature Suggestion: Add a **Memory Pattern Analyzer** -- a background job that periodically scans DevAgentLog entries for recurring error patterns (same file or same error type appearing 3+ times in 24h), automatically creates a `pattern-learned` entry with the pattern summary and suggested preventive action, and surfaces it as a pinned card in the dev mode UI so the developer can preemptively address systemic issues before they compound.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06T19:22:54Z
+- Agent ID: worker-opus-4-6-context
+- Model: claude-opus-4-6[1m]
+- Task Title: Phase 2 -- Dev Context Builder + Health Dashboard
+- Files Touched:
+  - `server/src/lib/dev-context-builder.js` (CREATED) -- Consolidated context builder with cached CLAUDE.md, cached file tree, system prompt assembly, and health reporting
+  - `server/src/routes/dev.js` (MODIFIED) -- buildDevSystemPrompt() now delegates to dev-context-builder; added GET /api/dev/health endpoint
+  - `.claude/memory/agent-completion-log.md` (MODIFIED) -- this entry
+- Self-Assessment: Done. All checklist items completed:
+  - dev-context-builder.js created with buildFullSystemPrompt, getCachedClaudeMd, getCachedFileTreeText, getContextHealth
+  - File tree reuses same IGNORE set and walking logic from /api/dev/tree (TREE_IGNORE mirrors the exact same Set)
+  - Hard character caps enforced: role 3200, claudeMd 20000, fileTree 8000, memory 2000
+  - /api/dev/health endpoint returns prompt, tree, memory, session, and server health -- all server-observable
+  - Health endpoint gracefully handles missing agent-memory module with try/catch fallback
+  - buildDevSystemPrompt delegates to buildFullSystemPrompt with roleText + memoryText
+  - CLAUDE.md cached with 5-min TTL and sha256 content hash
+  - File tree cached with 5-min TTL, includes fileCount and textLength
+  - Bonus: health endpoint also reports server uptime, PID, node version, and active session details
+- Feature Suggestion: Add a **context drift detector** -- when the health endpoint detects that CLAUDE.md hash or file tree fileCount has changed since the last dev agent spawn, surface a "Context Stale" badge in the dev mode UI with a one-click "Refresh Context" button that invalidates the cache and forces the next agent spawn to pick up the new context.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06T15:30:01Z
+- Agent ID: worker-opus-4-6-error-capture
+- Model: claude-opus-4-6[1m]
+- Task Title: Phase 3 -- Error Auto-Capture Pipeline
+- Files Touched:
+  - `client/src/hooks/useErrorCapture.js` (CREATED) -- Captures window.onerror and unhandledrejection with dedup, debounce, and coalescing
+  - `client/src/hooks/useAutoErrorReporter.js` (CREATED) -- Connects error capture to background agent auto-errors channel with circuit breaker
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED) -- Imported and wired useAutoErrorReporter, exposed errorReporter on context
+  - `.claude/memory/agent-completion-log.md` (MODIFIED) -- this entry
+- Self-Assessment: Done. All checklist items completed:
+  - useErrorCapture.js captures window.onerror and unhandledrejection
+  - Dedup: same hash (message+source+line) skipped within 30s window
+  - 500ms debounced flush (configurable via debounceMs prop)
+  - Coalesce repeated errors into single report with count
+  - useAutoErrorReporter.js connects capture to background agent auto-errors channel
+  - Default ON when isLeader is true
+  - Circuit breaker: max 3 auto-sends per 5-minute window with auto-reset
+  - Feedback loop prevention: skips errors from /api/dev/, useAutoErrorReporter, and useErrorCapture stacks
+  - Only leader tab reports errors (non-leader tabs skip silently)
+  - Message format includes [AUTO-ERROR] prefix and explicit fix instruction
+  - Integrated into DevAgentProvider with no circular dependency (props passed directly)
+  - No server changes needed
+  - Bonus: teardown flush on useErrorCapture unmount (no errors lost), configurable dedup window, stack truncated to 8 frames for readability
+- Feature Suggestion: Add an **Error Pattern Heatmap** -- a visual overlay in Dev Mode that maps captured auto-errors to their source files using stack trace analysis, rendering a miniature file tree with color-coded heat indicators (cool blue = 1 error, hot red = 5+ errors in the window). Clicking a hot file sends a targeted "audit this file for error patterns" command to the background agent, turning passive error capture into proactive code health monitoring.
+
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:35
+- Agent ID: worker-opus-4-6-phase7
+- Model: claude-opus-4-6
+- Task Summary: Phase 7 — Quick Chat From Anywhere (DevMiniWidget quick-chat input + Ctrl+Shift+D shortcut)
+- Files Touched:
+  - `client/src/components/DevMiniWidget.jsx` (rewritten — added quick-chat FAB, collapsible panel with input/messages/footer, Ctrl+Shift+D listener)
+  - `client/src/context/DevAgentContext.jsx` (added miniWidgetOpen state, toggleMiniWidget, focusMiniWidget, miniWidgetInputRef)
+  - `client/src/components/DevMode.jsx` (added Ctrl+Shift+D listener to focus textarea on dev page)
+  - `client/src/App.css` (added ~200 lines of quick-chat panel CSS: FAB, panel, messages, input, footer, responsive)
+- Self-Assessment: done
+- Notes:
+  - Quick-chat FAB always visible on non-dev pages (terminal icon with streaming pulse indicator)
+  - Clicking FAB opens collapsible panel with: header (provider badge, streaming spinner), last 3 messages in scrollable area (150px max), input row with send button, footer with "Open full view" link + shortcut hint
+  - Enter sends via sendMessage (foreground conversation); disabled when streaming
+  - Escape closes the panel
+  - Ctrl+Shift+D on non-dev pages toggles + focuses the quick-chat panel; on dev page focuses the main textarea
+  - Streaming monitor preserved as separate overlay (appears above FAB when streaming, independent of quick-chat)
+  - Messages show role badges (You/Dev) with color coding and truncated content (~100 chars)
+  - Build verified clean (vite build --logLevel error passed with zero output)
+- Feature Suggestion: Add **slash commands** to the quick-chat input -- typing `/status` shows the agent's current streaming state and queue depth, `/bg <message>` sends to the background channel instead of foreground, and `/last` expands the most recent assistant response in a modal overlay so users can read full responses without navigating to Dev Mode. This turns the quick-chat from a simple input surface into a lightweight command palette for the dev agent.
+
+**Verifier Review:**
+- Date/Time: 2026-03-06 22:45
+- Verifier Agent ID: haiku-verifier
+- Model: claude-haiku-4-5
+- Reviewed Agent: worker-opus-4-6-phase7
+- Assessment: DONE ✓
+- Verification Details:
+  - **DevMiniWidget.jsx (lines 1-492):** FAB button implemented with `.dev-qc-fab` class (lines 181-203), displays when `miniWidgetOpen` is false with pulsing indicator on streaming (line 201). Collapsible panel (`.dev-qc-panel`, lines 207-311) displays when `miniWidgetOpen` is true. Messages section (lines 248-268) shows last 3 messages from `recentMessages` memoized array (lines 166-168), with role badges (lines 254-255) showing "You"/"Dev" and truncated content (~100 chars via truncate function, lines 171-174). Input disabled when streaming (line 281). Enter sends via `handleSend` callback (lines 140-145) which calls `sendMessage(text)` directly for foreground conversation. Escape closes widget (line 153-155). "Open full view" link present (lines 301-306) navigating to `#/dev`. Ctrl+Shift+D keyboard shortcut implemented (lines 47-62) with preventDefault, toggles open state, and focuses input with 80ms delay. Footer shows shortcut hint (line 307). Streaming monitor preserved as separate overlay (lines 314-469).
+  - **DevAgentContext.jsx (lines 1-112):** `miniWidgetOpen` state created (line 38). `miniWidgetInputRef` ref created (line 39). `setMiniWidgetOpen` setter exported (line 85). `toggleMiniWidget` and `focusMiniWidget` callbacks implemented (lines 40-53, 87-88). All shared via context value (lines 65-89). Provider wraps entire app tree confirmed via App.jsx lines 195 and 358.
+  - **DevMode.jsx (lines 94-103):** Ctrl+Shift+D handler present and focuses textarea on dev page (lines 94-103), appropriate for on-page use vs mini-widget toggle behavior.
+  - **App.css (lines 4599-4833):** Complete CSS implementation: FAB button (4599-4625) with hover states and pulse animation (4634-4637). Panel (4639-4657) with proper z-index layering (FAB: 1000, panel: 1001). Header (4659-4687), message container (4690-4712), message styling with role badges (4714-4748), input row (4750-4779), send button (4780-4801), footer (4803-4833). Responsive design for mobile (4584-4592). All color values match existing dev-mode theme (#4ec9b5 accent, proper contrast).
+  - **App.jsx:** DevMiniWidget imported (line 13) and rendered within provider tree (line 279). No server-side changes confirmed. No dependencies on unavailable APIs or backend functionality.
+  - All 11 checklist items confirmed. Feature fully functional and production-ready.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:30
+- Agent ID: worker-opus-4-6-phase6a
+- Model: claude-opus-4-6
+- Task Summary: Phase 6a -- Client-Side Task Queue (Non-Preemptive) + Rate-Limit Budget
+- Files Touched:
+  - `client/src/hooks/useDevTaskQueue.js` (created, ~175 lines)
+  - `client/src/context/DevAgentContext.jsx` (modified -- added import, hook call, context value)
+- Self-Assessment: done
+- Notes:
+  - Priority queue with 5 levels (urgent/critical/high/medium/low), sorted by priority then enqueue time
+  - Non-preemptive: only one request at a time, guarded by processingRef
+  - Rate-limit budget: 8 total/min, 4 reserved for foreground, 4 for background
+  - Separate canSendForeground() and canSendBackground() checks
+  - 429 handling with exponential backoff (10s base, 2min max, re-enqueues with incremented retries)
+  - Idle scan after 2min idle, cooldown 1 per 10min, enqueued at low priority
+  - Max queue size 20 with lowest-priority-oldest eviction
+  - Pause/resume toggle exposed via setPaused
+  - Bonus: dequeue() to remove individual tasks by ID, clearQueue() to flush all, budget retry scheduler, stable sort preserving enqueue order within same priority
+  - Adapted sendMessage dispatch to match actual signature (text, images, providerOverride)
+  - No server changes, no circular dependencies
+- Feature Suggestion: Add a **Queue Priority Visualizer** -- a compact horizontal bar in the Dev Mode panel that renders queued tasks as color-coded segments (red=urgent, orange=critical, yellow=high, blue=medium, gray=low) with a live rate-budget gauge showing fg/bg usage as two concentric arcs. Clicking any segment previews the task message and allows drag-to-reorder or right-click-to-promote/demote, giving real-time control over what the agent works on next.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:37 (completed 15:39)
+- Agent ID: worker-opus-4-6-phase4
+- Model: claude-opus-4-6[1m]
+- Task Summary: Phase 4 -- DevTools Bridge (console.error + circuit breaker capture). Created useDevToolsBridge hook that intercepts console.error (stack-trace-bearing errors only) and subscribes to http.js circuit breaker state changes, forwarding both as [AUTO-ERROR] messages to the background agent's auto-errors channel.
+- Files Touched:
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\client\src\hooks\useDevToolsBridge.js` (CREATED, ~100 lines)
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\client\src\context\DevAgentContext.jsx` (MODIFIED -- added import + useDevToolsBridge call)
+  - `C:\Users\NewAdmin\Desktop\PROJECTS\qbo-escalations\.claude\memory\agent-completion-log.md` (this entry)
+- Self-Assessment: done
+- All checklist items met:
+  - useDevToolsBridge.js created with console.error override and circuit breaker subscription
+  - Original console.error preserved in ref and called first on every invocation
+  - Only errors with real Error objects + stack traces captured (string-only logs ignored)
+  - Feedback loop prevention: /api/dev/, useDevToolsBridge, useAutoErrorReporter stacks skipped
+  - React warnings filtered: Warning:, React does not recognize, validateDOMNesting
+  - Stack traces truncated to 8 frames
+  - Circuit breaker subscription via onCircuitChange() named export from http.js
+  - Reports circuit breaker OPEN state as [AUTO-ERROR] with failure count
+  - Cleanup restores console.error, unsubscribes circuit listener, clears dedup map
+  - Only active when isLeader is true
+  - Integrated into DevAgentProvider (after useAutoErrorReporter)
+  - No server changes
+  - No fetch monkeypatching
+- Bonus beyond spec: 30-second per-message dedup to prevent same console.error from flooding the channel, bounded dedup map (prunes entries >50 to prevent memory leak), circuit breaker message includes failure count for diagnostic context, validateDOMNesting filter (common React dev noise not in original spec)
+- Feature Suggestion: Add a **Console Capture Dashboard** -- a collapsible panel in the Dev Mode sidebar that shows a live feed of captured console.error events with their dedup counts and timestamps, color-coded by severity (single occurrence = amber, repeated = red). Include a "Replay" button next to each entry that re-sends the error to the auto-errors channel for re-analysis after a fix has been applied, verifying the fix resolved the issue. This gives developers visibility into what the bridge is capturing without checking browser DevTools.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:47 (completed 15:50)
+- Agent ID: worker-opus-4-6-deep-error-reporting
+- Model: Claude Opus 4.6 (1M context)
+- Task: Deep Error Reporting -- Client Side (API error subscriber, React boundary integration, SSE error dispatching, console.warn capture, comprehensive cleanup)
+- Files Touched:
+  - `client/src/api/http.js` -- added onApiError subscriber pattern + _notifyApiError calls in both retry functions
+  - `client/src/main.jsx` -- added onError callback to ErrorBoundary dispatching react-error-boundary custom event
+  - `client/src/hooks/useDevToolsBridge.js` -- expanded from 2 to 6 capture surfaces (API errors, React boundary, SSE errors, console.warn), full cleanup
+  - `client/src/api/chatApi.js` -- added sse-stream-error dispatch in sendChatMessage and retryChatMessage catch blocks
+  - `client/src/api/copilotApi.js` -- added sse-stream-error dispatch in streamRequest catch block
+  - `client/src/api/devApi.js` -- added sse-stream-error dispatch in sendDevMessage catch block
+- Self-Assessment: done
+- All 13 checklist items addressed:
+  - http.js: onApiError() export with subscriber pattern
+  - http.js: _notifyApiError called on every non-ok response (4xx immediate, 5xx after retry exhaustion)
+  - http.js: _notifyApiError called on network failures and timeouts
+  - main.jsx: ErrorBoundary onError dispatches react-error-boundary custom event
+  - useDevToolsBridge: subscribes to onApiError, reports API failures with 15s dedup
+  - useDevToolsBridge: listens for react-error-boundary custom events
+  - useDevToolsBridge: listens for sse-stream-error custom events
+  - useDevToolsBridge: captures specific console.warn patterns (deprecated, memory leak, unmounted component)
+  - chatApi.js, copilotApi.js, devApi.js: dispatch sse-stream-error on stream failures
+  - All feedback loop prevention preserved (/api/dev/ excluded in all new surfaces)
+  - All new listeners cleaned up on unmount (6 cleanup items in return function)
+  - Dedup on API errors (same url+status within 15s), warn dedup (30s), console.error dedup (30s)
+  - No fetch monkeypatching (uses subscriber pattern on http.js)
+- Feature Suggestion: Add an **Error Heatmap Timeline** -- a compact sparkline in the DevMode sidebar that bins auto-error events into 5-second buckets over the last 5 minutes, colored by error type (red for server-error, orange for client-error, yellow for timeout, blue for SSE, purple for render crash). Clicking a spike shows the specific errors in that time window. This gives a temporal view of error density that reveals intermittent failures and correlates them with user actions, going beyond the flat chronological list.
+
+---
+
+**Verifier Review:**
+- Date/Time: 2026-03-06 15:54
+- Verifier Agent ID: haiku-verifier-deep-error-reporting
+- Model: haiku
+- Reviewed Agent: worker-opus-4-6-deep-error-reporting
+- Assessment: DONE ✓
+- Verification Details:
+  1. **http.js onApiError() pattern** — CONFIRMED. Lines 17-30: _errorListeners Set with add/delete, _notifyApiError implementation, return unsubscribe function. Perfect subscriber pattern.
+  2. **http.js error notifications** — CONFIRMED. Lines 232-235 (4xx on GET), 247-250 (timeout on GET), 259-262 (server-error/network-error after retries). Lines 287-290 (4xx on mutation), 299-302 (timeout on mutation), 311-314 (server-error/network-error after retries). All non-ok responses trigger _notifyApiError.
+  3. **main.jsx ErrorBoundary** — CONFIRMED. Lines 75-84: ErrorBoundary with onError callback dispatching CustomEvent 'react-error-boundary' with error and componentStack detail.
+  4. **useDevToolsBridge — six surfaces** — CONFIRMED. Hook documented in header (lines 4-29), six surfaces implemented: console.error (lines 54-105), circuit breaker (lines 108-116), API errors (lines 119-133), React boundary listener (lines 136-147), SSE listener (lines 150-162), console.warn selective (lines 165-194).
+  5. **API error dedup** — CONFIRMED. Lines 123-128: 15-second dedup per url+status, recentRef Map with timestamp tracking.
+  6. **console.error original preserved** — CONFIRMED. Line 52: originalConsoleError = console.error, always called first (line 56).
+  7. **console.warn selective patterns** — CONFIRMED. Lines 167-171: WARN_PATTERNS array with 'deprecated', 'memory leak', unmounted component pattern. Pattern matching at lines 179.
+  8. **console.warn original preserved** — CONFIRMED. Line 165: originalConsoleWarn = console.warn, always called first (line 174). Restoration in cleanup (lines 210-212).
+  9. **SSE stream errors dispatched** — CONFIRMED. chatApi.js lines 43-44 and 91-92 (both sendChatMessage and retryChatMessage), copilotApi.js lines 32-33 (streamRequest), devApi.js lines 92-93 (sendDevMessage). All dispatch 'sse-stream-error' custom event on catch with url and error detail.
+  10. **/api/dev/ feedback loop prevention** — CONFIRMED. useDevToolsBridge line 121: if (evt.url?.includes('/api/dev/')) return, line 153: if (url?.includes('/api/dev/')) return. No devApi.js URLs in sse-stream-error detail check needed because that code is inside devApi itself (inherently trusted).
+  11. **Cleanup on unmount** — CONFIRMED. Lines 196-215: restores console.error, restores console.warn, unsubscribes circuit and API listeners, removes event listeners, clears redup map. All cleanup called in return function of useEffect.
+  12. **Integration in DevAgentContext** — CONFIRMED. Lines 46-51: useDevToolsBridge called with enabled=true, isLeader, sendBackground, log. Context properly wired.
+  13. **Dedup working correctly** — CONFIRMED. console.error 30s (lines 81-92), console.warn 30s (lines 184-189), API errors 15s (lines 123-128). Maps pruned to prevent unbounded growth.
+
+All 14 checklist items verified against actual code. No monkeypatching of fetch, proper subscriber pattern on http.js, all listeners unsubscribed on unmount, all consoles restored, full integration with DevAgentContext.
+
+**Usability:** User can use this feature right now. The deep error reporting is fully wired and operational. Auto-errors from six surfaces will automatically flow to the dev agent's background channel.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 15:48 (completed 15:56)
+- Agent ID: worker-opus-4-6-activity-stream
+- Model: Claude Opus 4.6 (1M context)
+- Task: Live Agent Activity Stream -- always-visible streaming log showing all agent actions in real-time (useAgentActivityLog hook, AgentActivityLog component, wired into all hooks, terminal-style UI in DevMode)
+- Files Touched:
+  - Created: `client/src/hooks/useAgentActivityLog.js` -- central log store (MAX_LOG_ENTRIES=200, log/clear callbacks)
+  - Created: `client/src/components/AgentActivityLog.jsx` -- terminal-style streaming log UI with filters, scroll lock, collapse, color coding
+  - Modified: `client/src/context/DevAgentContext.jsx` -- created activityLog, passed log() to all 7 hooks, exposed on context
+  - Modified: `client/src/hooks/useBackgroundAgent.js` -- logs bg-send, bg-response, bg-rotate, api-error
+  - Modified: `client/src/hooks/useAutoErrorReporter.js` -- logs error-captured, error-reported, error-circuit
+  - Modified: `client/src/hooks/useDevToolsBridge.js` -- logs error-captured, circuit-breaker, api-error, react-crash, stream-error
+  - Modified: `client/src/hooks/useDevTaskQueue.js` -- logs task-queued, task-started, task-completed, idle-scan
+  - Modified: `client/src/hooks/useCodeReview.js` -- logs change-detected, review-queued
+  - Modified: `client/src/hooks/useTabLeadership.js` -- logs leader-change (claim and relinquish)
+  - Modified: `client/src/hooks/useDevChat.js` -- logs fg-send, fg-response, stream-error
+  - Modified: `client/src/components/DevMode.jsx` -- added AgentActivityLog as persistent bottom panel
+  - Modified: `client/src/components/DevMiniWidget.jsx` -- added compact AgentActivityLog (last 5 entries)
+  - Modified: `client/src/App.css` -- ~270 lines of terminal-style CSS for the activity log
+- Self-Assessment: done
+- Checklist:
+  - useAgentActivityLog.js created with entries state, log() callback, clear() -- YES
+  - MAX_LOG_ENTRIES cap (200) -- YES
+  - All 19 event types supported (error-captured through context-refresh) -- YES
+  - useAutoErrorReporter logs error captures, sends, and circuit trips -- YES
+  - useBackgroundAgent logs sends, responses, rotations, and errors -- YES
+  - useDevTaskQueue logs queued, started, completed, and idle scans -- YES
+  - useCodeReview logs change detection and review queueing -- YES
+  - useDevToolsBridge logs console errors, API errors, circuit breaker, React crashes, SSE errors -- YES
+  - useTabLeadership logs leader elections and relinquish -- YES
+  - useDevChat logs foreground sends, responses, and stream errors -- YES
+  - All hooks receive log as parameter (no circular deps) -- YES (logRef pattern for useTabLeadership)
+  - activityLog exposed on DevAgentContext -- YES
+  - AgentActivityLog.jsx component with terminal-style rendering -- YES
+  - Auto-scroll to bottom with user-scroll-lock detection -- YES
+  - Color-coded by event type (red/amber/green/blue/gray) -- YES
+  - Click to expand detail -- YES
+  - Filter chips (All/Errors/Tasks/Background/Foreground/System) -- YES (6 categories)
+  - Pause and clear controls -- YES
+  - Placed in DevMode.jsx as permanent bottom panel -- YES
+  - CSS in App.css with terminal aesthetic -- YES (~270 lines)
+  - Condensed view in DevMiniWidget (last 5 entries) -- YES
+  - Collapsible panel with toggle arrow -- YES (bonus)
+  - Category count badges on filter chips -- YES (bonus)
+  - Vite build passes clean -- YES (verified)
+- Feature Suggestion: Add **Activity Log Grep** -- a real-time search/filter input at the top of the activity log that does substring matching across all entry messages, highlighting matching text in the results. Include regex support toggle so developers can search for patterns like `error.*timeout` or `channel:(auto-errors|code-reviews)`. This turns the activity log from a passive stream into an active investigation tool, similar to how `grep` works in a terminal -- essential when you have 200 entries and need to trace a specific chain of events.
+
+## Task: IDLE-SCAN quality check on client files (2026-03-06)
+
+**Agent ID:** haiku-scanner  
+**Model:** claude-haiku-4-5-20251001  
+**Completed:** 2026-03-06 02:15 UTC
+
+### Task Summary
+Performed comprehensive quality scan on 19 recently modified/new client files, checking for:
+1. Console.log debug leftovers
+2. Bugs (null access, wrong vars, unreachable code, race conditions, missing deps)
+3. Missing error handling (unhandled promises, missing catch blocks)
+4. Dead code (unused imports, unreachable branches)
+
+### Files Scanned (Read-Only)
+- client/src/api/chatApi.js
+- client/src/api/copilotApi.js
+- client/src/api/devApi.js
+- client/src/api/http.js
+- client/src/components/DevMiniWidget.jsx
+- client/src/components/DevMode.jsx
+- client/src/components/PolicyLab.jsx
+- client/src/context/DevAgentContext.jsx
+- client/src/hooks/useBackgroundAgent.js
+- client/src/hooks/useDevChat.js
+- client/src/hooks/useTabLeadership.js
+- client/src/main.jsx
+- client/src/components/AgentActivityLog.jsx
+- client/src/hooks/useAgentActivityLog.js
+- client/src/hooks/useAutoErrorReporter.js
+- client/src/hooks/useCodeReview.js
+- client/src/hooks/useDevTaskQueue.js
+- client/src/hooks/useDevToolsBridge.js
+- client/src/hooks/useErrorCapture.js
+
+### Issues Found
+
+#### HIGH SEVERITY (3)
+1. **devApi.js:20-21** — Dead code: `activeConversationId` and `activeSessionId` assigned but never read in stream event handler
+2. **useDevToolsBridge.js:54** — Missing error handling: `console.error` monkeypatch not wrapped; if original throws, recovery fails
+3. **useDevTaskQueue.js:155** — Unhandled promise rejection: `enqueue()` in catch block without await or error handling
+
+#### MEDIUM SEVERITY (5)
+1. **useBackgroundAgent.js:124-127** — Race condition: queue draining via `queueMicrotask` lacks serial execution guarantee
+2. **useDevChat.js:156-158** — Silent catch in `loadConversations()`; error not logged or reported
+3. **useErrorCapture.js:48-50** — Missing catch: `onErrorsRef.current()` can throw unhandled
+4. **DevAgentContext.jsx:117** — Dead code: `focusMiniWidget` function created but never called
+5. **DevMode.jsx:73-74** — Fragile null-coalescing: hardcoded `'claude'` default if PROVIDER_FAMILY key missing
+
+#### LOW SEVERITY (3)
+1. **useDevChat.js:115-117** — Noise: try-catch around `localStorage.setItem` with empty catch
+2. **useCodeReview.js:68** — Silent JSON.parse failure (intentional but could mask corruption)
+3. **main.jsx:46-56** — DOM null checks missing on querySelector results
+
+### Not Found
+- No console.log debug statements
+- No console.error in catches (these are appropriate)
+- No unreachable code branches
+- All useEffect dependency arrays correct or intentionally omitted
+
+### Status
+**DONE** ✓ — Quality scan complete. 11 issues documented (3 high, 5 medium, 3 low). All issues are in existing code (no new files modified). Ready for developer review and selective remediation.
+
+---
+
+### 2026-03-06 16:01 — Worker Agent (Client Health Monitor)
+- **Agent ID**: worker-health-monitor
+- **Model**: Claude Opus 4.6 (1M context)
+- **Task**: Client Health Monitoring — Runaway Hooks, Memory Pressure, Pre-Crash Detection
+- **Files Touched**:
+  - `client/src/hooks/useClientHealthMonitor.js` (CREATED — 210 lines)
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED — added import + hook call)
+  - `client/src/hooks/useAgentActivityLog.js` (MODIFIED — added health-warning event type to docs)
+- **Self-Assessment**: DONE
+- **Feature Suggestion**: Health dashboard sparkline widget — a tiny always-visible sparkline in the FlameBar area showing memory usage trend over the last 5 minutes, with the DOM node count overlaid as a second trace. Clicking it would expand to a full health status panel showing all 7 detection surfaces with their current readings, thresholds, and last-alert timestamps. This gives the developer at-a-glance visibility into system health without needing to wait for an alert to fire.
+
+**Verifier Review:**
+- Date/Time: 2026-03-06 16:05 UTC
+- Verifier Agent ID: haiku-verifier-health-monitor
+- Model: claude-haiku-4-5-20251001
+- Reviewed Agent: worker-health-monitor
+- Assessment: DONE ✓
+
+**Verification Checklist:**
+1. useClientHealthMonitor.js exists (~262 lines) — YES
+2. Memory pressure: warns 70%, critical 85%, rapid growth 20%+ — YES (lines 68, 75, 88)
+3. DOM size: warns 5000, critical 10000, rapid growth 50%+ — YES (lines 109, 115, 122)
+4. DOM thrashing: MutationObserver, 100+ mutations/sec alert — YES (lines 169-185)
+5. Long tasks: PerformanceObserver, 200ms warning, 500ms critical — YES (lines 193, 200)
+6. Frozen UI: interval gap >15s detection — YES (line 216)
+7. Effect loop: monitors __DEV_AGENT_EFFECT_TRACKER__, 20+ fires in 5s — YES (lines 132-150)
+8. Render storm: monitors __DEV_AGENT_RENDER_COUNT__, 200+ in 5s — YES (lines 153-163)
+9. Per-type circuit breaker (2-min cooldown) — YES (lines 42-49, COOLDOWN_MS = 120_000)
+10. Leader-only (isLeader check) — YES (line 38)
+11. Full cleanup on unmount (intervals, observers) — YES (lines 227-234)
+12. Integrated into DevAgentContext — YES (lines 9, 84-89)
+13. Logs to activity log AND sends critical to sendBackground — YES (all alert points)
+
+All 7 detection surfaces fully implemented with correct thresholds. Integration properly wired. All cleanup code in place. Hook is read-only (no state modifications). Leader-only guard prevents duplicate alerts across tabs. Circuit breaker per-type with 2-min cooldown prevents alert spam. Helper `trackEffect()` exported for opt-in instrumentation.
+
+**Feature Suggestion Noted**: Health dashboard sparkline widget (memory trend + DOM count overlay, expandable panel).
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 16:03 (completed 16:07)
+- Agent ID: worker-opus-4-6-server-error-pipeline
+- Model: claude-opus-4-6[1m]
+- Task Title: Server-Side Error Pipeline — Full-Stack Error Visibility
+- Files Touched:
+  - `server/src/lib/server-error-pipeline.js` (CREATED — 133 lines)
+  - `server/src/index.js` (MODIFIED — added reportServerError require, wired uncaughtException, unhandledRejection, MongoDB disconnected/error/reconnected)
+  - `server/src/app.js` (MODIFIED — enhanced Express global error handler to report to pipeline)
+  - `server/src/services/claude.js` (MODIFIED — added pipeline reporting to chat spawn errors, finishWithError, parseEscalation spawn/close/error)
+  - `server/src/routes/dev.js` (MODIFIED — added pipeline require, reportServerError in timeout/exit/error handlers, added GET /api/dev/server-errors SSE endpoint)
+  - `client/src/hooks/useServerErrors.js` (CREATED — 88 lines)
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED — added useServerErrors import and hook call)
+  - `client/src/components/AgentActivityLog.jsx` (MODIFIED — added server-error type to TYPE_COLORS and TYPE_CATEGORIES)
+- Self-Assessment: DONE
+- Feature Suggestion: Add an **Error Correlation Timeline** -- a horizontal timeline strip in Dev Mode that plots both client-side and server-side errors on a shared time axis with connecting lines between correlated pairs (e.g., a 500 Express error and the corresponding client fetch failure). Each dot is color-coded by source (red=server, orange=client) and size-scaled by frequency, with a tooltip showing the error chain. Clicking a correlation pair opens both the server stack trace and client error side-by-side, making cross-stack debugging a single-click operation instead of mentally correlating timestamps from separate log streams.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 16:08 (completed 16:12)
+- Agent ID: worker-opus-4-6-waterfall-insights
+- Model: claude-opus-4-6[1m]
+- Task Title: Waterfall Performance Insights for Dev Agent Pipeline
+- Files Touched:
+  - `client/src/hooks/useWaterfallInsights.js` (CREATED -- 213 lines)
+  - `client/src/api/http.js` (MODIFIED -- added onRequestEvent listener system + _notifyRequestEvent calls in _trackedFetch + dedup notification in apiFetch)
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED -- added useWaterfallInsights import and hook call)
+  - `client/src/components/AgentActivityLog.jsx` (MODIFIED -- added perf-insight to TYPE_COLORS, TYPE_CATEGORIES, and FILTER_OPTIONS)
+  - `client/src/hooks/useAgentActivityLog.js` (MODIFIED -- added perf-insight to event type documentation)
+- Self-Assessment: DONE
+- Feature Suggestion: Add a **Performance Regression Guard** -- when the insights hook detects a P95 regression (50%+ increase), instead of just alerting, it automatically snapshots the endpoint's recent request payloads/headers and diffs them against the previous window's patterns. The dev agent then receives not just "endpoint X is slower" but a root-cause hypothesis like "request payload size increased 3x -- body contains base64 image that wasn't there before" or "new query parameter ?include=all added -- likely fetching more data than needed." This turns a generic "it's slow" alert into an actionable diagnosis that the agent can immediately act on.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06T20:09Z (completed 2026-03-06T20:15Z)
+- Agent ID: worker-client-review
+- Model: claude-opus-4-6
+- Task Summary: [AUTO-REVIEW] Client-side code review of 23 files for bugs, edge cases, missing error handling
+- Files Touched (read-only):
+  - `client/src/api/http.js`
+  - `client/src/api/chatApi.js`
+  - `client/src/api/copilotApi.js`
+  - `client/src/api/devApi.js`
+  - `client/src/components/DevMiniWidget.jsx`
+  - `client/src/components/DevMode.jsx`
+  - `client/src/components/PolicyLab.jsx`
+  - `client/src/context/DevAgentContext.jsx`
+  - `client/src/hooks/useBackgroundAgent.js`
+  - `client/src/hooks/useDevChat.js`
+  - `client/src/hooks/useTabLeadership.js`
+  - `client/src/main.jsx`
+  - `client/src/App.css`
+  - `client/src/components/AgentActivityLog.jsx`
+  - `client/src/hooks/useAgentActivityLog.js`
+  - `client/src/hooks/useAutoErrorReporter.js`
+  - `client/src/hooks/useClientHealthMonitor.js`
+  - `client/src/hooks/useCodeReview.js`
+  - `client/src/hooks/useDevTaskQueue.js`
+  - `client/src/hooks/useDevToolsBridge.js`
+  - `client/src/hooks/useErrorCapture.js`
+  - `client/src/hooks/useServerErrors.js`
+  - `client/src/lib/devTelemetry.js`
+- Self-Assessment: DONE -- 22 issues documented across all 23 files (4 critical, 6 high, 8 medium, 4 low)
+- Feature Suggestion: Add a **Review Diff Overlay** -- when a code review completes, render an inline diff viewer inside the Activity Log panel that shows exactly which lines the agent identified as problematic. Each diff hunk would be annotated with the severity badge and a one-click "Apply Fix" button that sends a targeted fix command to the foreground dev agent. This turns passive review reports into an interactive triage workflow where the developer can selectively approve, skip, or modify each finding without leaving the Dev Mode UI.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 16:04 (completed 16:09)
+- Agent ID: worker-opus-4-6-health-extended
+- Model: claude-opus-4-6[1m]
+- Task Title: Extended Client Health Monitoring -- Every Edge Case
+- Files Touched:
+  - `client/src/hooks/useClientHealthExtended.js` (CREATED -- 310 lines, 11 detection surfaces)
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED -- added import and hook call for useClientHealthExtended)
+  - `client/src/hooks/useAgentActivityLog.js` (MODIFIED -- added 4 new event types to JSDoc: resource-error, security-warning, network-error, network-info)
+  - `.claude/memory/agent-completion-log.md` (MODIFIED -- this entry)
+- Self-Assessment: DONE
+- Checklist:
+  - [x] useClientHealthExtended.js created
+  - [x] Event listener leak detection (patched addEventListener/removeEventListener, warn 500+, critical 1000+, growth rate 50+/30s)
+  - [x] Timer leak detection (patched setInterval/setTimeout/clear variants, intervals >20, timeouts >100)
+  - [x] Fetch request pileup (in-flight >10 via onBudgetChange from http.js)
+  - [x] Resource load failures (img/script/link via capture-phase error listener)
+  - [x] Console.log flood detection (100+ in 10s via patched console.log)
+  - [x] localStorage quota monitoring (100KB probe + 4MB usage warning)
+  - [x] CSP violation detection (securitypolicyviolation event)
+  - [x] Vite chunk load failures (vite:preloadError event)
+  - [x] EventSource reconnect storm detection (patched EventSource constructor, 5+ errors in 60s)
+  - [x] Offline/online network detection (offline/online window events)
+  - [x] Excessive re-renders via __DEV_AGENT_RENDER_COUNT__ (30+/s threshold)
+  - [x] Per-type throttle (1 report per type per 2 minutes via throttleRef Map)
+  - [x] ALL globals restored on unmount (addEventListener, removeEventListener, setInterval, clearInterval, setTimeout, clearTimeout, console.log, EventSource)
+  - [x] Internal intervals use origSetInterval.current to avoid being tracked by own patcher
+  - [x] Integrated into DevAgentContext (import + hook call with standard 4-prop interface)
+  - [x] Activity log event types added (resource-error, security-warning, network-error, network-info)
+- Feature Suggestion: Add a **Health Budget Score** -- a single 0-100 number displayed as a compact gauge in the dev sidebar that combines all health signals (base monitor + extended monitor) into one weighted composite score. Weights: memory 25pts, DOM 15pts, listeners 15pts, timers 10pts, render rate 10pts, long tasks 10pts, network 10pts, storage 5pts. The score updates every 10 seconds with a trailing sparkline showing the last 5 minutes. When the score drops below 50, the gauge pulses amber; below 25, it pulses red. Clicking the gauge opens a breakdown showing which factor is dragging the score down. This gives non-developers a single "app health" metric they can glance at without understanding what event listeners or DOM nodes are.
+
+---
+
+### 2026-03-06 16:20 | worker | claude-opus-4-6 | Crash-Survivor Dev Agent Widget
+- **Status**: DONE
+- **Completed**: 2026-03-06 16:22
+- **Task**: Build CrashModeAgent.jsx that renders outside ErrorBoundary, survives app crashes, auto-sends crash errors to dev agent, provides standalone chat interface with raw fetch + SSE parsing
+- **Files Touched**:
+  - `client/src/components/CrashModeAgent.jsx` (CREATED) -- standalone crash-survivor dev agent widget
+  - `client/src/main.jsx` (MODIFIED) -- import CrashModeAgent, render as sibling outside ErrorBoundary
+  - `client/src/components/ErrorFallback.jsx` (MODIFIED) -- added dev agent notification message
+- **Self-Assessment**: done
+- **Checklist**:
+  - [x] CrashModeAgent.jsx created -- fully standalone, no context dependencies
+  - [x] Renders outside ErrorBoundary in main.jsx (sibling, not child)
+  - [x] Auto-shows when react-error-boundary event fires
+  - [x] Auto-sends crash error to dev agent with full error/stack/componentStack
+  - [x] Text input for user to talk to agent
+  - [x] SSE streaming response processing (matches project's event format: start/session/chunk/delta/result/text/done)
+  - [x] Handles server-not-running gracefully (catch block with helpful message)
+  - [x] All inline styles, no external CSS dependency
+  - [x] ErrorFallback updated with "agent is working on it" message (dev-only)
+  - [x] Closeable and minimizable
+  - [x] Keyboard shortcut Ctrl+Shift+E to toggle minimize
+  - [x] Dedup guard prevents multiple auto-sends for same crash
+  - [x] Conversation continuity via conversationId tracking
+- Feature Suggestion: Add **Crash Replay** -- when the crash agent receives an error, it could snapshot `sessionStorage`/`localStorage` state and the last N user interactions (route changes, clicks, input values) captured by a lightweight event recorder running in `main.jsx`. This gives the agent a reproducible sequence to understand what the user was doing when the crash happened, not just the stack trace. The recorder would be a simple ring buffer (~50 events) with zero overhead in normal operation, and only serialized on crash.
+
+---
+
+### 2026-03-06 16:23 — Full Integration Audit & Fix: Dev Agent System
+
+- **Date/Time**: 2026-03-06 16:23:35
+- **Agent ID**: worker (integration-audit)
+- **Model**: Claude Opus 4.6 (1M context)
+- **Task**: Read EVERY file in the dev agent system, find EVERY bug, fix ALL of them. Ensure the app loads cleanly and the dev agent system functions.
+- **Status**: done
+
+**Files Read (complete audit):**
+- `client/src/context/DevAgentContext.jsx` (hub)
+- `client/src/hooks/useDevChat.js`, `useBackgroundAgent.js`, `useBackgroundConversations.js`
+- `client/src/hooks/useTabLeadership.js`, `useErrorCapture.js`, `useAutoErrorReporter.js`
+- `client/src/hooks/useDevToolsBridge.js`, `useDevTaskQueue.js`, `useCodeReview.js`
+- `client/src/hooks/useClientHealthMonitor.js`, `useClientHealthExtended.js`
+- `client/src/hooks/useServerErrors.js`, `useAgentActivityLog.js`, `useWaterfallInsights.js`
+- `client/src/hooks/useAiSettings.js`
+- `client/src/api/http.js`, `devBackgroundClient.js`, `devApi.js`, `chatApi.js`, `copilotApi.js`
+- `client/src/lib/devTelemetry.js`, `providerCatalog.js`
+- `client/src/components/AgentActivityLog.jsx`, `DevMode.jsx`, `DevMiniWidget.jsx`
+- `client/src/App.jsx`, `client/src/main.jsx`
+- `server/src/routes/dev.js`, `server/src/app.js`, `server/src/index.js`
+- `server/src/lib/server-error-pipeline.js`, `agent-memory.js`, `tool-normalizer.js`, `dev-context-builder.js`
+- `server/src/models/DevAgentLog.js`, `DevConversation.js`
+- `server/src/services/change-detector.js`, `claude.js`
+
+**Files Modified:**
+- `client/src/hooks/useClientHealthExtended.js`
+
+**Bugs Found & Fixed:**
+1. **CRITICAL: StrictMode double-mount crash in `useClientHealthExtended`** — All 7 global patches (addEventListener, removeEventListener, setInterval, clearInterval, setTimeout, clearTimeout, console.log) were stored in `useRef` slots and nulled out during cleanup. In React StrictMode, the mount-cleanup-remount cycle would: (a) mount1 captures natives into refs, patches globals, (b) cleanup1 restores natives but sets all refs to null, (c) mount2 tries to capture from `ref.current` which is now null, patches globals to delegate to null, (d) any subsequent call to the patched global throws `Cannot read properties of null`. **Fix**: Moved all 7 original captures to module-level constants (same pattern `useDevToolsBridge` already uses for console.error/warn). Cleanup now restores from these stable module-level references instead of nulling refs. All internal timer creation/cleanup calls updated to use `.call(window, ...)` on the module-level captures.
+
+**Bugs Investigated but Found Not-Buggy (verification results):**
+- Import/export mismatches: All 40+ imports resolve to actual exports. Every hook exports what the context imports.
+- Parameter signatures: All hooks accept `{ log }` and every other param the provider passes.
+- Circular dependencies: None found. DevAgentContext -> hooks -> api/lib. No reverse imports.
+- Feedback loops: Both `useAutoErrorReporter` and `useDevToolsBridge` filter `/api/dev/` errors and their own stack frames. Circuit breakers cap volume (3 sends/5min for error reporter, 30s dedup for bridge).
+- Missing cleanup: All 12 hooks have proper cleanup in their useEffect returns (intervals cleared, observers disconnected, event listeners removed, EventSource closed).
+- Hook rules: All hooks are called unconditionally at the top of DevAgentProvider. No conditional hook calls.
+- ESM/CJS contamination: Client is pure ESM, server is pure CJS. No cross-contamination.
+- Null safety: `sendBackground` is guarded with `!sendBackground` early returns. `log?.()` optional chaining used throughout.
+- useMemo deps: `miniWidgetInputRef` (ref) and `setMiniWidgetOpen` (stable setter) correctly omitted from deps.
+
+**Vite Build Result**: Clean pass (zero errors, zero warnings)
+
+- Feature Suggestion: Add **Health Monitor Dashboard** -- a dedicated tab or panel that aggregates all the health metrics the extended monitor tracks (listener counts, timer counts, memory usage, DOM size, render rate, console flood count) into a live-updating dashboard with sparkline charts. Currently all this data is only visible when it crosses alert thresholds and triggers background agent messages. A persistent dashboard would let developers proactively observe trends before they become problems -- like watching memory creep up before it hits the 70% warning threshold, or seeing listener counts slowly grow over a session indicating a slow leak that never reaches the 500/1000 alert levels.
+
+
+---
+
+### Entry — 2026-03-06 (Quality Scan)
+- **Date/Time**: 2026-03-06
+- **Agent ID**: worker-quality-scan
+- **Model**: claude-opus-4-6
+- **Task Title**: Proactive quality review of all modified and new files
+- **Status**: IN PROGRESS
+
+---
+
+### Entry — 2026-03-06 (Adversarial Review + Hardening)
+- **Date/Time**: 2026-03-06
+- **Agent ID**: worker-adversarial-review
+- **Model**: claude-opus-4-6
+- **Task Title**: Deep adversarial review and hardening of Dev Agent system — hunt and fix every hidden bug
+- **Files Touched**:
+  - `client/src/hooks/useBackgroundConversations.js` — added useMemo to return value
+  - `client/src/hooks/useBackgroundAgent.js` — added useMemo to return value
+  - `client/src/hooks/useClientHealthMonitor.js` — module-level timer capture, guard document.body
+  - `client/src/hooks/useClientHealthExtended.js` — fixed offline handler cascade, fixed setTimeout patch double-timer
+  - `client/src/hooks/useCodeReview.js` — added EventSource reconnect storm protection
+  - `client/src/hooks/useServerErrors.js` — added EventSource reconnect storm protection
+  - `client/src/hooks/useErrorCapture.js` — removed unmount flush (prevents state updates on unmounted)
+  - `client/src/hooks/useTabLeadership.js` — fixed election timer leaks in visibility + relinquish handlers
+  - `client/src/hooks/useDevTaskQueue.js` — fixed retry timer leak, added missing `log` dependency
+  - `client/src/hooks/useDevChat.js` — fixed stale conversationId closure in removeConversation
+  - `client/src/hooks/useWaterfallInsights.js` — added hard cap on request buffer (prevents unbounded growth)
+  - `client/src/context/DevAgentContext.jsx` — fixed useMemo deps to use individual stable values
+  - `client/src/components/CrashModeAgent.jsx` — replaced broken SSE parser with buffered implementation
+  - `client/src/api/http.js` — added try/catch to circuit and budget listener notification
+  - `server/src/routes/dev.js` — added ObjectId validation, heartbeat try/catch
+  - `server/src/services/change-detector.js` — handle git quoted filenames
+- **Status**: DONE
+- **Feature Suggestion**: Add a "Dev Agent Health Dashboard" panel that shows real-time diagnostics: circuit breaker state, tab leadership status, active intervals/listeners count, memory usage trend, EventSource connection states, and queue depth — all on a single summary card visible in the mini-widget footer. This would make the dev agent's internal health transparent without needing to read the activity log.
+
+---
+
+### Entry — 2026-03-06 (Idle Scan: Client Quality Review)
+- **Date/Time**: 2026-03-06
+- **Agent ID**: worker-idle-scan-client-quality
+- **Model**: claude-opus-4-6
+- **Task Title**: Review all modified and new client files for quality issues (console.logs, bugs, dead code, missing error handling)
+- **Status**: IN PROGRESS
+
+---
+
+### Entry — 2026-03-06 16:44 (Section G: Operational Limits & Cleanup)
+- **Date/Time**: 2026-03-06 16:44 — completed 2026-03-06 16:46
+- **Agent ID**: worker-section-g-cleanup
+- **Model**: claude-opus-4-6[1m]
+- **Task Title**: Operational limits and cleanup — TTL indexes, server cleanup job, debounced activity log, localStorage pruning
+- **Files Touched**:
+  - `server/src/models/DevAgentLog.js` — added TTL index (7-day expiry)
+  - `server/src/lib/cleanup.js` — created — scheduled cleanup job (conversations 30d, channels prune to 3, logs 7d backup TTL)
+  - `server/src/index.js` — wired startCleanupSchedule on startup, stopCleanupSchedule on shutdown
+  - `client/src/hooks/useAgentActivityLog.js` — debounced batching (200ms flush), buffer cleanup on unmount
+  - `client/src/hooks/useBackgroundConversations.js` — timestamp tracking on writes, 7-day stale entry pruning on init
+- **Self-Assessment**: done
+- **Feature Suggestion**: Cleanup dashboard widget in DevMode showing last cleanup timestamp, items removed per category, and a manual "Run Now" button via `/api/dev/cleanup`.
+
+---
+
+### Entry — 2026-03-06 20:50 UTC (Section J: Integration Contracts & Stable References)
+- **Date/Time**: 2026-03-06 20:45 -- completed 2026-03-06 20:50
+- **Agent ID**: worker-section-j-contracts
+- **Model**: claude-opus-4-6[1m]
+- **Task Title**: Integration contracts & stable references -- stabilize function identities, add null guards, document dependency graph
+- **Files Touched**:
+  - `client/src/hooks/useBackgroundAgent.js` -- CRITICAL FIX: sendBackground stabilized (useCallback [] + bgConvsRef/logRef). Was [bgConvs, log] causing cascading re-renders on every channel state change.
+  - `client/src/hooks/useDevChat.js` -- added logRef bridge, removed log from sendMessage deps for robustness
+  - `client/src/hooks/useDevTaskQueue.js` -- added logRef/sendBackgroundRef/sendMessageRef bridges, enqueue now useCallback [] deps, process loop reads via refs
+  - `client/src/hooks/useAutoErrorReporter.js` -- strengthened sendBackground guard to typeof check
+  - `client/src/hooks/useDevToolsBridge.js` -- strengthened sendBackground guard to typeof check
+  - `client/src/hooks/useClientHealthMonitor.js` -- strengthened sendBackground guard to typeof check
+  - `client/src/hooks/useClientHealthExtended.js` -- strengthened sendBackground guard to typeof check
+  - `client/src/hooks/useServerErrors.js` -- added typeof sendBackground guard (was missing entirely)
+  - `client/src/hooks/useCodeReview.js` -- added typeof enqueue guard
+  - `docs/dev-agent-contracts.md` -- CREATED: full dependency graph (4 layers, 15 hooks), stability contracts table, null safety inventory, ref-bridge pattern docs, 8 system rules, new hook checklist
+- **Self-Assessment**: DONE
+- **Checklist**:
+  - [x] sendBackground stabilized (ref pattern, useCallback [])
+  - [x] sendMessage verified stable, hardened with logRef
+  - [x] enqueue stabilized (useCallback [], logRef)
+  - [x] log verified stable (useCallback [] in useAgentActivityLog)
+  - [x] Null checks added to all monitoring hook parameters (typeof guards)
+  - [x] docs/dev-agent-contracts.md created with full dependency graph
+  - [x] Stability contracts documented (table format)
+  - [x] Rules documented (8 rules)
+  - [x] Vite build passes clean
+- **Feature Suggestion**: Add a **Render Cascade Visualizer** -- a debug panel in DevMode that instruments the DevAgentContext.jsx useMemo and all hook returns to track which value change triggered which downstream re-render. Display as a live flame graph where each row is a hook (ordered by layer), and horizontal bars show when a hook's return value changed identity. Clicking a bar shows which specific field changed and what caused it (e.g., "bgConvs.channels changed -> sendBackground identity changed -> 6 Layer 2 effects re-ran"). This would make stability regressions immediately visible without needing React DevTools Profiler, and would catch any future violation of the stability contracts defined in this document.
+
+### 2026-03-06 16:54 — Worker (Opus 4.6 1M)
+- **Task**: Section B — Self-Monitoring & Heartbeat
+- **Status**: DONE
+- **Files Touched**:
+  - `client/src/hooks/useAgentSelfCheck.js` (CREATED) — heartbeat hook: server reachability + bg send tracking
+  - `client/src/hooks/useBackgroundAgent.js` (MODIFIED) — added `onSuccess` ref-bridge callback param, called after successful sends
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED) — wired useAgentSelfCheck into core provider, exposed agentHealthy/healthDetails/recordBgSuccess on context
+  - `client/src/components/DevMiniWidget.jsx` (MODIFIED) — added health indicator dot next to "Dev Agent" title in quick-chat header
+  - `client/src/App.css` (MODIFIED) — added .dev-health-dot styles (green=ok, amber pulse=warn)
+- **Checklist**:
+  - [x] useAgentSelfCheck.js created (~80 lines)
+  - [x] Checks server reachability every 60s via raw fetch to /api/health (bypasses circuit breaker)
+  - [x] Tracks time since last successful background send (10min threshold)
+  - [x] Returns agentHealthy boolean + healthDetails object
+  - [x] Logs issues to activity log with warning severity
+  - [x] Wired into DevAgentContext core layer (before bgAgent so recordBgSuccess is available)
+  - [x] recordBgSuccess called on successful background sends via onSuccess ref-bridge
+  - [x] DevMiniWidget shows health indicator dot (green=healthy, amber pulse=issues, tooltip with details)
+  - [x] Leader-only checks (non-leader tabs skip entirely)
+  - [x] Vite build passes clean
+- **Feature Suggestion**: Add a **Health History Sparkline** -- a tiny inline chart (last 30 checks, ~30 minutes of data) rendered next to the health dot that shows the health timeline at a glance. Each pixel-column represents one 60s check: green for pass, amber for issue, red for server-down. Hovering over a column shows the exact timestamp and issues. This would let developers instantly see whether a health issue is a momentary blip or a sustained degradation without needing to dig through the activity log.
+
+### 2026-03-06 16:53 — Worker (Opus 4.6 1M)
+- **Task**: Section D — Backpressure & Triage (Emergency Mode)
+- **Completed**: 2026-03-06 16:57
+- **Status**: DONE
+- **Files Touched**:
+  - `client/src/hooks/useEmergencyMode.js` (CREATED) — burst detection, auto-cooldown, manual reset
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED) — import + instantiate useEmergencyMode at core, expose emergencyActive/resetEmergency on context, pass emergency props to monitor boundary
+  - `client/src/context/DevAgentMonitors.jsx` (MODIFIED) — accept emergencyActive/recordError props, gate health/extended/code-review/waterfall with !emergencyActive, pass emergency state to error reporter and task queue
+  - `client/src/hooks/useAutoErrorReporter.js` (MODIFIED) — emergency batch mode (5s accumulation window), recordError() for burst detection, ref-based access for stable callbacks, batch timer cleanup
+  - `client/src/hooks/useDevTaskQueue.js` (MODIFIED) — accept emergencyActive, drop low/medium priority tasks when emergency activates
+  - `client/src/components/AgentActivityLog.jsx` (MODIFIED) — emergency banner with pulsing red indicator and manual Reset button, emergency type in color/category maps
+  - `client/src/App.css` (MODIFIED) — emergency banner styles (gradient bg, pulse animation, reset button hover)
+- **Checklist**:
+  - [x] useEmergencyMode.js created (~89 lines)
+  - [x] Triggers when 10+ errors in 5 seconds
+  - [x] Auto-exits after 2 minutes of calm
+  - [x] Manual reset available (resetEmergency)
+  - [x] emergencyActive passed to all monitor hooks (disables health, extended health, code review, waterfall)
+  - [x] Error reporters still active but batch in emergency mode (5s window summaries)
+  - [x] Task queue drops low/medium priority in emergency mode
+  - [x] Activity log shows emergency banner with Reset button
+  - [x] Emergency mode logged to activity stream (activation, auto-exit, manual reset, triage drops)
+  - [x] Vite build passes clean
+- **Feature Suggestion**: Add an **Emergency Mode Escalation Chain** -- when emergency mode triggers, instead of just pausing monitors, automatically spawn a background agent task that runs a targeted root-cause analysis. It would collect the error batch summary, the last 20 activity log entries, and current health metrics, then ask the agent "These errors arrived in a burst. Identify the single root cause and propose a fix." This turns emergency mode from a passive circuit breaker into an active diagnostic system that investigates while noise is suppressed.
+
+### 2026-03-06 16:55 — Worker (Opus 4.6 1M)
+- **Task**: Section H — Server-Down Degradation
+- **Status**: DONE
+- **Files Touched**:
+  - `client/src/hooks/useServerReachability.js` (CREATED) — tri-state reachability hook with offline queue
+  - `client/src/context/DevAgentContext.jsx` (MODIFIED) — added useServerReachability, safeSendBackground wrapper, queue drain effect, exposed serverState on context
+  - `client/src/context/DevAgentMonitors.jsx` (MODIFIED) — added serverState prop, serverUp gate for useServerErrors/useCodeReview/useWaterfallInsights SSE connections
+  - `client/src/components/DevMiniWidget.jsx` (MODIFIED) — added server status pills (inline in header + floating when widget closed)
+  - `client/src/App.css` (MODIFIED) — added server-pill, floating-pill, and dot-blink CSS styles
+- **Checklist**:
+  - [x] useServerReachability.js created with tri-state (reachable/degraded/unreachable)
+  - [x] Pings /api/health every 30s using raw fetch (bypasses circuit breaker)
+  - [x] State transitions: reachable -> degraded (3 failures) -> unreachable (6 failures)
+  - [x] Back to reachable when health check succeeds after being down
+  - [x] Offline queue (max 20 items) with queueForLater/drainQueue
+  - [x] safeSendBackground wrapper -- silently queues when unreachable
+  - [x] Queue drained as batched summary when server comes back
+  - [x] EventSource connections (useServerErrors, useCodeReview, useWaterfallInsights) gated on serverUp
+  - [x] DevMiniWidget shows server status indicator (red pill for offline, amber pill for degraded)
+  - [x] Floating server-status pill visible when widget is closed
+  - [x] Activity log entries for all state transitions
+  - [x] Vite build passes clean
+- **Feature Suggestion**: Add a **Server Downtime Timeline** -- when the server transitions back to reachable, log the total downtime duration and display it in the activity log as a collapsible entry showing the full timeline: when degraded state was first detected, when unreachable was reached, how many messages were queued, and how long recovery took. This would give developers a post-incident summary without needing external monitoring tools.
+
+---
+
+**Agent Claim:**
+- **Date/Time:** 2026-03-06 17:00 -> 17:04
+- **Agent ID:** worker-opus-4-6-error-resolution
+- **Model:** claude-opus-4-6[1m]
+- **Task Summary:** Section C -- Closed-Loop Error Resolution. Created useErrorResolution hook implementing full closed-loop error tracking (pending -> awaiting-verification -> resolved/failed/escalated). Wired into useAutoErrorReporter for automatic tracking, response capture, and recurrence detection. Added resolution event types and visual badges to AgentActivityLog.
+- **Files Touched:**
+  - `client/src/hooks/useErrorResolution.js` (CREATED -- 195 lines, full lifecycle tracker)
+  - `client/src/hooks/useAutoErrorReporter.js` (MODIFIED -- added errorResolution prop, markRecurrence calls, trackError + recordAgentResponse wiring in both immediate and batched send paths)
+  - `client/src/context/DevAgentMonitors.jsx` (MODIFIED -- imported useErrorResolution, created hook instance, passed to useAutoErrorReporter, exposed on monitor context)
+  - `client/src/components/AgentActivityLog.jsx` (MODIFIED -- added error-resolved/retry/escalated to TYPE_COLORS and TYPE_CATEGORIES, added Resolution filter option, added UNRESOLVED/RESOLVED badges)
+  - `client/src/App.css` (MODIFIED -- added .aal-badge styles with red pulsing animation for unresolved, green for resolved)
+  - `.claude/memory/agent-completion-log.md` (MODIFIED -- this entry)
+- **Self-Assessment:** Done
+  - [x] useErrorResolution.js created (~195 lines)
+  - [x] Tracks errors by hash: pending -> awaiting-verification -> resolved | failed | escalated
+  - [x] 60-second verification window after agent responds
+  - [x] Recurrence detection (same hash appears again via markRecurrence)
+  - [x] Auto-retry up to 3 times with escalation context (includes previous response summary)
+  - [x] Escalation after 3 failed attempts with red log entry
+  - [x] Wired into useAutoErrorReporter (trackError on send, markRecurrence before filtering, recordAgentResponse via async .then)
+  - [x] Both immediate-send and batched-send paths track and capture responses
+  - [x] Activity log shows error-resolved (green), error-retry (amber), error-escalated (red)
+  - [x] UNRESOLVED badge pulses red on escalated entries, RESOLVED badge in green
+  - [x] "Resolution" filter category added to AgentActivityLog
+  - [x] Tracker cleanup (max 50 entries with timer cleanup for evicted entries)
+  - [x] Exposed errorResolution on DevAgentMonitorContext for external consumers
+  - [x] Build passes clean (vite build --logLevel error produces no output)
+- **Feature Suggestion:** Add a **Resolution Success Rate Dashboard** -- a small panel in DevMode showing a donut chart with the ratio of resolved vs. escalated vs. pending errors over time. Include a scrollable timeline of recent resolution events (green checkmarks for fixes that stuck, red X for escalated). Clicking an escalated entry opens the full error context with all 3 retry attempts' agent responses inline, so the user can see what the agent tried and manually intervene with better guidance. This turns the closed-loop system from a behind-the-scenes mechanism into actionable observability.
+
+---
+
+**Agent Claim:**
+- **Date/Time:** 2026-03-06 17:02
+- **Agent ID:** worker-opus-4-6-monitoring-overhead
+- **Model:** claude-opus-4-6[1m]
+- **Task Summary:** Section I -- Monitoring Overhead Management. Staggered monitor startup (4 phases over 30s), adaptive idle detection (disable extended monitors after 5min no errors), enabled guards on useAutoErrorReporter and useDevTaskQueue, consolidated duplicate render monitoring between useClientHealthMonitor and useClientHealthExtended.
+- **Files Touched:**
+  - `client/src/context/DevAgentMonitors.jsx` -- added staggered phase startup (0-4), idle detection with 5-min threshold, wrappedRecordError for snap-back, monitorPhase/monitorIdle in context value
+  - `client/src/hooks/useAutoErrorReporter.js` -- added `enabled` prop, gates useErrorCapture on `enabled && isLeader`
+  - `client/src/hooks/useDevTaskQueue.js` -- added `enabled` prop, gates process effect and idle scan effect
+  - `client/src/hooks/useClientHealthExtended.js` -- removed duplicate render storm detection (surface #11), updated JSDoc from 12 to 10 surfaces
+- **Status:** done
+- **Feature Suggestion:** Monitor startup dashboard widget -- a small collapsible panel in the DevMiniWidget showing which monitoring phase is active, which monitors are currently enabled vs idle/disabled, and the time until next phase activation. Would give instant visibility into the monitoring system's own state without opening DevTools.
+
+### Entry #42
+- **Date/Time:** 2026-03-06T21:07:00Z
+- **Agent ID:** worker (Section E -- Severity Intelligence)
+- **Model:** claude-opus-4-6[1m]
+- **Task Summary:** Section E -- Severity Intelligence. Created a 5-tier severity classifier (CRITICAL/URGENT/ELEVATED/MONITORING/INFO) so crashes never compete with console.warn for circuit breaker budget. Replaced single flat circuit breaker in useAutoErrorReporter with per-tier independent budgets, each with its own rate limit window and batching delay. Tagged all error sources (useDevToolsBridge, useClientHealthMonitor, useClientHealthExtended) with _severity metadata. Added colored severity badges to AgentActivityLog (pulsing red for CRITICAL, red for URGENT, orange for ELEVATED, amber for MONITORING, gray for INFO).
+- **Files Touched:**
+  - `client/src/lib/severityClassifier.js` -- CREATED: SEVERITY enum, SEVERITY_LABELS, TIER_CONFIG, classifySeverity()
+  - `client/src/hooks/useAutoErrorReporter.js` -- REWRITTEN: replaced single circuitRef with per-tier tierCountsRef/tierBatchRef/tierTimerRef, checkTierBudget(), consumeTierBudget(), sendOrBatch() with batching logic
+  - `client/src/hooks/useDevToolsBridge.js` -- MODIFIED: imported SEVERITY, tagged all 6 log entries with _severity metadata, changed console.error type from error-captured to console-error
+  - `client/src/hooks/useClientHealthMonitor.js` -- MODIFIED: imported SEVERITY, tagged all 14 health warning log entries with _severity (CRITICAL for freeze/memory-critical/dom-critical/long-task-critical, MONITORING for the rest)
+  - `client/src/hooks/useClientHealthExtended.js` -- MODIFIED: imported SEVERITY, tagged all 15 log entries with _severity (CRITICAL for listener-leak-critical, MONITORING for all others, INFO for network-info)
+  - `client/src/components/AgentActivityLog.jsx` -- MODIFIED: imported SEVERITY_LABELS + SEVERITY, added SEVERITY_BADGE_CLASS map, renders severity badge inline on entries with _severity, added console-error/console-warn to type/category maps
+  - `client/src/App.css` -- MODIFIED: added .aal-sev base styles + 5 tier-specific badge classes with pulsing animation for CRITICAL
+- **Status:** done
+- **Feature Suggestion:** Severity heatmap timeline -- a thin horizontal strip at the top of the activity log showing the last 5 minutes as a gradient, where each second is colored by the highest severity error that occurred in that window. Would give an instant visual read on whether the system is calm (all gray), heating up (amber spots), or in crisis (red clusters) without scrolling through individual entries.
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 17:09 EST (completed 17:14 EST)
+- Agent ID: worker-hmr-verification
+- Model: claude-opus-4-6[1m]
+- Task Title: Section F -- Recovery & HMR Verification Loop
+- Files Touched:
+  - `client/src/hooks/useHMRVerification.js` -- CREATED: hooks into Vite import.meta.hot for vite:beforeUpdate, vite:beforeFullReload, vite:error events; feeds updated paths to resolution tracker
+  - `client/src/hooks/useErrorResolution.js` -- MODIFIED: added onHMRUpdate() method that cross-references agent-edited files with HMR-updated modules, added agentFiles/hmrApplied/hmrAppliedAt to entry schema, recordAgentResponse now accepts toolEvents param and extracts Write/Edit file paths, retry path passes toolEvents through
+  - `client/src/hooks/useAutoErrorReporter.js` -- MODIFIED: passes result.toolEvents to recordAgentResponse in immediate send, batched send, and retry paths
+  - `client/src/context/DevAgentMonitors.jsx` -- MODIFIED: imported and wired useHMRVerification into monitor chain at Phase 1
+  - `client/src/components/AgentActivityLog.jsx` -- MODIFIED: added hmr-update (blue), hmr-reload (amber), hmr-error (red), fix-applied (green), monitor-lifecycle (gray) to TYPE_COLORS and TYPE_CATEGORIES
+  - `client/src/components/DevMiniWidget.jsx` -- MODIFIED: added fix notification toast system with SVG icons per type, auto-dismiss after 8s, AnimatePresence animation, subscribes to activityLog entries for fix-applied/error-resolved/error-escalated events
+  - `client/src/App.css` -- MODIFIED: added ~100 lines of fix notification toast styles (positioned center-bottom, per-type colors: green for fix-applied/resolved, red for escalated, 8s auto-fade animation)
+- Status: done
+- Feature Suggestion: HMR success rate dashboard -- a small donut chart in the dev activity log header showing the ratio of HMR-verified fixes vs failed fixes vs escalated errors over the session lifetime. Clicking it would expand into a timeline showing each fix attempt with its verification status, giving developers an at-a-glance metric for how effective the auto-fix pipeline is at resolving errors without human intervention.
+
+---
+
+- Date/Time: 2026-03-06 19:35:30
+- Agent ID: worker (opus-4-6-1m)
+- Model: claude-opus-4-6
+- Task Title: Token Monitors on Dev Chat Page + Mini Widget
+- Files Touched:
+  - `client/src/hooks/useTokenMonitor.js` -- CREATED: hook computing cumulative foreground (from messages) + background (ref-accumulated from bgLastResults) token usage stats; exports formatTokenCount() and formatCost() helpers
+  - `client/src/components/DevMode.jsx` -- MODIFIED: imports useTokenMonitor; destructures bgLastResults from context; adds TokenMonitorBar component between messages and input area showing tokens in/out, cost, message count, and background stats
+  - `client/src/components/DevMiniWidget.jsx` -- MODIFIED: imports useTokenMonitor; destructures bgLastResults from context; adds compact token stats line (total tokens, cost, bg tokens) between input row and activity log
+  - `client/src/App.css` -- MODIFIED: added ~90 lines for .token-monitor-bar (full bar with flex layout, mono font, tabular-nums, label/value/detail styling, background section with teal accent, responsive breakpoint hiding detail on narrow screens) and .dev-qc-token-bar (compact mini widget display)
+- Status: done
+- Feature Suggestion: Token usage sparkline -- a tiny inline SVG sparkline next to the token counter that shows per-message token consumption over time, letting developers instantly spot which prompts are consuming disproportionate tokens. Hovering over a peak would show the message index and its token breakdown, making it easy to identify and optimize expensive prompts without scrolling through the conversation.
+
+---
+
+**Agent Claim:**
+- Date/Time: 2026-03-06 23:39 UTC (completed ~00:15 UTC)
+- Agent ID: worker (idle-scan)
+- Model: claude-opus-4-6
+- Task Title: Proactive Quality Review -- Modified Files Scan
+- Scope: 28 modified tracked files + 5 untracked spot-check files reviewed
+- Files Touched:
+  - MODIFIED: `client/src/App.jsx` (fixed stale closure bug in renderNonChatView useCallback -- added 12 missing dependencies)
+- Issues Found: 1
+- Issues Fixed: 1
+- Issues Noted But Not Fixed: 0
+- Self-Assessment: done
+- Status: DONE
+- Feature Suggestion: Automated dependency array linter -- a dev-mode-only hook (useDepArrayLint) that instruments useCallback/useMemo at runtime, compares captured closure variables against the declared dependency array, and flags mismatches as warnings in the Agent Activity Log. This would catch stale closure bugs like the one fixed here before they manifest as UI glitches.
+
+---
+
+- Date/Time: 2026-03-06 23:43 UTC -> completed 23:44 UTC
+- Agent ID: worker (flame-labels)
+- Model: claude-opus-4-6
+- Task Title: Flame Bar Render Source Labels
+- Files Touched:
+  - `client/src/hooks/useRenderFlame.js` (modified — store `source: profilerId` on segments)
+  - `client/src/components/FlameBar.jsx` (modified — source labels in expanded mode, rich tooltips)
+  - `client/src/App.jsx` (modified — inner Profiler wrappers around 9 major views)
+- Self-Assessment: done
+- Feature Suggestion: Flame bar source filter — click a source label to isolate renders from just that component, dimming all other segments. Lets you focus on one component's render performance without noise.
+
+### Verifier Review — worker (flame-labels)
+- **Reviewed by:** verifier (haiku)
+- **Date/Time:** 2026-03-06 23:46 UTC
+- **Model:** haiku
+- **Verdict:** DONE ✓
+- **Evidence:**
+  - [x] `useRenderFlame.js` line 91: onRender callback uses `profilerId` parameter
+  - [x] `useRenderFlame.js` line 103: stores `source: profilerId` on segment objects in buffer
+  - [x] `FlameBar.jsx` lines 34-39: extracts `seg.source`, calculates char budget, truncates with ellipsis
+  - [x] `FlameBar.jsx` lines 49-52: expanded mode renders truncated source + duration in inline span
+  - [x] `FlameBar.jsx` line 46: expanded title shows `Source (phase) duration` format
+  - [x] `FlameBar.jsx` line 47: non-expanded title unchanged — `duration (phase)` format
+  - [x] `App.jsx` lines 149-203: all 9 major view types wrapped with individual Profiler components (Dashboard, Playbook, Templates, Analytics, Usage, PolicyLab, Settings, Chat, DevMode)
+  - [x] `App.jsx` line 217: outer `<Profiler id="app">` exists
+  - [x] No regressions — React imported Profiler, JSX structure clean, no missing imports or broken syntax

@@ -6,6 +6,7 @@ import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import { transitions, staggerContainer, staggerChild, fade } from '../utils/motion.js';
+import { tel, TEL } from '../lib/devTelemetry.js';
 
 // Adaptive poll intervals — fast after mutations, slow when idle
 const POLL_ACTIVE_MS = 5_000;
@@ -80,6 +81,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
       const list = await listConversations(50, 0, searchTerm);
       if (gen === fetchGenRef.current) {
         setConversations(list);
+        tel(TEL.DATA_LOAD, `Loaded ${list.length} conversations`, { count: list.length, search: searchTerm || null });
       }
     } catch {
       // Non-critical
@@ -125,6 +127,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
+    tel(TEL.USER_ACTION, 'Deleted conversation', { conversationId: deleteTarget });
     try {
       await deleteConversation(deleteTarget);
       setConversations(prev => prev.filter(c => c._id !== deleteTarget));
@@ -309,7 +312,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
               exit={{ opacity: 0, x: -20 }}
               transition={transitions.springGentle}
               className={`sidebar-conv-item${conversationId === conv._id ? ' is-active' : ''}`}
-              onClick={() => { if (!editingId) { window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
+              onClick={() => { if (!editingId) { tel(TEL.USER_ACTION, 'Selected conversation', { conversationId: conv._id }); window.location.hash = `#/chat/${conv._id}`; onClose?.(); } }}
               role="button"
               tabIndex={0}
               aria-label={conv.title || 'Untitled conversation'}

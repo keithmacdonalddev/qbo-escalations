@@ -6,6 +6,7 @@ import {
   deleteDevConversation,
   deleteLastDevMessage,
 } from '../api/devApi.js';
+import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   DEFAULT_PROVIDER,
   DEFAULT_REASONING_EFFORT,
@@ -44,7 +45,7 @@ function normalizeFallback(primary, fallback) {
 }
 
 export function useDevChat(options = {}) {
-  const { aiSettings = null } = options;
+  const { aiSettings = null, log } = options;
   const [messages, setMessages] = useState([]);
   const [conversationId, setConversationId] = useState(null);
   const [sessionId, setSessionId] = useState(null);
@@ -89,6 +90,8 @@ export function useDevChat(options = {}) {
   const fallbackProviderRef = useRef(fallbackProvider);
   const aiSettingsRef = useRef(aiSettings);
   const reasoningEffortRef = useRef(reasoningEffort);
+  const logRef = useRef(log);
+  logRef.current = log;
 
   useEffect(() => {
     aiSettingsRef.current = aiSettings;
@@ -246,6 +249,12 @@ export function useDevChat(options = {}) {
     };
     setMessages((prev) => [...prev, userMsg]);
 
+    tel(TEL.CHAT_SEND, `Dev message sent (${trimmedText.length} chars)`, { provider: selectedProvider, mode: selectedMode, imageCount: normalizedImages.length });
+    tel(TEL.STREAM_START, 'Dev streaming response...', { provider: selectedProvider });
+
+    const msgPreview = trimmedText.length > 60 ? trimmedText.slice(0, 60) + '...' : (trimmedText || '(image)');
+    logRef.current?.({ type: 'fg-send', message: `User: ${msgPreview}` });
+
     const { abort } = sendDevMessage(
       {
         message: trimmedText,
@@ -304,6 +313,9 @@ export function useDevChat(options = {}) {
         onDone: (data) => {
           const elapsed = startTimeRef.current ? Date.now() - startTimeRef.current : null;
           setResponseTime(elapsed);
+          tel(TEL.CHAT_RESPONSE, `Dev agent responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
+          tel(TEL.STREAM_END, `Dev stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
+          logRef.current?.({ type: 'fg-response', message: `Agent responded (${elapsed ? (elapsed / 1000).toFixed(1) + 's' : '?'})` });
           const finalText = streamingTextRef.current || '';
           const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProvider);
           setMessages((prev) => [...prev, {
@@ -340,7 +352,10 @@ export function useDevChat(options = {}) {
           loadConversations();
         },
         onError: (errMsg) => {
-          setError(typeof errMsg === 'string' ? errMsg : (errMsg?.message || 'Request failed'));
+          const errText = typeof errMsg === 'string' ? errMsg : (errMsg?.message || 'Request failed');
+          tel(TEL.CHAT_ERROR, `Dev chat failed: ${errText}`, { provider: selectedProvider });
+          logRef.current?.({ type: 'stream-error', message: `Foreground stream error: ${errText}`, severity: 'error' });
+          setError(errText);
           setIsStreaming(false);
           isStreamingRef.current = false;
           setStreamingText('');
@@ -352,7 +367,7 @@ export function useDevChat(options = {}) {
     );
 
     abortRef.current = abort;
-  }, [loadConversations, setProvider]);
+  }, [loadConversations, setProvider]); // log accessed via logRef for stability
 
   const abortStream = useCallback(() => {
     abortRef.current?.();
@@ -367,12 +382,12 @@ export function useDevChat(options = {}) {
   const removeConversation = useCallback(async (id) => {
     try {
       await deleteDevConversation(id);
-      if (conversationId === id) newConversation();
+      if (conversationIdRef.current === id) newConversation();
       await loadConversations();
     } catch (err) {
       setError(err.message);
     }
-  }, [conversationId, newConversation, loadConversations]);
+  }, [newConversation, loadConversations]);
 
   const deleteLastMessage = useCallback(async () => {
     if (isStreamingRef.current) return;

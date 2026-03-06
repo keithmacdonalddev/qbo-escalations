@@ -147,6 +147,76 @@ Special Feature: summarize the special feature here
 
 ---
 
+### Special Feature #24
+
+Date: 2026-03-06
+Time: 19:36 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Token Budget Alerts — set a per-session token budget in Settings (e.g., 100K tokens / $1.00). The token monitor bar shows a progress indicator toward the budget. At 80%, the bar turns amber and the dev agent shifts background work to lighter models. At 95%, all autonomous background sends pause and a notification appears: "Token budget nearly exhausted — pausing autonomous work." Prevents runaway token costs from autonomous error fixes, idle scans, and code reviews.
+
+---
+
+### Special Feature #23
+
+Date: 2026-03-06
+Time: 19:34 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Memory Pressure Sparkline — a tiny inline sparkline chart in the FlameBar that shows the last 60 seconds of JS heap usage as a miniature area graph (60 data points, one per second). Color shifts from green to yellow to red as usage crosses 50%, 70%, and 85% thresholds. Hovering shows the exact MB value and growth rate (e.g., "+3MB/s"). Gives instant visual feedback on memory trends and leak detection without needing to open Chrome DevTools Performance tab. Auto-hides when performance.memory is unavailable (non-Chromium browsers).
+
+---
+
+### Special Feature #22
+
+Date: 2026-03-06
+Time: 19:32 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Startup Stabilization Window — a configurable warm-up period (default 15s) in Settings where all health monitors suppress alerts, letting the app fully mount and settle before monitoring begins. Displayed as a subtle countdown badge on the FlameBar that shows "Stabilizing... 12s" until monitoring goes live. Prevents false positives from normal React component mounting waves (e.g., DOM doubling from 350 to 750 nodes as panels render). Configurable from 5s to 60s in the Dev Agent section of Settings.
+
+---
+
+### Special Feature #21
+
+Date: 2026-03-06
+Time: 19:31 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Mutation Heatmap Overlay — a dev-only visual overlay that highlights DOM regions experiencing the most mutations using a color gradient (blue for calm, red for hot). Each top-level component subtree gets a semi-transparent colored border that pulses based on mutation frequency, making it instantly visible which component is causing DOM churn without opening browser DevTools. Toggle it with a button in the FlameBar toolbar. Uses a per-subtree MutationObserver that buckets counts into 1-second windows and maps intensity to hue. Auto-disables when no mutations are detected for 10 seconds to avoid visual noise.
+
+---
+
+### Special Feature #20
+
+Date: 2026-03-06
+Time: 16:15 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Self-Healing Error Loop Detector — a meta-monitor that watches the activity log itself. If the same error type appears 10+ times in 30 seconds, it auto-pauses all error reporting hooks for 60 seconds and logs "Error loop detected — reporting paused to prevent browser freeze." Prevents cascading failures where the monitoring infrastructure itself becomes the problem (e.g., circuit breaker spam, health check floods). After the pause, reporting resumes automatically. A visual indicator in the activity log header shows when the pause is active.
+
+---
+
+### Special Feature #19
+
+Date: 2026-03-06
+Time: 15:58 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Server-Side Error Pipeline — mirror the client-side deep error reporting on the server. Express global error handler, MongoDB disconnect/reconnect events, CLI spawn failures (child process exit code non-zero, stderr output), and process-level uncaughtException/unhandledRejection all get logged to DevAgentLog with type 'server-error' and pushed to connected clients via a new SSE endpoint (/api/dev/server-errors). The client subscribes and routes server errors through the same activity log and auto-error pipeline, giving the dev agent full-stack visibility — not just browser crashes but backend failures, database outages, and CLI spawn issues too.
+
+---
+
+### Special Feature #18
+
+Date: 2026-03-06
+Time: 15:41 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Agent Autonomy Level Selector — a slider in Settings (Low / Medium / High / Full) that controls how aggressively the dev agent acts autonomously. Low = only capture errors and log them, never auto-fix. Medium = auto-fix errors but ask before code reviews. High = auto-fix + auto-review but skip idle scans. Full = all autonomous features enabled (current default). Each level adjusts circuit breaker limits, idle scan frequency, and auto-review triggers. Gives users a single control to dial autonomy up or down based on comfort level, without toggling 6 separate settings.
+
+---
+
 ### Special Feature #17
 
 Date: 2026-03-06
@@ -294,6 +364,46 @@ Time: —
 Model: Claude Sonnet 4.6
 Is duplicate?: No
 Special Feature: Playbook Cross-Category Search — a search bar at the top of the PlaybookEditor sidebar that queries all categories simultaneously and returns highlighted excerpts showing where the term appears across every guide. Results grouped by category with a snippet preview; clicking a result loads that category and scrolls to the match. Lets new specialists and QBs quickly find relevant guidance without knowing which category to check — especially useful when an issue spans multiple areas (e.g., "1099" might hit both payroll and tax).
+
+---
+
+### Special Feature #7
+
+Date: 2026-03-06
+Time: 19:37 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Health Monitor Confidence Score — each health alert includes a 0-100 confidence score based on contextual signals (time since page load, absolute values vs thresholds, trend direction, number of concurrent alerts). Low-confidence alerts (< 50) appear as dimmed entries in the activity log instead of triggering AUTO-ERROR reports to the dev agent, reducing noise while keeping visibility. The confidence threshold is adjustable in Settings under Dev Mode, letting users tune how aggressive the auto-reporter is.
+
+---
+
+### Special Feature #25
+
+Date: 2026-03-06
+Time: 23:38 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Conversation Bookmark Pins — let users pin/bookmark specific messages in a chat conversation (both main chat and dev mode) so they can quickly jump back to important responses, key instructions, or resolution steps. Pinned messages show as a collapsible strip at the top of the chat panel with one-line previews. Clicking a pin scrolls to that message and highlights it briefly. Pins persist per conversation in MongoDB. Useful for long escalation threads where a critical answer gets buried under follow-up messages.
+
+---
+
+### Special Feature #26
+
+Date: 2026-03-06
+Time: 19:41 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Flame Bar Render Source Labels — when the flame bar is expanded, each segment shows not just the duration but a truncated component name identifying which component triggered that render (extracted from the Profiler's id and phase parameters). Hovering a segment shows the full component tree path. This turns the flame bar from "something is slow" into "Settings.jsx commit phase took 14ms" — actionable without opening React DevTools Profiler.
+
+---
+
+### Special Feature #27
+
+Date: 2026-03-06
+Time: 19:45 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Flame Bar Source Filter — click a source label in expanded mode to isolate renders from just that component, dimming all other segments. Click again to clear the filter. A small "filtered: Chat" badge appears next to the stats when active. Lets you zero in on one component's render performance without visual noise from the rest of the tree.
 
 ---
 

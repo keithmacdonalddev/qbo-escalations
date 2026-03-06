@@ -9,6 +9,32 @@
 // 6. Single retry for mutations (POST/PATCH/DELETE) on 5xx server errors
 // ---------------------------------------------------------------------------
 
+// ---- API error event system ------------------------------------------------
+// Lets consumers subscribe to every non-ok response and network failure
+// without monkeypatching fetch. Used by useDevToolsBridge for auto-error
+// reporting to the dev agent.
+
+/** @type {Set<(event: object) => void>} */
+const _errorListeners = new Set();
+
+/**
+ * Subscribe to API error events.
+ * Callback receives `{ url, method, status, statusText, timestamp, type }`.
+ * `type` is one of: 'server-error' (5xx), 'client-error' (4xx),
+ * 'network-error' (fetch rejected), 'timeout' (AbortError).
+ * Returns an unsubscribe function.
+ */
+export function onApiError(fn) {
+  _errorListeners.add(fn);
+  return () => _errorListeners.delete(fn);
+}
+
+function _notifyApiError(errorEvent) {
+  for (const fn of _errorListeners) {
+    try { fn(errorEvent); } catch {}
+  }
+}
+
 /** @type {Map<string, Promise<Response>>} */
 const _inFlight = new Map();
 
@@ -67,7 +93,9 @@ function _getCircuitStatus() {
 
 function _notifyCircuit() {
   const state = { status: _getCircuitStatus(), failures: _circuit.failures };
-  for (const fn of _circuitListeners) fn(state);
+  for (const fn of _circuitListeners) {
+    try { fn(state); } catch { /* listener error */ }
+  }
   _notifyBudget();
 }
 
@@ -102,7 +130,9 @@ function _getBudgetState() {
 
 function _notifyBudget() {
   const state = _getBudgetState();
-  for (const fn of _budgetListeners) fn(state);
+  for (const fn of _budgetListeners) {
+    try { fn(state); } catch { /* listener error */ }
+  }
 }
 
 /**
@@ -141,6 +171,31 @@ export function setRequestTracker(tracker) {
   _tracker = tracker;
 }
 
+// ---- Request event listeners ------------------------------------------------
+// Parallel subscription system so multiple consumers (waterfall UI, insights
+// hook, etc.) can observe request lifecycle events without fighting over the
+// single _tracker slot. Listeners receive lightweight event objects.
+
+/** @type {Set<(event: object) => void>} */
+const _requestListeners = new Set();
+
+/**
+ * Subscribe to request lifecycle events.
+ * Callback receives `{ phase, id, url, method, status, duration, state, isSSE, error, startTime }`.
+ * `phase` is one of: 'start', 'headers', 'complete', 'error', 'abort'.
+ * Returns an unsubscribe function.
+ */
+export function onRequestEvent(fn) {
+  _requestListeners.add(fn);
+  return () => _requestListeners.delete(fn);
+}
+
+function _notifyRequestEvent(event) {
+  for (const fn of _requestListeners) {
+    try { fn(event); } catch {}
+  }
+}
+
 // ---- public -----------------------------------------------------------------
 
 /**
@@ -159,6 +214,9 @@ export function apiFetch(url, options = {}) {
     if (_inFlight.has(url)) {
       _dedupSaves++;
       _notifyBudget();
+      if (_requestListeners.size > 0) {
+        _notifyRequestEvent({ phase: 'dedup', url, method, startTime: performance.now() });
+      }
       return _inFlight.get(url).then(r => r.clone());
     }
 
@@ -181,28 +239,59 @@ export function apiFetch(url, options = {}) {
  * Retries on 5xx responses. Does NOT retry on timeouts (AbortError) or 4xx.
  */
 async function _fetchWithRetry(url, options) {
+  const method = (options.method || 'GET').toUpperCase();
+
   if (_isCircuitOpen()) {
     throw new Error('Service temporarily unavailable');
   }
 
   let lastError;
+  let lastStatus = 0;
+  let lastStatusText = '';
   for (let attempt = 0; attempt <= MAX_GET_RETRIES; attempt++) {
     if (attempt > 0) {
       await new Promise(r => setTimeout(r, _jitteredDelay(attempt)));
     }
     try {
       const res = await _fetchWithTimeout(url, options);
-      if (res.ok || res.status < 500) {
+      if (res.ok) {
         _recordSuccess();
+        return res;
+      }
+      if (res.status < 500) {
+        // 4xx — not retriable, notify immediately
+        _recordSuccess();
+        _notifyApiError({
+          url, method, status: res.status, statusText: res.statusText,
+          timestamp: Date.now(), type: 'client-error',
+        });
         return res;
       }
       // 5xx — retriable server error
       lastError = new Error(`HTTP ${res.status}`);
+      lastStatus = res.status;
+      lastStatusText = res.statusText;
       _recordFailure();
     } catch (err) {
       lastError = err;
       _recordFailure();
-      if (err.name === 'AbortError') break; // Timeout — don't retry
+      if (err.name === 'AbortError') {
+        _notifyApiError({
+          url, method, status: 0, statusText: err.message,
+          timestamp: Date.now(), type: 'timeout',
+        });
+        break; // Timeout — don't retry
+      }
+    }
+  }
+  // Final failure after retries exhausted — notify
+  if (lastError) {
+    const isAbort = lastError.name === 'AbortError';
+    if (!isAbort) {
+      _notifyApiError({
+        url, method, status: lastStatus, statusText: lastStatusText || lastError.message,
+        timestamp: Date.now(), type: lastStatus >= 500 ? 'server-error' : 'network-error',
+      });
     }
   }
   throw lastError;
@@ -214,18 +303,47 @@ async function _fetchWithRetry(url, options) {
  * Does NOT participate in the circuit breaker.
  */
 async function _fetchMutationWithRetry(url, options) {
+  const method = (options.method || 'POST').toUpperCase();
   let lastError;
+  let lastStatus = 0;
+  let lastStatusText = '';
   for (let attempt = 0; attempt <= MAX_MUTATION_RETRIES; attempt++) {
     if (attempt > 0) {
       await new Promise(r => setTimeout(r, _jitteredDelay(attempt)));
     }
     try {
       const res = await _fetchWithTimeout(url, options);
-      if (res.ok || res.status < 500) return res;
+      if (res.ok) return res;
+      if (res.status < 500) {
+        // 4xx — not retriable, notify immediately
+        _notifyApiError({
+          url, method, status: res.status, statusText: res.statusText,
+          timestamp: Date.now(), type: 'client-error',
+        });
+        return res;
+      }
       lastError = new Error(`HTTP ${res.status}`);
+      lastStatus = res.status;
+      lastStatusText = res.statusText;
     } catch (err) {
       lastError = err;
-      if (err.name === 'AbortError') break;
+      if (err.name === 'AbortError') {
+        _notifyApiError({
+          url, method, status: 0, statusText: err.message,
+          timestamp: Date.now(), type: 'timeout',
+        });
+        break;
+      }
+    }
+  }
+  // Final failure after retries exhausted — notify
+  if (lastError) {
+    const isAbort = lastError.name === 'AbortError';
+    if (!isAbort) {
+      _notifyApiError({
+        url, method, status: lastStatus, statusText: lastStatusText || lastError.message,
+        timestamp: Date.now(), type: lastStatus >= 500 ? 'server-error' : 'network-error',
+      });
     }
   }
   throw lastError;
@@ -244,26 +362,35 @@ function _fetchWithTimeout(url, options) {
 }
 
 /**
- * Wraps a fetch promise with tracker lifecycle events.
- * If no tracker is registered, returns the promise as-is.
+ * Wraps a fetch promise with tracker lifecycle events and request listeners.
+ * Tracker is optional (waterfall UI); listeners always fire (insights hook).
  */
 function _trackedFetch(url, method, options, fetchPromise) {
   const tracker = _tracker;
-  if (!tracker) return fetchPromise;
+  const hasListeners = _requestListeners.size > 0;
+  if (!tracker && !hasListeners) return fetchPromise;
 
-  const id = tracker.start({ url, method, startTime: performance.now(), options });
+  const startTime = performance.now();
+  const id = tracker
+    ? tracker.start({ url, method, startTime, options })
+    : `evt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+  if (hasListeners) {
+    _notifyRequestEvent({ phase: 'start', id, url, method, startTime });
+  }
 
   return fetchPromise.then(
     (res) => {
       const contentType = res.headers.get('content-type') || '';
       const isSSE = contentType.includes('text/event-stream');
+      const headersTime = performance.now();
 
-      tracker.headersReceived(id, {
-        status: res.status,
-        ok: res.ok,
-        headersTime: performance.now(),
-        isSSE,
-      });
+      if (tracker) {
+        tracker.headersReceived(id, { status: res.status, ok: res.ok, headersTime, isSSE });
+      }
+      if (hasListeners) {
+        _notifyRequestEvent({ phase: 'headers', id, url, method, status: res.status, isSSE, startTime });
+      }
 
       if (isSSE && res.body) {
         // Wrap the ReadableStream so we detect when SSE consumption finishes.
@@ -277,14 +404,22 @@ function _trackedFetch(url, method, options, fetchPromise) {
               (function pump() {
                 reader.read().then(({ done, value }) => {
                   if (done) {
-                    tracker.complete(id, { endTime: performance.now() });
+                    const endTime = performance.now();
+                    if (tracker) tracker.complete(id, { endTime });
+                    if (hasListeners) {
+                      _notifyRequestEvent({ phase: 'complete', id, url, method, status: res.status, isSSE: true, duration: endTime - startTime, startTime });
+                    }
                     controller.close();
                     return;
                   }
                   controller.enqueue(value);
                   pump();
                 }).catch((err) => {
-                  tracker.error(id, { endTime: performance.now(), error: err.message });
+                  const endTime = performance.now();
+                  if (tracker) tracker.error(id, { endTime, error: err.message });
+                  if (hasListeners) {
+                    _notifyRequestEvent({ phase: 'error', id, url, method, status: res.status, isSSE: true, error: err.message, duration: endTime - startTime, startTime });
+                  }
                   controller.error(err);
                 });
               })();
@@ -295,20 +430,26 @@ function _trackedFetch(url, method, options, fetchPromise) {
       }
 
       // Non-SSE: mark complete immediately after headers.
-      // Body download for JSON API responses is negligible (<5ms), and
-      // the previous approach (res.clone().text()) silently hung when the
-      // tee'd body stream stalled, leaving entries stuck in 'headers' state
-      // with endlessly-growing durations.
-      tracker.complete(id, { endTime: performance.now() });
+      const endTime = performance.now();
+      if (tracker) tracker.complete(id, { endTime });
+      if (hasListeners) {
+        _notifyRequestEvent({ phase: 'complete', id, url, method, status: res.status, isSSE: false, duration: endTime - startTime, startTime });
+      }
 
       return res;
     },
     (err) => {
       const endTime = performance.now();
       if (err.name === 'AbortError') {
-        tracker.abort(id, { endTime });
+        if (tracker) tracker.abort(id, { endTime });
+        if (hasListeners) {
+          _notifyRequestEvent({ phase: 'abort', id, url, method, duration: endTime - startTime, startTime });
+        }
       } else {
-        tracker.error(id, { endTime, error: err.message });
+        if (tracker) tracker.error(id, { endTime, error: err.message });
+        if (hasListeners) {
+          _notifyRequestEvent({ phase: 'error', id, url, method, error: err.message, duration: endTime - startTime, startTime });
+        }
       }
       throw err;
     },

@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import ChatMessage from './ChatMessage.jsx';
 import Tooltip from './Tooltip.jsx';
+import AgentActivityLog from './AgentActivityLog.jsx';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
+import { useTokenMonitor, formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -28,6 +30,48 @@ function readFileAsDataUrl(file) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+/** Compact token usage bar between messages and input */
+function TokenMonitorBar({ tokenStats }) {
+  if (!tokenStats || tokenStats.combined.total === 0) return null;
+
+  const { foreground: fg, background: bg, combined } = tokenStats;
+
+  return (
+    <div className="token-monitor-bar">
+      <div className="token-monitor-left">
+        <div className="token-monitor-section">
+          <span className="token-monitor-label">Tokens</span>
+          <span className="token-monitor-value">{formatTokenCount(combined.total)}</span>
+          <span className="token-monitor-detail">
+            ({formatTokenCount(combined.input)} in / {formatTokenCount(combined.output)} out)
+          </span>
+        </div>
+        {combined.cost > 0 && (
+          <div className="token-monitor-section">
+            <span className="token-monitor-label">Cost</span>
+            <span className="token-monitor-value">{formatCost(combined.cost)}</span>
+          </div>
+        )}
+        <div className="token-monitor-section">
+          <span className="token-monitor-label">Msgs</span>
+          <span className="token-monitor-value">{combined.messages}</span>
+        </div>
+      </div>
+      {bg.total > 0 && (
+        <div className="token-monitor-right">
+          <div className="token-monitor-section token-monitor-bg">
+            <span className="token-monitor-label">Bg</span>
+            <span className="token-monitor-value">{formatTokenCount(bg.total)}</span>
+            {bg.cost > 0 && (
+              <span className="token-monitor-detail">({formatCost(bg.cost)})</span>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function DevMode() {
@@ -58,7 +102,10 @@ export default function DevMode() {
     removeConversation,
     deleteLastMessage,
     setError,
+    bgLastResults,
   } = useDevAgent();
+
+  const tokenStats = useTokenMonitor({ messages, bgLastResults });
 
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
@@ -89,6 +136,18 @@ export default function DevMode() {
   useEffect(() => {
     if (!isStreaming) textareaRef.current?.focus();
   }, [isStreaming]);
+
+  // Ctrl+Shift+D focuses the textarea when on the dev page
+  useEffect(() => {
+    function handleGlobalKey(e) {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    }
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
 
   // Close provider popover on outside click
   useEffect(() => {
@@ -412,6 +471,9 @@ export default function DevMode() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Token monitor bar */}
+          <TokenMonitorBar tokenStats={tokenStats} />
+
           {/* Input area — Compose Card */}
           <div className="chat-input-area">
             {/* Quick action chips — always visible */}
@@ -672,6 +734,8 @@ export default function DevMode() {
         </div>
       </div>
 
+      {/* Activity log — persistent bottom panel */}
+      <AgentActivityLog />
     </div>
   );
 }

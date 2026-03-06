@@ -89,6 +89,9 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url: `${BASE}/dev/chat`, error: err.message },
+        }));
         onError?.(normalizeError(err));
       }
     }

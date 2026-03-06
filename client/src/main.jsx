@@ -4,6 +4,7 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { TooltipProvider } from './hooks/useTooltipLevel.jsx';
 import { ToastProvider } from './hooks/useToast.jsx';
 import ErrorFallback from './components/ErrorFallback.jsx';
+import CrashModeAgent from './components/CrashModeAgent.jsx';
 import App from './App.jsx';
 import './App.css';
 import './settings.css';
@@ -72,12 +73,23 @@ if (import.meta.env.DEV) {
 // ── App mount ────────────────────────────────────────────────
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <ErrorBoundary FallbackComponent={ErrorFallback}>
+    <ErrorBoundary
+      FallbackComponent={ErrorFallback}
+      onError={(error, info) => {
+        // Dispatch custom event for the DevTools bridge to pick up.
+        // This bridges React render crashes to the auto-error pipeline
+        // without coupling main.jsx to DevAgentContext.
+        window.dispatchEvent(new CustomEvent('react-error-boundary', {
+          detail: { error, componentStack: info?.componentStack },
+        }));
+      }}
+    >
       <TooltipProvider>
         <ToastProvider>
           <App />
         </ToastProvider>
       </TooltipProvider>
     </ErrorBoundary>
+    <CrashModeAgent />
   </StrictMode>
 );

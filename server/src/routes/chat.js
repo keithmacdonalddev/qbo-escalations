@@ -1295,21 +1295,24 @@ conversationsRouter.get('/', async (req, res) => {
   try {
     // Aggregation pipeline projects only needed fields server-side,
     // avoiding transfer of the full messages array per conversation.
-    const conversations = await Conversation.aggregate([
-      { $match: filter },
-      { $sort: { updatedAt: -1 } },
-      { $skip: skip },
-      { $limit: limit },
-      { $project: {
-        title: 1,
-        provider: 1,
-        escalationId: 1,
-        createdAt: 1,
-        updatedAt: 1,
-        messageCount: { $size: { $ifNull: ['$messages', []] } },
-        lastMessage: { $arrayElemAt: ['$messages', -1] },
-      }},
-    ]).option({ maxTimeMS: 8000 });
+    const [conversations, total] = await Promise.all([
+      Conversation.aggregate([
+        { $match: filter },
+        { $sort: { updatedAt: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+        { $project: {
+          title: 1,
+          provider: 1,
+          escalationId: 1,
+          createdAt: 1,
+          updatedAt: 1,
+          messageCount: { $size: { $ifNull: ['$messages', []] } },
+          lastMessage: { $arrayElemAt: ['$messages', -1] },
+        }},
+      ]).option({ maxTimeMS: 8000 }),
+      Conversation.countDocuments(filter).maxTimeMS(5000),
+    ]);
 
     const items = conversations.map((c) => {
       const lastMsg = c.lastMessage || null;
@@ -1331,7 +1334,6 @@ conversationsRouter.get('/', async (req, res) => {
       };
     });
 
-    const total = await Conversation.countDocuments(filter).maxTimeMS(5000);
     res.json({ ok: true, conversations: items, total });
   } catch (err) {
     const isTimeout = err.codeName === 'MaxTimeMSExpired' || err.code === 50;

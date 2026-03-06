@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { extractClaudeUsage } = require('../lib/usage-extractor');
+const { reportServerError } = require('../lib/server-error-pipeline');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 function parsePositiveInt(value, fallback) {
@@ -220,7 +221,15 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     });
   } catch (err) {
     cleanupTempFiles(tempFiles);
-    onError(err instanceof Error ? err : new Error(String(err)));
+    const spawnErr = err instanceof Error ? err : new Error(String(err));
+    reportServerError({
+      message: `CLI spawn error: ${spawnErr.message}`,
+      detail: 'Failed to start Claude CLI subprocess for chat.',
+      stack: spawnErr.stack || '',
+      source: 'claude.js',
+      category: 'runtime-error',
+    });
+    onError(spawnErr);
     return function noopCleanup() {};
   }
   try {
@@ -236,6 +245,13 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     cleanupTempFiles(tempFiles);
     const error = err instanceof Error ? err : new Error(String(err));
     error._usage = capturedUsage || null;
+    reportServerError({
+      message: `CLI chat failed: ${error.message}`,
+      detail: `Claude CLI subprocess error during chat. Code: ${error.code || 'N/A'}`,
+      stack: error.stack || '',
+      source: 'claude.js',
+      category: 'runtime-error',
+    });
     onError(error);
   }
 
@@ -416,6 +432,13 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       if (tmpPath) {
         try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       }
+      reportServerError({
+        message: `CLI spawn error: ${err.message}`,
+        detail: 'Failed to start Claude CLI subprocess for parseEscalation.',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
       reject(err);
       return;
     }
@@ -460,6 +483,12 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       if (code !== 0 && !stdout) {
         const cliErr = new Error(formatCliFailure(code, stderr));
         cliErr._usage = capturedUsage || null;
+        reportServerError({
+          message: `CLI parse failed: exit code ${code}`,
+          detail: `stderr: ${(stderr || '').slice(0, 500)}`,
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
         return reject(cliErr);
       }
 
@@ -509,6 +538,13 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       if (tmpPath) {
         try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
       }
+      reportServerError({
+        message: `CLI spawn error (parse): ${err.message}`,
+        detail: 'The Claude CLI process emitted an error event during parseEscalation.',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
       err._usage = capturedUsage || null;
       reject(err);
     });

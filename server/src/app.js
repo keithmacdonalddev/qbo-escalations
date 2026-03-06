@@ -109,9 +109,22 @@ function createApp() {
   app.use('/api/policy-lab', require('./routes/policy-lab'));
 
   app.use((err, req, res, next) => {
-    console.error('Unhandled error:', err);
+    console.error(`[${req.method} ${req.path}]`, err.message || err);
+
+    // Report to server error pipeline for dev agent visibility
+    const { reportServerError } = require('./lib/server-error-pipeline');
+    const status = err.status || 500;
+    reportServerError({
+      message: `Express error: ${err.message || 'Unknown'}`,
+      detail: `${req.method} ${req.path} - ${err.message || 'Unknown error'}`,
+      stack: err.stack || '',
+      source: `routes${req.path}`,
+      category: status >= 500 ? 'runtime-error' : 'other',
+      severity: status >= 500 ? 'error' : 'warning',
+    });
+
     if (res.headersSent) return next(err);
-    res.status(err.status || 500).json({ ok: false, code: 'INTERNAL', error: 'Internal server error' });
+    res.status(status).json({ ok: false, code: 'INTERNAL', error: 'Internal server error' });
   });
 
   return app;

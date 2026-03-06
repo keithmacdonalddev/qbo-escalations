@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 
 /**
  * Background channel conversation ID registry.
@@ -6,6 +6,9 @@ import { useState, useCallback, useRef } from 'react';
  * Each background channel (auto-errors, code-reviews, quality-scans) gets
  * its own persistent conversationId stored in localStorage.  IDs are created
  * on first use and reused until explicitly cleared (e.g. on rotation or 404).
+ *
+ * Timestamp tracking: every write records a companion `:ts` key so stale
+ * entries (>7 days) can be pruned automatically on hook init.
  */
 
 const CHANNEL_KEYS = {
@@ -20,17 +23,44 @@ const TURN_KEYS = {
   'quality-scans': 'qbo-dev-bg-turns-quality-scans',
 };
 
+const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 function readLS(key) {
   try { return window.localStorage.getItem(key) || null; } catch { return null; }
 }
 
 function writeLS(key, value) {
-  try { window.localStorage.setItem(key, value); } catch { /* noop */ }
+  try {
+    window.localStorage.setItem(key, value);
+    window.localStorage.setItem(key + ':ts', String(Date.now()));
+  } catch { /* quota exceeded or private browsing */ }
 }
 
 function removeLS(key) {
-  try { window.localStorage.removeItem(key); } catch { /* noop */ }
+  try {
+    window.localStorage.removeItem(key);
+    window.localStorage.removeItem(key + ':ts');
+  } catch { /* noop */ }
 }
+
+/**
+ * Prune localStorage entries whose timestamp is older than MAX_AGE_MS.
+ * Called once at module load (before any hook mounts) so stale IDs
+ * don't get used as conversation references.
+ */
+function pruneStaleEntries() {
+  const now = Date.now();
+  for (const [ch, key] of Object.entries(CHANNEL_KEYS)) {
+    const ts = parseInt(readLS(key + ':ts') || '0', 10);
+    if (ts && now - ts > MAX_AGE_MS) {
+      removeLS(key);
+      removeLS(TURN_KEYS[ch]);
+    }
+  }
+}
+
+// Run once at module init
+pruneStaleEntries();
 
 export const CHANNEL_NAMES = Object.keys(CHANNEL_KEYS);
 
@@ -104,7 +134,7 @@ export function useBackgroundConversations() {
     setChannels(empty);
   }, []);
 
-  return {
+  return useMemo(() => ({
     channels,
     getConversationId,
     getTurns,
@@ -112,5 +142,5 @@ export function useBackgroundConversations() {
     incrementTurns,
     clearChannel,
     clearAll,
-  };
+  }), [channels, getConversationId, getTurns, setConversationId, incrementTurns, clearChannel, clearAll]);
 }

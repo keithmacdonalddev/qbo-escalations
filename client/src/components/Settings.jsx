@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
 import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import { tel, TEL } from '../lib/devTelemetry.js';
 
 // --- SVG Icons (must be above SETTINGS_SECTIONS for Vite HMR) ---
 
@@ -126,6 +127,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       );
 
   const handleThemeSelect = useCallback((id, name) => {
+    tel(TEL.USER_ACTION, `Changed theme to ${name}`, { themeId: id });
     stopPreview();
     setThemeId(id);
     if (liveRegionRef.current) {
@@ -816,6 +818,24 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                     <div className="ni-pill-slider" style={{ transform: `translateX(${layoutProps.waterfallView === 'grouped' ? '100%' : '0%'})` }} />
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Dev Tools */}
+            <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
+              <h3 className="settings-ai-title">Dev Tools</h3>
+              <div className="settings-ai-fields">
+                <label className="settings-ai-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutProps.flameBarEnabled}
+                    onChange={(e) => layoutProps.setFlameBarEnabled(e.target.checked)}
+                  />
+                  <span>Show render flame bar</span>
+                </label>
+                <p className="settings-section-desc" style={{ margin: 0 }}>
+                  Displays a color-coded performance strip at the top of the page showing React render times in real time. Only visible in dev mode.
+                </p>
               </div>
             </div>
           </div>

@@ -20,6 +20,7 @@ import ThinkingSidebar from './ThinkingSidebar.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
 import { getProviderLabel } from '../utils/markdown.jsx';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import { tel, TEL } from '../lib/devTelemetry.js';
 
 /**
  * Group messages for rendering: parallel messages with the same turnId become a single group.
@@ -271,8 +272,32 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   }, [conversationId, savedEscalationId]);
 
   // Load conversation from route param
+  // Mount telemetry
+  useEffect(() => {
+    tel(TEL.MOUNT, 'Chat component mounted');
+  }, []);
+
+  // State anomaly: messages exist without a conversationId
+  useEffect(() => {
+    if (!conversationId && messages.length > 0) {
+      tel(TEL.STATE_ANOMALY, 'Messages exist but no conversationId', { messageCount: messages.length });
+    }
+  }, [conversationId, messages.length]);
+
+  // State anomaly: streaming flag is on but no streaming text arriving after 15s
+  useEffect(() => {
+    if (!isStreaming) return;
+    const timer = setTimeout(() => {
+      if (isStreaming && !streamingText && !Object.keys(parallelStreaming).length) {
+        tel(TEL.STATE_ANOMALY, 'Streaming active for 15s but no content received', { provider, conversationId });
+      }
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [isStreaming, streamingText, parallelStreaming, provider, conversationId]);
+
   useEffect(() => {
     if (conversationIdFromRoute && conversationIdFromRoute !== conversationId) {
+      tel(TEL.USER_ACTION, 'Switched conversation', { conversationId: conversationIdFromRoute });
       selectConversation(conversationIdFromRoute);
       return;
     }
@@ -444,6 +469,10 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   const handleSubmit = useCallback(() => {
     if ((!input.trim() && images.length === 0) || isStreaming) return;
     setParseMeta(null);
+    tel(TEL.USER_ACTION, 'User clicked send', { hasImages: images.length > 0, textLength: input.trim().length });
+    if (images.length > 0) {
+      tel(TEL.USER_ACTION, `Image uploaded (${images.length} file${images.length === 1 ? '' : 's'})`, { count: images.length });
+    }
     // Auto-inject parse prompt when sending images with no text
     const textToSend = !input.trim() && images.length > 0 ? PARSE_ESCALATION_PROMPT : input;
     pendingImageParseRef.current = !input.trim() && images.length > 0;

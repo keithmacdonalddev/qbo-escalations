@@ -29,20 +29,31 @@ function FlameBar({ segments, stats, expanded, toggleExpanded, paused, togglePau
     <>
       {/* Bar strip */}
       <div className={`flame-bar${expanded ? ' flame-bar--expanded' : ''}`}>
-        {segments.map(seg => (
-          <div
-            key={seg.id}
-            className={`flame-seg flame-seg--${seg.tier}${seg.fading ? ' flame-seg--fading' : ''}`}
-            style={{ width: seg.width }}
-            title={`${seg.duration.toFixed(1)}ms (${seg.phase})`}
-          >
-            {expanded && (
-              <span className="flame-seg-inline">
-                {seg.duration < 10 ? seg.duration.toFixed(1) : Math.round(seg.duration)}
-              </span>
-            )}
-          </div>
-        ))}
+        {segments.map(seg => {
+          const durLabel = seg.duration < 10 ? seg.duration.toFixed(1) : Math.round(seg.duration);
+          const srcName = seg.source || '';
+          // Truncate source name to fit segment width — rough char budget from pixel width
+          const charBudget = Math.max(0, Math.floor(seg.width / 6) - String(durLabel).length - 1);
+          const truncSrc = charBudget >= 2
+            ? (srcName.length > charBudget ? srcName.slice(0, charBudget - 1) + '\u2026' : srcName)
+            : '';
+          return (
+            <div
+              key={seg.id}
+              className={`flame-seg flame-seg--${seg.tier}${seg.fading ? ' flame-seg--fading' : ''}`}
+              style={{ width: seg.width }}
+              title={expanded
+                ? `${srcName} (${seg.phase}) ${seg.duration.toFixed(1)}ms`
+                : `${seg.duration.toFixed(1)}ms (${seg.phase})`}
+            >
+              {expanded && (
+                <span className="flame-seg-inline">
+                  {truncSrc ? `${truncSrc} ${durLabel}` : durLabel}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Heatmap timeline — 60s render density minimap */}

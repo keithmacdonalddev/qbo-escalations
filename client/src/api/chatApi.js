@@ -11,10 +11,11 @@ const BASE = '/api';
  */
 export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
   const controller = new AbortController();
+  const url = `${BASE}/chat`;
 
   (async () => {
     try {
-      const res = await apiFetch(`${BASE}/chat`, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -39,6 +40,9 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: err.message },
+        }));
         onError?.(normalizeError({ message: err.message }, err.message));
       }
     }
@@ -55,10 +59,11 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
  */
 export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
   const controller = new AbortController();
+  const url = `${BASE}/chat/retry`;
 
   (async () => {
     try {
-      const res = await apiFetch(`${BASE}/chat/retry`, {
+      const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -83,6 +88,9 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
       });
     } catch (err) {
       if (err.name !== 'AbortError') {
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: err.message },
+        }));
         onError?.(normalizeError({ message: err.message }, err.message));
       }
     }

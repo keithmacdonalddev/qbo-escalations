@@ -4,6 +4,7 @@ import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
+import { tel, TEL } from '../lib/devTelemetry.js';
 
 const STATUSES = ['', 'open', 'in-progress', 'resolved', 'escalated-further'];
 const STATUS_LABELS = { '': 'All Statuses', 'open': 'Open', 'in-progress': 'In Progress', 'resolved': 'Resolved', 'escalated-further': 'Escalated' };
@@ -44,8 +45,13 @@ export default function EscalationDashboard() {
       setTotal(escData.total);
       setSummary(summaryData);
       setLoadError(null);
+      tel(TEL.DATA_LOAD, `Loaded ${escData.escalations.length} escalations`, { total: escData.total });
+      if (escData.escalations.length === 0) {
+        tel(TEL.DATA_EMPTY, 'No escalations found', { hasFilters: !!(statusFilter || categoryFilter || debouncedSearch) });
+      }
     } catch {
       setLoadError('Failed to load escalations');
+      tel(TEL.DATA_ERROR, 'Failed to load escalations', { statusFilter, categoryFilter, search: debouncedSearch });
     }
     setLoading(false);
   }, [statusFilter, categoryFilter, debouncedSearch]);
@@ -55,6 +61,7 @@ export default function EscalationDashboard() {
   }, [loadData]);
 
   const handleStatusChange = useCallback(async (id, newStatus) => {
+    tel(TEL.USER_ACTION, `Changed escalation status to ${newStatus}`, { escalationId: id, newStatus });
     try {
       await updateEscalation(id, { status: newStatus });
       loadData();
@@ -107,7 +114,7 @@ export default function EscalationDashboard() {
         <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => { tel(TEL.USER_ACTION, `Filtered by status: ${e.target.value || 'all'}`, { filterType: 'status', filterValue: e.target.value }); setStatusFilter(e.target.value); }}
             aria-label="Filter by status"
             style={{ width: 'auto', minWidth: 140 }}
           >
@@ -117,7 +124,7 @@ export default function EscalationDashboard() {
           </select>
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={(e) => { tel(TEL.USER_ACTION, `Filtered by category: ${e.target.value || 'all'}`, { filterType: 'category', filterValue: e.target.value }); setCategoryFilter(e.target.value); }}
             aria-label="Filter by category"
             style={{ width: 'auto', minWidth: 140 }}
           >

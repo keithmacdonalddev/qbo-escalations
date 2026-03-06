@@ -8,6 +8,7 @@ import {
   unacceptParallelTurn as unacceptParallelTurnApi,
 } from '../api/chatApi.js';
 import { normalizeError } from '../utils/normalizeError.js';
+import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   DEFAULT_PROVIDER,
   DEFAULT_REASONING_EFFORT,
@@ -149,9 +150,14 @@ export function useChat(options = {}) {
   }, []);
 
   const setProvider = useCallback((nextProvider) => {
+    const previous = providerRef.current;
     const normalized = normalizeProvider(nextProvider);
     providerRef.current = normalized;
     setProviderState(normalized);
+
+    if (previous !== normalized) {
+      tel(TEL.PROVIDER_SWITCH, `Switched to ${normalized}`, { from: previous, to: normalized });
+    }
 
     const fallback = normalizeFallback(normalized, fallbackProviderRef.current);
     fallbackProviderRef.current = fallback;
@@ -315,6 +321,9 @@ export function useChat(options = {}) {
     const selectedProvider = normalizeProvider(providerOverride || providerRef.current);
     const selectedMode = splitModeActiveRef.current ? 'parallel' : normalizeMode(modeRef.current);
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
+
+    tel(TEL.CHAT_SEND, `User sent message (${text.trim().length} chars)`, { provider: selectedProvider, mode: selectedMode, imageCount: images.length });
+    tel(TEL.STREAM_START, 'Streaming response...', { provider: selectedProvider, mode: selectedMode });
 
     setError(null);
     setFallbackNotice(null);
@@ -551,6 +560,9 @@ export function useChat(options = {}) {
             fallbackFrom: data.fallbackFrom || null,
           });
 
+          tel(TEL.CHAT_RESPONSE, `AI responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
+          tel(TEL.STREAM_END, `Stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
+
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
@@ -568,6 +580,7 @@ export function useChat(options = {}) {
         onError: (errPayload) => {
           const normalized = normalizeError(errPayload);
           setError(normalized);
+          tel(TEL.CHAT_ERROR, `Chat failed: ${normalized.message}`, { code: normalized.code, provider: selectedProvider });
           pushProcessEvent({
             level: 'error',
             title: 'Request failed',
@@ -843,6 +856,9 @@ export function useChat(options = {}) {
             fallbackFrom: data.fallbackFrom || null,
           });
 
+          tel(TEL.CHAT_RESPONSE, `Retry responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
+          tel(TEL.STREAM_END, `Retry stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
+
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
@@ -858,6 +874,7 @@ export function useChat(options = {}) {
         onError: (errPayload) => {
           const normalized = normalizeError(errPayload);
           setError(normalized);
+          tel(TEL.CHAT_ERROR, `Retry failed: ${normalized.message}`, { code: normalized.code, provider: selectedProvider });
           pushProcessEvent({
             level: 'error',
             title: 'Retry failed',
