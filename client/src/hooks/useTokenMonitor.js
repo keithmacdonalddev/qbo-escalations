@@ -41,7 +41,7 @@ export function formatCost(cost) {
  * @param {object} options.bgLastResults - { channel: { usage, ... } }
  * @returns {{ foreground, background, combined }}
  */
-export function useTokenMonitor({ messages, bgLastResults }) {
+export function useTokenMonitor({ messages, bgLastResults, sessionBudget }) {
   // --- Cumulative background usage tracking ---
   // bgLastResults overwrites per channel on each response, so we
   // detect changes by comparing object identity of each channel's result.
@@ -90,6 +90,20 @@ export function useTokenMonitor({ messages, bgLastResults }) {
 
     const combinedTotal = fgTotal + bg.total;
     const combinedCostMicros = fgCostMicros + bg.costMicros;
+    const combinedCost = combinedCostMicros / 1_000_000;
+
+    // --- Budget tracking ---
+    const tokenLimit = sessionBudget?.tokenLimit || 0;
+    const costLimitUsd = sessionBudget?.costLimitUsd || 0;
+    const tokenPercent = tokenLimit > 0 ? (combinedTotal / tokenLimit) * 100 : 0;
+    const costPercent = costLimitUsd > 0 ? (combinedCost / costLimitUsd) * 100 : 0;
+    const maxPercent = Math.max(tokenPercent, costPercent);
+
+    let budgetState = 'normal';
+    if (maxPercent >= 95) budgetState = 'danger';
+    else if (maxPercent >= 80) budgetState = 'amber';
+
+    const shouldPauseBg = maxPercent >= 95;
 
     return {
       foreground: {
@@ -110,9 +124,18 @@ export function useTokenMonitor({ messages, bgLastResults }) {
         input: fgInput + bg.input,
         output: fgOutput + bg.output,
         total: combinedTotal,
-        cost: combinedCostMicros / 1_000_000,
+        cost: combinedCost,
         messages: fgCount + bg.count,
       },
+      budget: {
+        tokenLimit,
+        costLimitUsd,
+        tokenPercent,
+        costPercent,
+        maxPercent,
+        state: budgetState,
+        shouldPauseBg,
+      },
     };
-  }, [messages, bgLastResults]);
+  }, [messages, bgLastResults, sessionBudget]);
 }

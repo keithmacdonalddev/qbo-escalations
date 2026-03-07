@@ -415,6 +415,22 @@ SYNTAX AND LOGIC VERIFICATION:
 ---
 
 **Agent Claim:**
+- Date/Time: 2026-03-07 00:37 UTC
+- Agent ID: worker-idle-scan
+- Model: claude-opus-4-6
+- Task Title: IDLE-SCAN -- Comprehensive code quality review of all recently modified files
+- Files Touched:
+  - MODIFIED: `client/src/context/DevAgentContext.jsx` (fixed coreValue to expose `safeSendBackground` instead of raw `bgAgent.sendBackground`)
+  - MODIFIED: `client/src/components/GmailInbox.jsx` (fixed MessageReader retry to use React state instead of `window.location.reload()`; fixed `apiFetch` to not set Content-Type on GET requests and guard against non-JSON error responses)
+  - MODIFIED: `client/src/components/Sidebar.jsx` (removed unused `IconSettings` dead code function)
+- Files Reviewed (no issues found):
+  - `client/src/App.jsx`, `client/src/components/AgentActivityLog.jsx`, `client/src/components/DevMiniWidget.jsx`, `client/src/components/DevMode.jsx`, `client/src/components/Settings.jsx`, `client/src/hooks/useAgentActivityLog.js`, `client/src/hooks/useAiSettings.js`, `client/src/hooks/useBackgroundAgent.js`, `client/src/hooks/useDevChat.js`, `client/src/hooks/useTokenMonitor.js`, `client/src/lib/devTelemetry.js`, `server/src/app.js`, `server/src/routes/chat.js`, `server/src/routes/gmail.js`, `server/src/services/gmail.js`
+- Self-Assessment: done
+- Status: DONE
+
+---
+
+**Agent Claim:**
 - Date/Time: 2026-02-28
 - Agent ID: opus-4-6-main
 - Model: claude-opus-4-6[1m]
@@ -1658,3 +1674,211 @@ All 7 detection surfaces fully implemented with correct thresholds. Integration 
   - [x] `App.jsx` lines 149-203: all 9 major view types wrapped with individual Profiler components (Dashboard, Playbook, Templates, Analytics, Usage, PolicyLab, Settings, Chat, DevMode)
   - [x] `App.jsx` line 217: outer `<Profiler id="app">` exists
   - [x] No regressions — React imported Profiler, JSX structure clean, no missing imports or broken syntax
+
+---
+
+### Entry — 2026-03-06T23:59:46Z
+- **Agent ID**: worker
+- **Model**: claude-opus-4-6
+- **Task Title**: Add Dev Tools toggles to Settings (Network Tab, Dev Widget, Telemetry)
+- **Status**: done
+- **Files Touched**:
+  - `client/src/App.jsx` — 3 new useState, 5 new useEffects, conditional rendering for network tab + dev widget, updated layoutProps + deps array, imported setTelemetryLogging
+  - `client/src/lib/devTelemetry.js` — added `_loggingEnabled` flag, `setTelemetryLogging()` export, gated `_logFn` call behind flag
+  - `client/src/components/Settings.jsx` — 3 new toggle+description pairs in Dev Tools card
+- **Self-Assessment**: done
+- **Feature Suggestion**: Add a "Dev Tools Master Switch" — a single toggle at the top of the Dev Tools card that disables ALL dev tools at once (flame bar, network tab, widget, telemetry), with a visual indicator showing how many are currently active (e.g., "3/4 enabled"). One-click silence for focused work sessions.
+
+### Entry — 2026-03-07T00:00:56Z
+- **Date/Time**: 2026-03-07T00:04:34Z (completed)
+- **Agent ID**: worker
+- **Model**: claude-opus-4-6
+- **Task Title**: Implement Token Budget Alerts Feature
+- **Files Touched**:
+  - `client/src/hooks/useAiSettings.js` (modified — added sessionBudget defaults + normalization)
+  - `client/src/hooks/useTokenMonitor.js` (modified — accepts sessionBudget, returns budget state object)
+  - `client/src/context/DevAgentContext.jsx` (modified — centralized useTokenMonitor, exposes tokenStats/budgetPaused, gates bg sends at 95%)
+  - `client/src/components/DevMode.jsx` (modified — removed local useTokenMonitor, consumes from context, budget progress bar in TokenMonitorBar)
+  - `client/src/components/DevMiniWidget.jsx` (modified — removed local useTokenMonitor, consumes from context, budget indicator in compact stats)
+  - `client/src/components/Settings.jsx` (modified — added Session Token Budget card with token limit + cost limit inputs)
+  - `client/src/App.css` (modified — budget progress bar styles, amber/danger states, pulse animation, mini widget budget indicator)
+- **Status**: done
+- **Feature Suggestion**: Add a "Budget Presets" dropdown in the Session Token Budget settings card — quick-select common budget profiles like "Light session (50K / $0.50)", "Standard (200K / $2.00)", "Heavy dev (1M / $10.00)" that auto-populate both fields at once, saving users from guessing appropriate values.
+
+---
+
+- **Date/Time**: 2026-03-07T00:12:10Z
+- **Agent ID**: worker (verification pass)
+- **Model**: claude-opus-4-6
+- **Task Title**: Verify Token Budget Alerts Feature (re-assigned after false claim of no work)
+- **Status**: done (verified — all 7 files already correctly implemented by previous agent)
+- **Verification Results**:
+  1. `useAiSettings.js` — sessionBudget in defaults + normalization (5 matches)
+  2. `useTokenMonitor.js` — shouldPauseBg budget logic (2 matches)
+  3. `DevAgentContext.jsx` — tokenStats from centralized hook, budgetPaused gate (4 matches)
+  4. `DevMode.jsx` — tokenStats from context, not local hook (5 matches, import is format-only)
+  5. `DevMiniWidget.jsx` — tokenStats from context, budget indicator in compact stats (10 matches)
+  6. `Settings.jsx` — Session Token Budget card with inputs (1 match)
+  7. `App.css` — token-monitor-budget styles, amber/danger states, pulse animation (10 matches)
+- **Feature Suggestion**: Add a budget reset button to the token monitor bar that appears when budget usage exceeds 50% — clicking it clears the session's accumulated token/cost counters without changing the budget limits, useful when a user wants to continue working after reviewing their mid-session spend.
+
+
+### Entry — 2026-03-06
+- **Date/Time**: 2026-03-06
+- **Agent ID**: worker-bg-visibility
+- **Model**: Claude Opus 4.6
+- **Task Title**: Add visibility into background dev agent tool usage and response previews
+- **Status**: IN PROGRESS
+- **Status**: done
+- **Files Touched**:
+  - `client/src/hooks/useBackgroundAgent.js` — added `summarizeBgTools` helper, added bg-tools/bg-files-changed logging, enriched bg-response with tool count and response preview detail
+  - `client/src/components/AgentActivityLog.jsx` — added bg-tools (blue) and bg-files-changed (green) to TYPE_COLORS and TYPE_CATEGORIES
+  - `client/src/hooks/useAgentActivityLog.js` — added bg-tools and bg-files-changed to docstring event type list
+- **Feature Suggestion**: Add a "Background Agent Replay" panel that lets you click any bg-response entry to see a full timeline view of that request — the message sent, each tool event in order with duration bars, the final response text, and token usage — essentially a mini request waterfall scoped to a single background agent turn, giving complete observability into what happened and how long each step took.
+
+### Entry — 2026-03-07T00:17:09Z (Verification)
+- **Date/Time**: 2026-03-07T00:17:09Z
+- **Agent ID**: worker-bg-visibility-verify
+- **Model**: Claude Opus 4.6
+- **Task Title**: Verify background agent visibility changes (re-assigned after previous agent claimed done)
+- **Status**: done (confirmed — previous agent's work verified present in all 3 files)
+- **Verification**:
+  - `summarizeBgTools` function exists at lines 26-59 in useBackgroundAgent.js
+  - Tool logging (bg-tools, bg-files-changed, enriched bg-response) at lines 158-195
+  - TYPE_COLORS entries at lines 24-25 in AgentActivityLog.jsx
+  - TYPE_CATEGORIES entries at lines 70-71 in AgentActivityLog.jsx
+  - Docstring event types at lines 21-22 in useAgentActivityLog.js
+- **Feature Suggestion**: Add a "Tool Heatmap" visualization to the activity log that shows which tools (Read, Edit, Bash, Grep) the background agent uses most frequently over time as a small sparkline or bar chart in the log header, helping users spot patterns like "the agent keeps reading the same file" or "too many Bash calls" at a glance.
+
+---
+
+### Entry — 2026-03-07T00:20:12Z
+- **Agent ID**: worker
+- **Model**: claude-opus-4-6
+- **Task Title**: Add token budget CSS styles and Settings card
+- **Status**: DONE (already implemented)
+- **Files Touched**: None — both `client/src/components/Settings.jsx` and `client/src/App.css` already contained all requested changes
+- **Details**: Verified that the "Session Token Budget" card exists in Settings.jsx (lines 484-514) after the "Cost Guardrails" card, with Token Limit and Cost Limit fields. All CSS token budget progress styles exist in App.css (lines 7592-7683), including `.token-monitor-bar.is-amber`/`.is-danger`, budget track/fill/label/alert classes, `@keyframes budget-pulse`, mini widget budget classes, and `flex-wrap: wrap` on `.token-monitor-bar`. Both verification greps passed.
+- **Feature Suggestion**: Add a budget history sparkline to the Session Token Budget settings card that shows the last 10 sessions' token usage as tiny inline bars, giving users a visual sense of their typical consumption patterns and whether the budget limits they set are reasonable.
+
+---
+
+**Agent Claim:**
+- **Date/Time**: 2026-03-06 20:25 AST (completed 20:31 AST)
+- **Agent ID**: worker-gmail-ui
+- **Model**: claude-opus-4-6
+- **Task Title**: Build Gmail UI integration (service, routes, React component, sidebar nav)
+- **Status**: DONE
+- **Files Touched**:
+  - CREATED: `server/src/services/gmail.js` — OAuth2 Gmail service with getProfile, listMessages, getMessage, listLabels, createDraft
+  - CREATED: `server/src/routes/gmail.js` — Express router with 5 endpoints (profile, messages list, message detail, labels, drafts)
+  - CREATED: `client/src/components/GmailInbox.jsx` — Full Gmail inbox UI with label sidebar, search, message list, message reader, compose draft modal, setup guide, loading/error/empty states
+  - MODIFIED: `server/src/app.js` — Mounted `/api/gmail` route
+  - MODIFIED: `server/.env.example` — Added GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN env vars
+  - MODIFIED: `client/src/App.jsx` — Added GmailInbox import, `#/gmail` hash route, gmail switch case in renderNonChatView, added gmail to isFullHeightView
+  - MODIFIED: `client/src/components/Sidebar.jsx` — Added IconMail component and Gmail nav item
+  - MODIFIED: `client/src/App.css` — Added ~500 lines of Gmail component styles (all `.gmail-*` prefixed, dark theme compatible, responsive)
+  - INSTALLED: `googleapis` npm package in server
+- **Feature Suggestion**: Add a "Quick Reply from QBO" feature — when reading a Gmail message in the inbox, show a "Draft AI Reply" button that sends the email context to the existing Claude chat system to generate a professional QBO escalation response, then auto-populates the compose draft modal with the AI-generated reply. This bridges the Gmail and chat features into a single workflow.
+
+---
+
+### 2026-03-06 20:40 AST — Worker Agent (Opus 4.6)
+- **Task**: Gmail OAuth Login/Logout Flow
+- **Completed**: 2026-03-06 20:46 AST
+- **Status**: DONE
+- **Files Touched**:
+  - CREATED: `server/src/models/GmailAuth.js` — Mongoose model for OAuth tokens (email, accessToken, refreshToken, tokenExpiry, scope) with singleton helpers
+  - MODIFIED: `server/src/services/gmail.js` — Replaced env-based refresh token with DB-backed OAuth2 flow. Added getAuthUrl(), handleCallback(), disconnect(), getAuthStatus(). Auto-refreshes expired tokens and persists new ones. Revokes tokens on disconnect.
+  - MODIFIED: `server/src/routes/gmail.js` — Added 4 auth endpoints: GET /auth/status, GET /auth/url, GET /auth/callback (browser redirect), POST /auth/disconnect. Existing data endpoints unchanged but now return GMAIL_NOT_CONNECTED when no tokens stored.
+  - MODIFIED: `client/src/components/GmailInbox.jsx` — Replaced GmailSetupGuide with GmailConnectPage (OAuth consent screen with Google brand colors, scope list, error handling). Added DisconnectModal with confirmation. Added connected email badge in header. Handles callback redirect query params (?connected=true, ?error=...). Re-checks auth status on mount.
+  - MODIFIED: `server/.env.example` — Removed GMAIL_REFRESH_TOKEN, added GMAIL_REDIRECT_URI, updated comments to explain OAuth flow
+  - MODIFIED: `client/src/App.css` — Replaced .gmail-setup-* styles with .gmail-auth-* styles (connect page card, scopes list, Google sign-in button, error banner, connected email badge, disconnect button, disconnect confirmation modal, danger button variant)
+- **Feature Suggestion**: Add "Gmail Session Health Monitor" — a background heartbeat that periodically validates the stored OAuth token is still valid (e.g., every 30 minutes via a lightweight /auth/status call that actually hits Google's tokeninfo endpoint). If the token has been externally revoked (user changed password, revoked from Google security settings), proactively show a reconnect banner in the inbox instead of waiting for the next API call to fail with a cryptic error.
+
+---
+
+### 2026-03-06 — worker-auto-review
+- **Date/Time**: 2026-03-06
+- **Agent ID**: worker-auto-review
+- **Model**: claude-opus-4-6
+- **Task Title**: Auto-review changed files for bugs, edge cases, missing error handling
+- **Status**: IN PROGRESS
+
+### 2026-03-06 — worker-gmail-mgmt
+- **Date/Time**: 2026-03-06 21:02 -- completed 21:13
+- **Agent ID**: worker-gmail-mgmt
+- **Model**: claude-opus-4-6
+- **Task Title**: Full email management capabilities (send, reply, forward, archive, delete, star, label, bulk actions)
+- **Files Touched**:
+  - MODIFIED: `server/src/services/gmail.js` — Added OAuth scopes (gmail.send, gmail.modify), SYSTEM_LABELS constants, buildRawMessage MIME helper, sendMessage, sendDraft, modifyMessage, trashMessage, untrashMessage, deleteMessage, batchModify functions, added messageId/references headers to getMessage response
+  - MODIFIED: `server/src/routes/gmail.js` — Added 6 new endpoints: POST /messages/send, POST /drafts/:id/send, PATCH /messages/batch, PATCH /messages/:id, DELETE /messages/:id, POST /messages/:id/untrash
+  - MODIFIED: `client/src/components/GmailInbox.jsx` — Enhanced ComposeDraft (Send button, BCC, reply/forward/new mode, threading), MessageReader action toolbar (Reply, Forward, Archive, Trash, Star, Read/Unread, Label dropdown with trash confirmation), MessageRow with checkbox selection, bulk action bar (Archive, Trash, Read, Unread, Star, Select all/deselect), toast notifications, composeMode state, all action handler callbacks
+  - MODIFIED: `client/src/App.css` — Added ~300 lines: gmail-action-* toolbar buttons, gmail-select-* checkboxes, gmail-bulk-* bar, gmail-btn-send, gmail-compose-field-toggles, gmail-toast, gmail-action-label-* dropdown, gmail-action-confirm, gmail-btn-sm, responsive overrides. Updated existing gmail-msg-row and gmail-reader-toolbar for new structure.
+- **Status**: done
+- **Feature Suggestion**: Add "Undo Send" with a configurable delay (5-10 seconds) — after clicking Send, show a toast with an "Undo" button that cancels the send within the grace period. Internally, this works by creating a draft first, starting a countdown timer, and only calling sendDraft when the timer expires. If the user clicks Undo, the draft is kept instead of sent. Gmail's web app has this feature and users rely on it heavily.
+
+### 2026-03-06 — worker-gmail-ai
+- **Date/Time**: 2026-03-06 21:02 -- completed 21:06
+- **Agent ID**: worker-gmail-ai
+- **Model**: claude-opus-4-6
+- **Task Title**: Add AI-powered email assistant to Gmail UI (summarize, draft reply, chat panel)
+- **Files Touched**:
+  - `server/src/routes/gmail.js` — added `POST /api/gmail/ai` SSE streaming endpoint with Claude CLI subprocess
+  - `client/src/components/GmailInbox.jsx` — added AiChatPanel, AiSummaryPopover, sendGmailAI SSE helper, Summarize/Draft Reply/Ask AI buttons in MessageReader, floating FAB, AI chat panel with quick actions
+  - `client/src/App.css` — added ~350 lines of `.gmail-ai-*` styles (FAB, chat panel, messages, typing indicator, summary popover, action buttons, responsive)
+- **Self-Assessment**: done
+- **Feature Suggestion**: Add "email search via AI" — when the user asks the AI to find emails (e.g. "find emails from John about invoices"), have the server-side endpoint call the Gmail listMessages API with a search query, inject the results into the Claude prompt as context, and return a summarized response with clickable message links. This bridges natural language with real Gmail search.
+
+
+---
+
+- **Date/Time**: 2026-03-06 21:03 (completed 21:10)
+- **Agent ID**: worker-calendar-ui
+- **Model**: claude-opus-4-6
+- **Task Title**: Add Google Calendar UI to QBO Escalations app
+- **Files Touched**:
+  - `server/src/services/gmail.js` (MODIFIED) -- added Calendar OAuth scopes + exported `getAuth` for calendar reuse
+  - `server/src/services/calendar.js` (CREATED) -- full Calendar v3 service: listCalendars, listEvents, getEvent, createEvent, updateEvent, deleteEvent, findFreeTime
+  - `server/src/routes/calendar.js` (CREATED) -- 7 API endpoints under /api/calendar with validation and error handling
+  - `server/src/app.js` (MODIFIED) -- mounted /api/calendar routes
+  - `client/src/components/CalendarView.jsx` (CREATED) -- full calendar UI with week/day/month views, mini calendar sidebar, calendar list toggle, event creation/edit modal, event detail popover, current time indicator, all-day event support
+  - `client/src/App.jsx` (MODIFIED) -- imported CalendarView, added #/calendar route, added to full-height views
+  - `client/src/components/Sidebar.jsx` (MODIFIED) -- added Calendar nav item with IconCalendar SVG component
+  - `.claude/memory/agent-completion-log.md` (MODIFIED) -- this entry
+- **Self-Assessment**: Done
+- **Feature Suggestion**: Add drag-and-drop event rescheduling in the week/day view. Users could drag event blocks vertically to change the time, or horizontally across day columns to move events to a different date. This would use the existing PATCH /api/calendar/events/:id endpoint and provide a native calendar feel without leaving the app.
+
+---
+
+- **Date/Time**: 2026-03-07 01:15 UTC
+- **Agent ID**: worker-conversations-perf
+- **Model**: claude-opus-4-6
+- **Task Title**: Fix slow /api/conversations endpoint (P50: 415ms, P95: 5930ms)
+- **Status**: IN PROGRESS
+
+
+---
+
+- **Date/Time**: 2026-03-07 01:25 UTC (completed)
+- **Agent ID**: worker-workspace-agent
+- **Model**: claude-opus-4-6
+- **Task Title**: Build Workspace Agent — unified AI for email and calendar
+- **Status**: DONE
+- **Files Touched**:
+  - `server/src/routes/workspace.js` (CREATED) — Workspace Agent route with tool-executing 2-pass AI loop
+  - `server/src/app.js` (MODIFIED) — Registered `/api/workspace` route
+  - `client/src/components/WorkspaceAgentPanel.jsx` (CREATED) — Shared docked panel component for Gmail + Calendar
+  - `client/src/components/GmailInbox.jsx` (MODIFIED) — Replaced floating FAB with docked panel, added toggle button
+  - `client/src/components/CalendarView.jsx` (MODIFIED) — Added WorkspaceAgentPanel with toggle button
+  - `client/src/App.jsx` (MODIFIED) — Made Gmail and Calendar always-mounted (display:none pattern)
+  - `client/src/App.css` (MODIFIED) — Added all workspace-agent-* styles
+- **Feature Suggestion**: Voice-to-action mode — hold a microphone button in the Workspace Agent panel to dictate commands (e.g., "schedule a meeting with John tomorrow at 2pm"), converting speech to tool calls via the Web Speech API without typing
+
+---
+
+- **Date/Time**: 2026-03-07 01:21 UTC
+- **Agent ID**: worker-connected-accounts
+- **Model**: claude-opus-4-6
+- **Task Title**: Add Connected Accounts section to Settings for Google account management
+- **Status**: IN PROGRESS

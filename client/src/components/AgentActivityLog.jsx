@@ -21,6 +21,8 @@ const TYPE_COLORS = {
   'error-reported': 'aal-amber',
   'bg-send': 'aal-amber',
   'error-circuit': 'aal-amber',
+  'bg-tools': 'aal-blue',
+  'bg-files-changed': 'aal-green',
   'bg-response': 'aal-green',
   'fg-response': 'aal-green',
   'task-completed': 'aal-green',
@@ -65,6 +67,8 @@ const TYPE_CATEGORIES = {
   'task-completed': 'tasks',
   'idle-scan': 'tasks',
   'bg-send': 'background',
+  'bg-tools': 'background',
+  'bg-files-changed': 'background',
   'bg-response': 'background',
   'bg-rotate': 'background',
   'fg-send': 'foreground',
@@ -313,10 +317,10 @@ export default function AgentActivityLog({ compact = false }) {
               <div
                 key={entry.id}
                 className={`aal-entry ${colorClass}${isExpanded ? ' is-expanded' : ''}`}
-                onClick={() => entry.detail && toggleExpand(entry.id)}
-                role={entry.detail ? 'button' : undefined}
-                tabIndex={entry.detail ? 0 : undefined}
-                onKeyDown={entry.detail ? (e) => { if (e.key === 'Enter') toggleExpand(entry.id); } : undefined}
+                onClick={() => toggleExpand(entry.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') toggleExpand(entry.id); }}
               >
                 <span className="aal-time">{formatTime(entry.timestamp)}</span>
                 <span className={`aal-type-tag ${colorClass}`}>{formatTypeLabel(entry.type)}</span>
@@ -335,7 +339,7 @@ export default function AgentActivityLog({ compact = false }) {
                 {entry.channel && <span className="aal-channel">{entry.channel}</span>}
                 {entry.detail && <span className="aal-expand-hint">{isExpanded ? '-' : '+'}</span>}
                 {isExpanded && entry.detail && (
-                  <div className="aal-detail">{entry.detail}</div>
+                  <pre className="aal-detail">{entry.detail}</pre>
                 )}
               </div>
             );

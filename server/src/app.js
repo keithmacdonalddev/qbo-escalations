@@ -107,6 +107,9 @@ function createApp() {
   app.use('/api/dev', requireDevModeEnabled, require('./routes/dev'));
   app.use('/api/usage', require('./routes/usage'));
   app.use('/api/policy-lab', require('./routes/policy-lab'));
+  app.use('/api/gmail', require('./routes/gmail'));
+  app.use('/api/calendar', require('./routes/calendar'));
+  app.use('/api/workspace', require('./routes/workspace'));
 
   app.use((err, req, res, next) => {
     console.error(`[${req.method} ${req.path}]`, err.message || err);

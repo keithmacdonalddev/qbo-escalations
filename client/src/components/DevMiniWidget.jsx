@@ -4,7 +4,7 @@ import { transitions, widgetSlideUp, scalePop, staggerContainer, staggerChild } 
 import { getProviderShortLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
 import AgentActivityLog from './AgentActivityLog.jsx';
-import { useTokenMonitor, formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
+import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 
 /**
  * Floating mini widget with two modes:
@@ -58,9 +58,8 @@ export default function DevMiniWidget() {
     serverState,
     activityLog,
     bgLastResults,
+    tokenStats,
   } = useDevAgent();
-
-  const tokenStats = useTokenMonitor({ messages, bgLastResults });
 
   // --- Streaming monitor state ---
   const [streamExpanded, setStreamExpanded] = useState(false);
@@ -410,6 +409,11 @@ export default function DevMiniWidget() {
                 {tokenStats.background.total > 0 && (
                   <span className="dev-qc-token-stat dev-qc-token-bg">
                     bg: {formatTokenCount(tokenStats.background.total)}
+                  </span>
+                )}
+                {tokenStats.budget?.maxPercent > 0 && (
+                  <span className={`dev-qc-token-stat dev-qc-token-budget dev-qc-token-budget--${tokenStats.budget.state}`}>
+                    {Math.round(tokenStats.budget.maxPercent)}% budget
                   </span>
                 )}
               </div>

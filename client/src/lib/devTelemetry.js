@@ -17,11 +17,17 @@ const BREADCRUMB_BUFFER_SIZE = 50;
 const breadcrumbs = [];
 let _logFn = null;   // Set by DevAgentProvider on mount
 let _sendFn = null;  // Set by DevAgentProvider on mount
+let _loggingEnabled = true; // Toggled by Settings → Dev Tools
 
 // ── Bootstrap (called once by DevAgentProvider) ─────────────────────
 export function initTelemetry(log, sendBackground) {
   _logFn = log;
   _sendFn = sendBackground;
+}
+
+// ── Toggle logging (breadcrumbs always accumulate) ──────────────────
+export function setTelemetryLogging(enabled) {
+  _loggingEnabled = enabled;
 }
 
 // ── Category constants ──────────────────────────────────────────────
@@ -66,7 +72,7 @@ export function tel(category, message, detail = null) {
   if (breadcrumbs.length > BREADCRUMB_BUFFER_SIZE) breadcrumbs.shift();
 
   // Push to the activity log stream so the UI picks it up
-  if (_logFn) {
+  if (_loggingEnabled && _logFn) {
     _logFn({
       type: 'telemetry',
       message: `[${category}] ${message}`,

@@ -407,6 +407,26 @@ Special Feature: Flame Bar Source Filter — click a source label in expanded mo
 
 ---
 
+### Special Feature #28
+
+Date: 2026-03-06
+Time: 20:02 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Dev Tools Master Switch — a toggle at the top of the Dev Tools settings card that disables or enables all dev tools at once (flame bar, network tab, mini widget, telemetry). Shows a count badge like "3/4 enabled". One click to silence everything for focused work sessions, one click to restore all. Individual toggles still work independently beneath it.
+
+---
+
+### Special Feature #29
+
+Date: 2026-03-06
+Time: 20:05 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Dev Tools Presets — save named combinations of dev tool toggle states (e.g. "Performance Debug" = flame bar + waterfall ON, widget + telemetry OFF; "Silent Mode" = all OFF). A dropdown at the top of the Dev Tools card lets you switch between saved presets with one click, plus a "Save current as..." option. Presets stored in localStorage.
+
+---
+
 ### Special Feature #4
 
 Date: 2026-03-04
@@ -437,6 +457,26 @@ Special Feature: Dev Mode System Prompt Editor — a collapsible panel in the De
 
 ---
 
+### Special Feature #30
+
+Date: 2026-03-07
+Time: 00:18 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Background Conversation Viewer — a "View Thread" link on each bg-response activity log entry that opens a read-only chat panel showing the full background conversation history for that channel. Currently background conversations exist in MongoDB as DevConversations but are completely invisible — no UI to browse them. This surfaces the hidden auto-errors, code-reviews, and quality-scans conversations as readable chat histories, so you can see every exchange between the monitors and Claude across all turns, not just the latest turn's summary. Gives full transparency into the autonomous agent's reasoning chain.
+
+---
+
+### Special Feature #31
+
+Date: 2026-03-07
+Time: 00:30 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Agent Prompt Inspector Sidebar — a persistent collapsible side panel (toggled via a button in the Activity Log header) that shows the LIVE prompt being constructed for the current/next agent send. Displays each prompt component in labeled sections: System Instructions (playbook + CLAUDE.md), Conversation History (last N turns, with token count per turn), User Message, and Injected Context (file tree, error details, etc.). Each section shows its token count and percentage of the total context budget. Updates in real-time as the user types and as context changes. Gives complete visibility into what the AI actually "sees" before you send — no more guessing why it hallucinated or missed context.
+
+---
+
 ### Special Feature #1
 
 Date: 2026-03-01
@@ -444,3 +484,41 @@ Time: 10:45 AST
 Model: Claude Haiku 4.5
 Is duplicate?: No
 Special Feature: Add conversation search with AI semantic matching — a search bar in the Sidebar that lets users find past conversations by meaning (e.g., "help with auth flow") instead of just keyword matching. Uses Claude CLI to understand search intent and rank MongoDB conversations by semantic relevance, making knowledge discovery instant without remembering exact phrases. Implemented as: search input in Sidebar header → useConversationSearch hook → POST /api/conversations/search endpoint → conversationSearch service using Claude subprocess for intent matching.
+
+---
+
+### Special Feature #32
+
+Date: 2026-03-06
+Time: 20:34 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Gmail Escalation Bridge — when viewing an email in the Gmail inbox, show a "Create Escalation" button that auto-detects QBO-related emails (keywords like "QuickBooks", "payroll", "bank feed", sender domains like intuit.com) and pre-populates a new escalation from the email content — extracting the customer issue description, category guess, and original email link as reference. Turns inbound escalation emails into structured cases with one click instead of manual copy-paste between email and the dashboard.
+
+### Special Feature #33
+
+Date: 2026-03-06
+Time: 21:15 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Gmail Offline Draft Queue — when the server is unreachable (detected via the existing serverReachability system), composed emails in GmailInbox are saved to localStorage as drafts instead of silently failing. When connectivity returns, a banner appears offering to send the queued drafts. This mirrors how safeSendBackground already queues background agent messages during downtime, extending the pattern to user-facing email composition.
+
+---
+
+### Special Feature #34
+
+Date: 2026-03-06
+Time: 21:22 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Context Budget Sankey Diagram — a visual Sankey/alluvial flow diagram in the Prompt Inspector panel that shows how the total token budget flows from the top-level allocation (system 35% / history 40% / retrieval 25%) down into sub-components: system → core prompt + citation instructions, history → summarized turns + recent turns + dropped turns, retrieval → each included chunk by source name and score. Width of each flow is proportional to character count. Hovering highlights the path and shows exact chars/tokens/percentage. Makes budget waste immediately obvious — e.g., a fat "dropped turns" branch means your history budget is too small, or a thin retrieval branch means RAG chunks aren't filling their allocation.
+
+---
+
+### Special Feature #35
+
+Date: 2026-03-06
+Time: 21:30 AST
+Model: Claude Opus 4.6
+Is duplicate?: No
+Special Feature: Vite Compile-Error Bridge — a lightweight Vite plugin (`vite-plugin-dev-agent-bridge.js`) that hooks into the `transform()` pipeline and `handleHotUpdate()` to intercept parse/compile/transform errors (like "Unterminated JSX contents") before they reach the browser. On failure, the plugin POSTs the error details (file path, line, column, error message, surrounding source) to the dev agent's `/api/dev/background` endpoint on the `auto-errors` channel. This closes the critical gap where compile-time errors kill the entire React tree before the runtime dev agent ever initializes — allowing the background agent to attempt diagnosis and auto-fix even when the app is completely dead.

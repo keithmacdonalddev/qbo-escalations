@@ -1195,6 +1195,7 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
     provider, // backward-compatible alias for primaryProvider
     primaryProvider,
     fallbackProvider,
+    reasoningEffort,
     timeoutMs,
     persist,
   } = req.body || {};
@@ -1293,9 +1294,9 @@ conversationsRouter.get('/', async (req, res) => {
     : {};
 
   try {
-    // Aggregation pipeline projects only needed fields server-side,
+    // Aggregation computes messageCount and lastMessage server-side,
     // avoiding transfer of the full messages array per conversation.
-    const [conversations, total] = await Promise.all([
+    const [conversations, countResult] = await Promise.all([
       Conversation.aggregate([
         { $match: filter },
         { $sort: { updatedAt: -1 } },
@@ -1308,12 +1309,13 @@ conversationsRouter.get('/', async (req, res) => {
           createdAt: 1,
           updatedAt: 1,
           messageCount: { $size: { $ifNull: ['$messages', []] } },
-          lastMessage: { $arrayElemAt: ['$messages', -1] },
-        }},
+          lastMessage: { $last: '$messages' },
+        } },
       ]).option({ maxTimeMS: 8000 }),
       Conversation.countDocuments(filter).maxTimeMS(5000),
     ]);
 
+    const total = countResult;
     const items = conversations.map((c) => {
       const lastMsg = c.lastMessage || null;
       const preview = lastMsg ? safeString(lastMsg.content, '').slice(0, 120) : '';

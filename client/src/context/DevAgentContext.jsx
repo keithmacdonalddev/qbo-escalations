@@ -6,6 +6,7 @@ import { useAgentActivityLog } from '../hooks/useAgentActivityLog.js';
 import { useAgentSelfCheck } from '../hooks/useAgentSelfCheck.js';
 import { useServerReachability } from '../hooks/useServerReachability.js';
 import { useEmergencyMode } from '../hooks/useEmergencyMode.js';
+import { useTokenMonitor } from '../hooks/useTokenMonitor.js';
 import { initTelemetry } from '../lib/devTelemetry.js';
 import { DevAgentMonitorBoundary } from './DevAgentMonitors.jsx';
 
@@ -39,8 +40,17 @@ export function DevAgentProvider({ aiSettings, children }) {
   const serverReachability = useServerReachability({ log: activityLog.log });
   const emergency = useEmergencyMode({ log: activityLog.log });
 
+  // Centralized token monitor — consumed by DevMode and DevMiniWidget via context
+  const tokenStats = useTokenMonitor({
+    messages: devChat.messages,
+    bgLastResults: bgAgent.lastResults,
+    sessionBudget: aiSettings?.sessionBudget,
+  });
+  const budgetPaused = tokenStats.budget?.shouldPauseBg || false;
+
   // Wrap sendBackground with server-state gate: when unreachable, silently
   // queue the message instead of attempting a request that will fail.
+  // Also gates on budget: at 95%+, autonomous background sends are paused.
   const safeSendBackground = useCallback(async (channel, message, options) => {
     if (serverReachability.serverState === serverReachability.STATES.UNREACHABLE) {
       serverReachability.queueForLater(channel, message);
@@ -51,8 +61,16 @@ export function DevAgentProvider({ aiSettings, children }) {
       });
       return null;
     }
+    if (budgetPaused) {
+      activityLog.log?.({
+        type: 'budget-paused',
+        message: `Background send to ${channel} blocked — token budget nearly exhausted`,
+        severity: 'warning',
+      });
+      return null;
+    }
     return bgAgent.sendBackground(channel, message, options);
-  }, [serverReachability.serverState, serverReachability.STATES.UNREACHABLE, serverReachability.queueForLater, bgAgent.sendBackground, activityLog.log]);
+  }, [serverReachability.serverState, serverReachability.STATES.UNREACHABLE, serverReachability.queueForLater, bgAgent.sendBackground, activityLog.log, budgetPaused]);
 
   // When server comes back from degraded/unreachable, drain the offline queue
   // and send a single batched summary to the auto-errors channel.
@@ -102,8 +120,8 @@ export function DevAgentProvider({ aiSettings, children }) {
   const coreValue = useMemo(() => ({
     // Foreground state (all useDevChat fields)
     ...devChat,
-    // Background execution
-    sendBackground: bgAgent.sendBackground,
+    // Background execution (wrapped with server-reachability + budget gate)
+    sendBackground: safeSendBackground,
     bgStreaming: bgAgent.bgStreaming,
     bgQueue: bgAgent.bgQueue,
     bgLastResults: bgAgent.lastResults,
@@ -130,15 +148,19 @@ export function DevAgentProvider({ aiSettings, children }) {
     // Emergency mode (backpressure triage)
     emergencyActive: emergency.emergencyActive,
     resetEmergency: emergency.resetEmergency,
+    // Token budget tracking (centralized)
+    tokenStats,
+    budgetPaused,
   }), [
     devChat,
-    bgAgent.sendBackground, bgAgent.bgStreaming, bgAgent.bgQueue, bgAgent.lastResults, bgAgent.channels,
+    safeSendBackground, bgAgent.bgStreaming, bgAgent.bgQueue, bgAgent.lastResults, bgAgent.channels,
     tabLeadership.isLeader, tabLeadership.tabId, tabLeadership.broadcastStatus, tabLeadership.onStatusUpdate,
     miniWidgetOpen, toggleMiniWidget, focusMiniWidget,
     activityLog,
     selfCheck.agentHealthy, selfCheck.healthDetails, selfCheck.recordBgSuccess,
     serverReachability.serverState,
     emergency.emergencyActive, emergency.resetEmergency,
+    tokenStats, budgetPaused,
   ]);
 
   return (

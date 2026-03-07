@@ -253,7 +253,7 @@ export function useDevChat(options = {}) {
     tel(TEL.STREAM_START, 'Dev streaming response...', { provider: selectedProvider });
 
     const msgPreview = trimmedText.length > 60 ? trimmedText.slice(0, 60) + '...' : (trimmedText || '(image)');
-    logRef.current?.({ type: 'fg-send', message: `User: ${msgPreview}` });
+    logRef.current?.({ type: 'fg-send', message: `User: ${msgPreview}`, detail: trimmedText || '(image attached)' });
 
     const { abort } = sendDevMessage(
       {
@@ -294,6 +294,11 @@ export function useDevChat(options = {}) {
         onToolUse: (data) => {
           toolEventsRef.current = [...toolEventsRef.current, data];
           setToolEvents(toolEventsRef.current);
+          logRef.current?.({
+            type: 'bg-tools',
+            message: `Tool: ${data.tool} [${data.status || 'started'}]`,
+            detail: JSON.stringify(data.input || data.details || {}, null, 2),
+          });
         },
         onProviderError: () => {},
         onFallback: (data) => {
@@ -315,7 +320,7 @@ export function useDevChat(options = {}) {
           setResponseTime(elapsed);
           tel(TEL.CHAT_RESPONSE, `Dev agent responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
           tel(TEL.STREAM_END, `Dev stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
-          logRef.current?.({ type: 'fg-response', message: `Agent responded (${elapsed ? (elapsed / 1000).toFixed(1) + 's' : '?'})` });
+          logRef.current?.({ type: 'fg-response', message: `Agent responded (${elapsed ? (elapsed / 1000).toFixed(1) + 's' : '?'})`, detail: streamingTextRef.current || undefined });
           const finalText = streamingTextRef.current || '';
           const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProvider);
           setMessages((prev) => [...prev, {

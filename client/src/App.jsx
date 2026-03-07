@@ -10,6 +10,8 @@ import Analytics from './components/Analytics.jsx';
 import UsageDashboard from './components/UsageDashboard.jsx';
 import DevMode from './components/DevMode.jsx';
 import PolicyLab from './components/PolicyLab.jsx';
+import GmailInbox from './components/GmailInbox.jsx';
+import CalendarView from './components/CalendarView.jsx';
 import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
@@ -23,7 +25,7 @@ import { DevAgentProvider } from './context/DevAgentContext.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import FlameBar from './components/FlameBar.jsx';
-import { tel, TEL } from './lib/devTelemetry.js';
+import { tel, TEL, setTelemetryLogging } from './lib/devTelemetry.js';
 
 function parseHashRoute(policyLabEnabled) {
   const hash = window.location.hash || '#/chat';
@@ -43,6 +45,8 @@ function parseHashRoute(policyLabEnabled) {
   if (hash === '#/usage') return { view: 'usage' };
   if (hash === '#/dev') return { view: 'dev' };
   if (policyLabEnabled && hash === '#/policy-lab') return { view: 'policy-lab' };
+  if (hash === '#/gmail') return { view: 'gmail' };
+  if (hash === '#/calendar') return { view: 'calendar' };
   if (hash === '#/settings') return { view: 'settings' };
   return { view: 'chat', conversationId: null };
 }
@@ -76,6 +80,15 @@ function App() {
   const [flameBarEnabled, setFlameBarEnabled] = useState(() => {
     try { return JSON.parse(localStorage.getItem('flameBarEnabled')) ?? true; } catch { return true; }
   });
+  const [networkTabEnabled, setNetworkTabEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('networkTabEnabled')) ?? true; } catch { return true; }
+  });
+  const [devWidgetEnabled, setDevWidgetEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('devWidgetEnabled')) ?? true; } catch { return true; }
+  });
+  const [telemetryEnabled, setTelemetryEnabled] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('telemetryEnabled')) ?? true; } catch { return true; }
+  });
   useEffect(() => { try { localStorage.setItem('sidebarHoverExpand', JSON.stringify(sidebarHoverExpand)); } catch {} }, [sidebarHoverExpand]);
   useEffect(() => { try { localStorage.setItem('sidebarShowLabels', JSON.stringify(sidebarShowLabels)); } catch {} }, [sidebarShowLabels]);
   useEffect(() => { try { localStorage.setItem('ledIntensity', JSON.stringify(ledIntensity)); } catch {} }, [ledIntensity]);
@@ -84,6 +97,11 @@ function App() {
   useEffect(() => { try { localStorage.setItem('waterfallDefaultView', waterfallView); } catch {} }, [waterfallView]);
   useEffect(() => { try { localStorage.setItem('flameBarEnabled', JSON.stringify(flameBarEnabled)); } catch {} }, [flameBarEnabled]);
   useEffect(() => { try { localStorage.setItem('policyLabEnabled', JSON.stringify(policyLabEnabled)); } catch {} }, [policyLabEnabled]);
+  useEffect(() => { try { localStorage.setItem('networkTabEnabled', JSON.stringify(networkTabEnabled)); } catch {} }, [networkTabEnabled]);
+  useEffect(() => { try { localStorage.setItem('devWidgetEnabled', JSON.stringify(devWidgetEnabled)); } catch {} }, [devWidgetEnabled]);
+  useEffect(() => { try { localStorage.setItem('telemetryEnabled', JSON.stringify(telemetryEnabled)); } catch {} }, [telemetryEnabled]);
+  useEffect(() => { setTelemetryLogging(telemetryEnabled); }, [telemetryEnabled]);
+  useEffect(() => { if (!networkTabEnabled) setNetworkOpen(false); }, [networkTabEnabled]);
   const shouldReduceMotion = useReducedMotion();
   const themeProps = useTheme();
   const aiProps = useAiSettings();
@@ -202,16 +220,16 @@ function App() {
         return (
           <Profiler id="Settings" onRender={flame.onRender}>
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled }} />
           </motion.div>
           </Profiler>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, flame.onRender]);
+  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled, flame.onRender]);
 
-  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings';
+  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings' || route.view === 'gmail' || route.view === 'calendar';
 
   return (
     <Profiler id="app" onRender={flame.onRender}>
@@ -279,8 +297,22 @@ function App() {
         </div>
         </Profiler>
 
+        {/* Gmail — always mounted so Workspace Agent persists */}
+        <Profiler id="Gmail" onRender={flame.onRender}>
+        <div style={{ display: route.view === 'gmail' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+          <GmailInbox />
+        </div>
+        </Profiler>
+
+        {/* Calendar — always mounted so Workspace Agent persists */}
+        <Profiler id="Calendar" onRender={flame.onRender}>
+        <div style={{ display: route.view === 'calendar' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+          <CalendarView />
+        </div>
+        </Profiler>
+
         {/* All other views use AnimatePresence for transitions */}
-        {route.view !== 'chat' && route.view !== 'dev' && (
+        {route.view !== 'chat' && route.view !== 'dev' && route.view !== 'gmail' && route.view !== 'calendar' && (
           <AnimatePresence mode="wait">
             {renderNonChatView()}
           </AnimatePresence>
@@ -303,7 +335,7 @@ function App() {
       )}
 
       {/* Floating mini widget — visible on non-dev tabs when dev mode is streaming */}
-      {route.view !== 'dev' && (
+      {devWidgetEnabled && route.view !== 'dev' && (
         <DevMiniWidget />
       )}
       {/* Floating settings gear — top right, no layout impact */}
@@ -334,54 +366,58 @@ function App() {
       </motion.button>
 
       {/* Network waterfall — edge tab + right sidebar overlay */}
-      <button
-        className={`network-edge-tab${networkOpen ? ' is-active' : ''}${networkActiveCount > 0 && ledMode === 'icon' ? ' led-icon-glow' : ''}`}
-        style={{ '--led-intensity': ledIntensity / 100, '--led-speed': `${ledSpeed}s` }}
-        onClick={() => setNetworkOpen(o => !o)}
-        type="button"
-        aria-label="Toggle network waterfall"
-      >
-        {networkActiveCount > 0 && ledMode === 'dot' && <span className="network-edge-dot" />}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-        </svg>
-        <span className="network-edge-tooltip">
-          <div className="tooltip-title">Network Waterfall</div>
-          <div className="tooltip-desc">Monitor API request timing and spot pileups without browser DevTools.</div>
-          <div className="tooltip-status">
-            <span className={`tooltip-dot${networkActiveCount === 0 ? ' tooltip-dot--idle' : ''}`} />
-            {networkActiveCount > 0
-              ? `${networkActiveCount} active request${networkActiveCount > 1 ? 's' : ''}`
-              : waterfall.requests.length > 0
-                ? `${waterfall.requests.length} recorded`
-                : 'No activity'}
-          </div>
-          <div className="tooltip-legend">
-            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--active" />Glowing = requests in flight</div>
-            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--idle" />Dim = idle, no active requests</div>
-            <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--error" />Red = errors detected</div>
-          </div>
-        </span>
-      </button>
+      {networkTabEnabled && (
+        <>
+          <button
+            className={`network-edge-tab${networkOpen ? ' is-active' : ''}${networkActiveCount > 0 && ledMode === 'icon' ? ' led-icon-glow' : ''}`}
+            style={{ '--led-intensity': ledIntensity / 100, '--led-speed': `${ledSpeed}s` }}
+            onClick={() => setNetworkOpen(o => !o)}
+            type="button"
+            aria-label="Toggle network waterfall"
+          >
+            {networkActiveCount > 0 && ledMode === 'dot' && <span className="network-edge-dot" />}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+            <span className="network-edge-tooltip">
+              <div className="tooltip-title">Network Waterfall</div>
+              <div className="tooltip-desc">Monitor API request timing and spot pileups without browser DevTools.</div>
+              <div className="tooltip-status">
+                <span className={`tooltip-dot${networkActiveCount === 0 ? ' tooltip-dot--idle' : ''}`} />
+                {networkActiveCount > 0
+                  ? `${networkActiveCount} active request${networkActiveCount > 1 ? 's' : ''}`
+                  : waterfall.requests.length > 0
+                    ? `${waterfall.requests.length} recorded`
+                    : 'No activity'}
+              </div>
+              <div className="tooltip-legend">
+                <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--active" />Glowing = requests in flight</div>
+                <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--idle" />Dim = idle, no active requests</div>
+                <div className="tooltip-legend-row"><span className="tooltip-legend-dot tooltip-legend-dot--error" />Red = errors detected</div>
+              </div>
+            </span>
+          </button>
 
-      <RightSidebar
-        open={networkOpen}
-        onClose={() => setNetworkOpen(false)}
-        title="Network"
-        width={380}
-        badge={
-          <>
-            {waterfall.requests.length > 0 && (
-              <span className="wf-count">{waterfall.requests.length}</span>
-            )}
-            {networkActiveCount > 0 && (
-              <span className="wf-active-badge">{networkActiveCount} active</span>
-            )}
-          </>
-        }
-      >
-        <RequestWaterfall {...waterfall} defaultView={waterfallView} />
-      </RightSidebar>
+          <RightSidebar
+            open={networkOpen}
+            onClose={() => setNetworkOpen(false)}
+            title="Network"
+            width={380}
+            badge={
+              <>
+                {waterfall.requests.length > 0 && (
+                  <span className="wf-count">{waterfall.requests.length}</span>
+                )}
+                {networkActiveCount > 0 && (
+                  <span className="wf-active-badge">{networkActiveCount} active</span>
+                )}
+              </>
+            }
+          >
+            <RequestWaterfall {...waterfall} defaultView={waterfallView} />
+          </RightSidebar>
+        </>
+      )}
     </div>
     </DevAgentProvider>
     </MotionConfig>

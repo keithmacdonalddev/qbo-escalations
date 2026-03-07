@@ -44,6 +44,10 @@ export const DEFAULT_AI_SETTINGS = Object.freeze({
     reasoningEffort: DEFAULT_REASONING_EFFORT,
     timeoutMs: 0,
   },
+  sessionBudget: {
+    tokenLimit: 0,      // 0 = unlimited
+    costLimitUsd: 0,    // 0 = unlimited
+  },
   debug: {
     showContextDebug: false,
     emitContextDebugSse: false,
@@ -98,6 +102,7 @@ function normalizeAiSettings(raw) {
   const providerRaw = source.providerStrategy && typeof source.providerStrategy === 'object'
     ? source.providerStrategy
     : {};
+  const sessionBudgetRaw = source.sessionBudget && typeof source.sessionBudget === 'object' ? source.sessionBudget : {};
   const debugRaw = source.debug && typeof source.debug === 'object' ? source.debug : {};
 
   const percents = normalizePercents(contextRaw);
@@ -152,6 +157,10 @@ function normalizeAiSettings(raw) {
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultFallbackProvider,
       reasoningEffort: normalizeReasoningEffort(providerRaw.reasoningEffort),
       timeoutMs: clampInt(providerRaw.timeoutMs, 0, 900000, DEFAULT_AI_SETTINGS.providerStrategy.timeoutMs),
+    },
+    sessionBudget: {
+      tokenLimit: clampInt(sessionBudgetRaw.tokenLimit, 0, 10000000, DEFAULT_AI_SETTINGS.sessionBudget.tokenLimit),
+      costLimitUsd: clampNumber(sessionBudgetRaw.costLimitUsd, 0, 1000, DEFAULT_AI_SETTINGS.sessionBudget.costLimitUsd),
     },
     debug: {
       showContextDebug: Boolean(debugRaw.showContextDebug),

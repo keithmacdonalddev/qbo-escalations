@@ -46,9 +46,19 @@ const _origConsoleLog = console.log;
  */
 export function useClientHealthExtended({ enabled = true, isLeader, sendBackground, log }) {
   const throttleRef = useRef(new Map()); // type -> lastFired timestamp
+  // Use refs for callback deps so the effect doesn't tear down / re-setup
+  // every time safeSendBackground gets a new identity (which happens on
+  // every serverState or budgetPaused change). Tearing down this effect
+  // means un-patching and re-patching EventTarget.prototype.addEventListener,
+  // resetting listener counters, and re-creating all intervals — which itself
+  // causes the "+79 listeners in 30s" growth the monitor reports.
+  const sendBackgroundRef = useRef(sendBackground);
+  sendBackgroundRef.current = sendBackground;
+  const logRef = useRef(log);
+  logRef.current = log;
 
   useEffect(() => {
-    if (!enabled || !isLeader || typeof sendBackground !== 'function') return;
+    if (!enabled || !isLeader || typeof sendBackgroundRef.current !== 'function') return;
 
     // Per-type throttle: max 1 report per 2 minutes
     function throttled(type, fn) {
@@ -85,8 +95,8 @@ export function useClientHealthExtended({ enabled = true, isLeader, sendBackgrou
 
       if (net > 1000) {
         throttled('listener-critical', () => {
-          log?.({ type: 'health-warning', message: `CRITICAL: ${net} net event listeners (leak likely)`, severity: 'error', _severity: SEVERITY.CRITICAL });
-          sendBackground('auto-errors', `[AUTO-ERROR] Event listener leak: ${net} net listeners
+          logRef.current?.({ type: 'health-warning', message: `CRITICAL: ${net} net event listeners (leak likely)`, severity: 'error', _severity: SEVERITY.CRITICAL });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Event listener leak: ${net} net listeners
 
 Added: ${addCount}, Removed: ${removeCount}, Net: ${net}
 Growth this window: +${growth}
@@ -97,14 +107,14 @@ event listeners added in loops or hot render paths, third-party libraries attach
         });
       } else if (net > 500) {
         throttled('listener-warning', () => {
-          log?.({ type: 'health-warning', message: `Event listener warning: ${net} net listeners`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          logRef.current?.({ type: 'health-warning', message: `Event listener warning: ${net} net listeners`, severity: 'warning', _severity: SEVERITY.MONITORING });
         });
       }
 
       if (growth > 50) {
         throttled('listener-growth', () => {
-          log?.({ type: 'health-warning', message: `Rapid listener growth: +${growth} in 30s`, severity: 'warning', _severity: SEVERITY.MONITORING });
-          sendBackground('auto-errors', `[AUTO-ERROR] Rapid event listener growth: +${growth} in 30 seconds
+          logRef.current?.({ type: 'health-warning', message: `Rapid listener growth: +${growth} in 30s`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Rapid event listener growth: +${growth} in 30 seconds
 
 Net listeners: ${net} (added ${addCount}, removed ${removeCount})
 Something is attaching listeners without cleaning up. Check recent component mounts and useEffect hooks.`);
@@ -149,8 +159,8 @@ Something is attaching listeners without cleaning up. Check recent component mou
     const timerCheckInterval = _origSetInterval.call(window, () => {
       if (activeIntervals.size > 20) {
         throttled('interval-leak', () => {
-          log?.({ type: 'health-warning', message: `Timer leak: ${activeIntervals.size} active intervals`, severity: 'warning', _severity: SEVERITY.MONITORING });
-          sendBackground('auto-errors', `[AUTO-ERROR] Timer leak: ${activeIntervals.size} active setInterval timers
+          logRef.current?.({ type: 'health-warning', message: `Timer leak: ${activeIntervals.size} active intervals`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Timer leak: ${activeIntervals.size} active setInterval timers
 
 Having ${activeIntervals.size} concurrent intervals is abnormal. Each interval consumes CPU every tick.
 Check for: setInterval in useEffect without clearInterval in cleanup, intervals created on every render.`);
@@ -158,8 +168,8 @@ Check for: setInterval in useEffect without clearInterval in cleanup, intervals 
       }
       if (activeTimeouts.size > 100) {
         throttled('timeout-leak', () => {
-          log?.({ type: 'health-warning', message: `Timer warning: ${activeTimeouts.size} pending timeouts`, severity: 'warning', _severity: SEVERITY.MONITORING });
-          sendBackground('auto-errors', `[AUTO-ERROR] Timeout accumulation: ${activeTimeouts.size} pending setTimeout timers
+          logRef.current?.({ type: 'health-warning', message: `Timer warning: ${activeTimeouts.size} pending timeouts`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Timeout accumulation: ${activeTimeouts.size} pending setTimeout timers
 
 Having ${activeTimeouts.size} pending timeouts suggests something is scheduling work faster than it completes.
 Check for: setTimeout in tight loops, debounce functions creating new timers without clearing old ones.`);
@@ -174,8 +184,8 @@ Check for: setTimeout in tight loops, debounce functions creating new timers wit
     const unsubBudget = onBudgetChange((state) => {
       if (state.inFlight > 10) {
         throttled('fetch-pileup', () => {
-          log?.({ type: 'health-warning', message: `Request pileup: ${state.inFlight} concurrent API requests`, severity: 'warning', _severity: SEVERITY.MONITORING });
-          sendBackground('auto-errors', `[AUTO-ERROR] Request pileup: ${state.inFlight} concurrent API requests
+          logRef.current?.({ type: 'health-warning', message: `Request pileup: ${state.inFlight} concurrent API requests`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Request pileup: ${state.inFlight} concurrent API requests
 
 The app is making ${state.inFlight} simultaneous requests. This can overwhelm the server
 and cause timeouts. Check for: polling loops without dedup, components re-fetching on every
@@ -199,10 +209,10 @@ render, missing abort controllers on unmount.`);
       if (src.includes('/api/dev/')) return;
 
       const kind = tag === 'IMG' ? 'image' : tag === 'SCRIPT' ? 'script' : 'stylesheet';
-      log?.({ type: 'resource-error', message: `Failed to load ${tag}: ${src}`, severity: 'error', _severity: SEVERITY.MONITORING });
+      logRef.current?.({ type: 'resource-error', message: `Failed to load ${tag}: ${src}`, severity: 'error', _severity: SEVERITY.MONITORING });
 
       throttled(`resource:${src}`, () => {
-        sendBackground('auto-errors', `[AUTO-ERROR] Resource load failure
+        sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Resource load failure
 
 Element: <${tag.toLowerCase()}>
 Source: ${src}
@@ -226,8 +236,8 @@ A ${kind} failed to load. Check if the file exists, the path is correct, and the
     const consoleCheckInterval = _origSetInterval.call(window, () => {
       if (consoleLogCount > 100) {
         throttled('console-flood', () => {
-          log?.({ type: 'health-warning', message: `Console flood: ${consoleLogCount} console.log calls in 10s`, severity: 'warning', _severity: SEVERITY.MONITORING });
-          sendBackground('auto-errors', `[AUTO-ERROR] Console.log flood: ${consoleLogCount} calls in 10 seconds
+          logRef.current?.({ type: 'health-warning', message: `Console flood: ${consoleLogCount} console.log calls in 10s`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Console.log flood: ${consoleLogCount} calls in 10 seconds
 
 A component is logging excessively, likely in a hot render path or tight loop.
 This slows the browser and pollutes DevTools. Find and remove or gate the log statement.`);
@@ -250,8 +260,8 @@ This slows the browser and pollutes DevTools. Find and remove or gate the log st
       } catch (e) {
         if (e.name === 'QuotaExceededError') {
           throttled('storage-quota', () => {
-            log?.({ type: 'health-warning', message: 'localStorage quota exceeded', severity: 'error', _severity: SEVERITY.MONITORING });
-            sendBackground('auto-errors', `[AUTO-ERROR] localStorage quota exceeded
+            logRef.current?.({ type: 'health-warning', message: 'localStorage quota exceeded', severity: 'error', _severity: SEVERITY.MONITORING });
+            sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] localStorage quota exceeded
 
 The browser's localStorage is full. New writes will fail silently.
 Check for: unbounded caching, conversation history stored locally, large base64 data.
@@ -271,7 +281,7 @@ Consider pruning old entries or switching to IndexedDB for large data.`);
 
       if (totalSize > 4 * 1024 * 1024) { // 4MB (limit is usually 5MB)
         throttled('storage-high', () => {
-          log?.({ type: 'health-warning', message: `localStorage usage: ${(totalSize / 1024 / 1024).toFixed(1)}MB of ~5MB`, severity: 'warning', _severity: SEVERITY.MONITORING });
+          logRef.current?.({ type: 'health-warning', message: `localStorage usage: ${(totalSize / 1024 / 1024).toFixed(1)}MB of ~5MB`, severity: 'warning', _severity: SEVERITY.MONITORING });
         });
       }
     }, 60_000);
@@ -282,8 +292,8 @@ Consider pruning old entries or switching to IndexedDB for large data.`);
     // =====================================================================
     function handleCSP(e) {
       throttled(`csp:${e.blockedURI}`, () => {
-        log?.({ type: 'security-warning', message: `CSP violation: ${e.violatedDirective} blocked ${e.blockedURI}`, severity: 'error', _severity: SEVERITY.MONITORING });
-        sendBackground('auto-errors', `[AUTO-ERROR] Content Security Policy violation
+        logRef.current?.({ type: 'security-warning', message: `CSP violation: ${e.violatedDirective} blocked ${e.blockedURI}`, severity: 'error', _severity: SEVERITY.MONITORING });
+        sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Content Security Policy violation
 
 Directive: ${e.violatedDirective}
 Blocked URI: ${e.blockedURI}
@@ -300,8 +310,8 @@ A resource was blocked by the Content Security Policy. This may break functional
     // =====================================================================
     function handleVitePreloadError(e) {
       throttled('vite-chunk', () => {
-        log?.({ type: 'resource-error', message: `Vite chunk load failed: ${e.payload?.message || 'unknown'}`, severity: 'error', _severity: SEVERITY.MONITORING });
-        sendBackground('auto-errors', `[AUTO-ERROR] Vite chunk load failed
+        logRef.current?.({ type: 'resource-error', message: `Vite chunk load failed: ${e.payload?.message || 'unknown'}`, severity: 'error', _severity: SEVERITY.MONITORING });
+        sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Vite chunk load failed
 
 A lazy-loaded module failed to load. This usually means a deployment mismatch or network issue.
 Error: ${e.payload?.message || 'Unknown'}
@@ -335,8 +345,8 @@ The user may see a blank page or broken component. Consider implementing a retry
 
           if (entry.count >= 5) {
             throttled(`es-storm:${url}`, () => {
-              log?.({ type: 'network-error', message: `EventSource reconnect storm: ${url} (${entry.count} errors in 60s)`, severity: 'error', _severity: SEVERITY.MONITORING });
-              sendBackground('auto-errors', `[AUTO-ERROR] EventSource reconnect storm
+              logRef.current?.({ type: 'network-error', message: `EventSource reconnect storm: ${url} (${entry.count} errors in 60s)`, severity: 'error', _severity: SEVERITY.MONITORING });
+              sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] EventSource reconnect storm
 
 URL: ${url}
 Errors: ${entry.count} in 60 seconds
@@ -362,12 +372,12 @@ Check: server health, CORS headers, proxy timeouts, and whether the endpoint act
     // 10. Offline/online network detection
     // =====================================================================
     function handleOffline() {
-      log?.({ type: 'network-error', message: 'Browser went offline', severity: 'error', _severity: SEVERITY.MONITORING });
-      // Do NOT call sendBackground here — the browser is offline so the
+      logRef.current?.({ type: 'network-error', message: 'Browser went offline', severity: 'error', _severity: SEVERITY.MONITORING });
+      // Do NOT call sendBackgroundRef.current here — the browser is offline so the
       // request would fail, triggering cascading error reports.
     }
     function handleOnline() {
-      log?.({ type: 'network-info', message: 'Browser back online', severity: 'info', _severity: SEVERITY.INFO });
+      logRef.current?.({ type: 'network-info', message: 'Browser back online', severity: 'info', _severity: SEVERITY.INFO });
     }
     window.addEventListener('offline', handleOffline);
     window.addEventListener('online', handleOnline);

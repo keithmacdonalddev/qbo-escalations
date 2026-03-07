@@ -17,6 +17,48 @@ const MAX_TURNS = {
 };
 
 /**
+ * Extract tool usage summary from background agent result.
+ * Pure function — safe to call outside React lifecycle.
+ *
+ * @param {Array<{tool: string, input?: object, details?: object, status?: string}>} toolEvents
+ * @returns {null | {toolCounts: Record<string,number>, toolSummary: string, filePaths: string[], editedFiles: string[]}}
+ */
+function summarizeBgTools(toolEvents) {
+  if (!toolEvents || toolEvents.length === 0) return null;
+
+  const toolCounts = {};
+  const filePaths = new Set();
+  const editedFiles = new Set();
+
+  for (const evt of toolEvents) {
+    const name = evt.tool || 'unknown';
+    toolCounts[name] = (toolCounts[name] || 0) + 1;
+
+    // Extract file paths from various tool input shapes
+    const input = evt.input || evt.details || {};
+    const path = input.file_path || input.path || input.file || input.filename;
+    if (path) filePaths.add(path);
+
+    // Track edited files specifically (Edit/Write tools only)
+    if (['Edit', 'Write', 'edit', 'write', 'MultiEdit'].includes(name) && path) {
+      editedFiles.add(path);
+    }
+
+    // Also check command-based tools for file references
+    if (name === 'Bash' && input.command) {
+      const cmdParts = (input.command || '').match(/(?:^|\s)([\w./-]+\.\w{1,5})/g);
+      if (cmdParts) cmdParts.forEach(p => filePaths.add(p.trim()));
+    }
+  }
+
+  const toolSummary = Object.entries(toolCounts)
+    .map(([n, count]) => count > 1 ? `${n} (${count})` : n)
+    .join(', ');
+
+  return { toolCounts, toolSummary, filePaths: [...filePaths], editedFiles: [...editedFiles] };
+}
+
+/**
  * Orchestrates background work: picks the right conversation ID, sends via
  * the headless client, manages turn counts, and handles channel rotation
  * and stale-ID recovery.
@@ -90,7 +132,7 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
       let conversationId = convs.getConversationId(channel);
 
       const preview = message.length > 80 ? message.slice(0, 80) + '...' : message;
-      logRef.current?.({ type: 'bg-send', message: `Sending to ${channel}: ${preview}`, channel });
+      logRef.current?.({ type: 'bg-send', message: `Sending to ${channel}: ${preview}`, channel, detail: message });
 
       const result = await sendBackgroundDevMessage({
         message,
@@ -113,8 +155,43 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
       // Store last result for observability
       setLastResults((prev) => ({ ...prev, [channel]: result }));
 
+      // --- Rich background agent logging ---
+
+      // 1) Tool usage summary
+      const toolSummary = summarizeBgTools(result.toolEvents);
+      if (toolSummary) {
+        const fileNote = toolSummary.filePaths.length > 0
+          ? ` — files: ${toolSummary.filePaths.map(f => f.split(/[/\\]/).slice(-2).join('/')).join(', ')}`
+          : '';
+        logRef.current?.({
+          type: 'bg-tools',
+          message: `Agent used ${result.toolEvents.length} tools: ${toolSummary.toolSummary}${fileNote}`,
+          channel,
+          detail: result.toolEvents
+            .map(e => `[${e.status || '?'}] ${e.tool}: ${JSON.stringify(e.input || e.details || {}, null, 2)}`)
+            .join('\n\n'),
+        });
+
+        // 2) Separate entry for file modifications (Edit/Write only)
+        if (toolSummary.editedFiles.length > 0) {
+          logRef.current?.({
+            type: 'bg-files-changed',
+            message: `Agent modified: ${toolSummary.editedFiles.map(f => f.split(/[/\\]/).slice(-2).join('/')).join(', ')}`,
+            channel,
+            detail: toolSummary.editedFiles.join('\n'),
+          });
+        }
+      }
+
+      // 3) Response log with preview and tool count
       const respLen = (result.assistantText || '').length;
-      logRef.current?.({ type: 'bg-response', message: `Agent responded on ${channel} (${respLen} chars)`, channel });
+      const toolCount = (result.toolEvents || []).length;
+      logRef.current?.({
+        type: 'bg-response',
+        message: `Agent responded on ${channel} (${respLen} chars${toolCount ? `, ${toolCount} tools` : ''})`,
+        channel,
+        detail: result.assistantText || undefined,
+      });
 
       // Notify self-check heartbeat of successful background send
       onSuccessRef.current?.();

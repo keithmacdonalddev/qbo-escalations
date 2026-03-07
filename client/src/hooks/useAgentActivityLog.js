@@ -18,6 +18,8 @@ const FLUSH_INTERVAL = 200; // ms — debounce window to batch log() calls
  * - error-reported    — error sent to the dev agent for fixing
  * - error-circuit     — circuit breaker tripped, preventing more auto-sends
  * - bg-send           — background message sent to a channel
+ * - bg-tools          — tools the background agent invoked (Read, Edit, Bash, etc.)
+ * - bg-files-changed  — files the background agent modified (Edit/Write only)
  * - bg-response       — background response received from agent
  * - bg-rotate         — background channel rotated (hit turn limit)
  * - fg-send           — foreground user message sent

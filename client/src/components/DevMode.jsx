@@ -4,7 +4,7 @@ import Tooltip from './Tooltip.jsx';
 import AgentActivityLog from './AgentActivityLog.jsx';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
-import { useTokenMonitor, formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
+import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -36,10 +36,12 @@ function readFileAsDataUrl(file) {
 function TokenMonitorBar({ tokenStats }) {
   if (!tokenStats || tokenStats.combined.total === 0) return null;
 
-  const { foreground: fg, background: bg, combined } = tokenStats;
+  const { foreground: fg, background: bg, combined, budget } = tokenStats;
+  const hasBudget = budget && budget.maxPercent > 0;
+  const barClass = `token-monitor-bar${hasBudget && budget.state === 'amber' ? ' is-amber' : ''}${hasBudget && budget.state === 'danger' ? ' is-danger' : ''}`;
 
   return (
-    <div className="token-monitor-bar">
+    <div className={barClass}>
       <div className="token-monitor-left">
         <div className="token-monitor-section">
           <span className="token-monitor-label">Tokens</span>
@@ -59,6 +61,24 @@ function TokenMonitorBar({ tokenStats }) {
           <span className="token-monitor-value">{combined.messages}</span>
         </div>
       </div>
+      {hasBudget && (
+        <div className="token-monitor-budget">
+          <div className="token-monitor-budget-track">
+            <div
+              className={`token-monitor-budget-fill token-monitor-budget-fill--${budget.state}`}
+              style={{ width: `${Math.min(budget.maxPercent, 100)}%` }}
+            />
+          </div>
+          <span className="token-monitor-budget-label">
+            {Math.round(budget.maxPercent)}%
+          </span>
+        </div>
+      )}
+      {hasBudget && budget.state === 'danger' && (
+        <div className="token-monitor-budget-alert">
+          Budget nearly exhausted — background work paused
+        </div>
+      )}
       {bg.total > 0 && (
         <div className="token-monitor-right">
           <div className="token-monitor-section token-monitor-bg">
@@ -103,9 +123,8 @@ export default function DevMode() {
     deleteLastMessage,
     setError,
     bgLastResults,
+    tokenStats,
   } = useDevAgent();
-
-  const tokenStats = useTokenMonitor({ messages, bgLastResults });
 
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);

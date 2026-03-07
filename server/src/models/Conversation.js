@@ -34,10 +34,38 @@ const conversationSchema = new mongoose.Schema({
     index: true,
   },
   systemPromptHash: { type: String, default: '' },
+  // Denormalized fields — kept in sync by pre-save hook.
+  // Lets list queries skip the messages array entirely.
+  messageCount: { type: Number, default: 0 },
+  lastMessagePreview: {
+    role: String,
+    preview: String,
+    provider: String,
+    timestamp: Date,
+  },
 }, {
   timestamps: true,
 });
 
 conversationSchema.index({ updatedAt: -1 });
+conversationSchema.index({ title: 1 });
+
+// Keep denormalized fields in sync on every save
+conversationSchema.pre('save', function (next) {
+  const msgs = this.messages;
+  this.messageCount = msgs ? msgs.length : 0;
+  if (msgs && msgs.length > 0) {
+    const last = msgs[msgs.length - 1];
+    this.lastMessagePreview = {
+      role: last.role,
+      preview: (last.content || '').slice(0, 120),
+      provider: last.provider || null,
+      timestamp: last.timestamp || null,
+    };
+  } else {
+    this.lastMessagePreview = null;
+  }
+  next();
+});
 
 module.exports = mongoose.model('Conversation', conversationSchema);
