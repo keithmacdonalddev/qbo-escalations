@@ -1,5 +1,52 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 
+// ── Friendly endpoint-to-feature name mapping ────────────────
+
+const ENDPOINT_NAMES = {
+  'chat/send': 'Chat',
+  'chat/conversations': 'Conversations',
+  'chat/history': 'Chat History',
+  'escalations': 'Escalations',
+  'gmail/threads': 'Email',
+  'gmail/send': 'Send Email',
+  'gmail/labels': 'Email Labels',
+  'calendar': 'Calendar',
+  'copilot': 'AI Copilot',
+  'dev/health': 'System Health',
+  'dev/server-errors': 'Error Monitor',
+  'dev/monitor': 'Monitor',
+  'workspace/status': 'Workspace',
+  'workspace/briefing': 'Briefing',
+  'traces': 'AI Traces',
+  'agents': 'Agents',
+};
+
+function friendlyEndpoint(rawUrl) {
+  const short = rawUrl.split('?')[0].replace('/api/', '');
+  for (const [pattern, name] of Object.entries(ENDPOINT_NAMES)) {
+    if (short === pattern || short.startsWith(pattern + '/')) return name;
+  }
+  // Best-effort: strip /api/, capitalize first segment
+  const first = short.split('/')[0];
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+// ── Friendly status code labels ──────────────────────────────
+
+function friendlyStatus(status, ok, state) {
+  if (!status && (state === 'pending' || state === 'headers' || state === 'streaming')) return 'Loading\u2026';
+  if (!status) return '\u2026';
+  if (status === 200 || status === 201 || status === 204) return 'OK';
+  if (status === 400) return 'Bad Request';
+  if (status === 401) return 'Unauthorized';
+  if (status === 403) return 'Forbidden';
+  if (status === 404) return 'Not Found';
+  if (status === 429) return 'Rate Limited';
+  if (status >= 500) return 'Failed';
+  if (ok === false) return 'Error';
+  return 'OK';
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 
 function formatDuration(ms) {
@@ -116,18 +163,18 @@ function WaterfallRow({ req, windowStart, windowDuration, now, slowThreshold, on
         <span className={`wf-method ${METHOD_CLASSES[req.method] || ''}`} title={req.method === 'GET' ? 'Loading data from the server' : req.method === 'POST' ? 'Sending data to the server' : req.method}>
           {req.method}
         </span>
-        <span className="wf-url" title={`Server endpoint: ${req.url.split('?')[0].replace('/api/', '')} — this is the part of the server your app is talking to`}>
-          {req.url.split('?')[0].replace('/api/', '')}
+        <span className="wf-url" title={req.url.split('?')[0].replace('/api/', '')}>
+          {friendlyEndpoint(req.url)}
         </span>
-        <span className={`wf-status${req.ok === false ? ' wf-status--err' : ''}`} title={req.ok === false ? 'This request failed (server returned an error)' : req.status ? `Server responded with status code ${req.status} (success)` : 'Waiting for server to respond...'}>
-          {req.status || '\u2026'}
+        <span className={`wf-status${req.ok === false || (req.status && req.status >= 400) ? ' wf-status--err' : req.status >= 200 && req.status < 300 ? ' wf-status--ok' : ''}`} title={req.status ? `Status ${req.status}` : 'Waiting for response...'}>
+          {friendlyStatus(req.status, req.ok, req.state)}
         </span>
         {req.isDuplicate && (
           <span className="wf-duplicate-badge" title="The app sent this same request twice within 100ms — usually a bug causing wasted work">
             DUP
           </span>
         )}
-        {!isActive && onReplay && (
+        {!isActive && onReplay && req.canReplay !== false && (
           <button
             className="wf-replay-btn"
             onClick={(e) => { e.stopPropagation(); onReplay(req.id); }}
@@ -189,8 +236,8 @@ function GroupedRow({ group, maxDuration, slowThreshold }) {
         <span className={`wf-method ${METHOD_CLASSES[group.method] || ''}`} title={group.method === 'GET' ? 'Loading data from the server' : group.method === 'POST' ? 'Sending data to the server' : group.method}>
           {group.method}
         </span>
-        <span className="wf-url" title={`Server endpoint: ${group.endpoint} — this is the part of the server your app is talking to`}>
-          {shortEndpoint(group.endpoint)}
+        <span className="wf-url" title={group.endpoint}>
+          {friendlyEndpoint('/api/' + group.endpoint)}
         </span>
         {isHot && (
           <span className="wf-hot-badge" title={`Slow endpoint — most requests take over ${formatDuration(group.p95)}`}>

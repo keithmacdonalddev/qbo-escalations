@@ -1,9 +1,10 @@
 /**
  * Headless background dev-chat client.
  *
- * Sends requests to the same POST /api/dev/chat endpoint that the foreground
- * useDevChat uses, but processes the SSE stream without touching any React
- * state.  Returns structured results as plain data.
+ * Sends requests to the dedicated background-monitor ingestion route for
+ * non-user channels, while preserving the foreground /api/dev/chat path for
+ * normal conversational traffic. Processes the SSE stream without touching
+ * any React state and returns structured results as plain data.
  *
  * Design contract:
  * - Zero React imports — this is a pure async function.
@@ -25,16 +26,20 @@ const BASE = '/api';
  * @param {string} [opts.conversationId]   Existing conversation to continue
  * @param {string} [opts.provider]         Provider ID
  * @param {string} [opts.channelType]      Background channel type
+ * @param {object} [opts.incidentMeta]     Structured monitor-incident metadata
+ * @param {object} [opts.incidentContext]  Structured supervisor context for the dev agent
  * @param {string} [opts.reasoningEffort]  Reasoning effort level
  * @param {(chunk: {text: string, provider?: string}) => void} [opts.onChunk]
  * @param {(event: object) => void} [opts.onToolUse]
- * @returns {Promise<{conversationId: string, assistantText: string, toolEvents: object[], usage: object|null}>}
+ * @returns {Promise<{conversationId: string|null, assistantText: string, toolEvents: object[], usage: object|null, collapsed?: boolean, collapseReason?: string|null, incident?: object|null}>}
  */
 export async function sendBackgroundDevMessage({
   message,
   conversationId = null,
   provider,
   channelType,
+  incidentMeta,
+  incidentContext,
   reasoningEffort,
   onChunk,
   onToolUse,
@@ -45,16 +50,24 @@ export async function sendBackgroundDevMessage({
   const toolEvents = [];
   let usage = null;
   let sessionId = null;
+  let collapsed = false;
+  let collapseReason = null;
+  let incident = null;
 
   const body = {
     message,
     conversationId,
     provider,
     channelType,
+    incidentMeta,
+    incidentContext,
     reasoningEffort,
   };
+  const endpoint = channelType && channelType !== 'user'
+    ? `${BASE}/dev/monitor`
+    : `${BASE}/dev/chat`;
 
-  const res = await apiFetch(`${BASE}/dev/chat`, {
+  const res = await apiFetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -63,8 +76,15 @@ export async function sendBackgroundDevMessage({
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => ({ error: res.statusText }));
-    const err = new Error(normalizeError(errBody).message);
+    const normalized = normalizeError(errBody);
+    const err = new Error(normalized.message);
     err.status = res.status;
+    err.code = normalized.code || errBody?.code || null;
+    const retryAfterHeader = res.headers.get('Retry-After');
+    const retryAfterSec = Number.parseInt(retryAfterHeader || '', 10);
+    err.retryAfterMs = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+      ? retryAfterSec * 1000
+      : null;
     throw err;
   }
 
@@ -78,6 +98,9 @@ export async function sendBackgroundDevMessage({
     if (eventType === 'done') {
       resolvedConversationId = data.conversationId || resolvedConversationId;
       usage = data.usage || null;
+      collapsed = Boolean(data.collapsed);
+      collapseReason = data.collapseReason || null;
+      incident = data.incident || null;
       return;
     }
 
@@ -126,5 +149,8 @@ export async function sendBackgroundDevMessage({
     toolEvents,
     usage,
     sessionId,
+    collapsed,
+    collapseReason,
+    incident,
   };
 }

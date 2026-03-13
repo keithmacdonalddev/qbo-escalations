@@ -2,6 +2,14 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
+import { apiFetch } from '../api/http.js';
+import {
+  getDefaultCalendarAccount,
+  getDefaultGmailAccount,
+  hasConnectedAccount,
+  setDefaultCalendarAccount,
+  setDefaultGmailAccount,
+} from '../lib/accountDefaults.js';
 import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 
@@ -141,9 +149,20 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const liveRegionRef = useRef(null);
 
   // --- Connected Accounts state ---
-  const [googleAuth, setGoogleAuth] = useState({ loading: true, connected: false, email: null, connectedAt: null, scopes: '', appConfigured: true });
+  const [googleAuth, setGoogleAuth] = useState({
+    loading: true,
+    connected: false,
+    email: null,
+    connectedAt: null,
+    scopes: '',
+    appConfigured: true,
+    accounts: [],
+    activeAccount: null,
+  });
   const [googleDisconnecting, setGoogleDisconnecting] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
+  const [defaultEmailAccount, setDefaultEmailAccountState] = useState(() => getDefaultGmailAccount());
+  const [defaultCalendarAccount, setDefaultCalendarAccountState] = useState(() => getDefaultCalendarAccount());
 
   // Auto-navigate to accounts section after OAuth redirect
   useEffect(() => {
@@ -157,7 +176,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
   const fetchGoogleAuth = useCallback(async () => {
     try {
-      const res = await fetch('/api/gmail/auth/status');
+      const res = await apiFetch('/api/gmail/auth/status');
       const data = await res.json();
       setGoogleAuth({
         loading: false,
@@ -166,6 +185,8 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
         connectedAt: data.connectedAt || null,
         scopes: data.scopes || '',
         appConfigured: data.appConfigured !== false,
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
+        activeAccount: data.activeAccount || data.email || null,
       });
     } catch {
       setGoogleAuth(prev => ({ ...prev, loading: false }));
@@ -179,7 +200,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const handleGoogleConnect = useCallback(async () => {
     setGoogleConnecting(true);
     try {
-      const res = await fetch('/api/gmail/auth/url?returnTo=/settings');
+      const res = await apiFetch('/api/gmail/auth/url?returnTo=/settings');
       const data = await res.json();
       if (data.ok && data.url) {
         window.location.href = data.url;
@@ -192,13 +213,33 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const handleGoogleDisconnect = useCallback(async () => {
     setGoogleDisconnecting(true);
     try {
-      const res = await fetch('/api/gmail/auth/disconnect', { method: 'POST' });
+      const res = await apiFetch('/api/gmail/auth/disconnect', { method: 'POST' });
       const data = await res.json();
       if (data.ok) {
-        setGoogleAuth(prev => ({ ...prev, connected: false, email: null, connectedAt: null, scopes: '' }));
+        await fetchGoogleAuth();
       }
     } catch { /* silent */ }
     setGoogleDisconnecting(false);
+  }, [fetchGoogleAuth]);
+
+  const handleDefaultEmailAccountChange = useCallback((event) => {
+    const nextValue = setDefaultGmailAccount(event.target.value);
+    setDefaultEmailAccountState(nextValue);
+    if (liveRegionRef.current) {
+      liveRegionRef.current.textContent = nextValue
+        ? `Default email address set to ${nextValue}`
+        : 'Default email address reset to the Google primary account';
+    }
+  }, []);
+
+  const handleDefaultCalendarAccountChange = useCallback((event) => {
+    const nextValue = setDefaultCalendarAccount(event.target.value);
+    setDefaultCalendarAccountState(nextValue);
+    if (liveRegionRef.current) {
+      liveRegionRef.current.textContent = nextValue
+        ? `Default calendar address set to ${nextValue}`
+        : 'Default calendar address reset to the Google primary account';
+    }
   }, []);
 
   const filteredSections = searchQuery.trim() === ''
@@ -221,6 +262,19 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     : textSize > 0 ? `+${textSize}` : `${textSize}`;
   const isPreviewing = previewThemeId && previewThemeId !== themeId;
   const isModifiedCombined = isModified || isAiModified;
+  const connectedAccounts = Array.isArray(googleAuth.accounts) ? googleAuth.accounts : [];
+  const primaryGoogleAccount = googleAuth.activeAccount || googleAuth.email || '';
+  const selectedDefaultEmailAccount = hasConnectedAccount(connectedAccounts, defaultEmailAccount)
+    ? defaultEmailAccount
+    : '';
+  const selectedDefaultCalendarAccount = hasConnectedAccount(connectedAccounts, defaultCalendarAccount)
+    ? defaultCalendarAccount
+    : '';
+  const missingDefaultEmailAccount = Boolean(defaultEmailAccount) && !selectedDefaultEmailAccount;
+  const missingDefaultCalendarAccount = Boolean(defaultCalendarAccount) && !selectedDefaultCalendarAccount;
+  const defaultFallbackLabel = primaryGoogleAccount
+    ? `Use Google primary (${primaryGoogleAccount})`
+    : 'Use Google primary account';
 
   return (
     <div className="settings-layout">
@@ -788,17 +842,6 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   <label className="settings-ai-toggle">
                     <input
                       type="checkbox"
-                      checked={layoutProps.policyLabEnabled}
-                      onChange={(e) => layoutProps.setPolicyLabEnabled(e.target.checked)}
-                    />
-                    <span>Show Policy Lab in app navigation</span>
-                  </label>
-                  <p className="settings-section-desc" style={{ margin: 0 }}>
-                    Controls visibility of the integrated repo-aware evaluation UI. This now defaults to on and no longer depends on environment flags.
-                  </p>
-                  <label className="settings-ai-toggle">
-                    <input
-                      type="checkbox"
                       checked={layoutProps.sidebarHoverExpand}
                     onChange={(e) => layoutProps.setSidebarHoverExpand(e.target.checked)}
                   />
@@ -1242,15 +1285,98 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   >
                     {/* Connected email */}
                     <div className="settings-accounts-email-row">
-                      <div className="settings-accounts-email-badge">
-                        <span className="settings-accounts-email-dot" />
-                        <span className="settings-accounts-email-text">{googleAuth.email}</span>
+                      <div className="settings-accounts-email-stack">
+                        <div className="settings-accounts-email-badge">
+                          <span className="settings-accounts-email-dot" />
+                          <span className="settings-accounts-email-text">{primaryGoogleAccount || googleAuth.email}</span>
+                        </div>
+                        {connectedAccounts.length > 1 && (
+                          <span className="settings-accounts-connected-count">
+                            {connectedAccounts.length} connected Google accounts
+                          </span>
+                        )}
                       </div>
                       {googleAuth.connectedAt && (
                         <span className="settings-accounts-connected-since">
                           Connected {new Date(googleAuth.connectedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                         </span>
                       )}
+                    </div>
+
+                    {connectedAccounts.length > 0 && (
+                      <div className="settings-accounts-connected-list" aria-label="Connected Google accounts">
+                        {connectedAccounts.map((account) => {
+                          const isPrimary = account.email === primaryGoogleAccount;
+                          return (
+                            <span
+                              key={account.email}
+                              className={`settings-accounts-connected-chip${isPrimary ? ' is-primary' : ''}`}
+                            >
+                              {account.email}
+                              {isPrimary ? ' · Google primary' : ''}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    <div className="settings-accounts-defaults">
+                      <div className="settings-accounts-defaults-header">
+                        <span className="settings-accounts-scopes-label">Preferred defaults</span>
+                        <p className="settings-accounts-defaults-desc">
+                          Choose which connected address opens first in Workspace Inbox and Workspace Calendar.
+                        </p>
+                      </div>
+
+                      <div className="settings-accounts-default-grid">
+                        <label className="settings-accounts-default-field">
+                          <span className="settings-accounts-default-label">Default email address</span>
+                          <select
+                            className="settings-accounts-default-select"
+                            value={selectedDefaultEmailAccount}
+                            onChange={handleDefaultEmailAccountChange}
+                          >
+                            <option value="">{defaultFallbackLabel}</option>
+                            {connectedAccounts.map((account) => (
+                              <option key={account.email} value={account.email}>
+                                {account.email}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="settings-accounts-default-hint">
+                            Used when Workspace Inbox opens.
+                          </span>
+                          {missingDefaultEmailAccount && (
+                            <span className="settings-accounts-default-note">
+                              The saved email default is no longer connected, so the Google primary account will be used instead.
+                            </span>
+                          )}
+                        </label>
+
+                        <label className="settings-accounts-default-field">
+                          <span className="settings-accounts-default-label">Default calendar address</span>
+                          <select
+                            className="settings-accounts-default-select"
+                            value={selectedDefaultCalendarAccount}
+                            onChange={handleDefaultCalendarAccountChange}
+                          >
+                            <option value="">{defaultFallbackLabel}</option>
+                            {connectedAccounts.map((account) => (
+                              <option key={account.email} value={account.email}>
+                                {account.email}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="settings-accounts-default-hint">
+                            Used when Workspace Calendar opens.
+                          </span>
+                          {missingDefaultCalendarAccount && (
+                            <span className="settings-accounts-default-note">
+                              The saved calendar default is no longer connected, so the Google primary account will be used instead.
+                            </span>
+                          )}
+                        </label>
+                      </div>
                     </div>
 
                     {/* Granted permissions */}

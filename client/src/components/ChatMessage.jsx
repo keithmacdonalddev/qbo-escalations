@@ -24,6 +24,9 @@ function ChatMessage({
   isStreaming,
   responseTimeMs,
   usage,
+  citations,
+  quickActions,
+  onQuickAction,
   onFork,
   onAccept,
   accepting = false,
@@ -41,9 +44,9 @@ function ChatMessage({
       : 'chat-bubble chat-bubble-assistant';
 
   const renderedContent = useMemo(() => {
-    if (role !== 'assistant' || !content) return null;
+    if (role !== 'assistant' || !content || isStreaming) return null;
     return renderMarkdown(content);
-  }, [role, content]);
+  }, [role, content, isStreaming]);
 
   // Separate bash events (for terminal preview) from other tool events
   const { bashEvents, otherEvents } = useMemo(() => {
@@ -173,6 +176,45 @@ function ChatMessage({
           {content}
           {isStreaming && <span className="streaming-cursor" />}
         </div>
+      )}
+
+      {role === 'user' && content && (
+        <div className="chat-bubble-user-actions">
+          <CopyButton text={content} />
+        </div>
+      )}
+
+      {role === 'assistant' && !isStreaming && citations?.length > 0 && (
+        <div className="citation-sources">
+          <div className="citation-header">Sources</div>
+          {citations.map((c) => (
+            <div key={c.index} className="citation-item">
+              <span className="citation-number">[{c.index}]</span>
+              <span className="citation-title">{c.title || c.sourceName}</span>
+              <span className="citation-source">({c.sourceName})</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {role === 'assistant' && !isStreaming && quickActions?.length > 0 && onQuickAction && (
+        <motion.div
+          className="chat-quick-actions"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={transitions.normal}
+        >
+          {quickActions.map((action, i) => (
+            <button
+              key={i}
+              className="chat-quick-action-btn"
+              type="button"
+              onClick={() => onQuickAction(action.value || action.label)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </motion.div>
       )}
 
       {(timestamp || responseTimeMs || usage) && (

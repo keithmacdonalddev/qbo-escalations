@@ -1,25 +1,57 @@
 import { apiFetch } from './http.js';
 import { consumeSSEStream } from './sse.js';
 import { normalizeError } from '../utils/normalizeError.js';
+import { serializeJsonRequestBody } from '../lib/jsonRequestBody.js';
 const BASE = '/api';
+const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
  * Send a chat message and consume SSE stream.
  * @param {{ message: string, conversationId?: string, images?: string[], provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat`;
+  const hasImages = Array.isArray(body.images) && body.images.length > 0;
 
   (async () => {
     try {
+      let streamSettled = false;
+      const requestStartedAt = performance.now();
+
+      // Large base64 image payloads can freeze the UI if JSON serialization
+      // runs on the main thread.
+      if (hasImages) window.__imageRequestActive = true;
+      const serializeStartedAt = performance.now();
+      onLocalStage?.({ stage: 'serialize', phase: 'start', hasImages });
+      if (hasImages) await new Promise((r) => setTimeout(r, 0));
+      const bodyStr = await serializeJsonRequestBody(body, {
+        offThread: hasImages,
+        signal: controller.signal,
+      });
+      onLocalStage?.({
+        stage: 'serialize',
+        phase: 'done',
+        hasImages,
+        durationMs: Math.round(performance.now() - serializeStartedAt),
+      });
+      if (hasImages) await new Promise((r) => setTimeout(r, 0));
+
       const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: bodyStr,
         signal: controller.signal,
+        timeout: STREAM_TIMEOUT_MS,
+      });
+      onLocalStage?.({
+        stage: 'response',
+        phase: 'headers',
+        hasImages,
+        status: res.status,
+        durationMs: Math.round(performance.now() - requestStartedAt),
       });
 
       if (!res.ok) {
@@ -35,9 +67,22 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
-        else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Request failed'));
+        else if (eventType === 'done') {
+          streamSettled = true;
+          onDone?.(data);
+        } else if (eventType === 'error') {
+          streamSettled = true;
+          onError?.(normalizeError(data, data?.error || 'Request failed'));
+        }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        onError?.(normalizeError({
+          code: 'STREAM_INCOMPLETE',
+          error: 'The response stream ended before completion.',
+          detail: 'The connection closed without a final done/error event.',
+        }, 'The response stream ended before completion.'));
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         window.dispatchEvent(new CustomEvent('sse-stream-error', {
@@ -45,6 +90,8 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         }));
         onError?.(normalizeError({ message: err.message }, err.message));
       }
+    } finally {
+      if (hasImages) window.__imageRequestActive = false;
     }
   })();
 
@@ -54,20 +101,29 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 /**
  * Retry last assistant response for a conversation and consume SSE stream.
  * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat/retry`;
 
   (async () => {
     try {
+      let streamSettled = false;
+      const requestStartedAt = performance.now();
       const res = await apiFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
+        timeout: STREAM_TIMEOUT_MS,
+      });
+      onLocalStage?.({
+        stage: 'response',
+        phase: 'headers',
+        status: res.status,
+        durationMs: Math.round(performance.now() - requestStartedAt),
       });
 
       if (!res.ok) {
@@ -83,9 +139,22 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
-        else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Request failed'));
+        else if (eventType === 'done') {
+          streamSettled = true;
+          onDone?.(data);
+        } else if (eventType === 'error') {
+          streamSettled = true;
+          onError?.(normalizeError(data, data?.error || 'Request failed'));
+        }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        onError?.(normalizeError({
+          code: 'STREAM_INCOMPLETE',
+          error: 'The response stream ended before completion.',
+          detail: 'The connection closed without a final done/error event.',
+        }, 'The response stream ended before completion.'));
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         window.dispatchEvent(new CustomEvent('sse-stream-error', {
@@ -112,6 +181,14 @@ export async function listConversations(limit = 50, skip = 0, search = '') {
 /** Get a single conversation with messages */
 export async function getConversation(id) {
   const res = await apiFetch(`${BASE}/conversations/${id}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'Conversation not found');
+  return data.conversation;
+}
+
+/** Get lightweight conversation metadata without message history */
+export async function getConversationMeta(id) {
+  const res = await apiFetch(`${BASE}/conversations/${id}/meta`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'Conversation not found');
   return data.conversation;

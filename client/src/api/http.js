@@ -179,6 +179,12 @@ export function setRequestTracker(tracker) {
 /** @type {Set<(event: object) => void>} */
 const _requestListeners = new Set();
 
+/** @type {Map<string, object>} */
+const _activeRequests = new Map();
+
+/** @type {Set<(snapshot: object[]) => void>} */
+const _activeRequestListeners = new Set();
+
 /**
  * Subscribe to request lifecycle events.
  * Callback receives `{ phase, id, url, method, status, duration, state, isSSE, error, startTime }`.
@@ -194,6 +200,76 @@ function _notifyRequestEvent(event) {
   for (const fn of _requestListeners) {
     try { fn(event); } catch {}
   }
+}
+
+function _cloneActiveRequest(entry) {
+  const now = Date.now();
+  return {
+    id: entry.id,
+    url: entry.url,
+    method: entry.method,
+    phase: entry.phase,
+    status: entry.status,
+    isSSE: !!entry.isSSE,
+    startedAt: entry.startedAt,
+    updatedAt: entry.updatedAt,
+    ageMs: now - entry.startedAt,
+    idleMs: now - entry.updatedAt,
+  };
+}
+
+function _getActiveRequestSnapshot() {
+  return [..._activeRequests.values()]
+    .sort((a, b) => a.startedAt - b.startedAt)
+    .map(_cloneActiveRequest);
+}
+
+function _notifyActiveRequests() {
+  const snapshot = _getActiveRequestSnapshot();
+  for (const fn of _activeRequestListeners) {
+    try { fn(snapshot); } catch {}
+  }
+}
+
+function _trackActiveRequestStart(id, { url, method }) {
+  const now = Date.now();
+  _activeRequests.set(id, {
+    id,
+    url,
+    method,
+    phase: 'start',
+    status: null,
+    isSSE: false,
+    startedAt: now,
+    updatedAt: now,
+  });
+  _notifyActiveRequests();
+}
+
+function _trackActiveRequestUpdate(id, patch = {}) {
+  const entry = _activeRequests.get(id);
+  if (!entry) return;
+  if (patch.phase !== undefined) entry.phase = patch.phase;
+  if (patch.status !== undefined) entry.status = patch.status;
+  if (patch.isSSE !== undefined) entry.isSSE = !!patch.isSSE;
+  entry.updatedAt = Date.now();
+  _notifyActiveRequests();
+}
+
+function _trackActiveRequestEnd(id) {
+  if (_activeRequests.delete(id)) {
+    _notifyActiveRequests();
+  }
+}
+
+export function onActiveRequestsChange(fn) {
+  _activeRequestListeners.add(fn);
+  fn(_getActiveRequestSnapshot());
+  return () => _activeRequestListeners.delete(fn);
+}
+
+export function getActiveRequestsSnapshot() {
+  return _getActiveRequestSnapshot();
 }
 
 // ---- public -----------------------------------------------------------------
@@ -350,15 +426,29 @@ async function _fetchMutationWithRetry(url, options) {
 }
 
 function _fetchWithTimeout(url, options) {
-  // If the caller already manages its own signal, don't layer a second one.
-  if (options.signal) return fetch(url, options);
-
+  const externalSignal = options.signal;
   const controller = new AbortController();
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  let removeAbortListener = null;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      controller.abort();
+    } else {
+      const onAbort = () => controller.abort();
+      externalSignal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => {
+        try { externalSignal.removeEventListener('abort', onAbort); } catch {}
+      };
+    }
+  }
+
   return fetch(url, { ...options, signal: controller.signal })
-    .finally(() => clearTimeout(timer));
+    .finally(() => {
+      clearTimeout(timer);
+      removeAbortListener?.();
+    });
 }
 
 /**
@@ -378,6 +468,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
   if (hasListeners) {
     _notifyRequestEvent({ phase: 'start', id, url, method, startTime });
   }
+  _trackActiveRequestStart(id, { url, method });
 
   return fetchPromise.then(
     (res) => {
@@ -391,6 +482,11 @@ function _trackedFetch(url, method, options, fetchPromise) {
       if (hasListeners) {
         _notifyRequestEvent({ phase: 'headers', id, url, method, status: res.status, isSSE, startTime });
       }
+      _trackActiveRequestUpdate(id, {
+        phase: isSSE ? 'streaming' : 'headers',
+        status: res.status,
+        isSSE,
+      });
 
       if (isSSE && res.body) {
         // Wrap the ReadableStream so we detect when SSE consumption finishes.
@@ -409,6 +505,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
                     if (hasListeners) {
                       _notifyRequestEvent({ phase: 'complete', id, url, method, status: res.status, isSSE: true, duration: endTime - startTime, startTime });
                     }
+                    _trackActiveRequestEnd(id);
                     controller.close();
                     return;
                   }
@@ -420,6 +517,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
                   if (hasListeners) {
                     _notifyRequestEvent({ phase: 'error', id, url, method, status: res.status, isSSE: true, error: err.message, duration: endTime - startTime, startTime });
                   }
+                  _trackActiveRequestEnd(id);
                   controller.error(err);
                 });
               })();
@@ -435,6 +533,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
       if (hasListeners) {
         _notifyRequestEvent({ phase: 'complete', id, url, method, status: res.status, isSSE: false, duration: endTime - startTime, startTime });
       }
+      _trackActiveRequestEnd(id);
 
       return res;
     },
@@ -451,6 +550,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
           _notifyRequestEvent({ phase: 'error', id, url, method, error: err.message, duration: endTime - startTime, startTime });
         }
       }
+      _trackActiveRequestEnd(id);
       throw err;
     },
   );

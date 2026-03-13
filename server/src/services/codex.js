@@ -178,7 +178,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
 
   let stderrOutput = '';
   child.stderr.on('data', (data) => {
-    stderrOutput += data.toString();
+    if (stderrOutput.length < 10240) stderrOutput += data.toString();
   });
 
   child.on('close', (code) => {
@@ -292,6 +292,9 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     '- category must be one of: payroll, bank-feeds, reconciliation, permissions, billing, tax, invoicing, reporting, inventory, payments, integrations, general, technical, unknown',
     '- triedTestAccount must be one of: yes, no, unknown',
     '- use empty strings for missing text fields',
+    '- do not guess unreadable names, identifiers, numbers, or labels',
+    '- if a value is unclear, unreadable, or uncertain, leave it as an empty string',
+    '- prefer exact transcription from the source over summarizing',
     '- do not include markdown fences',
   ].join('\n');
 

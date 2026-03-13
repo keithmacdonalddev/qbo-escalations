@@ -256,8 +256,15 @@ function buildChatModelContext({ normalizedMessages, settings }) {
     if (retrievalBlock.text) {
       sections.push('Retrieved Playbook Excerpts:\n' + retrievalBlock.text);
     }
-    if (settings.knowledge.includeCitations) {
-      sections.push('When citing playbook guidance, include source tags exactly as shown in brackets.');
+    if (settings.knowledge.includeCitations && retrievalIncluded.length > 0) {
+      const sourceList = retrievalIncluded
+        .map((s, i) => `[${i + 1}] ${s.sourceType.toUpperCase()}: ${s.sourceName}${s.title ? ' :: ' + s.title : ''}`)
+        .join('\n');
+      sections.push(
+        'Citation instructions:\n'
+        + 'When your answer draws from the reference sections above, naturally cite them using superscript numbers like [1], [2] corresponding to the numbered sources below. Only cite sections you actually used. Do not force citations — only include them when you directly reference playbook content.\n\n'
+        + 'Available sources:\n' + sourceList
+      );
     }
     systemPrompt = sections.join('\n\n').trim();
     if (!systemPrompt) {
@@ -289,10 +296,22 @@ function buildChatModelContext({ normalizedMessages, settings }) {
   debug.budgets.totalChars = totalChars;
   debug.budgets.estimatedInputTokens = estimateInputTokensFromChars(totalChars);
 
+  // Build citation metadata when retrieval sources were included and citations are enabled
+  const citations = (settings.knowledge.includeCitations && retrievalIncluded.length > 0)
+    ? retrievalIncluded.map((s, i) => ({
+        index: i + 1,
+        sourceType: s.sourceType,
+        sourceName: s.sourceName,
+        title: s.title || null,
+        id: s.id,
+      }))
+    : [];
+
   return {
     systemPrompt,
     messagesForModel: historyForModel,
     contextDebug: debug,
+    citations,
   };
 }
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useMemo } from 'react';
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { sendBackgroundDevMessage } from '../api/devBackgroundClient.js';
 import {
   useBackgroundConversations,
@@ -15,6 +15,11 @@ const MAX_TURNS = {
   'code-reviews': 30,
   'quality-scans': 20, // Codex channels re-send full history
 };
+const MIN_SEND_INTERVAL_MS = 8_000;
+const RATE_LIMIT_BACKOFF_BASE_MS = 10_000;
+const RATE_LIMIT_BACKOFF_MAX_MS = 120_000;
+const MAX_BG_QUEUE_SIZE = 60;
+const MAX_RATE_LIMIT_RETRIES = 3;
 
 /**
  * Extract tool usage summary from background agent result.
@@ -78,7 +83,19 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
   const [bgStreaming, setBgStreaming] = useState(false);
   const [bgQueue, setBgQueue] = useState([]);
   const [lastResults, setLastResults] = useState({});
+  const [bgTransportState, setBgTransportState] = useState({
+    nextAllowedAt: 0,
+    cooldownReason: null,
+    rateLimitStrikeCount: 0,
+    lastRateLimitAt: 0,
+    lastRateLimitMs: 0,
+  });
   const bgStreamingRef = useRef(false);
+  const bgTransportRef = useRef(bgTransportState);
+  bgTransportRef.current = bgTransportState;
+  const nextAllowedAtRef = useRef(0);
+  const rateLimitStrikeRef = useRef(0);
+  const drainTimerRef = useRef(null);
 
   // Ref-bridge: keeps sendBackground stable while reading latest bgConvs/log/onSuccess
   const bgConvsRef = useRef(bgConvs);
@@ -88,6 +105,39 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
   const onSuccessRef = useRef(onSuccess);
   onSuccessRef.current = onSuccess;
 
+  function scheduleDrain() {
+    const now = Date.now();
+    const delay = Math.max(0, nextAllowedAtRef.current - now);
+    if (drainTimerRef.current) {
+      clearTimeout(drainTimerRef.current);
+      drainTimerRef.current = null;
+    }
+    drainTimerRef.current = setTimeout(() => {
+      drainTimerRef.current = null;
+      setBgQueue((prev) => [...prev]);
+    }, Math.max(100, delay));
+  }
+
+  function enqueueQueuedSend(channel, message, options = {}) {
+    return new Promise((resolve, reject) => {
+      setBgQueue((prev) => {
+        const entry = { channel, message, options, resolve, reject };
+        const next = [...prev, entry];
+        if (next.length > MAX_BG_QUEUE_SIZE) {
+          const dropped = next.shift();
+          dropped?.reject?.(new Error('Background queue overflow'));
+          logRef.current?.({
+            type: 'bg-drop',
+            message: `Dropped oldest background task for ${dropped?.channel || 'unknown'} due to queue pressure`,
+            severity: 'warning',
+          });
+        }
+        return next;
+      });
+      scheduleDrain();
+    });
+  }
+
   /**
    * Send a background message on the given channel.
    *
@@ -95,6 +145,8 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
    * @param {string} message        User/system message text
    * @param {object} [options]
    * @param {string} [options.provider]         Provider ID override
+   * @param {object} [options.incidentMeta]     Structured monitor-incident metadata
+   * @param {object} [options.incidentContext]  Structured supervisor context for the dev agent
    * @param {string} [options.reasoningEffort]  Reasoning effort override
    * @param {(chunk: object) => void} [options.onChunk]   Progress callback
    * @param {(event: object) => void} [options.onToolUse] Tool-use callback
@@ -106,15 +158,19 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
     }
 
     const convs = bgConvsRef.current;
-
-    // Guard: only one background request at a time
-    if (bgStreamingRef.current) {
-      // Queue it
-      return new Promise((resolve, reject) => {
-        setBgQueue((prev) => [...prev, { channel, message, options, resolve, reject }]);
-      });
+    const now = Date.now();
+    if (bgStreamingRef.current || now < nextAllowedAtRef.current) {
+      return enqueueQueuedSend(channel, message, options);
+    }
+    if (bgTransportRef.current.nextAllowedAt && now >= bgTransportRef.current.nextAllowedAt) {
+      setBgTransportState((prev) => ({
+        ...prev,
+        nextAllowedAt: 0,
+        cooldownReason: null,
+      }));
     }
 
+    // Guard: only one background request at a time
     setBgStreaming(true);
     bgStreamingRef.current = true;
 
@@ -139,6 +195,8 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
         conversationId,
         provider: options.provider,
         channelType: channel,
+        incidentMeta: options.incidentMeta,
+        incidentContext: options.incidentContext,
         reasoningEffort: options.reasoningEffort,
         onChunk: options.onChunk,
         onToolUse: options.onToolUse,
@@ -149,11 +207,31 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
         bgConvsRef.current.setConversationId(channel, result.conversationId);
       }
 
-      // Increment turn count
-      bgConvsRef.current.incrementTurns(channel);
-
       // Store last result for observability
       setLastResults((prev) => ({ ...prev, [channel]: result }));
+
+      if (result.collapsed) {
+        logRef.current?.({
+          type: 'bg-collapsed',
+          message: `Server collapsed duplicate ${channel} report (${result.collapseReason || 'duplicate'})`,
+          channel,
+          severity: 'info',
+          detail: result.incident || undefined,
+        });
+        onSuccessRef.current?.();
+        rateLimitStrikeRef.current = 0;
+        nextAllowedAtRef.current = Date.now() + MIN_SEND_INTERVAL_MS;
+        setBgTransportState((prev) => ({
+          ...prev,
+          nextAllowedAt: nextAllowedAtRef.current,
+          cooldownReason: 'interval',
+          rateLimitStrikeCount: 0,
+        }));
+        return result;
+      }
+
+      // Increment turn count only when the agent actually ran
+      bgConvsRef.current.incrementTurns(channel);
 
       // --- Rich background agent logging ---
 
@@ -195,14 +273,57 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
 
       // Notify self-check heartbeat of successful background send
       onSuccessRef.current?.();
+      rateLimitStrikeRef.current = 0;
+      nextAllowedAtRef.current = Date.now() + MIN_SEND_INTERVAL_MS;
+      setBgTransportState((prev) => ({
+        ...prev,
+        nextAllowedAt: nextAllowedAtRef.current,
+        cooldownReason: 'interval',
+        rateLimitStrikeCount: 0,
+      }));
 
       return result;
     } catch (err) {
-      // Stale ID recovery: 404 means the conversation was deleted or expired
+      if (err?.status === 429 || err?.code === 'RATE_LIMITED') {
+        const retries = Number(options._rateLimitRetries || 0);
+        const retryAfterMs = Number.isFinite(err.retryAfterMs) && err.retryAfterMs > 0
+          ? err.retryAfterMs
+          : Math.min(RATE_LIMIT_BACKOFF_BASE_MS * Math.pow(2, rateLimitStrikeRef.current), RATE_LIMIT_BACKOFF_MAX_MS);
+        rateLimitStrikeRef.current += 1;
+        nextAllowedAtRef.current = Date.now() + retryAfterMs;
+        setBgTransportState({
+          nextAllowedAt: nextAllowedAtRef.current,
+          cooldownReason: 'rate-limit',
+          rateLimitStrikeCount: rateLimitStrikeRef.current,
+          lastRateLimitAt: Date.now(),
+          lastRateLimitMs: retryAfterMs,
+        });
+        logRef.current?.({
+          type: 'bg-rate-limit',
+          message: `Background dev agent rate-limited for ${Math.round(retryAfterMs / 1000)}s`,
+          channel,
+          severity: 'warning',
+        });
+        if (retries < MAX_RATE_LIMIT_RETRIES) {
+          return enqueueQueuedSend(channel, message, {
+            ...options,
+            _rateLimitRetries: retries + 1,
+          });
+        }
+      }
+      // Recover from invalid persisted conversation IDs so monitors can start fresh.
       if (err.status === 404) {
         bgConvsRef.current.clearChannel(channel);
         logRef.current?.({ type: 'api-error', message: `${channel}: stale conversation (404), cleared`, channel, severity: 'error' });
         // Do NOT auto-retry here — let the caller decide
+      } else if (err.status === 409 && err.code === 'CHANNEL_MISMATCH') {
+        bgConvsRef.current.clearChannel(channel);
+        logRef.current?.({
+          type: 'api-error',
+          message: `${channel}: cleared mismatched background conversation (409)`,
+          channel,
+          severity: 'error',
+        });
       } else {
         logRef.current?.({ type: 'api-error', message: `${channel}: ${err.message || err}`, channel, severity: 'error' });
       }
@@ -210,27 +331,71 @@ export function useBackgroundAgent({ log, onSuccess } = {}) {
     } finally {
       setBgStreaming(false);
       bgStreamingRef.current = false;
-
-      // Drain queue: process next queued item
-      setBgQueue((prev) => {
-        if (prev.length === 0) return prev;
-        const [next, ...rest] = prev;
-        // Schedule next send asynchronously to avoid setState-during-render
-        queueMicrotask(() => {
-          sendBackground(next.channel, next.message, next.options)
-            .then(next.resolve)
-            .catch(next.reject);
-        });
-        return rest;
-      });
+      scheduleDrain();
     }
   }, []); // Empty deps = stable identity forever (reads via refs)
+
+  useEffect(() => {
+    if (bgStreamingRef.current) return;
+    if (bgQueue.length === 0) return;
+
+    const now = Date.now();
+    if (now < nextAllowedAtRef.current) {
+      scheduleDrain();
+      return;
+    }
+
+    const [next, ...rest] = bgQueue;
+    if (!next) return;
+
+    setBgQueue(rest);
+    queueMicrotask(() => {
+      sendBackground(next.channel, next.message, next.options)
+        .then(next.resolve)
+        .catch(next.reject);
+    });
+  }, [bgQueue, sendBackground]);
+
+  useEffect(() => {
+    return () => {
+      if (drainTimerRef.current) {
+        clearTimeout(drainTimerRef.current);
+        drainTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bgTransportState.nextAllowedAt) return undefined;
+    const remainingMs = bgTransportState.nextAllowedAt - Date.now();
+    if (remainingMs <= 0) {
+      setBgTransportState((prev) => ({
+        ...prev,
+        nextAllowedAt: 0,
+        cooldownReason: null,
+      }));
+      return undefined;
+    }
+    const timeout = setTimeout(() => {
+      setBgTransportState((prev) => ({
+        ...prev,
+        nextAllowedAt: 0,
+        cooldownReason: null,
+      }));
+    }, remainingMs + 50);
+    return () => clearTimeout(timeout);
+  }, [bgTransportState.nextAllowedAt]);
 
   return useMemo(() => ({
     sendBackground,
     bgStreaming,
     bgQueue,
     lastResults,
+    bgTransport: {
+      ...bgTransportState,
+      queueSize: bgQueue.length,
+      coolingDown: bgTransportState.nextAllowedAt > Date.now(),
+    },
     channels: bgConvs,
-  }), [sendBackground, bgStreaming, bgQueue, lastResults, bgConvs]);
+  }), [sendBackground, bgStreaming, bgQueue, lastResults, bgTransportState, bgConvs]);
 }

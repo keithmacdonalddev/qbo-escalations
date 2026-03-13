@@ -121,6 +121,7 @@ function runAttempt({
   let settled = false;
   let cleanup = null;
   let timeoutHandle = null;
+  let thinkingText = '';
 
   function finalize(result) {
     if (settled) return;
@@ -144,10 +145,12 @@ function runAttempt({
           text,
         });
       },
-      onThinkingChunk: onThinkingChunk ? (thinking) => {
+      onThinkingChunk: (thinking) => {
         if (settled) return;
-        onThinkingChunk({ provider: providerId, thinking });
-      } : undefined,
+        const chunk = typeof thinking === 'string' ? thinking : '';
+        if (chunk) thinkingText += chunk;
+        onThinkingChunk?.({ provider: providerId, thinking: chunk });
+      },
       onDone: (fullResponse, usageMeta) => {
         if (settled) return;
         recordSuccess(providerId);
@@ -155,6 +158,7 @@ function runAttempt({
           ok: true,
           provider: providerId,
           fullResponse: fullResponse || '',
+          thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
           usage: usageMeta || null,
         });
@@ -167,6 +171,7 @@ function runAttempt({
           ok: false,
           provider: providerId,
           error: normalized,
+          thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
           usage: (err && err._usage) || null,
         });
@@ -179,6 +184,7 @@ function runAttempt({
       ok: false,
       provider: providerId,
       error: normalized,
+      thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
       usage: null,
     });
@@ -201,6 +207,7 @@ function runAttempt({
         ok: false,
         provider: providerId,
         error,
+        thinking: thinkingText,
         latencyMs: Date.now() - startedAt,
         usage: abortUsage,
       });
@@ -221,10 +228,22 @@ function runAttempt({
       ok: false,
       provider: providerId,
       error: { code: 'ABORT', message: `${providerId} request aborted` },
+      thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
       usage: abortUsage,
     });
   };
+}
+
+function buildProviderThinkingMap(results) {
+  const providerThinking = {};
+  for (const result of Array.isArray(results) ? results : []) {
+    if (!result || !result.provider) continue;
+    const thinking = typeof result.thinking === 'string' ? result.thinking : '';
+    if (!thinking.trim()) continue;
+    providerThinking[result.provider] = thinking;
+  }
+  return providerThinking;
 }
 
 function toAttempt(result) {
@@ -370,6 +389,7 @@ function startChatOrchestration({
             provider: result.provider,
             status: 'ok',
             fullResponse: result.fullResponse || '',
+            thinking: result.thinking || '',
             latencyMs: result.latencyMs,
             usage: result.usage || null,
           });
@@ -393,6 +413,7 @@ function startChatOrchestration({
             errorCode: r.error.code,
             errorMessage: r.error.message,
             errorDetail: r.error.detail || '',
+            thinking: r.thinking || '',
             latencyMs: r.latencyMs,
             usage: r.usage || null,
           }));
@@ -417,6 +438,7 @@ function startChatOrchestration({
           fallbackFrom: null,
           fullResponse: '',
           results: orderedResults,
+          providerThinking: buildProviderThinkingMap(results),
           attempts,
           mode: policy.mode,
         });
@@ -456,6 +478,8 @@ function startChatOrchestration({
           fallbackUsed: Boolean(fallbackFrom),
           fallbackFrom,
           fullResponse: result.fullResponse,
+          thinking: result.thinking || '',
+          providerThinking: buildProviderThinkingMap(allSettledResults),
           attempts,
           mode: policy.mode,
           usage: result.usage || null,

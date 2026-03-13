@@ -3,6 +3,15 @@
 const express = require('express');
 const gmail = require('../services/gmail');
 const { chat } = require('../services/claude');
+const {
+  createAiOperation,
+  updateAiOperation,
+  recordAiChunk,
+  recordAiEvent,
+  attachAiOperationController,
+  deleteAiOperation,
+} = require('../services/ai-runtime');
+const { reportServerError } = require('../lib/server-error-pipeline');
 
 const router = express.Router();
 
@@ -78,12 +87,127 @@ router.get('/auth/callback', async (req, res) => {
 });
 
 // POST /api/gmail/auth/disconnect — revoke tokens and disconnect
+// Accepts optional { email } body to disconnect a specific account
 router.post('/auth/disconnect', async (req, res) => {
   try {
-    await gmail.disconnect();
+    const { email } = req.body || {};
+    await gmail.disconnect(email || undefined);
     res.json({ ok: true });
   } catch (err) {
     console.error('[Gmail] disconnect error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Multi-account endpoints
+// ---------------------------------------------------------------------------
+
+// GET /api/gmail/accounts — list all connected accounts
+router.get('/accounts', async (req, res) => {
+  try {
+    const result = await gmail.listAccounts();
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] listAccounts error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// POST /api/gmail/accounts/switch — switch active account
+router.post('/accounts/switch', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const result = await gmail.switchAccount(email);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] switchAccount error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Unified Inbox endpoints (cross-account merged view)
+// ---------------------------------------------------------------------------
+
+// GET /api/gmail/unified — merged inbox from ALL connected accounts
+router.get('/unified', async (req, res) => {
+  try {
+    const { q, maxResults, pageTokens } = req.query;
+    // pageTokens arrives as JSON-encoded object, e.g. ?pageTokens={"a@b.com":"token1"}
+    let parsedPageTokens = {};
+    if (pageTokens) {
+      try { parsedPageTokens = JSON.parse(pageTokens); } catch { /* ignore malformed */ }
+    }
+    const result = await gmail.listUnifiedMessages({
+      q: q || undefined,
+      maxResults: maxResults && Number.isFinite(parseInt(maxResults, 10)) ? parseInt(maxResults, 10) : 25,
+      pageTokens: parsedPageTokens,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] unified inbox error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// GET /api/gmail/unified/unread-counts — per-account unread counts
+router.get('/unified/unread-counts', async (req, res) => {
+  try {
+    const result = await gmail.getUnifiedUnreadCounts();
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] unified unread-counts error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Filter endpoints
+// ---------------------------------------------------------------------------
+
+// GET /api/gmail/filters — list all Gmail filters
+router.get('/filters', async (req, res) => {
+  try {
+    const result = await gmail.listFilters(req.query.account || undefined);
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] listFilters error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// POST /api/gmail/filters — create a new Gmail filter
+router.post('/filters', async (req, res) => {
+  try {
+    const { criteria, action, account } = req.body;
+    if (!criteria || !action) {
+      return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'criteria and action are required' });
+    }
+    const result = await gmail.createFilter({ criteria, action, accountEmail: account || undefined });
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] createFilter error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// DELETE /api/gmail/filters/:id — delete a Gmail filter
+router.delete('/filters/:id', async (req, res) => {
+  try {
+    const result = await gmail.deleteFilter(req.params.id, req.query.account || undefined);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] deleteFilter error:', err.message);
     res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
   }
 });
@@ -95,7 +219,8 @@ router.post('/auth/disconnect', async (req, res) => {
 // GET /api/gmail/profile
 router.get('/profile', async (req, res) => {
   try {
-    const result = await gmail.getProfile();
+    const accountEmail = req.query.account;
+    const result = await gmail.getProfile(accountEmail || undefined);
     res.json(result);
   } catch (err) {
     console.error('[Gmail] getProfile error:', err.message);
@@ -103,15 +228,31 @@ router.get('/profile', async (req, res) => {
   }
 });
 
-// GET /api/gmail/messages?q=...&maxResults=...&pageToken=...&labelIds=...
+// GET /api/gmail/subscriptions — scan recent messages for subscription senders
+router.get('/subscriptions', async (req, res) => {
+  try {
+    const { maxScan, account } = req.query;
+    const result = await gmail.scanSubscriptions({
+      maxScan: maxScan && Number.isFinite(parseInt(maxScan, 10)) ? parseInt(maxScan, 10) : 300,
+      accountEmail: account || undefined,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] scanSubscriptions error:', err.message);
+    res.status(500).json({ ok: false, code: 'GMAIL_ERROR', error: err.message });
+  }
+});
+
+// GET /api/gmail/messages?q=...&maxResults=...&pageToken=...&labelIds=...&account=...
 router.get('/messages', async (req, res) => {
   try {
-    const { q, maxResults, pageToken, labelIds } = req.query;
+    const { q, maxResults, pageToken, labelIds, account } = req.query;
     const result = await gmail.listMessages({
       q: q || undefined,
       maxResults: maxResults && Number.isFinite(parseInt(maxResults, 10)) ? parseInt(maxResults, 10) : 20,
       pageToken: pageToken || undefined,
       labelIds: labelIds || undefined,
+      accountEmail: account || undefined,
     });
     res.json(result);
   } catch (err) {
@@ -123,7 +264,20 @@ router.get('/messages', async (req, res) => {
 // GET /api/gmail/messages/:id
 router.get('/messages/:id', async (req, res) => {
   try {
-    const result = await gmail.getMessage(req.params.id);
+    const accountEmail = req.query.account;
+    const result = await gmail.getMessage(req.params.id, accountEmail || undefined);
+
+    // Strip tracking pixels from HTML bodies
+    if (result.ok && result.bodyType === 'html' && result.body) {
+      const { cleanHtml, trackers, trackerCount } = gmail.stripTrackingPixels(result.body);
+      result.body = cleanHtml;
+      result.trackers = trackers;
+      result.trackerCount = trackerCount;
+    } else {
+      result.trackers = [];
+      result.trackerCount = 0;
+    }
+
     res.json(result);
   } catch (err) {
     console.error('[Gmail] getMessage error:', err.message);
@@ -134,7 +288,8 @@ router.get('/messages/:id', async (req, res) => {
 // GET /api/gmail/labels
 router.get('/labels', async (req, res) => {
   try {
-    const result = await gmail.listLabels();
+    const accountEmail = req.query.account;
+    const result = await gmail.listLabels(accountEmail || undefined);
     res.json(result);
   } catch (err) {
     console.error('[Gmail] listLabels error:', err.message);
@@ -142,11 +297,28 @@ router.get('/labels', async (req, res) => {
   }
 });
 
+// POST /api/gmail/labels — create a new label
+router.post('/labels', async (req, res) => {
+  try {
+    const { name, labelListVisibility, messageListVisibility, account } = req.body;
+    const result = await gmail.createLabel(name, { labelListVisibility, messageListVisibility }, account || undefined);
+    if (!result.ok) {
+      return res.status(400).json(result);
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[Gmail] createLabel error:', err.message);
+    // Gmail API returns 409 if label already exists
+    const status = err.code === 409 || err.status === 409 ? 409 : 500;
+    res.status(status).json({ ok: false, code: status === 409 ? 'LABEL_EXISTS' : 'GMAIL_ERROR', error: err.message });
+  }
+});
+
 // POST /api/gmail/drafts
 router.post('/drafts', async (req, res) => {
   try {
-    const { to, subject, body, cc, bcc } = req.body;
-    const result = await gmail.createDraft({ to, subject, body, cc, bcc });
+    const { to, subject, body, cc, bcc, account } = req.body;
+    const result = await gmail.createDraft({ to, subject, body, cc, bcc, accountEmail: account || undefined });
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -164,8 +336,8 @@ router.post('/drafts', async (req, res) => {
 // POST /api/gmail/messages/send — send a new email
 router.post('/messages/send', async (req, res) => {
   try {
-    const { to, cc, bcc, subject, body, threadId, inReplyTo, references } = req.body;
-    const result = await gmail.sendMessage({ to, cc, bcc, subject, body, threadId, inReplyTo, references });
+    const { to, cc, bcc, subject, body, threadId, inReplyTo, references, account } = req.body;
+    const result = await gmail.sendMessage({ to, cc, bcc, subject, body, threadId, inReplyTo, references, accountEmail: account || undefined });
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -179,7 +351,8 @@ router.post('/messages/send', async (req, res) => {
 // POST /api/gmail/drafts/:id/send — send an existing draft
 router.post('/drafts/:id/send', async (req, res) => {
   try {
-    const result = await gmail.sendDraft(req.params.id);
+    const accountEmail = (req.body && req.body.account) || undefined;
+    const result = await gmail.sendDraft(req.params.id, accountEmail);
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -198,8 +371,8 @@ router.post('/drafts/:id/send', async (req, res) => {
 // NOTE: this MUST come before /messages/:id to avoid matching "batch" as an :id
 router.patch('/messages/batch', async (req, res) => {
   try {
-    const { messageIds, addLabelIds, removeLabelIds } = req.body;
-    const result = await gmail.batchModify(messageIds, { addLabelIds, removeLabelIds });
+    const { messageIds, addLabelIds, removeLabelIds, account } = req.body;
+    const result = await gmail.batchModify(messageIds, { addLabelIds, removeLabelIds, accountEmail: account || undefined });
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -213,8 +386,8 @@ router.patch('/messages/batch', async (req, res) => {
 // PATCH /api/gmail/messages/:id — modify labels on a single message
 router.patch('/messages/:id', async (req, res) => {
   try {
-    const { addLabelIds, removeLabelIds } = req.body;
-    const result = await gmail.modifyMessage(req.params.id, { addLabelIds, removeLabelIds });
+    const { addLabelIds, removeLabelIds, account } = req.body;
+    const result = await gmail.modifyMessage(req.params.id, { addLabelIds, removeLabelIds, accountEmail: account || undefined });
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -228,7 +401,8 @@ router.patch('/messages/:id', async (req, res) => {
 // DELETE /api/gmail/messages/:id — trash a message
 router.delete('/messages/:id', async (req, res) => {
   try {
-    const result = await gmail.trashMessage(req.params.id);
+    const accountEmail = req.query.account || undefined;
+    const result = await gmail.trashMessage(req.params.id, accountEmail);
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -242,7 +416,8 @@ router.delete('/messages/:id', async (req, res) => {
 // POST /api/gmail/messages/:id/untrash — restore from trash
 router.post('/messages/:id/untrash', async (req, res) => {
   try {
-    const result = await gmail.untrashMessage(req.params.id);
+    const accountEmail = (req.body && req.body.account) || undefined;
+    const result = await gmail.untrashMessage(req.params.id, accountEmail);
     if (!result.ok) {
       return res.status(400).json(result);
     }
@@ -321,6 +496,20 @@ router.post('/ai', async (req, res) => {
   // Send start event
   res.write('event: start\ndata: ' + JSON.stringify({ ok: true }) + '\n\n');
 
+  const runtimeOperation = createAiOperation({
+    kind: 'gmail',
+    route: '/api/gmail/ai',
+    action: 'gmail-ai',
+    provider: 'claude',
+    mode: 'single',
+    promptPreview: prompt,
+    hasImages: false,
+    messageCount: messages.length,
+    providers: ['claude'],
+  });
+  const runtimeOperationId = runtimeOperation.id;
+  let streamSettled = false;
+
   // Heartbeat to keep connection alive
   const heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
@@ -330,20 +519,39 @@ router.post('/ai', async (req, res) => {
     messages,
     systemPrompt: GMAIL_AI_SYSTEM_PROMPT,
     onChunk: (text) => {
+      recordAiChunk(runtimeOperationId, text, { provider: 'claude' });
       try {
         res.write('event: chunk\ndata: ' + JSON.stringify({ text }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onDone: (fullResponse) => {
+      streamSettled = true;
       clearInterval(heartbeat);
+      recordAiEvent(runtimeOperationId, 'completed', { provider: 'claude' });
       try {
         res.write('event: done\ndata: ' + JSON.stringify({ ok: true, fullResponse }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
     },
     onError: (err) => {
+      streamSettled = true;
       clearInterval(heartbeat);
       console.error('[Gmail AI] error:', err.message);
+      recordAiEvent(runtimeOperationId, 'error', {
+        lastError: {
+          code: err.code || 'AI_ERROR',
+          message: err.message || 'AI assistant error',
+          detail: '',
+        },
+      });
+      reportServerError({
+        route: '/api/gmail/ai',
+        message: err.message || 'Gmail AI assistant failed',
+        code: err.code || 'AI_ERROR',
+        detail: err.stack || '',
+        severity: 'error',
+      });
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           ok: false,
@@ -352,13 +560,47 @@ router.post('/ai', async (req, res) => {
         }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
+    },
+  });
+
+  attachAiOperationController(runtimeOperationId, {
+    abort: (reason = 'Gmail AI request aborted by supervisor') => {
+      if (streamSettled) return;
+      streamSettled = true;
+      clearInterval(heartbeat);
+      updateAiOperation(runtimeOperationId, {
+        phase: 'aborting',
+        lastError: {
+          code: 'AUTO_ABORT',
+          message: reason,
+          detail: '',
+        },
+      });
+      try { if (typeof cleanup === 'function') cleanup(); } catch { /* ignore */ }
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          ok: false,
+          code: 'AUTO_ABORT',
+          error: reason,
+        }) + '\n\n');
+        res.end();
+      } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
     },
   });
 
   // Handle client disconnect
-  req.on('close', () => {
+  res.on('close', () => {
     clearInterval(heartbeat);
-    if (typeof cleanup === 'function') cleanup();
+    if (!streamSettled) {
+      updateAiOperation(runtimeOperationId, {
+        clientConnected: false,
+        phase: 'aborting',
+      });
+      try { if (typeof cleanup === 'function') cleanup(); } catch { /* ignore */ }
+      deleteAiOperation(runtimeOperationId);
+    }
   });
 });
 

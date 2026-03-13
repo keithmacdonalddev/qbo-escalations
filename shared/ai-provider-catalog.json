@@ -1,11 +1,11 @@
 [
   {
     "id": "claude",
-    "label": "Claude Default (CLI)",
-    "shortLabel": "Claude",
+    "label": "Claude Opus 4.6 (Default)",
+    "shortLabel": "Opus 4.6",
     "family": "claude",
     "transport": "claude",
-    "model": null,
+    "model": "claude-opus-4-6",
     "selectable": true,
     "order": 10,
     "default": true

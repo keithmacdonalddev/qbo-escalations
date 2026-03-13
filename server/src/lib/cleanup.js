@@ -2,6 +2,12 @@
 
 const DevConversation = require('../models/DevConversation');
 const DevAgentLog = require('../models/DevAgentLog');
+const {
+  startBackgroundTask,
+  completeBackgroundTask,
+  failBackgroundTask,
+  updateBackgroundService,
+} = require('../services/background-runtime');
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -19,6 +25,7 @@ const BACKGROUND_CHANNEL_TYPES = ['auto-errors', 'code-reviews', 'quality-scans'
  */
 async function runCleanup() {
   const results = { conversations: 0, logs: 0, channels: 0 };
+  const taskId = startBackgroundTask('cleanup', { trigger: 'scheduled' });
 
   try {
     // 1. Delete stale conversations (>30 days since last update)
@@ -52,8 +59,10 @@ async function runCleanup() {
     if (total > 0) {
       console.log('[cleanup] Removed:', results);
     }
+    completeBackgroundTask(taskId, results);
   } catch (err) {
     console.error('[cleanup] Error:', err.message);
+    failBackgroundTask(taskId, err, results);
   }
 
   return results;
@@ -62,14 +71,24 @@ async function runCleanup() {
 // --- Scheduling ---
 
 let cleanupInterval = null;
+let startupTimer = null;
 
 /**
  * Schedule cleanup: run once after STARTUP_DELAY_MS, then every 6 hours.
  */
 function startCleanupSchedule() {
-  setTimeout(() => {
+  updateBackgroundService('cleanup', {
+    state: 'scheduled',
+    meta: { startupDelayMs: STARTUP_DELAY_MS, intervalMs: SIX_HOURS_MS },
+  });
+  startupTimer = setTimeout(() => {
+    startupTimer = null;
     runCleanup();
     cleanupInterval = setInterval(runCleanup, SIX_HOURS_MS);
+    updateBackgroundService('cleanup', {
+      state: 'idle',
+      meta: { startupDelayMs: STARTUP_DELAY_MS, intervalMs: SIX_HOURS_MS, scheduled: true },
+    });
   }, STARTUP_DELAY_MS);
 }
 
@@ -77,10 +96,18 @@ function startCleanupSchedule() {
  * Stop the recurring cleanup interval (for graceful shutdown).
  */
 function stopCleanupSchedule() {
+  if (startupTimer) {
+    clearTimeout(startupTimer);
+    startupTimer = null;
+  }
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
+  updateBackgroundService('cleanup', {
+    state: 'stopped',
+    meta: { scheduled: false },
+  });
 }
 
 module.exports = { runCleanup, startCleanupSchedule, stopCleanupSchedule };

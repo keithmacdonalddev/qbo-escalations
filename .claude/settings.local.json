@@ -6,9 +6,7 @@
     "allow": [
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(findstr:*)",
       "Bash(git push:*)",
-      "Bash(dir /s /b)",
       "Bash(node scripts/migrateNotesProcessed.js:*)",
       "Bash(npm install:*)",
       "Bash(npm run build:*)",
@@ -21,9 +19,7 @@
       "Bash(node --check:*)",
       "Bash(tasklist:*)",
       "Bash(npm run dev:*)",
-      "Bash(timeout /t 5 /nobreak)",
       "Bash(netstat:*)",
-      "Bash(taskkill //F //PID 38536)",
       "Bash(curl:*)",
       "WebFetch(domain:loggingsucks.com)",
       "Bash(node scripts/migrateDefaultCategories.js:*)",
@@ -57,6 +53,12 @@
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/inject-context.mjs",
             "timeout": 15,
             "statusMessage": "Initializing memory system..."
+          },
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/config-freshness.mjs",
+            "timeout": 10,
+            "statusMessage": "Checking config freshness..."
           }
         ]
       }
@@ -69,17 +71,6 @@
             "type": "command",
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/capture-observation.mjs",
             "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Task",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/post-task-verify.sh",
-            "timeout": 10,
-            "statusMessage": "🔍 Agent finished — checking verification..."
           }
         ]
       }
@@ -97,42 +88,6 @@
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/generate-folder-context.mjs",
             "timeout": 15,
             "statusMessage": "Generating folder context..."
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/agent-boilerplate.sh",
-            "timeout": 5,
-            "statusMessage": "▶ Agent spawned — injecting boilerplate + logging instructions"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/task-completed.sh",
-            "timeout": 5,
-            "statusMessage": "✔ Task marked complete — agent logging results to completion log"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; bash .claude/hooks/agent-verify.sh",
-            "timeout": 5,
-            "statusMessage": "🔍 Agent stopped — spawning haiku verifier for independent review"
           }
         ]
       }

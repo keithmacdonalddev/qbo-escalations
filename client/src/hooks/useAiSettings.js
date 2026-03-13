@@ -34,7 +34,7 @@ export const DEFAULT_AI_SETTINGS = Object.freeze({
   },
   guardrails: {
     maxEstimatedRequestCostUsd: 0,
-    dailyBudgetUsd: 0,
+    dailyBudgetUsd: 25,
     onBudgetExceeded: 'warn',
   },
   providerStrategy: {
@@ -46,7 +46,7 @@ export const DEFAULT_AI_SETTINGS = Object.freeze({
   },
   sessionBudget: {
     tokenLimit: 0,      // 0 = unlimited
-    costLimitUsd: 0,    // 0 = unlimited
+    costLimitUsd: 10,   // session cost cap — pauses bg agents at 95%
   },
   debug: {
     showContextDebug: false,

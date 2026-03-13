@@ -26,8 +26,32 @@ const {
   VALID_PARSE_MODES,
   parseWithPolicy,
 } = require('../services/parse-orchestrator');
+const {
+  createAiOperation,
+  updateAiOperation,
+  recordAiChunk,
+  recordAiEvent,
+  attachAiOperationController,
+  deleteAiOperation,
+} = require('../services/ai-runtime');
+const { reportServerError } = require('../lib/server-error-pipeline');
 const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
+const { getProviderModelId } = require('../services/providers/catalog');
+const {
+  createTrace,
+  patchTrace,
+  appendTraceEvent,
+  setTraceAttempts,
+  setTraceUsage,
+  buildParseStage,
+  buildOutcome,
+  summarizeUsage,
+} = require('../services/ai-traces');
+const { archiveImages, getArchive, getAllImages, getImageFile, getArchiveStats } = require('../lib/image-archive');
+const { extractQuickActions } = require('../lib/quick-actions');
+
+const SSE_SAFETY_TIMEOUT_MS = parseInt(process.env.SSE_SAFETY_TIMEOUT_MS, 10) || 300000; // 5 minutes
 
 const DEFAULT_PROVIDER = getDefaultProvider();
 const TRIAGE_ALLOWED_CATEGORIES = Object.freeze([
@@ -150,6 +174,30 @@ function buildServerTriageCard(fields) {
   };
 }
 
+function buildTriageRefBlock(parseFields) {
+  if (!parseFields || typeof parseFields !== 'object') return '';
+  const f = parseFields;
+  const lines = [
+    '\n\n--- PRE-PARSED ESCALATION DATA (use as canonical reference) ---',
+    f.coid ? `COID/MID: ${f.coid}${f.mid ? '/' + f.mid : ''}` : '',
+    f.caseNumber ? `Case: ${f.caseNumber}` : '',
+    f.clientContact ? `Client/Contact: ${f.clientContact}` : '',
+    f.agentName ? `Agent: ${f.agentName}` : '',
+    f.attemptingTo ? `CX Attempting: ${f.attemptingTo}` : '',
+    f.expectedOutcome ? `Expected Outcome: ${f.expectedOutcome}` : '',
+    f.actualOutcome ? `Actual Outcome: ${f.actualOutcome}` : '',
+    f.tsSteps ? `TS Steps: ${f.tsSteps}` : '',
+    f.triedTestAccount ? `Tried Test Account: ${f.triedTestAccount}` : '',
+    f.category ? `Category: ${f.category}` : '',
+    f.severity ? `Severity: ${f.severity}` : '',
+    f.product ? `Product: ${f.product}` : '',
+    f.summary ? `Summary: ${f.summary}` : '',
+    '--- END PRE-PARSED DATA ---\n',
+  ].filter(Boolean).join('\n');
+  // Only return block if at least one real field was present (beyond the delimiters)
+  return lines.split('\n').filter(l => !l.startsWith('---') && l.trim()).length > 0 ? lines : '';
+}
+
 function buildImageTurnSystemPrompt(baseSystemPrompt) {
   const runtimeRules = [
     'Image Turn Runtime Contract (server-enforced):',
@@ -161,6 +209,8 @@ function buildImageTurnSystemPrompt(baseSystemPrompt) {
     '4. Diagnosis',
     '5. Steps for Agent',
     '6. Customer-Facing Explanation',
+    '- Pre-parsed escalation data is provided in the system prompt. Use it as the canonical source for IDs, names, and field values. You may reference the attached image for additional visual context but rely on the pre-parsed data for accuracy.',
+    '- If pre-parsed data is not available for a field, and the image text is unclear, say it is unclear rather than guessing.',
     '- Keep the response concise and actionable.',
   ].join('\n');
   const base = safeString(baseSystemPrompt, '').trim();
@@ -266,10 +316,13 @@ async function buildImageTriageContext({ images, mode, primaryProvider, fallback
 
   const triageMode = mode === 'parallel' ? 'fallback' : (mode === 'fallback' ? 'fallback' : 'single');
   const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
-    ? Math.min(timeoutMs, 15000)
-    : 15000;
+    ? Math.min(timeoutMs, 60000)
+    : 60000;
 
   let parseFields = null;
+  let parseMeta = null;
+  let error = null;
+  const startedAt = Date.now();
   try {
     const parseResult = await parseWithPolicy({
       image: images[0],
@@ -282,13 +335,21 @@ async function buildImageTriageContext({ images, mode, primaryProvider, fallback
       allowRegexFallback: false,
     });
     parseFields = parseResult && parseResult.fields ? parseResult.fields : null;
-  } catch {
+    parseMeta = parseResult && parseResult.meta ? parseResult.meta : null;
+  } catch (err) {
     parseFields = null;
+    error = err || null;
   }
 
   return {
     triageCard: parseFields ? buildServerTriageCard(parseFields) : buildFallbackTriageCard(),
     parseFields: parseFields || {},
+    parseMeta: parseMeta ? toParseResponseMeta(parseMeta) : null,
+    elapsedMs: Date.now() - startedAt,
+    error: error ? {
+      code: error.code || 'TRIAGE_FAILED',
+      message: error.message || 'Image triage failed',
+    } : null,
   };
 }
 
@@ -305,6 +366,26 @@ function buildUsageSubdoc(usage) {
     totalCostMicros: cost.totalCostMicros,
     usageAvailable: true,
   };
+}
+
+function buildTraceStats(traceStats) {
+  return {
+    chunkCount: Number(traceStats?.chunkCount) || 0,
+    chunkChars: Number(traceStats?.chunkChars) || 0,
+    thinkingChunkCount: Number(traceStats?.thinkingChunkCount) || 0,
+    providerErrors: Number(traceStats?.providerErrors) || 0,
+    fallbacks: Number(traceStats?.fallbacks) || 0,
+  };
+}
+
+function sumResponseChars(data) {
+  if (!data || typeof data !== 'object') return 0;
+  if (Array.isArray(data.results)) {
+    return data.results.reduce((sum, result) => (
+      sum + (typeof result?.fullResponse === 'string' ? result.fullResponse.length : 0)
+    ), 0);
+  }
+  return typeof data.fullResponse === 'string' ? data.fullResponse.length : 0;
 }
 
 // --- Triage Card Stream Detector ---
@@ -519,6 +600,7 @@ function toCandidateFromResult(result) {
   return {
     provider: result.provider,
     content: result.status === 'ok' ? (result.fullResponse || '') : '',
+    thinking: typeof result.thinking === 'string' ? result.thinking : '',
     state,
     errorCode: result.status === 'ok' ? '' : (result.errorCode || ''),
     errorMessage: result.status === 'ok' ? '' : (result.errorMessage || ''),
@@ -526,6 +608,24 @@ function toCandidateFromResult(result) {
     latencyMs: Number(result.latencyMs) || 0,
     usage: result.usage ? buildUsageSubdoc(result.usage) : null,
   };
+}
+
+function normalizeProviderThinking(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized = {};
+  for (const [provider, thinking] of Object.entries(value)) {
+    if (typeof thinking !== 'string') continue;
+    if (!thinking.trim()) continue;
+    normalized[provider] = thinking;
+  }
+  return normalized;
+}
+
+function getProviderThinking(providerThinking, provider, fallback = '') {
+  if (provider && typeof providerThinking?.[provider] === 'string' && providerThinking[provider].trim()) {
+    return providerThinking[provider];
+  }
+  return typeof fallback === 'string' ? fallback : '';
 }
 
 function safeString(value, fallback = '') {
@@ -536,6 +636,16 @@ function safeString(value, fallback = '') {
   } catch {
     return fallback;
   }
+}
+
+function normalizeConversationListTitle(title, lastPreview) {
+  const normalizedTitle = safeString(title, '').trim();
+  if (normalizedTitle) return normalizedTitle;
+
+  const normalizedPreview = safeString(lastPreview, '').trim();
+  if (normalizedPreview) return normalizedPreview;
+
+  return 'Untitled conversation';
 }
 
 function escapeRegexLiteral(value) {
@@ -717,6 +827,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     conversationId,
     message,
     images: requestedImages,
+    imageMeta: clientImageMeta,
     provider, // backward-compat alias for primaryProvider
     mode,
     primaryProvider,
@@ -729,6 +840,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   const runtimeSettings = normalizeChatRuntimeSettings(rawSettings);
   const normalizedImagesResult = normalizeChatImages(requestedImages);
   const normalizedImages = normalizedImagesResult.ok ? normalizedImagesResult.images : [];
+  const normalizedClientImageMeta = Array.isArray(clientImageMeta) ? clientImageMeta : [];
 
   if (!normalizedImagesResult.ok) {
     return res.status(400).json({
@@ -830,6 +942,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     role: 'user',
     content: message || '(image attached)',
     images: normalizedImages,
+    imageMeta: normalizedClientImageMeta,
+    traceRequestId: req.requestId,
     timestamp: new Date(),
   };
 
@@ -860,7 +974,73 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     });
   }
 
+  const traceStartedAt = new Date();
+  const trace = await createTrace({
+    requestId: req.requestId,
+    service: 'chat',
+    route: '/api/chat',
+    turnKind: 'send',
+    conversationId: conversation._id,
+    promptPreview: safeString(message || userMsg.content, ''),
+    messageLength: safeString(message || userMsg.content, '').length,
+    normalizedImages,
+    clientImageMeta: normalizedClientImageMeta,
+    requested: {
+      mode: requestedMode,
+      reasoningEffort: effectiveReasoningEffort,
+      timeoutMs: effectiveTimeoutMs,
+      primaryProvider: requestedPrimaryProvider,
+      fallbackProvider: requestedFallback,
+      parallelProviders: parallelProviders || [],
+    },
+    resolved: {
+      mode: policy.mode,
+      reasoningEffort: effectiveReasoningEffort,
+      timeoutMs: effectiveTimeoutMs,
+      primaryProvider: policy.primaryProvider,
+      fallbackProvider: policy.fallbackProvider,
+      parallelProviders: policy.parallelProviders || [],
+    },
+  }).catch(() => null);
+  await appendTraceEvent(trace?._id, {
+    key: 'request_received',
+    label: 'Request received',
+    status: 'info',
+    provider: policy.primaryProvider,
+    model: getProviderModelId(policy.primaryProvider),
+    message: `Chat request queued for ${policy.primaryProvider}.`,
+  }, traceStartedAt);
+  await appendTraceEvent(trace?._id, {
+    key: 'context_built',
+    label: 'Context built',
+    status: 'info',
+    message: `Prepared ${contextBundle.messagesForModel.length} message(s) for the model.`,
+    detail: {
+      knowledgeMode: contextBundle.contextDebug?.knowledgeMode || '',
+      estimatedInputTokens: contextBundle.contextDebug?.budgets?.estimatedInputTokens || 0,
+    },
+  }, traceStartedAt);
+
   if (guardrail.blocked) {
+    await appendTraceEvent(trace?._id, {
+      key: 'guardrail_blocked',
+      label: 'Budget guardrail blocked request',
+      status: 'error',
+      code: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
+      message: guardrail.blockError || 'Budget guardrail blocked request',
+      detail: guardrail.costEstimate || null,
+    }, traceStartedAt);
+    await patchTrace(trace?._id, {
+      status: 'error',
+      outcome: buildOutcome({
+        providerUsed: policy.primaryProvider,
+        modelUsed: getProviderModelId(policy.primaryProvider),
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+        errorCode: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
+        errorMessage: guardrail.blockError || 'Budget guardrail blocked request',
+      }),
+    });
     if (isNewConversation && conversation.messages.length === 0) {
       await Conversation.findByIdAndDelete(conversation._id).catch(() => {});
     }
@@ -875,6 +1055,24 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 
   if (policy.mode === 'parallel') {
     if (!isParallelModeEnabled()) {
+      await appendTraceEvent(trace?._id, {
+        key: 'parallel_disabled',
+        label: 'Parallel mode disabled',
+        status: 'error',
+        code: 'PARALLEL_MODE_DISABLED',
+        message: 'Parallel mode is disabled',
+      }, traceStartedAt);
+      await patchTrace(trace?._id, {
+        status: 'error',
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - traceStartedAt.getTime(),
+          completedAt: new Date(),
+          errorCode: 'PARALLEL_MODE_DISABLED',
+          errorMessage: 'Parallel mode is disabled',
+        }),
+      });
       if (isNewConversation && conversation.messages.length === 0) {
         await Conversation.findByIdAndDelete(conversation._id).catch(() => {});
       }
@@ -887,6 +1085,24 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     const openTurnLimit = getParallelOpenTurnLimit();
     const openTurnCount = await ParallelCandidateTurn.countDocuments({ service: 'chat', status: 'open' });
     if (openTurnCount >= openTurnLimit) {
+      await appendTraceEvent(trace?._id, {
+        key: 'parallel_limit',
+        label: 'Parallel turn limit reached',
+        status: 'error',
+        code: 'PARALLEL_TURN_LIMIT',
+        message: `Parallel open-turn limit reached (${openTurnLimit})`,
+      }, traceStartedAt);
+      await patchTrace(trace?._id, {
+        status: 'error',
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - traceStartedAt.getTime(),
+          completedAt: new Date(),
+          errorCode: 'PARALLEL_TURN_LIMIT',
+          errorMessage: `Parallel open-turn limit reached (${openTurnLimit})`,
+        }),
+      });
       if (isNewConversation && conversation.messages.length === 0) {
         await Conversation.findByIdAndDelete(conversation._id).catch(() => {});
       }
@@ -898,20 +1114,51 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }
   }
 
-  let imageTriageContext = null;
+  // Set up SSE headers IMMEDIATELY so the client knows the connection is alive
+  // before the potentially slow triage parse begins.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
   if (normalizedImages.length > 0) {
-    imageTriageContext = await buildImageTriageContext({
+    // Emit a status event so the client sees activity during triage
+    try {
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation image...' }) + '\n\n');
+    } catch { /* client disconnected */ }
+    await appendTraceEvent(trace?._id, {
+      key: 'triage_started',
+      label: 'Image triage started',
+      status: 'info',
+      provider: policy.primaryProvider,
+      model: getProviderModelId(policy.primaryProvider),
+      message: 'Running the lightweight pre-response image triage.',
+    }, traceStartedAt);
+  }
+  // When images are present, await triage BEFORE starting chat so parsed data
+  // can be injected into the system prompt. This changes the flow from parallel
+  // (triage + chat racing) to sequential (triage -> chat) for image turns only.
+  const imageTriageContext = normalizedImages.length > 0
+    ? await buildImageTriageContext({
       images: normalizedImages,
       mode: policy.mode,
       primaryProvider: policy.primaryProvider,
       fallbackProvider: policy.fallbackProvider,
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
-    });
-  }
-  const effectiveSystemPrompt = normalizedImages.length > 0
+    }).catch(() => null)
+    : null;
+  let effectiveSystemPrompt = normalizedImages.length > 0
     ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
     : contextBundle.systemPrompt;
+  // Inject pre-parsed triage fields into the system prompt so Claude has
+  // canonical reference data instead of squinting at the image.
+  if (imageTriageContext && imageTriageContext.parseFields) {
+    const refBlock = buildTriageRefBlock(imageTriageContext.parseFields);
+    if (refBlock) effectiveSystemPrompt = effectiveSystemPrompt + refBlock;
+  }
 
   if (conversation.provider !== policy.primaryProvider) {
     conversation.provider = policy.primaryProvider;
@@ -920,14 +1167,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   // Save user message once context/guardrails are resolved.
   conversation.messages.push(userMsg);
   await saveConversationLenient(conversation);
-
-  // Set up SSE headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
+  await appendTraceEvent(trace?._id, {
+    key: 'user_message_saved',
+    label: 'User message saved',
+    status: 'info',
+    message: 'Conversation state persisted before streaming started.',
+  }, traceStartedAt);
   const requestTurnId = policy.mode === 'parallel' ? randomUUID() : null;
 
   if (requestTurnId) {
@@ -949,11 +1194,21 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }
 
   const contextDebugPayload = buildContextDebugPayload(runtimeSettings, contextBundle.contextDebug, guardrail.costEstimate);
+  let responseClosed = false;
 
   // Send start event with conversation ID
+  await appendTraceEvent(trace?._id, {
+    key: 'request_accepted',
+    label: 'Request accepted',
+    status: 'info',
+    provider: policy.primaryProvider,
+    model: getProviderModelId(policy.primaryProvider),
+    message: 'SSE stream opened and request accepted by the server.',
+  }, traceStartedAt);
   res.write('event: start\ndata: ' + JSON.stringify({
     conversationId: conversation._id.toString(),
     requestId: req.requestId,
+    traceId: trace ? trace._id.toString() : null,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
@@ -963,19 +1218,89 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
-  if (imageTriageContext && imageTriageContext.triageCard) {
-    try {
-      res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
-    } catch { /* client disconnected */ }
+  // Triage is already awaited — emit trace events and triage card SSE synchronously.
+  if (imageTriageContext) {
+    const triageMeta = imageTriageContext.parseMeta;
+    patchTrace(trace?._id, {
+      triage: buildParseStage(
+        triageMeta,
+        triageMeta ? 'ok' : 'error',
+        {
+          latencyMs: imageTriageContext.elapsedMs || 0,
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+          card: imageTriageContext.triageCard || null,
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
+        }
+      ),
+    }).catch(() => {});
+    appendTraceEvent(trace?._id, {
+      key: triageMeta ? 'triage_completed' : 'triage_failed',
+      label: triageMeta ? 'Image triage completed' : 'Image triage failed',
+      status: triageMeta ? 'success' : 'error',
+      provider: triageMeta?.providerUsed || policy.primaryProvider,
+      model: getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
+      code: imageTriageContext.error?.code || '',
+      message: triageMeta
+        ? `Image triage completed in ${imageTriageContext.elapsedMs || 0}ms.`
+        : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
+      detail: triageMeta?.validation || imageTriageContext.error || null,
+    }, traceStartedAt).catch(() => {});
+    if (!responseClosed && imageTriageContext.triageCard) {
+      try {
+        res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
+      } catch { /* client disconnected */ }
+    }
   }
   const turnStartedAt = Date.now();
   const requestId = req.requestId;
   let streamSettled = false;
+  const traceStats = {
+    chunkCount: 0,
+    chunkChars: 0,
+    thinkingChunkCount: 0,
+    providerErrors: 0,
+    fallbacks: 0,
+  };
+  let firstThinkingMs = 0;
+  let firstChunkMs = 0;
+  const runtimeOperation = createAiOperation({
+    kind: 'chat',
+    route: '/api/chat',
+    action: 'chat',
+    provider: policy.primaryProvider,
+    mode: policy.mode,
+    conversationId: conversation._id.toString(),
+    promptPreview: safeString(userMsg.content, ''),
+    hasImages: normalizedImages.length > 0,
+    messageCount: contextBundle.messagesForModel.length,
+    providers: (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]).filter(Boolean),
+  });
+  const runtimeOperationId = runtimeOperation.id;
 
   // Set up heartbeat
   const heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
   }, 15000);
+
+  // SSE safety timeout — force-close if stream never settles
+  const sseSafetyTimeout = setTimeout(() => {
+    if (streamSettled || responseClosed) return;
+    console.error('[chat] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
+    streamSettled = true;
+    clearInterval(heartbeat);
+    try {
+      res.write('event: error\ndata: ' + JSON.stringify({
+        error: 'Request timed out — please try again',
+        code: 'SSE_STREAM_TIMEOUT',
+      }) + '\n\n');
+      res.end();
+    } catch { /* client already gone */ }
+    if (cleanupFn) {
+      try { cleanupFn(); } catch { /* ignore */ }
+    }
+  }, SSE_SAFETY_TIMEOUT_MS);
 
   const cleanupFn = startChatOrchestration({
     mode: policy.mode,
@@ -988,21 +1313,84 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
+      recordAiChunk(runtimeOperationId, text, { provider: chunkProvider });
+      traceStats.chunkCount += 1;
+      traceStats.chunkChars += typeof text === 'string' ? text.length : 0;
+      if (!firstChunkMs) {
+        firstChunkMs = Date.now() - turnStartedAt;
+        appendTraceEvent(trace?._id, {
+          key: 'first_output',
+          label: 'First output chunk',
+          status: 'info',
+          provider: chunkProvider,
+          model: getProviderModelId(chunkProvider),
+          message: `First output chunk arrived from ${chunkProvider}.`,
+          elapsedMs: firstChunkMs,
+        }, traceStartedAt).catch(() => {});
+      }
       try {
         res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onThinkingChunk: ({ provider: thinkingProvider, thinking }) => {
+      recordAiChunk(runtimeOperationId, thinking, { provider: thinkingProvider, thinking: true });
+      traceStats.thinkingChunkCount += 1;
+      if (!firstThinkingMs) {
+        firstThinkingMs = Date.now() - turnStartedAt;
+        appendTraceEvent(trace?._id, {
+          key: 'first_thinking',
+          label: 'First reasoning chunk',
+          status: 'info',
+          provider: thinkingProvider,
+          model: getProviderModelId(thinkingProvider),
+          message: `First reasoning chunk arrived from ${thinkingProvider}.`,
+          elapsedMs: firstThinkingMs,
+        }, traceStartedAt).catch(() => {});
+      }
       try {
         res.write('event: thinking\ndata: ' + JSON.stringify({ provider: thinkingProvider, thinking }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onProviderError: (data) => {
+      traceStats.providerErrors += 1;
+      recordAiEvent(runtimeOperationId, 'provider_error', {
+        provider: data && data.provider ? data.provider : null,
+        lastError: data ? {
+          code: data.code || 'PROVIDER_EXEC_FAILED',
+          message: data.message || 'Provider failed',
+          detail: data.detail || '',
+        } : null,
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'provider_error',
+        label: 'Provider attempt failed',
+        status: 'error',
+        provider: data && data.provider ? data.provider : '',
+        model: getProviderModelId(data && data.provider ? data.provider : ''),
+        code: data && data.code ? data.code : 'PROVIDER_EXEC_FAILED',
+        message: data && data.message ? data.message : 'Provider failed',
+        detail: data || null,
+      }, traceStartedAt).catch(() => {});
       try {
         res.write('event: provider_error\ndata: ' + JSON.stringify(data) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onFallback: (data) => {
+      traceStats.fallbacks += 1;
+      recordAiEvent(runtimeOperationId, 'fallback', {
+        provider: data && data.from ? data.from : null,
+        to: data && data.to ? data.to : null,
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'fallback',
+        label: 'Fallback engaged',
+        status: 'warning',
+        provider: data && data.to ? data.to : '',
+        model: getProviderModelId(data && data.to ? data.to : ''),
+        code: data && data.reason ? data.reason : 'PROVIDER_ERROR',
+        message: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
+        detail: data || null,
+      }, traceStartedAt).catch(() => {});
       try {
         res.write('event: fallback\ndata: ' + JSON.stringify(data) + '\n\n');
       } catch { /* client disconnected */ }
@@ -1010,9 +1398,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     onDone: async (data) => {
       streamSettled = true;
       clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(runtimeOperationId, 'saving', {
+        provider: data && data.providerUsed ? data.providerUsed : policy.primaryProvider,
+      });
       const latencyMs = Date.now() - turnStartedAt;
+      // imageTriageContext is already resolved in the outer scope (awaited before orchestration).
       const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
       const attempts = compliantData.attempts || [];
+      const providerThinking = normalizeProviderThinking(compliantData.providerThinking);
       logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });
       logChatTurn({
         route: '/api/chat',
@@ -1027,6 +1421,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         errorCode: null,
         attempts: attempts.length,
       });
+      // Extract quick-action suggestions from the final response text (non-parallel only)
+      const quickActions = (compliantData.mode !== 'parallel')
+        ? extractQuickActions(compliantData.fullResponse)
+        : [];
+
       try {
         if (compliantData.mode === 'parallel' && Array.isArray(compliantData.results)) {
           const turnId = compliantData.turnId || requestTurnId || randomUUID();
@@ -1053,10 +1452,17 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             conversation.messages.push({
               role: 'assistant',
               content: result.fullResponse,
+              thinking: getProviderThinking(providerThinking, result.provider, result.thinking || ''),
               provider: result.provider,
               mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
-              attemptMeta: { attempts: compliantData.attempts || [], parallel: true, turnId },
+              traceRequestId: req.requestId,
+              attemptMeta: {
+                attempts: compliantData.attempts || [],
+                parallel: true,
+                turnId,
+                ...(Object.keys(providerThinking).length > 0 ? { providerThinking } : {}),
+              },
               usage: buildUsageSubdoc(result.usage),
               timestamp: new Date(),
             });
@@ -1065,10 +1471,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           conversation.messages.push({
             role: 'assistant',
             content: compliantData.fullResponse,
+            thinking: getProviderThinking(providerThinking, compliantData.providerUsed, compliantData.thinking || ''),
             provider: compliantData.providerUsed,
             mode: compliantData.mode || policy.mode,
             fallbackFrom: compliantData.fallbackFrom || null,
-            attemptMeta: { attempts: compliantData.attempts || [] },
+            traceRequestId: req.requestId,
+            attemptMeta: {
+              attempts: compliantData.attempts || [],
+              ...(Object.keys(providerThinking).length > 0 ? { providerThinking } : {}),
+              ...(quickActions.length > 0 ? { quickActions } : {}),
+            },
             usage: buildUsageSubdoc(compliantData.usage),
             timestamp: new Date(),
           });
@@ -1080,11 +1492,73 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         }
 
         await saveConversationLenient(conversation);
+        await setTraceAttempts(trace?._id, attempts);
+        await setTraceUsage(trace?._id, compliantData.usage);
+        await patchTrace(trace?._id, {
+          status: 'ok',
+          responseChars: sumResponseChars(compliantData),
+          stats: buildTraceStats(traceStats),
+          outcome: buildOutcome({
+            providerUsed: compliantData.providerUsed || policy.primaryProvider,
+            modelUsed: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            winner: compliantData.providerUsed || policy.primaryProvider,
+            fallbackUsed: Boolean(compliantData.fallbackUsed),
+            fallbackFrom: compliantData.fallbackFrom || null,
+            responseRepaired: Boolean(compliantData.responseRepaired),
+            totalMs: latencyMs,
+            firstThinkingMs,
+            firstChunkMs,
+            completedAt: new Date(),
+          }),
+        });
+        await appendTraceEvent(trace?._id, {
+          key: 'conversation_saved',
+          label: 'Conversation saved',
+          status: 'success',
+          provider: compliantData.providerUsed || policy.primaryProvider,
+          model: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+          message: `Saved response and conversation state in ${latencyMs}ms.`,
+          elapsedMs: latencyMs,
+          detail: {
+            attempts: attempts.length,
+            responseRepaired: Boolean(compliantData.responseRepaired),
+            usage: summarizeUsage(compliantData.usage),
+          },
+        }, traceStartedAt);
+
+        // Fire-and-forget: archive images to disk with full metadata
+        if (normalizedImages.length > 0) {
+          try {
+            const userMsgIndex = conversation.messages.length - (
+              compliantData.mode === 'parallel' && Array.isArray(compliantData.results)
+                ? compliantData.results.filter((r) => r.status === 'ok').length + 1
+                : 2
+            );
+            const archiveModelParsing = compliantData.fullResponse
+              || (Array.isArray(compliantData.results) && compliantData.results.find((r) => r.status === 'ok')?.fullResponse)
+              || '';
+            archiveImages({
+              conversationId: conversation._id.toString(),
+              messageIndex: Math.max(0, userMsgIndex),
+              images: normalizedImages,
+              userPrompt: safeString(message, ''),
+              modelParsing: archiveModelParsing,
+              parseFields: imageTriageContext && imageTriageContext.parseFields ? imageTriageContext.parseFields : null,
+              triageCard: imageTriageContext && imageTriageContext.triageCard ? imageTriageContext.triageCard : null,
+              provider: compliantData.providerUsed || policy.primaryProvider,
+              usage: compliantData.usage || null,
+              timestamp: userMsg.timestamp,
+            });
+          } catch (archiveErr) {
+            console.warn('[image-archive] Failed to archive chat images:', archiveErr.message);
+          }
+        }
 
         try {
           const usagePayload = buildUsageSubdoc(compliantData.usage);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
+            traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
             fallbackUsed: compliantData.fallbackUsed,
@@ -1092,6 +1566,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             mode: compliantData.mode || policy.mode,
             turnId: compliantData.mode === 'parallel' ? (compliantData.turnId || requestTurnId) : null,
             attempts: compliantData.attempts || [],
+            thinking: compliantData.thinking || '',
+            providerThinking,
             fullResponse: compliantData.fullResponse,
             results: Array.isArray(compliantData.results) ? compliantData.results.map(r => ({
               ...r,
@@ -1102,10 +1578,42 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             responseRepaired: Boolean(compliantData.responseRepaired),
             warnings: guardrail.warnings || [],
             contextDebug: contextDebugPayload,
+            citations: contextBundle.citations || [],
+            quickActions,
           }) + '\n\n');
           res.end();
         } catch { /* client gone */ }
       } catch (onDoneErr) {
+        patchTrace(trace?._id, {
+          status: 'error',
+          stats: buildTraceStats(traceStats),
+          outcome: buildOutcome({
+            providerUsed: policy.primaryProvider,
+            modelUsed: getProviderModelId(policy.primaryProvider),
+            totalMs: Date.now() - turnStartedAt,
+            firstThinkingMs,
+            firstChunkMs,
+            completedAt: new Date(),
+            errorCode: 'ONDONE_SAVE_FAILED',
+            errorMessage: onDoneErr.message || 'Failed to save chat conversation',
+          }),
+        }).catch(() => {});
+        appendTraceEvent(trace?._id, {
+          key: 'save_failed',
+          label: 'Conversation save failed',
+          status: 'error',
+          provider: policy.primaryProvider,
+          model: getProviderModelId(policy.primaryProvider),
+          code: 'ONDONE_SAVE_FAILED',
+          message: onDoneErr.message || 'Failed to save chat conversation',
+        }, traceStartedAt).catch(() => {});
+        reportServerError({
+          route: '/api/chat',
+          message: onDoneErr.message || 'Failed to save chat conversation',
+          code: 'ONDONE_SAVE_FAILED',
+          detail: onDoneErr.stack || '',
+          severity: 'error',
+        });
         try {
           res.write('event: error\ndata: ' + JSON.stringify({
             error: onDoneErr.message || 'Failed to save conversation',
@@ -1113,11 +1621,21 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           }) + '\n\n');
           res.end();
         } catch { /* client gone */ }
+      } finally {
+        deleteAiOperation(runtimeOperationId);
       }
     },
     onError: (err) => {
       streamSettled = true;
       clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(runtimeOperationId, 'error', {
+        lastError: {
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          message: err.message || 'Chat failed',
+          detail: err.detail || '',
+        },
+      });
       const latencyMs = Date.now() - turnStartedAt;
       const attempts = err.attempts || [];
       logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: policy.mode });
@@ -1133,6 +1651,43 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         latencyMs,
         errorCode: err.code || 'PROVIDER_EXEC_FAILED',
         attempts: attempts.length,
+      });
+      setTraceAttempts(trace?._id, attempts).catch(() => {});
+      patchTrace(trace?._id, {
+        status: 'error',
+        stats: buildTraceStats(traceStats),
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: latencyMs,
+          firstThinkingMs,
+          firstChunkMs,
+          completedAt: new Date(),
+          errorCode: err.code || 'PROVIDER_EXEC_FAILED',
+          errorMessage: err.message || 'Chat failed',
+        }),
+      }).catch(() => {});
+      appendTraceEvent(trace?._id, {
+        key: 'request_failed',
+        label: 'Request failed',
+        status: 'error',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: err.code || 'PROVIDER_EXEC_FAILED',
+        message: err.message || 'Chat failed',
+        detail: {
+          attempts,
+          firstThinkingMs,
+          firstChunkMs,
+        },
+        elapsedMs: latencyMs,
+      }, traceStartedAt).catch(() => {});
+      reportServerError({
+        route: '/api/chat',
+        message: err.message || 'Chat failed',
+        code: err.code || 'PROVIDER_EXEC_FAILED',
+        detail: err.detail || '',
+        severity: 'error',
       });
       if (requestTurnId && policy.mode === 'parallel') {
         ParallelCandidateTurn.findOneAndUpdate(
@@ -1168,9 +1723,82 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
     },
     onAbort: (abortData) => {
+      if (streamSettled) return;
+      streamSettled = true;
+      clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(runtimeOperationId, 'aborting', {
+        lastError: {
+          code: 'CLIENT_ABORT',
+          message: 'Chat request aborted',
+          detail: '',
+        },
+      });
       logAttemptsUsage(abortData.attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: policy.mode });
+      setTraceAttempts(trace?._id, abortData.attempts || []).catch(() => {});
+      patchTrace(trace?._id, {
+        status: 'aborted',
+        stats: buildTraceStats(traceStats),
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - turnStartedAt,
+          firstThinkingMs,
+          firstChunkMs,
+          completedAt: new Date(),
+          errorCode: 'CLIENT_ABORT',
+          errorMessage: 'Chat request aborted before completion',
+        }),
+      }).catch(() => {});
+      appendTraceEvent(trace?._id, {
+        key: 'request_aborted',
+        label: 'Request aborted',
+        status: 'warning',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: 'CLIENT_ABORT',
+        message: 'Chat request aborted before completion',
+        detail: { attempts: abortData.attempts || [] },
+      }, traceStartedAt).catch(() => {});
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          error: 'Chat request aborted before completion',
+          code: 'CLIENT_ABORT',
+          attempts: abortData.attempts || [],
+          warnings: guardrail.warnings || [],
+          contextDebug: contextDebugPayload,
+        }) + '\n\n');
+        res.end();
+      } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
+    },
+  });
+  attachAiOperationController(runtimeOperationId, {
+    abort: (reason = 'Chat request aborted by supervisor') => {
+      if (streamSettled) return;
+      streamSettled = true;
+      clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      updateAiOperation(runtimeOperationId, {
+        phase: 'aborting',
+        lastError: {
+          code: 'AUTO_ABORT',
+          message: reason,
+          detail: '',
+        },
+      });
+      if (cleanupFn) cleanupFn();
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          error: reason,
+          code: 'AUTO_ABORT',
+        }) + '\n\n');
+        res.end();
+      } catch { /* client disconnected */ }
+      deleteAiOperation(runtimeOperationId);
     },
   });
 
@@ -1181,8 +1809,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   // register a listener. The response stream's 'close' event correctly fires
   // when the underlying TCP socket is torn down (e.g. client tab close).
   res.on('close', () => {
+    responseClosed = true;
     clearInterval(heartbeat);
-    if (!streamSettled && cleanupFn) cleanupFn();
+    clearTimeout(sseSafetyTimeout);
+    if (!streamSettled) {
+      updateAiOperation(runtimeOperationId, {
+        clientConnected: false,
+        phase: 'aborting',
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'client_disconnected',
+        label: 'Client disconnected',
+        status: 'warning',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: 'CLIENT_DISCONNECTED',
+        message: 'The client connection closed before the request settled.',
+      }, traceStartedAt).catch(() => {});
+      if (cleanupFn) cleanupFn();
+    }
   });
 });
 
@@ -1190,6 +1835,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
   const {
     image,
+    imageMeta,
     text,
     mode,
     provider, // backward-compatible alias for primaryProvider
@@ -1216,23 +1862,131 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_MODE', error: 'Unsupported parse mode' });
   }
 
-  const parseRequestId = randomUUID();
+  const parseRequestId = req.requestId || randomUUID();
   const resolvedMode = resolveParseMode(mode);
+  const traceStartedAt = new Date();
+  const selectedProvider = primaryProvider || provider || DEFAULT_PROVIDER;
+  const normalizedClientImageMeta = Array.isArray(imageMeta) ? imageMeta : [];
+  const parseRuntimeOperation = createAiOperation({
+    kind: 'parse',
+    route: '/api/chat/parse-escalation',
+    action: 'chat-parse-escalation',
+    provider: selectedProvider,
+    mode: resolvedMode,
+    promptPreview: text || '[image parse]',
+    hasImages: Boolean(image),
+    messageCount: text ? 1 : 0,
+    providers: [selectedProvider, fallbackProvider].filter(Boolean),
+  });
+  const parseRuntimeOperationId = parseRuntimeOperation.id;
+  const trace = await createTrace({
+    requestId: parseRequestId,
+    service: 'parse',
+    route: '/api/chat/parse-escalation',
+    turnKind: 'parse',
+    promptPreview: text || '[image parse]',
+    messageLength: typeof text === 'string' ? text.length : 0,
+    normalizedImages: image ? [image] : [],
+    clientImageMeta: normalizedClientImageMeta,
+    requested: {
+      mode: resolvedMode,
+      reasoningEffort,
+      timeoutMs,
+      primaryProvider: selectedProvider,
+      fallbackProvider,
+    },
+    resolved: {
+      mode: resolvedMode,
+      reasoningEffort,
+      timeoutMs,
+      primaryProvider: selectedProvider,
+      fallbackProvider,
+    },
+  }).catch(() => null);
+  await appendTraceEvent(trace?._id, {
+    key: 'parse_request_received',
+    label: 'Parse request received',
+    status: 'info',
+    provider: selectedProvider,
+    model: getProviderModelId(selectedProvider),
+    message: image
+      ? 'Received chat-side image escalation parse request.'
+      : 'Received chat-side text escalation parse request.',
+  }, traceStartedAt).catch(() => null);
+  let parseSettled = false;
+  res.on('close', () => {
+    if (parseSettled) return;
+    updateAiOperation(parseRuntimeOperationId, {
+      clientConnected: false,
+      phase: 'aborting',
+    });
+    patchTrace(trace?._id, {
+      status: 'aborted',
+      postParse: buildParseStage(
+        {
+          mode: resolvedMode,
+          providerUsed: selectedProvider,
+          attempts: [],
+        },
+        'error',
+        {
+          traceId: trace?._id,
+          latencyMs: Date.now() - traceStartedAt.getTime(),
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+        }
+      ),
+      outcome: buildOutcome({
+        providerUsed: selectedProvider,
+        modelUsed: getProviderModelId(selectedProvider),
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+        errorCode: 'CLIENT_DISCONNECTED',
+        errorMessage: 'The client connection closed before parse completed.',
+      }),
+    }).catch(() => null);
+    appendTraceEvent(trace?._id, {
+      key: 'client_disconnected',
+      label: 'Client disconnected',
+      status: 'warning',
+      provider: selectedProvider,
+      model: getProviderModelId(selectedProvider),
+      code: 'CLIENT_DISCONNECTED',
+      message: 'The client connection closed before the parse request settled.',
+    }, traceStartedAt).catch(() => null);
+  });
   try {
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_started',
+      label: 'Provider parse started',
+      status: 'info',
+      provider: selectedProvider,
+      model: getProviderModelId(selectedProvider),
+      message: 'Running provider-orchestrated chat parse.',
+    }, traceStartedAt).catch(() => null);
     const parseResult = await parseWithPolicy({
       image,
       text,
       mode: resolvedMode,
-      primaryProvider: primaryProvider || provider || DEFAULT_PROVIDER,
+      primaryProvider: selectedProvider,
       fallbackProvider,
       reasoningEffort,
       timeoutMs,
       allowRegexFallback: true,
     });
     const responseMeta = toParseResponseMeta(parseResult.meta);
+    await setTraceAttempts(trace?._id, parseResult.meta?.attempts || []).catch(() => null);
+    await setTraceUsage(
+      trace?._id,
+      (responseMeta.attempts || []).find((attempt) => attempt.status === 'ok' && attempt.provider === responseMeta.providerUsed)?.usage || null
+    ).catch(() => null);
+    recordAiEvent(parseRuntimeOperationId, 'saving', {
+      provider: responseMeta.providerUsed || selectedProvider,
+    });
 
+    let escalation = null;
     if (persist) {
-      const escalation = new Escalation({
+      escalation = new Escalation({
         ...parseResult.fields,
         source: image ? 'screenshot' : 'chat',
         parseMeta: {
@@ -1250,15 +2004,123 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
       });
       await escalation.save();
       logAttemptsUsage(parseResult.meta.attempts, { requestId: parseRequestId, service: 'parse', escalationId: escalation._id, mode: resolvedMode });
-      return res.status(201).json({ ok: true, escalation: escalation.toObject(), _meta: responseMeta });
+      await appendTraceEvent(trace?._id, {
+        key: 'parse_persisted',
+        label: 'Escalation persisted',
+        status: 'success',
+        provider: responseMeta.providerUsed || selectedProvider,
+        model: getProviderModelId(responseMeta.providerUsed || selectedProvider),
+        message: 'Structured parse was saved as an escalation record.',
+        detail: { escalationId: escalation._id },
+      }, traceStartedAt).catch(() => null);
+    } else {
+      logAttemptsUsage(parseResult.meta.attempts, { requestId: parseRequestId, service: 'parse', mode: resolvedMode });
     }
-
-    logAttemptsUsage(parseResult.meta.attempts, { requestId: parseRequestId, service: 'parse', mode: resolvedMode });
-    return res.json({ ok: true, escalation: parseResult.fields, _meta: responseMeta });
+    await patchTrace(trace?._id, {
+      status: 'ok',
+      escalationId: escalation?._id || null,
+      postParse: buildParseStage(responseMeta, 'ok', {
+        traceId: trace?._id,
+        latencyMs: Date.now() - traceStartedAt.getTime(),
+        startedAt: traceStartedAt,
+        completedAt: new Date(),
+        escalationId: escalation?._id || null,
+      }),
+      outcome: buildOutcome({
+        providerUsed: responseMeta.providerUsed || selectedProvider,
+        modelUsed: getProviderModelId(responseMeta.providerUsed || selectedProvider),
+        winner: responseMeta.winner || responseMeta.providerUsed,
+        fallbackUsed: Boolean(responseMeta.fallbackUsed),
+        fallbackFrom: responseMeta.fallbackFrom || '',
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+      }),
+    }).catch(() => null);
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_completed',
+      label: 'Structured parse completed',
+      status: 'success',
+      provider: responseMeta.providerUsed || selectedProvider,
+      model: getProviderModelId(responseMeta.providerUsed || selectedProvider),
+      message: 'Structured parse completed successfully.',
+      detail: responseMeta.validation || null,
+    }, traceStartedAt).catch(() => null);
+    parseSettled = true;
+    recordAiEvent(parseRuntimeOperationId, 'completed', {
+      provider: responseMeta.providerUsed || selectedProvider,
+    });
+    deleteAiOperation(parseRuntimeOperationId);
+    if (persist) {
+      return res.status(201).json({
+        ok: true,
+        escalation: escalation.toObject(),
+        _meta: responseMeta,
+        traceId: trace ? trace._id.toString() : null,
+      });
+    }
+    return res.json({
+      ok: true,
+      escalation: parseResult.fields,
+      _meta: responseMeta,
+      traceId: trace ? trace._id.toString() : null,
+    });
   } catch (err) {
     if (err && Array.isArray(err.attempts)) {
       logAttemptsUsage(err.attempts, { requestId: parseRequestId, service: 'parse', mode: resolvedMode });
     }
+    await setTraceAttempts(trace?._id, err && Array.isArray(err.attempts) ? err.attempts : []).catch(() => null);
+    await patchTrace(trace?._id, {
+      status: 'error',
+      postParse: buildParseStage(
+        {
+          mode: resolvedMode,
+          providerUsed: selectedProvider,
+          attempts: err && Array.isArray(err.attempts) ? err.attempts : [],
+        },
+        'error',
+        {
+          traceId: trace?._id,
+          latencyMs: Date.now() - traceStartedAt.getTime(),
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+        }
+      ),
+      outcome: buildOutcome({
+        providerUsed: selectedProvider,
+        modelUsed: getProviderModelId(selectedProvider),
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+        errorCode: err && err.code ? err.code : 'PARSE_FAILED',
+        errorMessage: err && err.message ? err.message : 'Failed to parse escalation',
+      }),
+    }).catch(() => null);
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_failed',
+      label: 'Structured parse failed',
+      status: 'error',
+      provider: selectedProvider,
+      model: getProviderModelId(selectedProvider),
+      code: err && err.code ? err.code : 'PARSE_FAILED',
+      message: err && err.message ? err.message : 'Failed to parse escalation',
+      detail: { attempts: err && Array.isArray(err.attempts) ? err.attempts : [] },
+    }, traceStartedAt).catch(() => null);
+    parseSettled = true;
+    recordAiEvent(parseRuntimeOperationId, 'error', {
+      provider: selectedProvider,
+      lastError: {
+        code: err && err.code ? err.code : 'PARSE_FAILED',
+        message: err && err.message ? err.message : 'Failed to parse escalation',
+        detail: '',
+      },
+    });
+    reportServerError({
+      route: '/api/chat/parse-escalation',
+      message: err && err.message ? err.message : 'Failed to parse escalation',
+      code: err && err.code ? err.code : 'PARSE_FAILED',
+      detail: err && err.stack ? err.stack : '',
+      severity: 'error',
+    });
+    deleteAiOperation(parseRuntimeOperationId);
     const code = err && err.code ? err.code : 'PARSE_FAILED';
     const status = code === 'PARSE_FAILED' ? 422 : 500;
     return res.status(status).json({
@@ -1266,6 +2128,7 @@ chatRouter.post('/parse-escalation', parseRateLimit, async (req, res) => {
       code,
       error: err && err.message ? err.message : 'Failed to parse escalation',
       attempts: err && Array.isArray(err.attempts) ? err.attempts : [],
+      traceId: trace ? trace._id.toString() : null,
     });
   }
 });
@@ -1287,6 +2150,7 @@ conversationsRouter.get('/', async (req, res) => {
     : 50;
   const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : 0;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const includeTotal = safeString(req.query.includeTotal, '') === '1';
   const escapedSearch = escapeRegexLiteral(search);
 
   const filter = escapedSearch
@@ -1294,49 +2158,42 @@ conversationsRouter.get('/', async (req, res) => {
     : {};
 
   try {
-    // Aggregation computes messageCount and lastMessage server-side,
-    // avoiding transfer of the full messages array per conversation.
-    const [conversations, countResult] = await Promise.all([
-      Conversation.aggregate([
-        { $match: filter },
-        { $sort: { updatedAt: -1 } },
-        { $skip: skip },
-        { $limit: limit },
-        { $project: {
-          title: 1,
-          provider: 1,
-          escalationId: 1,
-          createdAt: 1,
-          updatedAt: 1,
-          messageCount: { $size: { $ifNull: ['$messages', []] } },
-          lastMessage: { $last: '$messages' },
-        } },
-      ]).option({ maxTimeMS: 8000 }),
-      Conversation.countDocuments(filter).maxTimeMS(5000),
+    // Use denormalized messageCount + lastMessagePreview fields (maintained by
+    // pre-save hook) so MongoDB never touches the messages array.
+    const listFields = 'title provider escalationId createdAt updatedAt messageCount lastMessagePreview forkedFrom forkMessageIndex';
+    const conversationsPromise = Conversation.find(filter)
+      .select(listFields)
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean()
+      .maxTimeMS(8000);
+    const totalPromise = includeTotal
+      ? Conversation.countDocuments(filter).maxTimeMS(5000)
+      : Promise.resolve(undefined);
+    const [conversations, total] = await Promise.all([
+      conversationsPromise,
+      totalPromise,
     ]);
 
-    const total = countResult;
-    const items = conversations.map((c) => {
-      const lastMsg = c.lastMessage || null;
-      const preview = lastMsg ? safeString(lastMsg.content, '').slice(0, 120) : '';
-      return {
-        _id: c._id,
-        title: safeString(c.title, 'Conversation'),
-        provider: normalizeProvider(c.provider),
-        messageCount: c.messageCount || 0,
-        lastMessage: lastMsg ? {
-          role: lastMsg.role,
-          preview,
-          provider: lastMsg.provider,
-          timestamp: lastMsg.timestamp,
-        } : null,
-        escalationId: c.escalationId,
-        createdAt: c.createdAt,
-        updatedAt: c.updatedAt,
-      };
-    });
+    const items = conversations.map((c) => ({
+      _id: c._id,
+      title: normalizeConversationListTitle(c.title, c.lastMessagePreview?.preview),
+      provider: normalizeProvider(c.provider),
+      messageCount: c.messageCount || 0,
+      lastMessage: c.lastMessagePreview || null,
+      escalationId: c.escalationId,
+      forkedFrom: c.forkedFrom || null,
+      forkMessageIndex: c.forkMessageIndex != null ? c.forkMessageIndex : null,
+      createdAt: c.createdAt,
+      updatedAt: c.updatedAt,
+    }));
 
-    res.json({ ok: true, conversations: items, total });
+    if (includeTotal) {
+      return res.json({ ok: true, conversations: items, total });
+    }
+
+    return res.json({ ok: true, conversations: items });
   } catch (err) {
     const isTimeout = err.codeName === 'MaxTimeMSExpired' || err.code === 50;
     res.status(isTimeout ? 504 : 500).json({
@@ -1356,6 +2213,17 @@ conversationsRouter.use('/:id', (req, res, next) => {
     });
   }
   return next();
+});
+
+// GET /api/conversations/:id -- Get full conversation
+conversationsRouter.get('/:id/meta', async (req, res) => {
+  const conversation = await Conversation.findById(req.params.id)
+    .select('provider escalationId forkedFrom forkMessageIndex')
+    .lean();
+  if (!conversation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+  res.json({ ok: true, conversation });
 });
 
 // GET /api/conversations/:id -- Get full conversation
@@ -1440,6 +2308,11 @@ conversationsRouter.get('/:id/export', async (req, res) => {
     const time = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : '';
     lines.push(`[${label}] ${time}`);
     lines.push(safeString(msg.content, ''));
+    if (msg.role === 'assistant' && typeof msg.thinking === 'string' && msg.thinking.trim()) {
+      lines.push('');
+      lines.push('[Reasoning]');
+      lines.push(msg.thinking);
+    }
     lines.push('');
   }
 
@@ -1466,6 +2339,7 @@ conversationsRouter.post('/:id/fork', async (req, res) => {
   const messages = source.messages.slice(0, sliceEnd).map((m) => ({
     role: m.role,
     content: m.content,
+    thinking: m.thinking || '',
     images: m.images || [],
     provider: m.provider,
     mode: m.mode,
@@ -1481,10 +2355,72 @@ conversationsRouter.post('/:id/fork', async (req, res) => {
     provider: normalizeProvider(source.provider),
     escalationId: source.escalationId || null,
     systemPromptHash: source.systemPromptHash || '',
+    forkedFrom: source._id,
+    forkMessageIndex: sliceEnd - 1,
   });
   await forked.save();
 
   res.status(201).json({ ok: true, conversation: forked.toObject() });
+});
+
+// GET /api/conversations/:id/fork-tree -- Get the full fork tree for a conversation
+conversationsRouter.get('/:id/fork-tree', async (req, res) => {
+  const conv = await Conversation.findById(req.params.id).lean();
+  if (!conv) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
+  }
+
+  // Walk up the forkedFrom chain to find the root
+  let rootId = conv._id;
+  let current = conv;
+  const visited = new Set([rootId.toString()]);
+  while (current.forkedFrom) {
+    const parentId = current.forkedFrom;
+    if (visited.has(parentId.toString())) break; // cycle guard
+    visited.add(parentId.toString());
+    const parent = await Conversation.findById(parentId)
+      .select('_id title forkedFrom forkMessageIndex messageCount createdAt')
+      .lean();
+    if (!parent) break;
+    rootId = parent._id;
+    current = parent;
+  }
+
+  // Find all conversations that are forks (have forkedFrom set)
+  const allForks = await Conversation.find({ forkedFrom: { $ne: null } })
+    .select('_id title forkedFrom forkMessageIndex messageCount createdAt')
+    .lean();
+
+  const root = await Conversation.findById(rootId)
+    .select('_id title messageCount createdAt')
+    .lean();
+
+  if (!root) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Root conversation not found' });
+  }
+
+  const buildTree = (parentId) => {
+    const children = allForks.filter((f) => f.forkedFrom?.toString() === parentId.toString());
+    return children.map((c) => ({
+      _id: c._id,
+      title: c.title,
+      messageCount: c.messageCount,
+      forkMessageIndex: c.forkMessageIndex,
+      createdAt: c.createdAt,
+      children: buildTree(c._id),
+    }));
+  };
+
+  res.json({
+    ok: true,
+    tree: {
+      _id: root._id,
+      title: root.title,
+      messageCount: root.messageCount,
+      createdAt: root.createdAt,
+      children: buildTree(root._id),
+    },
+  });
 });
 
 // POST /api/chat/retry -- Retry last message in a conversation (removes bad assistant response, re-sends)
@@ -1602,6 +2538,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     });
   }
   const normalizedImages = normalizedImagesResult.images;
+  const normalizedClientImageMeta = Array.isArray(lastUserMsg.imageMeta) ? lastUserMsg.imageMeta : [];
 
   const contextSourceMessages = retryMessages.map((m) => normalizeMessageForModel(m));
   const contextBundle = buildChatModelContext({
@@ -1630,7 +2567,73 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     });
   }
 
+  const traceStartedAt = new Date();
+  const trace = await createTrace({
+    requestId: req.requestId,
+    service: 'chat',
+    route: '/api/chat/retry',
+    turnKind: 'retry',
+    conversationId: conversation._id,
+    promptPreview: safeString(lastUserMsg && lastUserMsg.content, ''),
+    messageLength: safeString(lastUserMsg && lastUserMsg.content, '').length,
+    normalizedImages,
+    clientImageMeta: normalizedClientImageMeta,
+    requested: {
+      mode: requestedMode,
+      reasoningEffort: effectiveReasoningEffort,
+      timeoutMs: effectiveTimeoutMs,
+      primaryProvider: requestedPrimaryProvider,
+      fallbackProvider: requestedFallback,
+      parallelProviders: parallelProviders || [],
+    },
+    resolved: {
+      mode: policy.mode,
+      reasoningEffort: effectiveReasoningEffort,
+      timeoutMs: effectiveTimeoutMs,
+      primaryProvider: policy.primaryProvider,
+      fallbackProvider: policy.fallbackProvider,
+      parallelProviders: policy.parallelProviders || [],
+    },
+  }).catch(() => null);
+  await appendTraceEvent(trace?._id, {
+    key: 'retry_received',
+    label: 'Retry request received',
+    status: 'info',
+    provider: policy.primaryProvider,
+    model: getProviderModelId(policy.primaryProvider),
+    message: `Retry queued for ${policy.primaryProvider}.`,
+  }, traceStartedAt);
+  await appendTraceEvent(trace?._id, {
+    key: 'context_built',
+    label: 'Retry context built',
+    status: 'info',
+    message: `Prepared ${contextBundle.messagesForModel.length} message(s) for retry.`,
+    detail: {
+      knowledgeMode: contextBundle.contextDebug?.knowledgeMode || '',
+      estimatedInputTokens: contextBundle.contextDebug?.budgets?.estimatedInputTokens || 0,
+    },
+  }, traceStartedAt);
+
   if (guardrail.blocked) {
+    await appendTraceEvent(trace?._id, {
+      key: 'guardrail_blocked',
+      label: 'Budget guardrail blocked retry',
+      status: 'error',
+      code: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
+      message: guardrail.blockError || 'Budget guardrail blocked request',
+      detail: guardrail.costEstimate || null,
+    }, traceStartedAt);
+    await patchTrace(trace?._id, {
+      status: 'error',
+      outcome: buildOutcome({
+        providerUsed: policy.primaryProvider,
+        modelUsed: getProviderModelId(policy.primaryProvider),
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+        errorCode: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
+        errorMessage: guardrail.blockError || 'Budget guardrail blocked request',
+      }),
+    });
     return res.status(429).json({
       ok: false,
       code: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
@@ -1642,6 +2645,24 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
 
   if (policy.mode === 'parallel') {
     if (!isParallelModeEnabled()) {
+      await appendTraceEvent(trace?._id, {
+        key: 'parallel_disabled',
+        label: 'Parallel mode disabled',
+        status: 'error',
+        code: 'PARALLEL_MODE_DISABLED',
+        message: 'Parallel mode is disabled',
+      }, traceStartedAt);
+      await patchTrace(trace?._id, {
+        status: 'error',
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - traceStartedAt.getTime(),
+          completedAt: new Date(),
+          errorCode: 'PARALLEL_MODE_DISABLED',
+          errorMessage: 'Parallel mode is disabled',
+        }),
+      });
       return res.status(409).json({
         ok: false,
         code: 'PARALLEL_MODE_DISABLED',
@@ -1651,6 +2672,24 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     const openTurnLimit = getParallelOpenTurnLimit();
     const openTurnCount = await ParallelCandidateTurn.countDocuments({ service: 'chat', status: 'open' });
     if (openTurnCount >= openTurnLimit) {
+      await appendTraceEvent(trace?._id, {
+        key: 'parallel_limit',
+        label: 'Parallel turn limit reached',
+        status: 'error',
+        code: 'PARALLEL_TURN_LIMIT',
+        message: `Parallel open-turn limit reached (${openTurnLimit})`,
+      }, traceStartedAt);
+      await patchTrace(trace?._id, {
+        status: 'error',
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - traceStartedAt.getTime(),
+          completedAt: new Date(),
+          errorCode: 'PARALLEL_TURN_LIMIT',
+          errorMessage: `Parallel open-turn limit reached (${openTurnLimit})`,
+        }),
+      });
       return res.status(429).json({
         ok: false,
         code: 'PARALLEL_TURN_LIMIT',
@@ -1659,20 +2698,38 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     }
   }
 
-  let imageTriageContext = null;
+  // Set up SSE headers IMMEDIATELY so the client knows the connection is alive
+  // before the potentially slow triage parse begins.
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  // Sequential triage -> chat for image turns (same pattern as main chat handler).
   if (normalizedImages.length > 0) {
-    imageTriageContext = await buildImageTriageContext({
+    try {
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation image...' }) + '\n\n');
+    } catch { /* client disconnected */ }
+  }
+  const imageTriageContext = normalizedImages.length > 0
+    ? await buildImageTriageContext({
       images: normalizedImages,
       mode: policy.mode,
       primaryProvider: policy.primaryProvider,
       fallbackProvider: policy.fallbackProvider,
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
-    });
-  }
-  const effectiveSystemPrompt = normalizedImages.length > 0
+    }).catch(() => null)
+    : null;
+  let effectiveSystemPrompt = normalizedImages.length > 0
     ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
     : contextBundle.systemPrompt;
+  if (imageTriageContext && imageTriageContext.parseFields) {
+    const refBlock = buildTriageRefBlock(imageTriageContext.parseFields);
+    if (refBlock) effectiveSystemPrompt = effectiveSystemPrompt + refBlock;
+  }
 
   let shouldSaveConversation = false;
   if (removedAnyAssistant) {
@@ -1686,14 +2743,6 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (shouldSaveConversation) {
     await saveConversationLenient(conversation);
   }
-
-  // Set up SSE and re-run the chat flow
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache, no-transform',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no',
-  });
   const requestTurnId = policy.mode === 'parallel' ? randomUUID() : null;
 
   if (requestTurnId) {
@@ -1720,10 +2769,20 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   }
 
   const contextDebugPayload = buildContextDebugPayload(runtimeSettings, contextBundle.contextDebug, guardrail.costEstimate);
+  let responseClosed = false;
 
+  await appendTraceEvent(trace?._id, {
+    key: 'request_accepted',
+    label: 'Retry accepted',
+    status: 'info',
+    provider: policy.primaryProvider,
+    model: getProviderModelId(policy.primaryProvider),
+    message: 'SSE stream opened and retry accepted by the server.',
+  }, traceStartedAt);
   res.write('event: start\ndata: ' + JSON.stringify({
     conversationId: conversation._id.toString(),
     requestId: req.requestId,
+    traceId: trace ? trace._id.toString() : null,
     retry: true,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
@@ -1734,19 +2793,89 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
-  if (imageTriageContext && imageTriageContext.triageCard) {
-    try {
-      res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
-    } catch { /* gone */ }
+  // Triage already resolved — emit trace events and triage card SSE synchronously.
+  if (imageTriageContext) {
+    const triageMeta = imageTriageContext.parseMeta;
+    patchTrace(trace?._id, {
+      triage: buildParseStage(
+        triageMeta,
+        triageMeta ? 'ok' : 'error',
+        {
+          latencyMs: imageTriageContext.elapsedMs || 0,
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+          card: imageTriageContext.triageCard || null,
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
+        }
+      ),
+    }).catch(() => {});
+    appendTraceEvent(trace?._id, {
+      key: triageMeta ? 'triage_completed' : 'triage_failed',
+      label: triageMeta ? 'Image triage completed' : 'Image triage failed',
+      status: triageMeta ? 'success' : 'error',
+      provider: triageMeta?.providerUsed || policy.primaryProvider,
+      model: getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
+      code: imageTriageContext.error?.code || '',
+      message: triageMeta
+        ? `Image triage completed in ${imageTriageContext.elapsedMs || 0}ms.`
+        : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
+      detail: triageMeta?.validation || imageTriageContext.error || null,
+    }, traceStartedAt).catch(() => {});
+    if (!responseClosed && imageTriageContext.triageCard) {
+      try {
+        res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
+      } catch { /* gone */ }
+    }
   }
 
   const turnStartedAt = Date.now();
-  const retryRequestId = randomUUID();
+  const retryRequestId = req.requestId;
   let retryStreamSettled = false;
+  const traceStats = {
+    chunkCount: 0,
+    chunkChars: 0,
+    thinkingChunkCount: 0,
+    providerErrors: 0,
+    fallbacks: 0,
+  };
+  let firstThinkingMs = 0;
+  let firstChunkMs = 0;
+  const retryRuntimeOperation = createAiOperation({
+    kind: 'chat',
+    route: '/api/chat/retry',
+    action: 'chat-retry',
+    provider: policy.primaryProvider,
+    mode: policy.mode,
+    conversationId: conversation._id.toString(),
+    promptPreview: safeString(lastUserMsg && lastUserMsg.content, ''),
+    hasImages: normalizedImages.length > 0,
+    messageCount: contextBundle.messagesForModel.length,
+    providers: (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]).filter(Boolean),
+  });
+  const retryRuntimeOperationId = retryRuntimeOperation.id;
 
   const heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* gone */ }
   }, 15000);
+
+  // SSE safety timeout — force-close if retry stream never settles
+  const sseSafetyTimeout = setTimeout(() => {
+    if (retryStreamSettled || responseClosed) return;
+    console.error('[chat/retry] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
+    retryStreamSettled = true;
+    clearInterval(heartbeat);
+    try {
+      res.write('event: error\ndata: ' + JSON.stringify({
+        error: 'Request timed out — please try again',
+        code: 'SSE_STREAM_TIMEOUT',
+      }) + '\n\n');
+      res.end();
+    } catch { /* client already gone */ }
+    if (cleanupFn) {
+      try { cleanupFn(); } catch { /* ignore */ }
+    }
+  }, SSE_SAFETY_TIMEOUT_MS);
 
   const cleanupFn = startChatOrchestration({
     mode: policy.mode,
@@ -1759,23 +2888,92 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
+      recordAiChunk(retryRuntimeOperationId, text, { provider: chunkProvider });
+      traceStats.chunkCount += 1;
+      traceStats.chunkChars += typeof text === 'string' ? text.length : 0;
+      if (!firstChunkMs) {
+        firstChunkMs = Date.now() - turnStartedAt;
+        appendTraceEvent(trace?._id, {
+          key: 'first_output',
+          label: 'First output chunk',
+          status: 'info',
+          provider: chunkProvider,
+          model: getProviderModelId(chunkProvider),
+          message: `First output chunk arrived from ${chunkProvider}.`,
+          elapsedMs: firstChunkMs,
+        }, traceStartedAt).catch(() => {});
+      }
       try { res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n'); } catch { /* gone */ }
     },
     onThinkingChunk: ({ provider: thinkingProvider, thinking }) => {
+      recordAiChunk(retryRuntimeOperationId, thinking, { provider: thinkingProvider, thinking: true });
+      traceStats.thinkingChunkCount += 1;
+      if (!firstThinkingMs) {
+        firstThinkingMs = Date.now() - turnStartedAt;
+        appendTraceEvent(trace?._id, {
+          key: 'first_thinking',
+          label: 'First reasoning chunk',
+          status: 'info',
+          provider: thinkingProvider,
+          model: getProviderModelId(thinkingProvider),
+          message: `First reasoning chunk arrived from ${thinkingProvider}.`,
+          elapsedMs: firstThinkingMs,
+        }, traceStartedAt).catch(() => {});
+      }
       try { res.write('event: thinking\ndata: ' + JSON.stringify({ provider: thinkingProvider, thinking }) + '\n\n'); } catch { /* gone */ }
     },
     onProviderError: (data) => {
+      traceStats.providerErrors += 1;
+      recordAiEvent(retryRuntimeOperationId, 'provider_error', {
+        provider: data && data.provider ? data.provider : null,
+        lastError: data ? {
+          code: data.code || 'PROVIDER_EXEC_FAILED',
+          message: data.message || 'Provider failed',
+          detail: data.detail || '',
+        } : null,
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'provider_error',
+        label: 'Provider attempt failed',
+        status: 'error',
+        provider: data && data.provider ? data.provider : '',
+        model: getProviderModelId(data && data.provider ? data.provider : ''),
+        code: data && data.code ? data.code : 'PROVIDER_EXEC_FAILED',
+        message: data && data.message ? data.message : 'Provider failed',
+        detail: data || null,
+      }, traceStartedAt).catch(() => {});
       try { res.write('event: provider_error\ndata: ' + JSON.stringify(data) + '\n\n'); } catch { /* gone */ }
     },
     onFallback: (data) => {
+      traceStats.fallbacks += 1;
+      recordAiEvent(retryRuntimeOperationId, 'fallback', {
+        provider: data && data.from ? data.from : null,
+        to: data && data.to ? data.to : null,
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'fallback',
+        label: 'Fallback engaged',
+        status: 'warning',
+        provider: data && data.to ? data.to : '',
+        model: getProviderModelId(data && data.to ? data.to : ''),
+        code: data && data.reason ? data.reason : 'PROVIDER_ERROR',
+        message: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
+        detail: data || null,
+      }, traceStartedAt).catch(() => {});
       try { res.write('event: fallback\ndata: ' + JSON.stringify(data) + '\n\n'); } catch { /* gone */ }
     },
     onDone: async (data) => {
       retryStreamSettled = true;
       clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(retryRuntimeOperationId, 'saving', {
+        provider: data && data.providerUsed ? data.providerUsed : policy.primaryProvider,
+      });
       const latencyMs = Date.now() - turnStartedAt;
+      // imageTriageContext is already resolved in the outer scope (awaited before orchestration).
       const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
       const attempts = compliantData.attempts || [];
+      const providerThinking = normalizeProviderThinking(compliantData.providerThinking);
       logAttemptsUsage(attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });
       logChatTurn({
         route: '/api/chat/retry',
@@ -1790,6 +2988,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         errorCode: null,
         attempts: attempts.length,
       });
+      // Extract quick-action suggestions from the final response text (non-parallel only)
+      const quickActions = (compliantData.mode !== 'parallel')
+        ? extractQuickActions(compliantData.fullResponse)
+        : [];
+
       try {
         if (compliantData.mode === 'parallel' && Array.isArray(compliantData.results)) {
           const turnId = compliantData.turnId || requestTurnId || randomUUID();
@@ -1816,10 +3019,17 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             conversation.messages.push({
               role: 'assistant',
               content: result.fullResponse,
+              thinking: getProviderThinking(providerThinking, result.provider, result.thinking || ''),
               provider: result.provider,
               mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
-              attemptMeta: { attempts: compliantData.attempts || [], parallel: true, turnId },
+              traceRequestId: req.requestId,
+              attemptMeta: {
+                attempts: compliantData.attempts || [],
+                parallel: true,
+                turnId,
+                ...(Object.keys(providerThinking).length > 0 ? { providerThinking } : {}),
+              },
               usage: buildUsageSubdoc(result.usage),
               timestamp: new Date(),
             });
@@ -1828,19 +3038,88 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           conversation.messages.push({
             role: 'assistant',
             content: compliantData.fullResponse,
+            thinking: getProviderThinking(providerThinking, compliantData.providerUsed, compliantData.thinking || ''),
             provider: compliantData.providerUsed,
             mode: compliantData.mode || policy.mode,
             fallbackFrom: compliantData.fallbackFrom || null,
-            attemptMeta: { attempts: compliantData.attempts || [] },
+            traceRequestId: req.requestId,
+            attemptMeta: {
+              attempts: compliantData.attempts || [],
+              ...(Object.keys(providerThinking).length > 0 ? { providerThinking } : {}),
+              ...(quickActions.length > 0 ? { quickActions } : {}),
+            },
             usage: buildUsageSubdoc(compliantData.usage),
             timestamp: new Date(),
           });
         }
         await saveConversationLenient(conversation);
+        await setTraceAttempts(trace?._id, attempts);
+        await setTraceUsage(trace?._id, compliantData.usage);
+        await patchTrace(trace?._id, {
+          status: 'ok',
+          responseChars: sumResponseChars(compliantData),
+          stats: buildTraceStats(traceStats),
+          outcome: buildOutcome({
+            providerUsed: compliantData.providerUsed || policy.primaryProvider,
+            modelUsed: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            winner: compliantData.providerUsed || policy.primaryProvider,
+            fallbackUsed: Boolean(compliantData.fallbackUsed),
+            fallbackFrom: compliantData.fallbackFrom || null,
+            responseRepaired: Boolean(compliantData.responseRepaired),
+            totalMs: latencyMs,
+            firstThinkingMs,
+            firstChunkMs,
+            completedAt: new Date(),
+          }),
+        });
+        await appendTraceEvent(trace?._id, {
+          key: 'conversation_saved',
+          label: 'Retry saved',
+          status: 'success',
+          provider: compliantData.providerUsed || policy.primaryProvider,
+          model: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+          message: `Saved retried response in ${latencyMs}ms.`,
+          elapsedMs: latencyMs,
+          detail: {
+            attempts: attempts.length,
+            responseRepaired: Boolean(compliantData.responseRepaired),
+            usage: summarizeUsage(compliantData.usage),
+          },
+        }, traceStartedAt);
+
+        // Fire-and-forget: archive images to disk with full metadata (retry)
+        if (normalizedImages.length > 0) {
+          try {
+            const retryUserMsgIndex = conversation.messages.length - (
+              compliantData.mode === 'parallel' && Array.isArray(compliantData.results)
+                ? compliantData.results.filter((r) => r.status === 'ok').length + 1
+                : 2
+            );
+            const retryArchiveModelParsing = compliantData.fullResponse
+              || (Array.isArray(compliantData.results) && compliantData.results.find((r) => r.status === 'ok')?.fullResponse)
+              || '';
+            archiveImages({
+              conversationId: conversation._id.toString(),
+              messageIndex: Math.max(0, retryUserMsgIndex),
+              images: normalizedImages,
+              userPrompt: safeString(lastUserMsg && lastUserMsg.content, ''),
+              modelParsing: retryArchiveModelParsing,
+              parseFields: imageTriageContext && imageTriageContext.parseFields ? imageTriageContext.parseFields : null,
+              triageCard: imageTriageContext && imageTriageContext.triageCard ? imageTriageContext.triageCard : null,
+              provider: compliantData.providerUsed || policy.primaryProvider,
+              usage: compliantData.usage || null,
+              timestamp: lastUserMsg && lastUserMsg.timestamp ? lastUserMsg.timestamp : new Date(),
+            });
+          } catch (archiveErr) {
+            console.warn('[image-archive] Failed to archive retry images:', archiveErr.message);
+          }
+        }
+
         try {
           const retryUsagePayload = buildUsageSubdoc(compliantData.usage);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
+            traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
             fallbackUsed: compliantData.fallbackUsed,
@@ -1848,6 +3127,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             mode: compliantData.mode || policy.mode,
             turnId: compliantData.mode === 'parallel' ? (compliantData.turnId || requestTurnId) : null,
             attempts: compliantData.attempts || [],
+            thinking: compliantData.thinking || '',
+            providerThinking,
             fullResponse: compliantData.fullResponse,
             results: Array.isArray(compliantData.results) ? compliantData.results.map(r => ({
               ...r,
@@ -1858,10 +3139,42 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             responseRepaired: Boolean(compliantData.responseRepaired),
             warnings: guardrail.warnings || [],
             contextDebug: contextDebugPayload,
+            citations: contextBundle.citations || [],
+            quickActions,
           }) + '\n\n');
           res.end();
         } catch { /* gone */ }
       } catch (onDoneErr) {
+        patchTrace(trace?._id, {
+          status: 'error',
+          stats: buildTraceStats(traceStats),
+          outcome: buildOutcome({
+            providerUsed: policy.primaryProvider,
+            modelUsed: getProviderModelId(policy.primaryProvider),
+            totalMs: Date.now() - turnStartedAt,
+            firstThinkingMs,
+            firstChunkMs,
+            completedAt: new Date(),
+            errorCode: 'ONDONE_SAVE_FAILED',
+            errorMessage: onDoneErr.message || 'Failed to save retried chat conversation',
+          }),
+        }).catch(() => {});
+        appendTraceEvent(trace?._id, {
+          key: 'save_failed',
+          label: 'Retry save failed',
+          status: 'error',
+          provider: policy.primaryProvider,
+          model: getProviderModelId(policy.primaryProvider),
+          code: 'ONDONE_SAVE_FAILED',
+          message: onDoneErr.message || 'Failed to save retried chat conversation',
+        }, traceStartedAt).catch(() => {});
+        reportServerError({
+          route: '/api/chat/retry',
+          message: onDoneErr.message || 'Failed to save retried chat conversation',
+          code: 'ONDONE_SAVE_FAILED',
+          detail: onDoneErr.stack || '',
+          severity: 'error',
+        });
         try {
           res.write('event: error\ndata: ' + JSON.stringify({
             error: onDoneErr.message || 'Failed to save conversation',
@@ -1869,11 +3182,21 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           }) + '\n\n');
           res.end();
         } catch { /* gone */ }
+      } finally {
+        deleteAiOperation(retryRuntimeOperationId);
       }
     },
     onError: (err) => {
       retryStreamSettled = true;
       clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(retryRuntimeOperationId, 'error', {
+        lastError: {
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          message: err.message || 'Chat retry failed',
+          detail: err.detail || '',
+        },
+      });
       const latencyMs = Date.now() - turnStartedAt;
       const attempts = err.attempts || [];
       logAttemptsUsage(attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: policy.mode });
@@ -1889,6 +3212,43 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         latencyMs,
         errorCode: err.code || 'PROVIDER_EXEC_FAILED',
         attempts: attempts.length,
+      });
+      setTraceAttempts(trace?._id, attempts).catch(() => {});
+      patchTrace(trace?._id, {
+        status: 'error',
+        stats: buildTraceStats(traceStats),
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: latencyMs,
+          firstThinkingMs,
+          firstChunkMs,
+          completedAt: new Date(),
+          errorCode: err.code || 'PROVIDER_EXEC_FAILED',
+          errorMessage: err.message || 'Chat retry failed',
+        }),
+      }).catch(() => {});
+      appendTraceEvent(trace?._id, {
+        key: 'request_failed',
+        label: 'Retry failed',
+        status: 'error',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: err.code || 'PROVIDER_EXEC_FAILED',
+        message: err.message || 'Chat retry failed',
+        detail: {
+          attempts,
+          firstThinkingMs,
+          firstChunkMs,
+        },
+        elapsedMs: latencyMs,
+      }, traceStartedAt).catch(() => {});
+      reportServerError({
+        route: '/api/chat/retry',
+        message: err.message || 'Chat retry failed',
+        code: err.code || 'PROVIDER_EXEC_FAILED',
+        detail: err.detail || '',
+        severity: 'error',
       });
       if (requestTurnId && policy.mode === 'parallel') {
         ParallelCandidateTurn.findOneAndUpdate(
@@ -1924,16 +3284,106 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         }) + '\n\n');
         res.end();
       } catch { /* gone */ }
+      deleteAiOperation(retryRuntimeOperationId);
     },
     onAbort: (abortData) => {
+      if (retryStreamSettled) return;
+      retryStreamSettled = true;
+      clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      recordAiEvent(retryRuntimeOperationId, 'aborting', {
+        lastError: {
+          code: 'CLIENT_ABORT',
+          message: 'Chat retry aborted',
+          detail: '',
+        },
+      });
       logAttemptsUsage(abortData.attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: policy.mode });
+      setTraceAttempts(trace?._id, abortData.attempts || []).catch(() => {});
+      patchTrace(trace?._id, {
+        status: 'aborted',
+        stats: buildTraceStats(traceStats),
+        outcome: buildOutcome({
+          providerUsed: policy.primaryProvider,
+          modelUsed: getProviderModelId(policy.primaryProvider),
+          totalMs: Date.now() - turnStartedAt,
+          firstThinkingMs,
+          firstChunkMs,
+          completedAt: new Date(),
+          errorCode: 'CLIENT_ABORT',
+          errorMessage: 'Chat retry aborted before completion',
+        }),
+      }).catch(() => {});
+      appendTraceEvent(trace?._id, {
+        key: 'request_aborted',
+        label: 'Retry aborted',
+        status: 'warning',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: 'CLIENT_ABORT',
+        message: 'Chat retry aborted before completion',
+        detail: { attempts: abortData.attempts || [] },
+      }, traceStartedAt).catch(() => {});
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          error: 'Chat retry aborted before completion',
+          code: 'CLIENT_ABORT',
+          attempts: abortData.attempts || [],
+          warnings: guardrail.warnings || [],
+          contextDebug: contextDebugPayload,
+        }) + '\n\n');
+        res.end();
+      } catch { /* gone */ }
+      deleteAiOperation(retryRuntimeOperationId);
+    },
+  });
+  attachAiOperationController(retryRuntimeOperationId, {
+    abort: (reason = 'Chat retry aborted by supervisor') => {
+      if (retryStreamSettled) return;
+      retryStreamSettled = true;
+      clearInterval(heartbeat);
+      clearTimeout(sseSafetyTimeout);
+      updateAiOperation(retryRuntimeOperationId, {
+        phase: 'aborting',
+        lastError: {
+          code: 'AUTO_ABORT',
+          message: reason,
+          detail: '',
+        },
+      });
+      if (cleanupFn) cleanupFn();
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          error: reason,
+          code: 'AUTO_ABORT',
+        }) + '\n\n');
+        res.end();
+      } catch { /* gone */ }
+      deleteAiOperation(retryRuntimeOperationId);
     },
   });
 
   // See comment on main chat route — must use res.on('close') not req.on('close').
   res.on('close', () => {
+    responseClosed = true;
     clearInterval(heartbeat);
-    if (!retryStreamSettled && cleanupFn) cleanupFn();
+    clearTimeout(sseSafetyTimeout);
+    if (!retryStreamSettled) {
+      updateAiOperation(retryRuntimeOperationId, {
+        clientConnected: false,
+        phase: 'aborting',
+      });
+      appendTraceEvent(trace?._id, {
+        key: 'client_disconnected',
+        label: 'Client disconnected',
+        status: 'warning',
+        provider: policy.primaryProvider,
+        model: getProviderModelId(policy.primaryProvider),
+        code: 'CLIENT_DISCONNECTED',
+        message: 'The client connection closed before the retry settled.',
+      }, traceStartedAt).catch(() => {});
+      if (cleanupFn) cleanupFn();
+    }
   });
 });
 
@@ -2319,6 +3769,7 @@ chatRouter.post('/parallel/:turnId/unaccept', parallelDecisionRateLimit, async (
         return {
           role: 'assistant',
           content,
+          thinking: candidate.thinking || '',
           provider: candidate.provider,
           mode: 'parallel',
           fallbackFrom: null,
@@ -2405,6 +3856,74 @@ conversationsRouter.delete('/:id', async (req, res) => {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
   }
   res.json({ ok: true });
+});
+
+// GET /api/chat/image-archive/stats -- Archive-wide statistics
+chatRouter.get('/image-archive/stats', (req, res) => {
+  const result = getArchiveStats();
+  if (!result.ok) {
+    return res.status(500).json({ ok: false, code: 'ARCHIVE_STATS_FAILED', error: result.error });
+  }
+  res.json({ ok: true, ...result.stats });
+});
+
+// GET /api/chat/image-archive/all -- All archived images with filtering + pagination
+chatRouter.get('/image-archive/all', (req, res) => {
+  const { grade, dateFrom, dateTo, conversationId, limit = '200', offset = '0' } = req.query;
+  const result = getAllImages({
+    grade: grade || undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+    conversationId: conversationId || undefined,
+    limit: parseInt(limit, 10),
+    offset: parseInt(offset, 10),
+  });
+  res.json({ ok: true, ...result });
+});
+
+// GET /api/chat/image-archive/:conversationId -- List all archived images for a conversation
+chatRouter.get('/image-archive/:conversationId', (req, res) => {
+  const { conversationId } = req.params;
+  if (!isValidObjectId(conversationId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_CONVERSATION_ID', error: 'Invalid conversationId' });
+  }
+  const result = getArchive(conversationId);
+  if (!result.ok) {
+    return res.status(500).json({ ok: false, code: 'ARCHIVE_READ_FAILED', error: result.error });
+  }
+  res.json({ ok: true, images: result.images, count: result.images.length });
+});
+
+// GET /api/chat/image-archive/:conversationId/:imageId/file -- Serve an archived image file
+chatRouter.get('/image-archive/:conversationId/:imageId/file', (req, res) => {
+  const { conversationId, imageId } = req.params;
+  if (!isValidObjectId(conversationId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_CONVERSATION_ID', error: 'Invalid conversationId' });
+  }
+  const result = getImageFile(conversationId, imageId);
+  if (!result.ok) {
+    return res.status(404).json({ ok: false, code: 'IMAGE_NOT_FOUND', error: result.error });
+  }
+  res.setHeader('Content-Type', result.contentType || 'application/octet-stream');
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  res.sendFile(result.filePath);
+});
+
+// GET /api/chat/image-archive/:conversationId/:imageId/metadata -- Serve metadata JSON for a single image
+chatRouter.get('/image-archive/:conversationId/:imageId/metadata', (req, res) => {
+  const { conversationId, imageId } = req.params;
+  if (!isValidObjectId(conversationId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_CONVERSATION_ID', error: 'Invalid conversationId' });
+  }
+  const archive = getArchive(conversationId);
+  if (!archive.ok) {
+    return res.status(500).json({ ok: false, code: 'ARCHIVE_READ_FAILED', error: archive.error });
+  }
+  const entry = archive.images.find((img) => img._imageId === imageId);
+  if (!entry) {
+    return res.status(404).json({ ok: false, code: 'IMAGE_NOT_FOUND', error: 'Image metadata not found' });
+  }
+  res.json({ ok: true, metadata: entry });
 });
 
 module.exports = { chatRouter, conversationsRouter };

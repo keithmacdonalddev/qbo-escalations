@@ -20,6 +20,7 @@ const COOLDOWN = 120_000;     // 2 minutes
  */
 export function useEmergencyMode({ log }) {
   const [emergencyActive, setEmergencyActive] = useState(false);
+  const [burstCount, setBurstCount] = useState(0);
   const burstRef = useRef({ count: 0, windowStart: Date.now() });
   const cooldownTimerRef = useRef(null);
   const logRef = useRef(log);
@@ -36,10 +37,12 @@ export function useEmergencyMode({ log }) {
     // Reset window if expired
     if (now - burstRef.current.windowStart > BURST_WINDOW) {
       burstRef.current = { count: 1, windowStart: now };
+      setBurstCount(1);
       return;
     }
 
     burstRef.current.count++;
+    setBurstCount(burstRef.current.count);
 
     if (burstRef.current.count > ERROR_THRESHOLD && !emergencyRef.current) {
       setEmergencyActive(true);
@@ -55,6 +58,7 @@ export function useEmergencyMode({ log }) {
         cooldownTimerRef.current = null;
         setEmergencyActive(false);
         burstRef.current = { count: 0, windowStart: Date.now() };
+        setBurstCount(0);
         logRef.current?.({
           type: 'emergency',
           message: 'Emergency mode ended — monitoring resumed',
@@ -67,6 +71,7 @@ export function useEmergencyMode({ log }) {
   const resetEmergency = useCallback(() => {
     setEmergencyActive(false);
     burstRef.current = { count: 0, windowStart: Date.now() };
+    setBurstCount(0);
     if (cooldownTimerRef.current) {
       clearTimeout(cooldownTimerRef.current);
       cooldownTimerRef.current = null;
@@ -85,5 +90,5 @@ export function useEmergencyMode({ log }) {
     };
   }, []);
 
-  return { emergencyActive, recordError, resetEmergency, burstCount: burstRef.current.count };
+  return { emergencyActive, recordError, resetEmergency, burstCount };
 }

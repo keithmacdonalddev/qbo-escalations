@@ -13,7 +13,7 @@ const CACHE_TTL = 60_000; // 60s
 const recentAgentFiles = new Map(); // path -> expiry timestamp
 
 // Character budget for memory section in system prompt
-const MEMORY_CHAR_CAP = 2000;
+const MEMORY_CHAR_CAP = 6000;
 
 // ---------------------------------------------------------------------------
 // Write
@@ -45,11 +45,11 @@ async function logAgentAction(entry) {
  *
  * @param {string} query - The user message or context to match against
  * @param {Object} [options]
- * @param {number} [options.topK=5] - Max entries to return
+ * @param {number} [options.topK=10] - Max entries to return
  * @returns {Promise<Object[]>}
  */
 async function retrieveRelevantMemory(query, options = {}) {
-  const { topK = 5 } = options;
+  const { topK = 10 } = options;
 
   // Check cache
   if (cachedEntries && Date.now() < cacheExpiry) {
@@ -90,6 +90,9 @@ function scoreAndRank(entries, query, topK) {
         if (text.includes(term)) score += 1;
       }
 
+      // Pinned boost: always surface persistent memories
+      if (entry.pinned) score += 3;
+
       // Recency boost: last hour +2, last day +1
       const ageMs = Date.now() - new Date(entry.createdAt).getTime();
       if (ageMs < 3_600_000) score += 2;
@@ -121,10 +124,11 @@ function formatMemoryForPrompt(entries) {
   let output = '';
 
   for (const e of entries) {
+    const pin = e.pinned ? '[PIN] ' : '';
     const age = formatAge(e.createdAt);
     const files = (e.filesAffected || []).slice(0, 3).join(', ');
     const resolution = e.resolution ? ` -> ${e.resolution}` : '';
-    const line = `[${age}] ${e.type.toUpperCase()}: ${e.summary}${files ? ` | ${files}` : ''}${resolution}`;
+    const line = `${pin}[${age}] ${e.type.toUpperCase()}: ${e.summary}${files ? ` | ${files}` : ''}${resolution}`;
     const separator = output ? '\n' : '';
 
     if (output.length + separator.length + line.length > MEMORY_CHAR_CAP) break;

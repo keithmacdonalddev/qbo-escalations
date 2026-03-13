@@ -183,6 +183,11 @@ function resetDrain() {
   draining = false;
 }
 
+function stopChainCleanup() {
+  // Chains are removed in the per-write `.finally()` block above.
+  // Kept as a no-op so shutdown wiring can call it safely.
+}
+
 // --- Helpers ---
 
 function clampNonNeg(value) {
@@ -204,4 +209,5 @@ module.exports = {
   getDroppedCount,
   getHealth,
   resetDrain,
+  stopChainCleanup,
 };

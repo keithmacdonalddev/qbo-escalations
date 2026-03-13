@@ -3,6 +3,7 @@
 const { execSync, execFileSync } = require('child_process');
 const crypto = require('crypto');
 const path = require('path');
+const { updateBackgroundService } = require('./background-runtime');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
@@ -19,17 +20,34 @@ let instance = null;
 class ChangeDetector {
   constructor() {
     this.pollInterval = null;
+    this._pruneInterval = null;
     this.subscribers = new Set();
     this.previousDirtySet = null;
     this.previousDirtySetTimestamp = 0;
     this.emittedHashes = new Set(); // prevent re-emitting identical stable sets
     this.pollIntervalMs = 15_000;   // 15s polling cadence
     this.stabilityMs = 30_000;      // dirty set must persist 30s before emitting
+    this.lastPollAt = 0;
+    this.lastEmitAt = 0;
+    this.lastError = null;
   }
 
   start() {
     if (this.pollInterval) return;
     this.pollInterval = setInterval(() => this._poll(), this.pollIntervalMs);
+    // Periodic pruning of emittedHashes to prevent unbounded growth between emits
+    this._pruneInterval = setInterval(() => {
+      if (this.emittedHashes.size > 50) {
+        const arr = [...this.emittedHashes];
+        this.emittedHashes = new Set(arr.slice(-25));
+      }
+    }, 60_000);
+    if (this._pruneInterval.unref) this._pruneInterval.unref();
+    updateBackgroundService('change-detector', {
+      state: 'running',
+      meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs },
+      lastError: null,
+    });
     this._poll(); // immediate first poll
   }
 
@@ -38,6 +56,14 @@ class ChangeDetector {
       clearInterval(this.pollInterval);
       this.pollInterval = null;
     }
+    if (this._pruneInterval) {
+      clearInterval(this._pruneInterval);
+      this._pruneInterval = null;
+    }
+    updateBackgroundService('change-detector', {
+      state: 'idle',
+      meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+    });
   }
 
   /**
@@ -49,18 +75,31 @@ class ChangeDetector {
    */
   subscribe(callback) {
     this.subscribers.add(callback);
+    updateBackgroundService('change-detector', {
+      state: this.pollInterval ? 'running' : 'idle',
+      meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+    });
     if (this.subscribers.size === 1) this.start();
     return () => this.unsubscribe(callback);
   }
 
   unsubscribe(callback) {
     this.subscribers.delete(callback);
+    updateBackgroundService('change-detector', {
+      state: this.pollInterval ? 'running' : 'idle',
+      meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+    });
     if (this.subscribers.size === 0) this.stop();
   }
 
   /** @private */
   _poll() {
     try {
+      this.lastPollAt = Date.now();
+      updateBackgroundService('change-detector', {
+        state: 'running',
+        meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+      });
       const output = execSync('git status --porcelain', {
         cwd: PROJECT_ROOT,
         encoding: 'utf8',
@@ -97,9 +136,9 @@ class ChangeDetector {
             this.emittedHashes.add(currentHash);
             this._emit(externalChanges);
             // Prune emitted hash memory to avoid unbounded growth
-            if (this.emittedHashes.size > 100) {
+            if (this.emittedHashes.size > 50) {
               const arr = [...this.emittedHashes];
-              this.emittedHashes = new Set(arr.slice(-50));
+              this.emittedHashes = new Set(arr.slice(-25));
             }
           }
           this.previousDirtySet = null;
@@ -113,6 +152,12 @@ class ChangeDetector {
     } catch (err) {
       // Git not available or error -- silent skip
       console.error('[change-detector] Poll error:', err.message);
+      this.lastError = { message: err.message, stack: err.stack || '' };
+      updateBackgroundService('change-detector', {
+        state: 'error',
+        meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+        lastError: this.lastError,
+      });
     }
   }
 
@@ -155,6 +200,7 @@ class ChangeDetector {
 
   /** @private */
   _emit(files) {
+    this.lastEmitAt = Date.now();
     let diffSummary = '';
     try {
       diffSummary = execSync('git diff --stat', {
@@ -197,6 +243,12 @@ class ChangeDetector {
         /* subscriber error -- do not crash the detector */
       }
     }
+    updateBackgroundService('change-detector', {
+      state: this.pollInterval ? 'running' : 'idle',
+      meta: { subscribers: this.subscribers.size, pollIntervalMs: this.pollIntervalMs, stabilityMs: this.stabilityMs, lastPollAt: this.lastPollAt, lastEmitAt: this.lastEmitAt },
+      lastCompletedAt: this.lastEmitAt,
+      lastError: null,
+    });
   }
 }
 

@@ -3,18 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { transitions, widgetSlideUp, scalePop, staggerContainer, staggerChild } from '../utils/motion.js';
 import { getProviderShortLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
-import AgentActivityLog from './AgentActivityLog.jsx';
-import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 
-/**
- * Floating mini widget with two modes:
- * 1. Quick-chat FAB — always available on non-dev pages for sending
- *    messages to the foreground dev conversation without navigating away.
- * 2. Streaming monitor — when the dev agent is actively streaming,
- *    shows progress overlay with tool events and live text preview.
- *
- * Quick-chat messages go to the FOREGROUND conversation via sendMessage().
- */
 /** Notification type -> icon SVG */
 const NOTIFICATION_ICONS = {
   'fix-applied': (
@@ -39,6 +28,20 @@ const NOTIFICATION_ICONS = {
 /** Event types that trigger fix notifications */
 const FIX_EVENT_TYPES = new Set(['fix-applied', 'error-resolved', 'error-escalated']);
 
+function formatShortDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0s';
+  const totalSeconds = Math.ceil(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function truncate(text, len = 100) {
+  if (!text) return '';
+  return text.length > len ? text.slice(0, len) + '...' : text;
+}
+
 export default function DevMiniWidget() {
   const {
     isStreaming,
@@ -53,12 +56,13 @@ export default function DevMiniWidget() {
     miniWidgetOpen,
     setMiniWidgetOpen,
     miniWidgetInputRef,
-    agentHealthy,
-    healthDetails,
     serverState,
     activityLog,
-    bgLastResults,
-    tokenStats,
+    agentHealthy,
+    healthDetails,
+    bgTransport,
+    runtimeHealth,
+    monitorTransport,
   } = useDevAgent();
 
   // --- Streaming monitor state ---
@@ -80,21 +84,22 @@ export default function DevMiniWidget() {
   const fixNotifTimerRef = useRef(null);
   const lastNotifIdRef = useRef(null);
 
+  const activityLogRef = useRef(activityLog);
+  activityLogRef.current = activityLog;
+
   useEffect(() => {
-    const entries = activityLog?.entries;
+    const entries = activityLogRef.current?.entries;
     if (!entries || entries.length === 0) return;
 
     const latest = entries[entries.length - 1];
     if (!FIX_EVENT_TYPES.has(latest.type)) return;
-    if (latest.id === lastNotifIdRef.current) return; // Already shown
+    if (latest.id === lastNotifIdRef.current) return;
 
     lastNotifIdRef.current = latest.id;
     setFixNotification(latest);
 
-    // Clear any existing timer
     if (fixNotifTimerRef.current) clearTimeout(fixNotifTimerRef.current);
 
-    // Auto-dismiss after 8 seconds
     fixNotifTimerRef.current = setTimeout(() => {
       setFixNotification(null);
       fixNotifTimerRef.current = null;
@@ -106,15 +111,14 @@ export default function DevMiniWidget() {
         fixNotifTimerRef.current = null;
       }
     };
-  }, [activityLog?.entries?.length]);
+  }, [activityLog]);
 
-  // Global Ctrl+Shift+D keyboard shortcut (non-dev pages)
+  // Global Ctrl+Shift+D keyboard shortcut
   useEffect(() => {
     function handleGlobalKey(e) {
       if (e.ctrlKey && e.shiftKey && e.key === 'D') {
         e.preventDefault();
         if (miniWidgetOpen) {
-          // Already open -- just focus input
           miniWidgetInputRef.current?.focus();
         } else {
           setMiniWidgetOpen(true);
@@ -201,7 +205,6 @@ export default function DevMiniWidget() {
     }
   }, [isStreaming, handleOpenDevMode]);
 
-  // Send quick-chat message (foreground conversation)
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
     if (!text || isStreaming) return;
@@ -214,65 +217,50 @@ export default function DevMiniWidget() {
       e.preventDefault();
       handleSend();
     }
-    // Escape closes the widget
     if (e.key === 'Escape') {
       setMiniWidgetOpen(false);
     }
   }, [handleSend, setMiniWidgetOpen]);
 
-  // Server status helpers
+  // Server status
   const serverDown = serverState === 'unreachable';
   const serverDegraded = serverState === 'degraded';
   const showServerPill = serverDown || serverDegraded;
+  const monitorCooldownMs = Math.max(0, (bgTransport?.nextAllowedAt || 0) - Date.now());
+  const monitorCoolingDown = Boolean(bgTransport?.coolingDown && monitorCooldownMs > 0);
 
-  // Streaming monitor state
+  // Streaming monitor
   const showStreamMonitor = streamVisible && !streamDismissed && (isStreaming || completedAt || error);
   const activeProvider = streamProvider || provider;
   const isComplete = !isStreaming && completedAt && !error;
   const isError = !isStreaming && error;
   const previewLines = (streamingText || '').split('\n').slice(-8).join('\n');
 
-  // Last 3 messages for compact preview
+  // Recent messages (last 6 for conversation preview)
   const recentMessages = useMemo(() => {
-    return (messages || []).slice(-3);
+    return (messages || []).slice(-6);
   }, [messages]);
 
-  /** Truncate text to ~100 chars */
-  function truncate(text, len = 100) {
-    if (!text) return '';
-    return text.length > len ? text.slice(0, len) + '...' : text;
-  }
+  const domains = runtimeHealth?.domains || {};
+  const monitorRuntime = runtimeHealth?.monitor || {};
+  const remediation = runtimeHealth?.remediation || {};
+  const domainEntries = [
+    { key: 'gmail', label: 'Gmail' },
+    { key: 'calendar', label: 'Calendar' },
+    { key: 'escalations', label: 'Escalations' },
+  ];
+  const blockedDomains = domainEntries.filter((entry) => domains[entry.key]?.remediation?.required);
+  const warnedDomains = domainEntries.filter((entry) => {
+    const status = domains[entry.key]?.status;
+    return !domains[entry.key]?.remediation?.required && (status === 'degraded' || status === 'warning');
+  });
+  const transportCooldownCount = monitorTransport?.cooldownCount || 0;
+  const transportDegradedCount = monitorTransport?.degradedCount || 0;
+  const activeTransportIncidents = monitorRuntime.activeMonitorTransportIncidents || 0;
+  const hasContent = recentMessages.length > 0 || (isStreaming && streamingText);
 
   return (
     <>
-      {/* --- Quick-chat FAB and panel --- */}
-      <AnimatePresence>
-        {!miniWidgetOpen && (
-          <motion.button
-            key="dev-fab"
-            className="dev-qc-fab"
-            onClick={() => {
-              setMiniWidgetOpen(true);
-              setTimeout(() => miniWidgetInputRef.current?.focus(), 80);
-            }}
-            type="button"
-            aria-label="Quick chat with dev agent (Ctrl+Shift+D)"
-            title="Quick chat (Ctrl+Shift+D)"
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.5 }}
-            transition={transitions.springSnappy}
-          >
-            {/* Terminal/chat icon */}
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="4 17 10 11 4 5" />
-              <line x1="12" y1="19" x2="20" y2="19" />
-            </svg>
-            {isStreaming && <span className="dev-qc-fab-pulse" />}
-          </motion.button>
-        )}
-      </AnimatePresence>
-
       {/* --- Floating server-status pill (visible when widget is closed + server not reachable) --- */}
       <AnimatePresence>
         {showServerPill && !miniWidgetOpen && (
@@ -290,90 +278,78 @@ export default function DevMiniWidget() {
         )}
       </AnimatePresence>
 
+      {/* --- Quick-chat backdrop (click-outside-to-close) --- */}
       <AnimatePresence>
         {miniWidgetOpen && (
           <motion.div
-            key="dev-qc-panel"
-            className="dev-qc-panel"
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            key="dqc-backdrop"
+            className="dqc-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
+            onClick={() => setMiniWidgetOpen(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* --- Quick-chat panel (dropdown from header) --- */}
+      <AnimatePresence>
+        {miniWidgetOpen && (
+          <motion.div
+            key="dqc"
+            className="dqc"
+            initial={{ opacity: 0, y: -8, scale: 0.97 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            transition={transitions.springGentle}
+            exit={{ opacity: 0, y: -8, scale: 0.97 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
           >
             {/* Header */}
-            <div className="dev-qc-header">
-              <div className="dev-qc-header-left">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ec9b5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="4 17 10 11 4 5" />
-                  <line x1="12" y1="19" x2="20" y2="19" />
-                </svg>
-                <span className="dev-qc-title">Dev Agent</span>
-                <span
-                  className={`dev-health-dot ${agentHealthy ? 'dev-health-dot--ok' : 'dev-health-dot--warn'}`}
-                  title={agentHealthy
-                    ? 'Agent healthy' + (healthDetails.checkedAt ? ` (checked ${Math.round((Date.now() - healthDetails.checkedAt) / 1000)}s ago)` : '')
-                    : (healthDetails.issues || []).join('; ') || 'Issues detected'
-                  }
-                />
-                {isStreaming && <span className="dev-mini-spinner" style={{ width: 10, height: 10 }} />}
-                <span className="dev-qc-badge">{getProviderShortLabel(activeProvider)}</span>
-                {showServerPill && (
-                  <span className={`dev-server-pill ${serverDown ? 'dev-server-pill--offline' : 'dev-server-pill--degraded'}`}>
-                    {serverDown ? 'Server offline' : 'Server degraded'}
-                  </span>
+            <div className="dqc-head">
+              <div className="dqc-head-left">
+                <span className="dqc-title">Dev Agent</span>
+                {isStreaming && <span className="dqc-streaming-badge">Working...</span>}
+              </div>
+              <div className="dqc-head-right">
+                <button className="dqc-head-btn" onClick={handleOpenDevMode} title="Open full Dev Mode" type="button">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </button>
+                <button className="dqc-head-btn" onClick={() => setMiniWidgetOpen(false)} title="Close (Esc)" type="button">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Chat area — only appears when there are messages */}
+            {hasContent && (
+              <div className="dqc-chat" ref={chatScrollRef}>
+                {recentMessages.map((msg, i) => (
+                  <div key={i} className={`dqc-msg dqc-msg--${msg.role}`}>
+                    {truncate(msg.content, 140)}
+                  </div>
+                ))}
+                {isStreaming && streamingText && (
+                  <div className="dqc-msg dqc-msg--assistant is-streaming">
+                    {truncate(streamingText.split('\n').filter(Boolean).slice(-3).join(' '), 160)}
+                    <span className="dqc-cursor" />
+                  </div>
                 )}
               </div>
-              <div className="dev-qc-header-actions">
-                <button
-                  className="dev-mini-header-btn"
-                  onClick={handleOpenDevMode}
-                  title="Open full Dev Mode"
-                  type="button"
-                >
-                  &#8599;
-                </button>
-                <button
-                  className="dev-mini-header-btn"
-                  onClick={() => setMiniWidgetOpen(false)}
-                  title="Close (Esc)"
-                  type="button"
-                >
-                  &times;
-                </button>
-              </div>
-            </div>
-
-            {/* Messages preview */}
-            <div className="dev-qc-messages" ref={chatScrollRef}>
-              {recentMessages.length === 0 && !isStreaming && (
-                <div className="dev-qc-empty">No messages yet. Type below to start.</div>
-              )}
-              {recentMessages.map((msg, i) => (
-                <div key={i} className={`dev-qc-msg dev-qc-msg--${msg.role}`}>
-                  <span className={`dev-qc-role dev-qc-role--${msg.role}`}>
-                    {msg.role === 'user' ? 'You' : 'Dev'}
-                  </span>
-                  <span className="dev-qc-content">{truncate(msg.content)}</span>
-                </div>
-              ))}
-              {isStreaming && streamingText && (
-                <div className="dev-qc-msg dev-qc-msg--assistant">
-                  <span className="dev-qc-role dev-qc-role--assistant">Dev</span>
-                  <span className="dev-qc-content dev-qc-content--streaming">
-                    {truncate(streamingText.split('\n').filter(Boolean).slice(-2).join(' '), 120)}
-                    <span className="dev-mini-cursor" />
-                  </span>
-                </div>
-              )}
-            </div>
+            )}
 
             {/* Input */}
-            <div className="dev-qc-input-row">
+            <div className="dqc-compose">
               <input
                 ref={miniWidgetInputRef}
-                className="dev-qc-input"
+                className="dqc-input"
                 type="text"
-                placeholder={isStreaming ? 'Agent is streaming...' : 'Quick message to dev agent...'}
+                placeholder={isStreaming ? 'Agent is working...' : 'Ask the dev agent anything...'}
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -381,56 +357,91 @@ export default function DevMiniWidget() {
                 autoComplete="off"
                 spellCheck="false"
               />
-              <button
-                className="dev-qc-send"
-                onClick={handleSend}
-                disabled={isStreaming || !inputValue.trim()}
-                type="button"
-                title="Send (Enter)"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-              </button>
+              {isStreaming ? (
+                <button className="dqc-send is-stop" onClick={abortStream} type="button" title="Stop">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                    <rect x="5" y="5" width="14" height="14" rx="2" />
+                  </svg>
+                </button>
+              ) : (
+                <button
+                  className="dqc-send"
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                  type="button"
+                  title="Send (Enter)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="5 12 12 5 19 12" />
+                  </svg>
+                </button>
+              )}
             </div>
 
-            {/* Compact token stats */}
-            {tokenStats.combined.total > 0 && (
-              <div className="dev-qc-token-bar">
-                <span className="dev-qc-token-stat">
-                  {formatTokenCount(tokenStats.combined.total)} tokens
+            <div className="dqc-status">
+              <span
+                className={`dqc-status-chip${agentHealthy ? '' : ' is-warn'}`}
+                title={agentHealthy ? 'Agent healthy' : (healthDetails?.issues || []).join('; ') || 'Issues detected'}
+              >
+                {agentHealthy ? 'Healthy' : 'Issues'}
+              </span>
+              {monitorCoolingDown && (
+                <span className="dqc-status-chip is-warn" title="Background monitor channel is cooling down">
+                  Monitor {formatShortDuration(monitorCooldownMs)}
                 </span>
-                {tokenStats.combined.cost > 0 && (
-                  <span className="dev-qc-token-stat dev-qc-token-cost">
-                    {formatCost(tokenStats.combined.cost)}
-                  </span>
-                )}
-                {tokenStats.background.total > 0 && (
-                  <span className="dev-qc-token-stat dev-qc-token-bg">
-                    bg: {formatTokenCount(tokenStats.background.total)}
-                  </span>
-                )}
-                {tokenStats.budget?.maxPercent > 0 && (
-                  <span className={`dev-qc-token-stat dev-qc-token-budget dev-qc-token-budget--${tokenStats.budget.state}`}>
-                    {Math.round(tokenStats.budget.maxPercent)}% budget
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+              {(transportCooldownCount > 0 || transportDegradedCount > 0) && (
+                <span
+                  className="dqc-status-chip is-warn"
+                  title={`Monitor streams: ${monitorTransport?.connectedCount || 0} connected, ${transportCooldownCount} cooling down, ${transportDegradedCount} degraded`}
+                >
+                  Streams {transportCooldownCount}/{transportDegradedCount}
+                </span>
+              )}
+              {activeTransportIncidents > 0 && (
+                <span
+                  className="dqc-status-chip is-alert"
+                  title={`${activeTransportIncidents} active monitor transport incident${activeTransportIncidents === 1 ? '' : 's'} are reducing supervisor visibility`}
+                >
+                  {activeTransportIncidents} blind
+                </span>
+              )}
+              {blockedDomains.length > 0 && (
+                <span
+                  className="dqc-status-chip is-alert"
+                  title={blockedDomains.map((entry) => `${entry.label}: ${domains[entry.key]?.remediation?.message || 'Action needed'}`).join('; ')}
+                >
+                  {blockedDomains.length} blocked
+                </span>
+              )}
+              {warnedDomains.length > 0 && (
+                <span
+                  className="dqc-status-chip is-warn"
+                  title={warnedDomains.map((entry) => `${entry.label}: ${(domains[entry.key]?.issues || []).join('; ') || domains[entry.key]?.status || 'warning'}`).join('; ')}
+                >
+                  {warnedDomains.length} warned
+                </span>
+              )}
+              {((remediation.failedAttempts || 0) > 0 || (remediation.partialAttempts || 0) > 0) && (
+                <span
+                  className="dqc-status-chip is-alert"
+                  title={`Failed remediations: ${remediation.failedAttempts || 0}; partial remediations: ${remediation.partialAttempts || 0}`}
+                >
+                  {remediation.failedAttempts || 0} failed
+                </span>
+              )}
+            </div>
 
-            {/* Compact activity log */}
-            <AgentActivityLog compact />
-
-            {/* Footer link */}
-            <div className="dev-qc-footer">
-              <button className="dev-qc-fullview" onClick={handleOpenDevMode} type="button">
+            {/* Footer */}
+            <div className="dqc-foot">
+              <button className="dqc-foot-link" onClick={handleOpenDevMode} type="button">
                 Open full view
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="9 18 15 12 9 6" />
                 </svg>
               </button>
-              <span className="dev-qc-shortcut">Ctrl+Shift+D</span>
+              <kbd className="dqc-foot-kbd">Ctrl+Shift+D</kbd>
             </div>
           </motion.div>
         )}
@@ -442,13 +453,12 @@ export default function DevMiniWidget() {
           <motion.div
             key="dev-stream-monitor"
             className={`dev-mini-widget ${streamExpanded ? 'dev-mini-widget--expanded' : 'dev-mini-widget--collapsed'}`}
-            style={{ bottom: 72 }}
+            style={{ bottom: 20 }}
             {...widgetSlideUp}
             transition={transitions.springGentle}
           >
             <AnimatePresence mode="wait" initial={false}>
               {!streamExpanded ? (
-                /* ---- Collapsed pill ---- */
                 <motion.div
                   key="pill"
                   className="dev-mini-pill"
@@ -496,7 +506,6 @@ export default function DevMiniWidget() {
                   </button>
                 </motion.div>
               ) : (
-                /* ---- Expanded streaming card ---- */
                 <motion.div
                   key="card"
                   className="dev-mini-card"
@@ -505,7 +514,6 @@ export default function DevMiniWidget() {
                   exit={{ opacity: 0 }}
                   transition={transitions.fast}
                 >
-                  {/* Header */}
                   <div className="dev-mini-header">
                     <div className="dev-mini-header-left">
                       <span className="dev-mini-spinner" />
@@ -532,7 +540,6 @@ export default function DevMiniWidget() {
                     </div>
                   </div>
 
-                  {/* Terminal */}
                   <div className="dev-mini-terminal" ref={terminalRef}>
                     <motion.div variants={staggerContainer} initial="initial" animate="animate">
                       {toolEvents.map((evt, i) => (
@@ -558,7 +565,6 @@ export default function DevMiniWidget() {
                     )}
                   </div>
 
-                  {/* Footer */}
                   <div className="dev-mini-footer">
                     <motion.div className="dev-mini-tool-badges" variants={staggerContainer} initial="initial" animate="animate">
                       {summarizeTools(toolEvents).map(({ tool, count }) => (

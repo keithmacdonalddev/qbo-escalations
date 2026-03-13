@@ -3,11 +3,12 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "nodemon src/index.js",
-    "start": "node src/index.js",
+    "dev": "nodemon --exec \"node --max-old-space-size=512\" src/index.js",
+    "start": "node --max-old-space-size=512 src/index.js",
     "test": "node --test --test-isolation=none test/**/*.test.js"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.74",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^5.2.0",

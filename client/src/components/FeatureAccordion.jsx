@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { getProviderLabel } from '../utils/markdown.jsx';
+import { getProviderLabel } from '../lib/providerCatalog.js';
 import SnapDecision from './SnapDecision.jsx';
 
 /**

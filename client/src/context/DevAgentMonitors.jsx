@@ -1,3 +1,4 @@
+// @refresh reset — force full remount on HMR to prevent hooks mismatch crashes
 import { createContext, useContext, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { useAutoErrorReporter } from '../hooks/useAutoErrorReporter.js';
@@ -10,6 +11,16 @@ import { useClientHealthExtended } from '../hooks/useClientHealthExtended.js';
 import { useServerErrors } from '../hooks/useServerErrors.js';
 import { useWaterfallInsights } from '../hooks/useWaterfallInsights.js';
 import { useHMRVerification } from '../hooks/useHMRVerification.js';
+import { useWorkspaceMonitor } from '../hooks/useWorkspaceMonitor.js';
+import { useAiRuntimeMonitor } from '../hooks/useAiRuntimeMonitor.js';
+import { useActiveRequestMonitor } from '../hooks/useActiveRequestMonitor.js';
+import { useCrossTabIssueRelay } from '../hooks/useCrossTabIssueRelay.js';
+import { useServerRequestMonitor } from '../hooks/useServerRequestMonitor.js';
+import { useRuntimeAutoRemediation } from '../hooks/useRuntimeAutoRemediation.js';
+import { useMonitorDispatch } from '../hooks/useMonitorDispatch.js';
+import { useSupervisorAlerts } from '../hooks/useSupervisorAlerts.js';
+import { useDomainHealthMonitor } from '../hooks/useDomainHealthMonitor.js';
+import { useMonitorTransportAutoRemediation } from '../hooks/useMonitorTransportAutoRemediation.js';
 
 // ── Secondary context for monitor-specific state ────────────────────
 const DevAgentMonitorContext = createContext(null);
@@ -25,16 +36,43 @@ export function useDevAgentMonitors() {
 
 // ── ErrorBoundary fallback ──────────────────────────────────────────
 
+// Track whether we've already reported a monitor crash to prevent spam
+let _monitorCrashReported = false;
+
 function MonitorFallback({ error }) {
-  // Silent fallback -- monitors crashed but app continues.
-  // Log to original console.error to avoid any patched interceptors.
+  // Monitors crashed — log and escalate to the dev agent directly.
+  // Since the monitors (including useAutoErrorReporter) are dead,
+  // we must bypass the normal pipeline and POST directly to the server.
   try {
     const msg = error?.message || String(error);
-    // Use Function constructor to get unpatched console reference
+    const stack = error?.stack || '';
     (console.__original_error || console.error)(
       '[DevAgent] Monitors crashed (app continues normally):',
       msg
     );
+
+    // Escalate to dev agent via direct fetch — only once per crash
+    if (!_monitorCrashReported) {
+      _monitorCrashReported = true;
+      fetch('/api/dev/monitor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channelType: 'auto-errors',
+          message: [
+            '[AUTO-ERROR] DevAgent monitors crashed — error pipeline is offline',
+            '',
+            `Error: ${msg}`,
+            stack ? `Stack: ${stack.slice(0, 1500)}` : '',
+            '',
+            'The monitor ErrorBoundary caught this. All monitor hooks (auto-error reporter,',
+            'health checks, workspace monitor, etc.) are DOWN until the root cause is fixed.',
+            'This error likely originated from a hook ordering issue or TDZ reference.',
+            'Investigate and fix the source file immediately.',
+          ].filter(Boolean).join('\n'),
+        }),
+      }).catch(() => {}); // best-effort, don't throw
+    }
   } catch {
     // Truly best-effort -- if even logging fails, just swallow it
   }
@@ -56,6 +94,8 @@ export function DevAgentMonitorBoundary({
   children,
   sendBackground,
   isLeader,
+  broadcastStatus,
+  onStatusUpdate,
   log,
   isStreaming,
   bgStreaming,
@@ -63,6 +103,8 @@ export function DevAgentMonitorBoundary({
   serverState,
   emergencyActive,
   recordError,
+  runtimeHealth,
+  monitorTransport,
 }) {
   return (
     <ErrorBoundary
@@ -76,6 +118,8 @@ export function DevAgentMonitorBoundary({
       <DevAgentMonitorsInner
         sendBackground={sendBackground}
         isLeader={isLeader}
+        broadcastStatus={broadcastStatus}
+        onStatusUpdate={onStatusUpdate}
         log={log}
         isStreaming={isStreaming}
         bgStreaming={bgStreaming}
@@ -83,6 +127,8 @@ export function DevAgentMonitorBoundary({
         serverState={serverState}
         emergencyActive={emergencyActive}
         recordError={recordError}
+        runtimeHealth={runtimeHealth}
+        monitorTransport={monitorTransport}
       >
         {children}
       </DevAgentMonitorsInner>
@@ -100,6 +146,8 @@ function DevAgentMonitorsInner({
   children,
   sendBackground,
   isLeader,
+  broadcastStatus,
+  onStatusUpdate,
   log,
   isStreaming,
   bgStreaming,
@@ -107,6 +155,8 @@ function DevAgentMonitorsInner({
   serverState,
   emergencyActive,
   recordError,
+  runtimeHealth,
+  monitorTransport,
 }) {
   // ── Staggered startup: phase monitors in over 30 seconds ──────────
   //
@@ -172,10 +222,15 @@ function DevAgentMonitorsInner({
 
   // Gate SSE connections when server is unreachable to prevent reconnect storms
   const serverUp = serverState !== 'unreachable';
+  const monitorSendBackground = useMonitorDispatch({
+    enabled: phase >= 1 && serverUp,
+    sendBackground,
+    log,
+  });
 
   // ── Phase 1 (immediate): Error resolution tracker ──────────────────
   // Closed-loop: detect -> report -> fix -> verify -> confirm/escalate
-  const errorResolution = useErrorResolution({ sendBackground, log });
+  const errorResolution = useErrorResolution({ sendBackground: monitorSendBackground, log });
 
   // ── Phase 1 (immediate): HMR verification ────────────────────────
   // Detects Vite HMR updates and feeds them to the resolution tracker
@@ -186,7 +241,7 @@ function DevAgentMonitorsInner({
   // Stays active in emergency but batches aggressively
   const errorReporter = useAutoErrorReporter({
     enabled: phase >= 1,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     isLeader,
     log,
     emergencyActive,
@@ -194,12 +249,22 @@ function DevAgentMonitorsInner({
     errorResolution,
   });
 
+  // ── Phase 1 (immediate): relay critical issues from non-leader tabs ──
+  useCrossTabIssueRelay({
+    enabled: phase >= 1,
+    isLeader,
+    broadcastStatus,
+    onStatusUpdate,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
   // ── Phase 2 (5s): DevTools bridge ─────────────────────────────────
   // console.error, circuit breaker, API errors, React crashes
   useDevToolsBridge({
     enabled: phase >= 2,
     isLeader,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     log,
   });
 
@@ -220,7 +285,7 @@ function DevAgentMonitorsInner({
   useClientHealthMonitor({
     enabled: phase >= 3 && !emergencyActive,
     isLeader,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     log,
   });
 
@@ -229,7 +294,7 @@ function DevAgentMonitorsInner({
   useClientHealthExtended({
     enabled: phase >= 3 && !emergencyActive && !isIdle,
     isLeader,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     log,
   });
 
@@ -237,8 +302,80 @@ function DevAgentMonitorsInner({
   useServerErrors({
     enabled: phase >= 3 && serverUp,
     isLeader,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     log,
+  });
+
+  // ── Phase 3 (15s): Workspace runtime monitor ──────────────────────
+  // Watches active workspace sessions for hangs/stalls from the server side.
+  useWorkspaceMonitor({
+    enabled: phase >= 1 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Chat/copilot runtime monitor ──────────────────
+  // Watches long-running AI operations that do not have dedicated status UI.
+  useAiRuntimeMonitor({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Shared HTTP active-request monitor ─────────────
+  // Watches apiFetch-backed requests that are active too long.
+  useActiveRequestMonitor({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Backend request runtime monitor ───────────────
+  // Watches server-side requests that stay active too long.
+  useServerRequestMonitor({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Domain health monitor ─────────────────────────
+  // Watches Gmail, Calendar, and Escalations subsystem health summaries.
+  useDomainHealthMonitor({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Deterministic runtime auto-remediation ─────────
+  // Aborts clearly stale AI/runtime sessions before escalating further.
+  useRuntimeAutoRemediation({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+  });
+
+  // ── Phase 3 (15s): Supervisor alerts from /api/dev/health ──────────
+  // Escalates server-observable stuck sessions back to the dev agent.
+  useSupervisorAlerts({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    sendBackground: monitorSendBackground,
+    log,
+    runtimeHealth,
+    monitorTransport,
+  });
+
+  useMonitorTransportAutoRemediation({
+    enabled: phase >= 3 && serverUp,
+    isLeader,
+    log,
+    monitorTransport,
   });
 
   // ── Phase 4 (30s): Code review (SSE to git change detector) ──────
@@ -255,7 +392,7 @@ function DevAgentMonitorsInner({
   useWaterfallInsights({
     enabled: phase >= 4 && serverUp && !emergencyActive && !isIdle,
     isLeader,
-    sendBackground,
+    sendBackground: monitorSendBackground,
     log,
   });
 

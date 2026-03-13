@@ -19,6 +19,7 @@ const devMessageSchema = new mongoose.Schema({
   mode: { type: String, enum: CHAT_MODES },
   fallbackFrom: { type: String, enum: PROVIDERS },
   attemptMeta: { type: mongoose.Schema.Types.Mixed, default: null },
+  meta: { type: mongoose.Schema.Types.Mixed, default: null },
   usage: {
     inputTokens: Number,
     outputTokens: Number,
@@ -50,4 +51,8 @@ const devConversationSchema = new mongoose.Schema({
 
 devConversationSchema.index({ updatedAt: -1 });
 
-module.exports = mongoose.model('DevConversation', devConversationSchema);
+const DevConversation = mongoose.model('DevConversation', devConversationSchema);
+
+module.exports = DevConversation;
+module.exports.CHANNEL_TYPES = CHANNEL_TYPES;
+module.exports.DEFAULT_CHANNEL_TYPE = 'user';

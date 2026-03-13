@@ -1,8 +1,37 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+
+const HMR_TRANSIENT_ERRORS = [
+  'Should have a queue',
+  'Rendered fewer hooks than expected',
+  'Rendered more hooks than expected',
+  'is not defined',
+];
+
+function isHmrTransientError(error) {
+  const msg = error?.message || '';
+  return import.meta.env.DEV && HMR_TRANSIENT_ERRORS.some(p => msg.includes(p));
+}
 
 export default function ErrorFallback({ error, resetErrorBoundary }) {
   const [showStack, setShowStack] = useState(false);
   const isDev = import.meta.env.DEV;
+
+  // Auto-reload for HMR hook mismatch errors — these are transient and
+  // only fixable via full page reload (react-refresh can't reconcile them).
+  // Use 300ms delay (fast enough to prevent cascading re-render crashes)
+  // and sessionStorage guard to prevent infinite reload loops.
+  useEffect(() => {
+    if (isHmrTransientError(error)) {
+      const key = 'qbo-hmr-reload';
+      const last = Number(sessionStorage.getItem(key) || 0);
+      const now = Date.now();
+      // If we reloaded less than 3s ago, don't reload again (break the loop)
+      if (now - last < 3000) return;
+      sessionStorage.setItem(key, String(now));
+      const tid = setTimeout(() => location.reload(), 300);
+      return () => clearTimeout(tid);
+    }
+  }, [error]);
 
   return (
     <div className="error-fallback">
@@ -10,6 +39,12 @@ export default function ErrorFallback({ error, resetErrorBoundary }) {
         <div className="error-fallback-icon">!</div>
         <h1 className="error-fallback-title">Something went wrong</h1>
         <p className="error-fallback-message">{error?.message || 'An unexpected error occurred'}</p>
+
+        {isHmrTransientError(error) && (
+          <p style={{ fontSize: 13, color: 'var(--accent, #6366f1)', marginTop: 8, fontWeight: 600 }}>
+            Transient HMR error detected — auto-reloading...
+          </p>
+        )}
 
         {isDev && error?.stack && (
           <>

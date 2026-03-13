@@ -17,9 +17,10 @@ function notConnected() {
 
 /**
  * Build an authenticated Google Calendar v3 client.
+ * @param {string} [email] - Google account email to use. Falls back to primary if omitted.
  */
-async function getCalendarClient() {
-  const auth = await getAuth();
+async function getCalendarClient(email) {
+  const auth = await getAuth(email || undefined);
   if (!auth) return null;
   return google.calendar({ version: 'v3', auth });
 }
@@ -44,7 +45,7 @@ function normalizeEvent(ev) {
       ? { date: ev.start.date, dateTime: null, timeZone: ev.start.timeZone || null }
       : { date: null, dateTime: ev.start?.dateTime || null, timeZone: ev.start?.timeZone || null },
     end: isAllDay
-      ? { date: ev.end.date, dateTime: null, timeZone: ev.end.timeZone || null }
+      ? { date: ev.end?.date || null, dateTime: null, timeZone: ev.end?.timeZone || null }
       : { date: null, dateTime: ev.end?.dateTime || null, timeZone: ev.end?.timeZone || null },
     attendees: (ev.attendees || []).map((a) => ({
       email: a.email,
@@ -69,9 +70,10 @@ function normalizeEvent(ev) {
 
 /**
  * List the user's calendars.
+ * @param {string} [email] - Google account email to use. Falls back to primary if omitted.
  */
-async function listCalendars() {
-  const cal = await getCalendarClient();
+async function listCalendars(email) {
+  const cal = await getCalendarClient(email);
   if (!cal) return notConnected();
 
   const res = await cal.calendarList.list({ minAccessRole: 'reader' });
@@ -99,9 +101,10 @@ async function listCalendars() {
  * @param {string} [opts.q] - Free-text search term
  * @param {number} [opts.maxResults=250]
  * @param {string} [opts.pageToken]
+ * @param {string} [opts.account] - Google account email to use
  */
-async function listEvents({ calendarId = 'primary', timeMin, timeMax, q, maxResults = 250, pageToken } = {}) {
-  const cal = await getCalendarClient();
+async function listEvents({ calendarId = 'primary', timeMin, timeMax, q, maxResults = 250, pageToken, account } = {}) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
 
   const params = {
@@ -109,6 +112,7 @@ async function listEvents({ calendarId = 'primary', timeMin, timeMax, q, maxResu
     singleEvents: true,
     orderBy: 'startTime',
     maxResults: Math.min(maxResults, 2500),
+    fields: 'items(id,summary,description,location,start,end,attendees,organizer,reminders,recurrence,colorId,created,updated,htmlLink,status),nextPageToken',
   };
   if (timeMin) params.timeMin = timeMin;
   if (timeMax) params.timeMax = timeMax;
@@ -127,12 +131,19 @@ async function listEvents({ calendarId = 'primary', timeMin, timeMax, q, maxResu
 
 /**
  * Get a single event by ID.
+ * @param {string} [calendarId='primary']
+ * @param {string} eventId
+ * @param {string} [account] - Google account email to use
  */
-async function getEvent(calendarId = 'primary', eventId) {
-  const cal = await getCalendarClient();
+async function getEvent(calendarId = 'primary', eventId, account) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
 
-  const res = await cal.events.get({ calendarId, eventId });
+  const res = await cal.events.get({
+    calendarId,
+    eventId,
+    fields: 'id,summary,description,location,start,end,attendees,organizer,reminders,recurrence,colorId,created,updated,htmlLink,status',
+  });
   return { ok: true, event: normalizeEvent(res.data) };
 }
 
@@ -140,10 +151,42 @@ async function getEvent(calendarId = 'primary', eventId) {
  * Create a new event.
  * @param {string} calendarId
  * @param {Object} eventData - { summary, description, location, start, end, attendees, reminders, allDay }
+ * @param {string} [account] - Google account email to use
  */
-async function createEvent(calendarId = 'primary', eventData) {
-  const cal = await getCalendarClient();
+async function createEvent(calendarId = 'primary', eventData, account) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
+
+  // --- Duplicate guard: check for existing event with same name & time ---
+  try {
+    const startStr = eventData.start;
+    const endStr = eventData.end;
+    if (eventData.summary && startStr) {
+      const searchMin = eventData.allDay ? startStr : startStr;
+      const searchMax = endStr || (eventData.allDay
+        ? startStr
+        : new Date(new Date(startStr).getTime() + 24 * 60 * 60 * 1000).toISOString());
+      const existing = await cal.events.list({
+        calendarId,
+        timeMin: eventData.allDay ? `${searchMin}T00:00:00Z` : searchMin,
+        timeMax: eventData.allDay ? `${searchMax}T23:59:59Z` : searchMax,
+        q: eventData.summary,
+        singleEvents: true,
+        maxResults: 10,
+      });
+      const dupes = (existing.data.items || []).filter((ev) => {
+        const evSummary = (ev.summary || '').toLowerCase().trim();
+        const newSummary = eventData.summary.toLowerCase().trim();
+        if (evSummary !== newSummary) return false;
+        const evStart = ev.start?.dateTime || ev.start?.date || '';
+        return evStart === startStr;
+      });
+      if (dupes.length > 0) {
+        return { ok: true, event: normalizeEvent(dupes[0]), duplicate: true,
+          message: `Event "${eventData.summary}" already exists at that time — skipped creation.` };
+      }
+    }
+  } catch (_) { /* dedup is best-effort — proceed with creation on error */ }
 
   const resource = {};
   if (eventData.summary) resource.summary = eventData.summary;
@@ -180,9 +223,13 @@ async function createEvent(calendarId = 'primary', eventData) {
 
 /**
  * Update an existing event.
+ * @param {string} [calendarId='primary']
+ * @param {string} eventId
+ * @param {Object} updates
+ * @param {string} [account] - Google account email to use
  */
-async function updateEvent(calendarId = 'primary', eventId, updates) {
-  const cal = await getCalendarClient();
+async function updateEvent(calendarId = 'primary', eventId, updates, account) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
 
   const resource = {};
@@ -220,9 +267,12 @@ async function updateEvent(calendarId = 'primary', eventId, updates) {
 
 /**
  * Delete an event.
+ * @param {string} [calendarId='primary']
+ * @param {string} eventId
+ * @param {string} [account] - Google account email to use
  */
-async function deleteEvent(calendarId = 'primary', eventId) {
-  const cal = await getCalendarClient();
+async function deleteEvent(calendarId = 'primary', eventId, account) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
 
   await cal.events.delete({
@@ -240,9 +290,10 @@ async function deleteEvent(calendarId = 'primary', eventId) {
  * @param {string} timeMin - ISO date string
  * @param {string} timeMax - ISO date string
  * @param {string} [timeZone] - IANA timezone string
+ * @param {string} [account] - Google account email to use
  */
-async function findFreeTime(calendarIds = ['primary'], timeMin, timeMax, timeZone) {
-  const cal = await getCalendarClient();
+async function findFreeTime(calendarIds = ['primary'], timeMin, timeMax, timeZone, account) {
+  const cal = await getCalendarClient(account);
   if (!cal) return notConnected();
 
   const res = await cal.freebusy.query({

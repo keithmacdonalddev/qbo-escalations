@@ -1,4 +1,5 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+// @refresh reset — force full remount on HMR (many hooks, HMR can't reconcile)
+import { startTransition, useState, useCallback, useRef, useEffect } from 'react';
 import {
   sendChatMessage,
   retryChatMessage,
@@ -58,10 +59,36 @@ function createProcessEvent(event) {
   };
 }
 
+// ── Session recovery helpers ──────────────────────────────
+// Attempt to restore chat state from sessionStorage (saved before reload).
+// Returns { messages, conversationId } or nulls if nothing was cached.
+function recoverSessionState() {
+  try {
+    const raw = sessionStorage.getItem('qbo-chat-messages');
+    const id = sessionStorage.getItem('qbo-chat-conversationId');
+    // Clear immediately — one-time use only
+    sessionStorage.removeItem('qbo-chat-messages');
+    sessionStorage.removeItem('qbo-chat-conversationId');
+    sessionStorage.removeItem('qbo-chat-route');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { messages: parsed, conversationId: id || null, recovered: true };
+      }
+    }
+  } catch {
+    // Corrupted or unavailable — fall through
+  }
+  return { messages: null, conversationId: null, recovered: false };
+}
+
+// Run recovery once at module load so the values are ready for useState init
+const _sessionRecovery = recoverSessionState();
+
 export function useChat(options = {}) {
   const { aiSettings = null } = options;
-  const [messages, setMessages] = useState([]);
-  const [conversationId, setConversationId] = useState(null);
+  const [messages, setMessages] = useState(() => _sessionRecovery.messages || []);
+  const [conversationId, setConversationId] = useState(() => _sessionRecovery.conversationId || null);
   const [provider, setProviderState] = useState(() => {
     if (typeof window === 'undefined') return DEFAULT_PROVIDER;
     return normalizeProvider(window.localStorage.getItem('qbo-chat-provider'));
@@ -100,11 +127,12 @@ export function useChat(options = {}) {
   const [thinkingText, setThinkingText] = useState('');
   const [isThinking, setIsThinking] = useState(false);
   const [thinkingStartTime, setThinkingStartTime] = useState(null);
+  const [currentTraceId, setCurrentTraceId] = useState(null);
 
   const abortRef = useRef(null);
   const startTimeRef = useRef(null);
   const isStreamingRef = useRef(false);
-  const conversationIdRef = useRef(null);
+  const conversationIdRef = useRef(_sessionRecovery.conversationId || null);
   const streamingTextRef = useRef('');
   const parallelStreamingRef = useRef({});
   const providerRef = useRef(provider);
@@ -118,6 +146,12 @@ export function useChat(options = {}) {
   const chunkStartedProvidersRef = useRef(new Set());
   const thinkingTextRef = useRef('');
   const isThinkingRef = useRef(false);
+  const streamFlushFrameRef = useRef(0);
+  const pendingStreamFlushRef = useRef({
+    streaming: false,
+    parallel: false,
+    thinking: false,
+  });
 
   const shouldShowContextDebug = useCallback(() => (
     Boolean(aiSettingsRef.current?.debug?.showContextDebug)
@@ -132,6 +166,50 @@ export function useChat(options = {}) {
     const normalized = normalizeError(nextError);
     setErrorState(normalized.message);
     setErrorDetails(normalized);
+  }, []);
+
+  const clearScheduledStreamFlush = useCallback(() => {
+    if (streamFlushFrameRef.current) {
+      cancelAnimationFrame(streamFlushFrameRef.current);
+      streamFlushFrameRef.current = 0;
+    }
+    pendingStreamFlushRef.current = {
+      streaming: false,
+      parallel: false,
+      thinking: false,
+    };
+  }, []);
+
+  const scheduleStreamFlush = useCallback((kind) => {
+    if (!pendingStreamFlushRef.current[kind]) {
+      pendingStreamFlushRef.current = {
+        ...pendingStreamFlushRef.current,
+        [kind]: true,
+      };
+    }
+    if (streamFlushFrameRef.current) return;
+
+    streamFlushFrameRef.current = requestAnimationFrame(() => {
+      streamFlushFrameRef.current = 0;
+      const pending = pendingStreamFlushRef.current;
+      pendingStreamFlushRef.current = {
+        streaming: false,
+        parallel: false,
+        thinking: false,
+      };
+
+      startTransition(() => {
+        if (pending.streaming) {
+          setStreamingText(streamingTextRef.current);
+        }
+        if (pending.parallel) {
+          setParallelStreaming({ ...parallelStreamingRef.current });
+        }
+        if (pending.thinking) {
+          setThinkingText(thinkingTextRef.current);
+        }
+      });
+    });
   }, []);
 
   const pushProcessEvent = useCallback((event) => {
@@ -231,10 +309,110 @@ export function useChat(options = {}) {
     }
   }, [aiSettings?.debug?.showContextDebug]);
 
+  // ── Streaming flag bridge ──────────────────────────────────
+  // Sync isStreaming to a global so main.jsx's reload guard can check it
+  // without coupling to React state.
+  useEffect(() => {
+    window.__qboStreaming = isStreaming;
+  }, [isStreaming]);
+
+  // ── State snapshot for reload recovery ────────────────────
+  // Save messages + conversationId to sessionStorage before any page unload
+  // so reloads restore instantly without a DB round-trip.
+  useEffect(() => {
+    const snapshotState = () => {
+      try {
+        const id = conversationIdRef.current;
+        if (id) {
+          sessionStorage.setItem('qbo-chat-conversationId', id);
+        }
+        // Read messages from ref-like source: use a getter attached to window
+        // so the beforeunload handler always gets the latest messages.
+        const msgs = window.__qboChatMessages;
+        if (msgs && msgs.length > 0) {
+          // Cap at last 50 messages to stay within sessionStorage limits (~5MB)
+          const capped = msgs.slice(-50);
+          sessionStorage.setItem('qbo-chat-messages', JSON.stringify(capped));
+        }
+        // Save current hash route
+        if (window.location.hash) {
+          sessionStorage.setItem('qbo-chat-route', window.location.hash);
+        }
+      } catch {
+        // sessionStorage can throw if full or in private browsing
+      }
+    };
+
+    window.addEventListener('beforeunload', snapshotState);
+
+    // Also tie into Vite's HMR signal (fires before the debounced reload)
+    if (import.meta.hot) {
+      import.meta.hot.on('vite:beforeFullReload', snapshotState);
+    }
+
+    return () => {
+      window.removeEventListener('beforeunload', snapshotState);
+    };
+  }, []);
+
+  // Keep a global reference to messages so the snapshot handler can read
+  // the latest value without a stale closure.
+  useEffect(() => {
+    window.__qboChatMessages = messages;
+  }, [messages]);
+
+  // ── Post-reload recovery ───────────────────────────────────
+  // If messages were restored from sessionStorage, sync conversationIdRef
+  // and run a background DB fetch to ensure consistency. Show recovery toast.
+  useEffect(() => {
+    if (!_sessionRecovery.recovered) return;
+    const recoveredId = _sessionRecovery.conversationId;
+
+    // Sync the ref so sendMessage/selectConversation work immediately
+    if (recoveredId) {
+      conversationIdRef.current = recoveredId;
+    }
+
+    // Signal recovery toast (picked up by main.jsx DOM toast)
+    window.dispatchEvent(new CustomEvent('qbo:session-recovered'));
+
+    // Background DB sync — silently refresh from server to pick up any
+    // messages that arrived after our snapshot. Don't flash empty state.
+    if (recoveredId) {
+      getConversation(recoveredId)
+        .then((conv) => {
+          const conversationProvider = normalizeProvider(conv.provider);
+          const normalizedMessages = (conv.messages || []).map((msg) => {
+            if (msg.role !== 'assistant') return msg;
+            const qa = msg.attemptMeta?.quickActions;
+            return {
+              ...msg,
+              provider: normalizeProvider(msg.provider || conversationProvider),
+              ...(Array.isArray(qa) && qa.length > 0 ? { quickActions: qa } : {}),
+            };
+          });
+          // Only update if DB has same or more messages (don't regress)
+          setMessages((current) => {
+            if (normalizedMessages.length >= current.length) return normalizedMessages;
+            return current;
+          });
+        })
+        .catch(() => {
+          // DB unreachable — sessionStorage data is still valid, keep it
+        });
+    }
+
+    // Clear the recovery flag so this doesn't re-run
+    _sessionRecovery.recovered = false;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Abort any in-flight stream on unmount
   useEffect(() => {
-    return () => { if (abortRef.current) abortRef.current(); };
-  }, []);
+    return () => {
+      clearScheduledStreamFlush();
+      if (abortRef.current) abortRef.current();
+    };
+  }, [clearScheduledStreamFlush]);
 
   const selectConversation = useCallback(async (id) => {
     try {
@@ -242,6 +420,7 @@ export function useChat(options = {}) {
       if (abortRef.current) {
         abortRef.current();
         abortRef.current = null;
+        clearScheduledStreamFlush();
         setIsStreaming(false);
         isStreamingRef.current = false;
         setStreamingText('');
@@ -255,6 +434,7 @@ export function useChat(options = {}) {
       setContextDebug(null);
       setRuntimeWarnings([]);
       resetProcessEvents();
+      setCurrentTraceId(null);
       setThinkingText('');
       thinkingTextRef.current = '';
       setIsThinking(false);
@@ -270,9 +450,11 @@ export function useChat(options = {}) {
 
       const normalizedMessages = (conv.messages || []).map((msg) => {
         if (msg.role !== 'assistant') return msg;
+        const qa = msg.attemptMeta?.quickActions;
         return {
           ...msg,
           provider: normalizeProvider(msg.provider || conversationProvider),
+          ...(Array.isArray(qa) && qa.length > 0 ? { quickActions: qa } : {}),
         };
       });
 
@@ -290,9 +472,10 @@ export function useChat(options = {}) {
     } catch (err) {
       setError(err.message);
     }
-  }, [resetProcessEvents, setError, setMode, setProvider]);
+  }, [clearScheduledStreamFlush, resetProcessEvents, setError, setMode, setProvider]);
 
   const newConversation = useCallback(() => {
+    clearScheduledStreamFlush();
     setConversationId(null);
     conversationIdRef.current = null;
     setMessages([]);
@@ -306,6 +489,7 @@ export function useChat(options = {}) {
     setContextDebug(null);
     setRuntimeWarnings([]);
     resetProcessEvents();
+    setCurrentTraceId(null);
     setSplitModeActive(false);
     splitModeActiveRef.current = false;
     setThinkingText('');
@@ -313,9 +497,9 @@ export function useChat(options = {}) {
     setIsThinking(false);
     isThinkingRef.current = false;
     setThinkingStartTime(null);
-  }, [resetProcessEvents, setError]);
+  }, [clearScheduledStreamFlush, resetProcessEvents, setError]);
 
-  const sendMessage = useCallback((text, images = [], providerOverride) => {
+  const sendMessage = useCallback((text, images = [], providerOverride, imageMeta = []) => {
     if ((!text.trim() && images.length === 0) || isStreamingRef.current) return;
 
     const selectedProvider = normalizeProvider(providerOverride || providerRef.current);
@@ -339,6 +523,7 @@ export function useChat(options = {}) {
       imageCount: images.length,
     }]);
     chunkStartedProvidersRef.current = new Set();
+    clearScheduledStreamFlush();
     setIsStreaming(true);
     isStreamingRef.current = true;
     setStreamingText('');
@@ -353,11 +538,13 @@ export function useChat(options = {}) {
     setIsThinking(true);
     isThinkingRef.current = true;
     setThinkingStartTime(Date.now());
+    setCurrentTraceId(null);
 
     const userMsg = {
       role: 'user',
       content: text.trim() || '(image attached)',
       images,
+      imageMeta: Array.isArray(imageMeta) ? imageMeta : [],
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -367,6 +554,7 @@ export function useChat(options = {}) {
         message: text.trim(),
         conversationId: conversationIdRef.current,
         images,
+        imageMeta: Array.isArray(imageMeta) ? imageMeta : [],
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode !== 'single' ? selectedFallback : undefined,
@@ -380,6 +568,7 @@ export function useChat(options = {}) {
         onInit: (data) => {
           setConversationId(data.conversationId);
           conversationIdRef.current = data.conversationId;
+          setCurrentTraceId(data.traceId || null);
           if (data.primaryProvider) setProvider(data.primaryProvider);
           const activeProvider = normalizeProvider(data.primaryProvider || data.provider || selectedProvider);
           setStreamProvider(activeProvider);
@@ -423,7 +612,7 @@ export function useChat(options = {}) {
             setIsThinking(true);
           }
           thinkingTextRef.current += data.thinking;
-          setThinkingText(thinkingTextRef.current);
+          scheduleStreamFlush('thinking');
         },
         onChunk: (data) => {
           if (isThinkingRef.current) {
@@ -447,12 +636,12 @@ export function useChat(options = {}) {
               ...parallelStreamingRef.current,
               [chunkProvider]: (parallelStreamingRef.current[chunkProvider] || '') + data.text,
             };
-            setParallelStreaming(parallelStreamingRef.current);
+            scheduleStreamFlush('parallel');
             return;
           }
           if (data.provider) setStreamProvider(data.provider);
           streamingTextRef.current += data.text;
-          setStreamingText(streamingTextRef.current);
+          scheduleStreamFlush('streaming');
         },
         onProviderError: (data) => {
           const normalized = normalizeError(data);
@@ -466,6 +655,10 @@ export function useChat(options = {}) {
             retriable: Boolean(data?.retriable),
           });
         },
+        onLocalStage: (stageEvent) => {
+          const processEvent = mapLocalStageEventToProcessEvent(stageEvent);
+          if (processEvent) pushProcessEvent(processEvent);
+        },
         onFallback: (data) => {
           const nextProvider = normalizeProvider(data.to || selectedFallback);
           setFallbackNotice({
@@ -476,6 +669,7 @@ export function useChat(options = {}) {
           });
           setStreamProvider(nextProvider);
           // Discard partial output from failed provider to avoid mixed responses.
+          clearScheduledStreamFlush();
           streamingTextRef.current = '';
           setStreamingText('');
           pushProcessEvent({
@@ -492,12 +686,16 @@ export function useChat(options = {}) {
           setResponseTime(elapsed);
           setContextDebug(shouldShowContextDebug() ? (data.contextDebug || null) : null);
           setRuntimeWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+          const providerThinking = data?.providerThinking && typeof data.providerThinking === 'object' && !Array.isArray(data.providerThinking)
+            ? data.providerThinking
+            : null;
           if ((data.mode || selectedMode) === 'parallel' && Array.isArray(data.results)) {
             const nextMessages = data.results
               .filter((result) => result.status === 'ok')
               .map((result) => ({
                 role: 'assistant',
                 content: result.fullResponse || parallelStreamingRef.current[result.provider] || '',
+                thinking: result.thinking || '',
                 provider: normalizeProvider(result.provider || selectedProvider),
                 mode: 'parallel',
                 fallbackFrom: null,
@@ -505,6 +703,7 @@ export function useChat(options = {}) {
                   attempts: data.attempts || [],
                   parallel: true,
                   turnId: data.turnId || null,
+                  ...(providerThinking ? { providerThinking } : {}),
                 },
                 timestamp: new Date().toISOString(),
                 responseTimeMs: elapsed,
@@ -539,13 +738,21 @@ export function useChat(options = {}) {
             setMessages((prev) => [...prev, {
               role: 'assistant',
               content: finalText,
+              thinking: data.thinking || '',
               provider: finalProvider,
               mode: data.mode || selectedMode,
               fallbackFrom: data.fallbackFrom || null,
-              attemptMeta: data.attempts ? { attempts: data.attempts } : null,
+              attemptMeta: data.attempts
+                ? {
+                    attempts: data.attempts,
+                    ...(providerThinking ? { providerThinking } : {}),
+                  }
+                : null,
               timestamp: new Date().toISOString(),
               responseTimeMs: elapsed,
               usage: data.usage || null,
+              citations: Array.isArray(data.citations) && data.citations.length > 0 ? data.citations : undefined,
+              quickActions: Array.isArray(data.quickActions) && data.quickActions.length > 0 ? data.quickActions : undefined,
             }]);
             setStreamProvider(finalProvider);
           }
@@ -563,14 +770,13 @@ export function useChat(options = {}) {
           tel(TEL.CHAT_RESPONSE, `AI responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
           tel(TEL.STREAM_END, `Stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
 
+          clearScheduledStreamFlush();
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
           setIsStreaming(false);
           isStreamingRef.current = false;
-          setThinkingText('');
-          thinkingTextRef.current = '';
           setIsThinking(false);
           isThinkingRef.current = false;
           setThinkingStartTime(null);
@@ -605,12 +811,11 @@ export function useChat(options = {}) {
           }
           setIsStreaming(false);
           isStreamingRef.current = false;
+          clearScheduledStreamFlush();
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
-          setThinkingText('');
-          thinkingTextRef.current = '';
           setIsThinking(false);
           isThinkingRef.current = false;
           setThinkingStartTime(null);
@@ -619,7 +824,7 @@ export function useChat(options = {}) {
     );
 
     abortRef.current = abort;
-  }, [pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
+  }, [clearScheduledStreamFlush, pushProcessEvent, resetProcessEvents, scheduleStreamFlush, setError, setProvider, shouldShowContextDebug]);
 
   const retryLastResponse = useCallback((providerOverride) => {
     if (!conversationIdRef.current || isStreamingRef.current) return;
@@ -641,6 +846,7 @@ export function useChat(options = {}) {
       fallbackProvider: selectedMode === 'single' ? null : selectedFallback,
     }]);
     chunkStartedProvidersRef.current = new Set();
+    clearScheduledStreamFlush();
     setIsStreaming(true);
     isStreamingRef.current = true;
     setStreamingText('');
@@ -681,6 +887,7 @@ export function useChat(options = {}) {
         onInit: (data) => {
           setConversationId(data.conversationId);
           conversationIdRef.current = data.conversationId;
+          setCurrentTraceId(data.traceId || null);
           if (data.primaryProvider) setProvider(data.primaryProvider);
           const activeProvider = normalizeProvider(data.primaryProvider || data.provider || selectedProvider);
           setStreamProvider(activeProvider);
@@ -724,7 +931,7 @@ export function useChat(options = {}) {
             setIsThinking(true);
           }
           thinkingTextRef.current += data.thinking;
-          setThinkingText(thinkingTextRef.current);
+          scheduleStreamFlush('thinking');
         },
         onChunk: (data) => {
           if (isThinkingRef.current) {
@@ -748,12 +955,12 @@ export function useChat(options = {}) {
               ...parallelStreamingRef.current,
               [chunkProvider]: (parallelStreamingRef.current[chunkProvider] || '') + data.text,
             };
-            setParallelStreaming(parallelStreamingRef.current);
+            scheduleStreamFlush('parallel');
             return;
           }
           if (data.provider) setStreamProvider(data.provider);
           streamingTextRef.current += data.text;
-          setStreamingText(streamingTextRef.current);
+          scheduleStreamFlush('streaming');
         },
         onProviderError: (data) => {
           const normalized = normalizeError(data);
@@ -767,6 +974,10 @@ export function useChat(options = {}) {
             retriable: Boolean(data?.retriable),
           });
         },
+        onLocalStage: (stageEvent) => {
+          const processEvent = mapLocalStageEventToProcessEvent(stageEvent);
+          if (processEvent) pushProcessEvent(processEvent);
+        },
         onFallback: (data) => {
           const nextProvider = normalizeProvider(data.to || selectedFallback);
           setFallbackNotice({
@@ -776,6 +987,7 @@ export function useChat(options = {}) {
             at: Date.now(),
           });
           setStreamProvider(nextProvider);
+          clearScheduledStreamFlush();
           streamingTextRef.current = '';
           setStreamingText('');
           pushProcessEvent({
@@ -792,12 +1004,16 @@ export function useChat(options = {}) {
           setResponseTime(elapsed);
           setContextDebug(shouldShowContextDebug() ? (data.contextDebug || null) : null);
           setRuntimeWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+          const providerThinking = data?.providerThinking && typeof data.providerThinking === 'object' && !Array.isArray(data.providerThinking)
+            ? data.providerThinking
+            : null;
           if ((data.mode || selectedMode) === 'parallel' && Array.isArray(data.results)) {
             const nextMessages = data.results
               .filter((result) => result.status === 'ok')
               .map((result) => ({
                 role: 'assistant',
                 content: result.fullResponse || parallelStreamingRef.current[result.provider] || '',
+                thinking: result.thinking || '',
                 provider: normalizeProvider(result.provider || selectedProvider),
                 mode: 'parallel',
                 fallbackFrom: null,
@@ -805,6 +1021,7 @@ export function useChat(options = {}) {
                   attempts: data.attempts || [],
                   parallel: true,
                   turnId: data.turnId || null,
+                  ...(providerThinking ? { providerThinking } : {}),
                 },
                 timestamp: new Date().toISOString(),
                 responseTimeMs: elapsed,
@@ -835,13 +1052,21 @@ export function useChat(options = {}) {
             setMessages((prev) => [...prev, {
               role: 'assistant',
               content: finalText,
+              thinking: data.thinking || '',
               provider: finalProvider,
               mode: data.mode || selectedMode,
               fallbackFrom: data.fallbackFrom || null,
-              attemptMeta: data.attempts ? { attempts: data.attempts } : null,
+              attemptMeta: data.attempts
+                ? {
+                    attempts: data.attempts,
+                    ...(providerThinking ? { providerThinking } : {}),
+                  }
+                : null,
               timestamp: new Date().toISOString(),
               responseTimeMs: elapsed,
               usage: data.usage || null,
+              citations: Array.isArray(data.citations) && data.citations.length > 0 ? data.citations : undefined,
+              quickActions: Array.isArray(data.quickActions) && data.quickActions.length > 0 ? data.quickActions : undefined,
             }]);
             setStreamProvider(finalProvider);
           }
@@ -859,14 +1084,13 @@ export function useChat(options = {}) {
           tel(TEL.CHAT_RESPONSE, `Retry responded (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider), elapsedMs: elapsed });
           tel(TEL.STREAM_END, `Retry stream complete (${elapsed || 0}ms)`, { provider: normalizeProvider(data.providerUsed || data.provider || selectedProvider) });
 
+          clearScheduledStreamFlush();
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
           setIsStreaming(false);
           isStreamingRef.current = false;
-          setThinkingText('');
-          thinkingTextRef.current = '';
           setIsThinking(false);
           isThinkingRef.current = false;
           setThinkingStartTime(null);
@@ -899,12 +1123,11 @@ export function useChat(options = {}) {
           }
           setIsStreaming(false);
           isStreamingRef.current = false;
+          clearScheduledStreamFlush();
           setStreamingText('');
           streamingTextRef.current = '';
           setParallelStreaming({});
           parallelStreamingRef.current = {};
-          setThinkingText('');
-          thinkingTextRef.current = '';
           setIsThinking(false);
           isThinkingRef.current = false;
           setThinkingStartTime(null);
@@ -913,7 +1136,7 @@ export function useChat(options = {}) {
     );
 
     abortRef.current = abort;
-  }, [pushProcessEvent, resetProcessEvents, setError, setProvider, shouldShowContextDebug]);
+  }, [clearScheduledStreamFlush, pushProcessEvent, resetProcessEvents, scheduleStreamFlush, setError, setProvider, shouldShowContextDebug]);
 
   const abortStream = useCallback(() => {
     if (isStreamingRef.current) {
@@ -925,6 +1148,7 @@ export function useChat(options = {}) {
       });
     }
     abortRef.current?.();
+    clearScheduledStreamFlush();
     setIsStreaming(false);
     isStreamingRef.current = false;
     setTriageCard(null);
@@ -937,7 +1161,7 @@ export function useChat(options = {}) {
     setIsThinking(false);
     isThinkingRef.current = false;
     setThinkingStartTime(null);
-  }, [pushProcessEvent]);
+  }, [clearScheduledStreamFlush, pushProcessEvent]);
 
   const removeConversation = useCallback(async (id) => {
     try {
@@ -980,9 +1204,11 @@ export function useChat(options = {}) {
 
       const normalizedMessages = (conversation.messages || []).map((msg) => {
         if (msg.role !== 'assistant') return msg;
+        const qa = msg.attemptMeta?.quickActions;
         return {
           ...msg,
           provider: normalizeProvider(msg.provider || conversationProvider),
+          ...(Array.isArray(qa) && qa.length > 0 ? { quickActions: qa } : {}),
         };
       });
       const lastAssistant = [...normalizedMessages].reverse().find((m) => m.role === 'assistant');
@@ -1013,7 +1239,12 @@ export function useChat(options = {}) {
       const conversationProvider = normalizeProvider(conversation.provider);
       const normalizedMessages = (conversation.messages || []).map((msg) => {
         if (msg.role !== 'assistant') return msg;
-        return { ...msg, provider: normalizeProvider(msg.provider || conversationProvider) };
+        const qa = msg.attemptMeta?.quickActions;
+        return {
+          ...msg,
+          provider: normalizeProvider(msg.provider || conversationProvider),
+          ...(Array.isArray(qa) && qa.length > 0 ? { quickActions: qa } : {}),
+        };
       });
       setMessages(normalizedMessages);
       return out;
@@ -1068,5 +1299,45 @@ export function useChat(options = {}) {
     thinkingText,
     isThinking,
     thinkingStartTime,
+    currentTraceId,
   };
+}
+
+function mapLocalStageEventToProcessEvent(stageEvent) {
+  if (!stageEvent || typeof stageEvent !== 'object') return null;
+  const durationText = Number.isFinite(stageEvent.durationMs)
+    ? ` in ${stageEvent.durationMs}ms`
+    : '';
+
+  if (stageEvent.stage === 'serialize' && stageEvent.phase === 'start') {
+    return {
+      level: 'info',
+      title: 'Preparing request',
+      message: 'Serializing the outgoing request body before upload.',
+      code: 'REQUEST_SERIALIZE_START',
+    };
+  }
+
+  if (stageEvent.stage === 'serialize' && stageEvent.phase === 'done') {
+    return {
+      level: 'info',
+      title: 'Request ready',
+      message: `Request body serialization finished${durationText}.`,
+      code: 'REQUEST_SERIALIZE_DONE',
+      durationMs: stageEvent.durationMs || 0,
+    };
+  }
+
+  if (stageEvent.stage === 'response' && stageEvent.phase === 'headers') {
+    return {
+      level: 'info',
+      title: 'Response started',
+      message: `Server response headers arrived${durationText}.`,
+      code: 'RESPONSE_HEADERS',
+      durationMs: stageEvent.durationMs || 0,
+      status: stageEvent.status || 0,
+    };
+  }
+
+  return null;
 }

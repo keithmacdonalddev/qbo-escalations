@@ -17,8 +17,8 @@ const CLAUDE_MD_PATH = path.join(PROJECT_ROOT, 'CLAUDE.md');
 const CAPS = {
   role: 3200,
   claudeMd: 20000,
-  fileTree: 8000,
-  memory: 2000,
+  fileTree: 4000,
+  memory: 6000,
 };
 
 const CACHE_TTL = 300_000; // 5 minutes
@@ -121,6 +121,64 @@ function buildFullSystemPrompt(roleText, memoryText) {
   return sections.join('\n\n');
 }
 
+// ── Prompt version snapshotting ──────────────────────────────────────────
+
+let _lastSnapshotHash = null;
+let _lastSnapshotTime = 0;
+const SNAPSHOT_COOLDOWN = 60_000; // 60s minimum between snapshots
+
+/**
+ * Snapshot the current prompt state if the hash changed (async fire-and-forget).
+ * Called from buildDevSystemPrompt on every dev chat message.
+ * Requires PromptVersion model — lazy-loaded to avoid circular deps.
+ */
+function snapshotPromptVersion(assembledPrompt, providerInfo) {
+  const claudeMd = getCachedClaudeMd();
+  const treeData = getCachedFileTreeText();
+
+  const hashInput = [claudeMd.hash, String(treeData.generatedAt), assembledPrompt.slice(0, 200)].join('|');
+  const contextHash = crypto.createHash('sha256').update(hashInput).digest('hex').slice(0, 16);
+
+  // Fast in-memory check before hitting DB
+  const now = Date.now();
+  if (contextHash === _lastSnapshotHash && (now - _lastSnapshotTime < SNAPSHOT_COOLDOWN)) return;
+
+  // Async — don't block the caller
+  setImmediate(async () => {
+    try {
+      const PromptVersion = require('../models/PromptVersion');
+      const lastVersion = await PromptVersion.findOne().sort({ createdAt: -1 }).select('createdAt contextHash').lean();
+      const cooldownOk = !lastVersion || (now - new Date(lastVersion.createdAt).getTime() > SNAPSHOT_COOLDOWN);
+      const hashIsNew = !lastVersion || lastVersion.contextHash !== contextHash;
+      if (!cooldownOk || !hashIsNew) {
+        _lastSnapshotHash = contextHash;
+        _lastSnapshotTime = now;
+        return;
+      }
+
+      const sections = {
+        role: { chars: assembledPrompt.indexOf('\nPROJECT DOCUMENTATION'), cap: CAPS.role },
+        claudeMd: { chars: claudeMd.content.length, cap: CAPS.claudeMd, hash: claudeMd.hash },
+        fileTree: { chars: treeData.text.length, cap: CAPS.fileTree, fileCount: treeData.fileCount },
+        memory: { chars: Math.max(0, assembledPrompt.length - assembledPrompt.lastIndexOf('\nAGENT MEMORY:\n')), cap: CAPS.memory },
+      };
+
+      await PromptVersion.create({
+        contextHash,
+        assembledPrompt,
+        totalChars: assembledPrompt.length,
+        estimatedTokens: Math.ceil(assembledPrompt.length / 4),
+        sections,
+        provider: providerInfo || null,
+      });
+      await PromptVersion.pruneOldVersions();
+
+      _lastSnapshotHash = contextHash;
+      _lastSnapshotTime = now;
+    } catch { /* non-critical */ }
+  });
+}
+
 // ── Health reporting ───────────────────────────────────────────────────────
 
 function getContextHealth() {
@@ -144,6 +202,7 @@ function getContextHealth() {
 
 module.exports = {
   buildFullSystemPrompt,
+  snapshotPromptVersion,
   getCachedClaudeMd,
   getCachedFileTreeText,
   getContextHealth,

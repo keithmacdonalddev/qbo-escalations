@@ -3,8 +3,9 @@ const router = express.Router();
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { randomUUID } = require('node:crypto');
 const Escalation = require('../models/Escalation');
+const KnowledgeCandidate = require('../models/KnowledgeCandidate');
+const { hasCategoryPlaybook, publishKnowledgeCandidate, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { parseEscalationText, looksLikeEscalation } = require('../lib/escalation-parser');
@@ -15,7 +16,27 @@ const {
   parseWithPolicy,
 } = require('../services/parse-orchestrator');
 const { isValidProvider } = require('../services/providers/registry');
+const { getProviderModelId } = require('../services/providers/catalog');
 const { logUsage } = require('../lib/usage-writer');
+const {
+  createAiOperation,
+  updateAiOperation,
+  recordAiEvent,
+  deleteAiOperation,
+} = require('../services/ai-runtime');
+const { reportServerError } = require('../lib/server-error-pipeline');
+const {
+  createTrace,
+  patchTrace,
+  appendTraceEvent,
+  setTraceAttempts,
+  setTraceUsage,
+  buildOutcome,
+  buildParseStage,
+  summarizeUsage,
+  linkChildTrace,
+} = require('../services/ai-traces');
+const { prompt: claudePrompt } = require('../services/claude');
 let sharp = null;
 try { sharp = require('sharp'); } catch { /* optional dependency */ }
 
@@ -24,6 +45,17 @@ const ESCALATION_UPLOADS_DIR = path.join(UPLOADS_ROOT, 'escalations');
 const MAX_RAW_IMAGE_BYTES = 20 * 1024 * 1024;
 const parseRateLimit = createRateLimiter({ name: 'escalation-parse', limit: 12, windowMs: 60_000 });
 const screenshotRateLimit = createRateLimiter({ name: 'screenshot-upload', limit: 10, windowMs: 60_000 });
+const KNOWLEDGE_REVIEW_STATUSES = new Set(['draft', 'approved', 'rejected']);
+const KNOWLEDGE_PUBLISH_TARGETS = new Set(['category', 'edge-case', 'case-history-only']);
+const KNOWLEDGE_REUSABLE_OUTCOMES = new Set([
+  'canonical',
+  'edge-case',
+  'case-history-only',
+  'customer-specific',
+  'temporary-incident',
+  'unsafe-to-reuse',
+]);
+const ELIGIBLE_KNOWLEDGE_STATUSES = new Set(['resolved', 'escalated-further']);
 
 if (!fs.existsSync(ESCALATION_UPLOADS_DIR)) {
   fs.mkdirSync(ESCALATION_UPLOADS_DIR, { recursive: true });
@@ -45,6 +77,434 @@ function deriveSourceFromPayload(payload) {
     return 'screenshot';
   }
   return 'manual';
+}
+
+function isValidObjectId(value) {
+  return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value);
+}
+
+function safeString(value, fallback = '') {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return fallback;
+  try {
+    return String(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function compactText(value, maxChars = 240) {
+  const compact = safeString(value, '').replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (!Number.isFinite(maxChars) || maxChars <= 0 || compact.length <= maxChars) return compact;
+  return compact.slice(0, Math.max(0, maxChars - 3)).trimEnd() + '...';
+}
+
+function firstNonEmpty(values, fallback = '') {
+  if (!Array.isArray(values)) return fallback;
+  for (const value of values) {
+    const text = compactText(value, 500);
+    if (text) return text;
+  }
+  return fallback;
+}
+
+function splitKeySignals(value, maxItems = 8) {
+  const raw = Array.isArray(value)
+    ? value
+    : safeString(value, '').split(/\r?\n|,/);
+  const out = [];
+  const seen = new Set();
+
+  for (const item of raw) {
+    const text = compactText(item, 160);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= maxItems) break;
+  }
+
+  return out;
+}
+
+function normalizeCandidateConfidence(value, fallback = 0.6) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(0, Math.min(1, num));
+}
+
+async function loadConversationSnapshot(conversationId) {
+  if (!isValidObjectId(conversationId)) {
+    return {
+      conversationTitle: '',
+      conversationPreview: '',
+      conversationMessageCount: 0,
+    };
+  }
+
+  const Conversation = require('../models/Conversation');
+  const conversation = await Conversation.findById(conversationId)
+    .select('title messages')
+    .lean();
+
+  if (!conversation) {
+    return {
+      conversationTitle: '',
+      conversationPreview: '',
+      conversationMessageCount: 0,
+    };
+  }
+
+  const messages = Array.isArray(conversation.messages) ? conversation.messages : [];
+  const preview = messages
+    .filter((msg) => msg && typeof msg.content === 'string' && msg.content.trim())
+    .slice(-4)
+    .map((msg) => `${msg.role === 'assistant' ? 'Assistant' : 'User'}: ${compactText(msg.content, 140)}`)
+    .join(' | ');
+
+  return {
+    conversationTitle: safeString(conversation.title, ''),
+    conversationPreview: compactText(preview, 600),
+    conversationMessageCount: messages.length,
+  };
+}
+
+function deriveKnowledgeTitle(escalation) {
+  const raw = firstNonEmpty([
+    escalation && escalation.actualOutcome,
+    escalation && escalation.attemptingTo,
+    escalation && escalation.resolution,
+    escalation && escalation.category && escalation.category !== 'unknown'
+      ? `${safeString(escalation.category).replace(/-/g, ' ')} reviewed learning`
+      : '',
+  ], 'Reviewed case learning');
+
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+function buildDraftSignals(escalation) {
+  const signals = [];
+  if (escalation && escalation.actualOutcome) {
+    signals.push(compactText(escalation.actualOutcome, 160));
+  }
+  if (escalation && escalation.triedTestAccount && escalation.triedTestAccount !== 'unknown') {
+    signals.push(`Tried test account: ${escalation.triedTestAccount}`);
+  }
+  if (escalation && escalation.tsSteps) {
+    const fragments = safeString(escalation.tsSteps, '')
+      .split(/\r?\n|[.;]/)
+      .map((part) => compactText(part, 140))
+      .filter(Boolean);
+    for (const fragment of fragments.slice(0, 3)) {
+      signals.push(fragment);
+    }
+  }
+  return splitKeySignals(signals, 6);
+}
+
+async function buildKnowledgeDraftData(escalation, existing = null) {
+  const snapshot = await loadConversationSnapshot(escalation.conversationId);
+  const category = safeString(existing && existing.category, '').trim()
+    || safeString(escalation.category, 'unknown').trim()
+    || 'unknown';
+  const defaultTarget = hasCategoryPlaybook(category) ? 'category' : 'edge-case';
+  const summary = firstNonEmpty([
+    escalation.resolution,
+    escalation.resolutionNotes,
+    escalation.actualOutcome,
+    escalation.attemptingTo,
+  ], '');
+
+  return {
+    escalationId: escalation._id,
+    conversationId: escalation.conversationId || null,
+    reviewStatus: existing && existing.reviewStatus && existing.reviewStatus !== 'published'
+      ? existing.reviewStatus
+      : 'draft',
+    publishTarget: existing && existing.publishTarget
+      ? existing.publishTarget
+      : (ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status) ? defaultTarget : 'case-history-only'),
+    reusableOutcome: existing && existing.reusableOutcome
+      ? existing.reusableOutcome
+      : (defaultTarget === 'category' ? 'canonical' : 'edge-case'),
+    title: safeString(existing && existing.title, '').trim() || deriveKnowledgeTitle(escalation),
+    category,
+    summary: safeString(existing && existing.summary, '').trim() || compactText(summary, 280),
+    symptom: safeString(existing && existing.symptom, '').trim()
+      || firstNonEmpty([escalation.actualOutcome, escalation.attemptingTo], ''),
+    rootCause: safeString(existing && existing.rootCause, '').trim(),
+    exactFix: safeString(existing && existing.exactFix, '').trim()
+      || firstNonEmpty([escalation.resolution, escalation.resolutionNotes], ''),
+    escalationPath: safeString(existing && existing.escalationPath, '').trim()
+      || (escalation.status === 'escalated-further'
+        ? firstNonEmpty([escalation.resolution, escalation.resolutionNotes], 'Escalated further for specialist review.')
+        : ''),
+    keySignals: Array.isArray(existing && existing.keySignals) && existing.keySignals.length > 0
+      ? splitKeySignals(existing.keySignals, 8)
+      : buildDraftSignals(escalation),
+    confidence: normalizeCandidateConfidence(
+      existing && existing.confidence,
+      defaultTarget === 'category' ? 0.85 : 0.6
+    ),
+    reviewNotes: safeString(existing && existing.reviewNotes, '').trim(),
+    sourceSnapshot: {
+      status: escalation.status || '',
+      category: escalation.category || '',
+      coid: escalation.coid || '',
+      caseNumber: escalation.caseNumber || '',
+      attemptingTo: escalation.attemptingTo || '',
+      actualOutcome: escalation.actualOutcome || '',
+      tsSteps: escalation.tsSteps || '',
+      resolution: escalation.resolution || '',
+      resolutionNotes: escalation.resolutionNotes || '',
+      conversationTitle: snapshot.conversationTitle,
+      conversationPreview: snapshot.conversationPreview,
+      conversationMessageCount: snapshot.conversationMessageCount,
+      resolvedAt: escalation.resolvedAt || null,
+    },
+    generatedAt: new Date(),
+  };
+}
+
+/**
+ * AI enrichment: load the full conversation, ask Claude to extract structured
+ * knowledge fields, and return parsed results. Returns null if no conversation
+ * exists or Claude returns unparseable output.
+ */
+async function enrichKnowledgeDraft(escalation, draftData) {
+  const Conversation = require('../models/Conversation');
+  const conversationId = escalation.conversationId
+    || (draftData && draftData.conversationId)
+    || null;
+
+  // Build context from escalation fields even if no conversation exists
+  const escalationContext = [
+    escalation.category && escalation.category !== 'unknown'
+      ? `Category: ${escalation.category}`
+      : '',
+    escalation.attemptingTo ? `Customer attempting: ${escalation.attemptingTo}` : '',
+    escalation.expectedOutcome ? `Expected outcome: ${escalation.expectedOutcome}` : '',
+    escalation.actualOutcome ? `Actual outcome: ${escalation.actualOutcome}` : '',
+    escalation.tsSteps ? `Troubleshooting steps taken: ${escalation.tsSteps}` : '',
+    escalation.resolution ? `Resolution: ${escalation.resolution}` : '',
+    escalation.resolutionNotes ? `Resolution notes: ${escalation.resolutionNotes}` : '',
+    escalation.status ? `Final status: ${escalation.status}` : '',
+  ].filter(Boolean).join('\n');
+
+  // Load conversation messages if available
+  let conversationTranscript = '';
+  if (isValidObjectId(conversationId)) {
+    const conversation = await Conversation.findById(conversationId)
+      .select('title messages')
+      .lean();
+    if (conversation && Array.isArray(conversation.messages) && conversation.messages.length > 0) {
+      // Take last 30 messages to avoid overwhelming the prompt
+      const recent = conversation.messages.slice(-30);
+      conversationTranscript = recent
+        .filter((m) => m && typeof m.content === 'string' && m.content.trim())
+        .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 2000)}`)
+        .join('\n\n');
+    }
+  }
+
+  if (!escalationContext && !conversationTranscript) return null;
+
+  const promptText = buildEnrichmentPrompt(escalationContext, conversationTranscript);
+
+  const result = await claudePrompt(promptText, {
+    systemPrompt: ENRICHMENT_SYSTEM_PROMPT,
+    reasoningEffort: 'low',
+    timeoutMs: 60000,
+  });
+
+  if (!result || !result.text) return null;
+  return parseEnrichmentResponse(result.text);
+}
+
+const ENRICHMENT_SYSTEM_PROMPT =
+  'You are a QBO (QuickBooks Online) escalation knowledge analyst. ' +
+  'Your job is to analyze resolved escalation cases and extract structured knowledge ' +
+  'that will help other QBO escalation specialists handle similar issues faster. ' +
+  'Be specific and practical. Use QBO terminology. Write for someone who already knows QBO ' +
+  'but needs to quickly understand this specific issue pattern.';
+
+function buildEnrichmentPrompt(escalationContext, conversationTranscript) {
+  const parts = [
+    'Analyze this resolved QBO escalation and extract structured knowledge.\n',
+    '--- ESCALATION DATA ---',
+    escalationContext,
+  ];
+
+  if (conversationTranscript) {
+    parts.push(
+      '',
+      '--- CONVERSATION TRANSCRIPT ---',
+      conversationTranscript,
+    );
+  }
+
+  parts.push(
+    '',
+    '--- INSTRUCTIONS ---',
+    'Return a JSON object with these fields (no markdown fences, just raw JSON):',
+    '{',
+    '  "title": "concise title for this knowledge entry (under 80 chars)",',
+    '  "symptom": "what the customer reported or what the agent described as the problem",',
+    '  "rootCause": "what was actually wrong — the underlying issue, not just the symptom",',
+    '  "exactFix": "step-by-step resolution that another specialist could follow",',
+    '  "keySignals": ["array of 2-5 clues that indicate this is the issue — things to look for in future cases"],',
+    '  "summary": "1-2 sentence overview of the issue and resolution"',
+    '}',
+    '',
+    'Rules:',
+    '- If the conversation does not reveal a clear root cause, set rootCause to an empty string',
+    '- exactFix must be actionable steps, not vague advice',
+    '- keySignals should be observable facts (error messages, account states, specific behaviors)',
+    '- Keep everything QBO-specific and practical',
+    '- Do not invent information that is not in the data',
+  );
+
+  return parts.join('\n');
+}
+
+function parseEnrichmentResponse(text) {
+  // Try direct JSON parse first
+  try {
+    const parsed = JSON.parse(text.trim());
+    if (parsed && typeof parsed === 'object') return validateEnrichmentFields(parsed);
+  } catch { /* not raw JSON */ }
+
+  // Try extracting JSON from markdown fences or embedded in text
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[0]);
+      if (parsed && typeof parsed === 'object') return validateEnrichmentFields(parsed);
+    } catch { /* malformed JSON */ }
+  }
+
+  return null;
+}
+
+function validateEnrichmentFields(obj) {
+  const result = {};
+  const stringFields = ['title', 'symptom', 'rootCause', 'exactFix', 'summary'];
+  let hasContent = false;
+
+  for (const field of stringFields) {
+    if (typeof obj[field] === 'string' && obj[field].trim()) {
+      result[field] = obj[field].trim();
+      hasContent = true;
+    }
+  }
+
+  if (Array.isArray(obj.keySignals)) {
+    const signals = obj.keySignals
+      .filter((s) => typeof s === 'string' && s.trim())
+      .map((s) => s.trim())
+      .slice(0, 8);
+    if (signals.length > 0) {
+      result.keySignals = signals;
+      hasContent = true;
+    }
+  }
+
+  return hasContent ? result : null;
+}
+
+function sanitizeKnowledgeCandidateUpdates(input) {
+  const payload = input && typeof input === 'object' ? input : {};
+  const updates = {};
+  const stringFields = [
+    'title',
+    'category',
+    'summary',
+    'symptom',
+    'rootCause',
+    'exactFix',
+    'escalationPath',
+    'reviewNotes',
+  ];
+
+  for (const field of stringFields) {
+    if (payload[field] !== undefined) {
+      updates[field] = safeString(payload[field], '').trim();
+    }
+  }
+
+  if (payload.reviewStatus !== undefined) {
+    const status = safeString(payload.reviewStatus, '').trim().toLowerCase();
+    if (!KNOWLEDGE_REVIEW_STATUSES.has(status)) {
+      const err = new Error('Invalid reviewStatus');
+      err.code = 'INVALID_REVIEW_STATUS';
+      throw err;
+    }
+    updates.reviewStatus = status;
+  }
+
+  if (payload.publishTarget !== undefined) {
+    const target = safeString(payload.publishTarget, '').trim().toLowerCase();
+    if (!KNOWLEDGE_PUBLISH_TARGETS.has(target)) {
+      const err = new Error('Invalid publishTarget');
+      err.code = 'INVALID_PUBLISH_TARGET';
+      throw err;
+    }
+    updates.publishTarget = target;
+  }
+
+  if (payload.reusableOutcome !== undefined) {
+    const outcome = safeString(payload.reusableOutcome, '').trim().toLowerCase();
+    if (!KNOWLEDGE_REUSABLE_OUTCOMES.has(outcome)) {
+      const err = new Error('Invalid reusableOutcome');
+      err.code = 'INVALID_REUSABLE_OUTCOME';
+      throw err;
+    }
+    updates.reusableOutcome = outcome;
+  }
+
+  if (payload.keySignals !== undefined) {
+    updates.keySignals = splitKeySignals(payload.keySignals, 8);
+  }
+
+  if (payload.confidence !== undefined) {
+    updates.confidence = normalizeCandidateConfidence(payload.confidence);
+  }
+
+  return updates;
+}
+
+async function resolveParseInputsFromConversation(conversationId) {
+  if (!isValidObjectId(conversationId)) {
+    const err = new Error('conversationId must be a valid ObjectId');
+    err.code = 'INVALID_CONVERSATION_ID';
+    throw err;
+  }
+
+  const Conversation = require('../models/Conversation');
+  const conversation = await Conversation.findById(conversationId).select('messages').lean();
+  if (!conversation) {
+    const err = new Error('Conversation not found');
+    err.code = 'CONVERSATION_NOT_FOUND';
+    throw err;
+  }
+
+  const lastUserWithImage = [...(conversation.messages || [])]
+    .reverse()
+    .find((msg) => msg && msg.role === 'user' && Array.isArray(msg.images) && msg.images.length > 0);
+
+  if (!lastUserWithImage || !lastUserWithImage.images[0]) {
+    const err = new Error('Conversation has no image to parse');
+    err.code = 'CONVERSATION_IMAGE_NOT_FOUND';
+    throw err;
+  }
+
+  return {
+    image: lastUserWithImage.images[0],
+    imageMeta: Array.isArray(lastUserWithImage.imageMeta) ? lastUserWithImage.imageMeta[0] || null : null,
+    text: typeof lastUserWithImage.content === 'string' ? lastUserWithImage.content : '',
+  };
 }
 
 function decodeBase64Image(imageData) {
@@ -165,6 +625,163 @@ function toParseResponseMeta(meta) {
     fallbackReason: firstError ? firstError.errorMessage : null,
   };
 }
+
+// GET /api/escalations/knowledge-gaps -- Analyze playbook coverage gaps
+router.get('/knowledge-gaps', async (req, res) => {
+  const Conversation = require('../models/Conversation');
+  const { getCategories } = require('../lib/playbook-loader');
+  const { days = 30 } = req.query;
+  const since = new Date(Date.now() - Number(days) * 86400000);
+
+  // 1. Get all escalations in the time window
+  const escalations = await Escalation.find({
+    createdAt: { $gte: since },
+  }).lean();
+
+  // 2. Get linked conversations for analysis
+  const withConvos = escalations.filter(e => e.conversationId);
+  const convos = await Conversation.find({
+    _id: { $in: withConvos.map(e => e.conversationId) },
+  }).lean();
+  const convoMap = Object.fromEntries(convos.map(c => [c._id.toString(), c]));
+
+  // 3. Analyze per category
+  const categories = {};
+  const HEDGES = [
+    'i\'m not sure', 'i don\'t have', 'unclear', 'i cannot determine',
+    'you may need to', 'i\'d recommend checking', 'i don\'t see this in',
+    'this isn\'t covered', 'beyond my current', 'i\'m unable to find',
+    'i\'m not certain', 'i lack information', 'not enough context',
+  ];
+
+  for (const esc of escalations) {
+    const cat = esc.category || 'unknown';
+    if (!categories[cat]) {
+      categories[cat] = {
+        total: 0, resolved: 0, escalatedFurther: 0, open: 0, inProgress: 0,
+        messageCounts: [],
+        longConversations: [],
+        uncertainPhrases: 0,
+      };
+    }
+    const bucket = categories[cat];
+    bucket.total++;
+    if (esc.status === 'resolved') bucket.resolved++;
+    else if (esc.status === 'escalated-further') bucket.escalatedFurther++;
+    else if (esc.status === 'in-progress') bucket.inProgress++;
+    else bucket.open++;
+
+    // Analyze linked conversation
+    const convo = esc.conversationId ? convoMap[esc.conversationId.toString()] : null;
+    if (convo) {
+      const msgCount = convo.messages ? convo.messages.length : 0;
+      bucket.messageCounts.push(msgCount);
+
+      if (msgCount >= 10) {
+        bucket.longConversations.push({
+          escalationId: esc._id,
+          conversationId: convo._id,
+          messageCount: msgCount,
+          category: cat,
+          title: convo.title,
+          attemptingTo: esc.attemptingTo,
+        });
+      }
+
+      // Check AI responses for uncertainty language
+      const aiMessages = (convo.messages || []).filter(m => m.role === 'assistant');
+      for (const msg of aiMessages) {
+        const lower = (msg.content || '').toLowerCase();
+        if (HEDGES.some(h => lower.includes(h))) bucket.uncertainPhrases++;
+      }
+    }
+  }
+
+  // 4. Compute averages and build gap report
+  const playbookCategories = getCategories();
+  const gaps = [];
+
+  for (const [cat, data] of Object.entries(categories)) {
+    const avgMessageCount = data.messageCounts.length
+      ? Math.round(data.messageCounts.reduce((a, b) => a + b, 0) / data.messageCounts.length * 10) / 10
+      : 0;
+
+    const resolutionRate = data.total > 0 ? Math.round(data.resolved / data.total * 100) : 0;
+    const hasPlaybook = playbookCategories.includes(cat);
+
+    // Gap score: lower = bigger gap (worse coverage)
+    let gapScore = 100;
+    if (!hasPlaybook) gapScore -= 40;
+    gapScore -= (100 - resolutionRate) * 0.3;
+    gapScore -= Math.min(data.uncertainPhrases * 5, 25);
+    gapScore -= Math.min(data.longConversations.length * 3, 15);
+    if (data.escalatedFurther > 0) gapScore -= data.escalatedFurther * 5;
+    gapScore = Math.max(0, Math.round(gapScore));
+
+    gaps.push({
+      category: cat,
+      gapScore,
+      resolutionRate,
+      hasPlaybook,
+      total: data.total,
+      resolved: data.resolved,
+      escalatedFurther: data.escalatedFurther,
+      open: data.open,
+      inProgress: data.inProgress,
+      avgMessageCount,
+      longConversations: data.longConversations,
+      uncertainPhrases: data.uncertainPhrases,
+    });
+  }
+
+  // 5. Sort by gap score ascending (worst gaps first)
+  gaps.sort((a, b) => a.gapScore - b.gapScore);
+
+  // 6. Playbook categories with zero escalations in this period
+  const unusedCategories = playbookCategories.filter(c => !categories[c]);
+
+  res.json({
+    ok: true,
+    gaps,
+    unusedCategories,
+    period: { days: Number(days), since },
+    totalEscalations: escalations.length,
+  });
+});
+
+// GET /api/escalations/knowledge-candidates -- List all knowledge candidates with filters
+router.get('/knowledge-candidates', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const sort = req.query.sort || '-createdAt';
+
+  const filter = {};
+  if (req.query.reviewStatus) filter.reviewStatus = req.query.reviewStatus;
+  if (req.query.category) filter.category = req.query.category;
+  if (req.query.reusableOutcome) filter.reusableOutcome = req.query.reusableOutcome;
+
+  const [candidates, total] = await Promise.all([
+    KnowledgeCandidate.find(filter)
+      .sort(sort)
+      .skip(offset)
+      .limit(limit)
+      .populate('escalationId', 'coid caseNumber category status attemptingTo agentName')
+      .lean(),
+    KnowledgeCandidate.countDocuments(filter),
+  ]);
+
+  // Status breakdown for the header counts (always unfiltered so the user
+  // can see the full picture regardless of active filter)
+  const statusCounts = await KnowledgeCandidate.aggregate([
+    { $group: { _id: '$reviewStatus', count: { $sum: 1 } } },
+  ]);
+  const counts = { draft: 0, approved: 0, published: 0, rejected: 0 };
+  for (const s of statusCounts) {
+    if (s._id in counts) counts[s._id] = s.count;
+  }
+
+  res.json({ ok: true, candidates, total, counts });
+});
 
 // GET /api/escalations -- List with filters
 router.get('/', async (req, res) => {
@@ -291,6 +908,228 @@ router.get('/similar', async (req, res) => {
   res.json({ ok: true, escalations, count: escalations.length });
 });
 
+// GET /api/escalations/:id/knowledge -- Fetch the reviewed knowledge draft for an escalation
+router.get('/:id/knowledge', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const escalation = await Escalation.findById(req.params.id).select('_id conversationId').lean();
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+
+  const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  return res.json({ ok: true, knowledge: knowledge || null });
+});
+
+// POST /api/escalations/:id/knowledge/generate -- Create or refresh a draft knowledge record
+// Query params:
+//   ?enrich=true  — run AI enrichment via Claude to produce high-quality structured fields
+//   ?enrich=false — deterministic draft only (default)
+router.post('/:id/knowledge/generate', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const force = req.body && req.body.force === true;
+  const enrich = (req.query.enrich || (req.body && req.body.enrich) || '').toString().toLowerCase() === 'true';
+  const escalation = await Escalation.findById(req.params.id);
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+  if (!ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status)) {
+    return res.status(409).json({
+      ok: false,
+      code: 'KNOWLEDGE_SOURCE_NOT_FINALIZED',
+      error: 'Only resolved or escalated-further escalations can generate reviewed knowledge',
+    });
+  }
+
+  const existing = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  if (existing && existing.reviewStatus === 'published' && !force) {
+    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, published: true });
+  }
+  if (existing && !force) {
+    return res.json({ ok: true, knowledge: existing.toObject(), generated: false });
+  }
+
+  const draftData = await buildKnowledgeDraftData(escalation, force ? existing : null);
+
+  // AI enrichment: analyze the full conversation to produce structured knowledge fields
+  let enriched = false;
+  if (enrich) {
+    try {
+      const aiFields = await enrichKnowledgeDraft(escalation, draftData);
+      if (aiFields) {
+        if (aiFields.title && (!draftData.title || draftData.title === 'Reviewed case learning')) {
+          draftData.title = aiFields.title;
+        }
+        if (aiFields.symptom) draftData.symptom = aiFields.symptom;
+        if (aiFields.rootCause) draftData.rootCause = aiFields.rootCause;
+        if (aiFields.exactFix) draftData.exactFix = aiFields.exactFix;
+        if (aiFields.summary) draftData.summary = aiFields.summary;
+        if (Array.isArray(aiFields.keySignals) && aiFields.keySignals.length > 0) {
+          draftData.keySignals = splitKeySignals(aiFields.keySignals, 8);
+        }
+        if (aiFields.rootCause && aiFields.exactFix) {
+          draftData.confidence = Math.min(1, draftData.confidence + 0.1);
+        }
+        enriched = true;
+      }
+    } catch (enrichErr) {
+      console.warn('[knowledge/generate] AI enrichment failed, using deterministic draft:', enrichErr.message);
+    }
+  }
+
+  const knowledge = existing || new KnowledgeCandidate({ escalationId: escalation._id });
+  knowledge.set(draftData);
+  if (!knowledge.reviewStatus) knowledge.reviewStatus = 'draft';
+  await knowledge.save();
+
+  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched });
+});
+
+// PATCH /api/escalations/:id/knowledge -- Update the reviewed knowledge draft
+router.patch('/:id/knowledge', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const escalation = await Escalation.findById(req.params.id).select('_id conversationId').lean();
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+
+  const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  if (!knowledge) {
+    return res.status(404).json({ ok: false, code: 'KNOWLEDGE_NOT_FOUND', error: 'Knowledge draft not found' });
+  }
+  if (knowledge.reviewStatus === 'published') {
+    return res.status(409).json({
+      ok: false,
+      code: 'KNOWLEDGE_ALREADY_PUBLISHED',
+      error: 'Published knowledge entries are locked in this first version',
+    });
+  }
+
+  try {
+    const updates = sanitizeKnowledgeCandidateUpdates(req.body);
+    knowledge.set(updates);
+    await knowledge.save();
+    return res.json({ ok: true, knowledge: knowledge.toObject() });
+  } catch (err) {
+    const code = err && err.code ? err.code : 'INVALID_KNOWLEDGE_UPDATE';
+    const status = code.startsWith('INVALID_') ? 400 : 500;
+    return res.status(status).json({ ok: false, code, error: err.message || 'Invalid knowledge update' });
+  }
+});
+
+// POST /api/escalations/:id/knowledge/publish -- Publish an approved draft into the playbook
+router.post('/:id/knowledge/publish', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const escalation = await Escalation.findById(req.params.id).lean();
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+
+  const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  if (!knowledge) {
+    return res.status(404).json({ ok: false, code: 'KNOWLEDGE_NOT_FOUND', error: 'Knowledge draft not found' });
+  }
+  if (knowledge.reviewStatus === 'published' && knowledge.publishedAt) {
+    return res.json({ ok: true, knowledge: knowledge.toObject(), published: false, idempotent: true });
+  }
+  if (knowledge.reviewStatus !== 'approved') {
+    return res.status(409).json({
+      ok: false,
+      code: 'KNOWLEDGE_REVIEW_REQUIRED',
+      error: 'Knowledge draft must be marked approved before publish',
+    });
+  }
+  if (knowledge.publishTarget === 'case-history-only') {
+    return res.status(409).json({
+      ok: false,
+      code: 'KNOWLEDGE_NOT_PUBLISHABLE',
+      error: 'Case-history-only entries are saved for review but not published into the playbook',
+    });
+  }
+
+  try {
+    const publish = publishKnowledgeCandidate({ knowledge: knowledge.toObject(), escalation });
+    knowledge.reviewStatus = 'published';
+    knowledge.publishedAt = new Date();
+    knowledge.publishedDocType = publish.docType;
+    knowledge.publishedDocPath = publish.relativePath;
+    knowledge.publishedMarker = publish.marker;
+    knowledge.publishedSectionTitle = publish.sectionTitle;
+    await knowledge.save();
+
+    return res.json({
+      ok: true,
+      knowledge: knowledge.toObject(),
+      publish,
+      published: true,
+    });
+  } catch (err) {
+    const code = err && err.code ? err.code : 'KNOWLEDGE_PUBLISH_FAILED';
+    const status = (
+      code === 'INVALID_PUBLISH_TARGET'
+      || code === 'CATEGORY_PLAYBOOK_NOT_FOUND'
+      || code === 'KNOWLEDGE_REQUIRED'
+    ) ? 400 : 500;
+    return res.status(status).json({ ok: false, code, error: err.message || 'Failed to publish knowledge draft' });
+  }
+});
+
+// POST /api/escalations/:id/knowledge/unpublish -- Retract published knowledge from the playbook
+router.post('/:id/knowledge/unpublish', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const escalation = await Escalation.findById(req.params.id).lean();
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+
+  const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  if (!knowledge) {
+    return res.status(404).json({ ok: false, code: 'KNOWLEDGE_NOT_FOUND', error: 'Knowledge draft not found' });
+  }
+  if (knowledge.reviewStatus !== 'published') {
+    return res.status(409).json({
+      ok: false,
+      code: 'KNOWLEDGE_NOT_PUBLISHED',
+      error: 'Knowledge draft is not currently published',
+    });
+  }
+
+  try {
+    const result = unpublishKnowledgeCandidate({ knowledge: knowledge.toObject() });
+    knowledge.reviewStatus = 'draft';
+    knowledge.publishedAt = null;
+    knowledge.publishedDocType = null;
+    knowledge.publishedDocPath = null;
+    knowledge.publishedMarker = null;
+    knowledge.publishedSectionTitle = null;
+    await knowledge.save();
+
+    return res.json({
+      ok: true,
+      knowledge: knowledge.toObject(),
+      unpublish: result,
+    });
+  } catch (err) {
+    const code = err && err.code ? err.code : 'KNOWLEDGE_UNPUBLISH_FAILED';
+    const status = code === 'PUBLISHED_FILE_NOT_FOUND' ? 404 : 500;
+    return res.status(status).json({ ok: false, code, error: err.message || 'Failed to unpublish knowledge' });
+  }
+});
+
 // GET /api/escalations/:id -- Single escalation
 router.get('/:id', async (req, res) => {
   const escalation = await Escalation.findById(req.params.id).lean();
@@ -313,6 +1152,7 @@ router.delete('/:id', async (req, res) => {
   }
 
   cleanupEscalationScreenshots(escalation.toObject());
+  await KnowledgeCandidate.deleteOne({ escalationId: escalation._id }).catch(() => {});
   await Escalation.findByIdAndDelete(req.params.id);
 
   res.json({ ok: true });
@@ -341,7 +1181,23 @@ router.post('/:id/transition', async (req, res) => {
   if (!escalation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
   }
-  res.json({ ok: true, escalation: escalation.toObject() });
+
+  // When resolving or escalating further, check whether a knowledge draft already exists.
+  // This tells the client whether to auto-generate one.
+  let knowledgeExists = false;
+  if (status === 'resolved' || status === 'escalated-further') {
+    const existing = await KnowledgeCandidate.findOne(
+      { escalationId: escalation._id },
+      { _id: 1 },
+    ).lean();
+    knowledgeExists = Boolean(existing);
+  }
+
+  res.json({
+    ok: true,
+    escalation: escalation.toObject(),
+    knowledgeEligible: (status === 'resolved' || status === 'escalated-further') && !knowledgeExists,
+  });
 });
 
 // POST /api/escalations/:id/link -- Link escalation to a conversation
@@ -549,14 +1405,30 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   const {
     image,
     text,
+    conversationId,
+    traceId,
     mode,
     provider, // backward-compatible alias for primaryProvider
     primaryProvider,
     fallbackProvider,
     timeoutMs,
   } = req.body || {};
-  if (!image && !text) {
-    return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Image or text required' });
+  let resolvedImage = image;
+  let resolvedImageMeta = null;
+  let resolvedText = text;
+  if (!resolvedImage && !resolvedText && conversationId) {
+    try {
+      const resolved = await resolveParseInputsFromConversation(conversationId);
+      resolvedImage = resolved.image;
+      resolvedImageMeta = resolved.imageMeta || null;
+      resolvedText = resolved.text;
+    } catch (err) {
+      const status = err.code === 'CONVERSATION_NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ ok: false, code: err.code || 'PARSE_INPUT_RESOLUTION_FAILED', error: err.message || 'Unable to resolve parse input' });
+    }
+  }
+  if (!resolvedImage && !resolvedText) {
+    return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Image, text, or conversationId required' });
   }
   if (!isValidParseMode(mode)) {
     return res.status(400).json({ ok: false, code: 'INVALID_MODE', error: 'Unsupported parse mode' });
@@ -573,15 +1445,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
 
   if (mode === 'quick') {
     // No AI call — no usage logging
-    if (!text) {
+    if (!resolvedText) {
       return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Text required for quick mode' });
     }
-    if (!looksLikeEscalation(text)) {
+    if (!looksLikeEscalation(resolvedText)) {
       return res.status(422).json({ ok: false, code: 'NOT_ESCALATION_TEXT', error: 'Text does not look like escalation content' });
     }
 
-    const quickParsed = parseEscalationText(text);
-    const quickValidation = validateParsedEscalation(quickParsed, { sourceText: text });
+    const quickParsed = parseEscalationText(resolvedText);
+    const quickValidation = validateParsedEscalation(quickParsed, { sourceText: resolvedText });
     const quickMeta = toParseResponseMeta({
       mode: 'single',
       providerUsed: 'regex',
@@ -621,20 +1493,140 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       },
     });
     await escalation.save();
+    await patchTrace(trace?._id, {
+      status: 'ok',
+      escalationId: escalation._id,
+      postParse: buildParseStage(quickMeta, 'ok', {
+        traceId: trace?._id,
+        latencyMs: 0,
+        startedAt: traceStartedAt,
+        completedAt: new Date(),
+        escalationId: escalation._id,
+      }),
+      outcome: buildOutcome({
+        providerUsed: 'regex',
+        modelUsed: 'regex',
+        winner: 'regex',
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+      }),
+    });
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_completed',
+      label: 'Regex parse completed',
+      status: 'success',
+      provider: 'regex',
+      model: 'regex',
+      message: 'Quick regex parse completed successfully.',
+      detail: quickMeta.validation || null,
+    }, traceStartedAt);
+    if (traceId) {
+      await patchTrace(traceId, {
+        postParse: buildParseStage(quickMeta, 'ok', {
+          traceId: trace?._id,
+          latencyMs: 0,
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+          escalationId: escalation._id,
+        }),
+      });
+      await linkChildTrace(traceId, trace?._id);
+      await appendTraceEvent(traceId, {
+        key: 'post_parse_completed',
+        label: 'Structured parse completed',
+        status: 'success',
+        provider: 'regex',
+        model: 'regex',
+        message: 'Linked post-chat structured parse completed via regex mode.',
+      }, traceStartedAt);
+    }
 
     return res.status(201).json({
       ok: true,
       escalation: escalation.toObject(),
       _meta: quickMeta,
+      traceId: trace ? trace._id.toString() : null,
     });
   }
 
-  const escParseRequestId = randomUUID();
+  const escParseRequestId = req.requestId;
   const resolvedMode = resolveParseMode(mode);
+  const traceStartedAt = new Date();
+  const trace = await createTrace({
+    requestId: req.requestId,
+    parentTraceId: traceId || null,
+    service: 'parse',
+    route: '/api/escalations/parse',
+    turnKind: 'parse',
+    conversationId: conversationId || null,
+    promptPreview: resolvedText || '[image parse]',
+    messageLength: typeof resolvedText === 'string' ? resolvedText.length : 0,
+    normalizedImages: resolvedImage ? [resolvedImage] : [],
+    clientImageMeta: resolvedImageMeta ? [resolvedImageMeta] : [],
+    requested: {
+      mode: resolvedMode,
+      timeoutMs,
+      primaryProvider: primaryProvider || provider || '',
+      fallbackProvider: fallbackProvider || '',
+      parallelProviders: [],
+    },
+    resolved: {
+      mode: resolvedMode,
+      timeoutMs,
+      primaryProvider: primaryProvider || provider || '',
+      fallbackProvider: fallbackProvider || '',
+      parallelProviders: [],
+    },
+  }).catch(() => null);
+  await appendTraceEvent(trace?._id, {
+    key: 'parse_received',
+    label: 'Parse request received',
+    status: 'info',
+    provider: primaryProvider || provider || '',
+    model: getProviderModelId(primaryProvider || provider || ''),
+    message: 'Structured parse request accepted.',
+  }, traceStartedAt);
+  const runtimeOperation = createAiOperation({
+    kind: 'parse',
+    route: '/api/escalations/parse',
+    action: 'escalation-parse',
+    provider: primaryProvider || provider || null,
+    mode: resolvedMode,
+    promptPreview: resolvedText || '[image parse]',
+    hasImages: Boolean(resolvedImage),
+    messageCount: resolvedText ? 1 : 0,
+    providers: [primaryProvider || provider, fallbackProvider].filter(Boolean),
+  });
+  const runtimeOperationId = runtimeOperation.id;
+  let parseSettled = false;
+  res.on('close', () => {
+    if (parseSettled) return;
+    updateAiOperation(runtimeOperationId, {
+      clientConnected: false,
+      phase: 'aborting',
+    });
+    appendTraceEvent(trace?._id, {
+      key: 'client_disconnected',
+      label: 'Client disconnected',
+      status: 'warning',
+      provider: primaryProvider || provider || '',
+      model: getProviderModelId(primaryProvider || provider || ''),
+      code: 'CLIENT_DISCONNECTED',
+      message: 'The client disconnected before the parse settled.',
+    }, traceStartedAt).catch(() => {});
+  });
   try {
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_started',
+      label: 'Provider parse started',
+      status: 'info',
+      provider: primaryProvider || provider || '',
+      model: getProviderModelId(primaryProvider || provider || ''),
+      message: 'Running provider-orchestrated structured parse.',
+    }, traceStartedAt);
     const parseResult = await parseWithPolicy({
-      image,
-      text,
+      image: resolvedImage,
+      text: resolvedText,
       mode: resolvedMode,
       primaryProvider: primaryProvider || provider,
       fallbackProvider,
@@ -642,10 +1634,13 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       allowRegexFallback: true,
     });
     const parseMeta = toParseResponseMeta(parseResult.meta);
+    recordAiEvent(runtimeOperationId, 'saving', {
+      provider: parseMeta.providerUsed || primaryProvider || provider || null,
+    });
 
     const escalation = new Escalation({
       ...parseResult.fields,
-      source: image ? 'screenshot' : 'manual',
+      source: resolvedImage ? 'screenshot' : (conversationId ? 'chat' : 'manual'),
       parseMeta: {
         mode: parseMeta.mode,
         providerUsed: parseMeta.providerUsed,
@@ -660,6 +1655,58 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       },
     });
     await escalation.save();
+    await setTraceAttempts(trace?._id, parseMeta.attempts || []);
+    await setTraceUsage(trace?._id, (parseMeta.attempts || []).find((attempt) => attempt.status === 'ok' && attempt.provider === parseMeta.providerUsed)?.usage || null);
+    await patchTrace(trace?._id, {
+      status: 'ok',
+      escalationId: escalation._id,
+      postParse: buildParseStage(parseMeta, 'ok', {
+        traceId: trace?._id,
+        latencyMs: Date.now() - traceStartedAt.getTime(),
+        startedAt: traceStartedAt,
+        completedAt: new Date(),
+        escalationId: escalation._id,
+      }),
+      outcome: buildOutcome({
+        providerUsed: parseMeta.providerUsed || primaryProvider || provider || '',
+        modelUsed: getProviderModelId(parseMeta.providerUsed || primaryProvider || provider || ''),
+        winner: parseMeta.winner || parseMeta.providerUsed,
+        fallbackUsed: Boolean(parseMeta.fallbackUsed),
+        fallbackFrom: parseMeta.fallbackFrom || '',
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+      }),
+    });
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_completed',
+      label: 'Structured parse completed',
+      status: 'success',
+      provider: parseMeta.providerUsed || primaryProvider || provider || '',
+      model: getProviderModelId(parseMeta.providerUsed || primaryProvider || provider || ''),
+      message: 'Structured parse completed successfully.',
+      detail: parseMeta.validation || null,
+    }, traceStartedAt);
+    if (traceId) {
+      await patchTrace(traceId, {
+        postParse: buildParseStage(parseMeta, 'ok', {
+          traceId: trace?._id,
+          latencyMs: Date.now() - traceStartedAt.getTime(),
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+          escalationId: escalation._id,
+        }),
+      });
+      await linkChildTrace(traceId, trace?._id);
+      await appendTraceEvent(traceId, {
+        key: 'post_parse_completed',
+        label: 'Structured parse completed',
+        status: 'success',
+        provider: parseMeta.providerUsed || primaryProvider || provider || '',
+        model: getProviderModelId(parseMeta.providerUsed || primaryProvider || provider || ''),
+        message: 'Linked post-chat structured parse completed successfully.',
+        detail: parseMeta.validation || null,
+      }, traceStartedAt);
+    }
 
     // Log usage for AI attempts (skip regex)
     if (Array.isArray(parseResult.meta.attempts)) {
@@ -677,10 +1724,16 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       }
     }
 
+    parseSettled = true;
+    recordAiEvent(runtimeOperationId, 'completed', {
+      provider: parseMeta.providerUsed || primaryProvider || provider || null,
+    });
+    deleteAiOperation(runtimeOperationId);
     return res.status(201).json({
       ok: true,
       escalation: escalation.toObject(),
       _meta: parseMeta,
+      traceId: trace ? trace._id.toString() : null,
     });
   } catch (err) {
     if (err && Array.isArray(err.attempts)) {
@@ -696,6 +1749,89 @@ router.post('/parse', parseRateLimit, async (req, res) => {
         });
       }
     }
+    await setTraceAttempts(trace?._id, err && Array.isArray(err.attempts) ? err.attempts : []);
+    await patchTrace(trace?._id, {
+      status: 'error',
+      postParse: buildParseStage(
+        {
+          mode: resolvedMode,
+          providerUsed: primaryProvider || provider || '',
+          attempts: err && Array.isArray(err.attempts) ? err.attempts : [],
+          validation: null,
+        },
+        'error',
+        {
+          traceId: trace?._id,
+          latencyMs: Date.now() - traceStartedAt.getTime(),
+          startedAt: traceStartedAt,
+          completedAt: new Date(),
+        }
+      ),
+      outcome: buildOutcome({
+        providerUsed: primaryProvider || provider || '',
+        modelUsed: getProviderModelId(primaryProvider || provider || ''),
+        totalMs: Date.now() - traceStartedAt.getTime(),
+        completedAt: new Date(),
+        errorCode: err && err.code ? err.code : 'PARSE_FAILED',
+        errorMessage: err && err.message ? err.message : 'Failed to parse escalation',
+      }),
+    });
+    await appendTraceEvent(trace?._id, {
+      key: 'parse_failed',
+      label: 'Structured parse failed',
+      status: 'error',
+      provider: primaryProvider || provider || '',
+      model: getProviderModelId(primaryProvider || provider || ''),
+      code: err && err.code ? err.code : 'PARSE_FAILED',
+      message: err && err.message ? err.message : 'Failed to parse escalation',
+      detail: { attempts: err && Array.isArray(err.attempts) ? err.attempts : [] },
+    }, traceStartedAt);
+    if (traceId) {
+      await patchTrace(traceId, {
+        postParse: buildParseStage(
+          {
+            mode: resolvedMode,
+            providerUsed: primaryProvider || provider || '',
+            attempts: err && Array.isArray(err.attempts) ? err.attempts : [],
+            validation: null,
+          },
+          'error',
+          {
+            traceId: trace?._id,
+            latencyMs: Date.now() - traceStartedAt.getTime(),
+            startedAt: traceStartedAt,
+            completedAt: new Date(),
+          }
+        ),
+      });
+      await linkChildTrace(traceId, trace?._id);
+      await appendTraceEvent(traceId, {
+        key: 'post_parse_failed',
+        label: 'Structured parse failed',
+        status: 'error',
+        provider: primaryProvider || provider || '',
+        model: getProviderModelId(primaryProvider || provider || ''),
+        code: err && err.code ? err.code : 'PARSE_FAILED',
+        message: err && err.message ? err.message : 'Failed to parse escalation',
+      }, traceStartedAt);
+    }
+    parseSettled = true;
+    recordAiEvent(runtimeOperationId, 'error', {
+      provider: primaryProvider || provider || null,
+      lastError: {
+        code: err && err.code ? err.code : 'PARSE_FAILED',
+        message: err && err.message ? err.message : 'Failed to parse escalation',
+        detail: '',
+      },
+    });
+    reportServerError({
+      route: '/api/escalations/parse',
+      message: err && err.message ? err.message : 'Failed to parse escalation',
+      code: err && err.code ? err.code : 'PARSE_FAILED',
+      detail: err && err.stack ? err.stack : '',
+      severity: 'error',
+    });
+    deleteAiOperation(runtimeOperationId);
     const code = err && err.code ? err.code : 'PARSE_FAILED';
     const status = code === 'PARSE_FAILED' ? 422 : 500;
     return res.status(status).json({

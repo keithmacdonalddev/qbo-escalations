@@ -8,7 +8,7 @@
     "dev:client": "npm --prefix client run dev",
     "dev:server": "npm --prefix server run dev",
     "build": "npm --prefix client run build",
-    "start": "node server/src/index.js",
+    "start": "node --max-old-space-size=512 server/src/index.js",
     "test": "npm --prefix server test"
   },
   "devDependencies": {

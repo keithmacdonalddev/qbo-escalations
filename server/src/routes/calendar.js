@@ -10,7 +10,7 @@ const router = express.Router();
 // ---------------------------------------------------------------------------
 router.get('/calendars', async (req, res) => {
   try {
-    const result = await calendar.listCalendars();
+    const result = await calendar.listCalendars(req.query.account || undefined);
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
@@ -25,7 +25,7 @@ router.get('/calendars', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.get('/events', async (req, res) => {
   try {
-    const { calendarId, timeMin, timeMax, q, maxResults, pageToken } = req.query;
+    const { calendarId, timeMin, timeMax, q, maxResults, pageToken, account } = req.query;
     const result = await calendar.listEvents({
       calendarId: calendarId || 'primary',
       timeMin: timeMin || undefined,
@@ -33,10 +33,16 @@ router.get('/events', async (req, res) => {
       q: q || undefined,
       maxResults: maxResults && Number.isFinite(parseInt(maxResults, 10)) ? parseInt(maxResults, 10) : 250,
       pageToken: pageToken || undefined,
+      account: account || undefined,
     });
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
+    // Google API returns 404 for non-existent / unsubscribed calendar IDs — handle gracefully
+    const is404 = err.code === 404 || err.status === 404 || (err.message && err.message.includes('Not Found'));
+    if (is404) {
+      return res.json({ ok: true, events: [], calendarNotFound: true });
+    }
     console.error('[Calendar] listEvents error:', err.message);
     res.status(500).json({ ok: false, code: 'CALENDAR_ERROR', error: err.message });
   }
@@ -49,7 +55,7 @@ router.get('/events', async (req, res) => {
 router.get('/events/:id', async (req, res) => {
   try {
     const calendarId = req.query.calendarId || 'primary';
-    const result = await calendar.getEvent(calendarId, req.params.id);
+    const result = await calendar.getEvent(calendarId, req.params.id, req.query.account || undefined);
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
@@ -64,14 +70,14 @@ router.get('/events/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/events', async (req, res) => {
   try {
-    const { calendarId, ...eventData } = req.body;
+    const { calendarId, account, ...eventData } = req.body;
     if (!eventData.summary) {
       return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: '"summary" field is required' });
     }
     if (!eventData.start || !eventData.end) {
       return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: '"start" and "end" fields are required' });
     }
-    const result = await calendar.createEvent(calendarId || 'primary', eventData);
+    const result = await calendar.createEvent(calendarId || 'primary', eventData, account || undefined);
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
@@ -86,8 +92,8 @@ router.post('/events', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.patch('/events/:id', async (req, res) => {
   try {
-    const { calendarId, ...updates } = req.body;
-    const result = await calendar.updateEvent(calendarId || 'primary', req.params.id, updates);
+    const { calendarId, account, ...updates } = req.body;
+    const result = await calendar.updateEvent(calendarId || 'primary', req.params.id, updates, account || undefined);
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
@@ -103,7 +109,7 @@ router.patch('/events/:id', async (req, res) => {
 router.delete('/events/:id', async (req, res) => {
   try {
     const calendarId = req.query.calendarId || 'primary';
-    const result = await calendar.deleteEvent(calendarId, req.params.id);
+    const result = await calendar.deleteEvent(calendarId, req.params.id, req.query.account || undefined);
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);
   } catch (err) {
@@ -118,7 +124,7 @@ router.delete('/events/:id', async (req, res) => {
 // ---------------------------------------------------------------------------
 router.post('/freebusy', async (req, res) => {
   try {
-    const { calendarIds, timeMin, timeMax, timeZone } = req.body;
+    const { calendarIds, timeMin, timeMax, timeZone, account } = req.body;
     if (!timeMin || !timeMax) {
       return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: '"timeMin" and "timeMax" are required' });
     }
@@ -127,6 +133,7 @@ router.post('/freebusy', async (req, res) => {
       timeMin,
       timeMax,
       timeZone || undefined,
+      account || undefined,
     );
     if (!result.ok) return res.status(result.code === 'GMAIL_NOT_CONNECTED' ? 401 : 500).json(result);
     res.json(result);

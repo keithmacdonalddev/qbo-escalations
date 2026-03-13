@@ -62,6 +62,9 @@ export function useClientHealthExtended({ enabled = true, isLeader, sendBackgrou
 
     // Per-type throttle: max 1 report per 2 minutes
     function throttled(type, fn) {
+      // Suspend all alerting while a large image request is being serialized
+      // or transmitted — the main-thread stall is expected and temporary.
+      if (window.__imageRequestActive) return;
       const last = throttleRef.current.get(type) || 0;
       if (Date.now() - last < 120_000) return;
       throttleRef.current.set(type, Date.now());
@@ -78,6 +81,7 @@ export function useClientHealthExtended({ enabled = true, isLeader, sendBackgrou
     let addCount = 0;
     let removeCount = 0;
     let prevNetListeners = 0;
+    let listenerTickCount = 0;
 
     EventTarget.prototype.addEventListener = function (...args) {
       addCount++;
@@ -89,6 +93,7 @@ export function useClientHealthExtended({ enabled = true, isLeader, sendBackgrou
     };
 
     const listenerCheckInterval = setInterval(() => {
+      listenerTickCount++;
       const net = addCount - removeCount;
       const growth = net - prevNetListeners;
       prevNetListeners = net;
@@ -111,7 +116,7 @@ event listeners added in loops or hot render paths, third-party libraries attach
         });
       }
 
-      if (growth > 50) {
+      if (listenerTickCount > 1 && growth > 50) {
         throttled('listener-growth', () => {
           logRef.current?.({ type: 'health-warning', message: `Rapid listener growth: +${growth} in 30s`, severity: 'warning', _severity: SEVERITY.MONITORING });
           sendBackgroundRef.current('auto-errors', `[AUTO-ERROR] Rapid event listener growth: +${growth} in 30 seconds
@@ -357,6 +362,13 @@ Check: server health, CORS headers, proxy timeouts, and whether the endpoint act
             entry.count = 0;
             entry.windowStart = now;
           }
+
+          // Prune stale entries to prevent unbounded growth
+          for (const [esUrl, esEntry] of esErrorCounts) {
+            if (now - esEntry.windowStart > 120_000) {
+              esErrorCounts.delete(esUrl);
+            }
+          }
         });
         return instance;
       };
@@ -417,5 +429,5 @@ Check: server health, CORS headers, proxy timeouts, and whether the endpoint act
       // Clear throttle map
       try { throttleRef.current.clear(); } catch {}
     };
-  }, [enabled, isLeader, sendBackground, log]);
+  }, [enabled, isLeader]); // sendBackground + log accessed via refs to avoid teardown
 }

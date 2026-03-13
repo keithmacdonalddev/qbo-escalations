@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
 import { SEVERITY, SEVERITY_LABELS } from '../lib/severityClassifier.js';
+import ThreadViewer from './ThreadViewer.jsx';
 
 /** Severity badge CSS class map */
 const SEVERITY_BADGE_CLASS = {
@@ -24,6 +25,9 @@ const TYPE_COLORS = {
   'bg-tools': 'aal-blue',
   'bg-files-changed': 'aal-green',
   'bg-response': 'aal-green',
+  'bg-rate-limit': 'aal-amber',
+  'bg-suppressed': 'aal-gray',
+  'bg-collapsed': 'aal-gray',
   'fg-response': 'aal-green',
   'task-completed': 'aal-green',
   'fg-send': 'aal-blue',
@@ -50,6 +54,7 @@ const TYPE_COLORS = {
   'hmr-reload': 'aal-amber',
   'hmr-error': 'aal-red',
   'monitor-lifecycle': 'aal-gray',
+  'agent-health': 'aal-amber',
 };
 
 /** Map event types to filter categories */
@@ -70,6 +75,9 @@ const TYPE_CATEGORIES = {
   'bg-tools': 'background',
   'bg-files-changed': 'background',
   'bg-response': 'background',
+  'bg-rate-limit': 'background',
+  'bg-suppressed': 'background',
+  'bg-collapsed': 'background',
   'bg-rotate': 'background',
   'fg-send': 'foreground',
   'fg-response': 'foreground',
@@ -91,6 +99,7 @@ const TYPE_CATEGORIES = {
   'hmr-reload': 'system',
   'hmr-error': 'errors',
   'monitor-lifecycle': 'system',
+  'agent-health': 'system',
 };
 
 const FILTER_OPTIONS = [
@@ -136,7 +145,8 @@ export default function AgentActivityLog({ compact = false }) {
   const [filter, setFilter] = useState('all');
   const [paused, setPaused] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
+  const [threadChannel, setThreadChannel] = useState(null);
   const scrollRef = useRef(null);
   const isUserScrolledRef = useRef(false);
   const prevLengthRef = useRef(0);
@@ -302,7 +312,7 @@ export default function AgentActivityLog({ compact = false }) {
 
       {/* Log body */}
       {!collapsed && (
-        <div className="aal-body" ref={scrollRef} onScroll={handleScroll}>
+        <div className="aal-body" ref={scrollRef} onScroll={handleScroll} style={{ position: 'relative' }}>
           {filtered.length === 0 && (
             <div className="aal-empty">
               {entries.length === 0
@@ -341,10 +351,30 @@ export default function AgentActivityLog({ compact = false }) {
                 {isExpanded && entry.detail && (
                   <pre className="aal-detail">{entry.detail}</pre>
                 )}
+                {isExpanded && entry.channel && (entry.type === 'bg-response' || entry.type === 'bg-send') && (
+                  <button
+                    className="aal-thread-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setThreadChannel(entry.channel);
+                    }}
+                    type="button"
+                  >
+                    View Thread &rarr;
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
+      )}
+
+      {/* Thread viewer slide-over */}
+      {threadChannel && (
+        <ThreadViewer
+          channel={threadChannel}
+          onClose={() => setThreadChannel(null)}
+        />
       )}
     </div>
   );

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Memory Decay Timeline</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-text">
+        <h1 class="header-title">Memory Decay Timeline</h1>
+        <p class="header-subtitle">Agent knowledge with TTL expiry</p>
+      </div>
+      <div class="header-stats" id="stats"></div>
+      <div class="header-controls">
+        <button class="btn btn-simulate" id="btn-simulate">
+          <span class="btn-icon">&#9203;</span> Simulate Decay
+        </button>
+        <button class="btn btn-reset" id="btn-reset">
+          <span class="btn-icon">&#8634;</span> Reset Time
+        </button>
+      </div>
+    </header>
+
+    <div class="time-offset-banner" id="time-banner" style="display:none;">
+      <span class="banner-icon">&#9203;</span>
+      <span id="time-offset-label">Simulated: +0h</span>
+    </div>
+
+    <div class="timeline" id="timeline"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

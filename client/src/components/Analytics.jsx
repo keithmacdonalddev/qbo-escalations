@@ -14,6 +14,8 @@ import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
 import { getProviderLabel, isClaudeProvider } from '../lib/providerCatalog.js';
 
+const ANALYTICS_SECTION_TIMEOUT_MS = 12_000;
+
 const CAT_BADGE_MAP = {
   payroll: 'cat-payroll',
   'bank-feeds': 'cat-bank-feeds',
@@ -35,6 +37,14 @@ const STATUS_LABELS = {
   'escalated-further': 'Escalated',
 };
 
+function withSectionTimeout(label, promise, timeoutMs = ANALYTICS_SECTION_TIMEOUT_MS) {
+  let timeoutId = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+}
+
 export default function Analytics() {
   const [summary, setSummary] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -49,40 +59,55 @@ export default function Analytics() {
   const [fetchError, setFetchError] = useState(null);
   const fetchedRef = useRef(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (signal) => {
     setLoading(true);
     setFetchError(null);
-    try {
-      const [sum, cats, ags, rec, resTime, trendData, todayData, flowData, modelPerfData] = await Promise.all([
-        getSummary(),
-        getCategoryBreakdown(),
-        getTopAgents(10),
-        getRecurringIssues(8),
-        getResolutionTimes(),
-        getTrends('daily'),
-        getTodaySnapshot(),
-        getStatusFlow(),
-        getModelPerformance().catch(() => null),
-      ]);
-      setSummary(sum);
-      setCategories(cats);
-      setAgents(ags);
-      setRecurring(rec);
-      setResolutionTimes(resTime);
-      setTrends(trendData);
-      setToday(todayData);
-      setStatusFlow(flowData || { total: 0, flow: {} });
-      setModelPerf(modelPerfData);
-    } catch {
-      setFetchError('Failed to load analytics data');
+    const sections = [
+      { key: 'summary', label: 'summary', load: () => getSummary(), apply: setSummary, fallback: null },
+      { key: 'categories', label: 'categories', load: () => getCategoryBreakdown(), apply: setCategories, fallback: [] },
+      { key: 'agents', label: 'agents', load: () => getTopAgents(10), apply: setAgents, fallback: [] },
+      { key: 'recurring', label: 'recurring issues', load: () => getRecurringIssues(8), apply: setRecurring, fallback: [] },
+      { key: 'resolutionTimes', label: 'resolution times', load: () => getResolutionTimes(), apply: setResolutionTimes, fallback: [] },
+      { key: 'trends', label: 'daily trends', load: () => getTrends('daily'), apply: setTrends, fallback: [] },
+      { key: 'today', label: 'today snapshot', load: () => getTodaySnapshot(), apply: setToday, fallback: null },
+      { key: 'statusFlow', label: 'status flow', load: () => getStatusFlow(), apply: setStatusFlow, fallback: { total: 0, flow: {} } },
+      { key: 'modelPerf', label: 'model performance', load: () => getModelPerformance(), apply: setModelPerf, fallback: null },
+    ];
+
+    const results = await Promise.allSettled(
+      sections.map((section) => withSectionTimeout(section.label, section.load())),
+    );
+
+    if (signal?.aborted) return;
+
+    const failedSections = [];
+    results.forEach((result, index) => {
+      const section = sections[index];
+      if (result.status === 'fulfilled') {
+        section.apply(result.value);
+        return;
+      }
+      section.apply(section.fallback);
+      failedSections.push(section.label);
+    });
+
+    if (failedSections.length > 0) {
+      setFetchError(
+        failedSections.length === sections.length
+          ? 'Failed to load analytics data'
+          : `Some analytics sections could not load: ${failedSections.join(', ')}`
+      );
     }
+
     setLoading(false);
   }, []);
 
   useEffect(() => {
     if (fetchedRef.current) return;
     fetchedRef.current = true;
-    loadData();
+    const ac = new AbortController();
+    loadData(ac.signal);
+    return () => ac.abort();
   }, [loadData]);
 
   if (loading) {

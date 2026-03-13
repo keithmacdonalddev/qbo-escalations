@@ -6,6 +6,7 @@ const PROVIDERS = getProviderIds();
 const candidateSchema = new mongoose.Schema({
   provider: { type: String, enum: PROVIDERS, required: true },
   content: { type: String, default: '' },
+  thinking: { type: String, default: '' },
   state: { type: String, enum: ['ok', 'error', 'timeout'], default: 'ok' },
   errorCode: { type: String, default: '' },
   errorMessage: { type: String, default: '' },

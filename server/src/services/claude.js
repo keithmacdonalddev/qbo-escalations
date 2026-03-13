@@ -1,10 +1,36 @@
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { extractClaudeUsage } = require('../lib/usage-extractor');
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { parseImageWithSDK } = require('./sdk-image-parse');
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+
+// Concurrency limiter for SDK image parsing — only 1 at a time to prevent
+// memory pressure from parallel Claude Code subprocess spawns.
+let _sdkParseActive = false;
+const _sdkParseQueue = [];
+
+function acquireSdkSlot() {
+  return new Promise((resolve) => {
+    if (!_sdkParseActive) {
+      _sdkParseActive = true;
+      resolve();
+    } else {
+      _sdkParseQueue.push(resolve);
+    }
+  });
+}
+
+function releaseSdkSlot() {
+  if (_sdkParseQueue.length > 0) {
+    const next = _sdkParseQueue.shift();
+    next();
+  } else {
+    _sdkParseActive = false;
+  }
+}
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -31,6 +57,20 @@ function cleanupTempFiles(paths) {
   for (const f of paths) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
   }
+}
+
+function combineUsage(usageA, usageB) {
+  if (!usageA && !usageB) return null;
+  if (!usageA) return usageB;
+  if (!usageB) return usageA;
+  return {
+    model: usageB.model || usageA.model,
+    inputTokens: (usageA.inputTokens || 0) + (usageB.inputTokens || 0),
+    outputTokens: (usageA.outputTokens || 0) + (usageB.outputTokens || 0),
+    cacheCreationInputTokens: (usageA.cacheCreationInputTokens || 0) + (usageB.cacheCreationInputTokens || 0),
+    cacheReadInputTokens: (usageA.cacheReadInputTokens || 0) + (usageB.cacheReadInputTokens || 0),
+    cost: ((usageA.cost || 0) + (usageB.cost || 0)) || undefined,
+  };
 }
 
 function formatCliFailure(code, stderr) {
@@ -62,28 +102,60 @@ function parseBool(value, fallback) {
 }
 
 function supportsClaudeImageFlag() {
-  if (supportsClaudeImageFlagCache !== null) return supportsClaudeImageFlagCache;
+  // Returns the cached result. The cache is warmed eagerly at module load
+  // (see _warmImageFlagCache below) so this never blocks.
+  // Falls back to false if the cache hasn't resolved yet.
+  return supportsClaudeImageFlagCache === true;
+}
+
+// Eagerly warm the --image flag support cache in the background at module load.
+// This fires a non-blocking async spawn so the result is ready before the first
+// image request arrives, eliminating the 5-second spawnSync block.
+function _warmImageFlagCache() {
+  if (supportsClaudeImageFlagCache !== null) return;
 
   if (process.env.CLAUDE_SUPPORTS_IMAGE_INPUT !== undefined) {
     supportsClaudeImageFlagCache = parseBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false);
-    return supportsClaudeImageFlagCache;
+    return;
   }
 
-  try {
-    const help = spawnSync('claude', ['--help'], {
-      shell: true,
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, CLAUDECODE: undefined },
-      encoding: 'utf8',
-      timeout: CLAUDE_IMAGE_HELP_TIMEOUT_MS,
-    });
-    const text = `${help.stdout || ''}\n${help.stderr || ''}`.toLowerCase();
+  const child = spawn('claude', ['--help'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    shell: true,
+    cwd: PROJECT_ROOT,
+    env: {
+      ...process.env,
+      CLAUDECODE: undefined,
+      CLAUDE_CODE_SIMPLE: '1',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    },
+  });
+
+  let stdout = '';
+  let stderr = '';
+  const timeout = setTimeout(() => {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    if (supportsClaudeImageFlagCache === null) supportsClaudeImageFlagCache = false;
+  }, CLAUDE_IMAGE_HELP_TIMEOUT_MS);
+
+  child.stdout.on('data', (d) => { if (stdout.length < 10240) stdout += d.toString(); });
+  child.stderr.on('data', (d) => { if (stderr.length < 10240) stderr += d.toString(); });
+
+  child.on('close', () => {
+    clearTimeout(timeout);
+    if (supportsClaudeImageFlagCache !== null) return; // already set by timeout
+    const text = `${stdout}\n${stderr}`.toLowerCase();
     supportsClaudeImageFlagCache = text.includes('--image');
-  } catch {
-    supportsClaudeImageFlagCache = false;
-  }
-  return supportsClaudeImageFlagCache;
+  });
+
+  child.on('error', () => {
+    clearTimeout(timeout);
+    if (supportsClaudeImageFlagCache === null) supportsClaudeImageFlagCache = false;
+  });
 }
+
+// Fire-and-forget at module load — cache is warm before any image request.
+_warmImageFlagCache();
 
 function appendImagePathsToPrompt(prompt, imagePaths) {
   if (!Array.isArray(imagePaths) || imagePaths.length === 0) return prompt;
@@ -151,11 +223,11 @@ function decodeImageInput(imageInput) {
   };
 }
 
-function writeTempImageFile(imageInput, prefix, index) {
+async function writeTempImageFile(imageInput, prefix, index) {
   const decoded = decodeImageInput(imageInput);
   const fileName = `${prefix}-${Date.now()}-${process.pid}-${index}.${decoded.extension}`;
   const tmpPath = path.join(os.tmpdir(), fileName);
-  fs.writeFileSync(tmpPath, decoded.buffer);
+  await fs.promises.writeFile(tmpPath, decoded.buffer);
   return tmpPath;
 }
 
@@ -174,7 +246,7 @@ function writeTempImageFile(imageInput, prefix, index) {
 function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk, onThinkingChunk, onDone, onError }) {
   const prompt = buildPrompt(messages);
   const tempFiles = [];
-  const args = ['-p', '--output-format', 'stream-json', '--verbose'];
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
   if (model) args.push('--model', model);
   const normalizedEffort = normalizeClaudeEffort(reasoningEffort);
   if (normalizedEffort) args.push('--effort', normalizedEffort);
@@ -182,62 +254,13 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     ? `System instructions:\n${systemPrompt}\n\n${prompt}`
     : prompt;
 
-  try {
-    if (images && images.length > 0) {
-      for (let i = 0; i < images.length; i++) {
-        const tmpPath = writeTempImageFile(images[i], 'qbo-escalation-img', i);
-        tempFiles.push(tmpPath);
-      }
-    }
-  } catch (err) {
-    cleanupTempFiles(tempFiles);
-    onError(err instanceof Error ? err : new Error(String(err)));
-    return function noopCleanup() {};
-  }
-  if (tempFiles.length > 0) {
-    if (supportsClaudeImageFlag()) {
-      for (const tempFilePath of tempFiles) {
-        args.push('--image', tempFilePath);
-      }
-    } else {
-      stdinPrompt = appendImagePathsToPrompt(stdinPrompt, tempFiles);
-      addCompatibilityImageAccessArgs(args, tempFiles);
-    }
-  }
-
   let fullResponse = '';
   let killed = false;
   let settled = false;
   let capturedUsage = null;
-  let child;
-  try {
-    // shell: true required on Windows where claude may be a .cmd shim.
-    // User content is piped via stdin — never passed as a CLI argument.
-    child = spawn('claude', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, CLAUDECODE: undefined },
-    });
-  } catch (err) {
-    cleanupTempFiles(tempFiles);
-    const spawnErr = err instanceof Error ? err : new Error(String(err));
-    reportServerError({
-      message: `CLI spawn error: ${spawnErr.message}`,
-      detail: 'Failed to start Claude CLI subprocess for chat.',
-      stack: spawnErr.stack || '',
-      source: 'claude.js',
-      category: 'runtime-error',
-    });
-    onError(spawnErr);
-    return function noopCleanup() {};
-  }
-  try {
-    child.stdin.end(stdinPrompt);
-  } catch { /* ignore; process error handler will surface if needed */ }
-
-  let stdoutBuffer = '';
-  let stderrOutput = '';
+  let receivedThinking = false;
+  let child = null;
+  let timeoutHandle = null;
 
   function finishWithError(err) {
     if (settled || killed) return;
@@ -262,82 +285,198 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     onDone(text, capturedUsage || null);
   }
 
-  const timeout = setTimeout(() => {
-    if (killed || settled) return;
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
-    const timeoutErr = new Error('Claude CLI timed out after ' + CHAT_TIMEOUT_MS + 'ms');
-    timeoutErr.code = 'TIMEOUT';
-    finishWithError(timeoutErr);
-  }, CHAT_TIMEOUT_MS);
+  // Async setup: write temp image files (non-blocking), then spawn subprocess.
+  // The cleanup function returned below handles both the setup and spawn phases.
+  (async () => {
+    try {
+      if (images && images.length > 0) {
+        const written = await Promise.all(
+          images.map((img, i) => writeTempImageFile(img, 'qbo-escalation-img', i))
+        );
+        tempFiles.push(...written);
+      }
+    } catch (err) {
+      cleanupTempFiles(tempFiles);
+      if (!killed) onError(err instanceof Error ? err : new Error(String(err)));
+      return;
+    }
 
-  child.stdout.on('data', (data) => {
-    if (settled || killed) return;
-    stdoutBuffer += data.toString();
-    const lines = stdoutBuffer.split('\n');
-    stdoutBuffer = lines.pop() || '';
+    // Abort if cleanup was called during file writes
+    if (killed || settled) {
+      cleanupTempFiles(tempFiles);
+      return;
+    }
 
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const msg = JSON.parse(line);
-        const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
-        if (usage) capturedUsage = usage;
-        const thinking = extractThinking(msg);
-        if (thinking && onThinkingChunk) {
-          try { onThinkingChunk(thinking); } catch { /* ignore */ }
+    if (tempFiles.length > 0) {
+      if (supportsClaudeImageFlag()) {
+        for (const tempFilePath of tempFiles) {
+          args.push('--image', tempFilePath);
         }
-        const text = extractText(msg);
-        if (text) {
-          fullResponse += text;
-          try { onChunk(text); } catch { /* ignore client callback errors */ }
-        }
-      } catch {
-        // Non-JSON line (verbose output), ignore
+      } else {
+        stdinPrompt = appendImagePathsToPrompt(stdinPrompt, tempFiles);
+        addCompatibilityImageAccessArgs(args, tempFiles);
       }
     }
-  });
 
-  child.stderr.on('data', (data) => {
-    stderrOutput += data.toString();
-  });
-
-  child.on('close', (code) => {
-    clearTimeout(timeout);
-    if (settled || killed) return;
-
-    if (stdoutBuffer.trim()) {
-      try {
-        const msg = JSON.parse(stdoutBuffer);
-        const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
-        if (usage) capturedUsage = usage;
-        const thinking = extractThinking(msg);
-        if (thinking && onThinkingChunk) {
-          try { onThinkingChunk(thinking); } catch { /* ignore */ }
-        }
-        const text = extractText(msg);
-        if (text) {
-          fullResponse += text;
-          try { onChunk(text); } catch { /* ignore client callback errors */ }
-        }
-      } catch { /* ignore */ }
+    try {
+      // shell: true required on Windows where claude may be a .cmd shim.
+      // User content is piped via stdin — never passed as a CLI argument.
+      child = spawn('claude', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: true,
+        cwd: PROJECT_ROOT,
+        env: {
+          ...process.env,
+          CLAUDECODE: undefined,
+          CLAUDE_CODE_SIMPLE: '1',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        },
+      });
+    } catch (err) {
+      cleanupTempFiles(tempFiles);
+      const spawnErr = err instanceof Error ? err : new Error(String(err));
+      reportServerError({
+        message: `CLI spawn error: ${spawnErr.message}`,
+        detail: 'Failed to start Claude CLI subprocess for chat.',
+        stack: spawnErr.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
+      if (!killed) onError(spawnErr);
+      return;
     }
+    try {
+      child.stdin.end(stdinPrompt);
+    } catch { /* ignore; process error handler will surface if needed */ }
 
-    if (!didCliExitSuccessfully(code)) {
-      finishWithError(new Error(formatCliFailure(code, stderrOutput)));
-    } else {
-      finishWithSuccess(fullResponse);
-    }
-  });
+    let stdoutBuffer = '';
+    let stderrOutput = '';
 
-  child.on('error', (err) => {
-    clearTimeout(timeout);
-    if (!killed) finishWithError(err);
+    timeoutHandle = setTimeout(() => {
+      if (killed || settled) return;
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      const timeoutErr = new Error('Claude CLI timed out after ' + CHAT_TIMEOUT_MS + 'ms');
+      timeoutErr.code = 'TIMEOUT';
+      finishWithError(timeoutErr);
+    }, CHAT_TIMEOUT_MS);
+
+    child.stdout.on('data', (data) => {
+      if (settled || killed) return;
+      stdoutBuffer += data.toString();
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const msg = JSON.parse(line);
+          const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
+          if (usage) capturedUsage = usage;
+          const thinking = extractThinking(msg);
+          if (thinking && onThinkingChunk) {
+            receivedThinking = true;
+            try { onThinkingChunk(thinking); } catch { /* ignore */ }
+          }
+          const text = extractText(msg);
+          if (text) {
+            fullResponse += text;
+            try { onChunk(text); } catch { /* ignore client callback errors */ }
+          }
+          // Fallback: if this is a result/assistant msg and no deltas arrived yet, use it
+          if (!text && !fullResponse) {
+            const finalText = extractFinalText(msg);
+            if (finalText) {
+              fullResponse = finalText;
+              try { onChunk(finalText); } catch { /* ignore */ }
+            }
+          }
+          // Log unhandled message types that produced no output
+          if (!thinking && !text) {
+            const inner = (msg.type === 'stream_event' && msg.event) ? msg.event : msg;
+            const msgType = inner.type || msg.type || 'unknown';
+            if (!['ping', 'message_start', 'content_block_start', 'content_block_stop', 'message_stop'].includes(msgType)) {
+              console.debug('[claude] Unhandled stream event type=%s keys=%s', msgType, Object.keys(inner).join(','));
+            }
+          }
+        } catch {
+          // Log potential JSON parse failures (not verbose text output)
+          if (line.trim().startsWith('{')) {
+            console.warn('[claude] Failed to parse potential JSON line:', line.substring(0, 200));
+          }
+        }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      if (stderrOutput.length < 10240) stderrOutput += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (settled || killed) return;
+
+      if (stdoutBuffer.trim()) {
+        try {
+          const msg = JSON.parse(stdoutBuffer);
+          const usage = extractClaudeUsage(msg, { fallbackModel: process.env.CLAUDE_CHAT_MODEL || '' });
+          if (usage) capturedUsage = usage;
+          const thinking = extractThinking(msg);
+          if (thinking && onThinkingChunk) {
+            receivedThinking = true;
+            try { onThinkingChunk(thinking); } catch { /* ignore */ }
+          }
+          // Try streaming delta first
+          const text = extractText(msg);
+          if (text) {
+            fullResponse += text;
+            try { onChunk(text); } catch { /* ignore client callback errors */ }
+          }
+          // If no deltas were received, fall back to the final result/assistant message
+          if (!fullResponse) {
+            const finalText = extractFinalText(msg);
+            if (finalText) {
+              fullResponse = finalText;
+              try { onChunk(finalText); } catch { /* ignore */ }
+            }
+          }
+          // Log unhandled message types in final buffer flush
+          if (!thinking && !text) {
+            const inner = (msg.type === 'stream_event' && msg.event) ? msg.event : msg;
+            const msgType = inner.type || msg.type || 'unknown';
+            if (!['ping', 'message_start', 'content_block_start', 'content_block_stop', 'message_stop'].includes(msgType)) {
+              console.debug('[claude] Unhandled stream event (final buffer) type=%s keys=%s', msgType, Object.keys(inner).join(','));
+            }
+          }
+        } catch {
+          if (stdoutBuffer.trim().startsWith('{')) {
+            console.warn('[claude] Failed to parse final buffer as JSON:', stdoutBuffer.substring(0, 200));
+          }
+        }
+      }
+
+      if (!didCliExitSuccessfully(code)) {
+        finishWithError(new Error(formatCliFailure(code, stderrOutput)));
+      } else {
+        if (!fullResponse && receivedThinking) {
+          console.warn('[claude] Process exited OK but fullResponse is empty despite receiving thinking chunks — possible extraction gap');
+        }
+        finishWithSuccess(fullResponse);
+      }
+    });
+
+    child.on('error', (err) => {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (!killed) finishWithError(err);
+    });
+  })().catch((err) => {
+    // Safety net: prevent unhandled rejection if an unexpected error escapes
+    if (!settled && !killed) finishWithError(err);
   });
 
   return function cleanup() {
     killed = true;
-    clearTimeout(timeout);
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+    try { if (child) child.kill('SIGTERM'); } catch { /* ignore */ }
     cleanupTempFiles(tempFiles);
     return { usage: capturedUsage || null, partialResponse: fullResponse };
   };
@@ -383,55 +522,321 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     required: ['category'],
   });
 
-  let prompt;
-  let tmpPath = null;
+  const effectiveTimeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : PARSE_TIMEOUT_MS;
 
+  // ---------- IMAGE PATH ----------
   if (isBase64Image) {
-    tmpPath = writeTempImageFile(source, 'qbo-parse', 0);
+    // Try SDK path first (native vision, single-pass, best quality).
+    // Concurrency-limited to 1 to prevent memory pressure from parallel subprocess spawns.
+    try {
+      await acquireSdkSlot();
+      try {
+        const sdkResult = await parseImageWithSDK(imageBase64OrText, {
+          timeoutMs: effectiveTimeoutMs,
+          model: modelOverride || undefined,
+          reasoningEffort: effortOverride || undefined,
+        });
+        if (sdkResult && sdkResult.fields) {
+          console.log('[parseEscalation] SDK path succeeded');
+          return sdkResult;
+        }
+        console.warn('[parseEscalation] SDK path returned null — falling back to CLI');
+      } finally {
+        releaseSdkSlot();
+      }
+    } catch (sdkErr) {
+      // releaseSdkSlot() already called by the inner finally — no double-release
+      console.warn('[parseEscalation] SDK path error, falling back to CLI:', sdkErr.message);
+    }
 
-    prompt = 'Parse this escalation screenshot. Extract all fields: COID, MID, case number, ' +
+    // --- CLI fallback: two-step transcribe then parse ---
+    let tmpPath;
+    try {
+      tmpPath = await writeTempImageFile(source, 'qbo-parse', 0);
+    } catch (err) {
+      reportServerError({
+        message: `Image decode error: ${err.message}`,
+        detail: 'Failed to write temp image file for parseEscalation.',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
+      throw err;
+    }
+
+    // --- Step A: Transcribe the image as plain text (no JSON schema) ---
+    const transcribeTimeoutMs = Math.round(effectiveTimeoutMs * 0.7);
+    const transcribePrompt =
+      'Transcribe all text visible in this escalation screenshot exactly as written. ' +
+      'Do not summarize, interpret, or reword anything. Pay special attention to numeric IDs — ' +
+      'transcribe each digit carefully. Include all field labels exactly as they appear ' +
+      '(COID/MID, CASE, CLIENT/CONTACT, CX IS ATTEMPTING TO, EXPECTED OUTCOME, ACTUAL OUTCOME, ' +
+      'TS STEPS, TRIED TEST ACCOUNT, etc). Return only the transcribed text.';
+
+    let transcriptionText;
+    let stepAUsage = null;
+
+    try {
+      const stepAResult = await new Promise((resolve, reject) => {
+        let settled = false;
+        const tArgs = ['-p', '--output-format', 'text'];
+        if (modelOverride) tArgs.push('--model', modelOverride);
+        if (effortOverride) tArgs.push('--effort', effortOverride);
+        if (supportsClaudeImageFlag()) {
+          tArgs.push('--image', tmpPath);
+        } else {
+          addCompatibilityImageAccessArgs(tArgs, [tmpPath]);
+        }
+
+        let child;
+        try {
+          child = spawn('claude', tArgs, {
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: true,
+            cwd: PROJECT_ROOT,
+            env: {
+              ...process.env,
+              CLAUDECODE: undefined,
+              CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+            },
+          });
+        } catch (err) {
+          reportServerError({
+            message: `CLI spawn error (transcribe): ${err.message}`,
+            detail: 'Failed to start Claude CLI subprocess for image transcription.',
+            stack: err.stack || '',
+            source: 'claude.js',
+            category: 'runtime-error',
+          });
+          return reject(err);
+        }
+
+        let stdinPromptA = transcribePrompt;
+        if (!supportsClaudeImageFlag()) {
+          stdinPromptA = appendImagePathsToPrompt(stdinPromptA, [tmpPath]);
+        }
+        try { child.stdin.end(stdinPromptA); } catch { /* ignore */ }
+
+        let stdout = '';
+        let stderr = '';
+        const timeout = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          try { child.kill('SIGTERM'); } catch { /* ignore */ }
+          const timeoutErr = new Error('Claude CLI transcription timed out after ' + transcribeTimeoutMs + 'ms');
+          timeoutErr.code = 'TIMEOUT';
+          reject(timeoutErr);
+        }, transcribeTimeoutMs);
+
+        child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
+        child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+
+        child.on('close', (code) => {
+          clearTimeout(timeout);
+          if (settled) return;
+          settled = true;
+          if (code !== 0 && !stdout) {
+            const cliErr = new Error(formatCliFailure(code, stderr));
+            reportServerError({
+              message: `CLI transcribe failed: exit code ${code}`,
+              detail: `stderr: ${(stderr || '').slice(0, 500)}`,
+              source: 'claude.js',
+              category: 'runtime-error',
+            });
+            return reject(cliErr);
+          }
+          // Try to extract usage from text output (may be wrapped in JSON)
+          let usage = null;
+          try {
+            const parsed = JSON.parse(stdout);
+            usage = extractClaudeUsage(parsed, { fallbackModel: process.env.CLAUDE_PARSE_MODEL || '' });
+            // If output was JSON-wrapped, extract the text result
+            const text = typeof parsed.result === 'string' ? parsed.result : stdout;
+            resolve({ text, usage });
+          } catch {
+            resolve({ text: stdout, usage: null });
+          }
+        });
+
+        child.on('error', (err) => {
+          clearTimeout(timeout);
+          if (settled) return;
+          settled = true;
+          reportServerError({
+            message: `CLI spawn error (transcribe): ${err.message}`,
+            detail: 'Claude CLI process emitted an error event during transcription.',
+            stack: err.stack || '',
+            source: 'claude.js',
+            category: 'runtime-error',
+          });
+          reject(err);
+        });
+      });
+
+      transcriptionText = stepAResult.text;
+      stepAUsage = stepAResult.usage;
+    } finally {
+      // Clean up temp image file after Step A regardless of outcome
+      try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+    }
+
+    // --- Step B: Parse the transcription text using the existing text-parse path ---
+    const parseTimeoutMs = effectiveTimeoutMs - Math.round(effectiveTimeoutMs * 0.7);
+    const parsePrompt = 'Parse this escalation text. Extract all fields: COID, MID, case number, ' +
       'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
       'troubleshooting steps, whether they tried a test account, and issue category. ' +
-      'Return ONLY the JSON.';
-  } else {
-    prompt = 'Parse this escalation text. Extract all fields: COID, MID, case number, ' +
-      'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
-      'troubleshooting steps, whether they tried a test account, and issue category. ' +
-      'Return ONLY the JSON.\n\nEscalation text:\n' + source;
+      'Do not guess unclear names, IDs, numbers, or labels. If a field is unreadable or uncertain, return an empty string for that field. ' +
+      'Prefer exact transcription over summarizing. Return ONLY the JSON.\n\nEscalation text:\n' + transcriptionText;
+
+    const parseArgs = ['-p', '--output-format', 'json', '--json-schema', schema];
+    if (modelOverride) parseArgs.push('--model', modelOverride);
+    if (effortOverride) parseArgs.push('--effort', effortOverride);
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let child;
+      try {
+        child = spawn('claude', parseArgs, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: true,
+          cwd: PROJECT_ROOT,
+          env: {
+            ...process.env,
+            CLAUDECODE: undefined,
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+          },
+        });
+      } catch (err) {
+        reportServerError({
+          message: `CLI spawn error (parse step B): ${err.message}`,
+          detail: 'Failed to start Claude CLI subprocess for parseEscalation step B.',
+          stack: err.stack || '',
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
+        err._usage = stepAUsage || null;
+        return reject(err);
+      }
+      try { child.stdin.end(parsePrompt); } catch { /* ignore */ }
+
+      let stdout = '';
+      let stderr = '';
+      let capturedUsage = null;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        const timeoutErr = new Error('Claude CLI parse (step B) timed out after ' + parseTimeoutMs + 'ms');
+        timeoutErr.code = 'TIMEOUT';
+        timeoutErr._usage = combineUsage(stepAUsage, capturedUsage);
+        reject(timeoutErr);
+      }, parseTimeoutMs);
+
+      child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
+      child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        if (settled) return;
+        settled = true;
+
+        if (code !== 0 && !stdout) {
+          const cliErr = new Error(formatCliFailure(code, stderr));
+          cliErr._usage = combineUsage(stepAUsage, capturedUsage);
+          reportServerError({
+            message: `CLI parse (step B) failed: exit code ${code}`,
+            detail: `stderr: ${(stderr || '').slice(0, 500)}`,
+            source: 'claude.js',
+            category: 'runtime-error',
+          });
+          return reject(cliErr);
+        }
+
+        try {
+          const parsed = JSON.parse(stdout);
+          const usage = extractClaudeUsage(parsed, { fallbackModel: process.env.CLAUDE_PARSE_MODEL || '' });
+          if (usage) capturedUsage = usage;
+          const combined = combineUsage(stepAUsage, capturedUsage);
+          const data = parsed.structured_output || parsed.result || parsed;
+          if (typeof data === 'string') {
+            const jsonMatch = data.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              resolve({ fields: JSON.parse(jsonMatch[0]), usage: combined });
+            } else {
+              resolve({ fields: { category: 'unknown', attemptingTo: data }, usage: combined });
+            }
+          } else {
+            resolve({ fields: data, usage: combined });
+          }
+        } catch {
+          if (!capturedUsage) {
+            for (const line of stdout.split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const u = extractClaudeUsage(JSON.parse(line), { fallbackModel: process.env.CLAUDE_PARSE_MODEL || '' });
+                if (u) { capturedUsage = u; break; }
+              } catch { /* ignore non-JSON lines */ }
+            }
+          }
+          const combined = combineUsage(stepAUsage, capturedUsage);
+          const jsonMatch = stdout.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              resolve({ fields: JSON.parse(jsonMatch[0]), usage: combined });
+            } catch {
+              resolve({ fields: { category: 'unknown', attemptingTo: stdout.slice(0, 500) }, usage: combined });
+            }
+          } else {
+            resolve({ fields: { category: 'unknown', attemptingTo: stdout.slice(0, 500) }, usage: combined });
+          }
+        }
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timeout);
+        if (settled) return;
+        settled = true;
+        reportServerError({
+          message: `CLI spawn error (parse step B): ${err.message}`,
+          detail: 'Claude CLI process emitted an error event during parseEscalation step B.',
+          stack: err.stack || '',
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
+        err._usage = combineUsage(stepAUsage, capturedUsage);
+        reject(err);
+      });
+    });
   }
+
+  // ---------- TEXT PATH: single-step parse (unchanged) ----------
+  const prompt = 'Parse this escalation text. Extract all fields: COID, MID, case number, ' +
+    'client contact, agent name, what they are attempting, expected outcome, actual outcome, ' +
+    'troubleshooting steps, whether they tried a test account, and issue category. ' +
+    'Do not guess unclear names, IDs, numbers, or labels. If a field is unreadable or uncertain, return an empty string for that field. ' +
+    'Prefer exact transcription over summarizing. Return ONLY the JSON.\n\nEscalation text:\n' + source;
 
   const args = ['-p', '--output-format', 'json', '--json-schema', schema];
   if (modelOverride) args.push('--model', modelOverride);
   if (effortOverride) args.push('--effort', effortOverride);
-  if (tmpPath) {
-    if (supportsClaudeImageFlag()) {
-      args.push('--image', tmpPath);
-    } else {
-      prompt = appendImagePathsToPrompt(prompt, [tmpPath]);
-      addCompatibilityImageAccessArgs(args, [tmpPath]);
-    }
-  }
-
-  const effectiveTimeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-    ? options.timeoutMs
-    : PARSE_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
     let settled = false;
     let child;
     try {
-      // shell: true required on Windows where claude may be a .cmd shim.
-      // User content is piped via stdin — never passed as a CLI argument.
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
         cwd: PROJECT_ROOT,
-        env: { ...process.env, CLAUDECODE: undefined },
+        env: {
+          ...process.env,
+          CLAUDECODE: undefined,
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        },
       });
     } catch (err) {
-      if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      }
       reportServerError({
         message: `CLI spawn error: ${err.message}`,
         detail: 'Failed to start Claude CLI subprocess for parseEscalation.',
@@ -453,9 +858,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       if (settled) return;
       settled = true;
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      }
       const timeoutErr = new Error('Claude CLI parse timed out after ' + effectiveTimeoutMs + 'ms');
       timeoutErr.code = 'TIMEOUT';
       timeoutErr._usage = capturedUsage || null;
@@ -468,17 +870,13 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     });
     child.stderr.on('data', (d) => {
       if (settled) return;
-      stderr += d.toString();
+      if (stderr.length < 10240) stderr += d.toString();
     });
 
     child.on('close', (code) => {
       clearTimeout(timeout);
       if (settled) return;
       settled = true;
-
-      if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      }
 
       if (code !== 0 && !stdout) {
         const cliErr = new Error(formatCliFailure(code, stderr));
@@ -508,7 +906,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           resolve({ fields: data, usage: capturedUsage });
         }
       } catch {
-        // stdout wasn't valid JSON as a whole — try line-by-line extraction for usage
         if (!capturedUsage) {
           for (const line of stdout.split('\n')) {
             if (!line.trim()) continue;
@@ -535,9 +932,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       clearTimeout(timeout);
       if (settled) return;
       settled = true;
-      if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
-      }
       reportServerError({
         message: `CLI spawn error (parse): ${err.message}`,
         detail: 'The Claude CLI process emitted an error event during parseEscalation.',
@@ -560,7 +954,12 @@ async function warmUp() {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: true,               // required on Windows where claude may be a .cmd shim
       cwd: PROJECT_ROOT,
-      env: { ...process.env, CLAUDECODE: undefined },
+      env: {
+        ...process.env,
+        CLAUDECODE: undefined,
+        CLAUDE_CODE_SIMPLE: '1',
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+      },
     });
     // Pipe the prompt via stdin to avoid passing content as a CLI argument
     try { child.stdin.end('hello'); } catch { /* ignore */ }
@@ -603,21 +1002,41 @@ function buildPrompt(messages) {
 
 /**
  * Extract thinking content from a stream-json thinking_delta message.
+ * With --include-partial-messages, events arrive wrapped as:
+ * { type: "stream_event", event: { type: "content_block_delta", delta: { type: "thinking_delta", thinking: "..." } } }
  */
 function extractThinking(msg) {
-  if (msg.type === 'content_block_delta'
-      && msg.delta
-      && msg.delta.type === 'thinking_delta'
-      && typeof msg.delta.thinking === 'string') {
-    return msg.delta.thinking;
+  const inner = (msg.type === 'stream_event' && msg.event) ? msg.event : msg;
+  if (inner.type === 'content_block_delta'
+      && inner.delta
+      && inner.delta.type === 'thinking_delta'
+      && typeof inner.delta.thinking === 'string') {
+    return inner.delta.thinking;
   }
   return null;
 }
 
 /**
  * Extract text content from a stream-json message.
+ *
+ * IMPORTANT: Only extract from content_block_delta (streaming chunks).
+ * The 'assistant' and 'result' message types contain the FULL text again
+ * and would duplicate what was already accumulated from deltas.
  */
 function extractText(msg) {
+  // Unwrap stream_event wrapper if present
+  const inner = (msg.type === 'stream_event' && msg.event) ? msg.event : msg;
+  if (inner.type === 'content_block_delta' && inner.delta && inner.delta.text) {
+    return inner.delta.text;
+  }
+  return '';
+}
+
+/**
+ * Extract final complete text from a result/assistant message.
+ * Used ONLY as a fallback when no streaming deltas were received.
+ */
+function extractFinalText(msg) {
   if (msg.type === 'assistant' && msg.message && msg.message.content) {
     return msg.message.content
       .filter((b) => b.type === 'text')
@@ -627,11 +1046,119 @@ function extractText(msg) {
   if (msg.type === 'result' && msg.result) {
     return typeof msg.result === 'string' ? msg.result : '';
   }
-  if (msg.type === 'content_block_delta' && msg.delta && msg.delta.text) {
-    return msg.delta.text;
-  }
   return '';
 }
 
-module.exports = { chat, parseEscalation, warmUp };
+/**
+ * Run a single non-streaming Claude prompt and return the text result.
+ *
+ * @param {string} promptText - The prompt to send
+ * @param {Object} [options]
+ * @param {string} [options.systemPrompt] - Optional system prompt prepended
+ * @param {string} [options.model] - Override model
+ * @param {string} [options.reasoningEffort] - Effort level (low/medium/high)
+ * @param {number} [options.timeoutMs] - Timeout in ms (default CHAT_TIMEOUT_MS)
+ * @returns {Promise<{text: string, usage: Object|null}>}
+ */
+async function prompt(promptText, options = {}) {
+  const args = ['-p', '--output-format', 'text', '--max-turns', '1'];
+  if (options.model) args.push('--model', options.model);
+  const effort = normalizeClaudeEffort(options.reasoningEffort);
+  if (effort) args.push('--effort', effort);
+
+  let stdinContent = promptText || '';
+  if (options.systemPrompt) {
+    stdinContent = `System instructions:\n${options.systemPrompt}\n\n${stdinContent}`;
+  }
+
+  const timeoutMs = parsePositiveInt(options.timeoutMs, CHAT_TIMEOUT_MS);
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let child;
+    try {
+      child = spawn('claude', args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: true,
+        cwd: PROJECT_ROOT,
+        env: {
+          ...process.env,
+          CLAUDECODE: undefined,
+          CLAUDE_CODE_SIMPLE: '1',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        },
+      });
+    } catch (err) {
+      reportServerError({
+        message: `CLI spawn error (prompt): ${err.message}`,
+        detail: 'Failed to start Claude CLI subprocess for prompt().',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
+      return reject(err);
+    }
+
+    try { child.stdin.end(stdinContent); } catch { /* ignore */ }
+
+    let stdout = '';
+    let stderr = '';
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      const err = new Error('Claude CLI prompt timed out after ' + timeoutMs + 'ms');
+      err.code = 'TIMEOUT';
+      reject(err);
+    }, timeoutMs);
+
+    child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
+    child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
+
+      if (!didCliExitSuccessfully(code) && !stdout) {
+        const err = new Error(formatCliFailure(code, stderr));
+        reportServerError({
+          message: `CLI prompt failed: exit code ${code}`,
+          detail: `stderr: ${(stderr || '').slice(0, 500)}`,
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
+        return reject(err);
+      }
+
+      // Try to extract usage if output is JSON-wrapped
+      let usage = null;
+      let text = stdout;
+      try {
+        const parsed = JSON.parse(stdout);
+        usage = extractClaudeUsage(parsed, { fallbackModel: '' });
+        text = typeof parsed.result === 'string' ? parsed.result : stdout;
+      } catch { /* text output, not JSON — that's fine */ }
+
+      resolve({ text, usage });
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      if (settled) return;
+      settled = true;
+      reportServerError({
+        message: `CLI spawn error (prompt): ${err.message}`,
+        detail: 'Claude CLI process emitted an error event during prompt().',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
+      reject(err);
+    });
+  });
+}
+
+module.exports = { chat, parseEscalation, warmUp, prompt };
 module.exports._internal = { parsePositiveInt, didCliExitSuccessfully };

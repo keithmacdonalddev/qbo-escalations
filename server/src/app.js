@@ -3,6 +3,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { listProviderHealth } = require('./services/provider-health');
+const { registerRequestRuntime } = require('./services/request-runtime');
+const { registerDomainRequestObserver } = require('./services/domain-health');
 const requestId = require('./middleware/request-id');
 const responseTimeout = require('./middleware/response-timeout');
 
@@ -74,14 +76,10 @@ function createApp() {
   const app = express();
   app.use(cors(buildCorsOptions()));
   app.use(requestId);
-  app.use((req, res, next) => {
-    if (req.path.startsWith('/api/policy-lab')) {
-      req.responseTimeoutMs = 180_000;
-    }
-    next();
-  });
+  app.use(registerRequestRuntime);
+  app.use(registerDomainRequestObserver);
   app.use(responseTimeout(30_000));
-  app.use(express.json({ limit: '50mb' }));
+  app.use(express.json({ limit: '12mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
 
   app.get('/api/health', (req, res) => {
@@ -106,7 +104,8 @@ function createApp() {
   app.use('/api/copilot', require('./routes/copilot'));
   app.use('/api/dev', requireDevModeEnabled, require('./routes/dev'));
   app.use('/api/usage', require('./routes/usage'));
-  app.use('/api/policy-lab', require('./routes/policy-lab'));
+  app.use('/api/traces', require('./routes/traces'));
+  app.use('/api/agents', require('./routes/agents'));
   app.use('/api/gmail', require('./routes/gmail'));
   app.use('/api/calendar', require('./routes/calendar'));
   app.use('/api/workspace', require('./routes/workspace'));

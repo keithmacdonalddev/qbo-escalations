@@ -11,6 +11,10 @@ qbo-escalations/
 ├── playbook/        # QBO escalation knowledge base (markdown files)
 │   ├── categories/  # Topic-specific guides (payroll, bank-feeds, etc.)
 │   └── templates/   # Response templates (acknowledgment, resolution, etc.)
+├── prompts/         # Saved Claude/Codex prompt templates
+├── prototypes/      # Standalone HTML prototypes
+├── scripts/         # One-off migration/utility scripts
+├── shared/          # Shared config (ai-provider-catalog.json)
 └── docs/            # Planning docs
 ```
 
@@ -44,7 +48,7 @@ npm start            # Production server
 | `server/src/index.js`           | Express entry point, MongoDB connection              |
 | `server/src/services/claude.js` | Claude CLI subprocess wrapper                        |
 | `server/src/routes/chat.js`     | Chat API with SSE streaming                          |
-| `server/src/models/`            | Mongoose models (Escalation, Conversation, Template) |
+| `server/src/models/`            | Mongoose models                                      |
 | `playbook/`                     | QBO knowledge base loaded as system prompt context   |
 
 ## Claude Integration

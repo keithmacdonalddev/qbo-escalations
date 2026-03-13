@@ -33,6 +33,7 @@ const BUDGET_RETRY_MS = 5_000;
 export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, sendBackground, sendMessage, log, emergencyActive }) {
   const [queue, setQueue] = useState([]);
   const [paused, setPaused] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const requestLogRef = useRef([]);
   const processingRef = useRef(false);
   const idleTimerRef = useRef(null);
@@ -115,6 +116,26 @@ export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, send
     setQueue([]);
   }, []);
 
+  // --- Budget retry scheduler ---
+
+  const scheduleRetry = useCallback(() => {
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+    }
+    retryTimerRef.current = setTimeout(() => {
+      retryTimerRef.current = null;
+      // Trigger re-evaluation by touching queue
+      setQueue(q => [...q]);
+    }, BUDGET_RETRY_MS);
+  }, []);
+
+  // Clean up retry timer on unmount
+  useEffect(() => {
+    return () => {
+      try { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); } catch {}
+    };
+  }, []);
+
   // --- Process queue when idle ---
 
   useEffect(() => {
@@ -141,6 +162,7 @@ export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, send
       }
 
       processingRef.current = true;
+      setProcessing(true);
       setQueue(prev => prev.slice(1));
       logRef.current?.({ type: 'task-started', message: `Processing: ${task.type || 'task'}`, detail: task.id });
 
@@ -163,6 +185,7 @@ export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, send
           }
         } finally {
           processingRef.current = false;
+          setProcessing(false);
         }
       };
 
@@ -170,8 +193,9 @@ export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, send
     } catch (err) {
       console.error('[DevAgent] useDevTaskQueue process failed:', err);
       processingRef.current = false;
+      setProcessing(false);
     }
-  }, [enabled, queue, isStreaming, bgStreaming, paused, enqueue]); // sendBackground/sendMessage/log accessed via refs
+  }, [enabled, queue, isStreaming, bgStreaming, paused, enqueue, scheduleRetry]); // sendBackground/sendMessage/log accessed via refs
 
   // --- Emergency mode: drop low and medium priority tasks ---
 
@@ -192,26 +216,6 @@ export function useDevTaskQueue({ enabled = true, isStreaming, bgStreaming, send
       return filtered;
     });
   }, [emergencyActive]);
-
-  // --- Budget retry scheduler ---
-
-  function scheduleRetry() {
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-    }
-    retryTimerRef.current = setTimeout(() => {
-      retryTimerRef.current = null;
-      // Trigger re-evaluation by touching queue
-      setQueue(q => [...q]);
-    }, BUDGET_RETRY_MS);
-  }
-
-  // Clean up retry timer on unmount
-  useEffect(() => {
-    return () => {
-      try { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); } catch {}
-    };
-  }, []);
 
   // --- Idle scan ---
 
@@ -274,9 +278,12 @@ Report what you find. Fix anything clearly wrong.`,
     paused,
     setPaused,
     queueDepth: queue.length,
-    processing: processingRef.current,
+    processing,
     canSendBackground: canSendBackground(),
     canSendForeground: canSendForeground(),
+    /** Call for a fresh budget check (avoids stale snapshot). */
+    checkCanSendBackground: canSendBackground,
+    checkCanSendForeground: canSendForeground,
     rateBudget: {
       total: TOTAL_LIMIT,
       foregroundReserve: FOREGROUND_RESERVE,

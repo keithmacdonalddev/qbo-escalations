@@ -8,6 +8,7 @@ const PERSIST_KEY = 'qbo-waterfall-persist';
 const DEFAULT_SLOW_MS = 500;
 const DUPLICATE_WINDOW_MS = 100;
 const DUPLICATE_BADGE_DURATION_MS = 3000;
+const MAX_TRACKED_BODY_CHARS = 8_192;
 
 // ── localStorage helpers (silent on quota errors) ────────────
 
@@ -20,6 +21,43 @@ function loadJSON(key, fallback) {
 
 function saveJSON(key, value) {
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* quota */ }
+}
+
+function looksLikeImagePayload(body) {
+  return typeof body === 'string' && (
+    body.includes('data:image/')
+    || body.includes('"images":[')
+    || body.includes('"image":"data:image/')
+  );
+}
+
+function sanitizeTrackedOptions(options) {
+  if (!options || typeof options !== 'object') return null;
+  const next = {};
+  if (options.headers) next.headers = options.headers;
+
+  const body = options.body;
+  if (typeof body === 'string') {
+    const shouldOmit = body.length > MAX_TRACKED_BODY_CHARS || looksLikeImagePayload(body);
+    if (!shouldOmit) {
+      next.body = body;
+      next.canReplay = true;
+    } else {
+      next.body = null;
+      next.canReplay = false;
+      next.bodyOmitted = true;
+      next.bodyLength = body.length;
+    }
+  } else if (body == null) {
+    next.body = body;
+    next.canReplay = true;
+  } else {
+    next.body = null;
+    next.canReplay = false;
+    next.bodyOmitted = true;
+  }
+
+  return next;
 }
 
 // ── Slow-request notification (fires once per request) ───────
@@ -56,7 +94,9 @@ export function useRequestWaterfall() {
   const restoredRef = useRef(null);
   if (restoredRef.current === null) {
     const saved = persist ? loadJSON(STORAGE_KEY, []) : [];
-    restoredRef.current = saved.filter(r => r.state === 'complete' || r.state === 'error' || r.state === 'aborted');
+    restoredRef.current = saved
+      .filter(r => r.state === 'complete' || r.state === 'error' || r.state === 'aborted')
+      .map(r => ({ ...r, restored: true }));
   }
 
   const requestsRef = useRef(restoredRef.current);
@@ -107,6 +147,7 @@ export function useRequestWaterfall() {
       const id = `req-${nextIdRef.current++}`;
       const shortUrl = url.split('?')[0].replace('/api/', '');
       const endpoint = url.split('?')[0]; // full endpoint without query params
+      const trackedOptions = sanitizeTrackedOptions(options);
       const entry = {
         id,
         url,
@@ -120,9 +161,11 @@ export function useRequestWaterfall() {
         isSSE: false,
         error: null,
         label: `${method} ${shortUrl}`,
-        _options: options || null, // kept in memory only, stripped before persist
+        _options: trackedOptions, // kept in memory only, stripped before persist
+        canReplay: trackedOptions?.canReplay !== false,
         isDuplicate: false,
         duplicateClearTimer: null,
+        restored: false,
       };
 
       // Check for duplicates within 100ms window
@@ -245,6 +288,7 @@ export function useRequestWaterfall() {
   const replayRequest = useCallback((reqId) => {
     const req = requestsRef.current.find(r => r.id === reqId);
     if (!req) return;
+    if (req.canReplay === false) return;
     const { url, method, _options } = req;
     // Rebuild options — strip signal (stale AbortController) but keep body/headers/method
     const opts = { method };

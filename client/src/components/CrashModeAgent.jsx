@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { apiFetch } from '../api/http.js';
+import { consumeSSEStream } from '../api/sse.js';
 
 /**
  * Crash-Survivor Dev Agent Widget
  *
  * Renders OUTSIDE the ErrorBoundary so it survives app crashes.
  * Zero dependencies on React context, providers, or hooks from the app tree.
- * Uses raw fetch() + manual SSE parsing to talk to /api/dev/chat.
+ * Uses shared HTTP/SSE helpers to talk to /api/dev/chat.
  *
  * Listens for `react-error-boundary` custom events dispatched by main.jsx
  * and auto-sends the crash details to the dev agent.
@@ -36,57 +38,7 @@ export default function CrashModeAgent() {
     }
   }, [visible, minimized]);
 
-  // Buffered SSE parser — handles events split across ReadableStream chunks.
-  // Returns a parser object with pushChunk(text) and finish() methods.
-  // Events are collected in the returned `events` array.
-  function createSSEParser() {
-    let buffer = '';
-    let currentEvent = '';
-    let dataLines = [];
-    const events = [];
-
-    function flushEvent() {
-      if (dataLines.length > 0) {
-        try {
-          const data = JSON.parse(dataLines.join('\n'));
-          events.push({ eventType: currentEvent, data });
-        } catch { /* ignore malformed */ }
-      }
-      currentEvent = '';
-      dataLines = [];
-    }
-
-    function processLine(rawLine) {
-      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
-      if (!line) {
-        flushEvent();
-        return;
-      }
-      if (line.startsWith(':')) return;
-      if (line.startsWith('event:')) {
-        currentEvent = line.slice(6).trim();
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trimStart());
-      }
-    }
-
-    return {
-      events,
-      pushChunk(chunk) {
-        if (!chunk) return;
-        buffer += chunk;
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) processLine(line);
-      },
-      finish() {
-        if (buffer) processLine(buffer);
-        flushEvent();
-      },
-    };
-  }
-
-  // Raw fetch to dev agent -- no hooks, no context, no dependencies
+  // Shared fetch/SSE helpers keep crash-mode traffic visible to monitors
   const sendToAgent = useCallback(async (text) => {
     if (sendingRef.current) return;
     sendingRef.current = true;
@@ -94,7 +46,7 @@ export default function CrashModeAgent() {
     setMessages(prev => [...prev, { role: 'user', text }]);
 
     try {
-      const res = await fetch('/api/dev/chat', {
+      const res = await apiFetch('/api/dev/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -116,47 +68,34 @@ export default function CrashModeAgent() {
       }
 
       // Process SSE stream using the project's event format
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
       let assistantText = '';
       let newConvId = conversationId;
-      const parser = createSSEParser();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        parser.pushChunk(decoder.decode(value, { stream: true }));
-      }
-      parser.finish();
-
-      for (const { eventType, data } of parser.events) {
-          // Conversation ID from start/session/init events
-          if ((eventType === 'start' || eventType === 'init' || eventType === 'session') && data.conversationId) {
-            newConvId = data.conversationId;
-          }
-          // Text content from chunk/delta/text/result events
-          if (eventType === 'chunk' && typeof data.text === 'string') {
-            assistantText += data.text;
-          }
-          if (eventType === 'delta' && data.delta?.text) {
-            assistantText += data.delta.text;
-          }
-          if (eventType === 'result' && typeof data.result === 'string') {
-            assistantText = data.result;
-          }
-          if (eventType === 'text' && data.message?.content) {
-            assistantText = data.message.content
-              .filter(b => b.type === 'text' && typeof b.text === 'string')
-              .map(b => b.text).join('');
-          }
-          // Done event may carry full text
-          if (eventType === 'done' && data.conversationId) {
-            newConvId = data.conversationId;
-          }
-          if (eventType === 'done' && typeof data.text === 'string') {
-            assistantText = data.text;
-          }
-      }
+      await consumeSSEStream(res, (eventType, data) => {
+        if ((eventType === 'start' || eventType === 'init' || eventType === 'session') && data?.conversationId) {
+          newConvId = data.conversationId;
+        }
+        if (eventType === 'chunk' && typeof data?.text === 'string') {
+          assistantText += data.text;
+        }
+        if (eventType === 'delta' && data?.delta?.text) {
+          assistantText += data.delta.text;
+        }
+        if (eventType === 'result' && typeof data?.result === 'string') {
+          assistantText = data.result;
+        }
+        if (eventType === 'text' && Array.isArray(data?.message?.content)) {
+          assistantText = data.message.content
+            .filter((block) => block.type === 'text' && typeof block.text === 'string')
+            .map((block) => block.text)
+            .join('');
+        }
+        if (eventType === 'done' && data?.conversationId) {
+          newConvId = data.conversationId;
+        }
+        if (eventType === 'done' && typeof data?.text === 'string') {
+          assistantText = data.text;
+        }
+      });
 
       setConversationId(newConvId);
       if (assistantText) {

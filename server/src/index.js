@@ -6,6 +6,22 @@ const UsageLog = require('./models/UsageLog');
 const { drainPendingWrites } = require('./lib/usage-writer');
 const { reportServerError } = require('./lib/server-error-pipeline');
 const { startCleanupSchedule, stopCleanupSchedule } = require('./lib/cleanup');
+const { startScheduler: startBriefingScheduler, stopScheduler: stopBriefingScheduler } = require('./services/workspace-scheduler');
+const { startMonitor: startWorkspaceMonitor, stopMonitor: stopWorkspaceMonitor } = require('./services/workspace-monitor');
+const {
+  startBackgroundTask,
+  completeBackgroundTask,
+  failBackgroundTask,
+  updateBackgroundService,
+  stopPruning: stopBackgroundPruning,
+} = require('./services/background-runtime');
+const { stopPruning: stopAiPruning } = require('./services/ai-runtime');
+const { stopPruning: stopWorkspacePruning } = require('./services/workspace-runtime');
+const { stopPruning: stopAgentSessionPruning } = require('./services/agent-session-runtime');
+const { stopErrorPipeline } = require('./lib/server-error-pipeline');
+const { stopChainCleanup: stopUsageChainCleanup } = require('./lib/usage-writer');
+const { stopIncidentPruning } = require('./services/monitor-incidents');
+const { stopDevSessionPruning } = require('./routes/dev');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -24,6 +40,10 @@ let httpServer = null;
 // MongoDB connection + server start
 async function start() {
   const uri = process.env.MONGODB_URI;
+  updateBackgroundService('mongodb-connection', {
+    state: 'starting',
+    meta: { connected: false },
+  });
   if (!uri) {
     console.error('MONGODB_URI is not set. Check server/.env');
     process.exit(1);
@@ -32,6 +52,12 @@ async function start() {
   try {
     await mongoose.connect(uri);
     console.log('MongoDB connected');
+    updateBackgroundService('mongodb-connection', {
+      state: 'healthy',
+      meta: { connected: true },
+      lastCompletedAt: Date.now(),
+      lastError: null,
+    });
   } catch (err) {
     console.error('MongoDB connection failed:', err.message);
     process.exit(1);
@@ -40,10 +66,13 @@ async function start() {
   // Ensure UsageLog indexes exist (dedup + TTL depend on them).
   // Failure is non-fatal to avoid blocking startup, but dedup and TTL
   // guarantees will be degraded until indexes are created manually.
+  const syncIndexesTaskId = startBackgroundTask('usage-log-index-sync');
   try {
     await UsageLog.syncIndexes();
+    completeBackgroundTask(syncIndexesTaskId, { ok: true });
   } catch (err) {
     console.error('UsageLog index sync failed (dedup/TTL may be degraded):', err.message);
+    failBackgroundTask(syncIndexesTaskId, err, { ok: false });
   }
 
   httpServer = app.listen(PORT, HOST, () => {
@@ -52,16 +81,32 @@ async function start() {
     // Warm up CLI providers in background (non-blocking)
     const { warmUp: warmClaude } = require('./services/claude');
     const { warmUp: warmCodex } = require('./services/codex');
-    warmClaude().catch(() => { /* non-fatal */ });
-    warmCodex().catch(() => { /* non-fatal */ });
+    const claudeWarmTaskId = startBackgroundTask('claude-warmup');
+    warmClaude()
+      .then(() => completeBackgroundTask(claudeWarmTaskId, { ok: true }))
+      .catch((err) => failBackgroundTask(claudeWarmTaskId, err, { ok: false }));
+    const codexWarmTaskId = startBackgroundTask('codex-warmup');
+    warmCodex()
+      .then(() => completeBackgroundTask(codexWarmTaskId, { ok: true }))
+      .catch((err) => failBackgroundTask(codexWarmTaskId, err, { ok: false }));
 
     // Start periodic DB cleanup (30s delay, then every 6h)
     startCleanupSchedule();
+
+    // Start workspace morning briefing scheduler (checks every 5 min)
+    startBriefingScheduler();
+
+    // Start workspace background monitor (5-min alert scans + SSE push)
+    startWorkspaceMonitor();
   });
 }
 
 mongoose.connection.on('disconnected', () => {
   console.log('MongoDB disconnected');
+  updateBackgroundService('mongodb-connection', {
+    state: 'error',
+    lastError: { message: 'MongoDB disconnected', stack: '' },
+  });
   reportServerError({
     message: 'MongoDB disconnected',
     detail: 'The database connection was lost. Queries will fail until reconnection.',
@@ -73,6 +118,10 @@ mongoose.connection.on('disconnected', () => {
 
 mongoose.connection.on('error', (err) => {
   console.error('MongoDB connection error:', err.message);
+  updateBackgroundService('mongodb-connection', {
+    state: 'error',
+    lastError: { message: err.message, stack: err.stack || '' },
+  });
   reportServerError({
     message: `MongoDB error: ${err.message}`,
     detail: 'A database-level error occurred on the active connection.',
@@ -85,6 +134,11 @@ mongoose.connection.on('error', (err) => {
 
 mongoose.connection.on('reconnected', () => {
   console.log('MongoDB reconnected');
+  updateBackgroundService('mongodb-connection', {
+    state: 'healthy',
+    lastCompletedAt: Date.now(),
+    lastError: null,
+  });
   reportServerError({
     message: 'MongoDB reconnected',
     detail: 'Database connection restored after a disconnect.',
@@ -98,6 +152,16 @@ mongoose.connection.on('reconnected', () => {
 function shutdown(signal) {
   console.log(`\n${signal} received — shutting down`);
   stopCleanupSchedule();
+  stopBriefingScheduler();
+  stopWorkspaceMonitor();
+  stopAiPruning();
+  stopWorkspacePruning();
+  stopBackgroundPruning();
+  stopAgentSessionPruning();
+  stopErrorPipeline();
+  stopUsageChainCleanup();
+  stopIncidentPruning();
+  stopDevSessionPruning();
   if (httpServer) {
     httpServer.close(async () => {
       console.log('HTTP server closed');

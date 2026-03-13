@@ -1,10 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useChat } from '../hooks/useChat.js';
 import { useToast } from '../hooks/useToast.jsx';
 import { transitions, fadeSlideUp, fadeSlideDown, fade, popover } from '../utils/motion.js';
-import { exportConversation, getConversation, forkConversation } from '../api/chatApi.js';
+import { apiFetch } from '../api/http.js';
+import { exportConversation, getConversation, getConversationMeta, forkConversation } from '../api/chatApi.js';
 import {
   parseEscalation,
   getEscalation,
@@ -16,11 +17,13 @@ import ChatMessage from './ChatMessage.jsx';
 import ParallelResponsePair from './ParallelResponsePair.jsx';
 import TriageCard from './TriageCard.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
-import ThinkingSidebar from './ThinkingSidebar.jsx';
+import AgentDock from './AgentDock.jsx';
+import WebcamCapture from './WebcamCapture.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
 import { getProviderLabel } from '../utils/markdown.jsx';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
+import { prepareImageForChat } from '../lib/chatImagePrep.js';
 
 /**
  * Group messages for rendering: parallel messages with the same turnId become a single group.
@@ -75,6 +78,20 @@ const QUICK_PROMPTS = [
   { label: 'Suggest Troubleshooting', prompt: 'Based on the issue described, what troubleshooting steps should the agent try next? List them in order of likelihood to resolve.' },
 ];
 
+const QUICK_PROMPT_COMMANDS = Object.freeze({
+  parse: PARSE_ESCALATION_PROMPT,
+  draft: QUICK_PROMPTS[1].prompt,
+  categorize: QUICK_PROMPTS[2].prompt,
+  troubleshoot: QUICK_PROMPTS[3].prompt,
+});
+
+const AGENT_SURFACE_TABS = [
+  { id: 'chat', label: 'Chat' },
+  { id: 'workspace', label: 'Workspace' },
+  { id: 'dev', label: 'Dev Agent' },
+  { id: 'copilot', label: 'Co-pilot' },
+];
+
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
   { value: 'fallback', label: 'Fallback' },
@@ -100,6 +117,22 @@ function formatProcessEventTime(value) {
   return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function formatStreamingElapsed(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0.0s';
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.floor((ms % 60_000) / 1000);
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function normalizeSlashToken(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^\/+/, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
 function createFileMetaKey(file) {
   const name = file?.name || '';
   const size = Number.isFinite(file?.size) ? file.size : 0;
@@ -107,27 +140,33 @@ function createFileMetaKey(file) {
   return `${name}::${size}::${lastModified}`;
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
+function estimateDataUrlBytes(input) {
+  const source = typeof input === 'string' ? input : '';
+  if (!source) return 0;
+  const commaIndex = source.indexOf(',');
+  const base64 = commaIndex >= 0 ? source.slice(commaIndex + 1) : source;
+  if (!base64) return 0;
+  const normalized = base64.replace(/\s+/g, '');
+  const padding = normalized.endsWith('==') ? 2 : (normalized.endsWith('=') ? 1 : 0);
+  return Math.max(0, Math.floor((normalized.length * 3) / 4) - padding);
 }
 
-async function computeFileHash(file) {
-  if (!globalThis.crypto?.subtle) {
-    return null;
-  }
-  const buffer = await file.arrayBuffer();
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', buffer);
-  const bytes = new Uint8Array(digest);
-  let hex = '';
-  for (const byte of bytes) {
-    hex += byte.toString(16).padStart(2, '0');
-  }
-  return hex;
+function detectDataUrlMimeType(input, fallback = '') {
+  const source = typeof input === 'string' ? input : '';
+  const match = source.match(/^data:([^;,]+)[;,]/i);
+  return match ? match[1].toLowerCase() : String(fallback || '').toLowerCase();
+}
+
+function readImageDimensionsFromSrc(src) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve({
+      width: image.naturalWidth || image.width || 0,
+      height: image.naturalHeight || image.height || 0,
+    });
+    image.onerror = () => resolve({ width: 0, height: 0 });
+    image.src = src;
+  });
 }
 
 export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
@@ -173,6 +212,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     isThinking,
     thinkingStartTime,
     splitModeActive,
+    currentTraceId,
   } = chat;
 
   // Effective mode accounts for persistent split mode from prior parallel turns
@@ -182,6 +222,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   const [savedEscalationId, setSavedEscalationId] = useState(null);
   const [parseMeta, setParseMeta] = useState(null);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [templateCategory, setTemplateCategory] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
@@ -230,9 +271,20 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
 
   // Co-pilot panel toggle
   const [showCopilot, setShowCopilot] = useState(false);
+  const [surfaceTab, setSurfaceTab] = useState('chat');
+  const [streamElapsedMs, setStreamElapsedMs] = useState(0);
+  const [liveRequestRuntime, setLiveRequestRuntime] = useState(null);
+
+  // Reset overlays when switching away from chat tab
+  useEffect(() => {
+    if (surfaceTab === 'chat') return;
+    setShowCopilot(false);
+    setShowTemplatePicker(false);
+  }, [surfaceTab]);
 
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [resolvingEscalation, setResolvingEscalation] = useState(false);
+  const [forkInfo, setForkInfo] = useState(null); // { forkedFrom, forkMessageIndex }
 
   const [input, setInput] = useState(() => {
     if (!import.meta.env.DEV) return '';
@@ -243,21 +295,31 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     return '';
   });
   const [images, setImages] = useState([]);
+  const [showWebcam, setShowWebcam] = useState(false);
   const [isComposeDragOver, setIsComposeDragOver] = useState(false);
+  const [slashMenuIndex, setSlashMenuIndex] = useState(0);
   const pendingImageParseRef = useRef(false);
   const toast = useToast();
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
+  const previousRouteConversationIdRef = useRef(conversationIdFromRoute);
+  const scrollFrameRef = useRef(0);
 
-  // Check if current conversation has a linked escalation
+  // Check if current conversation has a linked escalation or fork parent
   useEffect(() => {
-    if (!conversationId) { setLinkedEscalation(null); return; }
+    if (!conversationId) { setLinkedEscalation(null); setForkInfo(null); return; }
     let cancelled = false;
     (async () => {
       try {
-        const conv = await getConversation(conversationId);
+        const conv = await getConversationMeta(conversationId);
         if (cancelled) return;
+        // Fork info
+        if (conv.forkedFrom) {
+          setForkInfo({ forkedFrom: conv.forkedFrom, forkMessageIndex: conv.forkMessageIndex });
+        } else {
+          setForkInfo(null);
+        }
         if (conv.escalationId) {
           const esc = await getEscalation(conv.escalationId);
           if (!cancelled) setLinkedEscalation(esc);
@@ -265,7 +327,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           setLinkedEscalation(null);
         }
       } catch {
-        if (!cancelled) setLinkedEscalation(null);
+        if (!cancelled) { setLinkedEscalation(null); setForkInfo(null); }
       }
     })();
     return () => { cancelled = true; };
@@ -296,20 +358,37 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   }, [isStreaming, streamingText, parallelStreaming, provider, conversationId]);
 
   useEffect(() => {
+    const previousRouteConversationId = previousRouteConversationIdRef.current;
     if (conversationIdFromRoute && conversationIdFromRoute !== conversationId) {
       tel(TEL.USER_ACTION, 'Switched conversation', { conversationId: conversationIdFromRoute });
       selectConversation(conversationIdFromRoute);
-      return;
-    }
-    if (conversationIdFromRoute === null && conversationId) {
+    } else if (previousRouteConversationId && conversationIdFromRoute === null) {
       newConversation();
     }
+    previousRouteConversationIdRef.current = conversationIdFromRoute;
   }, [conversationIdFromRoute, conversationId, selectConversation, newConversation]);
 
   // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamingText, parallelStreaming]);
+    if (scrollFrameRef.current) {
+      cancelAnimationFrame(scrollFrameRef.current);
+    }
+
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: isStreaming ? 'auto' : 'smooth',
+        block: 'end',
+      });
+      scrollFrameRef.current = 0;
+    });
+
+    return () => {
+      if (scrollFrameRef.current) {
+        cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = 0;
+      }
+    };
+  }, [isStreaming, messages.length, parallelStreaming, streamingText]);
 
   // Restore scroll position after HMR safe-reload (dev only, runs once)
   useEffect(() => {
@@ -332,19 +411,57 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px';
   }, [input]);
 
+  const focusComposerWithValue = useCallback((nextValue) => {
+    setInput(nextValue);
+    setGhostText('');
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const length = nextValue.length;
+      textareaRef.current?.setSelectionRange(length, length);
+    });
+  }, []);
+
+  const startFreshConversation = useCallback(() => {
+    pendingImageParseRef.current = false;
+    setParseMeta(null);
+    setSavedEscalationId(null);
+    setImages([]);
+    setShowWebcam(false);
+    setShowCopilot(false);
+    setSurfaceTab('chat');
+    setComposeFocused(false);
+    setIsComposeDragOver(false);
+    setGhostText('');
+    dismissFallbackNotice();
+    dismissRuntimeWarnings();
+    clearProcessEvents();
+    setError(null);
+    newConversation();
+    if (window.location.hash !== '#/chat') {
+      window.location.hash = '#/chat';
+    }
+    focusComposerWithValue('');
+  }, [
+    clearProcessEvents,
+    dismissFallbackNotice,
+    dismissRuntimeWarnings,
+    focusComposerWithValue,
+    newConversation,
+    setError,
+  ]);
+
   // Global keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
       // Ctrl+N: new conversation
       if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
         e.preventDefault();
-        newConversation();
-        textareaRef.current?.focus();
+        startFreshConversation();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [newConversation]);
+  }, [startFreshConversation]);
 
   // Focus input after streaming ends
   useEffect(() => {
@@ -352,6 +469,69 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
       textareaRef.current?.focus();
     }
   }, [isStreaming]);
+
+  useEffect(() => {
+    const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
+    if (!showRuntimeDiagnostics || !isStreaming || !thinkingStartTime) {
+      setStreamElapsedMs(0);
+      return;
+    }
+
+    setStreamElapsedMs(Date.now() - thinkingStartTime);
+    const interval = window.setInterval(() => {
+      setStreamElapsedMs(Date.now() - thinkingStartTime);
+    }, 250);
+
+    return () => window.clearInterval(interval);
+  }, [aiSettings?.debug?.showContextDebug, isStreaming, thinkingStartTime]);
+
+  useEffect(() => {
+    const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
+    if (!showRuntimeDiagnostics || !isStreaming || surfaceTab !== 'chat') {
+      setLiveRequestRuntime(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollRuntime() {
+      try {
+        const res = await apiFetch('/api/dev/health', {
+          timeout: 8_000,
+          headers: { 'Cache-Control': 'no-cache' },
+        });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data || cancelled) return;
+
+        const requestEntries = Array.isArray(data?.requests?.requests)
+          ? data.requests.requests.filter((entry) => String(entry.path || '').startsWith('/api/chat'))
+          : [];
+        const chatAi = data?.ai?.chat || data?.ai?.byKind?.chat || {};
+        const parseAi = data?.ai?.parse || data?.ai?.byKind?.parse || {};
+
+        setLiveRequestRuntime({
+          checkedAt: Date.now(),
+          requests: requestEntries,
+          chatAiActive: Number(chatAi.activeSessions) || 0,
+          parseAiActive: Number(parseAi.activeSessions) || 0,
+          chatSessions: Array.isArray(chatAi.sessions) ? chatAi.sessions : [],
+          parseSessions: Array.isArray(parseAi.sessions) ? parseAi.sessions : [],
+        });
+      } catch {
+        if (!cancelled) {
+          setLiveRequestRuntime((prev) => prev ? { ...prev, checkedAt: Date.now() } : prev);
+        }
+      }
+    }
+
+    pollRuntime();
+    const interval = window.setInterval(pollRuntime, 4_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [aiSettings?.debug?.showContextDebug, isStreaming, surfaceTab]);
 
   // Close provider popover on outside click
   useEffect(() => {
@@ -398,20 +578,360 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     } catch { /* silent */ }
   }, []);
 
+  const providerAliasMap = useMemo(() => {
+    const aliasMap = new Map();
+    const familyDefaults = new Map();
+    for (const option of PROVIDER_OPTIONS) {
+      if (!familyDefaults.has(option.family)) {
+        familyDefaults.set(option.family, option.value);
+      }
+      const aliases = [
+        option.value,
+        option.label,
+        option.shortLabel,
+        option.family,
+      ];
+      for (const alias of aliases) {
+        const key = normalizeSlashToken(alias);
+        if (key && !aliasMap.has(key)) {
+          aliasMap.set(key, option.value);
+        }
+      }
+    }
+    for (const [family, providerId] of familyDefaults.entries()) {
+      const key = normalizeSlashToken(family);
+      if (key) aliasMap.set(key, providerId);
+    }
+    aliasMap.set('default', PROVIDER_OPTIONS[0]?.value || provider);
+    return aliasMap;
+  }, [provider]);
+
+  const slashCommands = useMemo(() => ([
+    {
+      id: 'help',
+      command: '/help',
+      insertValue: '/help',
+      description: 'Show the slash-command menu and shortcuts.',
+      example: '/help',
+      keywords: ['commands', 'menu', 'slash', 'shortcuts'],
+    },
+    {
+      id: 'clear',
+      command: '/clear',
+      insertValue: '/clear',
+      description: 'Start a fresh conversation and clear the draft.',
+      example: '/clear',
+      keywords: ['new', 'reset', 'empty', 'wipe'],
+    },
+    {
+      id: 'parse',
+      command: '/parse',
+      insertValue: '/parse',
+      description: 'Load the parse-escalation prompt into the input.',
+      example: '/parse',
+      keywords: ['triage', 'image', 'extract'],
+    },
+    {
+      id: 'draft',
+      command: '/draft',
+      insertValue: '/draft',
+      description: 'Load the draft-response prompt into the input.',
+      example: '/draft',
+      keywords: ['response', 'reply', 'agent'],
+    },
+    {
+      id: 'categorize',
+      command: '/categorize',
+      insertValue: '/categorize',
+      description: 'Load the issue-categorization prompt into the input.',
+      example: '/categorize',
+      keywords: ['category', 'classify', 'bucket'],
+    },
+    {
+      id: 'troubleshoot',
+      command: '/troubleshoot',
+      insertValue: '/troubleshoot',
+      description: 'Load the troubleshooting prompt into the input.',
+      example: '/troubleshoot',
+      keywords: ['steps', 'debug', 'next'],
+    },
+    {
+      id: 'provider',
+      command: '/provider',
+      insertValue: '/provider ',
+      description: `Switch models. Current: ${getProviderLabel(provider)}.`,
+      example: '/provider claude',
+      keywords: ['model', 'claude', 'codex', 'gpt', 'sonnet', 'opus'],
+    },
+    {
+      id: 'mode',
+      command: '/mode',
+      insertValue: '/mode ',
+      description: `Switch response strategy. Current: ${effectiveMode}.`,
+      example: '/mode parallel',
+      keywords: ['single', 'fallback', 'parallel', 'strategy'],
+    },
+    {
+      id: 'effort',
+      command: '/effort',
+      insertValue: '/effort ',
+      description: `Set reasoning effort. Current: ${reasoningEffort}.`,
+      example: '/effort high',
+      keywords: ['reasoning', 'low', 'medium', 'high', 'xhigh'],
+    },
+    {
+      id: 'tab',
+      command: '/tab',
+      insertValue: '/tab ',
+      description: `Switch panel tabs. Current: ${surfaceTab}.`,
+      example: '/tab workspace',
+      keywords: ['workspace', 'dev', 'copilot', 'chat', 'panel'],
+    },
+    {
+      id: 'copilot',
+      command: '/copilot',
+      insertValue: '/copilot',
+      description: `${showCopilot ? 'Hide' : 'Show'} the inline Co-pilot drawer.`,
+      example: '/copilot',
+      keywords: ['drawer', 'assistant', 'toggle'],
+    },
+    {
+      id: 'attach',
+      command: '/attach',
+      insertValue: '/attach',
+      description: 'Open the image file picker.',
+      example: '/attach',
+      keywords: ['upload', 'file', 'image', 'screenshot'],
+    },
+    {
+      id: 'webcam',
+      command: '/webcam',
+      insertValue: '/webcam',
+      description: 'Open webcam capture.',
+      example: '/webcam',
+      keywords: ['camera', 'photo', 'capture'],
+    },
+  ]), [effectiveMode, provider, reasoningEffort, showCopilot, surfaceTab]);
+
+  const trimmedInput = input.trimStart();
+  const slashMenuOpen = !isStreaming && trimmedInput.startsWith('/');
+  const slashQuery = slashMenuOpen ? trimmedInput.slice(1) : '';
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashMenuOpen) return [];
+    const normalizedQuery = normalizeSlashToken(slashQuery);
+    if (!normalizedQuery) return slashCommands;
+    return slashCommands.filter((item) => {
+      const haystack = [
+        item.command,
+        item.description,
+        item.example,
+        ...(item.keywords || []),
+      ].map(normalizeSlashToken);
+      return haystack.some((entry) => entry.includes(normalizedQuery));
+    });
+  }, [slashCommands, slashMenuOpen, slashQuery]);
+
+  useEffect(() => {
+    setSlashMenuIndex(0);
+  }, [slashQuery, slashMenuOpen]);
+
+  const handleAttachClick = useCallback(() => {
+    if (isStreaming) return;
+    imageInputRef.current?.click();
+  }, [isStreaming]);
+
+  const insertSlashCommand = useCallback((command) => {
+    focusComposerWithValue(command.insertValue || command.command);
+  }, [focusComposerWithValue]);
+
+  const executeSlashCommand = useCallback((rawValue) => {
+    const trimmed = String(rawValue || '').trim();
+    if (!trimmed.startsWith('/')) return false;
+
+    if (trimmed.startsWith('//')) {
+      focusComposerWithValue(trimmed.slice(1));
+      toast.info('Leading slash escaped. Press Enter again to send it as text.');
+      return true;
+    }
+
+    const parts = trimmed.slice(1).split(/\s+/).filter(Boolean);
+    const commandName = normalizeSlashToken(parts[0]);
+    const argRaw = parts.slice(1).join(' ').trim();
+    const argToken = normalizeSlashToken(argRaw);
+
+    switch (commandName) {
+      case '':
+      case 'help':
+        focusComposerWithValue('/');
+        toast.info('Slash commands are listed below the input.');
+        return true;
+      case 'clear':
+      case 'new':
+      case 'reset':
+        startFreshConversation();
+        toast.success('Started a fresh conversation.');
+        return true;
+      case 'parse':
+      case 'triage':
+        focusComposerWithValue(QUICK_PROMPT_COMMANDS.parse);
+        toast.info('Parse prompt loaded into the composer.');
+        return true;
+      case 'draft':
+      case 'reply':
+        focusComposerWithValue(QUICK_PROMPT_COMMANDS.draft);
+        toast.info('Draft-response prompt loaded into the composer.');
+        return true;
+      case 'categorize':
+      case 'category':
+      case 'classify':
+        focusComposerWithValue(QUICK_PROMPT_COMMANDS.categorize);
+        toast.info('Categorization prompt loaded into the composer.');
+        return true;
+      case 'troubleshoot':
+      case 'steps':
+        focusComposerWithValue(QUICK_PROMPT_COMMANDS.troubleshoot);
+        toast.info('Troubleshooting prompt loaded into the composer.');
+        return true;
+      case 'provider': {
+        if (!argToken) {
+          focusComposerWithValue('/provider ');
+          toast.info('Try /provider claude, /provider codex, /provider sonnet, or /provider opus.');
+          return true;
+        }
+        const resolvedProvider = providerAliasMap.get(argToken);
+        if (!resolvedProvider) {
+          toast.warning(`Unknown provider "${argRaw}".`);
+          return true;
+        }
+        setProvider(resolvedProvider);
+        setInput('');
+        setGhostText('');
+        toast.success(`Provider set to ${getProviderLabel(resolvedProvider)}.`);
+        return true;
+      }
+      case 'mode': {
+        const modeAliases = new Map([
+          ['single', 'single'],
+          ['fallback', 'fallback'],
+          ['parallel', 'parallel'],
+        ]);
+        if (!argToken || !modeAliases.has(argToken)) {
+          focusComposerWithValue('/mode ');
+          toast.info('Try /mode single, /mode fallback, or /mode parallel.');
+          return true;
+        }
+        const nextMode = modeAliases.get(argToken);
+        setMode(nextMode);
+        setInput('');
+        setGhostText('');
+        toast.success(`Mode set to ${nextMode}.`);
+        return true;
+      }
+      case 'effort':
+      case 'reasoning': {
+        const effortAliases = new Map([
+          ['low', 'low'],
+          ['medium', 'medium'],
+          ['high', 'high'],
+          ['xhigh', 'xhigh'],
+          ['extrahigh', 'xhigh'],
+        ]);
+        if (!argToken || !effortAliases.has(argToken)) {
+          focusComposerWithValue('/effort ');
+          toast.info('Try /effort low, /effort medium, /effort high, or /effort xhigh.');
+          return true;
+        }
+        const nextEffort = effortAliases.get(argToken);
+        setReasoningEffort(nextEffort);
+        setInput('');
+        setGhostText('');
+        toast.success(`Reasoning effort set to ${nextEffort}.`);
+        return true;
+      }
+      case 'tab': {
+        const tabAliases = new Map([
+          ['chat', 'chat'],
+          ['workspace', 'workspace'],
+          ['dev', 'dev'],
+          ['devagent', 'dev'],
+          ['copilot', 'copilot'],
+        ]);
+        if (!argToken || !tabAliases.has(argToken)) {
+          focusComposerWithValue('/tab ');
+          toast.info('Try /tab chat, /tab workspace, /tab dev, or /tab copilot.');
+          return true;
+        }
+        const nextTab = tabAliases.get(argToken);
+        setSurfaceTab(nextTab);
+        if (nextTab !== 'chat') {
+          setShowCopilot(false);
+        }
+        setInput('');
+        setGhostText('');
+        toast.success(`Switched to ${nextTab}.`);
+        return true;
+      }
+      case 'copilot':
+        setSurfaceTab('chat');
+        setShowCopilot(!showCopilot);
+        setInput('');
+        setGhostText('');
+        toast.info(!showCopilot ? 'Co-pilot opened.' : 'Co-pilot closed.');
+        return true;
+      case 'attach':
+      case 'upload':
+        setInput('');
+        setGhostText('');
+        if (!isStreaming) imageInputRef.current?.click();
+        toast.info('Choose one or more images to attach.');
+        return true;
+      case 'webcam':
+      case 'camera':
+        setSurfaceTab('chat');
+        setInput('');
+        setGhostText('');
+        setShowWebcam(true);
+        toast.info('Webcam capture opened.');
+        return true;
+      default:
+        toast.warning(`Unknown slash command "${trimmed}". Type /help to see commands.`);
+        return true;
+    }
+  }, [
+    focusComposerWithValue,
+    isStreaming,
+    providerAliasMap,
+    setMode,
+    setProvider,
+    setReasoningEffort,
+    showCopilot,
+    startFreshConversation,
+    toast,
+  ]);
+
+  const activateSlashCommand = useCallback((command) => {
+    if (!command) return;
+    const commandValue = command.insertValue || command.command || '';
+    if (/\s$/.test(commandValue)) {
+      insertSlashCommand(command);
+      return;
+    }
+    executeSlashCommand(command.command || commandValue);
+  }, [executeSlashCommand, insertSlashCommand]);
+
   const appendImageFiles = useCallback((files) => {
     const imageFiles = Array.from(files || []).filter((file) => file?.type?.startsWith('image/'));
     if (imageFiles.length === 0) return;
 
     Promise.all(imageFiles.map(async (file) => {
       try {
-        const [src, hash] = await Promise.all([
-          readFileAsDataUrl(file),
-          computeFileHash(file).catch(() => null),
-        ]);
+        const prepared = await prepareImageForChat(file);
+        if (!prepared?.src) return null;
         return {
-          src,
-          hash,
+          src: prepared.src,
+          hash: null,
           metaKey: createFileMetaKey(file),
+          meta: prepared.meta || null,
         };
       } catch {
         return null;
@@ -468,6 +988,10 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
 
   const handleSubmit = useCallback(() => {
     if ((!input.trim() && images.length === 0) || isStreaming) return;
+    if (input.trim().startsWith('/')) {
+      executeSlashCommand(input);
+      return;
+    }
     setParseMeta(null);
     tel(TEL.USER_ACTION, 'User clicked send', { hasImages: images.length > 0, textLength: input.trim().length });
     if (images.length > 0) {
@@ -476,13 +1000,48 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     // Auto-inject parse prompt when sending images with no text
     const textToSend = !input.trim() && images.length > 0 ? PARSE_ESCALATION_PROMPT : input;
     pendingImageParseRef.current = !input.trim() && images.length > 0;
-    sendMessage(textToSend, images.map((img) => img.src), provider);
+    sendMessage(
+      textToSend,
+      images.map((img) => img.src),
+      provider,
+      images.map((img) => img.meta || null),
+    );
     setInput('');
     setImages([]);
     setGhostText('');
-  }, [input, images, isStreaming, sendMessage, provider]);
+  }, [executeSlashCommand, input, images, isStreaming, sendMessage, provider]);
+
+  const handleQuickAction = useCallback((value) => {
+    if (isStreaming || !value) return;
+    sendMessage(value, [], provider);
+  }, [isStreaming, sendMessage, provider]);
 
   const handleKeyDown = useCallback((e) => {
+    if (slashMenuOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashMenuIndex((prev) => Math.min(prev + 1, Math.max(filteredSlashCommands.length - 1, 0)));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashMenuIndex((prev) => Math.max(prev - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' && filteredSlashCommands.length > 0) {
+        e.preventDefault();
+        insertSlashCommand(filteredSlashCommands[Math.min(slashMenuIndex, filteredSlashCommands.length - 1)]);
+        return;
+      }
+      if (e.key === 'Enter' && !e.shiftKey && filteredSlashCommands.length > 0) {
+        e.preventDefault();
+        const selectedCommand = filteredSlashCommands[Math.min(slashMenuIndex, filteredSlashCommands.length - 1)];
+        if (!input.trim().includes(' ')) {
+          activateSlashCommand(selectedCommand);
+          return;
+        }
+      }
+    }
     if (e.key === 'Tab' && ghostText) {
       e.preventDefault();
       setInput(prev => prev + ghostText);
@@ -493,7 +1052,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
       e.preventDefault();
       handleSubmit();
     }
-  }, [handleSubmit, ghostText]);
+  }, [activateSlashCommand, filteredSlashCommands, ghostText, handleSubmit, input, insertSlashCommand, slashMenuIndex, slashMenuOpen]);
 
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items;
@@ -506,10 +1065,46 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     }
   }, [appendImageFiles]);
 
-  const handleAttachClick = useCallback(() => {
-    if (isStreaming) return;
-    imageInputRef.current?.click();
-  }, [isStreaming]);
+  const handleWebcamCapture = useCallback(async (payload) => {
+    const src = typeof payload === 'string' ? payload : payload?.src;
+    if (!src) return;
+    const payloadMeta = payload && typeof payload === 'object' ? payload.meta : null;
+    const dimensions = payloadMeta?.preparedWidth && payloadMeta?.preparedHeight
+      ? {
+          width: payloadMeta.preparedWidth,
+          height: payloadMeta.preparedHeight,
+        }
+      : await readImageDimensionsFromSrc(src);
+    const now = new Date().toISOString();
+    const key = `webcam-${Date.now()}`;
+    const preparedBytes = estimateDataUrlBytes(src);
+    const meta = payloadMeta || {
+      source: 'webcam',
+      name: 'webcam-capture',
+      mimeType: detectDataUrlMimeType(src, 'image/jpeg'),
+      originalBytes: preparedBytes,
+      preparedBytes,
+      originalWidth: dimensions.width,
+      originalHeight: dimensions.height,
+      preparedWidth: dimensions.width,
+      preparedHeight: dimensions.height,
+      optimized: false,
+      textHeavy: false,
+      prepDurationMs: 0,
+      attachedAt: now,
+      preparedAt: now,
+      compressionRatio: 1,
+    };
+    setImages(prev => [...prev, { src, hash: key, metaKey: key, meta }]);
+    setShowWebcam(false);
+    appendProcessEvent({
+      level: 'info',
+      title: 'Webcam capture',
+      message: 'Photo captured from webcam.',
+      code: 'WEBCAM_CAPTURED',
+      imageCount: 1,
+    });
+  }, [appendProcessEvent]);
 
   const handleFilePickerChange = useCallback((e) => {
     appendImageFiles(e.target.files);
@@ -544,14 +1139,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     appendImageFiles(e.dataTransfer.files);
   }, [isStreaming, hasImageItems, appendImageFiles]);
 
-  const handleQuickPrompt = useCallback((prompt) => {
-    if (isStreaming) return;
-    setParseMeta(null);
-    sendMessage(prompt, images.map((img) => img.src), provider);
-    setImages([]);
-  }, [isStreaming, images, sendMessage, provider]);
-
-
   // Mark linked escalation as resolved
   const handleResolveEscalation = useCallback(async () => {
     if (!linkedEscalation || resolvingEscalation) return;
@@ -569,8 +1156,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     pendingImageParseRef.current = false;
     const lastUser = [...messages].reverse().find((m) => m.role === 'user');
     if (!lastUser || !Array.isArray(lastUser.images) || lastUser.images.length === 0) return;
-    // Use first image (most likely the escalation template); parse API accepts a single image
-    const primaryImage = lastUser.images[0];
     let cancelled = false;
     (async () => {
       try {
@@ -581,7 +1166,8 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           code: 'PARSE_STARTED',
         });
         const parsed = await parseEscalation({
-          image: primaryImage,
+          conversationId,
+          traceId: currentTraceId,
           mode,
           primaryProvider: provider,
           fallbackProvider: mode !== 'single' ? fallbackProvider : undefined,
@@ -627,6 +1213,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   }, [
     isStreaming,
     conversationId,
+    currentTraceId,
     savedEscalationId,
     messages,
     mode,
@@ -687,6 +1274,164 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
       && messages.length > 1
       && messages.some((m) => m.role === 'user')
   );
+  const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
+  const groupedMessages = useMemo(() => groupMessagesForRendering(messages), [messages]);
+  const lastAssistantIndex = useMemo(() => {
+    for (let j = messages.length - 1; j >= 0; j--) {
+      if (messages[j].role === 'assistant') return j;
+    }
+    return -1;
+  }, [messages]);
+  const latestProcessEvent = processEvents.length > 0 ? processEvents[processEvents.length - 1] : null;
+  const activeChatRequests = Array.isArray(liveRequestRuntime?.requests) ? liveRequestRuntime.requests : [];
+  const activeAiSessionCount = Number(liveRequestRuntime?.chatAiActive || 0) + Number(liveRequestRuntime?.parseAiActive || 0);
+  const parallelLiveEntries = Object.entries(parallelStreaming || {}).filter(([, text]) => Boolean(text));
+  const liveParallelResponses = useMemo(() => {
+    if (!isStreaming || effectiveMode !== 'parallel') return [];
+    const orderedProviders = Array.isArray(parallelProviders) && parallelProviders.length > 0
+      ? parallelProviders
+      : Object.keys(parallelStreaming || {});
+    return orderedProviders.map((providerId) => ({
+      provider: providerId,
+      content: parallelStreaming?.[providerId] || '',
+      isStreaming: true,
+      turnId: 'live-stream',
+    }));
+  }, [effectiveMode, isStreaming, parallelProviders, parallelStreaming]);
+  const backendLooksIdle = Boolean(isStreaming)
+    && Boolean(liveRequestRuntime)
+    && activeChatRequests.length === 0
+    && activeAiSessionCount === 0;
+  const likelyStaleStream = backendLooksIdle && streamElapsedMs >= 20_000;
+
+  let livePhaseLabel = 'Waiting for server activity';
+  if (effectiveMode === 'parallel' && parallelLiveEntries.length > 0) {
+    livePhaseLabel = 'Streaming parallel responses';
+  } else if (streamingText) {
+    livePhaseLabel = 'Streaming response';
+  } else if (thinkingText) {
+    livePhaseLabel = 'Model reasoning';
+  } else if (activeAiSessionCount > 0 || activeChatRequests.length > 0) {
+    livePhaseLabel = 'Running on server';
+  } else if (latestProcessEvent?.code === 'REQUEST_ACCEPTED') {
+    livePhaseLabel = 'Accepted by server';
+  } else if (latestProcessEvent?.title) {
+    livePhaseLabel = latestProcessEvent.title;
+  }
+
+  let liveStatusMessage = latestProcessEvent?.message || 'Request queued.';
+  if (likelyStaleStream) {
+    liveStatusMessage = 'This page still thinks the request is active, but the backend currently shows no matching chat work running.';
+  } else if (activeChatRequests.length > 0) {
+    const longestRequest = activeChatRequests.reduce((longest, entry) => (
+      !longest || (entry.ageMs || 0) > (longest.ageMs || 0) ? entry : longest
+    ), null);
+    if (longestRequest) {
+      liveStatusMessage = `${longestRequest.method} ${longestRequest.path} is ${longestRequest.phase || 'running'} on the server for ${formatStreamingElapsed(longestRequest.ageMs || 0)}.`;
+    }
+  } else if (activeAiSessionCount > 0) {
+    liveStatusMessage = `AI runtime reports ${activeAiSessionCount} active operation${activeAiSessionCount === 1 ? '' : 's'}.`;
+  } else if (!streamingText && !thinkingText) {
+    liveStatusMessage = 'Waiting for the first model event.';
+  }
+
+  const liveRequestPanel = isStreaming && showRuntimeDiagnostics ? (
+    <div className={`chat-live-panel${likelyStaleStream ? ' is-warning' : ''}`} role="status" aria-live="polite">
+      <div className="chat-live-header">
+        <div className="chat-live-title-wrap">
+          <span className="chat-live-pulse" />
+          <div>
+            <div className="chat-live-title">Live Request</div>
+            <div className="chat-live-subtitle">{livePhaseLabel}</div>
+          </div>
+        </div>
+        <div className="chat-live-actions">
+          <span className="chat-live-elapsed">{formatStreamingElapsed(streamElapsedMs)}</span>
+          <button
+            className="btn btn-sm btn-ghost"
+            onClick={abortStream}
+            type="button"
+          >
+            Stop
+          </button>
+        </div>
+      </div>
+
+      <div className="chat-live-meta">
+        <span>{getProviderLabel(streamProvider || provider)}</span>
+        <span>{MODE_OPTIONS.find((entry) => entry.value === effectiveMode)?.label || 'Single'}</span>
+        <span>{getReasoningEffortLabel(reasoningEffort)}</span>
+        {liveRequestRuntime?.checkedAt ? (
+          <span>Backend checked {formatProcessEventTime(liveRequestRuntime.checkedAt)}</span>
+        ) : null}
+      </div>
+
+      <div className={`chat-live-status${likelyStaleStream ? ' is-warning' : ''}`}>
+        {liveStatusMessage}
+      </div>
+
+      {thinkingText ? (
+        <div className="chat-live-block">
+          <div className="chat-live-block-label">Reasoning</div>
+          <pre className="chat-live-pre">{thinkingText}</pre>
+        </div>
+      ) : null}
+
+      {effectiveMode === 'parallel' ? (
+        <div className="chat-live-block">
+          <div className="chat-live-block-label">Provider Output</div>
+          {parallelLiveEntries.length > 0 ? (
+            <div className="chat-live-lanes">
+              {parallelLiveEntries.map(([providerId, text]) => (
+                <div key={providerId} className="chat-live-lane">
+                  <div className="chat-live-lane-head">{getProviderLabel(providerId)}</div>
+                  <div className="chat-live-preview">{text}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="chat-live-preview is-muted">No provider output has arrived yet.</div>
+          )}
+        </div>
+      ) : (
+        <div className="chat-live-block">
+          <div className="chat-live-block-label">Response Stream</div>
+          <div className={`chat-live-preview${streamingText ? '' : ' is-muted'}`}>
+            {streamingText || 'No response text has arrived yet.'}
+          </div>
+        </div>
+      )}
+
+      <details className="chat-live-runtime">
+        <summary>Backend activity</summary>
+        <div className="chat-live-runtime-grid">
+          <div className="chat-live-runtime-stat">
+            <span className="chat-live-runtime-label">Chat requests</span>
+            <strong>{activeChatRequests.length}</strong>
+          </div>
+          <div className="chat-live-runtime-stat">
+            <span className="chat-live-runtime-label">AI sessions</span>
+            <strong>{activeAiSessionCount}</strong>
+          </div>
+        </div>
+        {activeChatRequests.length > 0 ? (
+          <div className="chat-live-runtime-list">
+            {activeChatRequests.map((request) => (
+              <div key={request.id || request.requestId} className="chat-live-runtime-item">
+                <span className="mono">{request.method} {request.path}</span>
+                <span>{request.phase || 'running'}</span>
+                <span>{formatStreamingElapsed(request.ageMs || 0)}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="chat-live-runtime-empty">
+            No active `/api/chat` requests are visible from the backend snapshot.
+          </div>
+        )}
+      </details>
+    </div>
+  ) : null;
 
   return (
     <div className="chat-with-thinking">
@@ -734,6 +1479,30 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
         </div>
       )}
 
+      {/* Fork origin banner */}
+      {forkInfo && (
+        <div className="fork-banner">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6, flexShrink: 0 }}>
+            <line x1="6" y1="3" x2="6" y2="15" />
+            <circle cx="18" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <path d="M18 9a9 9 0 01-9 9" />
+          </svg>
+          <span>
+            Forked from message #{(forkInfo.forkMessageIndex ?? 0) + 1} of{' '}
+            <a
+              className="fork-banner-link"
+              onClick={() => { window.location.hash = `#/chat/${forkInfo.forkedFrom}`; }}
+              style={{ cursor: 'pointer', color: 'var(--accent)', textDecoration: 'underline' }}
+            >
+              parent conversation
+            </a>
+          </span>
+        </div>
+      )}
+
+      {surfaceTab === 'chat' ? (
+      <>
       {/* Messages area */}
       <div className="chat-messages" aria-live="polite">
         {runtimeWarnings.length > 0 && (
@@ -763,19 +1532,21 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           </div>
         )}
 
-        {processEvents.length > 0 && (
+        {showRuntimeDiagnostics && processEvents.length > 0 && (
           <div className="chat-process-panel" role="status" aria-live="polite">
-            <div className="chat-process-header">
-              <span>Request Activity</span>
-              <button
-                className="btn btn-sm btn-ghost"
-                onClick={clearProcessEvents}
-                type="button"
-              >
-                Clear
-              </button>
+            <div className="chat-process-header" onClick={() => setActivityExpanded(prev => !prev)} style={{ cursor: 'pointer', userSelect: 'none' }}>
+              <span>Request Activity <span style={{ fontSize: '0.7em', opacity: 0.5, marginLeft: 6 }}>{activityExpanded ? '▲' : '▼'}</span></span>
+              {activityExpanded && (
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={(e) => { e.stopPropagation(); clearProcessEvents(); }}
+                  type="button"
+                >
+                  Clear
+                </button>
+              )}
             </div>
-            <div className="chat-process-list">
+            {activityExpanded && <div className="chat-process-list">
               {processEvents.slice(-14).map((event) => (
                 <div key={event.id} className={`chat-process-item is-${event.level || 'info'}`}>
                   <span className="chat-process-dot" />
@@ -801,7 +1572,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                   </div>
                 </div>
               ))}
-            </div>
+            </div>}
           </div>
         )}
 
@@ -830,15 +1601,23 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
 
         {messages.length === 0 && !isStreaming && (
           <motion.div
-            className="empty-state"
+            className="empty-state empty-state-enhanced"
             style={{ marginTop: 'var(--sp-10)' }}
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={transitions.emphasis}
           >
+            <svg className="empty-state-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+              <line x1="9" y1="9" x2="15" y2="9" opacity="0.5" />
+              <line x1="9" y1="12" x2="13" y2="12" opacity="0.5" />
+            </svg>
             <div className="empty-state-title">QBO Escalation Assistant</div>
             <div className="empty-state-desc">
               Paste escalation screenshots (Ctrl+V) and hit Send. {getProviderLabel(provider)} will parse, save, and recommend next steps.
+            </div>
+            <div className="empty-state-subtitle">
+              Start a new conversation or select one from the sidebar
             </div>
           </motion.div>
         )}
@@ -848,7 +1627,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', padding: '0 var(--sp-2)' }}>
             <button
               className="copy-btn"
-              onClick={newConversation}
+              onClick={startFreshConversation}
               type="button"
               title="Start a new conversation"
             >
@@ -863,6 +1642,16 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                 Retry Last Response
               </button>
             )}
+            <button
+              className="copy-btn"
+              onClick={() => {
+                window.location.hash = `#/usage?tab=traces&conversationId=${encodeURIComponent(conversationId)}`;
+              }}
+              type="button"
+              title="Open full trace logs and timings for this conversation"
+            >
+              View Trace Logs
+            </button>
             <button
               className={`copy-btn${exportCopied ? ' is-copied' : ''}`}
               onClick={async () => {
@@ -881,7 +1670,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
         )}
 
         <AnimatePresence initial={false}>
-          {groupMessagesForRendering(messages).map((group) => {
+          {groupedMessages.map((group) => {
             if (group.type === 'parallel-pair') {
               const { turnId, responses: turnResponses, firstIndex } = group;
               const hasAccepted = turnResponses.some(r => r.attemptMeta?.accepted);
@@ -916,7 +1705,9 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
             const msg = group.message;
             const i = group.index;
             return (
-              <motion.div key={msg._id || msg.timestamp || `msg-${i}`} {...fadeSlideUp} transition={transitions.springGentle}>
+              <motion.div key={msg._id || msg.timestamp || `msg-${i}`} {...fadeSlideUp} transition={transitions.springGentle}
+                style={msg.role === 'user' ? { display: 'flex', justifyContent: 'flex-end' } : undefined}
+              >
                 <ChatMessage
                   role={msg.role}
                   content={msg.content}
@@ -927,6 +1718,9 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                   timestamp={msg.timestamp}
                   responseTimeMs={msg.responseTimeMs}
                   usage={msg.usage}
+                  citations={msg.citations}
+                  quickActions={i === lastAssistantIndex && !isStreaming ? msg.quickActions : undefined}
+                  onQuickAction={i === lastAssistantIndex && !isStreaming ? handleQuickAction : undefined}
                   onFork={msg.role === 'assistant' && conversationId && !isStreaming ? () => handleFork(i) : undefined}
                 />
               </motion.div>
@@ -939,58 +1733,23 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           <TriageCard triageCard={triageCard} />
         )}
 
-        {/* Streaming response (single/fallback) */}
-        <AnimatePresence>
-          {isStreaming && effectiveMode !== 'parallel' && streamingText && (
-            <motion.div key="streaming-single" {...fadeSlideUp} transition={transitions.normal}>
-              <ChatMessage
-                role="assistant"
-                content={streamingText}
-                provider={streamProvider}
-                isStreaming={true}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {isStreaming && effectiveMode === 'parallel' && liveParallelResponses.length > 0 ? (
+          <motion.div key="live-parallel-stream" {...fadeSlideUp} transition={transitions.normal}>
+            <ParallelResponsePair responses={liveParallelResponses} />
+          </motion.div>
+        ) : null}
 
-        {/* Streaming response (parallel) — split-column layout */}
-        <AnimatePresence>
-          {isStreaming && effectiveMode === 'parallel' && (() => {
-            const activeParallelProviders = parallelProviders.length >= 2
-              ? parallelProviders
-              : [...new Set([provider, fallbackProvider])].filter(Boolean);
-            return (
-              <motion.div key="streaming-parallel" {...fadeSlideUp} transition={transitions.normal}>
-                <ParallelResponsePair
-                  responses={activeParallelProviders.map(p => ({
-                    provider: p,
-                    content: parallelStreaming[p] || '',
-                    isStreaming: true,
-                    responseTimeMs: null,
-                    turnId: null,
-                    isAccepted: false,
-                    isRejected: false,
-                  }))}
-                  accepting={null}
-                  isImageParseTurn={false}
-                  discardedProviders={[]}
-                />
-              </motion.div>
-            );
-          })()}
-        </AnimatePresence>
-
-        {/* Streaming but no text yet (single/fallback) — minimal indicator since sidebar shows details */}
-        <AnimatePresence>
-          {isStreaming && effectiveMode !== 'parallel' && !streamingText && (
-            <motion.div key="streaming-thinking" {...fadeSlideUp} transition={transitions.normal}>
-              <div className="chat-bubble chat-bubble-assistant" style={{ alignSelf: 'flex-start' }}>
-                <div className="eyebrow" style={{ marginBottom: 'var(--sp-2)' }}>{getProviderLabel(streamProvider || provider)}</div>
-                <span className="spinner spinner-sm" />
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        {isStreaming && effectiveMode !== 'parallel' ? (
+          <motion.div key="live-single-stream" {...fadeSlideUp} transition={transitions.normal}>
+            <ChatMessage
+              role="assistant"
+              content={streamingText || ''}
+              provider={streamProvider || provider}
+              mode={effectiveMode}
+              isStreaming
+            />
+          </motion.div>
+        ) : null}
 
         {/* Discard unsaved chat — shows when aborted/failed before server saved the conversation,
              or when only user messages exist with an error (no assistant response came through) */}
@@ -1132,27 +1891,23 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
 
       {/* Input area — Compose Card */}
       <div className="chat-input-area">
-        {/* Quick action chips — always visible */}
-        <div className="quick-action-chips">
-          {QUICK_PROMPTS.map((qp, i) => (
-            <button
-              key={i}
-              className="quick-action-chip"
-              onClick={() => handleQuickPrompt(qp.prompt)}
-              type="button"
-              disabled={isStreaming}
-            >
-              {qp.label}
-            </button>
-          ))}
-          <button
-            className={`quick-action-chip${showCopilot ? ' is-active' : ''}`}
-            onClick={() => setShowCopilot(prev => !prev)}
-            type="button"
-            style={showCopilot ? { background: 'var(--accent)', color: '#fff' } : {}}
-          >
-            Co-pilot
-          </button>
+        <div className="compose-card-header-row">
+          <div className="compose-card-tab-row">
+            <div className="compose-card-tab-strip" role="tablist" aria-label="Agent tabs">
+              {AGENT_SURFACE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  className={`compose-card-tab${surfaceTab === tab.id ? ' is-active' : ''}`}
+                  onClick={() => setSurfaceTab(tab.id)}
+                  type="button"
+                  role="tab"
+                  aria-selected={surfaceTab === tab.id}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Co-pilot panel — collapsible */}
@@ -1237,14 +1992,14 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           </div>
         )}
 
-        {/* Compose card */}
-        <div
-          className={`compose-card${composeFocused ? ' is-focused' : ''}${isComposeDragOver ? ' is-dragover' : ''}`}
-          onDragEnter={handleComposeDragEnter}
-          onDragOver={handleComposeDragOver}
-          onDragLeave={handleComposeDragLeave}
-          onDrop={handleComposeDrop}
-        >
+        <div className="compose-card-shell">
+          <div
+            className={`compose-card${composeFocused ? ' is-focused' : ''}${isComposeDragOver ? ' is-dragover' : ''}`}
+            onDragEnter={handleComposeDragEnter}
+            onDragOver={handleComposeDragOver}
+            onDragLeave={handleComposeDragLeave}
+            onDrop={handleComposeDrop}
+          >
           {/* Top strip: provider chip + help */}
           <div className="compose-top-strip">
             <div ref={providerPopoverRef} style={{ position: 'relative' }}>
@@ -1449,7 +2204,8 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                   <kbd>Shift</kbd>+<kbd>Enter</kbd> New line<br />
                   <kbd>Ctrl</kbd>+<kbd>V</kbd> Paste images<br />
                   <kbd>Ctrl</kbd>+<kbd>N</kbd> New conversation<br />
-                  <kbd>Tab</kbd> Accept suggestion
+                  <kbd>Tab</kbd> Accept suggestion<br />
+                  <kbd>/</kbd> Slash commands
                 </div>
               </div>
             </div>
@@ -1464,7 +2220,9 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                 onChange={(e) => {
                   const val = e.target.value;
                   setInput(val);
-                  if (smartComposeEnabled) {
+                  if (val.trimStart().startsWith('/')) {
+                    setGhostText('');
+                  } else if (smartComposeEnabled) {
                     setGhostText(computeGhostText(val));
                   }
                 }}
@@ -1472,8 +2230,8 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                 onPaste={handlePaste}
                 onFocus={() => setComposeFocused(true)}
                 onBlur={() => setComposeFocused(false)}
-                placeholder="What's the escalation?"
-                rows={2}
+                placeholder="What's the escalation? Type / for commands."
+                rows={1}
                 disabled={isStreaming}
               />
               {smartComposeEnabled && ghostText && (
@@ -1483,6 +2241,38 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                 </div>
               )}
             </div>
+            {slashMenuOpen && (
+              <div className="slash-command-menu" role="listbox" aria-label="Slash commands">
+                <div className="slash-command-menu-head">
+                  <span>Slash Commands</span>
+                  <span>Enter runs, Tab completes</span>
+                </div>
+                {filteredSlashCommands.length > 0 ? (
+                  <div className="slash-command-list">
+                    {filteredSlashCommands.map((command, index) => (
+                      <button
+                        key={command.id}
+                        type="button"
+                        className={`slash-command-item${index === slashMenuIndex ? ' is-active' : ''}`}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => activateSlashCommand(command)}
+                        role="option"
+                        aria-selected={index === slashMenuIndex}
+                      >
+                        <div className="slash-command-item-row">
+                          <span className="slash-command-name">{command.command}</span>
+                          <span className="slash-command-desc">{command.description}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="slash-command-empty">
+                    No matching slash commands. Use <code>//</code> to send a literal slash.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Compose footer — actions + send */}
@@ -1511,6 +2301,21 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                 tabIndex={-1}
                 aria-hidden="true"
               />
+
+              <Tooltip text="Capture photo from webcam" level="low">
+                <button
+                  className={`compose-action-btn${showWebcam ? ' is-active' : ''}`}
+                  onClick={() => setShowWebcam(true)}
+                  type="button"
+                  aria-label="Open webcam"
+                  disabled={isStreaming}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="13" r="4" />
+                    <path d="M9 2L7.17 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-3.17L15 2H9z" />
+                  </svg>
+                </button>
+              </Tooltip>
 
               <Tooltip text="Insert a response template" level="medium">
                 <button
@@ -1567,7 +2372,11 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
               )}
             </div>
 
-            <span className="compose-footer-hint">Drag and drop images into this box</span>
+            <span className="compose-footer-hint">
+              {slashMenuOpen
+                ? 'Enter runs the command. Tab completes it. Type // to send a literal slash.'
+                : 'Drag and drop images, use webcam, or type / for commands'}
+            </span>
 
             <span className="compose-char-count">{input.length} chars</span>
 
@@ -1612,7 +2421,49 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
             </AnimatePresence>
           </div>
         </div>
+        </div>
       </div>
+        </>
+      ) : (
+        <>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <div style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+          }}>
+            <AgentDock
+              chat={chat}
+              activeTab={surfaceTab}
+              onActiveTabChange={setSurfaceTab}
+              hideTabs
+              viewContext={{ view: 'chat', conversationId: conversationId || conversationIdFromRoute || null }}
+            />
+          </div>
+        </div>
+        <div className="chat-input-area">
+          <div className="compose-card-tab-row">
+            <div className="compose-card-tab-strip" role="tablist" aria-label="Agent tabs">
+              {AGENT_SURFACE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  className={`compose-card-tab${surfaceTab === tab.id ? ' is-active' : ''}`}
+                  onClick={() => setSurfaceTab(tab.id)}
+                  type="button"
+                  role="tab"
+                  aria-selected={surfaceTab === tab.id}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="compose-card-shell">
+            <div className="compose-card" />
+          </div>
+        </div>
+        </>
+      )}
 
       {/* Template picker overlay */}
       <AnimatePresence>
@@ -1723,16 +2574,14 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
         </motion.div>
       )}
       </AnimatePresence>
+
+      {showWebcam && (
+        <WebcamCapture
+          onCapture={handleWebcamCapture}
+          onClose={() => setShowWebcam(false)}
+        />
+      )}
     </div>
-    <ThinkingSidebar
-      thinkingText={thinkingText}
-      isThinking={isThinking}
-      thinkingStartTime={thinkingStartTime}
-      isStreaming={isStreaming}
-      streamingText={streamingText}
-      parallelStreaming={parallelStreaming}
-      isParallelMode={effectiveMode === 'parallel'}
-    />
     </div>
   );
 }

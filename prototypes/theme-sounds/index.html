@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Theme Sound Design</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="header">
+        <h1>Theme Sound Design</h1>
+        <p>Procedural UI audio via Web Audio API oscillators &mdash; zero audio files, pure synthesis.</p>
+      </header>
+
+      <div id="audioGate" class="audio-gate card">
+        <button id="enableAudioBtn" type="button">Click to Enable Audio</button>
+        <p>Browser autoplay policy requires a user gesture to start the AudioContext.</p>
+      </div>
+
+      <section class="card controls-card">
+        <div class="controls-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="soundToggle" checked />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            <span>Enable UI Sounds</span>
+          </label>
+          <div class="volume-control">
+            <span class="volume-label">Volume</span>
+            <input type="range" id="volumeSlider" min="0" max="100" value="30" />
+            <span id="volumeValue" class="volume-value">30%</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="card waveform-card">
+        <h2>Waveform Visualization</h2>
+        <canvas id="waveformCanvas" width="800" height="120"></canvas>
+      </section>
+
+      <section class="card themes-card" id="themesCard">
+        <!-- Theme groups injected by JS -->
+      </section>
+
+      <section class="card demo-card">
+        <h2>Interactive Demo</h2>
+        <p class="demo-subtitle">Click these to hear per-theme sounds:</p>
+        <div class="demo-buttons">
+          <button class="demo-btn" data-action="send">Send Message</button>
+          <button class="demo-btn" data-action="navigate">Navigate</button>
+          <button class="demo-btn" data-action="toggle">Toggle Setting</button>
+          <button class="demo-btn" data-action="menu">Open Menu</button>
+          <button class="demo-btn" data-action="close">Close Dialog</button>
+          <button class="demo-btn" data-action="save">Save</button>
+        </div>
+        <div class="demo-info">
+          <span id="profileInfo">Sound profile: &mdash;</span>
+          <span id="lastPlayed">Last played: &mdash;</span>
+        </div>
+      </section>
+
+      <section class="card tech-card">
+        <h2>Technical Info</h2>
+        <div class="tech-grid">
+          <div class="tech-item">
+            <span class="tech-key">Oscillator</span>
+            <span class="tech-val" id="techOsc">&mdash;</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-key">Frequency</span>
+            <span class="tech-val" id="techFreq">&mdash;</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-key">Attack</span>
+            <span class="tech-val" id="techAttack">&mdash;</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-key">Decay</span>
+            <span class="tech-val" id="techDecay">&mdash;</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-key">Gain</span>
+            <span class="tech-val" id="techGain">&mdash;</span>
+          </div>
+          <div class="tech-item">
+            <span class="tech-key">AudioContext</span>
+            <span class="tech-val" id="techCtxState">&mdash;</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

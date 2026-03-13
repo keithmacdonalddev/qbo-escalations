@@ -36,6 +36,14 @@ const devAgentLogSchema = new mongoose.Schema({
     enum: CATEGORIES,
     default: 'other',
   },
+  pinned: {
+    type: Boolean,
+    default: false,
+  },
+  expiresAt: {
+    type: Date,
+    default: () => new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  },
   conversationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'DevConversation',
@@ -54,7 +62,27 @@ devAgentLogSchema.index({ createdAt: -1 });
 devAgentLogSchema.index({ type: 1, createdAt: -1 });
 devAgentLogSchema.index({ filesAffected: 1 });
 
-// TTL: auto-expire entries after 7 days
-devAgentLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
+// TTL: auto-expire entries when expiresAt is reached.
+// Pinned entries have expiresAt: null, so MongoDB TTL skips them.
+devAgentLogSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
-module.exports = mongoose.model('DevAgentLog', devAgentLogSchema);
+const DevAgentLog = mongoose.model('DevAgentLog', devAgentLogSchema);
+
+// Self-healing migration: drop the old TTL index on createdAt if it exists.
+// The old index (`{ createdAt: 1 }, { expireAfterSeconds: 604800 }`) would
+// delete ALL docs after 7 days regardless of pinned status. The new TTL uses
+// expiresAt which is null for pinned entries (MongoDB skips null TTL fields).
+DevAgentLog.collection.indexes()
+  .then(indexes => {
+    const oldTtl = indexes.find(idx =>
+      idx.key && idx.key.createdAt === 1 && typeof idx.expireAfterSeconds === 'number'
+    );
+    if (oldTtl) {
+      return DevAgentLog.collection.dropIndex(oldTtl.name).then(() => {
+        console.log('[DevAgentLog] Dropped old TTL index on createdAt:', oldTtl.name);
+      });
+    }
+  })
+  .catch(() => { /* collection may not exist yet — safe to ignore */ });
+
+module.exports = DevAgentLog;

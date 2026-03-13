@@ -60,6 +60,118 @@ if (import.meta.env.DEV) {
     setTimeout(() => { if (toastEl === toast) { toast.style.opacity = '0'; setTimeout(() => { toast.remove(); toastEl = null; }, 300); } }, 8000);
   };
 
+  // Auto-save draft state before ANY page unload (Vite HMR full reload, manual refresh, etc.)
+  // This ensures draft input and scroll position survive reloads without user action.
+  const saveDraftState = () => {
+    try {
+      const textarea = document.querySelector('.compose-body textarea');
+      if (textarea?.value) sessionStorage.setItem('qbo-draft-input', textarea.value);
+      const msgBox = document.querySelector('.chat-messages');
+      if (msgBox) sessionStorage.setItem('qbo-draft-scroll', String(msgBox.scrollTop));
+    } catch {}
+  };
+
+  window.addEventListener('beforeunload', saveDraftState);
+
+  // Also intercept Vite's full reload signal to save state before it triggers
+  if (import.meta.hot) {
+    import.meta.hot.on('vite:beforeFullReload', saveDraftState);
+  }
+
+  // ── Reload Guard ──────────────────────────────────────────
+  // When an AI stream is active (window.__qboStreaming), intercept
+  // location.reload() calls (fired by Vite's debounced pageReload) and
+  // defer the reload until the stream completes. This prevents killing
+  // in-progress AI responses.
+  //
+  // Why monkey-patch location.reload:
+  //   Vite 7's vite:beforeFullReload uses Promise.allSettled — throwing
+  //   in the listener does NOT prevent the subsequent pageReload().
+  //   The only reliable interception point is location.reload itself.
+  {
+    const _realReload = location.reload.bind(location);
+    let reloadDeferred = false;
+    let deferToastEl = null;
+
+    const showDeferToast = () => {
+      if (deferToastEl) return;
+      const el = document.createElement('div');
+      el.id = 'qbo-reload-deferred-toast';
+      el.textContent = 'Update queued — reloading after stream completes';
+      Object.assign(el.style, {
+        position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+        zIndex: '99999', background: 'rgba(30,30,30,0.92)', color: 'rgba(255,255,255,0.85)',
+        padding: '8px 16px', borderRadius: '8px', fontSize: '12px',
+        fontFamily: 'system-ui, sans-serif',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        pointerEvents: 'none',
+      });
+      document.body.appendChild(el);
+      deferToastEl = el;
+    };
+
+    const removeDeferToast = () => {
+      if (deferToastEl) {
+        deferToastEl.remove();
+        deferToastEl = null;
+      }
+    };
+
+    // Override location.reload — defer when streaming is active.
+    // Use direct assignment (defineProperty throws on location in most browsers).
+    const guardedReload = function patchedReload() {
+      if (window.__qboStreaming) {
+        if (!reloadDeferred) {
+          reloadDeferred = true;
+          showDeferToast();
+          const check = setInterval(() => {
+            if (!window.__qboStreaming) {
+              clearInterval(check);
+              reloadDeferred = false;
+              removeDeferToast();
+              saveDraftState();
+              _realReload();
+            }
+          }, 500);
+        }
+        return;
+      }
+      _realReload();
+    };
+    try { location.reload = guardedReload; } catch (_) { /* readonly in some engines */ }
+
+    // Also intercept Vite's full reload via beforeunload — if streaming,
+    // cancel the navigation (browsers show a confirmation dialog or block it).
+    window.addEventListener('beforeunload', (e) => {
+      if (window.__qboStreaming && reloadDeferred) {
+        e.preventDefault();
+      }
+    });
+  }
+
+  // ── Recovery Toast ────────────────────────────────────────
+  // After a reload recovery (sessionStorage restore), show a brief
+  // informational toast. Uses DOM directly because this runs before React.
+  window.addEventListener('qbo:session-recovered', () => {
+    const el = document.createElement('div');
+    el.textContent = 'Session restored';
+    Object.assign(el.style, {
+      position: 'fixed', bottom: '16px', left: '50%', transform: 'translateX(-50%)',
+      zIndex: '99998', background: 'rgba(34,120,75,0.92)', color: '#fff',
+      padding: '8px 16px', borderRadius: '8px', fontSize: '12px',
+      fontFamily: 'system-ui, sans-serif',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
+      transition: 'opacity 400ms ease',
+      pointerEvents: 'none',
+    });
+    document.body.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 400);
+    }, 3000);
+  });
+
   window.addEventListener('error', (e) => {
     if (e.message && HMR_PATTERNS.some(p => e.message.includes(p))) showDesyncToast();
   });
@@ -76,6 +188,10 @@ createRoot(document.getElementById('root')).render(
     <ErrorBoundary
       FallbackComponent={ErrorFallback}
       onError={(error, info) => {
+        // Clear streaming flag so the monkey-patched location.reload()
+        // doesn't defer indefinitely when the app crashes mid-stream.
+        window.__qboStreaming = false;
+
         // Dispatch custom event for the DevTools bridge to pick up.
         // This bridges React render crashes to the auto-error pipeline
         // without coupling main.jsx to DevAgentContext.

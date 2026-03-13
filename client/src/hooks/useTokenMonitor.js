@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect } from 'react';
+import { useMemo, useRef } from 'react';
 
 /**
  * Format a token count into a human-readable abbreviated string.
@@ -48,15 +48,13 @@ export function useTokenMonitor({ messages, bgLastResults, sessionBudget }) {
   const bgSeenRef = useRef(new Map()); // channel -> last result object reference
   const bgAccRef = useRef({ input: 0, output: 0, total: 0, costMicros: 0, count: 0 });
 
-  // Detect new background results and accumulate their usage
-  useEffect(() => {
-    if (!bgLastResults) return;
+  // Accumulate new background results synchronously during render
+  // so the useMemo below always sees the latest totals.
+  if (bgLastResults) {
     const seen = bgSeenRef.current;
     const acc = bgAccRef.current;
-
     for (const [channel, result] of Object.entries(bgLastResults)) {
       if (!result || result === seen.get(channel)) continue;
-      // New result for this channel -- accumulate usage
       seen.set(channel, result);
       if (result.usage) {
         acc.input += result.usage.inputTokens || 0;
@@ -66,7 +64,7 @@ export function useTokenMonitor({ messages, bgLastResults, sessionBudget }) {
         acc.count++;
       }
     }
-  }, [bgLastResults]);
+  }
 
   return useMemo(() => {
     // --- Foreground usage from dev chat messages ---

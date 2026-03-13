@@ -27,6 +27,7 @@ const LOG_WINDOW = 60_000; // 1 minute
 // Dedup window: suppress identical messages within DEDUP_WINDOW_MS
 const _recentHashes = new Map(); // hash -> timestamp
 const DEDUP_WINDOW_MS = 5_000;
+const DEDUP_CLEANUP_INTERVAL_MS = 60_000; // periodic cleanup every 60s
 
 function _hash(message, source) {
   return `${source || ''}::${message || ''}`;
@@ -38,8 +39,8 @@ function _isDuplicate(message, source) {
   const last = _recentHashes.get(key);
   if (last && now - last < DEDUP_WINDOW_MS) return true;
   _recentHashes.set(key, now);
-  // Prune old entries every 100 inserts
-  if (_recentHashes.size > 200) {
+  // Prune old entries every 50 inserts
+  if (_recentHashes.size > 100) {
     for (const [k, ts] of _recentHashes) {
       if (now - ts > DEDUP_WINDOW_MS) _recentHashes.delete(k);
     }
@@ -141,4 +142,20 @@ function getStats() {
   };
 }
 
-module.exports = { reportServerError, subscribe, getRecentErrors, getStats };
+// Periodic background cleanup — delete expired dedup hashes every 60s
+let _dedupCleanupInterval = setInterval(() => {
+  const now = Date.now();
+  for (const [k, ts] of _recentHashes) {
+    if (now - ts > DEDUP_WINDOW_MS) _recentHashes.delete(k);
+  }
+}, DEDUP_CLEANUP_INTERVAL_MS);
+if (_dedupCleanupInterval.unref) _dedupCleanupInterval.unref();
+
+function stopErrorPipeline() {
+  if (_dedupCleanupInterval) {
+    clearInterval(_dedupCleanupInterval);
+    _dedupCleanupInterval = null;
+  }
+}
+
+module.exports = { reportServerError, subscribe, getRecentErrors, getStats, stopErrorPipeline };

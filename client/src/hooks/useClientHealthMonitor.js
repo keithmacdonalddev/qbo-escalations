@@ -46,11 +46,15 @@ export function useClientHealthMonitor({ enabled = true, isLeader, sendBackgroun
 
     const state = stateRef.current;
     const cleanups = [];
+    const isImageRequestActive = () => Boolean(window.__imageRequestActive);
 
     try {
     // --- Circuit breaker helper (max 1 per type per 2 minutes) ---------------
     const COOLDOWN_MS = 120_000;
     function canAlert(type) {
+      // Suspend all alerting while a large image request is being serialized
+      // or transmitted — the main-thread stall is expected and temporary.
+      if (window.__imageRequestActive) return false;
       const last = state.circuitBreakers.get(type);
       if (last && Date.now() - last < COOLDOWN_MS) return false;
       state.circuitBreakers.set(type, Date.now());
@@ -68,6 +72,7 @@ export function useClientHealthMonitor({ enabled = true, isLeader, sendBackgroun
 
     // --- 1. Memory pressure (every 10 seconds) --------------------------------
     const memoryInterval = _origSetInterval.call(window, () => {
+      if (isImageRequestActive()) return;
       if (!performance.memory) return; // Chrome-only API
       const { usedJSHeapSize, jsHeapSizeLimit } = performance.memory;
       const usagePercent = usedJSHeapSize / jsHeapSizeLimit;
@@ -118,6 +123,7 @@ This growth rate suggests an active memory leak. Investigate recent state change
 
     // --- 2. DOM size + 6. Effect loop + 7. Render storm (every 5 seconds) ----
     const healthInterval = _origSetInterval.call(window, () => {
+      if (isImageRequestActive()) return;
       // DOM size monitoring
       const domCount = document.getElementsByTagName('*').length;
 
@@ -133,11 +139,11 @@ Investigate components that create excessive elements (long lists without virtua
 
       // DOM rapid growth (50%+ since last check, only after warmup)
       // Skip first 3 ticks (15s) to let React finish mounting all components.
-      // Also require absolute count > 1500 — small DOM doubling is normal startup.
+      // Also require absolute count > 3000 — sub-3k DOM doubling is normal app lifecycle.
       if (state.lastDomCount > 0) {
         state.domCheckCount = (state.domCheckCount || 0) + 1;
         const domGrowth = domCount - state.lastDomCount;
-        if (state.domCheckCount > 3 && domCount > 1500 && domGrowth > state.lastDomCount * 0.5 && canAlert('dom-growth')) {
+        if (state.domCheckCount > 3 && domCount > 3000 && domGrowth > state.lastDomCount * 0.5 && canAlert('dom-growth')) {
           log?.({ type: 'health-warning', message: `DOM explosion: ${state.lastDomCount} -> ${domCount} nodes (+${domGrowth})`, severity: 'error', _severity: SEVERITY.MONITORING });
           sendBackground('auto-errors', `[AUTO-ERROR] DOM explosion detected: ${state.lastDomCount} -> ${domCount} nodes (+${domGrowth})
 
@@ -166,6 +172,12 @@ Investigate the useEffect with identifier "${effectId}" and fix the dependency c
             data.windowStart = now;
           }
         }
+        // Prune stale entries: effects that haven't fired in 60s
+        for (const [effectId, data] of tracker) {
+          if (now - data.windowStart > 60_000 && data.count === 0) {
+            tracker.delete(effectId);
+          }
+        }
       }
 
       // Render storm detection (via global counter from React.Profiler / FlameBar)
@@ -185,6 +197,11 @@ Investigate: missing React.memo on frequently-rendered components, state updates
     let mutationCount = 0;
     let mutationWindowStart = Date.now();
     const mutationObserver = new MutationObserver((mutations) => {
+      if (isImageRequestActive()) {
+        mutationCount = 0;
+        mutationWindowStart = Date.now();
+        return;
+      }
       mutationCount += mutations.length;
       const elapsed = Date.now() - mutationWindowStart;
       if (elapsed >= 1_000) {
@@ -209,6 +226,7 @@ Investigate the React component tree for components that are re-rendering excess
     if (typeof PerformanceObserver !== 'undefined') {
       try {
         longTaskObserver = new PerformanceObserver((list) => {
+          if (isImageRequestActive()) return;
           for (const entry of list.getEntries()) {
             if (entry.duration > 500 && canAlert('long-task-critical')) {
               log?.({ type: 'health-warning', message: `CRITICAL: Long task: ${entry.duration.toFixed(0)}ms (near-freeze)`, severity: 'error', _severity: SEVERITY.CRITICAL });
@@ -232,6 +250,10 @@ Investigate: heavy computation, synchronous operations, large array processing, 
     let lastTickTime = Date.now();
     const freezeInterval = _origSetInterval.call(window, () => {
       const now = Date.now();
+      if (isImageRequestActive()) {
+        lastTickTime = now;
+        return;
+      }
       const elapsed = now - lastTickTime;
       if (elapsed > 15_000 && canAlert('ui-freeze')) {
         log?.({ type: 'health-warning', message: `CRITICAL: UI freeze: main thread blocked ${(elapsed / 1000).toFixed(1)}s`, severity: 'error', _severity: SEVERITY.CRITICAL });

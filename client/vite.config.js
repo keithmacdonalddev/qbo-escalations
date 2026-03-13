@@ -1,8 +1,9 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import devAgentBridge from './vite-plugin-dev-agent-bridge.js';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), devAgentBridge()],
   server: {
     port: 5174,
     proxy: {

@@ -2,6 +2,8 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ChatMessage from './ChatMessage.jsx';
 import Tooltip from './Tooltip.jsx';
 import AgentActivityLog from './AgentActivityLog.jsx';
+import PromptInspector from './PromptInspector.jsx';
+import AgentDock from './AgentDock.jsx';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
 import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
@@ -17,6 +19,13 @@ const DEV_PROMPTS = [
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
   { value: 'fallback', label: 'Fallback' },
+];
+
+const AGENT_SURFACE_TABS = [
+  { id: 'dev', label: 'Dev Agent' },
+  { id: 'workspace', label: 'Workspace' },
+  { id: 'chat', label: 'Chat' },
+  { id: 'copilot', label: 'Co-pilot' },
 ];
 
 function getReasoningEffortLabel(value) {
@@ -94,7 +103,137 @@ function TokenMonitorBar({ tokenStats }) {
   );
 }
 
-export default function DevMode() {
+function formatShortDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '0s';
+  const totalSeconds = Math.ceil(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function ControlPlaneBar({ agentHealthy, healthDetails, runtimeHealth, bgTransport, monitorTransport }) {
+  const monitor = runtimeHealth?.monitor || {};
+  const remediation = runtimeHealth?.remediation || {};
+  const domains = runtimeHealth?.domains || {};
+  const stateCounts = monitor.stateCounts || {};
+  const activeTransportIncidents = monitor.activeMonitorTransportIncidents || 0;
+  const queueSize = bgTransport?.queueSize || 0;
+  const cooldownRemainingMs = Math.max(0, (bgTransport?.nextAllowedAt || 0) - Date.now());
+  const coolingDown = Boolean(bgTransport?.coolingDown && cooldownRemainingMs > 0);
+  const controlState = coolingDown
+    ? (bgTransport?.cooldownReason === 'rate-limit' ? 'Rate-limited' : 'Cooling down')
+    : 'Ready';
+  const degradedDomains = ['gmail', 'calendar', 'escalations']
+    .filter((key) => {
+      const status = domains[key]?.status;
+      return status === 'degraded' || status === 'warning';
+    });
+  const transport = monitorTransport || {};
+
+  return (
+    <div className="dev-control-bar">
+      <div className="dev-control-chip">
+        <span className={`dev-control-dot ${agentHealthy ? 'is-ok' : 'is-warn'}`} />
+        <span className="dev-control-label">Agent</span>
+        <strong>{agentHealthy ? 'Healthy' : `${(healthDetails?.issues || []).length} issue${(healthDetails?.issues || []).length === 1 ? '' : 's'}`}</strong>
+      </div>
+      <div className={`dev-control-chip${coolingDown ? ' is-warn' : ''}`}>
+        <span className="dev-control-label">Monitor Channel</span>
+        <strong>{controlState}</strong>
+        {coolingDown && (
+          <span className="dev-control-detail">{formatShortDuration(cooldownRemainingMs)} left</span>
+        )}
+        {!coolingDown && queueSize > 0 && (
+          <span className="dev-control-detail">{queueSize} queued</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Incidents</span>
+        <strong>{monitor.activeIncidents || 0} active</strong>
+        {activeTransportIncidents > 0 && (
+          <span className="dev-control-detail">{activeTransportIncidents} blind spot</span>
+        )}
+        {(monitor.remediatingIncidents || 0) > 0 && (
+          <span className="dev-control-detail">{monitor.remediatingIncidents} remediating</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Lifecycle</span>
+        <strong>{stateCounts.failed || 0} failed</strong>
+        {(stateCounts.resolved || 0) > 0 && (
+          <span className="dev-control-detail">{stateCounts.resolved} resolved</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Duplicates</span>
+        <strong>{monitor.totalSuppressed || 0} suppressed</strong>
+        {(monitor.totalForwarded || 0) > 0 && (
+          <span className="dev-control-detail">{monitor.totalForwarded} forwarded</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Remediation</span>
+        <strong>{remediation.failedAttempts || 0} failed</strong>
+        {(remediation.partialAttempts || 0) > 0 && (
+          <span className="dev-control-detail">{remediation.partialAttempts} partial</span>
+        )}
+        {(remediation.verifiedAttempts || 0) > 0 && (
+          <span className="dev-control-detail">{remediation.verifiedAttempts} verified</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Domains</span>
+        <strong>{degradedDomains.length} degraded</strong>
+        {degradedDomains.length > 0 && (
+          <span className="dev-control-detail">{degradedDomains.join(', ')}</span>
+        )}
+      </div>
+      <div className="dev-control-chip">
+        <span className="dev-control-label">Monitor Streams</span>
+        <strong>{transport.connectedCount || 0} connected</strong>
+        {((transport.cooldownCount || 0) > 0 || (transport.degradedCount || 0) > 0) && (
+          <span className="dev-control-detail">
+            {transport.cooldownCount || 0} cooling, {transport.degradedCount || 0} degraded
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function DomainRemediationBar({ runtimeHealth }) {
+  const domains = runtimeHealth?.domains || {};
+  const entries = [
+    { key: 'gmail', label: 'Gmail' },
+    { key: 'calendar', label: 'Calendar' },
+    { key: 'escalations', label: 'Escalations' },
+  ].filter((entry) => {
+    const domain = domains[entry.key] || {};
+    return Boolean(domain.remediation?.message) || (Array.isArray(domain.issues) && domain.issues.length > 0);
+  });
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="dev-control-bar">
+      {entries.map((entry) => {
+        const domain = domains[entry.key] || {};
+        return (
+          <div key={entry.key} className="dev-control-chip">
+            <span className="dev-control-label">{entry.label}</span>
+            <strong>{domain.remediation?.required ? 'Action needed' : (domain.status || 'ok')}</strong>
+            <span className="dev-control-detail">
+              {domain.remediation?.message || domain.issues?.[0] || 'Healthy'}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function DevMode({ chat = null }) {
   const {
     messages,
     conversationId,
@@ -123,14 +262,31 @@ export default function DevMode() {
     deleteLastMessage,
     setError,
     bgLastResults,
+    bgTransport,
+    monitorTransport,
+    agentHealthy,
+    healthDetails,
+    runtimeHealth,
     tokenStats,
   } = useDevAgent();
+
+  const [inspectorOpen, setInspectorOpen] = useState(() => {
+    try { return localStorage.getItem('promptInspectorOpen') === 'true'; } catch { return false; }
+  });
+  const toggleInspector = useCallback(() => {
+    setInspectorOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('promptInspectorOpen', String(next)); } catch {}
+      return next;
+    });
+  }, []);
 
   const [input, setInput] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [composeFocused, setComposeFocused] = useState(false);
   const [showProviderPopover, setShowProviderPopover] = useState(false);
   const [images, setImages] = useState([]);
+  const [surfaceTab, setSurfaceTab] = useState('dev');
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -155,6 +311,12 @@ export default function DevMode() {
   useEffect(() => {
     if (!isStreaming) textareaRef.current?.focus();
   }, [isStreaming]);
+
+  useEffect(() => {
+    if (surfaceTab === 'dev') return;
+    setShowHistory(false);
+    setInspectorOpen(false);
+  }, [surfaceTab]);
 
   // Ctrl+Shift+D focuses the textarea when on the dev page
   useEffect(() => {
@@ -292,21 +454,6 @@ export default function DevMode() {
 
   return (
     <div className="dev-container">
-      {/* Top bar */}
-      <div className="dev-topbar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="16 18 22 12 16 6" />
-            <polyline points="8 6 2 12 8 18" />
-          </svg>
-          <span style={{ fontWeight: 700, fontFamily: 'var(--font-mono)', fontSize: 'var(--text-sm)' }}>
-            Dev Mode
-          </span>
-          <span className="dev-badge">{getProviderLabel(provider)}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }} />
-      </div>
-
       {fallbackNotice && (
         <div className="chat-bubble chat-bubble-system" style={{ margin: 'var(--sp-3)', border: '1px solid var(--line)', background: 'var(--bg-sunken)' }}>
           <strong style={{ marginRight: 'var(--sp-2)' }}>Fallback used:</strong>
@@ -327,6 +474,7 @@ export default function DevMode() {
         </div>
       )}
 
+      {surfaceTab === 'dev' ? (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* History sidebar */}
         {showHistory && (
@@ -369,8 +517,8 @@ export default function DevMode() {
           </div>
         )}
 
-        {/* Main terminal area */}
-        <div className="dev-terminal">
+        {/* Main terminal area + inspector side-by-side */}
+        <div className={`dev-terminal${inspectorOpen ? ' dev-terminal--with-inspector' : ''}`}>
           {/* Messages */}
           <div className="dev-messages">
             {messages.length === 0 && !isStreaming && (
@@ -492,26 +640,53 @@ export default function DevMode() {
 
           {/* Token monitor bar */}
           <TokenMonitorBar tokenStats={tokenStats} />
+          <ControlPlaneBar
+            agentHealthy={agentHealthy}
+            healthDetails={healthDetails}
+            runtimeHealth={runtimeHealth}
+            bgTransport={bgTransport}
+            monitorTransport={monitorTransport}
+          />
+          <DomainRemediationBar runtimeHealth={runtimeHealth} />
 
           {/* Input area — Compose Card */}
           <div className="chat-input-area">
-            {/* Quick action chips — always visible */}
-            <div className="quick-action-chips">
-              {DEV_PROMPTS.map((dp, i) => (
-                <button
-                  key={i}
-                  className="quick-action-chip"
-                  onClick={() => handleQuickPrompt(dp.prompt)}
-                  type="button"
-                  disabled={isStreaming}
-                >
-                  {dp.label}
-                </button>
-              ))}
+            <div className="compose-card-header-row">
+              <div className="quick-action-chips chat-input-prompts">
+                {DEV_PROMPTS.map((dp, i) => (
+                  <button
+                    key={i}
+                    className="quick-action-chip"
+                    onClick={() => handleQuickPrompt(dp.prompt)}
+                    type="button"
+                    disabled={isStreaming}
+                  >
+                    {dp.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="compose-card-tab-row">
+                <div className="compose-card-tab-strip compose-card-tab-strip--dev" role="tablist" aria-label="Agent tabs">
+                  {AGENT_SURFACE_TABS.map((tab) => (
+                    <button
+                      key={tab.id}
+                      className={`compose-card-tab compose-card-tab--dev${surfaceTab === tab.id ? ' is-active' : ''}`}
+                      onClick={() => setSurfaceTab(tab.id)}
+                      type="button"
+                      role="tab"
+                      aria-selected={surfaceTab === tab.id}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {/* Compose card */}
-            <div className={`compose-card compose-card--dev${composeFocused ? ' is-focused' : ''}`}>
+            <div className="compose-card-shell">
+              <div className={`compose-card compose-card--dev${composeFocused ? ' is-focused' : ''}`}>
               {/* Top strip: provider chip + help */}
               <div className="compose-top-strip">
                 <div ref={providerPopoverRef} style={{ position: 'relative' }}>
@@ -653,7 +828,7 @@ export default function DevMode() {
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
                     placeholder="Describe what you want to build, fix, or change..."
-                    rows={2}
+                    rows={1}
                     disabled={isStreaming}
                   />
                 </div>
@@ -749,12 +924,76 @@ export default function DevMode() {
                 )}
               </div>
             </div>
+            </div>
           </div>
         </div>
       </div>
+      ) : (
+        <>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+          <div style={{
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+          }}>
+            <AgentDock
+              chat={chat}
+              activeTab={surfaceTab}
+              onActiveTabChange={setSurfaceTab}
+              hideTabs
+              viewContext={{ view: 'dev', conversationId: conversationId || null }}
+            />
+          </div>
+        </div>
+        <div className="chat-input-area">
+          <div className="compose-card-tab-row">
+            <div className="compose-card-tab-strip compose-card-tab-strip--dev" role="tablist" aria-label="Agent tabs">
+              {AGENT_SURFACE_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  className={`compose-card-tab compose-card-tab--dev${surfaceTab === tab.id ? ' is-active' : ''}`}
+                  onClick={() => setSurfaceTab(tab.id)}
+                  type="button"
+                  role="tab"
+                  aria-selected={surfaceTab === tab.id}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="compose-card-shell">
+            <div className="compose-card compose-card--dev" />
+          </div>
+        </div>
+        </>
+      )}
 
-      {/* Activity log — persistent bottom panel */}
-      <AgentActivityLog />
+        {/* Prompt Inspector — side panel */}
+        {inspectorOpen && (
+          <PromptInspector
+            isOpen={inspectorOpen}
+            onClose={toggleInspector}
+            conversationId={conversationId}
+          />
+        )}
+
+      {/* Activity log — persistent bottom panel with Inspector toggle */}
+      <div className="dev-activity-row">
+        <AgentActivityLog />
+        <button
+          className={`btn btn-sm btn-ghost pi-toggle-btn${inspectorOpen ? ' is-active' : ''}`}
+          onClick={toggleInspector}
+          type="button"
+          title={inspectorOpen ? 'Close prompt inspector' : 'Open prompt inspector'}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          Inspector
+        </button>
+      </div>
     </div>
   );
 }

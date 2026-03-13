@@ -1,3 +1,4 @@
+// @refresh reset — force full remount on HMR (many hooks, HMR can't reconcile)
 import { useState, useEffect, useCallback, useMemo, useRef, Profiler } from 'react';
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'framer-motion';
 import { transitions, fade } from './utils/motion.js';
@@ -7,57 +8,158 @@ import EscalationDashboard from './components/EscalationDashboard.jsx';
 import PlaybookEditor from './components/PlaybookEditor.jsx';
 import TemplateLibrary from './components/TemplateLibrary.jsx';
 import Analytics from './components/Analytics.jsx';
+import ImageGallery from './components/ImageGallery.jsx';
 import UsageDashboard from './components/UsageDashboard.jsx';
 import DevMode from './components/DevMode.jsx';
-import PolicyLab from './components/PolicyLab.jsx';
-import GmailInbox from './components/GmailInbox.jsx';
-import CalendarView from './components/CalendarView.jsx';
+import WorkspaceShell from './components/WorkspaceShell.jsx';
 import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
 import Settings from './components/Settings.jsx';
 import RightSidebar from './components/RightSidebar.jsx';
 import RequestWaterfall from './components/RequestWaterfall.jsx';
+import HealthBanner from './components/HealthBanner.jsx';
+import HealthToast from './components/HealthToast.jsx';
+import GlobalAgentLauncher from './components/GlobalAgentLauncher.jsx';
+import AgentDock from './components/AgentDock.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import { useChat } from './hooks/useChat.js';
 import { DevAgentProvider } from './context/DevAgentContext.jsx';
+import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import FlameBar from './components/FlameBar.jsx';
 import { tel, TEL, setTelemetryLogging } from './lib/devTelemetry.js';
+import { updateAgentSession } from './lib/agentSessions.js';
 
-function parseHashRoute(policyLabEnabled) {
-  const hash = window.location.hash || '#/chat';
-  if (hash.startsWith('#/chat/')) {
-    return { view: 'chat', conversationId: hash.slice(7) };
+function getDefaultDockTabForRoute(view) {
+  if (view === 'dev') return 'dev';
+  if (view === 'workspace') return 'workspace';
+  return 'chat';
+}
+
+function normalizeWorkspaceView(rawView) {
+  switch (String(rawView || '').toLowerCase()) {
+    case '':
+    case 'overview':
+      return 'overview';
+    case 'inbox':
+    case 'gmail':
+      return 'inbox';
+    case 'calendar':
+      return 'calendar';
+    case 'tasks':
+      return 'tasks';
+    case 'projects':
+      return 'projects';
+    default:
+      return 'overview';
   }
-  if (hash === '#/chat' || hash === '#/' || hash === '#') {
+}
+
+function parseHashRoute() {
+  const hash = window.location.hash || '#/chat';
+  const normalized = hash.startsWith('#') ? hash.slice(1) : hash;
+  const queryIndex = normalized.indexOf('?');
+  const path = queryIndex >= 0 ? normalized.slice(0, queryIndex) : normalized;
+  const query = new URLSearchParams(queryIndex >= 0 ? normalized.slice(queryIndex + 1) : '');
+
+  if (path.startsWith('/chat/')) {
+    return { view: 'chat', conversationId: path.slice(6) };
+  }
+  if (path === '/chat' || path === '/' || path === '') {
     return { view: 'chat', conversationId: null };
   }
-  if (hash.startsWith('#/escalations/')) {
-    return { view: 'escalation-detail', escalationId: hash.slice(14) };
+  if (path.startsWith('/escalations/')) {
+    return { view: 'escalation-detail', escalationId: path.slice(13) };
   }
-  if (hash === '#/dashboard' || hash === '#/escalations') return { view: 'dashboard' };
-  if (hash === '#/playbook') return { view: 'playbook' };
-  if (hash === '#/templates') return { view: 'templates' };
-  if (hash === '#/analytics') return { view: 'analytics' };
-  if (hash === '#/usage') return { view: 'usage' };
-  if (hash === '#/dev') return { view: 'dev' };
-  if (policyLabEnabled && hash === '#/policy-lab') return { view: 'policy-lab' };
-  if (hash === '#/gmail') return { view: 'gmail' };
-  if (hash === '#/calendar') return { view: 'calendar' };
-  if (hash === '#/settings') return { view: 'settings' };
+  if (path === '/dashboard' || path === '/escalations') return { view: 'dashboard' };
+  if (path === '/playbook') return { view: 'playbook' };
+  if (path === '/templates') return { view: 'templates' };
+  if (path === '/analytics') return { view: 'analytics' };
+  if (path === '/gallery') return { view: 'gallery' };
+  if (path === '/usage') {
+    return {
+      view: 'usage',
+      usageTab: query.get('tab') === 'traces' ? 'traces' : 'usage',
+      traceConversationId: query.get('conversationId') || '',
+      traceId: query.get('traceId') || '',
+    };
+  }
+  if (path === '/dev') return { view: 'dev' };
+  if (path === '/workspace') {
+    return { view: 'workspace', workspaceView: 'overview' };
+  }
+  if (path.startsWith('/workspace/')) {
+    return {
+      view: 'workspace',
+      workspaceView: normalizeWorkspaceView(path.slice('/workspace/'.length)),
+    };
+  }
+  if (path === '/gmail') return { view: 'workspace', workspaceView: 'inbox' };
+  if (path === '/calendar') return { view: 'workspace', workspaceView: 'calendar' };
+  if (path === '/settings') return { view: 'settings' };
   return { view: 'chat', conversationId: null };
 }
 
+/**
+ * AppHeader — renders the top bar with the mobile sidebar toggle and settings gear.
+ */
+function AppHeader({ settingsOpen, toggleSettings, setSidebarOpen }) {
+  return (
+    <header className="app-header">
+      <div className="app-header-left">
+        {/* Mobile sidebar toggle — only visible on small screens via CSS */}
+        <button
+          className="sidebar-toggle-header"
+          onClick={() => setSidebarOpen(prev => !prev)}
+          aria-label="Toggle sidebar"
+          type="button"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+      </div>
+      <div className="app-header-right">
+        {/* Settings gear */}
+        <motion.button
+          className={`app-header-icon-btn${settingsOpen ? ' is-active' : ''}`}
+          onClick={toggleSettings}
+          type="button"
+          aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
+          title={settingsOpen ? 'Close settings' : 'Settings'}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+        >
+          <motion.svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            animate={{ rotate: settingsOpen ? 135 : 0 }}
+            transition={transitions.springSnappy}
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+          </motion.svg>
+        </motion.button>
+      </div>
+    </header>
+  );
+}
+
 function App() {
-  const [policyLabEnabled, setPolicyLabEnabled] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('policyLabEnabled')) ?? true; } catch { return true; }
-  });
-  const [route, setRoute] = useState(() => parseHashRoute(policyLabEnabled));
+  const [route, setRoute] = useState(() => parseHashRoute());
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [sidebarHoverExpand, setSidebarHoverExpand] = useState(() => {
     try { return JSON.parse(localStorage.getItem('sidebarHoverExpand')) ?? true; } catch { return true; }
   });
@@ -96,7 +198,6 @@ function App() {
   useEffect(() => { try { localStorage.setItem('ledSpeed', JSON.stringify(ledSpeed)); } catch {} }, [ledSpeed]);
   useEffect(() => { try { localStorage.setItem('waterfallDefaultView', waterfallView); } catch {} }, [waterfallView]);
   useEffect(() => { try { localStorage.setItem('flameBarEnabled', JSON.stringify(flameBarEnabled)); } catch {} }, [flameBarEnabled]);
-  useEffect(() => { try { localStorage.setItem('policyLabEnabled', JSON.stringify(policyLabEnabled)); } catch {} }, [policyLabEnabled]);
   useEffect(() => { try { localStorage.setItem('networkTabEnabled', JSON.stringify(networkTabEnabled)); } catch {} }, [networkTabEnabled]);
   useEffect(() => { try { localStorage.setItem('devWidgetEnabled', JSON.stringify(devWidgetEnabled)); } catch {} }, [devWidgetEnabled]);
   useEffect(() => { try { localStorage.setItem('telemetryEnabled', JSON.stringify(telemetryEnabled)); } catch {} }, [telemetryEnabled]);
@@ -109,11 +210,19 @@ function App() {
   const waterfall = useRequestWaterfall();
   const flame = useRenderFlame();
   const [networkOpen, setNetworkOpen] = useState(false);
+  const [globalDockTab, setGlobalDockTab] = useState(() => getDefaultDockTabForRoute(route.view));
+  const [dockContexts, setDockContexts] = useState(() => ({
+    workspace: { view: 'workspace', subview: 'overview' },
+  }));
+  const [dockOpenByView, setDockOpenByView] = useState(() => ({
+    workspace: true,
+  }));
   const networkActiveCount = useMemo(
     () => waterfall.requests.filter(r => r.state === 'pending' || r.state === 'streaming' || r.state === 'headers').length,
     [waterfall.requests],
   );
   const previousHashRef = useRef('#/chat');
+  const previousChatRouteConversationIdRef = useRef(route.view === 'chat' ? route.conversationId || null : null);
   const settingsOpen = route.view === 'settings';
 
   const toggleSettings = useCallback(() => {
@@ -127,13 +236,13 @@ function App() {
 
   useEffect(() => {
     const onHashChange = () => {
-      const next = parseHashRoute(policyLabEnabled);
+      const next = parseHashRoute();
       tel(TEL.ROUTE_CHANGE, `Navigated to ${next.view}`, { from: route.view, to: next.view });
       setRoute(next);
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
-  }, [policyLabEnabled, route.view]);
+  }, [route.view]);
 
   // App mount telemetry + set default hash if empty
   useEffect(() => {
@@ -143,13 +252,99 @@ function App() {
     }
   }, []);
 
+  // Sync conversationId to URL hash so reloads restore the active chat
   useEffect(() => {
-    if (!policyLabEnabled && route.view === 'policy-lab') {
-      window.location.hash = '#/chat';
+    const previousRouteConversationId = previousChatRouteConversationIdRef.current;
+    const userJustClearedChatRoute = route.view === 'chat'
+      && previousRouteConversationId
+      && route.conversationId === null;
+
+    if (!chat.conversationId || route.view !== 'chat' || userJustClearedChatRoute) {
+      previousChatRouteConversationIdRef.current = route.view === 'chat'
+        ? route.conversationId || null
+        : null;
       return;
     }
-    setRoute(parseHashRoute(policyLabEnabled));
-  }, [policyLabEnabled, route.view]);
+
+    const expected = `#/chat/${chat.conversationId}`;
+    if (window.location.hash !== expected) {
+      window.location.hash = expected;
+    }
+
+    previousChatRouteConversationIdRef.current = route.view === 'chat'
+      ? route.conversationId || null
+      : null;
+  }, [chat.conversationId, route.conversationId, route.view]);
+
+  useEffect(() => {
+    updateAgentSession('chat:main', {}, {
+      type: 'chat',
+      mounted: true,
+      conversationId: chat.conversationId || null,
+      provider: chat.provider,
+      mode: chat.mode,
+      fallbackProvider: chat.fallbackProvider || null,
+      reasoningEffort: chat.reasoningEffort || null,
+      isStreaming: chat.isStreaming === true,
+      streamProvider: chat.streamProvider || null,
+      messageCount: Array.isArray(chat.messages) ? chat.messages.length : 0,
+      streamingText: chat.streamingText || '',
+      thinkingText: chat.thinkingText || '',
+      updatedAt: Date.now(),
+    });
+  }, [
+    chat.conversationId,
+    chat.provider,
+    chat.mode,
+    chat.fallbackProvider,
+    chat.reasoningEffort,
+    chat.isStreaming,
+    chat.streamProvider,
+    chat.messages,
+    chat.streamingText,
+    chat.thinkingText,
+  ]);
+
+  useEffect(() => {
+    setGlobalDockTab(getDefaultDockTabForRoute(route.view));
+  }, [route.view]);
+
+  useEffect(() => {
+    if (route.view !== 'chat') return;
+    if (chat.isStreaming !== true) return;
+    setGlobalDockTab((current) => (current === 'chat' ? current : 'chat'));
+  }, [route.view, chat.isStreaming]);
+
+  const updateDockContext = useCallback((view, nextContext) => {
+    if (!view) return;
+    setDockContexts((prev) => {
+      const fallbackContext = { view };
+      const normalized = nextContext && typeof nextContext === 'object'
+        ? { ...fallbackContext, ...nextContext }
+        : fallbackContext;
+      const current = prev[view];
+      if (JSON.stringify(current) === JSON.stringify(normalized)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [view]: normalized,
+      };
+    });
+  }, []);
+
+  const setRouteDockOpen = useCallback((view, nextValue) => {
+    if (!view) return;
+    setDockOpenByView((prev) => {
+      const current = prev[view] ?? true;
+      const next = typeof nextValue === 'function' ? nextValue(current) : nextValue;
+      if (current === !!next) return prev;
+      return {
+        ...prev,
+        [view]: !!next,
+      };
+    });
+  }, []);
 
   const motionProps = useMemo(() => shouldReduceMotion
     ? {}
@@ -200,19 +395,41 @@ function App() {
           </motion.div>
           </Profiler>
         );
+      case 'gallery':
+        return (
+          <Profiler id="Gallery" onRender={flame.onRender}>
+          <motion.div key="gallery" {...motionProps}>
+            <ImageGallery />
+          </motion.div>
+          </Profiler>
+        );
       case 'usage':
         return (
           <Profiler id="Usage" onRender={flame.onRender}>
           <motion.div key="usage" {...motionProps}>
-            <UsageDashboard />
+            <UsageDashboard
+              initialTab={route.usageTab || 'usage'}
+              initialTraceConversationId={route.traceConversationId || ''}
+              initialTraceId={route.traceId || ''}
+            />
           </motion.div>
           </Profiler>
         );
-      case 'policy-lab':
+      case 'workspace':
         return (
-          <Profiler id="PolicyLab" onRender={flame.onRender}>
-          <motion.div key="policy-lab" {...motionProps}>
-            <PolicyLab />
+          <Profiler id="Workspace" onRender={flame.onRender}>
+          <motion.div key={`workspace-${route.workspaceView || 'overview'}`} {...motionProps} style={{ height: '100%' }}>
+            <WorkspaceShell
+              chat={chat}
+              subview={route.workspaceView || 'overview'}
+              agentDock={{
+                managed: true,
+                open: dockOpenByView.workspace ?? true,
+                setOpen: (nextValue) => setRouteDockOpen('workspace', nextValue),
+                setActiveTab: setGlobalDockTab,
+                onContextChange: (nextContext) => updateDockContext('workspace', nextContext),
+              }}
+            />
           </motion.div>
           </Profiler>
         );
@@ -220,38 +437,69 @@ function App() {
         return (
           <Profiler id="Settings" onRender={flame.onRender}>
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled }} />
           </motion.div>
           </Profiler>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, policyLabEnabled, setPolicyLabEnabled, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled, flame.onRender]);
+  }, [route, motionProps, themeProps, aiProps, chat, dockOpenByView.workspace, setRouteDockOpen, setGlobalDockTab, updateDockContext, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled, flame.onRender]);
 
-  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings' || route.view === 'gmail' || route.view === 'calendar';
+  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings' || route.view === 'workspace';
+  const dockDefaultTab = getDefaultDockTabForRoute(route.view);
+  const dockViewContext = useMemo(() => {
+    if (route.view === 'workspace') {
+      const routeSubview = route.workspaceView || 'overview';
+      if (dockContexts.workspace?.subview === routeSubview) {
+        return dockContexts.workspace;
+      }
+      return { view: 'workspace', subview: routeSubview };
+    }
+    if (route.view === 'escalation-detail') {
+      return { view: route.view, escalationId: route.escalationId || null };
+    }
+    return { view: route.view };
+  }, [route.view, route.workspaceView, route.escalationId, dockContexts.workspace]);
+  const showGlobalDock = route.view !== 'settings'
+    && (route.view !== 'workspace' ? true : (dockOpenByView.workspace ?? true));
+  const dockCloseHandler = useMemo(() => {
+    if (route.view !== 'workspace') return undefined;
+    return () => setRouteDockOpen('workspace', false);
+  }, [route.view, setRouteDockOpen]);
+  const mainStyle = useMemo(() => ({
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+    ...(isFullHeightView ? { padding: 0 } : {}),
+  }), [isFullHeightView]);
+
+  const devMonitorsEnabled = route.view === 'dev';
+  const workspaceMonitorEnabled = route.view === 'workspace'
+    || (showGlobalDock && globalDockTab === 'workspace');
+  const sidebarCurrentRoute = useMemo(() => {
+    if (route.view === 'chat' && route.conversationId) {
+      return `#/chat/${route.conversationId}`;
+    }
+    if (route.view === 'workspace') {
+      return route.workspaceView && route.workspaceView !== 'overview'
+        ? `#/workspace/${route.workspaceView}`
+        : '#/workspace';
+    }
+    return `#/${route.view}`;
+  }, [route.view, route.conversationId, route.workspaceView]);
 
   return (
     <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
-    <DevAgentProvider aiSettings={aiProps.aiSettings}>
+    <DevAgentProvider aiSettings={aiProps.aiSettings} monitorsEnabled={devMonitorsEnabled}>
+    <WorkspaceMonitorProvider enabled={workspaceMonitorEnabled}>
     <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
+      {/* Health banner — always visible at the very top */}
+      <HealthBanner requests={waterfall.requests} slowThreshold={waterfall.slowThreshold} />
+
       {/* Render flame bar — dev only, toggleable in Settings */}
       {import.meta.env.DEV && flameBarEnabled && <FlameBar {...flame} />}
-
-      {/* Mobile sidebar toggle */}
-      <button
-        className="btn btn-ghost btn-icon sidebar-toggle"
-        onClick={() => setSidebarOpen(prev => !prev)}
-        aria-label="Toggle sidebar"
-        type="button"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="3" y1="12" x2="21" y2="12" />
-          <line x1="3" y1="6" x2="21" y2="6" />
-          <line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
-      </button>
 
       {/* Mobile overlay */}
       <AnimatePresence>
@@ -268,7 +516,7 @@ function App() {
       </AnimatePresence>
 
       <Sidebar
-        currentRoute={route.view === 'chat' && route.conversationId ? `#/chat/${route.conversationId}` : `#/${route.view}`}
+        currentRoute={sidebarCurrentRoute}
         conversationId={route.conversationId}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -276,48 +524,69 @@ function App() {
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         hoverExpand={sidebarHoverExpand}
         showLabels={sidebarShowLabels}
-        extraNavItems={policyLabEnabled ? [{ hash: '#/policy-lab', label: 'Policy Lab', short: 'Eval' }] : []}
+      />
+
+      <div className="app-content-area">
+      <AppHeader
+        settingsOpen={settingsOpen}
+        toggleSettings={toggleSettings}
+        setSidebarOpen={setSidebarOpen}
       />
 
       <main
         className="app-content"
-        style={isFullHeightView ? { padding: 0, display: 'flex', flexDirection: 'column' } : {}}
+        style={mainStyle}
       >
-        {/* Chat — always mounted so streaming persists when navigating away */}
-        <Profiler id="Chat" onRender={flame.onRender}>
-        <div style={{ display: route.view === 'chat' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} />
-        </div>
-        </Profiler>
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* Chat — always mounted so streaming persists when navigating away */}
+            <Profiler id="Chat" onRender={flame.onRender}>
+            <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} />
+              </div>
+            </div>
+            </Profiler>
 
-        {/* DevMode — always mounted, hidden when not the active view */}
-        <Profiler id="DevMode" onRender={flame.onRender}>
-        <div style={{ display: route.view === 'dev' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <DevMode />
-        </div>
-        </Profiler>
+            {/* DevMode — always mounted, hidden when not the active view */}
+            <Profiler id="DevMode" onRender={flame.onRender}>
+            <div style={{ display: route.view === 'dev' ? 'flex' : 'none', height: '100%' }}>
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                <DevMode chat={chat} />
+              </div>
+            </div>
+            </Profiler>
 
-        {/* Gmail — always mounted so Workspace Agent persists */}
-        <Profiler id="Gmail" onRender={flame.onRender}>
-        <div style={{ display: route.view === 'gmail' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <GmailInbox />
+            {/* All other views use AnimatePresence for transitions */}
+            {route.view !== 'chat' && route.view !== 'dev' && (
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={`dock-shell-${route.view}-${route.workspaceView || 'default'}`}
+                  style={{ display: 'flex', height: '100%', minHeight: 0 }}
+                  {...motionProps}
+                >
+                  <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+                    {renderNonChatView()}
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            )}
+          </div>
+          {showGlobalDock && (
+            <div className="gmail-agent-dock-wrapper">
+              <AgentDock
+                chat={chat}
+                activeTab={globalDockTab}
+                onActiveTabChange={setGlobalDockTab}
+                defaultTab={dockDefaultTab}
+                viewContext={dockViewContext}
+                onClose={dockCloseHandler}
+              />
+            </div>
+          )}
         </div>
-        </Profiler>
-
-        {/* Calendar — always mounted so Workspace Agent persists */}
-        <Profiler id="Calendar" onRender={flame.onRender}>
-        <div style={{ display: route.view === 'calendar' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <CalendarView />
-        </div>
-        </Profiler>
-
-        {/* All other views use AnimatePresence for transitions */}
-        {route.view !== 'chat' && route.view !== 'dev' && route.view !== 'gmail' && route.view !== 'calendar' && (
-          <AnimatePresence mode="wait">
-            {renderNonChatView()}
-          </AnimatePresence>
-        )}
       </main>
+      </div>{/* end .app-content-area */}
 
       {/* Floating mini widget — regular chat streaming monitor outside Chat view */}
       {route.view !== 'chat' && (
@@ -338,32 +607,16 @@ function App() {
       {devWidgetEnabled && route.view !== 'dev' && (
         <DevMiniWidget />
       )}
-      {/* Floating settings gear — top right, no layout impact */}
-      <motion.button
-        className={`app-settings-btn${settingsOpen ? ' is-active' : ''}`}
-        onClick={toggleSettings}
-        type="button"
-        aria-label={settingsOpen ? 'Close settings' : 'Open settings'}
-        title={settingsOpen ? 'Close settings' : 'Settings'}
-        whileHover={{ scale: 1.12 }}
-        whileTap={{ scale: 0.88 }}
-      >
-        <motion.svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          animate={{ rotate: settingsOpen ? 135 : 0 }}
-          transition={transitions.springSnappy}
-        >
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
-        </motion.svg>
-      </motion.button>
+
+      {route.view === 'settings' && (
+        <GlobalAgentLauncher
+          currentRoute={route.view}
+          chat={chat}
+        />
+      )}
+
+      {/* Toast notifications for failures */}
+      <HealthToast requests={waterfall.requests} />
 
       {/* Network waterfall — edge tab + right sidebar overlay */}
       {networkTabEnabled && (
@@ -419,6 +672,7 @@ function App() {
         </>
       )}
     </div>
+    </WorkspaceMonitorProvider>
     </DevAgentProvider>
     </MotionConfig>
     </Profiler>
