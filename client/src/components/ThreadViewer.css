@@ -1,0 +1,664 @@
+/* ============================================================
+   Thread Viewer — slide-over panel for background conversations
+   ============================================================ */
+
+/* Overlay: semi-transparent backdrop anchored to aal-panel */
+.aal-thread-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.aal-thread-overlay.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Panel: slides in from the right */
+.aal-thread-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 58%;
+  min-width: 320px;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  background: #0d0f14;
+  border-left: 1px solid #2a3040;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.4);
+  transform: translateX(100%);
+  transition: transform 0.2s ease;
+}
+
+.aal-thread-panel.is-visible {
+  transform: translateX(0);
+}
+
+/* ---- Thread header ---- */
+.aal-thread-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #1e222c;
+  background: #111420;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.aal-thread-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.aal-thread-channel-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #60a5fa;
+  background: #1a2030;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #2a3550;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.aal-thread-msg-count {
+  font-size: 10px;
+  color: #5a6275;
+  white-space: nowrap;
+}
+
+.aal-thread-updated {
+  font-size: 9px;
+  color: #3a4255;
+  white-space: nowrap;
+}
+
+.aal-thread-close {
+  background: none;
+  border: 1px solid #2e3340;
+  color: #5a6275;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.aal-thread-close:hover {
+  color: #f87171;
+  border-color: #5a2020;
+  background: #2e1a17;
+}
+
+/* ---- Thread body (scrollable message list) ---- */
+.aal-thread-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px;
+  scroll-behavior: smooth;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aal-thread-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.aal-thread-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aal-thread-body::-webkit-scrollbar-thumb {
+  background: #2e3340;
+  border-radius: 3px;
+}
+
+.aal-thread-body {
+  scrollbar-width: thin;
+  scrollbar-color: #2e3340 transparent;
+}
+
+/* ---- Loading / error / empty state ---- */
+.aal-thread-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 16px;
+  color: #4a5265;
+  font-size: 11px;
+  font-style: italic;
+}
+
+.aal-thread-state--error {
+  color: #f87171;
+  font-style: normal;
+}
+
+.aal-thread-error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #5a2020;
+  color: #f87171;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.aal-thread-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #2e3340;
+  border-top-color: #60a5fa;
+  border-radius: 50%;
+  animation: aal-thread-spin 0.7s linear infinite;
+}
+
+@keyframes aal-thread-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Chat message bubbles ---- */
+.aal-thread-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  max-width: 95%;
+}
+
+/* Role-specific bubble styles */
+.aal-thread-msg--system {
+  background: #111420;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  align-self: center;
+  max-width: 85%;
+}
+
+.aal-thread-msg--user {
+  background: #1e3a5f;
+  border: 1px solid #2a4a70;
+  align-self: flex-end;
+}
+
+.aal-thread-msg--assistant {
+  background: #1a1a2e;
+  border: 1px solid #252540;
+  align-self: flex-start;
+}
+
+/* ---- Message meta line ---- */
+.aal-thread-msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.aal-thread-msg-role {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.aal-thread-role--system {
+  color: #6b7385;
+  background: #1e222c;
+}
+
+.aal-thread-role--user {
+  color: #60a5fa;
+  background: #1a2030;
+}
+
+.aal-thread-role--assistant {
+  color: #4ade80;
+  background: #1a2e22;
+}
+
+.aal-thread-msg-provider {
+  font-size: 9px;
+  color: #8b93a5;
+  background: #1e222c;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.aal-thread-msg-model {
+  font-size: 8px;
+  color: #4a5265;
+  background: #14171f;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.aal-thread-msg-time {
+  font-size: 9px;
+  color: #3a4255;
+}
+
+.aal-thread-msg-tokens {
+  font-size: 8px;
+  color: #5a4a10;
+  background: #2a2610;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+/* ---- Message content ---- */
+.aal-thread-msg-content {
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  cursor: text;
+}
+
+.aal-thread-msg--system .aal-thread-msg-content {
+  color: #5a6275;
+  font-style: italic;
+  font-size: 10px;
+}
+
+.aal-thread-msg--user .aal-thread-msg-content {
+  color: #c5d5e8;
+}
+
+.aal-thread-msg--assistant .aal-thread-msg-content {
+  color: #c8cad0;
+}
+
+/* ---- Tool events within a message ---- */
+.aal-thread-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.aal-thread-tools-label {
+  font-size: 9px;
+  color: #4a5265;
+  font-weight: 600;
+}
+
+.aal-thread-tool-chip {
+  font-size: 8px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.aal-thread-tool--started {
+  color: #60a5fa;
+  background: #1a2030;
+}
+
+.aal-thread-tool--success {
+  color: #4ade80;
+  background: #1a2e22;
+}
+
+.aal-thread-tool--error {
+  color: #f87171;
+  background: #2e1a17;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 760px) {
+  .aal-thread-panel {
+    width: 90%;
+    min-width: unset;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Fix Notification Toast — dev mini widget
+   ═══════════════════════════════════════════════════════════════════ */
+
+.dev-fix-notification {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+  max-width: 420px;
+  min-width: 220px;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: dev-fix-notif-fade 8s ease-in-out forwards;
+}
+
+.dev-fix-notification-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  padding: 4px;
+}
+
+.dev-fix-notification-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dev-fix-notification-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.5;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.dev-fix-notification-dismiss:hover {
+  opacity: 1;
+}
+
+/* --- fix-applied: green --- */
+.dev-fix-notification--fix-applied {
+  background: rgba(22, 78, 48, 0.92);
+  color: #a3e6c8;
+  border: 1px solid rgba(82, 196, 26, 0.3);
+}
+.dev-fix-notification--fix-applied .dev-fix-notification-icon {
+  background: rgba(82, 196, 26, 0.2);
+  color: #52c41a;
+}
+
+/* --- error-resolved: bright green with check --- */
+.dev-fix-notification--error-resolved {
+  background: rgba(22, 78, 48, 0.95);
+  color: #b7eb8f;
+  border: 1px solid rgba(82, 196, 26, 0.4);
+}
+.dev-fix-notification--error-resolved .dev-fix-notification-icon {
+  background: rgba(82, 196, 26, 0.25);
+  color: #73d13d;
+}
+
+/* --- error-escalated: red with warning --- */
+.dev-fix-notification--error-escalated {
+  background: rgba(95, 22, 22, 0.92);
+  color: #ffa39e;
+  border: 1px solid rgba(255, 77, 79, 0.3);
+}
+.dev-fix-notification--error-escalated .dev-fix-notification-icon {
+  background: rgba(255, 77, 79, 0.2);
+  color: #ff4d4f;
+}
+.dev-fix-notification--error-escalated .dev-fix-notification-text {
+  white-space: normal;
+}
+
+/* Auto-fade: start fading at 6s, fully gone at 8s */
+@keyframes dev-fix-notif-fade {
+  0%   { opacity: 1; }
+  75%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── Token Monitor Bar (DevMode) ─────────────────────────── */
+
+.token-monitor-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-3);
+  min-height: 30px;
+  padding: 4px var(--sp-4);
+  background: rgba(255, 255, 255, 0.02);
+  border-top: 1px solid var(--line-subtle);
+  border-bottom: 1px solid var(--line-subtle);
+  flex-shrink: 0;
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+
+.token-monitor-left,
+.token-monitor-right {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.token-monitor-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.token-monitor-label {
+  color: var(--ink-tertiary);
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.token-monitor-value {
+  color: var(--ink-secondary);
+  font-weight: 500;
+}
+
+.token-monitor-detail {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.token-monitor-bg {
+  padding-left: var(--sp-3);
+  border-left: 1px solid var(--line-subtle);
+}
+
+.token-monitor-bg .token-monitor-label {
+  color: rgba(78, 201, 181, 0.5);
+}
+
+.token-monitor-bg .token-monitor-value {
+  color: rgba(78, 201, 181, 0.7);
+}
+
+/* Hide detail breakdowns on narrow screens */
+@media (max-width: 640px) {
+  .token-monitor-detail {
+    display: none;
+  }
+  .token-monitor-right {
+    display: none;
+  }
+}
+
+/* ── Token Budget Progress ──────────────────────────────── */
+
+.token-monitor-bar.is-amber {
+  border-color: var(--status-warning, #f59e0b);
+  background: color-mix(in srgb, var(--status-warning, #f59e0b) 8%, var(--bg-sunken));
+}
+
+.token-monitor-bar.is-danger {
+  border-color: var(--status-danger, #dc2626);
+  background: color-mix(in srgb, var(--status-danger, #dc2626) 8%, var(--bg-sunken));
+}
+
+.token-monitor-budget {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  min-width: 80px;
+}
+
+.token-monitor-budget-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+  min-width: 48px;
+}
+
+.token-monitor-budget-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease, background 0.3s ease;
+}
+
+.token-monitor-budget-fill--normal {
+  background: var(--accent);
+}
+
+.token-monitor-budget-fill--amber {
+  background: var(--status-warning, #f59e0b);
+}
+
+.token-monitor-budget-fill--danger {
+  background: var(--status-danger, #dc2626);
+  animation: budget-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes budget-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.token-monitor-budget-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-tertiary);
+  white-space: nowrap;
+}
+
+.token-monitor-bar.is-amber .token-monitor-budget-label {
+  color: var(--status-warning, #f59e0b);
+}
+
+.token-monitor-bar.is-danger .token-monitor-budget-label {
+  color: var(--status-danger, #dc2626);
+  font-weight: 600;
+}
+
+.token-monitor-budget-alert {
+  width: 100%;
+  text-align: center;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--status-danger, #dc2626);
+  padding: 2px 0 0;
+  animation: budget-pulse 1.5s ease-in-out infinite;
+}
+
+.dev-control-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px var(--sp-4);
+  border-bottom: 1px solid var(--line-subtle);
+  background: rgba(255, 255, 255, 0.015);
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.dev-control-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-subtle);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--ink-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-control-chip.is-warn {
+  border-color: color-mix(in srgb, var(--status-warning, #f59e0b) 45%, var(--line-subtle));
+  background: color-mix(in srgb, var(--status-warning, #f59e0b) 8%, transparent);
+}
+
+.dev-control-label {
+  color: var(--ink-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.dev-control-detail {
+  color: var(--ink-tertiary);
+}
+
+.dev-control-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--status-warning, #f59e0b);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+.dev-control-dot.is-ok {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(78, 201, 181, 0.12);
+}
+
+.dev-control-dot.is-warn {
+  background: var(--status-warning, #f59e0b);
+}
+
+/* (dev-qc token/monitor styles removed — replaced by dqc-* panel) */
+

@@ -11,7 +11,7 @@ const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
  * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onLocalStage }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat`;
   const hasImages = Array.isArray(body.images) && body.images.length > 0;
@@ -62,7 +62,9 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
+        else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'inv_matches') onInvMatches?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
@@ -101,10 +103,10 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 /**
  * Retry last assistant response for a conversation and consume SSE stream.
  * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function, onLocalStage?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onLocalStage }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat/retry`;
 
@@ -134,7 +136,9 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
 
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
+        else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'inv_matches') onInvMatches?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);

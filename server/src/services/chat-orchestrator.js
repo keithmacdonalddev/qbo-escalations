@@ -138,6 +138,7 @@ function runAttempt({
       systemPrompt,
       images,
       reasoningEffort,
+      timeoutMs,
       onChunk: (text) => {
         if (settled) return;
         onChunk({

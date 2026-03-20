@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import './WebcamCapture.css';
 
 const PREFERRED_CAPTURE_WIDTH = 1600;
 const PREFERRED_CAPTURE_HEIGHT = 1200;

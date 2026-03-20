@@ -12,15 +12,16 @@ import ImageGallery from './components/ImageGallery.jsx';
 import UsageDashboard from './components/UsageDashboard.jsx';
 import DevMode from './components/DevMode.jsx';
 import WorkspaceShell from './components/WorkspaceShell.jsx';
+import ModelLab from './components/ModelLab.jsx';
 import DevMiniWidget from './components/DevMiniWidget.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
 import Settings from './components/Settings.jsx';
+import InvestigationsView from './components/InvestigationsView.jsx';
 import RightSidebar from './components/RightSidebar.jsx';
 import RequestWaterfall from './components/RequestWaterfall.jsx';
 import HealthBanner from './components/HealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
-import GlobalAgentLauncher from './components/GlobalAgentLauncher.jsx';
 import AgentDock from './components/AgentDock.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
@@ -78,6 +79,7 @@ function parseHashRoute() {
   if (path === '/playbook') return { view: 'playbook' };
   if (path === '/templates') return { view: 'templates' };
   if (path === '/analytics') return { view: 'analytics' };
+  if (path === '/model-lab') return { view: 'model-lab' };
   if (path === '/gallery') return { view: 'gallery' };
   if (path === '/usage') {
     return {
@@ -99,6 +101,7 @@ function parseHashRoute() {
   }
   if (path === '/gmail') return { view: 'workspace', workspaceView: 'inbox' };
   if (path === '/calendar') return { view: 'workspace', workspaceView: 'calendar' };
+  if (path === '/investigations') return { view: 'investigations' };
   if (path === '/settings') return { view: 'settings' };
   return { view: 'chat', conversationId: null };
 }
@@ -107,6 +110,46 @@ function parseHashRoute() {
  * AppHeader — renders the top bar with the mobile sidebar toggle and settings gear.
  */
 function AppHeader({ settingsOpen, toggleSettings, setSidebarOpen }) {
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const fetchUnread = () => {
+      // Dynamically read the current default email each poll cycle
+      const defaultEmail = window.localStorage.getItem('qbo-default-gmail-account') || '';
+      fetch('/api/gmail/unified/unread-counts')
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!active || !data?.ok) return;
+          const counts = data.counts || {};
+          // Use the default email's count, or fall back to total
+          const count = defaultEmail && counts[defaultEmail] != null
+            ? counts[defaultEmail]
+            : (counts.total ?? 0);
+          setUnreadCount(count);
+        })
+        .catch(() => {});
+    };
+    fetchUnread();
+    const id = setInterval(fetchUnread, 60_000);
+    // Listen for storage changes (e.g. from Settings panel) to refresh immediately
+    const onStorage = (e) => {
+      if (e.key === 'qbo-default-gmail-account') fetchUnread();
+    };
+    window.addEventListener('storage', onStorage);
+    // Also listen for a custom event so same-tab changes trigger a refresh
+    const onDefaultChange = () => fetchUnread();
+    window.addEventListener('default-email-changed', onDefaultChange);
+    return () => {
+      active = false;
+      clearInterval(id);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('default-email-changed', onDefaultChange);
+    };
+  }, []);
+
+  const badgeLabel = unreadCount > 99 ? '99+' : String(unreadCount);
+
   return (
     <header className="app-header">
       <div className="app-header-left">
@@ -125,6 +168,24 @@ function AppHeader({ settingsOpen, toggleSettings, setSidebarOpen }) {
         </button>
       </div>
       <div className="app-header-right">
+        {/* Mail inbox */}
+        <motion.button
+          className="app-header-icon-btn app-header-mail-btn"
+          onClick={() => { window.location.hash = '#/gmail'; }}
+          type="button"
+          aria-label={unreadCount > 0 ? `${unreadCount} unread emails` : 'Inbox'}
+          title={unreadCount > 0 ? `${unreadCount} unread` : 'Inbox'}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <path d="M22 4l-10 8L2 4" />
+          </svg>
+          {unreadCount > 0 && (
+            <span className="app-header-mail-badge">{badgeLabel}</span>
+          )}
+        </motion.button>
         {/* Settings gear */}
         <motion.button
           className={`app-header-icon-btn${settingsOpen ? ' is-active' : ''}`}
@@ -367,7 +428,7 @@ function App() {
         );
       case 'escalation-detail':
         return (
-          <motion.div key="escalation-detail" {...motionProps}>
+          <motion.div key="escalation-detail" {...motionProps} style={{ height: '100%' }}>
             <EscalationDetail escalationId={route.escalationId} />
           </motion.div>
         );
@@ -392,6 +453,14 @@ function App() {
           <Profiler id="Analytics" onRender={flame.onRender}>
           <motion.div key="analytics" {...motionProps}>
             <Analytics />
+          </motion.div>
+          </Profiler>
+        );
+      case 'model-lab':
+        return (
+          <Profiler id="ModelLab" onRender={flame.onRender}>
+          <motion.div key="model-lab" {...motionProps}>
+            <ModelLab />
           </motion.div>
           </Profiler>
         );
@@ -433,6 +502,14 @@ function App() {
           </motion.div>
           </Profiler>
         );
+      case 'investigations':
+        return (
+          <Profiler id="Investigations" onRender={flame.onRender}>
+          <motion.div key="investigations" {...motionProps} style={{ height: '100%' }}>
+            <InvestigationsView />
+          </motion.div>
+          </Profiler>
+        );
       case 'settings':
         return (
           <Profiler id="Settings" onRender={flame.onRender}>
@@ -446,7 +523,7 @@ function App() {
     }
   }, [route, motionProps, themeProps, aiProps, chat, dockOpenByView.workspace, setRouteDockOpen, setGlobalDockTab, updateDockContext, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devWidgetEnabled, setDevWidgetEnabled, telemetryEnabled, setTelemetryEnabled, flame.onRender]);
 
-  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings' || route.view === 'workspace';
+  const isFullHeightView = route.view === 'chat' || route.view === 'dev' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail';
   const dockDefaultTab = getDefaultDockTabForRoute(route.view);
   const dockViewContext = useMemo(() => {
     if (route.view === 'workspace') {
@@ -467,12 +544,13 @@ function App() {
     if (route.view !== 'workspace') return undefined;
     return () => setRouteDockOpen('workspace', false);
   }, [route.view, setRouteDockOpen]);
+  const usesEdgeToEdgeShell = isFullHeightView || route.view === 'model-lab';
   const mainStyle = useMemo(() => ({
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
-    ...(isFullHeightView ? { padding: 0 } : {}),
-  }), [isFullHeightView]);
+    ...(usesEdgeToEdgeShell ? { padding: 0 } : {}),
+  }), [usesEdgeToEdgeShell]);
 
   const devMonitorsEnabled = route.view === 'dev';
   const workspaceMonitorEnabled = route.view === 'workspace'
@@ -537,8 +615,8 @@ function App() {
         className="app-content"
         style={mainStyle}
       >
-        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
-          <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <div className="app-shell-body">
+          <div className="app-shell-main-column">
             {/* Chat — always mounted so streaming persists when navigating away */}
             <Profiler id="Chat" onRender={flame.onRender}>
             <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
@@ -562,10 +640,10 @@ function App() {
               <AnimatePresence mode="wait">
                 <motion.div
                   key={`dock-shell-${route.view}-${route.workspaceView || 'default'}`}
-                  style={{ display: 'flex', height: '100%', minHeight: 0 }}
+                  className="app-shell-view"
                   {...motionProps}
                 >
-                  <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+                  <div className={`app-shell-view-region${isFullHeightView ? ' app-shell-view-region--managed' : ' app-shell-view-region--scroll'}`}>
                     {renderNonChatView()}
                   </div>
                 </motion.div>
@@ -573,7 +651,7 @@ function App() {
             )}
           </div>
           {showGlobalDock && (
-            <div className="gmail-agent-dock-wrapper">
+            <div className="gmail-agent-dock-wrapper app-global-dock-wrapper">
               <AgentDock
                 chat={chat}
                 activeTab={globalDockTab}
@@ -608,12 +686,6 @@ function App() {
         <DevMiniWidget />
       )}
 
-      {route.view === 'settings' && (
-        <GlobalAgentLauncher
-          currentRoute={route.view}
-          chat={chat}
-        />
-      )}
 
       {/* Toast notifications for failures */}
       <HealthToast requests={waterfall.requests} />

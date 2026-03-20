@@ -42,9 +42,7 @@ function didCliExitSuccessfully(code) {
 }
 
 const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_CHAT_TIMEOUT_MS, 180000);
-const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 120000);
-const CLAUDE_IMAGE_HELP_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_IMAGE_HELP_TIMEOUT_MS, 5000);
-let supportsClaudeImageFlagCache = null;
+const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 300000);
 const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
 
 function normalizeClaudeEffort(value) {
@@ -57,6 +55,21 @@ function cleanupTempFiles(paths) {
   for (const f of paths) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
   }
+}
+
+/**
+ * Prepare CLI args and prompt text for passing images to Claude.
+ *
+ * Claude CLI no longer supports the --image flag. Images are passed by:
+ *  1. Writing base64 data to temp files on disk
+ *  2. Appending the file paths to the prompt text
+ *  3. Granting the CLI read access via --add-dir + --permission-mode bypassPermissions
+ */
+function prepareImageArgs(args, stdinPrompt, imagePaths) {
+  if (!Array.isArray(imagePaths) || imagePaths.length === 0) return stdinPrompt;
+  const result = appendImagePathsToPrompt(stdinPrompt, imagePaths);
+  addCompatibilityImageAccessArgs(args, imagePaths);
+  return result;
 }
 
 function combineUsage(usageA, usageB) {
@@ -80,82 +93,13 @@ function formatCliFailure(code, stderr) {
     lower.includes('not recognized as an internal or external command') ||
     lower.includes('command not found') ||
     lower.includes('enoent');
-  const unsupportedImageFlag =
-    (lower.includes('unknown option') || lower.includes('unknown argument') || lower.includes('unrecognized option'))
-    && lower.includes('--image');
 
   if (missingBinary) {
     return 'Claude CLI command not found. Ensure `claude` is installed and available on PATH.';
   }
-  if (unsupportedImageFlag) {
-    return 'Installed Claude CLI does not support --image attachments. Upgrade Claude Code or use compatibility mode.';
-  }
   return 'Claude CLI exited with code ' + code + ': ' + preview;
 }
 
-function parseBool(value, fallback) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
-  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
-  return fallback;
-}
-
-function supportsClaudeImageFlag() {
-  // Returns the cached result. The cache is warmed eagerly at module load
-  // (see _warmImageFlagCache below) so this never blocks.
-  // Falls back to false if the cache hasn't resolved yet.
-  return supportsClaudeImageFlagCache === true;
-}
-
-// Eagerly warm the --image flag support cache in the background at module load.
-// This fires a non-blocking async spawn so the result is ready before the first
-// image request arrives, eliminating the 5-second spawnSync block.
-function _warmImageFlagCache() {
-  if (supportsClaudeImageFlagCache !== null) return;
-
-  if (process.env.CLAUDE_SUPPORTS_IMAGE_INPUT !== undefined) {
-    supportsClaudeImageFlagCache = parseBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false);
-    return;
-  }
-
-  const child = spawn('claude', ['--help'], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    shell: true,
-    cwd: PROJECT_ROOT,
-    env: {
-      ...process.env,
-      CLAUDECODE: undefined,
-      CLAUDE_CODE_SIMPLE: '1',
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-    },
-  });
-
-  let stdout = '';
-  let stderr = '';
-  const timeout = setTimeout(() => {
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
-    if (supportsClaudeImageFlagCache === null) supportsClaudeImageFlagCache = false;
-  }, CLAUDE_IMAGE_HELP_TIMEOUT_MS);
-
-  child.stdout.on('data', (d) => { if (stdout.length < 10240) stdout += d.toString(); });
-  child.stderr.on('data', (d) => { if (stderr.length < 10240) stderr += d.toString(); });
-
-  child.on('close', () => {
-    clearTimeout(timeout);
-    if (supportsClaudeImageFlagCache !== null) return; // already set by timeout
-    const text = `${stdout}\n${stderr}`.toLowerCase();
-    supportsClaudeImageFlagCache = text.includes('--image');
-  });
-
-  child.on('error', () => {
-    clearTimeout(timeout);
-    if (supportsClaudeImageFlagCache === null) supportsClaudeImageFlagCache = false;
-  });
-}
-
-// Fire-and-forget at module load — cache is warm before any image request.
-_warmImageFlagCache();
 
 function appendImagePathsToPrompt(prompt, imagePaths) {
   if (!Array.isArray(imagePaths) || imagePaths.length === 0) return prompt;
@@ -243,10 +187,11 @@ async function writeTempImageFile(imageInput, prefix, index) {
  * @param {function} opts.onError - Called on failure
  * @returns {function} cleanup - Call to kill the subprocess
  */
-function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk, onThinkingChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError }) {
   const prompt = buildPrompt(messages);
   const tempFiles = [];
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
   if (model) args.push('--model', model);
   const normalizedEffort = normalizeClaudeEffort(reasoningEffort);
   if (normalizedEffort) args.push('--effort', normalizedEffort);
@@ -308,14 +253,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     }
 
     if (tempFiles.length > 0) {
-      if (supportsClaudeImageFlag()) {
-        for (const tempFilePath of tempFiles) {
-          args.push('--image', tempFilePath);
-        }
-      } else {
-        stdinPrompt = appendImagePathsToPrompt(stdinPrompt, tempFiles);
-        addCompatibilityImageAccessArgs(args, tempFiles);
-      }
+      stdinPrompt = prepareImageArgs(args, stdinPrompt, tempFiles);
     }
 
     try {
@@ -352,16 +290,24 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     let stdoutBuffer = '';
     let stderrOutput = '';
 
-    timeoutHandle = setTimeout(() => {
-      if (killed || settled) return;
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      const timeoutErr = new Error('Claude CLI timed out after ' + CHAT_TIMEOUT_MS + 'ms');
-      timeoutErr.code = 'TIMEOUT';
-      finishWithError(timeoutErr);
-    }, CHAT_TIMEOUT_MS);
+    // Activity-based timeout: resets on each stdout/stderr data event so
+    // active-but-slow streams are not killed prematurely. The timeout only
+    // fires after effectiveTimeoutMs of complete CLI inactivity.
+    function resetActivityTimeout() {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      timeoutHandle = setTimeout(() => {
+        if (killed || settled) return;
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        const timeoutErr = new Error('Claude CLI timed out after ' + effectiveTimeoutMs + 'ms of inactivity');
+        timeoutErr.code = 'TIMEOUT';
+        finishWithError(timeoutErr);
+      }, effectiveTimeoutMs);
+    }
+    resetActivityTimeout();
 
     child.stdout.on('data', (data) => {
       if (settled || killed) return;
+      resetActivityTimeout();
       stdoutBuffer += data.toString();
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() || '';
@@ -408,6 +354,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
     });
 
     child.stderr.on('data', (data) => {
+      resetActivityTimeout();
       if (stderrOutput.length < 10240) stderrOutput += data.toString();
     });
 
@@ -584,11 +531,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         const tArgs = ['-p', '--output-format', 'text'];
         if (modelOverride) tArgs.push('--model', modelOverride);
         if (effortOverride) tArgs.push('--effort', effortOverride);
-        if (supportsClaudeImageFlag()) {
-          tArgs.push('--image', tmpPath);
-        } else {
-          addCompatibilityImageAccessArgs(tArgs, [tmpPath]);
-        }
+        addCompatibilityImageAccessArgs(tArgs, [tmpPath]);
 
         let child;
         try {
@@ -613,10 +556,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           return reject(err);
         }
 
-        let stdinPromptA = transcribePrompt;
-        if (!supportsClaudeImageFlag()) {
-          stdinPromptA = appendImagePathsToPrompt(stdinPromptA, [tmpPath]);
-        }
+        const stdinPromptA = appendImagePathsToPrompt(transcribePrompt, [tmpPath]);
         try { child.stdin.end(stdinPromptA); } catch { /* ignore */ }
 
         let stdout = '';
@@ -1160,5 +1100,170 @@ async function prompt(promptText, options = {}) {
   });
 }
 
-module.exports = { chat, parseEscalation, warmUp, prompt };
+/**
+ * Fast image transcription — extracts ALL visible text from an image without
+ * any structured parsing, triage, or field extraction.
+ *
+ * Accepts a base64 image string (with or without data-URI prefix) or an
+ * absolute file path to an image on disk.
+ *
+ * @param {string} imageBase64OrPath - Base64 image data or absolute file path
+ * @param {Object} [options]
+ * @param {string} [options.model] - Override model
+ * @param {string} [options.reasoningEffort] - Effort level (low/medium/high)
+ * @param {number} [options.timeoutMs] - Timeout in ms (default 60 000)
+ * @returns {Promise<{text: string, usage: Object|null}>}
+ */
+const TRANSCRIBE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS, 60000);
+
+async function transcribeImage(imageBase64OrPath, options = {}) {
+  const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
+  if (!input) throw new Error('transcribeImage: image input is empty');
+
+  const modelOverride = options.model || null;
+  const effortOverride = normalizeClaudeEffort(options.reasoningEffort);
+  const timeoutMs = parsePositiveInt(options.timeoutMs, TRANSCRIBE_TIMEOUT_MS);
+
+  const transcribePrompt =
+    'Transcribe ALL text visible in this image exactly as written. ' +
+    'Preserve layout, line breaks, labels, and formatting as closely as possible. ' +
+    'Do not summarize, interpret, reword, or omit anything. ' +
+    'Pay special attention to numeric IDs, codes, and reference numbers — ' +
+    'transcribe each digit and character carefully. ' +
+    'Return only the transcribed text, nothing else.';
+
+  // Determine whether input is a file path or base64 data
+  const isFilePath = !input.startsWith('data:image') &&
+    !/^[A-Za-z0-9+/=]{100,}/.test(input) &&
+    (path.isAbsolute(input) || /^[a-zA-Z]:[/\\]/.test(input));
+
+  let imagePath = null;
+  let tempPath = null;
+
+  if (isFilePath) {
+    // Verify the file exists
+    if (!fs.existsSync(input)) {
+      throw new Error('transcribeImage: file not found: ' + input);
+    }
+    imagePath = input;
+  } else {
+    // Write base64 data to a temp file
+    try {
+      tempPath = await writeTempImageFile(input, 'qbo-transcribe', 0);
+      imagePath = tempPath;
+    } catch (err) {
+      reportServerError({
+        message: `Image decode error (transcribeImage): ${err.message}`,
+        detail: 'Failed to write temp image file for transcribeImage.',
+        stack: err.stack || '',
+        source: 'claude.js',
+        category: 'runtime-error',
+      });
+      throw err;
+    }
+  }
+
+  try {
+    return await new Promise((resolve, reject) => {
+      let settled = false;
+
+      const args = ['-p', '--output-format', 'text', '--max-turns', '1'];
+      if (modelOverride) args.push('--model', modelOverride);
+      if (effortOverride) args.push('--effort', effortOverride);
+
+      addCompatibilityImageAccessArgs(args, [imagePath]);
+
+      let child;
+      try {
+        child = spawn('claude', args, {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          shell: true,
+          cwd: PROJECT_ROOT,
+          env: {
+            ...process.env,
+            CLAUDECODE: undefined,
+            CLAUDE_CODE_SIMPLE: '1',
+            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+          },
+        });
+      } catch (err) {
+        reportServerError({
+          message: `CLI spawn error (transcribeImage): ${err.message}`,
+          detail: 'Failed to start Claude CLI subprocess for transcribeImage.',
+          stack: err.stack || '',
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
+        return reject(err);
+      }
+
+      const stdinContent = appendImagePathsToPrompt(transcribePrompt, [imagePath]);
+      try { child.stdin.end(stdinContent); } catch { /* ignore */ }
+
+      let stdout = '';
+      let stderr = '';
+
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        try { child.kill('SIGTERM'); } catch { /* ignore */ }
+        const err = new Error('Claude CLI transcribeImage timed out after ' + timeoutMs + 'ms');
+        err.code = 'TIMEOUT';
+        reject(err);
+      }, timeoutMs);
+
+      child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
+      child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+
+      child.on('close', (code) => {
+        clearTimeout(timeout);
+        if (settled) return;
+        settled = true;
+
+        if (!didCliExitSuccessfully(code) && !stdout) {
+          const err = new Error(formatCliFailure(code, stderr));
+          reportServerError({
+            message: `CLI transcribeImage failed: exit code ${code}`,
+            detail: `stderr: ${(stderr || '').slice(0, 500)}`,
+            source: 'claude.js',
+            category: 'runtime-error',
+          });
+          return reject(err);
+        }
+
+        // Try to extract usage if output is JSON-wrapped
+        let usage = null;
+        let text = stdout;
+        try {
+          const parsed = JSON.parse(stdout);
+          usage = extractClaudeUsage(parsed, { fallbackModel: '' });
+          text = typeof parsed.result === 'string' ? parsed.result : stdout;
+        } catch { /* text output, not JSON — that's fine */ }
+
+        resolve({ text: text.trim(), usage });
+      });
+
+      child.on('error', (err) => {
+        clearTimeout(timeout);
+        if (settled) return;
+        settled = true;
+        reportServerError({
+          message: `CLI spawn error (transcribeImage): ${err.message}`,
+          detail: 'Claude CLI process emitted an error event during transcribeImage.',
+          stack: err.stack || '',
+          source: 'claude.js',
+          category: 'runtime-error',
+        });
+        reject(err);
+      });
+    });
+  } finally {
+    // Clean up temp file if we created one
+    if (tempPath) {
+      try { fs.unlinkSync(tempPath); } catch { /* ignore */ }
+    }
+  }
+}
+
+module.exports = { chat, parseEscalation, warmUp, prompt, transcribeImage };
 module.exports._internal = { parsePositiveInt, didCliExitSuccessfully };

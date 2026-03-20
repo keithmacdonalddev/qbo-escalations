@@ -6,6 +6,7 @@ import { useDevAgent } from '../context/DevAgentContext.jsx';
 import { useWorkspaceMonitorStream } from '../context/WorkspaceMonitorContext.jsx';
 import { useToast } from '../hooks/useToast.jsx';
 import WorkspaceBriefingCards from './WorkspaceBriefingCards.jsx';
+import ShipmentTracker from './ShipmentTracker.jsx';
 import {
   getAgentSessionSnapshot,
   useSharedAgentSession,
@@ -15,11 +16,14 @@ import {
   DEFAULT_REASONING_EFFORT,
   getAlternateProvider,
   getProviderShortLabel,
+  getReasoningEffortOptions,
   normalizeProvider,
   normalizeReasoningEffort,
+  PROVIDER_FAMILY,
   PROVIDER_OPTIONS,
-  REASONING_EFFORT_OPTIONS,
+  supportsLiveReasoning,
 } from '../lib/providerCatalog.js';
+import './WorkspaceAgentPanel.css';
 
 // ---------------------------------------------------------------------------
 // Relative time formatter for conversation history
@@ -220,6 +224,8 @@ function attachWorkspaceAISession(sessionId, {
   onThinking,
   onStatus,
   onActions,
+  onProviderError,
+  onFallback,
   onDone,
   onError,
 }) {
@@ -240,6 +246,8 @@ function attachWorkspaceAISession(sessionId, {
     onThinking,
     onStatus,
     onActions,
+    onProviderError,
+    onFallback,
     onDone: (data) => {
       const raw = data?.fullResponse || collectedText;
       const cleaned = raw.replace(/^✓\s*PM rules loaded\s*/i, '');
@@ -248,11 +256,12 @@ function attachWorkspaceAISession(sessionId, {
         fullResponse: cleaned,
       });
     },
-    onError: (err) => onError?.(err?.message || err?.error || 'AI error'),
+    onError: (err) => onError?.(err || { message: 'AI error' }),
   });
 }
 
 const WORKSPACE_STALL_ALERT_MS = 20_000; // hmr-bust
+const LIVE_REASONING_PAUSE_MS = 12_000;
 
 // ---------------------------------------------------------------------------
 // Helpers for the Recent EA Activity feed
@@ -761,6 +770,8 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
   // ---------------------------------------------------------------------------
   const [recentActivity, setRecentActivity] = useState([]);
   const [activityExpanded, setActivityExpanded] = useState(false);
+  const [activityScrollReady, setActivityScrollReady] = useState(false);
+  const hasStackAboveWelcome = Boolean((briefing && !briefingDismissed) || recentActivity.length > 0);
 
   useEffect(() => {
     if (!open) return;
@@ -779,6 +790,27 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     })();
     return () => { cancelled = true; };
   }, [open]);
+
+  useEffect(() => {
+    if (!activityExpanded) {
+      setActivityScrollReady(false);
+      return undefined;
+    }
+    setActivityScrollReady(false);
+    const timerId = window.setTimeout(() => {
+      setActivityScrollReady(true);
+    }, 180);
+    return () => window.clearTimeout(timerId);
+  }, [activityExpanded, recentActivity.length]);
+
+  const handleActivityToggle = useCallback(() => {
+    if (activityExpanded) {
+      setActivityScrollReady(false);
+      setActivityExpanded(false);
+      return;
+    }
+    setActivityExpanded(true);
+  }, [activityExpanded]);
 
   const initialSession = useMemo(() => {
     let initialProvider = DEFAULT_PROVIDER;
@@ -851,8 +883,15 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
   const [historyLoading, setHistoryLoading] = useState(false);
   const activeRequestRef = useRef(null);
   const stallTimerRef = useRef(null);
+  const reasoningPauseTimerRef = useRef(null);
+  const reasoningMetaRef = useRef({
+    provider: null,
+    supportsThinking: true,
+    lastThinkingAt: 0,
+  });
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
+  const [reasoningNotice, setReasoningNotice] = useState('');
 
   const clearStallWatch = useCallback(() => {
     if (stallTimerRef.current) {
@@ -861,6 +900,133 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     }
     activeRequestRef.current = null;
   }, []);
+
+  const clearReasoningWatch = useCallback(() => {
+    if (reasoningPauseTimerRef.current) {
+      clearTimeout(reasoningPauseTimerRef.current);
+      reasoningPauseTimerRef.current = null;
+    }
+  }, []);
+
+  const resetReasoningState = useCallback(() => {
+    clearReasoningWatch();
+    reasoningMetaRef.current = {
+      provider: null,
+      supportsThinking: true,
+      lastThinkingAt: 0,
+    };
+    setReasoningNotice('');
+  }, [clearReasoningWatch]);
+
+  const armStallWatch = useCallback(() => {
+    if (stallTimerRef.current) {
+      clearTimeout(stallTimerRef.current);
+      stallTimerRef.current = null;
+    }
+    if (typeof sendBackground !== 'function') return;
+    stallTimerRef.current = setTimeout(() => {
+      const active = activeRequestRef.current;
+      if (!active) return;
+      const elapsedMs = Date.now() - active.startedAt;
+      const idleMs = Date.now() - (active.lastActivityAt || active.startedAt);
+      sendBackground('auto-errors', [
+        '[AUTO-ERROR] Workspace panel request appears stuck',
+        '',
+        `Prompt: ${active.prompt}`,
+        `Elapsed: ${Math.round(elapsedMs / 1000)}s`,
+        `Idle: ${Math.round(idleMs / 1000)}s since last stream activity`,
+        active.currentProvider ? `Provider: ${active.currentProvider}` : '',
+        active.lastStatus ? `Last status: ${active.lastStatus}` : 'Last status: none received',
+        active.streamChars > 0 ? `Streamed chars: ${active.streamChars}` : 'No streamed output received yet',
+        active.view ? `View: ${active.view}` : '',
+        '',
+        'This was observed directly from the workspace panel while the request was in flight. Investigate the workspace route, SSE flow, and provider execution path.',
+      ].filter(Boolean).join('\n'), {
+        incidentMeta: {
+          kind: 'workspace-ui-stall',
+          severity: 'urgent',
+          category: 'workspace-ui-stall',
+          source: 'WorkspaceAgentPanel',
+          subsystem: 'workspace',
+          component: 'workspace-panel',
+          fingerprint: `workspace-ui-stall:${active.requestKey}`,
+        },
+        incidentContext: {
+          requestKey: active.requestKey,
+          prompt: active.prompt,
+          view: active.view || null,
+          context: active.context || null,
+          elapsedMs,
+          idleMs,
+          currentProvider: active.currentProvider || null,
+          lastStatus: active.lastStatus || null,
+          streamChars: active.streamChars || 0,
+          conversationHistoryLength: active.historyLength || 0,
+        },
+      });
+    }, WORKSPACE_STALL_ALERT_MS);
+  }, [sendBackground]);
+
+  const scheduleStallWatch = useCallback((requestMeta) => {
+    const startedAt = requestMeta?.startedAt || Date.now();
+    activeRequestRef.current = {
+      ...(requestMeta || {}),
+      startedAt,
+      lastActivityAt: Date.now(),
+    };
+    armStallWatch();
+  }, [armStallWatch]);
+
+  const touchStallWatch = useCallback((patch) => {
+    const active = activeRequestRef.current;
+    if (!active) return;
+    const nextPatch = typeof patch === 'function' ? patch(active) : patch;
+    activeRequestRef.current = {
+      ...active,
+      ...(nextPatch || {}),
+      lastActivityAt: Date.now(),
+    };
+    armStallWatch();
+  }, [armStallWatch]);
+
+  const scheduleReasoningPauseNotice = useCallback(() => {
+    clearReasoningWatch();
+    const meta = reasoningMetaRef.current;
+    if (!meta.supportsThinking || !meta.lastThinkingAt) return;
+    reasoningPauseTimerRef.current = setTimeout(() => {
+      const latest = reasoningMetaRef.current;
+      if (!latest.supportsThinking || !latest.lastThinkingAt) return;
+      if ((Date.now() - latest.lastThinkingAt) < LIVE_REASONING_PAUSE_MS) return;
+      const providerLabel = latest.provider ? getProviderShortLabel(latest.provider) : 'The current provider';
+      setReasoningNotice(`${providerLabel} stopped sending live reasoning. The response may still be running.`);
+    }, LIVE_REASONING_PAUSE_MS);
+  }, [clearReasoningWatch]);
+
+  const syncReasoningProvider = useCallback((providerId) => {
+    const nextProvider = providerId || null;
+    const supportsThinking = nextProvider ? supportsLiveReasoning(nextProvider) : true;
+    reasoningMetaRef.current = {
+      ...reasoningMetaRef.current,
+      provider: nextProvider,
+      supportsThinking,
+    };
+
+    if (!nextProvider) {
+      setReasoningNotice('');
+      return;
+    }
+
+    if (!supportsThinking) {
+      clearReasoningWatch();
+      setReasoningNotice(`${getProviderShortLabel(nextProvider)} does not stream live reasoning. The response is still running.`);
+      return;
+    }
+
+    setReasoningNotice('');
+    if (reasoningMetaRef.current.lastThinkingAt) {
+      scheduleReasoningPauseNotice();
+    }
+  }, [clearReasoningWatch, scheduleReasoningPauseNotice]);
 
   const abortActiveAgentSession = useCallback(async (reason) => {
     if (!activeAgentSessionId) return;
@@ -915,9 +1081,10 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
       preserveKeys: ['provider', 'mode', 'fallbackProvider', 'reasoningEffort'],
     });
     clearStallWatch();
+    resetReasoningState();
     setController(null);
     setHistoryOpen(false);
-  }, [abortActiveAgentSession, abortSession, clearSession, clearStallWatch, setController, setWorkspaceSessionId, setConversationRestored, setActiveAgentSessionId]);
+  }, [abortActiveAgentSession, abortSession, clearSession, clearStallWatch, resetReasoningState, setController, setWorkspaceSessionId, setConversationRestored, setActiveAgentSessionId]);
 
   const startNewConversation = useCallback(() => {
     abortActiveAgentSession('Starting new conversation');
@@ -929,54 +1096,19 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
       preserveKeys: ['provider', 'mode', 'fallbackProvider', 'reasoningEffort'],
     });
     clearStallWatch();
+    resetReasoningState();
     setController(null);
     setHistoryOpen(false);
-  }, [abortActiveAgentSession, abortSession, clearSession, clearStallWatch, setController, setWorkspaceSessionId, setConversationRestored, setActiveAgentSessionId]);
-
-  const scheduleStallWatch = useCallback((requestMeta) => {
-    clearStallWatch();
-    activeRequestRef.current = requestMeta;
-    stallTimerRef.current = setTimeout(() => {
-      const active = activeRequestRef.current;
-      if (!active || typeof sendBackground !== 'function') return;
-      const elapsedMs = Date.now() - active.startedAt;
-      sendBackground('auto-errors', [
-        '[AUTO-ERROR] Workspace panel request appears stuck',
-        '',
-        `Prompt: ${active.prompt}`,
-        `Elapsed: ${Math.round(elapsedMs / 1000)}s`,
-        active.lastStatus ? `Last status: ${active.lastStatus}` : 'Last status: none received',
-        active.streamChars > 0 ? `Streamed chars: ${active.streamChars}` : 'No streamed output received yet',
-        active.view ? `View: ${active.view}` : '',
-        '',
-        'This was observed directly from the workspace panel while the request was in flight. Investigate the workspace route, SSE flow, and provider execution path.',
-      ].filter(Boolean).join('\n'), {
-        incidentMeta: {
-          kind: 'workspace-ui-stall',
-          severity: 'urgent',
-          category: 'workspace-ui-stall',
-          source: 'WorkspaceAgentPanel',
-          subsystem: 'workspace',
-          component: 'workspace-panel',
-          fingerprint: `workspace-ui-stall:${active.requestKey}`,
-        },
-        incidentContext: {
-          requestKey: active.requestKey,
-          prompt: active.prompt,
-          view: active.view || null,
-          context: active.context || null,
-          elapsedMs,
-          lastStatus: active.lastStatus || null,
-          streamChars: active.streamChars || 0,
-          conversationHistoryLength: active.historyLength || 0,
-        },
-      });
-    }, WORKSPACE_STALL_ALERT_MS);
-  }, [clearStallWatch, sendBackground]);
+  }, [abortActiveAgentSession, abortSession, clearSession, clearStallWatch, resetReasoningState, setController, setWorkspaceSessionId, setConversationRestored, setActiveAgentSessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamText]);
+
+  useEffect(() => () => {
+    clearStallWatch();
+    clearReasoningWatch();
+  }, [clearStallWatch, clearReasoningWatch]);
 
   // Drain proactive message queue when not streaming
   useEffect(() => {
@@ -1079,26 +1211,83 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     const { abort } = attachWorkspaceAISession(agentSessionId, {
       onSession: (sessionMeta) => {
         const conversationId = sessionMeta?.metadata?.conversationSessionId || null;
+        const currentProvider = sessionMeta?.metadata?.currentProvider || sessionMeta?.metadata?.provider || null;
         if (conversationId) setWorkspaceSessionId(conversationId);
+        if (currentProvider) {
+          syncReasoningProvider(currentProvider);
+          touchStallWatch({
+            currentProvider,
+            lastStatus: sessionMeta?.status === 'running' ? 'Streaming response...' : sessionMeta?.status || null,
+          });
+        }
       },
       onStart: (data) => {
+        resetReasoningState();
         if (data?.conversationSessionId) {
           setWorkspaceSessionId(data.conversationSessionId);
         }
+        const currentProvider = data?.provider || data?.primaryProvider || null;
+        if (currentProvider) {
+          syncReasoningProvider(currentProvider);
+        }
+        touchStallWatch({
+          currentProvider: currentProvider || null,
+          lastStatus: 'Thinking...',
+        });
       },
       onChunk: (chunk) => {
+        touchStallWatch((active) => ({
+          streamChars: (active.streamChars || 0) + (chunk?.length || 0),
+          currentProvider: active.currentProvider || reasoningMetaRef.current.provider || null,
+        }));
         patchSession((prev) => ({ ...prev, streamText: `${prev.streamText || ''}${chunk}` }));
       },
       onThinking: (data) => {
+        const currentProvider = data?.provider || reasoningMetaRef.current.provider || null;
+        reasoningMetaRef.current = {
+          provider: currentProvider,
+          supportsThinking: true,
+          lastThinkingAt: Date.now(),
+        };
+        setReasoningNotice('');
+        scheduleReasoningPauseNotice();
+        touchStallWatch({
+          currentProvider: currentProvider || null,
+          lastStatus: currentProvider
+            ? `${getProviderShortLabel(currentProvider)} streaming live reasoning`
+            : 'Streaming live reasoning',
+        });
         patchSession((prev) => ({
           ...prev,
           thinkingText: `${prev.thinkingText || ''}${data?.thinking || ''}`,
         }));
       },
       onStatus: (data) => {
+        touchStallWatch({
+          lastStatus: data?.message || data?.phase || 'Working...',
+          currentProvider: activeRequestRef.current?.currentProvider || reasoningMetaRef.current.provider || null,
+        });
+        if (
+          data?.phase === 'actions-detected'
+          || data?.phase === 'actions'
+          || data?.phase === 'pass2'
+          || data?.phase === 'summary'
+          || String(data?.phase || '').startsWith('loop-')
+        ) {
+          clearReasoningWatch();
+          setReasoningNotice('');
+        }
         patchSession({ statusState: data || null });
       },
       onActions: (data) => {
+        clearReasoningWatch();
+        setReasoningNotice('');
+        touchStallWatch((active) => ({
+          lastStatus: data?.results?.length
+            ? `Executed ${data.results.length} action${data.results.length === 1 ? '' : 's'}`
+            : 'Executed actions',
+          currentProvider: active.currentProvider || reasoningMetaRef.current.provider || null,
+        }));
         patchSession({
           lastActions: data.results || [],
           statusState: null,
@@ -1109,10 +1298,40 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
           window.dispatchEvent(new CustomEvent('calendar-changed'));
         }
       },
+      onProviderError: (data) => {
+        touchStallWatch({
+          lastStatus: data?.message || 'Workspace provider error',
+          currentProvider: data?.provider || activeRequestRef.current?.currentProvider || reasoningMetaRef.current.provider || null,
+        });
+      },
+      onFallback: (data) => {
+        const fromProvider = data?.from || null;
+        const toProvider = data?.to || null;
+        if (toProvider) {
+          syncReasoningProvider(toProvider);
+        }
+        touchStallWatch({
+          currentProvider: toProvider || activeRequestRef.current?.currentProvider || null,
+          lastStatus: `Switching provider from ${getProviderShortLabel(fromProvider || provider)} to ${getProviderShortLabel(toProvider || fallbackProvider)}...`,
+        });
+        patchSession((prev) => ({
+          ...prev,
+          statusState: {
+            ...(prev.statusState || {}),
+            type: 'fallback',
+            from: fromProvider,
+            to: toProvider,
+            phase: data?.phase || prev.statusState?.phase || 'pass1',
+            sessionId: data?.sessionId || prev.statusState?.sessionId || null,
+            message: `Switching provider from ${getProviderShortLabel(fromProvider || provider)} to ${getProviderShortLabel(toProvider || fallbackProvider)}...`,
+          },
+        }));
+      },
       onDone: (data) => {
         setController(null);
         setActiveAgentSessionId(null);
         clearStallWatch();
+        resetReasoningState();
         patchSession((prev) => {
           const newMsg = {
             role: 'assistant',
@@ -1139,14 +1358,21 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
         });
       },
       onError: (err) => {
+        const errorMessage = err?.message || err?.error || String(err || 'AI error');
         setController(null);
         setActiveAgentSessionId(null);
         clearStallWatch();
+        resetReasoningState();
         patchSession((prev) => ({
           ...prev,
           messages: [
             ...prev.messages,
-            { role: 'assistant', content: `Error: ${err}`, isError: true, timestamp: new Date().toISOString() },
+            {
+              role: 'assistant',
+              content: err?.detail ? `Error: ${errorMessage}\n${err.detail}` : `Error: ${errorMessage}`,
+              isError: true,
+              timestamp: new Date().toISOString(),
+            },
           ],
           streamText: '',
           thinkingText: '',
@@ -1157,7 +1383,18 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     });
     setController(abort);
     return abort;
-  }, [patchSession, setController, clearStallWatch]);
+  }, [
+    patchSession,
+    setController,
+    clearReasoningWatch,
+    clearStallWatch,
+    fallbackProvider,
+    provider,
+    resetReasoningState,
+    scheduleReasoningPauseNotice,
+    syncReasoningProvider,
+    touchStallWatch,
+  ]);
 
   useEffect(() => {
     if (!activeAgentSessionId) return;
@@ -1211,10 +1448,12 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
       context: viewContext || null,
       historyLength: history.length,
       startedAt: Date.now(),
-      lastStatus: null,
+      lastStatus: 'Creating workspace session...',
       streamChars: 0,
+      currentProvider: provider,
     };
     scheduleStallWatch(requestMeta);
+    resetReasoningState();
     patchSession((prev) => ({
       ...prev,
       messages: [...prev.messages, { role: 'user', content: text, timestamp: new Date().toISOString() }],
@@ -1232,7 +1471,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
       const nowIso = new Date().toISOString();
       const in48hIso = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
       const [inboxRes, calRes, draftsRes] = await Promise.all([
-        fetch('/api/gmail/messages?maxResults=10&q=' + encodeURIComponent('is:unread in:inbox'))
+        fetch('/api/gmail/messages?maxResults=100&q=' + encodeURIComponent('is:unread in:inbox'))
           .then((r) => r.json()).catch(() => null),
         fetch('/api/calendar/events?' + new URLSearchParams({
           timeMin: nowIso,
@@ -1315,6 +1554,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
       clearStallWatch();
       setController(null);
       setActiveAgentSessionId(null);
+      resetReasoningState();
       patchSession((prev) => ({
         ...prev,
         messages: [
@@ -1341,6 +1581,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     clearStallWatch,
     attachExistingWorkspaceSession,
     patchSession,
+    resetReasoningState,
     setController,
   ]);
 
@@ -1482,6 +1723,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
           preserveKeys: ['provider', 'mode', 'fallbackProvider', 'reasoningEffort'],
         });
         clearStallWatch();
+        resetReasoningState();
         setController(null);
         return true;
       }
@@ -1547,6 +1789,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
             streaming: false,
             statusState: null,
           }));
+          resetReasoningState();
           setController(null);
           setActiveAgentSessionId(null);
           addSystemMessage('Response stopped.');
@@ -1611,7 +1854,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     abortActiveAgentSession, abortSession, addSystemMessage, clearSession,
     clearStallWatch, fallbackProvider, messages, mode, patchSession, provider,
     reasoningEffort, setActiveAgentSessionId, setController,
-    setConversationRestored, setWorkspaceSessionId, streaming, workspaceSessionId,
+    resetReasoningState, setConversationRestored, setWorkspaceSessionId, streaming, workspaceSessionId,
   ]);
 
   const handleSend = useCallback((e) => {
@@ -1643,6 +1886,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     abortActiveAgentSession('Workspace session stopped by the user');
     abortSession();
     clearStallWatch();
+    resetReasoningState();
     patchSession((prev) => ({
       ...prev,
       messages: prev.streamText
@@ -1655,7 +1899,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     }));
     setController(null);
     setActiveAgentSessionId(null);
-  }, [abortActiveAgentSession, abortSession, clearStallWatch, patchSession, setController]);
+  }, [abortActiveAgentSession, abortSession, clearStallWatch, patchSession, resetReasoningState, setController]);
 
   const handleQuickAction = useCallback((promptText) => {
     if (streaming) return;
@@ -1875,6 +2119,16 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     return `${base} (${elapsedSeconds}s)`;
   }, [statusState]);
 
+  const thinkingPhaseLabel = useMemo(() => {
+    if (statusState?.phase === 'pass2' || statusState?.phase === 'summary') return 'Summary pass';
+    if (statusState?.phase === 'pass1') return 'Thinking';
+    if (statusState?.phase === 'actions-detected') return 'Planning actions';
+    if (statusState?.phase === 'actions') return 'Executing actions';
+    return 'Responding';
+  }, [statusState]);
+
+  const showThinkingPanel = streaming && Boolean(thinkingText || reasoningNotice);
+
   // Use the shared markdown renderer for full formatting (headings, tables, lists, code, etc.)
   function renderText(text) {
     return renderMarkdown(text);
@@ -2061,7 +2315,15 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
                 key={option.value}
                 type="button"
                 className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                onClick={() => patchSession({ provider: option.value })}
+                onClick={() => {
+                  const patch = { provider: option.value };
+                  const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                  const allowed = getReasoningEffortOptions(nextFamily);
+                  if (!allowed.some((o) => o.value === reasoningEffort)) {
+                    patch.reasoningEffort = 'high';
+                  }
+                  patchSession(patch);
+                }}
               >
                 <span>{option.label}</span>
                 <span className="check">{provider === option.value ? '\u2713' : ''}</span>
@@ -2102,7 +2364,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
             )}
             <div className="provider-popover-divider" />
             <div className="provider-popover-label">Reasoning Effort</div>
-            {REASONING_EFFORT_OPTIONS.map((option) => (
+            {getReasoningEffortOptions(PROVIDER_FAMILY[provider] || 'claude').map((option) => (
               <button
                 key={option.value}
                 type="button"
@@ -2437,19 +2699,23 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
           )}
         </AnimatePresence>
 
+        {/* Active shipments tracker */}
+        <ShipmentTracker />
+
         {/* Recent EA Activity */}
         <AnimatePresence>
           {recentActivity.length > 0 && (
             <motion.div
               className="workspace-activity-feed"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
+              layout
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.2 }}
             >
               <div
                 className="workspace-activity-header"
-                onClick={() => setActivityExpanded((p) => !p)}
+                onClick={handleActivityToggle}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -2463,31 +2729,32 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
               </div>
-              <AnimatePresence>
-                {activityExpanded && (
-                  <motion.div
-                    className="workspace-activity-list"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    {recentActivity.map((act) => (
-                      <div key={act._id} className="workspace-activity-item">
-                        <span className="workspace-activity-time">{relativeTime(act.timestamp)}</span>
-                        <span className="workspace-activity-dot">{activityIcon(act.type)}</span>
-                        <span className="workspace-activity-summary">{act.summary}</span>
-                      </div>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              <motion.div
+                className="workspace-activity-list-wrapper"
+                initial={false}
+                animate={{
+                  opacity: activityExpanded ? 1 : 0,
+                  height: activityExpanded ? Math.min(recentActivity.length * 26 + 6, 180) : 0,
+                }}
+                transition={{ duration: 0.15 }}
+                aria-hidden={!activityExpanded}
+              >
+                <div className={`workspace-activity-list${activityScrollReady ? ' is-scrollable' : ''}`}>
+                  {recentActivity.map((act) => (
+                    <div key={act._id} className="workspace-activity-item">
+                      <span className="workspace-activity-time">{relativeTime(act.timestamp)}</span>
+                      <span className="workspace-activity-dot">{activityIcon(act.type)}</span>
+                      <span className="workspace-activity-summary">{act.summary}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
         {messages.length === 0 && !streaming && (
-          <div className="workspace-agent-welcome">
+          <div className={`workspace-agent-welcome${hasStackAboveWelcome ? ' is-compact' : ''}`}>
             <div className="workspace-agent-welcome-icon">
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--ink-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
@@ -2583,6 +2850,9 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
                 {msg.role === 'assistant' && msg.usage?.totalCostMicros > 0 && (
                   <span>${(msg.usage.totalCostMicros / 1_000_000).toFixed(4)}</span>
                 )}
+                {msg.role === 'assistant' && msg.usage?.model && (
+                  <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '10px' }}>{msg.usage.model}</span>
+                )}
                 <CopyButton text={msg.content || ''} style={{ padding: 0, background: 'none', border: 'none', opacity: 0.5, cursor: 'pointer' }} />
               </div>
             </div>
@@ -2636,17 +2906,22 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
           )}
         </AnimatePresence>
 
-        {streaming && thinkingText && (
+        {showThinkingPanel && (
           <div className="workspace-agent-thinking">
             <div className="workspace-agent-thinking-header">
-              <span className="workspace-agent-thinking-pill">Live reasoning</span>
+              <span className="workspace-agent-thinking-pill">{thinkingText ? 'Live reasoning' : 'Reasoning status'}</span>
               <span className="workspace-agent-thinking-phase">
-                {statusState?.phase === 'pass2' || statusState?.phase === 'summary' ? 'Summary pass' : statusState?.phase === 'pass1' ? 'Thinking' : statusState?.phase === 'actions-detected' ? 'Planning actions' : 'Responding'}
+                {thinkingPhaseLabel}
               </span>
             </div>
             <div className="workspace-agent-thinking-content">
               {thinkingText}
-              <span className="streaming-cursor" />
+              {thinkingText && <span className="streaming-cursor" />}
+              {reasoningNotice && (
+                <div className="workspace-agent-thinking-note">
+                  {reasoningNotice}
+                </div>
+              )}
             </div>
           </div>
         )}

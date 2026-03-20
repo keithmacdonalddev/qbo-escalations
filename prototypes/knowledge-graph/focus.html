@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Graph — Neighborhood Focus View</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    /* ===== RESET & BASE ===== */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000008; font-family: 'Inter', -apple-system, sans-serif; color: #e0e6f0; }
+
+    /* ===== GLASS MORPHISM ===== */
+    .glass {
+      background: rgba(8, 12, 28, 0.72);
+      backdrop-filter: blur(20px) saturate(1.3);
+      -webkit-backdrop-filter: blur(20px) saturate(1.3);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+    }
+
+    /* ===== TOP BAR ===== */
+    #topBar {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 20px; height: 52px;
+      border-radius: 0; border-top: none; border-left: none; border-right: none;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: rgba(4, 6, 18, 0.85);
+      backdrop-filter: blur(24px);
+    }
+    #backBtn {
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      color: #8899bb; border-radius: 8px; padding: 5px 12px; cursor: pointer;
+      font-size: 13px; font-family: inherit; transition: all 0.2s;
+    }
+    #backBtn:hover { background: rgba(255,255,255,0.1); color: #c0d0f0; }
+    #backBtn:disabled { opacity: 0.3; cursor: default; }
+    #backBtn svg { width: 14px; height: 14px; }
+    .breadcrumb { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .breadcrumb-segment { font-size: 13px; color: #5a6a8a; white-space: nowrap; }
+    .breadcrumb-segment.active { color: #c8d4f0; font-weight: 600; }
+    .breadcrumb-sep { color: #334; font-size: 11px; }
+    #nodeSearch { position: relative; margin-left: auto; }
+    #nodeSearchInput {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+      color: #c0d0f0; border-radius: 8px; padding: 6px 12px 6px 32px;
+      font-size: 13px; font-family: inherit; width: 220px; outline: none;
+      transition: all 0.2s;
+    }
+    #nodeSearchInput::placeholder { color: #445; }
+    #nodeSearchInput:focus { border-color: rgba(61,194,255,0.4); background: rgba(255,255,255,0.09); width: 280px; }
+    #nodeSearch svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: #445; pointer-events: none; }
+    #searchResults {
+      position: absolute; top: 100%; right: 0; margin-top: 4px;
+      width: 320px; max-height: 300px; overflow-y: auto;
+      border-radius: 10px; display: none;
+      background: rgba(8, 12, 28, 0.92); border: 1px solid rgba(255,255,255,0.08);
+      backdrop-filter: blur(24px);
+    }
+    #searchResults.visible { display: block; }
+    .search-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; cursor: pointer; transition: background 0.15s;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+    .search-item:hover { background: rgba(255,255,255,0.06); }
+    .search-item:last-child { border-bottom: none; }
+    .search-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .search-label { font-size: 13px; color: #b0c0e0; }
+    .search-type { font-size: 11px; color: #445; margin-left: auto; text-transform: capitalize; }
+
+    /* ===== NODE INFO CARD ===== */
+    #infoCard {
+      position: fixed; bottom: 24px; left: 24px; z-index: 100;
+      width: 320px; padding: 20px;
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    #infoCard.hidden { opacity: 0; transform: translateY(10px); pointer-events: none; }
+    .info-type { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+    .info-type-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .info-type-label { font-size: 12px; color: #6a7a9a; text-transform: uppercase; letter-spacing: 0.5px; }
+    .info-title { font-size: 18px; font-weight: 700; color: #e8eef8; margin-bottom: 10px; line-height: 1.3; }
+    .info-meta { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 12px; }
+    .info-meta-item { font-size: 12px; color: #6a7a9a; }
+    .info-meta-item span { color: #a0b0d0; }
+    .info-entities { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px; }
+    .info-entity {
+      font-size: 11px; font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px; border-radius: 4px;
+      background: rgba(255,255,255,0.06); color: #8899bb;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    .info-actions { display: flex; gap: 8px; }
+    .info-btn {
+      font-size: 12px; font-family: inherit; padding: 6px 14px;
+      border-radius: 6px; cursor: pointer; transition: all 0.2s;
+      border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.06); color: #8899bb;
+    }
+    .info-btn:hover { background: rgba(255,255,255,0.1); color: #c0d0f0; }
+    .info-btn.primary { background: rgba(61,194,255,0.15); color: #3dc2ff; border-color: rgba(61,194,255,0.3); }
+    .info-btn.primary:hover { background: rgba(61,194,255,0.25); }
+
+    /* ===== LEGEND ===== */
+    #legend {
+      position: fixed; bottom: 24px; right: 24px; z-index: 100;
+      padding: 16px 20px; min-width: 200px;
+    }
+    .legend-title { font-size: 11px; color: #4a5a7a; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; font-weight: 600; }
+    .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 20px; }
+    .legend-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #7a8aaa; }
+    .legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .legend-count { color: #4a5a7a; margin-left: auto; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+
+    /* ===== HOVER TOOLTIP ===== */
+    #hoverTooltip {
+      position: fixed; z-index: 200; pointer-events: none;
+      padding: 10px 14px; max-width: 260px;
+      background: rgba(4, 8, 20, 0.92); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px; backdrop-filter: blur(16px);
+      opacity: 0; transition: opacity 0.15s; font-size: 12px;
+    }
+    #hoverTooltip.visible { opacity: 1; }
+    .tooltip-name { font-weight: 600; color: #e0e8f4; margin-bottom: 4px; }
+    .tooltip-type { font-size: 11px; color: #5a6a8a; text-transform: capitalize; }
+    .tooltip-edge { font-size: 11px; color: #5a6a8a; margin-top: 4px; }
+    .tooltip-edge span { font-weight: 500; }
+
+    /* ===== TRANSITION OVERLAY ===== */
+    #transitionOverlay {
+      position: fixed; inset: 0; z-index: 50;
+      background: radial-gradient(ellipse at center, transparent 0%, rgba(0,0,8,0.6) 100%);
+      pointer-events: none; opacity: 0; transition: opacity 0.4s;
+    }
+    #transitionOverlay.active { opacity: 1; }
+
+    /* ===== ORBIT INDICATOR ===== */
+    #orbitIndicator {
+      position: fixed; top: 64px; right: 20px; z-index: 100;
+      font-size: 11px; color: #334; padding: 4px 10px;
+      border-radius: 6px; background: rgba(0,0,0,0.3);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    #orbitIndicator.visible { opacity: 1; }
+
+    /* ===== SCROLLBAR ===== */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <div id="topBar" class="glass">
+    <button id="backBtn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      Back
+    </button>
+    <div class="breadcrumb">
+      <span class="breadcrumb-segment">Knowledge Graph</span>
+      <span class="breadcrumb-sep">&rsaquo;</span>
+      <span class="breadcrumb-segment active" id="breadcrumbTitle">OL-301 Bank Feed Disconnect</span>
+    </div>
+    <div id="nodeSearch">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input id="nodeSearchInput" type="text" placeholder="Search nodes..." autocomplete="off" />
+      <div id="searchResults"></div>
+    </div>
+  </div>
+
+  <!-- NODE INFO CARD -->
+  <div id="infoCard" class="glass">
+    <div class="info-type">
+      <div class="info-type-dot" id="infoTypeDot"></div>
+      <span class="info-type-label" id="infoTypeLabel"></span>
+    </div>
+    <div class="info-title" id="infoTitle"></div>
+    <div class="info-meta" id="infoMeta"></div>
+    <div class="info-entities" id="infoEntities"></div>
+    <div class="info-actions">
+      <button class="info-btn primary">Open Source</button>
+      <button class="info-btn" onclick="window.open('explorer.html','_self')">Full Graph &rarr;</button>
+    </div>
+  </div>
+
+  <!-- LEGEND -->
+  <div id="legend" class="glass">
+    <div class="legend-title">Edge Types</div>
+    <div class="legend-grid" id="legendGrid"></div>
+  </div>
+
+  <!-- HOVER TOOLTIP -->
+  <div id="hoverTooltip">
+    <div class="tooltip-name" id="tooltipName"></div>
+    <div class="tooltip-type" id="tooltipType"></div>
+    <div class="tooltip-edge" id="tooltipEdge"></div>
+  </div>
+
+  <!-- TRANSITION OVERLAY -->
+  <div id="transitionOverlay"></div>
+
+  <!-- ORBIT INDICATOR -->
+  <div id="orbitIndicator">Auto-orbiting &mdash; click to interact</div>
+
+  <!-- 3D GRAPH CONTAINER -->
+  <div id="graphContainer"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.79.1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three-spritetext"></script>
+
+  <script type="module">
+    import { UnrealBloomPass } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+    const THREE = window.THREE;
+
+      // ============================================================
+      //  COLOR MAPS
+      // ============================================================
+      const NODE_COLORS = {
+        escalation:    '#ff6b35',
+        conversation:  '#3dc2ff',
+        investigation: '#ff4961',
+        playbook:      '#00d68f',
+        email:         '#b366ff',
+        template:      '#2dd4a8',
+        knowledge:     '#ffd866'
+      };
+
+      const EDGE_COLORS = {
+        error_code:     '#ff6b35',
+        customer:       '#3dc2ff',
+        investigation:  '#ff4961',
+        symptom:        '#00d68f',
+        semantic:       '#b366ff',
+        fk_link:        '#8899aa',
+        knowledge:      '#ffd866',
+        template_match: '#2dd4a8'
+      };
+
+      const EDGE_LABELS = {
+        error_code:     'Error Code',
+        customer:       'Customer',
+        investigation:  'Investigation',
+        symptom:        'Symptom',
+        semantic:       'Semantic',
+        fk_link:        'FK Link',
+        knowledge:      'Knowledge',
+        template_match: 'Template'
+      };
+
+      // ============================================================
+      //  MOCK DATA
+      // ============================================================
+      const allNodes = [
+        { id: 'ol-301', label: 'OL-301 Bank Feed Disconnect', type: 'escalation', category: 'Bank Feeds', status: 'Open', date: '2026-03-12', entities: ['OL-301', 'COID:4829371', 'Chase'], connections: 12 },
+        { id: 'chat-ol301', label: 'Chat: OL-301 Troubleshooting', type: 'conversation', category: 'Bank Feeds', date: '2026-03-12', entities: ['OL-301'], connections: 4 },
+        { id: 'inv-038291', label: 'INV-038291 Chase OAuth March Outage', type: 'investigation', category: 'Bank Feeds', status: 'Active', date: '2026-03-10', entities: ['INV-038291', 'Chase', 'OAuth'], connections: 9 },
+        { id: 'ol-301-chase', label: 'OL-301 Chase OAuth Token Expired', type: 'escalation', category: 'Bank Feeds', status: 'Resolved', date: '2026-03-11', entities: ['OL-301', 'Chase', 'OAuth'], connections: 6 },
+        { id: 'email-chase', label: 'RE: Chase OL-301 Cluster Report', type: 'email', date: '2026-03-11', entities: ['OL-301', 'Chase'], connections: 3 },
+        { id: 'pb-bankfeed', label: 'Bank Feed Troubleshooting Guide', type: 'playbook', category: 'Bank Feeds', entities: ['Bank Feeds'], connections: 8 },
+        { id: 'kn-chase-oauth', label: 'Chase OAuth Migration Pattern', type: 'knowledge', category: 'Bank Feeds', entities: ['Chase', 'OAuth'], connections: 5 },
+        { id: 'tpl-reconnect', label: 'Bank Feed Reconnection Steps', type: 'template', category: 'Bank Feeds', entities: ['Bank Feeds'], connections: 3 },
+        { id: 'olsu-1024', label: 'OLSU-1024 Multi-User Sync', type: 'escalation', category: 'Bank Feeds', status: 'Open', date: '2026-03-13', entities: ['OLSU-1024'], connections: 4 },
+        { id: 'rule-automatch', label: 'Bank Rule Auto-Match Broken', type: 'escalation', category: 'Bank Feeds', status: 'Open', date: '2026-03-09', entities: ['Bank Rules'], connections: 3 },
+        { id: 'chat-chase-oauth', label: 'Chat: Chase OAuth Pattern', type: 'conversation', category: 'Bank Feeds', date: '2026-03-10', entities: ['Chase', 'OAuth'], connections: 5 },
+        { id: 'err-324', label: 'Error 324 Duplicate Transactions', type: 'escalation', category: 'Bank Feeds', status: 'Investigating', date: '2026-03-08', entities: ['Error 324', 'Duplicates'], connections: 2 },
+        { id: 'email-payroll', label: 'FWD: Payroll Tax Hotfix Timeline', type: 'email', date: '2026-03-07', entities: ['Payroll', 'Tax'], connections: 2 },
+        // INV-038291 extra neighbors
+        { id: 'inv-payroll', label: 'INV-041002 Payroll Direct Deposit Failure', type: 'investigation', category: 'Payroll', status: 'Active', date: '2026-03-09', entities: ['INV-041002', 'Payroll'], connections: 6 },
+        { id: 'chat-inv-chase', label: 'Chat: INV-038291 Chase Deep Dive', type: 'conversation', category: 'Bank Feeds', date: '2026-03-11', entities: ['INV-038291'], connections: 3 },
+        { id: 'kn-oauth-refresh', label: 'OAuth Token Refresh Lifecycle', type: 'knowledge', category: 'Auth', entities: ['OAuth', 'Token'], connections: 7 },
+        { id: 'email-inv-update', label: 'RE: March Outage Postmortem Draft', type: 'email', date: '2026-03-13', entities: ['INV-038291', 'Postmortem'], connections: 2 },
+        { id: 'tpl-inv-summary', label: 'Investigation Summary Template', type: 'template', category: 'Investigations', entities: ['Investigation'], connections: 4 },
+      ];
+
+      const nodeMap = {};
+      allNodes.forEach(n => { nodeMap[n.id] = n; });
+
+      const allEdges = [
+        // OL-301 star system
+        { source: 'ol-301', target: 'chat-ol301', type: 'fk_link', weight: 0.95 },
+        { source: 'ol-301', target: 'inv-038291', type: 'investigation', weight: 0.92 },
+        { source: 'ol-301', target: 'ol-301-chase', type: 'error_code', weight: 0.96 },
+        { source: 'ol-301', target: 'email-chase', type: 'semantic', weight: 0.75 },
+        { source: 'ol-301', target: 'pb-bankfeed', type: 'semantic', weight: 0.78 },
+        { source: 'ol-301', target: 'kn-chase-oauth', type: 'knowledge', weight: 0.78 },
+        { source: 'ol-301', target: 'tpl-reconnect', type: 'semantic', weight: 0.55 },
+        { source: 'ol-301', target: 'olsu-1024', type: 'symptom', weight: 0.55 },
+        { source: 'ol-301', target: 'rule-automatch', type: 'symptom', weight: 0.55 },
+        { source: 'ol-301', target: 'chat-chase-oauth', type: 'semantic', weight: 0.80 },
+        { source: 'ol-301', target: 'err-324', type: 'symptom', weight: 0.35 },
+        { source: 'ol-301', target: 'email-payroll', type: 'semantic', weight: 0.25 },
+        // INV-038291 star system
+        { source: 'inv-038291', target: 'ol-301-chase', type: 'error_code', weight: 0.90 },
+        { source: 'inv-038291', target: 'email-chase', type: 'semantic', weight: 0.82 },
+        { source: 'inv-038291', target: 'kn-chase-oauth', type: 'knowledge', weight: 0.88 },
+        { source: 'inv-038291', target: 'chat-chase-oauth', type: 'semantic', weight: 0.76 },
+        { source: 'inv-038291', target: 'inv-payroll', type: 'investigation', weight: 0.45 },
+        { source: 'inv-038291', target: 'chat-inv-chase', type: 'fk_link', weight: 0.93 },
+        { source: 'inv-038291', target: 'kn-oauth-refresh', type: 'knowledge', weight: 0.85 },
+        { source: 'inv-038291', target: 'email-inv-update', type: 'semantic', weight: 0.78 },
+        { source: 'inv-038291', target: 'tpl-inv-summary', type: 'template_match', weight: 0.60 },
+        { source: 'inv-038291', target: 'pb-bankfeed', type: 'semantic', weight: 0.52 },
+        { source: 'inv-038291', target: 'ol-301', type: 'investigation', weight: 0.92 },
+        // Cross-links
+        { source: 'ol-301-chase', target: 'kn-chase-oauth', type: 'knowledge', weight: 0.70 },
+        { source: 'chat-ol301', target: 'pb-bankfeed', type: 'semantic', weight: 0.50 },
+        { source: 'olsu-1024', target: 'rule-automatch', type: 'symptom', weight: 0.60 },
+        { source: 'inv-payroll', target: 'email-payroll', type: 'semantic', weight: 0.65 },
+      ];
+
+      // ============================================================
+      //  STATE
+      // ============================================================
+      let currentCenterId = 'ol-301';
+      let navigationHistory = [];
+      let autoOrbit = true;
+      let orbitAngle = 0;
+      let graph = null;
+      let isTransitioning = false;
+      let haloRing = null;
+
+      // Track node three objects for pulsing
+      const nodeObjects = new Map();
+
+      // ============================================================
+      //  STAR TEXTURE
+      // ============================================================
+      const textureCache = {};
+      function createStarTexture(color, size) {
+        size = size || 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size; canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const cx = size / 2, cy = size / 2;
+        // Outer glow
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, size / 2);
+        grad.addColorStop(0, color);
+        grad.addColorStop(0.12, color);
+        grad.addColorStop(0.35, hexAlpha(color, 0.5));
+        grad.addColorStop(0.65, hexAlpha(color, 0.12));
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        // Bright core
+        const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.1);
+        core.addColorStop(0, '#ffffff');
+        core.addColorStop(0.6, 'rgba(255,255,255,0.7)');
+        core.addColorStop(1, 'transparent');
+        ctx.fillStyle = core;
+        ctx.fillRect(0, 0, size, size);
+        return canvas;
+      }
+
+      function hexAlpha(hex, a) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+      }
+
+      function getTexture(color) {
+        if (!textureCache[color]) {
+          textureCache[color] = new THREE.CanvasTexture(createStarTexture(color));
+        }
+        return textureCache[color];
+      }
+
+      // ============================================================
+      //  NEIGHBORHOOD BUILDER
+      // ============================================================
+      function buildNeighborhood(centerId) {
+        const center = nodeMap[centerId];
+        if (!center) return { nodes: [], links: [] };
+
+        const neighborEdges = allEdges.filter(function(e) {
+          return e.source === centerId || e.target === centerId;
+        });
+
+        const neighborIds = new Set();
+        const links = [];
+
+        neighborEdges.forEach(function(e) {
+          var neighborId = e.source === centerId ? e.target : e.source;
+          neighborIds.add(neighborId);
+          // Orient: particles flow FROM neighbor TOWARD center
+          links.push({
+            source: neighborId,
+            target: centerId,
+            edgeType: e.type,
+            weight: e.weight
+          });
+        });
+
+        var nodes = [Object.assign({}, center, { isCenter: true })];
+        neighborIds.forEach(function(id) {
+          if (nodeMap[id]) {
+            nodes.push(Object.assign({}, nodeMap[id], { isCenter: false }));
+          }
+        });
+
+        return { nodes: nodes, links: links };
+      }
+
+      // ============================================================
+      //  HALO RING
+      // ============================================================
+      function createHaloRing(scene) {
+        if (haloRing) {
+          scene.remove(haloRing);
+          if (haloRing.geometry) haloRing.geometry.dispose();
+          if (haloRing.material) haloRing.material.dispose();
+        }
+        var centerType = nodeMap[currentCenterId] ? nodeMap[currentCenterId].type : 'escalation';
+        var geo = new THREE.TorusGeometry(16, 0.35, 16, 100);
+        var mat = new THREE.MeshBasicMaterial({
+          color: new THREE.Color(NODE_COLORS[centerType] || '#ffffff'),
+          transparent: true,
+          opacity: 0.22,
+          side: THREE.DoubleSide
+        });
+        haloRing = new THREE.Mesh(geo, mat);
+        haloRing.rotation.x = Math.PI / 2.2;
+        scene.add(haloRing);
+      }
+
+      // ============================================================
+      //  INIT GRAPH
+      // ============================================================
+      function initGraph() {
+        var container = document.getElementById('graphContainer');
+        var data = buildNeighborhood(currentCenterId);
+
+        graph = ForceGraph3D({ controlType: 'orbit' })(container)
+          .backgroundColor('#000008')
+          .showNavInfo(false)
+          .width(window.innerWidth)
+          .height(window.innerHeight)
+          // ---------- Nodes ----------
+          .nodeThreeObject(function(node) {
+            var color = NODE_COLORS[node.type] || '#ffffff';
+            var isCenter = node.isCenter;
+            var baseSize = isCenter ? 14 : (3.5 + Math.min(node.connections || 1, 10) * 0.55);
+
+            var group = new THREE.Group();
+            group.userData.isCenter = isCenter;
+            group.userData.baseSize = baseSize;
+            group.userData.nodeId = node.id;
+
+            // Main glow sprite
+            var spriteMat = new THREE.SpriteMaterial({
+              map: getTexture(color),
+              transparent: true,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+              opacity: isCenter ? 1.0 : 0.85,
+            });
+            var sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(baseSize * 2.2, baseSize * 2.2, 1);
+            group.add(sprite);
+
+            // White-hot core
+            var coreMat = new THREE.SpriteMaterial({
+              map: getTexture('#ffffff'),
+              transparent: true,
+              blending: THREE.AdditiveBlending,
+              depthWrite: false,
+              opacity: isCenter ? 0.8 : 0.4,
+            });
+            var core = new THREE.Sprite(coreMat);
+            core.scale.set(baseSize * 0.55, baseSize * 0.55, 1);
+            group.add(core);
+
+            // Always-on label for center node
+            if (isCenter) {
+              var label = new SpriteText(node.label, 2.8, color);
+              label.fontFace = 'Inter, sans-serif';
+              label.fontWeight = '600';
+              label.backgroundColor = 'rgba(0,0,8,0.65)';
+              label.padding = 3;
+              label.borderRadius = 3;
+              label.position.y = baseSize * 1.8;
+              group.add(label);
+            }
+
+            // Store reference for animation
+            nodeObjects.set(node.id, group);
+
+            return group;
+          })
+          .nodeThreeObjectExtend(false)
+          // ---------- Links ----------
+          .linkColor(function(link) { return EDGE_COLORS[link.edgeType] || '#445566'; })
+          .linkOpacity(0.35)
+          .linkWidth(function(link) { return 0.25 + link.weight * 1.2; })
+          .linkDirectionalParticles(function(link) { return Math.ceil(link.weight * 4); })
+          .linkDirectionalParticleWidth(function(link) { return 0.5 + link.weight * 1.0; })
+          .linkDirectionalParticleSpeed(function(link) { return 0.003 + link.weight * 0.004; })
+          .linkDirectionalParticleColor(function(link) { return EDGE_COLORS[link.edgeType] || '#445566'; })
+          // ---------- Interaction ----------
+          .onNodeClick(handleNodeClick)
+          .onNodeHover(handleNodeHover)
+          .onBackgroundClick(function() {
+            document.getElementById('hoverTooltip').classList.remove('visible');
+          })
+          .graphData(data);
+
+        // Pin center at origin
+        var centerNode = data.nodes.find(function(n) { return n.isCenter; });
+        if (centerNode) {
+          centerNode.fx = 0; centerNode.fy = 0; centerNode.fz = 0;
+        }
+
+        // Configure forces — use the graph's own d3 force engine
+        graph.d3Force('charge').strength(-150);
+        graph.d3Force('link')
+          .distance(function(link) { return 35 + (1 - link.weight) * 75; })
+          .strength(0.55);
+        // Remove the centering force so pinned center is the anchor
+        graph.d3Force('center', null);
+        graph.d3VelocityDecay(0.35);
+        graph.d3ReheatSimulation();
+
+        // ---------- Post-processing ----------
+        var scene = graph.scene();
+
+        // Fog
+        scene.fog = new THREE.FogExp2(0x000008, 0.001);
+
+        // Bloom — imported via ESM at top of script
+        var bloomPass = new UnrealBloomPass();
+        bloomPass.strength = 2.8;
+        bloomPass.radius = 1;
+        bloomPass.threshold = 0;
+        graph.postProcessingComposer().addPass(bloomPass);
+
+        // Halo ring around center
+        createHaloRing(scene);
+
+        // ---------- Camera entry animation ----------
+        graph.cameraPosition({ x: 0, y: 0, z: 350 }, { x: 0, y: 0, z: 0 }, 0);
+        setTimeout(function() {
+          graph.cameraPosition({ x: 70, y: 45, z: 130 }, { x: 0, y: 0, z: 0 }, 2200);
+        }, 100);
+
+        // Orbit indicator
+        setTimeout(function() {
+          var ind = document.getElementById('orbitIndicator');
+          ind.classList.add('visible');
+          setTimeout(function() { ind.classList.remove('visible'); }, 4000);
+        }, 3000);
+
+        // ---------- Animation tick ----------
+        graph.onEngineTick(function() {
+          var t = performance.now() / 1000;
+
+          // Auto orbit
+          if (autoOrbit && !isTransitioning) {
+            orbitAngle += 0.0012;
+            var dist = 140;
+            var y = 38 + Math.sin(t * 0.1) * 14;
+            graph.cameraPosition(
+              { x: Math.cos(orbitAngle) * dist, y: y, z: Math.sin(orbitAngle) * dist },
+              { x: 0, y: 0, z: 0 }
+            );
+          }
+
+          // Halo ring animation
+          if (haloRing) {
+            haloRing.rotation.z += 0.005;
+            haloRing.rotation.x = Math.PI / 2.2 + Math.sin(t * 0.4) * 0.12;
+            haloRing.material.opacity = 0.2 + Math.sin(t * 1.6) * 0.08;
+          }
+
+          // Pulse node sizes
+          nodeObjects.forEach(function(group, nodeId) {
+            if (!group.children || group.children.length < 2) return;
+            var isCenter = group.userData.isCenter;
+            var base = group.userData.baseSize;
+            var pulse = isCenter
+              ? 1.0 + Math.sin(t * 2.0) * 0.12
+              : 1.0 + Math.sin(t * 1.5 + nodeId.charCodeAt(0)) * 0.06;
+            var sz = base * 2.2 * pulse;
+            group.children[0].scale.set(sz, sz, 1); // glow
+            var cz = base * 0.55 * pulse;
+            group.children[1].scale.set(cz, cz, 1); // core
+          });
+        });
+
+        // Stop auto-orbit on user interaction
+        var controls = graph.controls();
+        controls.addEventListener('start', function() { autoOrbit = false; });
+
+        // ---------- UI ----------
+        updateInfoCard(nodeMap[currentCenterId]);
+        updateLegend();
+        updateBreadcrumb();
+        updateBackButton();
+      }
+
+      // ============================================================
+      //  NODE INTERACTION
+      // ============================================================
+      function handleNodeClick(node) {
+        if (!node || node.isCenter || isTransitioning) return;
+        navigateToNode(node.id);
+      }
+
+      var hoverLabel = null; // 3D sprite label shown on hover
+      function handleNodeHover(node) {
+        var tooltip = document.getElementById('hoverTooltip');
+        var container = document.getElementById('graphContainer');
+
+        // Remove previous 3D hover label
+        if (hoverLabel) {
+          graph.scene().remove(hoverLabel);
+          hoverLabel = null;
+        }
+
+        if (node && !node.isCenter) {
+          document.getElementById('tooltipName').textContent = node.label;
+          document.getElementById('tooltipType').textContent = node.type;
+
+          // Find edge info
+          var gData = graph.graphData();
+          var edge = gData.links.find(function(l) {
+            var sid = typeof l.source === 'object' ? l.source.id : l.source;
+            var tid = typeof l.target === 'object' ? l.target.id : l.target;
+            return sid === node.id || tid === node.id;
+          });
+          if (edge) {
+            var etype = EDGE_LABELS[edge.edgeType] || edge.edgeType;
+            document.getElementById('tooltipEdge').innerHTML =
+              '<span>' + etype + '</span> &middot; weight ' + edge.weight.toFixed(2);
+          }
+          tooltip.classList.add('visible');
+          container.style.cursor = 'pointer';
+
+          // Add 3D label in scene above the hovered node
+          var color = NODE_COLORS[node.type] || '#ffffff';
+          hoverLabel = new SpriteText(node.label, 2.2, color);
+          hoverLabel.fontFace = 'Inter, sans-serif';
+          hoverLabel.fontWeight = '500';
+          hoverLabel.backgroundColor = 'rgba(0,0,8,0.6)';
+          hoverLabel.padding = 2.5;
+          hoverLabel.borderRadius = 2;
+          var baseSize = 3.5 + Math.min(node.connections || 1, 10) * 0.55;
+          hoverLabel.position.set(node.x || 0, (node.y || 0) + baseSize * 1.8, node.z || 0);
+          graph.scene().add(hoverLabel);
+        } else {
+          tooltip.classList.remove('visible');
+          container.style.cursor = 'default';
+        }
+      }
+
+      // Track mouse for tooltip position
+      document.addEventListener('mousemove', function(e) {
+        var tooltip = document.getElementById('hoverTooltip');
+        if (tooltip.classList.contains('visible')) {
+          tooltip.style.left = (e.clientX + 16) + 'px';
+          tooltip.style.top = (e.clientY - 10) + 'px';
+        }
+      });
+
+      // ============================================================
+      //  NAVIGATION
+      // ============================================================
+      function navigateToNode(nodeId) {
+        if (isTransitioning || nodeId === currentCenterId) return;
+        isTransitioning = true;
+        navigationHistory.push(currentCenterId);
+
+        var overlay = document.getElementById('transitionOverlay');
+        overlay.classList.add('active');
+
+        // Fly camera toward the target node first
+        var gData = graph.graphData();
+        var targetNode = gData.nodes.find(function(n) { return n.id === nodeId; });
+        if (targetNode) {
+          graph.cameraPosition(
+            { x: (targetNode.x || 0) + 30, y: (targetNode.y || 0) + 20, z: (targetNode.z || 0) + 50 },
+            { x: targetNode.x || 0, y: targetNode.y || 0, z: targetNode.z || 0 },
+            700
+          );
+        }
+
+        setTimeout(function() {
+          switchCenter(nodeId);
+          setTimeout(function() {
+            graph.cameraPosition({ x: 70, y: 45, z: 130 }, { x: 0, y: 0, z: 0 }, 1200);
+            overlay.classList.remove('active');
+            isTransitioning = false;
+            autoOrbit = true;
+            orbitAngle = Math.atan2(130, 70);
+          }, 200);
+        }, 700);
+      }
+
+      function navigateBack() {
+        if (navigationHistory.length === 0 || isTransitioning) return;
+        isTransitioning = true;
+        var prevId = navigationHistory.pop();
+
+        var overlay = document.getElementById('transitionOverlay');
+        overlay.classList.add('active');
+
+        setTimeout(function() {
+          switchCenter(prevId);
+          setTimeout(function() {
+            graph.cameraPosition({ x: 70, y: 45, z: 130 }, { x: 0, y: 0, z: 0 }, 1200);
+            overlay.classList.remove('active');
+            isTransitioning = false;
+            autoOrbit = true;
+            orbitAngle = Math.atan2(130, 70);
+          }, 200);
+        }, 500);
+      }
+
+      function switchCenter(nodeId) {
+        nodeObjects.clear();
+        currentCenterId = nodeId;
+        var newData = buildNeighborhood(currentCenterId);
+
+        // Unpin all, then pin new center
+        newData.nodes.forEach(function(n) { delete n.fx; delete n.fy; delete n.fz; });
+        var newCenter = newData.nodes.find(function(n) { return n.isCenter; });
+        if (newCenter) { newCenter.fx = 0; newCenter.fy = 0; newCenter.fz = 0; }
+
+        graph.graphData(newData);
+
+        // Reconfigure forces (graphData resets them)
+        graph.d3Force('charge').strength(-150);
+        graph.d3Force('link')
+          .distance(function(link) { return 35 + (1 - link.weight) * 75; })
+          .strength(0.55);
+        graph.d3Force('center', null);
+        graph.d3VelocityDecay(0.35);
+        graph.d3ReheatSimulation();
+
+        // Update halo
+        createHaloRing(graph.scene());
+
+        // Update UI
+        updateInfoCard(nodeMap[currentCenterId]);
+        updateLegend();
+        updateBreadcrumb();
+        updateBackButton();
+      }
+
+      // ============================================================
+      //  UI UPDATES
+      // ============================================================
+      function updateInfoCard(node) {
+        if (!node) return;
+        document.getElementById('infoCard').classList.remove('hidden');
+        document.getElementById('infoTypeDot').style.background = NODE_COLORS[node.type] || '#fff';
+        document.getElementById('infoTypeDot').style.boxShadow = '0 0 8px ' + (NODE_COLORS[node.type] || '#fff') + '80';
+        document.getElementById('infoTypeLabel').textContent = node.type;
+        document.getElementById('infoTitle').textContent = node.label;
+
+        var meta = document.getElementById('infoMeta');
+        meta.innerHTML = '';
+        if (node.category) meta.innerHTML += '<div class="info-meta-item">Category: <span>' + node.category + '</span></div>';
+        if (node.status) meta.innerHTML += '<div class="info-meta-item">Status: <span>' + node.status + '</span></div>';
+        if (node.connections) meta.innerHTML += '<div class="info-meta-item"><span>' + node.connections + '</span> connections</div>';
+        if (node.date) meta.innerHTML += '<div class="info-meta-item">Date: <span>' + node.date + '</span></div>';
+
+        var entities = document.getElementById('infoEntities');
+        entities.innerHTML = '';
+        if (node.entities) {
+          node.entities.forEach(function(e) {
+            entities.innerHTML += '<span class="info-entity">' + e + '</span>';
+          });
+        }
+      }
+
+      function updateLegend() {
+        var grid = document.getElementById('legendGrid');
+        var gData = graph.graphData();
+        var counts = {};
+        gData.links.forEach(function(l) {
+          counts[l.edgeType] = (counts[l.edgeType] || 0) + 1;
+        });
+
+        grid.innerHTML = '';
+        Object.keys(counts).sort(function(a, b) { return counts[b] - counts[a]; }).forEach(function(type) {
+          grid.innerHTML +=
+            '<div class="legend-item">' +
+            '<div class="legend-dot" style="background:' + (EDGE_COLORS[type] || '#556') +
+            '; box-shadow: 0 0 6px ' + (EDGE_COLORS[type] || '#556') + '80;"></div>' +
+            (EDGE_LABELS[type] || type) +
+            '<span class="legend-count">' + counts[type] + '</span></div>';
+        });
+      }
+
+      function updateBreadcrumb() {
+        var title = document.getElementById('breadcrumbTitle');
+        var node = nodeMap[currentCenterId];
+        title.textContent = node ? node.label : currentCenterId;
+        title.style.color = NODE_COLORS[node ? node.type : ''] || '#c8d4f0';
+      }
+
+      function updateBackButton() {
+        document.getElementById('backBtn').disabled = navigationHistory.length === 0;
+      }
+
+      // ============================================================
+      //  SEARCH
+      // ============================================================
+      var searchInput = document.getElementById('nodeSearchInput');
+      var searchResults = document.getElementById('searchResults');
+
+      searchInput.addEventListener('input', function() {
+        var q = searchInput.value.toLowerCase().trim();
+        if (q.length < 2) { searchResults.classList.remove('visible'); return; }
+
+        var matches = allNodes.filter(function(n) {
+          return n.label.toLowerCase().indexOf(q) !== -1;
+        }).slice(0, 8);
+
+        if (matches.length === 0) { searchResults.classList.remove('visible'); return; }
+
+        searchResults.innerHTML = matches.map(function(n) {
+          return '<div class="search-item" data-id="' + n.id + '">' +
+            '<div class="search-dot" style="background:' + NODE_COLORS[n.type] +
+            ';box-shadow:0 0 6px ' + NODE_COLORS[n.type] + '80;"></div>' +
+            '<span class="search-label">' + n.label + '</span>' +
+            '<span class="search-type">' + n.type + '</span></div>';
+        }).join('');
+        searchResults.classList.add('visible');
+
+        searchResults.querySelectorAll('.search-item').forEach(function(item) {
+          item.addEventListener('click', function() {
+            var id = item.dataset.id;
+            searchResults.classList.remove('visible');
+            searchInput.value = '';
+            if (id !== currentCenterId) navigateToNode(id);
+          });
+        });
+      });
+
+      searchInput.addEventListener('blur', function() {
+        setTimeout(function() { searchResults.classList.remove('visible'); }, 200);
+      });
+
+      // ============================================================
+      //  KEYBOARD & BUTTONS
+      // ============================================================
+      document.getElementById('backBtn').addEventListener('click', navigateBack);
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && navigationHistory.length > 0) navigateBack();
+      });
+
+      // ============================================================
+      //  RESIZE
+      // ============================================================
+      window.addEventListener('resize', function() {
+        if (graph) graph.width(window.innerWidth).height(window.innerHeight);
+      });
+
+      // ============================================================
+      //  BOOT
+      // ============================================================
+      initGraph();
+
+  </script>
+</body>
+</html>

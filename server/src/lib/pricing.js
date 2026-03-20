@@ -29,8 +29,9 @@ const DEFAULT_PRICING = {
   'claude-3-5-haiku-20241022':    { inputNanosPerToken: 800,   outputNanosPerToken: 4000   }, // $0.80/$4 per MTok
   'claude-3-haiku-20240307':      { inputNanosPerToken: 250,   outputNanosPerToken: 1250   }, // $0.25/$1.25 per MTok
 
-  // OpenAI / Codex models — pricing as of 2026-03-06
+  // OpenAI / Codex models — pricing baseline as of 2026-03-06
   'gpt-5.4':                      { inputNanosPerToken: 2500,  outputNanosPerToken: 15000  }, // $2.50/$15 per MTok
+  'gpt-5.4-mini':                 { inputNanosPerToken: 375,   outputNanosPerToken: 2250   }, // $0.375/$2.25 per MTok (OpenAI pricing page, 2026-03-19)
   'gpt-5.4-pro':                  { inputNanosPerToken: 30000, outputNanosPerToken: 180000 }, // $30/$180 per MTok
   'gpt-5.3-codex':                { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
   'gpt-4o':                       { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
@@ -52,6 +53,7 @@ const PROVIDER_FALLBACKS = {
   'chatgpt-5.3-codex-high':    { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
   'gpt-5.3-codex-high':        { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
   'gpt-5.4':                    { inputNanosPerToken: 2500,  outputNanosPerToken: 15000 },
+  'gpt-5.4-mini':               { inputNanosPerToken: 375,   outputNanosPerToken: 2250  },
   'gpt-5.4-pro':                { inputNanosPerToken: 30000, outputNanosPerToken: 180000 },
   'gpt-5-mini':                 { inputNanosPerToken: 250,   outputNanosPerToken: 2000  },
   'gpt-5-nano':                 { inputNanosPerToken: 50,    outputNanosPerToken: 400   },

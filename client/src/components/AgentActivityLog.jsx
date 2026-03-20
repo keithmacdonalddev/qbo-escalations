@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
 import { SEVERITY, SEVERITY_LABELS } from '../lib/severityClassifier.js';
 import ThreadViewer from './ThreadViewer.jsx';
+import './AgentActivityLog.css';
 
 /** Severity badge CSS class map */
 const SEVERITY_BADGE_CLASS = {

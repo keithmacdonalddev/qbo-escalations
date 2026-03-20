@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   getSummary,
   getCategoryBreakdown,
@@ -57,8 +57,6 @@ export default function Analytics() {
   const [modelPerf, setModelPerf] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState(null);
-  const fetchedRef = useRef(false);
-
   const loadData = useCallback(async (signal) => {
     setLoading(true);
     setFetchError(null);
@@ -103,8 +101,6 @@ export default function Analytics() {
   }, []);
 
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
     const ac = new AbortController();
     loadData(ac.signal);
     return () => ac.abort();
@@ -133,7 +129,7 @@ export default function Analytics() {
       {fetchError && (
         <div className="error-banner">
           <span>{fetchError}</span>
-          <button onClick={() => { fetchedRef.current = false; loadData(); }} type="button">Retry</button>
+          <button onClick={() => { loadData(); }} type="button">Retry</button>
         </div>
       )}
 

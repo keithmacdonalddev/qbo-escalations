@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import './HealthBanner.css';
 
 /**
  * HealthBanner — slim status strip at the very top of the app.

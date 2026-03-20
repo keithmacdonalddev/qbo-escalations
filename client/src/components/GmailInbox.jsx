@@ -5,6 +5,8 @@ import { apiFetch as trackedFetch } from '../api/http.js';
 import { consumeSSEStream } from '../api/sse.js';
 import { useWorkspaceMonitorStream } from '../context/WorkspaceMonitorContext.jsx';
 import { getDefaultGmailAccount, resolveConnectedAccount } from '../lib/accountDefaults.js';
+import { formatDateRelative as formatDate } from '../utils/dateFormatting.js';
+import './GmailInbox.css';
 
 // ---------------------------------------------------------------------------
 // API helpers
@@ -489,8 +491,8 @@ function MessageContextMenu({ x, y, msg, onClose, onOpen, onReply, onForward, on
     { label: msg.isUnread ? 'Mark as read' : 'Mark as unread', action: () => onToggleRead?.(msg) },
     { label: 'Trash', action: () => onTrash?.(msg.id), danger: true },
     { divider: true },
-    { label: 'Copy subject', action: () => { navigator.clipboard?.writeText(msg.subject || ''); } },
-    { label: 'Copy sender email', action: () => { navigator.clipboard?.writeText(msg.fromEmail || msg.from || ''); } },
+    { label: 'Copy subject', action: () => { navigator.clipboard?.writeText(msg.subject || '').catch(() => {}); } },
+    { label: 'Copy sender email', action: () => { navigator.clipboard?.writeText(msg.fromEmail || msg.from || '').catch(() => {}); } },
   ];
 
   return (
@@ -637,27 +639,6 @@ const SYSTEM_LABEL_ICONS = {
   TRASH: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>,
 };
 
-/** Format a date string into a short display form. */
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffDays = Math.floor(diffMs / 86400000);
-    if (diffDays === 0) {
-      return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-    }
-    if (diffDays === 1) return 'Yesterday';
-    if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: 'short' });
-    if (d.getFullYear() === now.getFullYear()) {
-      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    }
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch {
-    return dateStr;
-  }
-}
 
 /** Format a full date for the message reader header. */
 function formatFullDate(dateStr) {
@@ -1052,11 +1033,20 @@ function sendGmailAI({ prompt, emailContext, conversationHistory, onChunk, onDon
         onError?.(err.error || 'Request failed');
         return;
       }
+      let streamSettled = false;
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'chunk' && data?.text) onChunk?.(data.text);
-        else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(data?.error || 'AI error');
+        else if (eventType === 'done') {
+          streamSettled = true;
+          onDone?.(data);
+        } else if (eventType === 'error') {
+          streamSettled = true;
+          onError?.(data?.error || 'AI error');
+        }
       });
+      if (!streamSettled && !controller.signal.aborted) {
+        onError?.('The Gmail AI stream ended before completion.');
+      }
     } catch (err) {
       if (err.name !== 'AbortError') onError?.(err.message || 'Network error');
     }
@@ -1164,7 +1154,7 @@ function AiChatPanel({ emailContext, onDraftReply, onClose }) {
       conversationHistory: history,
       onChunk: (chunk) => setStreamText((prev) => prev + chunk),
       onDone: (data) => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '' }]);
+        setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '', usage: data.usage || null }]);
         setStreamText('');
         setStreaming(false);
       },
@@ -1220,7 +1210,7 @@ function AiChatPanel({ emailContext, onDraftReply, onClose }) {
         conversationHistory: history,
         onChunk: (chunk) => setStreamText((prev) => prev + chunk),
         onDone: (data) => {
-          setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '' }]);
+          setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '', usage: data.usage || null }]);
           setStreamText('');
           setStreaming(false);
         },
@@ -1310,6 +1300,24 @@ function AiChatPanel({ emailContext, onDraftReply, onClose }) {
               {msg.content.split('\n').map((line, j) => (
                 <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
               ))}
+              {msg.role === 'assistant' && msg.usage && msg.usage.totalTokens > 0 && (
+                <span style={{
+                  fontSize: '11px',
+                  color: 'var(--text-tertiary, #666)',
+                  marginTop: '4px',
+                  display: 'inline-flex',
+                  gap: '6px',
+                  opacity: 0.7,
+                }}>
+                  {msg.usage.totalTokens.toLocaleString()} tokens
+                  {msg.usage.totalCostMicros > 0 && (
+                    <span>· ${(msg.usage.totalCostMicros / 1_000_000).toFixed(4)}</span>
+                  )}
+                  {msg.usage.model && (
+                    <span>· {msg.usage.model}</span>
+                  )}
+                </span>
+              )}
             </div>
           </div>
         ))}
@@ -2435,6 +2443,11 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
   const [activeCategory, setActiveCategory] = useState('all');
   const [density, setDensity] = useState('default'); // 'comfortable' | 'default' | 'compact'
   const [showDensityMenu, setShowDensityMenu] = useState(false);
+  const [pageSize, setPageSize] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('gmail-page-size'), 10); return [25, 50, 100].includes(v) ? v : 25; } catch { return 25; }
+  });
+  const pageSizeRef = useRef(pageSize);
+  useEffect(() => { pageSizeRef.current = pageSize; }, [pageSize]);
   const [focusedIndex, setFocusedIndex] = useState(-1);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y, msg }
@@ -2697,7 +2710,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
     const id = ++fetchIdRef.current;
     if (append) setLoadingMore(true);
     try {
-      const params = new URLSearchParams({ maxResults: '25' });
+      const params = new URLSearchParams({ maxResults: String(pageSizeRef.current) });
       if (query) params.set('q', query);
       if (labelId) params.set('labelIds', labelId);
       if (append && pageToken) params.set('pageToken', pageToken);
@@ -2749,6 +2762,50 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
     document.addEventListener('mousedown', handle);
     return () => document.removeEventListener('mousedown', handle);
   }, [showDensityMenu]);
+
+  // Page size change handler — persists to localStorage and re-fetches
+  const handlePageSizeChange = useCallback((newSize) => {
+    const size = parseInt(newSize, 10);
+    if (![25, 50, 100].includes(size)) return;
+    setPageSize(size);
+    pageSizeRef.current = size;
+    try { localStorage.setItem('gmail-page-size', String(size)); } catch { /* ignore */ }
+    // Re-fetch current view with new page size
+    setMessages([]);
+    setNextPageToken(null);
+    setSelectedMessageId(null);
+    setSelectedIds(new Set());
+    // Slight delay to let state settle, then fetch
+    setTimeout(() => {
+      const label = activeLabel;
+      const search = activeSearch;
+      if (isUnifiedMode) {
+        trackedFetch(`${API}/unified?maxResults=${size}${search ? `&q=${encodeURIComponent(search)}` : ''}`)
+          .then(r => r.json())
+          .then(res => {
+            if (res.ok) {
+              const msgs = res.messages || [];
+              msgs.sort((a, b) => new Date(b.date) - new Date(a.date));
+              setMessages(msgs);
+              setNextPageToken(res.nextPageToken || null);
+            }
+          })
+          .catch(() => {});
+      } else {
+        const params = new URLSearchParams({ maxResults: String(size) });
+        if (search) params.set('q', search);
+        if (label) params.set('labelIds', label);
+        acctFetch(`/messages?${params}`)
+          .then(res => {
+            if (res.ok) {
+              setMessages(res.messages || []);
+              setNextPageToken(res.nextPageToken || null);
+            }
+          })
+          .catch(() => {});
+      }
+    }, 0);
+  }, [activeLabel, activeSearch, isUnifiedMode, acctFetch]);
 
   // Visible messages (filter snoozed)
   const visibleMessages = useMemo(() => messages.filter((m) => !snoozedIds.has(m.id)), [messages, snoozedIds]);
@@ -3034,7 +3091,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
         const [profileRes, labelsRes, messagesRes] = await Promise.all([
           apiFetch('/profile', {}, currentActive),
           apiFetch('/labels', {}, currentActive),
-          apiFetch('/messages?maxResults=25&labelIds=INBOX', {}, currentActive),
+          apiFetch(`/messages?maxResults=${pageSizeRef.current}&labelIds=INBOX`, {}, currentActive),
         ]);
         if (cancelled) return;
 
@@ -3190,7 +3247,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
           const [profileRes, labelsRes, messagesRes] = await Promise.all([
             apiFetch('/profile', {}, newActive),
             apiFetch('/labels', {}, newActive),
-            apiFetch('/messages?maxResults=25&labelIds=INBOX', {}, newActive),
+            apiFetch(`/messages?maxResults=${pageSizeRef.current}&labelIds=INBOX`, {}, newActive),
           ]);
           setProfile(profileRes.ok ? profileRes : null);
           setLabels(labelsRes.ok ? labelsRes.labels : []);
@@ -3239,7 +3296,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
         const [profileRes, labelsRes, messagesRes] = await Promise.all([
           apiFetch('/profile', {}, newActive),
           apiFetch('/labels', {}, newActive),
-          apiFetch('/messages?maxResults=25&labelIds=INBOX', {}, newActive),
+          apiFetch(`/messages?maxResults=${pageSizeRef.current}&labelIds=INBOX`, {}, newActive),
         ]);
         if (!profileRes.ok) {
           setStatus('not-connected');
@@ -3282,7 +3339,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
         const [profileRes, labelsRes, messagesRes] = await Promise.all([
           apiFetch('/profile', {}, email),
           apiFetch('/labels', {}, email),
-          apiFetch('/messages?maxResults=25&labelIds=INBOX', {}, email),
+          apiFetch(`/messages?maxResults=${pageSizeRef.current}&labelIds=INBOX`, {}, email),
         ]);
         if (profileRes.ok) setProfile(profileRes);
         setLabels(labelsRes.ok ? labelsRes.labels : []);
@@ -3313,7 +3370,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
       if (nextUnified) {
         // Entering unified mode — fetch unified messages
         const id = ++fetchIdRef.current;
-        trackedFetch(`${API}/unified?maxResults=25`)
+        trackedFetch(`${API}/unified?maxResults=${pageSizeRef.current}`)
           .then(r => r.json())
           .then(res => {
             if (id !== fetchIdRef.current) return;
@@ -3341,7 +3398,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
         if (email) {
           Promise.all([
             apiFetch('/labels', {}, email),
-            apiFetch('/messages?maxResults=25&labelIds=INBOX', {}, email),
+            apiFetch(`/messages?maxResults=${pageSizeRef.current}&labelIds=INBOX`, {}, email),
           ]).then(([labelsRes, messagesRes]) => {
             setLabels(labelsRes.ok ? labelsRes.labels : []);
             if (messagesRes.ok) {
@@ -3441,6 +3498,20 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
                 ))}
               </div>
             )}
+          </div>
+          {/* Page size selector */}
+          <div className="gmail-pagesize-wrap">
+            <select
+              className="gmail-pagesize-select"
+              value={pageSize}
+              onChange={(e) => handlePageSizeChange(e.target.value)}
+              title="Emails per page"
+              aria-label="Emails per page"
+            >
+              <option value={25}>25</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
           </div>
           <button className="gmail-btn-icon" onClick={handleRefresh} type="button" title="Refresh" aria-label="Refresh">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

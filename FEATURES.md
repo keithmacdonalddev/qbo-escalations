@@ -2223,3 +2223,403 @@ Model: Claude Opus 4.6
 Is duplicate?: No
 Complexity: high
 Special Feature: Playbook Flashcard Drills — The app generates quick-fire flashcard quizzes from your published playbook entries: it shows a symptom and you guess the root cause/fix before revealing the answer. Spaced repetition ensures categories you haven't seen in a while come up more often. A surprisingly effective way to stay sharp on edge cases during slow shifts without re-reading docs.
+
+---
+Date: March 13, 2026
+Time: 10:45 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Mood Jukebox — Let the app detect the "vibe" of your shift based on escalation volume, resolution speed, and inbox pressure, then auto-generate a Spotify/YouTube search link for a matching playlist. Crushing it? Upbeat victory anthems. Drowning? Lo-fi focus beats. Slow day? Discovery mix. A tiny dopamine hit that acknowledges the emotional rhythm of support work instead of pretending every hour feels the same.
+
+---
+Date: March 13, 2026
+Time: 10:56 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Déjà Vu Detector — When you start a new chat escalation, the AI silently fingerprints the issue (symptoms + category + error keywords) and checks if you've personally handled a near-identical case before. If it finds a match, it surfaces a ghost card: "You resolved something like this on Feb 18 — here's what worked." Turns your own escalation history into an instant expert recall system so you never re-solve the same problem from scratch.
+
+---
+Date: March 13, 2026
+Time: 11:32 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Rubber Duck — A tiny floating duck icon in the chat area that opens a Socratic mini-dialog. Instead of giving answers, the AI asks probing questions ("what else could cause that?", "have you ruled out...?", "walk me through what you see") to coach you through tricky escalations. Deliberately withholds solutions and pushes YOU to reason through the problem — because sometimes explaining it to a duck that keeps asking "why?" is the fastest path to the answer.
+
+---
+Date: March 13, 2026
+Time: 11:41 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: low
+Special Feature: Panic Button — Triple-tap Escape to instantly blank the entire screen to a neutral "Loading..." placeholder, hiding all chat content, escalation data, and customer info. Useful when someone walks up to your desk or you need to screen-share without exposing sensitive details. Press again to restore everything exactly as it was — no data lost, no navigation changed.
+
+---
+Date: March 13, 2026
+Time: 11:41 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Escalation Time Machine — Paste any case number or COID into a search bar and the app reconstructs a complete timeline of everything that happened: every chat conversation about it, every image parsed, every triage card generated, every resolution note — stitched together chronologically across all your sessions. Like git log but for your support cases, so when a customer calls back 3 weeks later you have instant total recall of the full story.
+
+---
+Date: March 13, 2026
+Time: 11:41 AM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Ghost Typist Mode — Toggle a mode where AI responses render character-by-character with procedurally-generated mechanical typewriter sounds (Web Audio API, zero sound files). Each letter gets a faint ink-stamp visual bloom that fades after 200ms. The clacking speed matches the actual SSE stream rate so it feels alive, not canned. Turns reading long AI responses from "wall of text appeared" into something oddly satisfying — like watching a telegram arrive in real time.
+
+---
+
+Date: March 13, 2026
+Time: 1:15 PM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium-high
+Special Feature: Gmail Push Notifications via Pub/Sub — Use the Gmail `users.watch()` API with Google Cloud Pub/Sub to get instant push notifications when new emails arrive (~1-2 seconds). The server receives a webhook, then pushes updates to the client via SSE — true real-time email with zero polling. No more stale inbox or 30-second delays.
+
+---
+
+Date: March 13, 2026
+Time: 1:18 PM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Voice Memo Sticky Notes — Hold a button anywhere in the app to record a quick voice memo (MediaRecorder API). It gets auto-transcribed by Claude and pinned as a draggable sticky note on your workspace. Great for those moments mid-escalation when you think "I need to remember this for later" but don't want to stop typing. Notes persist across sessions and can be searched by spoken content.
+
+---
+
+Date: March 13, 2026
+Time: 2:05 PM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Ambient Soundscapes — A subtle background audio player (lo-fi beats, rain, coffee shop, white noise) you can toggle from the header while working escalations. Auto-pauses when you switch tabs and remembers your last pick — turns long triage sessions into something almost cozy.
+
+---
+
+Date: March 13, 2026
+Time: 2:20 PM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Investigation Constellation Map — A force-directed graph visualization where each INV is a node, color-coded by category, with nodes that share keywords or symptoms gravitating toward each other. Clusters reveal hidden patterns invisible in a flat list — like multiple unrelated INVs all involving the same financial institution or shared root cause. Click any node to expand details, drag to rearrange, zoom to explore.
+
+---
+
+Date: March 13, 2026
+Time: 2:52 PM ADT
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Shift Scorecard — At the end of your work shift, the app auto-generates a personal performance card: escalations handled, INV matches surfaced, average response time, categories worked, and a streak counter for consecutive days using the app. Not gamification fluff — a genuine "here's what you accomplished today" snapshot you can screenshot for yourself or use in a 1:1 with your lead to show impact.
+
+---
+Date: 2026-03-14 11:23 AM
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: Spec Sheet Scanner — Drag any screenshot (product page, receipt, system info, customer environment) into the chat and the AI extracts structured specs into a formatted comparison card with key/value pairs. Works for PC hardware, QBO subscription tiers, Intuit product pages, or customer environment screenshots during escalations — instantly parse what someone is running without manual transcription.
+
+---
+Date: 2026-03-14 11:33 AM
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: medium
+Special Feature: **Ambient Soundscape Engine** — A built-in ambient sound generator that plays context-aware background audio while you work. Pick from soundscapes like "rainy office," "coffee shop," or "deep focus white noise," or let it auto-select based on time of day. Uses the Web Audio API so it runs entirely in-browser with no external files needed.
+
+---
+Date: 2026-03-14 12:02 PM
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: high
+Special Feature: Second Brain Knowledge Graph — Every escalation, chat, email, INV case, and playbook entry becomes a node in a force-directed graph visualization. The AI automatically discovers connections (same error codes, customer, resolution pattern, product area) and draws edges. Click any node to see its neighborhood — instantly revealing patterns like "these 4 unrelated cases all trace back to the same bank feed API bug." Obsidian's graph view but built from your actual work data, zero manual linking.
+
+---
+Date: 2026-03-14 12:38 PM
+Model: Claude Opus 4.6
+Is duplicate?: No
+Complexity: high
+Special Feature: AI Meeting Prep Briefing — 5 minutes before any calendar event with attendees, the workspace agent auto-generates a prep card: who's attending (with their last email interactions pulled from Gmail), what the meeting is about, any unresolved escalation threads with those contacts, and suggested talking points. Appears as a toast notification you can expand or dismiss — like having a personal chief of staff who whispers context in your ear before every meeting.
+
+---
+Date: 2026-03-14 12:38 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Escalation Deja Vu Alert — When you start typing a new escalation or receive one from an agent, the system silently hashes the error codes, product area, and symptoms against your entire conversation history and flags "You solved something 87% similar on Feb 22 — here's what worked." Shows a compact card with the prior resolution steps, outcome, and a one-click "Apply same approach" button that pre-fills your response. Turns your personal experience into a searchable institutional memory without you ever having to document anything.
+
+---
+Date: 2026-03-14 12:40 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Command Palette (Ctrl+K) — Press Ctrl+K anywhere to open a Spotlight-style floating search bar that searches everything simultaneously: conversations, escalations, INV cases, emails, playbook entries, templates, calendar events, and AI commands. Type "OL-301" and see every mention across all data sources. Type "navigate analytics" to jump to a view. Type "draft email to..." to start an action. One keystroke replaces clicking through 10 sidebar tabs — the universal entry point to your entire work universe.
+
+---
+Date: 2026-03-14 1:05 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Live Desktop Dashboard Widgets — Pin miniature floating widgets (unread emails, next meeting countdown, open escalation count, INV case alerts) directly on your Windows desktop via a system tray Electron companion app. They hover over everything like Xbox Game Bar overlays, so you see critical info without alt-tabbing. Click any widget to deep-link straight into the relevant app view.
+
+---
+Date: 2026-03-14 1:20 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Rage Detector — Monitors your typing patterns in real-time (keypress velocity, backspace frequency, caps lock ratio, rapid message sends). When frustration signals spike, it surfaces a calm contextual intervention: "This one's tough — here's a fresh angle..." with an AI-generated alternative approach to the current escalation. A subtle pulse indicator in the chat header shifts green → amber → red as frustration builds, giving you self-awareness before it affects your responses.
+
+---
+Date: 2026-03-14 1:26 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Ambient Soundscape Engine — The app generates a dynamic audio environment tied to your real work state. Low orchestral hum when inbox is clear. Subtle percussion ticks as new escalations arrive. A rising drone when multiple INV cases activate simultaneously. Typing speed modulates tempo. Resolving a case triggers a satisfying harmonic resolution chord. All Web Audio API with zero dependencies — your workday becomes a generative ambient composition that gives you subconscious awareness of system state without ever looking at a dashboard. Includes a small waveform visualizer in the sidebar footer and a mood dial to shift between "focus" (minimal), "flow" (rhythmic), and "alert" (percussive) profiles.
+
+---
+Date: 2026-03-14 1:28 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: AI Scenario Simulator — Select any resolved escalation and ask "what if the customer had been on Advanced instead of Plus?" or "what if the agent tried X instead of Y?" The AI reruns the case through your playbook with the altered variables and generates an alternate-timeline resolution path, highlighting where the outcome would have diverged. Turns your closed cases into an infinite training sandbox — practice decision-making against real scenarios without real consequences.
+
+---
+Date: 2026-03-14 1:29 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Writing Clone — Feed the AI a dozen of your past escalation responses and it builds a "voice profile" of your writing style (sentence length, tone, vocabulary, greeting/closing habits). Toggle "Write Like Me" mode and all AI drafts come out sounding like you wrote them — not generic AI prose. Your colleagues can't tell the difference.
+
+---
+Date: 2026-03-14 1:36 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: In-App Clipboard Ring — A persistent clipboard history panel that captures everything you copy within the app (escalation IDs, case numbers, customer details, AI responses, email snippets). Access with Ctrl+Shift+V to see your last 50 clips, searchable and clickable to re-paste. Entries auto-tag by source (chat, Gmail, calendar) so you can find "that case number I copied 20 minutes ago" instantly — way faster than digging through conversation history or re-opening emails.
+
+---
+
+Date: 2026-03-14 1:45 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Escalation Déjà Vu — When you start typing a new escalation, the app silently fingerprints the issue description and surfaces a ghost overlay showing your own past resolution for a nearly-identical case, including what template you used and how long it took. Not a search — it's automatic pattern-matching against your history that feels like muscle memory made visible.
+
+---
+Date: 2026-03-14 1:46 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Live Translate Layer — Right-click any text in the app (email, chat message, AI response) and hit "Translate" for an instant Claude-powered inline translation to/from any language. The translation appears as a subtle overlay below the original text, not a separate window. Essential for Canadian bilingual support where French emails land alongside English ones.
+
+---
+Date: 2026-03-14 1:46 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: low
+Special Feature: AI Alibi Generator — Type "/alibi" in the workspace chat and Claude crafts a polished, professional "sorry for the delay" message based on your actual calendar and inbox context (back-to-back meetings, high inbox volume, travel days). Always truthful, just elegantly worded. Saves you from the writer's block of composing the same apologetic opener for the hundredth time.
+
+---
+Date: 2026-03-14 2:18 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Daily Micro-Journal — A tiny expandable text area pinned to the bottom of the sidebar where you jot down one sentence about your day before closing the app. Entries auto-timestamp and accumulate into a private, searchable personal log stored in MongoDB. After a month, ask the AI "what was I dealing with last week?" and it synthesizes your entries into a narrative. Turns scattered workdays into a story you can actually remember.
+
+---
+Date: 2026-03-14 3:08 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Peripheral Vision Dashboard — A second-screen or picture-in-picture mini window (Browser PiP API) that floats a stripped-down status board over whatever else you're working in. Shows live escalation count, inbox unread, next calendar event, and AI availability as tiny glanceable icons that pulse on state changes. Drag it to a corner of your monitor and never alt-tab back to the app just to check if something needs attention — your peripheral vision catches it instead.
+
+---
+Date: 2026-03-15 9:41 AM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Phantom Workspace — A second, hidden workspace activated with a keyboard shortcut (Ctrl+Shift+Space) that maintains completely separate state: different open tabs, chat history, and layout. Flip between "work mode" (escalations, investigations) and "personal mode" (Gmail, calendar, webcam) instantly without closing anything. Nobody walking by sees the wrong screen, and context-switching takes zero effort.
+
+---
+Date: 2026-03-15 4:02 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Time Machine Replay — Click any past date on the calendar and the app reconstructs that entire day: what emails arrived, what escalations were active, what meetings you had, and what the workspace chat discussed. Like scrolling through a photo reel but for your entire workday — perfect for backtracking on "what was that thing from last Tuesday?"
+
+---
+Date: 2026-03-15 4:31 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Conversation Autopilot — When an escalation email thread goes back-and-forth more than 3 times, the workspace agent auto-drafts the next reply based on the full thread context + your playbook, and pins it as a "suggested response" at the top of the thread. You just review and hit send instead of writing from scratch every time a case drags on.
+
+---
+Date: 2026-03-15 4:39 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Inbox Heatmap Sparkline — A tiny inline sparkline next to each sender name in the Gmail inbox showing their email frequency over the past 30 days (e.g., "Facebook sent 14 emails this month" as a visual bar). Instantly reveals which senders are flooding your inbox so you can prioritize unsubscribes or filters without opening the unsubscribe panel. Computed from cached message metadata — zero extra API calls.
+
+---
+Date: 2026-03-15 4:50 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Inbox Cleanup Live Scoreboard — While the workspace agent processes a bulk inbox cleanup, stream a real-time floating scoreboard overlay showing "Archived: 34 | Labeled: 12 | Trashed: 8 | Skipped: 3" with counts incrementing live as each action completes. Turns an invisible background process into a satisfying visual ticker — like watching a vending machine sort coins.
+
+---
+Date: 2026-03-15 4:41 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: small
+Special Feature: Email Time-of-Day Distribution — A small bar chart overlay (accessible from the inbox header) that shows when your emails arrive grouped by hour of day across the past 7 days. Reveals your peak inbox load hours so you can schedule focused email triage windows instead of reactively checking all day. Uses the Date header from already-fetched messages — no extra API calls needed.
+
+---
+Date: 2026-03-15 6:01 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Escalation Speed Dial — Assign hotkeys (1-9) to your most common escalation categories + status transitions. When viewing any escalation, press a number key to instantly categorize, change status, or apply a saved resolution template in one keystroke. Eliminates the dropdown-click-dropdown-click dance when you're triaging a batch of cases back to back.
+
+---
+Date: 2026-03-15 6:11 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Smart Paste Intelligence — When you paste content into any text field, Claude auto-detects what it is (QBO error code, transaction ID, stack trace, customer email, phone number) and offers contextual one-click actions: paste an error code → instant playbook lookup and pre-filled response. Paste a transaction ID → search all related escalations. Paste an email address → pull up Gmail history with that contact. Turns your clipboard into a context-aware command line.
+
+---
+Date: 2026-03-15 6:33 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Live Dashboard Screensaver — After 2 minutes of inactivity, the app smoothly transitions into a full-screen ambient dashboard showing real-time stats: today's escalation count, resolution rate, inbox zero progress, next calendar event countdown, and a slowly cycling motivational quote — all with subtle animations against your current theme. Move the mouse and you're instantly back. Turns idle time into a glanceable command center instead of a dead screen.
+
+---
+Date: 2026-03-15 7:00 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Parallel Universe Drafts — When composing any response (escalation reply, email draft, workspace message), hit a hotkey to instantly generate 3 alternative versions in parallel using different personas: "Empathetic," "Direct/Technical," and "Executive Summary." All three appear side-by-side as cards you can pick from, mix-and-match paragraphs between, or dismiss — like choosing between timelines where you wrote the same message three different ways.
+
+---
+Date: 2026-03-16 10:24 AM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Devil's Advocate Mode — Toggle a mode where after every AI response, a second hidden Claude call automatically generates a brief counter-argument or "what could go wrong" critique of its own answer, shown as a collapsible red-tinted card below the response. Forces you to consider the other side before committing to a resolution — especially valuable for tricky escalations where the obvious answer isn't always the right one.
+
+---
+Date: 2026-03-16 1:14 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: high
+Special Feature: Ghost Courier — Phantom Delivery Timeline — When tracking a package, the app periodically fetches the carrier's public tracking page and builds a visual animated timeline of your package's journey on a mini-map — each scan location as a glowing dot connected by a route line, with the package's current position pulsing. Ask the workspace agent "show me my GPU's journey" and it renders the full path your package has taken, updating in real-time. Turns boring tracking numbers into a visual adventure.
+
+---
+
+### Special Feature #158 — Screenshot Annotator (2026-03-17 12:37 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Screenshot Annotator — Before sending an image to chat, open a quick canvas overlay where you can draw circles, arrows, and highlights directly on the screenshot to point out exactly what's wrong. The AI receives both the annotated image AND the annotation coordinates, so it knows precisely where to look instead of scanning the entire screenshot trying to guess what's relevant. Turns "look at this error" from a treasure hunt into a laser pointer.
+
+---
+Date: 2026-03-17 1:44 PM
+Model: Claude Opus 4.6 (1M context)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Price Watch Hawk — When the workspace agent detects a purchase/shipping email, it remembers what you paid and the retailer. During your return/price-protection window (typically 30 days), it periodically checks the product page for price drops and alerts you: "Your RTX 5060 Ti dropped $47 on Newegg — you're still in the return window. Want me to draft a price match request?" Turns your shipping tracker into a money-saving watchdog.
+
+---
+
+### Special Feature #159 — AI Context Handoff (2026-03-17 1:50 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Context Handoff — When you're mid-escalation and need to step away or shift tasks, hit a "Park" button that tells the AI to generate a 3-sentence situation briefing of exactly where you left off (what the issue is, what you've tried, what the next step should be). When you come back — even days later — click "Resume" and the AI reconstructs your mental context instantly, so you never lose that "where was I?" momentum that kills productivity after interruptions.
+
+---
+
+### Special Feature #160 — Escalation Sonar (2026-03-17 2:53 PM)
+Is duplicate?: No
+Complexity: high
+Special Feature: Escalation Sonar — A passive background listener that watches all your chat conversations in real-time and builds a live signal map. When 3+ different agents message you about the same symptom within an hour, a Sonar ping fires: "Possible emerging issue — 4 agents reported bank feed disconnects in the last 45 minutes. Create an INV?" Turns you from reactive (waiting for Slack INV posts) to proactive (spotting outages before they're even officially filed).
+
+---
+
+### Special Feature #161 — INV Constellation Map (2026-03-17 3:00 PM)
+Is duplicate?: No
+Complexity: high
+Special Feature: INV Constellation Map — A visual graph that maps relationships between INV investigations based on shared symptoms, affected product areas, and timing clusters. Each INV is a node; edges form when the matcher detects similarity. Over time, constellations emerge: "These 4 bank feed INVs all share the same OAuth symptom cluster -- they might be one root cause." Clicking a constellation shows a unified summary and lets you propose merging them into a single master INV with combined affected user counts. Turns isolated bug tickets into pattern intelligence.
+
+---
+
+### Special Feature #162 — Temporal Replay Slider (2026-03-17 3:14 PM)
+Is duplicate?: No
+Complexity: high
+Special Feature: Temporal Replay Slider — A timeline scrubber at the bottom of the Constellation Map that lets you replay clusters forming over time. Each node fades in on its reportedDate, edges appear as shared symptoms are discovered, and you watch clusters coalesce day by day — revealing outbreak patterns like "all bank-feed INVs landed within 48 hours" that are invisible in a static view.
+
+---
+
+### Special Feature #163 — Mood Ring Ambient Theme (2026-03-17 5:31 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Mood Ring Ambient Theme — Your app automatically shifts its color palette throughout the day based on your activity patterns. Morning = cool blues for focus mode, afternoon escalation rushes = warm ambers, quiet evening catch-up = deep purples. If you're in a long streak of closed INVs, the theme subtly celebrates with a gold tint. It's not just dark/light mode — it's a living theme that reflects your workday rhythm and makes the app feel alive.
+
+---
+
+### Special Feature #164 — Screenshot Markup Canvas (2026-03-19 7:31 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Screenshot Markup Canvas — Drop any screenshot into the app and get a lightweight annotation layer: arrows, circles, text callouts, and blur/redact regions. Mark up a QBO screen to show an agent exactly where to click, then send it as a single flattened annotated image. No more "see the button in the top right" — just circle it. Built-in canvas tools, no external apps needed.
+
+---
+
+### Special Feature #165 — Clipboard Ring (2026-03-19 8:10 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Clipboard Ring — A built-in clipboard history that captures everything you copy inside the app (AI responses, escalation text, template snippets, email fragments). Press Ctrl+Shift+V to pop open a searchable ring of your last 50 clips, click to paste. Survives page refreshes via localStorage. Kills the "wait, where did I copy that from?" moment during heavy multi-tab escalation work.
+
+---
+
+### Special Feature #166 — Model Lab Live Streaming Results (2026-03-19 8:39 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Model Lab Live Streaming Results — Convert the benchmark endpoint to SSE so each model's result streams to the UI the instant it finishes, instead of waiting in silence for 5-13 minutes. Watch "Sonnet 4.6: 12.4s, 847 words" appear while GPT-5.4 is still running. No more staring at a spinner wondering if it froze — results come alive one by one.
+
+---
+
+### Special Feature #167 — Voice Memo Quick-Capture (2026-03-19 9:01 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Voice Memo Quick-Capture — Tap a floating mic button anywhere in the app to record a quick voice memo (Web Audio API + MediaRecorder). The recording gets auto-transcribed by your AI provider and saved as a searchable text note with timestamp. Perfect for when you're on the phone getting details from an agent faster than you can type — just dictate the COID, case number, and symptoms, then paste the transcript into your template later.
+
+---
+
+### Special Feature #168 — Phantom Typist (2026-03-19 9:16 PM)
+Is duplicate?: No
+Complexity: low
+Special Feature: Phantom Typist — When AI responses stream in, the app plays soft realistic keyboard typing sounds synced to the token speed — fast clacking during bursts, slowing during thinking pauses. Toggle it on/off with a speaker icon. Makes the AI feel like a real person typing your answer in real time, and it's weirdly satisfying during long waits.
+
+---
+
+### Special Feature #169 — Escalation Wrapped (2026-03-19 9:18 PM)
+Is duplicate?: No
+Complexity: high
+Special Feature: Escalation Wrapped — A Spotify Wrapped-style personal recap that auto-generates at the end of each week/month. Beautiful animated cards showing: your most-resolved category, fastest resolution time, total escalations handled, your "power hour" (busiest time), longest streak, and an AI-generated "escalation personality type" based on your patterns (e.g. "The Bank Feed Whisperer"). Shareable as a screenshot, genuinely fun to review.
+
+### Special Feature #170 — Shift Debrief: Auto-Generated End-of-Shift Intelligence Report (2026-03-19 9:34 PM)
+Is duplicate?: No
+Complexity: high
+Special Feature: Shift Debrief — Hit a button at end-of-shift (or auto-prompted after 4+ hours of activity) and the app generates a full intelligence report: escalation summary by category, emerging pattern detection ("3 payroll escalations today all hit vacation accrual after Advanced upgrade — not a tracked INV yet, flag to your lead"), playbook gap report with auto-drafted additions from today's resolutions, agent coaching insights ("Agent Sarah Chen escalated 4x today, 3 were permissions — she may need the permissions quick-ref"), unresolved handoff notes for tomorrow's pickup, and INV trend alerts showing which investigations are heating up. Turns individual case work into institutional knowledge that compounds over time.
+
+- [ ] **Ambient Sound Mixer** — A built-in background noise generator (rain, coffee shop, lo-fi hum, ocean waves) with a tiny floating player widget. Mix multiple sounds with individual volume sliders, save presets like "Deep Focus" or "Chill Afternoon." *(suggested 2026-03-19 9:31 PM)*
+
+### Special Feature #171 — Walk-Away Lock (2026-03-20 12:05 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Walk-Away Lock — Webcam detects when you leave your desk (face disappears for 10+ seconds) and automatically blurs the entire app with a frosted-glass overlay to protect sensitive customer data on screen. When you sit back down and your face reappears, it unlocks instantly — zero-click security using the webcam hardware you already have. Perfect for open-office back-office environments where customer account info is visible.

@@ -3,7 +3,7 @@
 const UsageLog = require('../models/UsageLog');
 const { calculateCost } = require('./pricing');
 
-const VALID_SERVICES = new Set(['chat', 'parse', 'dev', 'copilot']);
+const VALID_SERVICES = new Set(['chat', 'parse', 'dev', 'copilot', 'workspace', 'gmail', 'briefing']);
 const VALID_MODES = new Set(['single', 'fallback', 'parallel']);
 const VALID_STATUSES = new Set(['ok', 'error', 'timeout', 'abort']);
 

@@ -53,9 +53,14 @@ gmailAuthSchema.statics.removeByEmail = async function (email) {
   return this.deleteOne({ email: email.toLowerCase().trim() });
 };
 
-/** Remove all accounts. */
+/**
+ * Remove all accounts — DISABLED.
+ * Bulk-deleting all accounts caused silent data loss (keithmacdonald2025 incident, Mar 2026).
+ * Use removeByEmail() to disconnect accounts one at a time.
+ */
 gmailAuthSchema.statics.clearAll = async function () {
-  return this.deleteMany({});
+  console.error('[GmailAuth] clearAll() is disabled — use removeByEmail() instead');
+  return { deletedCount: 0 };
 };
 
 /** Touch an account's updatedAt to make it the primary/active account. */

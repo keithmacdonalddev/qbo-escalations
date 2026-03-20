@@ -5,6 +5,8 @@ const calendar = require('./calendar');
 const { startChatOrchestration, resolvePolicy } = require('./chat-orchestrator');
 const { getDefaultProvider, getAlternateProvider } = require('./providers/registry');
 const { extractBriefingPayload, hydrateBriefingDocument } = require('../lib/workspace-briefing');
+const { logUsage } = require('../lib/usage-writer');
+const { randomUUID } = require('node:crypto');
 
 // ---------------------------------------------------------------------------
 // Workspace Scheduler — lightweight setInterval-based scheduler
@@ -315,11 +317,34 @@ async function generateBriefing() {
       timeoutMs: config.timeoutMs,
       reasoningEffort: 'medium',
       onChunk: ({ text: chunk }) => { text += chunk; },
-      onDone: () => {
+      onDone: ({ attempts, usage } = {}) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
           resolve(text);
+          // Log usage for briefing generation
+          if (Array.isArray(attempts)) {
+            for (let i = 0; i < attempts.length; i++) {
+              const a = attempts[i];
+              if (a.provider === 'regex') continue;
+              const u = a.usage || {};
+              logUsage({
+                requestId: randomUUID(),
+                attemptIndex: i,
+                service: 'briefing',
+                provider: a.provider,
+                model: u.model,
+                inputTokens: u.inputTokens,
+                outputTokens: u.outputTokens,
+                usageAvailable: !!a.usage,
+                usageComplete: u.usageComplete,
+                rawUsage: u.rawUsage,
+                mode: 'fallback',
+                status: a.status === 'ok' ? 'ok' : 'error',
+                latencyMs: a.latencyMs,
+              });
+            }
+          }
         }
       },
       onError: (err) => {

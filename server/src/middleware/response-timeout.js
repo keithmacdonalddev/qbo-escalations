@@ -7,22 +7,39 @@
  */
 function responseTimeout(ms = 30000) {
   return function responseTimeoutMiddleware(req, res, next) {
-    const effectiveMs = Number.isFinite(req.responseTimeoutMs) && req.responseTimeoutMs > 0
+    let effectiveMs = Number.isFinite(req.responseTimeoutMs) && req.responseTimeoutMs > 0
       ? req.responseTimeoutMs
       : ms;
+    let timer = null;
 
-    const timer = setTimeout(() => {
-      if (!res.headersSent) {
-        res.status(504).json({
-          ok: false,
-          code: 'RESPONSE_TIMEOUT',
-          error: `Request timed out after ${effectiveMs}ms`,
-        });
+    function clearTimer() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
       }
-    }, effectiveMs);
+    }
 
-    res.on('finish', () => clearTimeout(timer));
-    res.on('close', () => clearTimeout(timer));
+    function armTimeout(nextMs) {
+      if (!Number.isFinite(nextMs) || nextMs <= 0) return;
+      effectiveMs = nextMs;
+      clearTimer();
+      timer = setTimeout(() => {
+        if (!res.headersSent) {
+          res.status(504).json({
+            ok: false,
+            code: 'RESPONSE_TIMEOUT',
+            error: `Request timed out after ${effectiveMs}ms`,
+          });
+        }
+      }, effectiveMs);
+    }
+
+    req.setResponseTimeout = armTimeout;
+
+    armTimeout(effectiveMs);
+
+    res.on('finish', clearTimer);
+    res.on('close', clearTimer);
 
     next();
   };

@@ -159,7 +159,7 @@ function appendAgentSessionEvent(id, type, data = {}) {
   }
   if (type === 'done') session.status = 'done';
   if (type === 'error') {
-    session.status = 'error';
+    session.status = data?.code === 'ABORTED' ? 'aborted' : 'error';
     session.lastError = data?.error || data?.message || 'Session error';
   }
   emit(id, event);

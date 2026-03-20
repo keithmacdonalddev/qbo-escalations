@@ -29,6 +29,31 @@ export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'Extra High' },
 ]);
+
+/* Family-specific effort levels derived from catalog allowedEfforts field */
+const FAMILY_EFFORT_MAP = (() => {
+  const map = {};
+  for (const entry of catalog) {
+    const f = entry.family;
+    if (!map[f] && Array.isArray(entry.allowedEfforts)) {
+      map[f] = Object.freeze(
+        REASONING_EFFORT_OPTIONS.filter((opt) => entry.allowedEfforts.includes(opt.value))
+      );
+    }
+  }
+  return Object.freeze(map);
+})();
+
+/**
+ * Return the allowed reasoning-effort options for a given provider family.
+ * Falls back to the full REASONING_EFFORT_OPTIONS list for unknown families.
+ * @param {string} family - 'claude' | 'codex' | etc.
+ * @returns {ReadonlyArray<{value:string, label:string}>}
+ */
+export function getReasoningEffortOptions(family) {
+  return FAMILY_EFFORT_MAP[family] || REASONING_EFFORT_OPTIONS;
+}
+
 const PREFERRED_CODEX_FALLBACK = 'chatgpt-5.3-codex-high';
 export const PROVIDER_FAMILY = Object.freeze(
   PROVIDER_CATALOG.reduce((acc, entry) => {
@@ -36,6 +61,19 @@ export const PROVIDER_FAMILY = Object.freeze(
     return acc;
   }, {})
 );
+
+/**
+ * Returns whether a specific provider supports live thinking/reasoning display.
+ * Reads the supportsThinking field from the catalog entry.
+ * @param {string} providerId
+ * @returns {boolean}
+ */
+export function catalogSupportsThinking(providerId) {
+  const entry = PROVIDER_CATALOG.find((e) => e.id === providerId);
+  if (entry && typeof entry.supportsThinking === 'boolean') return entry.supportsThinking;
+  // Fallback: claude family supports thinking
+  return PROVIDER_FAMILY[providerId] === 'claude';
+}
 
 export const PROVIDER_LABELS = Object.freeze(
   PROVIDER_CATALOG.reduce((acc, entry) => {
@@ -80,7 +118,15 @@ export function isClaudeProvider(provider) {
   return (PROVIDER_FAMILY[provider] || PROVIDER_FAMILY[DEFAULT_PROVIDER] || 'claude') === 'claude';
 }
 
-export function normalizeReasoningEffort(value) {
+export function supportsLiveReasoning(provider) {
+  return isClaudeProvider(provider);
+}
+
+export function normalizeReasoningEffort(value, family) {
+  if (family) {
+    const allowed = getReasoningEffortOptions(family);
+    return allowed.some((entry) => entry.value === value) ? value : DEFAULT_REASONING_EFFORT;
+  }
   return REASONING_EFFORT_OPTIONS.some((entry) => entry.value === value)
     ? value
     : DEFAULT_REASONING_EFFORT;

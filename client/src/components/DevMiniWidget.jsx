@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { transitions, widgetSlideUp, scalePop, staggerContainer, staggerChild } from '../utils/motion.js';
 import { getProviderShortLabel } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
+import './DevMiniWidget.css';
 
 /** Notification type -> icon SVG */
 const NOTIFICATION_ICONS = {

@@ -70,6 +70,7 @@ export default function CrashModeAgent() {
       // Process SSE stream using the project's event format
       let assistantText = '';
       let newConvId = conversationId;
+      let streamSettled = false;
       await consumeSSEStream(res, (eventType, data) => {
         if ((eventType === 'start' || eventType === 'init' || eventType === 'session') && data?.conversationId) {
           newConvId = data.conversationId;
@@ -89,13 +90,22 @@ export default function CrashModeAgent() {
             .map((block) => block.text)
             .join('');
         }
+        if (eventType === 'error') {
+          streamSettled = true;
+          throw new Error(data?.error || data?.message || 'Crash agent request failed');
+        }
         if (eventType === 'done' && data?.conversationId) {
+          streamSettled = true;
           newConvId = data.conversationId;
         }
         if (eventType === 'done' && typeof data?.text === 'string') {
           assistantText = data.text;
         }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        throw new Error('The crash agent stream ended before completion.');
+      }
 
       setConversationId(newConvId);
       if (assistantText) {

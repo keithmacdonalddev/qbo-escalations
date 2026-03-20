@@ -67,9 +67,23 @@ const PROVIDER_DEFS = Object.freeze(
           ? (input, options) => claude.parseEscalation(input, { ...options, model })
           : claude.parseEscalation;
       },
+      getTranscribe: () => {
+        if (isCodex) {
+          return model
+            ? (input, options) => codex.transcribeImage(input, { ...options, model })
+            : codex.transcribeImage;
+        }
+        return model
+          ? (input, options) => claude.transcribeImage(input, { ...options, model })
+          : claude.transcribeImage;
+      },
       getDefaultParseTimeoutMs: () => toInt(
         isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS,
         120_000
+      ),
+      getDefaultTranscribeTimeoutMs: () => toInt(
+        isCodex ? process.env.CODEX_TRANSCRIBE_TIMEOUT_MS : process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS,
+        toInt(isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS, 60_000)
       ),
     };
     return acc;
@@ -105,6 +119,8 @@ function getProvider(provider) {
     defaultTimeoutMs: def.getDefaultTimeoutMs(),
     parseEscalation: def.getParse ? def.getParse() : null,
     defaultParseTimeoutMs: def.getDefaultParseTimeoutMs ? def.getDefaultParseTimeoutMs() : def.getDefaultTimeoutMs(),
+    transcribeImage: def.getTranscribe ? def.getTranscribe() : null,
+    defaultTranscribeTimeoutMs: def.getDefaultTranscribeTimeoutMs ? def.getDefaultTranscribeTimeoutMs() : def.getDefaultTimeoutMs(),
   };
 }
 

@@ -90,6 +90,25 @@ function isSelectableProvider(providerId) {
   return SELECTABLE_PROVIDER_IDS.includes(providerId);
 }
 
+function getAllowedEfforts(providerId) {
+  const meta = getProviderMeta(providerId);
+  if (meta && Array.isArray(meta.allowedEfforts)) return meta.allowedEfforts;
+  // Fallback based on family
+  return getProviderFamily(providerId) === 'codex'
+    ? ['low', 'medium', 'high', 'xhigh']
+    : ['low', 'medium', 'high'];
+}
+
+function getSupportsThinking(providerId) {
+  const meta = getProviderMeta(providerId);
+  if (meta && typeof meta.supportsThinking === 'boolean') return meta.supportsThinking;
+  return getProviderFamily(providerId) === 'claude';
+}
+
+function isAllowedEffort(providerId, effort) {
+  return getAllowedEfforts(providerId).includes(effort);
+}
+
 module.exports = {
   PROVIDER_CATALOG,
   PROVIDER_IDS,
@@ -109,4 +128,7 @@ module.exports = {
   getCodexProviderIds,
   getSelectableProviderIds,
   isSelectableProvider,
+  getAllowedEfforts,
+  getSupportsThinking,
+  isAllowedEffort,
 };

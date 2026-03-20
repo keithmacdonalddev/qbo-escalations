@@ -88,7 +88,8 @@ export async function sendBackgroundDevMessage({
     throw err;
   }
 
-  await consumeSSEStream(res, (eventType, data) => {
+  let streamSettled = false;
+  const streamMeta = await consumeSSEStream(res, (eventType, data) => {
     if (eventType === 'start' || eventType === 'init' || eventType === 'session') {
       resolvedConversationId = data.conversationId || resolvedConversationId;
       sessionId = data.sessionId || sessionId;
@@ -96,6 +97,7 @@ export async function sendBackgroundDevMessage({
     }
 
     if (eventType === 'done') {
+      streamSettled = true;
       resolvedConversationId = data.conversationId || resolvedConversationId;
       usage = data.usage || null;
       collapsed = Boolean(data.collapsed);
@@ -105,8 +107,13 @@ export async function sendBackgroundDevMessage({
     }
 
     if (eventType === 'error') {
+      streamSettled = true;
       // Surface SSE-level errors as thrown exceptions
-      throw new Error(normalizeError(data).message);
+      const normalized = normalizeError(data);
+      const err = new Error(normalized.message);
+      err.code = normalized.code;
+      err.detail = normalized.detail;
+      throw err;
     }
 
     // Text chunks
@@ -142,6 +149,20 @@ export async function sendBackgroundDevMessage({
       onToolUse?.(evt);
     }
   });
+
+  if (!streamSettled && !controller.signal.aborted) {
+    const normalized = normalizeError({
+      code: 'STREAM_INCOMPLETE',
+      error: 'The background dev stream ended before completion.',
+      detail: streamMeta?.malformedEventCount > 0
+        ? `The connection closed without a final done/error event and ${streamMeta.malformedEventCount} malformed SSE payload${streamMeta.malformedEventCount === 1 ? ' was' : 's were'} ignored.`
+        : 'The connection closed without a final done/error event.',
+    }, 'The background dev stream ended before completion.');
+    const err = new Error(normalized.message);
+    err.code = normalized.code;
+    err.detail = normalized.detail;
+    throw err;
+  }
 
   return {
     conversationId: resolvedConversationId,

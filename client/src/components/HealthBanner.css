@@ -1,0 +1,182 @@
+/* ==========================================================
+   HEALTH BANNER — slim status strip at app top
+   ========================================================== */
+
+.health-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  z-index: 9999;
+  border-radius: 20px;
+  animation: health-banner-slide-in 0.25s ease-out;
+  flex-shrink: 0;
+  pointer-events: auto;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+
+@keyframes health-banner-slide-in {
+  from { transform: translateX(-50%) translateY(-120%); opacity: 0; }
+  to   { transform: translateX(-50%) translateY(0); opacity: 1; }
+}
+
+.health-banner--green {
+  background: var(--success-subtle);
+  color: var(--success);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  animation: health-banner-slide-in 0.25s ease-out, health-banner-fade-out 0.5s ease-in 2.5s forwards;
+}
+
+@keyframes health-banner-fade-out {
+  to { opacity: 0; transform: translateX(-50%) translateY(-120%); }
+}
+
+.health-banner--yellow {
+  background: var(--warning-subtle);
+  color: var(--warning);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.health-banner--red {
+  background: var(--danger-subtle);
+  color: var(--danger);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.health-banner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.health-banner--green .health-banner-dot { background: var(--success); }
+.health-banner--yellow .health-banner-dot { background: var(--warning); }
+.health-banner--red .health-banner-dot {
+  background: var(--danger);
+  animation: health-dot-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes health-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.health-banner-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.health-banner-dismiss {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.health-banner-dismiss:hover {
+  opacity: 1;
+}
+
+/* -- Expand hint chevron -- */
+.health-banner-expand-hint {
+  font-size: 10px;
+  opacity: 0.6;
+  margin-left: 2px;
+  display: inline-block;
+  transition: transform 0.2s ease;
+}
+.health-banner-expand-hint--open {
+  transform: rotate(180deg);
+}
+
+/* -- Expanded detail panel -- */
+.health-banner-details {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+  min-width: 240px;
+  max-width: 360px;
+  padding: 8px 0;
+  border-radius: 12px;
+  font-size: 12px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  animation: health-details-fade-in 0.15s ease-out;
+}
+
+.health-banner--yellow .health-banner-details {
+  background: var(--warning-subtle);
+  border: 1px solid rgba(234,179,8,0.2);
+}
+
+.health-banner--red .health-banner-details {
+  background: var(--danger-subtle);
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+.health-banner-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.health-banner-detail-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.health-banner-detail-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.health-banner-detail-code {
+  opacity: 0.5;
+  font-size: 11px;
+  min-width: 28px;
+  text-align: center;
+}
+
+.health-banner-detail-time {
+  font-size: 11px;
+  opacity: 0.7;
+  min-width: 36px;
+  text-align: right;
+}
+
+@keyframes health-details-fade-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+

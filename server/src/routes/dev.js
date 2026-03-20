@@ -1,7 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const router = express.Router();
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const DevConversation = require('../models/DevConversation');
@@ -65,11 +65,9 @@ const DEV_CHAT_TIMEOUT_MS = parsePositiveInt(process.env.DEV_CHAT_TIMEOUT_MS, 60
 const DEV_CHAT_MAX_TIMEOUT_MS = parsePositiveInt(process.env.DEV_CHAT_MAX_TIMEOUT_MS, 1800000);
 const CODEX_DEV_MODEL = process.env.CODEX_DEV_MODEL || process.env.CODEX_CHAT_MODEL || 'gpt-5.3-codex';
 const CODEX_DEV_REASONING_EFFORT = process.env.CODEX_DEV_REASONING_EFFORT || process.env.CODEX_REASONING_EFFORT || 'high';
-const CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS, 5000);
 const DEFAULT_DEV_MAX_IMAGES = 6;
 const DEFAULT_DEV_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 const DEFAULT_DEV_MAX_TOTAL_IMAGE_BYTES = 30 * 1024 * 1024;
-let supportsClaudeDevImageFlagCache = null;
 const CLAUDE_DEV_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
 const DEV_ALLOWED_REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 
@@ -454,34 +452,6 @@ async function verifyRuntimeTargetsCleared({ workspaceSessionIds = [], aiOperati
     remainingWorkspaceIds,
     remainingAiIds,
   };
-}
-
-function supportsClaudeDevImageFlag() {
-  if (supportsClaudeDevImageFlagCache !== null) return supportsClaudeDevImageFlagCache;
-
-  if (process.env.CLAUDE_SUPPORTS_IMAGE_INPUT !== undefined) {
-    const normalized = String(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT).trim().toLowerCase();
-    supportsClaudeDevImageFlagCache = normalized === '1'
-      || normalized === 'true'
-      || normalized === 'yes'
-      || normalized === 'on';
-    return supportsClaudeDevImageFlagCache;
-  }
-
-  try {
-    const help = spawnSync('claude', ['--help'], {
-      shell: true,
-      cwd: PROJECT_ROOT,
-      env: { ...process.env, CLAUDECODE: undefined },
-      encoding: 'utf8',
-      timeout: CLAUDE_DEV_IMAGE_HELP_TIMEOUT_MS,
-    });
-    const text = `${help.stdout || ''}\n${help.stderr || ''}`.toLowerCase();
-    supportsClaudeDevImageFlagCache = text.includes('--image');
-  } catch {
-    supportsClaudeDevImageFlagCache = false;
-  }
-  return supportsClaudeDevImageFlagCache;
 }
 
 function appendImagePathsToPrompt(prompt, imagePaths) {
@@ -946,14 +916,8 @@ function buildProviderCommand({
     stdinText = `System instructions:\n${systemPrompt}\n\n${stdinText}`;
   }
   if (Array.isArray(imagePaths) && imagePaths.length > 0) {
-    if (supportsClaudeDevImageFlag()) {
-      for (const imgPath of imagePaths) {
-        args.push('--image', imgPath);
-      }
-    } else {
-      stdinText = appendImagePathsToPrompt(stdinText, imagePaths);
-      addCompatibilityImageAccessArgs(args, imagePaths);
-    }
+    stdinText = appendImagePathsToPrompt(stdinText, imagePaths);
+    addCompatibilityImageAccessArgs(args, imagePaths);
   }
   return {
     command: 'claude',
@@ -1694,19 +1658,23 @@ async function handleDevChatRequest(req, res, {
         });
       }
     } catch (err) {
+      // Always close the monitor incident on error, even if stream/session is dead
+      closeMonitorIncident('error', err, getConversationIdValue());
       if (sessionEntry.killed || streamClosed) return;
       const normalized = normalizeProviderError(policy.primaryProvider, err, 'INTERNAL');
-      const monitorIncident = closeMonitorIncident('error', err, getConversationIdValue());
       writeEvent('error', {
         error: normalized.message,
         code: normalized.code,
         attempts,
-        incident: monitorIncident || null,
+        incident: closeMonitorIncident('error', err, getConversationIdValue()) || null,
       });
       endStream();
       cleanup();
     }
-  })();
+  })().catch(() => {
+    // Safety net: ensure monitor incident is closed on any unhandled rejection
+    closeMonitorIncident('error', new Error('Unhandled rejection in dev chat stream'), getConversationIdValue());
+  });
 }
 
 // POST /api/dev/chat -- Developer mode stream with persistent dev conversations

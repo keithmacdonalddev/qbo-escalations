@@ -8,7 +8,9 @@
     "model": "claude-opus-4-6",
     "selectable": true,
     "order": 10,
-    "default": true
+    "default": true,
+    "allowedEfforts": ["low", "medium", "high"],
+    "supportsThinking": true
   },
   {
     "id": "claude-sonnet-4-6",
@@ -18,7 +20,9 @@
     "transport": "claude",
     "model": "claude-sonnet-4-6",
     "selectable": true,
-    "order": 20
+    "order": 20,
+    "allowedEfforts": ["low", "medium", "high"],
+    "supportsThinking": true
   },
   {
     "id": "claude-opus-4-6",
@@ -28,7 +32,9 @@
     "transport": "claude",
     "model": "claude-opus-4-6",
     "selectable": true,
-    "order": 25
+    "order": 25,
+    "allowedEfforts": ["low", "medium", "high"],
+    "supportsThinking": true
   },
   {
     "id": "chatgpt-5.3-codex-high",
@@ -38,7 +44,9 @@
     "transport": "codex",
     "model": "gpt-5.3-codex",
     "selectable": true,
-    "order": 30
+    "order": 30,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
   },
   {
     "id": "gpt-5.4",
@@ -48,7 +56,21 @@
     "transport": "codex",
     "model": "gpt-5.4",
     "selectable": true,
-    "order": 40
+    "order": 40,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
+  },
+  {
+    "id": "gpt-5.4-mini",
+    "label": "GPT-5.4 Mini",
+    "shortLabel": "5.4 Mini",
+    "family": "codex",
+    "transport": "codex",
+    "model": "gpt-5.4-mini",
+    "selectable": true,
+    "order": 45,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
   },
   {
     "id": "gpt-5.4-pro",
@@ -59,7 +81,9 @@
     "model": "gpt-5.4-pro",
     "selectable": false,
     "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
-    "order": 50
+    "order": 50,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
   },
   {
     "id": "gpt-5-mini",
@@ -70,7 +94,9 @@
     "model": "gpt-5-mini",
     "selectable": false,
     "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
-    "order": 60
+    "order": 60,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
   },
   {
     "id": "gpt-5-nano",
@@ -81,6 +107,8 @@
     "model": "gpt-5-nano",
     "selectable": false,
     "availabilityNote": "Rejected by Codex CLI for this ChatGPT account.",
-    "order": 70
+    "order": 70,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
   }
 ]

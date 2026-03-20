@@ -129,7 +129,16 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
       return;
     }
 
+    let sawTerminalEvent = false;
+    let eventCount = 0;
+    let lastEventType = null;
     const parser = createSseParser((eventType, data) => {
+      eventCount += 1;
+      lastEventType = eventType;
+      if (eventType === 'done' || eventType === 'error') {
+        sawTerminalEvent = true;
+      }
+
       if (eventType === 'start') {
         updateAgentSession(sessionId, {
           status: 'running',
@@ -137,6 +146,7 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
             conversationSessionId: data?.conversationSessionId || null,
             workspaceRuntimeSessionId: data?.sessionId || null,
             provider: data?.provider || data?.primaryProvider || null,
+            currentProvider: data?.provider || data?.primaryProvider || null,
             fallbackProvider: data?.fallbackProvider || null,
             mode: data?.mode || null,
           },
@@ -154,6 +164,24 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
             phase: data?.phase || null,
             elapsedMs: data?.elapsedMs || null,
           },
+        });
+      } else if (eventType === 'fallback') {
+        updateAgentSession(sessionId, {
+          metadata: {
+            provider: data?.to || null,
+            currentProvider: data?.to || null,
+            fallbackFrom: data?.from || null,
+            fallbackTo: data?.to || null,
+            fallbackAt: new Date().toISOString(),
+          },
+        });
+      } else if (eventType === 'provider_error') {
+        updateAgentSession(sessionId, {
+          metadata: {
+            lastProviderError: data?.message || data?.error || 'Workspace provider error',
+            lastProviderErrorProvider: data?.provider || null,
+          },
+          lastError: data?.message || data?.error || 'Workspace provider error',
         });
       }
 
@@ -183,6 +211,25 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
     parser.finish();
 
     const finalSession = getAgentSession(sessionId);
+    if (finalSession && !sawTerminalEvent && finalSession.status !== 'aborted') {
+      const error = eventCount > 0
+        ? 'Workspace session ended unexpectedly'
+        : 'Workspace session ended before any events were received';
+      const detail = eventCount > 0
+        ? `The workspace stream closed after ${eventCount} event${eventCount === 1 ? '' : 's'} without a final done/error event${lastEventType ? `; last event was "${lastEventType}".` : '.'}`
+        : 'The workspace stream closed before it emitted any SSE events.';
+      updateAgentSession(sessionId, {
+        status: 'error',
+        lastError: error,
+      });
+      appendAgentSessionEvent(sessionId, 'error', {
+        ok: false,
+        code: 'SESSION_STREAM_INCOMPLETE',
+        error,
+        detail,
+      });
+      return;
+    }
     if (finalSession && finalSession.status === 'running') {
       updateAgentSession(sessionId, { status: 'done' });
     }

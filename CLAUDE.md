@@ -57,7 +57,7 @@ Uses Claude CLI subprocess (`claude -p`) with the user's Max subscription. No AP
 
 - Streaming via `--output-format stream-json`
 - Playbook content prepended to stdin as `System instructions:`
-- Images via `--image <path>` flag
+- Images via temp files + `--add-dir` (paths appended to prompt text)
 - Each request spawns a fresh process; conversation history reconstructed from MongoDB
 
 ## API Response Format
@@ -87,8 +87,20 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 
 - Be direct and honest. Push back when the user is wrong rather than agreeing.
 - Treat conversations as real discussions, not yes-man confirmations.
-- Limit tool calls the appears in the chat/context window. They are rarely relevant for the user to see.Keep chat window clean and mindful of wasting tokens and context
-- **Verify before answering.** If unsure about external tools, features, APIs, or whether something exists — search first (WebSearch, Read, Grep), answer second. Never confidently state something doesn't exist without checking. A wrong confident answer erodes trust far more than "let me check."
+- Limit tool calls the appears in the chat/context window. They are rarely relevant for the user to see. Keep chat window clean and mindful of wasting tokens and context.
+
+## Verification — MANDATORY (hardened 3x, 7+ failures logged)
+
+**If you have not verified it with a tool call in THIS conversation, do not state it as fact. Say "let me check." No exceptions. EVER.**
+
+This applies to EVERYTHING — code, APIs, product specs, pricing, hardware details, general knowledge, subagent output, recommendations, advice. There is no category of information exempt from verification.
+
+- **Do not parrot subagent/research output.** Critically review it first. Check if it accounts for user context (location, hardware, preferences).
+- **Do not rely on training data for facts.** Training data is stale and wrong often enough to destroy trust.
+- **When the user says you're wrong, investigate immediately.** Do not argue or repeat the same answer.
+- **Flag uncertainty explicitly.** "The search found X but I haven't independently verified it" is always better than presenting something as fact.
+- **Instruct ALL subagents** to verify their own findings and flag what they couldn't confirm.
+- **Accuracy over speed — ALWAYS.** A slower correct answer beats a fast wrong one. Nobody asked for speed.
 
 ## Environment Variables
 

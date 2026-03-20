@@ -2,7 +2,7 @@
 
 const mongoose = require('mongoose');
 
-const SERVICES = ['chat', 'parse', 'dev', 'copilot'];
+const SERVICES = ['chat', 'parse', 'dev', 'copilot', 'workspace', 'gmail', 'briefing'];
 const MODES = ['single', 'fallback', 'parallel'];
 const STATUSES = ['ok', 'error', 'timeout', 'abort'];
 

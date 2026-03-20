@@ -105,10 +105,13 @@ function createApp() {
   app.use('/api/dev', requireDevModeEnabled, require('./routes/dev'));
   app.use('/api/usage', require('./routes/usage'));
   app.use('/api/traces', require('./routes/traces'));
+  app.use('/api/model-lab', require('./routes/model-lab'));
   app.use('/api/agents', require('./routes/agents'));
   app.use('/api/gmail', require('./routes/gmail'));
   app.use('/api/calendar', require('./routes/calendar'));
   app.use('/api/workspace', require('./routes/workspace'));
+  app.use('/api/investigations', require('./routes/investigations'));
+  app.use('/api/preferences', require('./routes/preferences'));
 
   app.use((err, req, res, next) => {
     console.error(`[${req.method} ${req.path}]`, err.message || err);

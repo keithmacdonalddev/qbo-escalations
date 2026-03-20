@@ -208,7 +208,7 @@ router.get('/by-provider', async (req, res) => {
 });
 
 // ── GET /api/usage/by-service ──────────────────────────────────────────
-// Breakdown per service (chat, parse, dev, copilot).
+// Breakdown per service (chat, parse, dev, copilot, workspace, gmail, briefing).
 router.get('/by-service', async (req, res) => {
   const match = dateFilter(req.query);
   if (match._invalid) {
@@ -310,7 +310,7 @@ router.get('/trends', async (req, res) => {
 // Token usage per escalation category / copilot action.
 // Groups include both service and category fields (R11).
 // Optional ?service= filter to narrow to one service.
-const VALID_SERVICES = ['chat', 'parse', 'dev', 'copilot'];
+const VALID_SERVICES = ['chat', 'parse', 'dev', 'copilot', 'workspace', 'gmail', 'briefing'];
 
 router.get('/by-category', async (req, res) => {
   const match = dateFilter(req.query);

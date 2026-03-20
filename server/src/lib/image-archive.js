@@ -74,21 +74,21 @@ function decodeBase64Image(base64Input) {
  *
  * Returns { grade: 'A'|'B'|'C'|'D'|'F', reason: string }
  */
-function gradeImageParsing(parsing) {
+function gradeImageParsing(parsing, thinking) {
   const text = safeString(parsing, '').trim();
   if (!text) return { grade: 'F', reason: 'No parsing output produced' };
 
   let score = 0;
   const reasons = [];
 
-  // Length scoring (0-25 points)
+  // Length scoring (0-20 points)
   const len = text.length;
-  if (len >= 800) { score += 25; reasons.push('detailed response'); }
-  else if (len >= 400) { score += 18; reasons.push('moderate detail'); }
-  else if (len >= 150) { score += 10; reasons.push('brief response'); }
-  else { score += 3; reasons.push('very short response'); }
+  if (len >= 800) { score += 20; reasons.push('detailed response'); }
+  else if (len >= 400) { score += 14; reasons.push('moderate detail'); }
+  else if (len >= 150) { score += 8; reasons.push('brief response'); }
+  else { score += 2; reasons.push('very short response'); }
 
-  // Structured sections (0-30 points)
+  // Structured sections (0-25 points)
   const expectedSections = [
     'What the Agent Is Attempting',
     'Expected vs Actual Outcome',
@@ -98,13 +98,13 @@ function gradeImageParsing(parsing) {
     'Customer-Facing Explanation',
   ];
   const sectionHits = expectedSections.filter((s) => text.toLowerCase().includes(s.toLowerCase())).length;
-  const sectionScore = Math.round((sectionHits / expectedSections.length) * 30);
+  const sectionScore = Math.round((sectionHits / expectedSections.length) * 25);
   score += sectionScore;
   if (sectionHits === expectedSections.length) reasons.push('all sections present');
   else if (sectionHits >= 4) reasons.push(`${sectionHits}/${expectedSections.length} sections`);
   else if (sectionHits > 0) reasons.push(`only ${sectionHits} sections`);
 
-  // Specific element identification (0-25 points)
+  // Specific element identification (0-20 points)
   const specifics = [
     /\b(COID|coid)\b/,
     /\b(MID|mid)\b/,
@@ -115,11 +115,37 @@ function gradeImageParsing(parsing) {
     /\b(incognito|browser|cache|clear)/i,
   ];
   const specificHits = specifics.filter((rx) => rx.test(text)).length;
-  const specificScore = Math.round((specificHits / specifics.length) * 25);
+  const specificScore = Math.round((specificHits / specifics.length) * 20);
   score += specificScore;
   if (specificHits >= 5) reasons.push('strong element identification');
   else if (specificHits >= 3) reasons.push('partial element identification');
   else if (specificHits > 0) reasons.push('minimal element identification');
+
+  // Reasoning quality (0-25 points)
+  const thinkingText = safeString(thinking, '').trim();
+  if (thinkingText.length > 0) {
+    let thinkingScore = 0;
+    // Has substantial thinking
+    if (thinkingText.length >= 500) { thinkingScore += 8; reasons.push('thorough reasoning'); }
+    else if (thinkingText.length >= 200) { thinkingScore += 5; reasons.push('moderate reasoning'); }
+    else if (thinkingText.length >= 50) { thinkingScore += 2; reasons.push('brief reasoning'); }
+
+    // Field-by-field analysis in thinking
+    const fieldMentions = [/coid/i, /mid/i, /case\s*(number|#)/i, /agent/i, /client/i, /category/i, /attempting/i, /outcome/i];
+    const fieldHits = fieldMentions.filter(rx => rx.test(thinkingText)).length;
+    thinkingScore += Math.min(8, Math.round((fieldHits / fieldMentions.length) * 8));
+    if (fieldHits >= 6) reasons.push('field-by-field analysis');
+
+    // Diagnostic reasoning
+    const diagPatterns = [/diagnos/i, /root\s*cause/i, /rul(e|ing)\s*out/i, /playbook/i, /INV[- ]?\d/i, /cross.?check/i, /confidence/i];
+    const diagHits = diagPatterns.filter(rx => rx.test(thinkingText)).length;
+    thinkingScore += Math.min(9, Math.round((diagHits / diagPatterns.length) * 9));
+    if (diagHits >= 4) reasons.push('strong diagnostic reasoning');
+
+    score += Math.min(25, thinkingScore);
+  } else {
+    reasons.push('no reasoning provided');
+  }
 
   // Uncertainty penalty (0 to -10 points)
   const uncertaintyPatterns = [
@@ -175,6 +201,7 @@ function archiveImage(opts) {
       base64Image,
       userPrompt,
       modelParsing,
+      thinking,
       parseFields,
       triageCard,
       provider,
@@ -202,8 +229,8 @@ function archiveImage(opts) {
     const imagePath = path.join(archiveDir, imageFileName);
     fs.writeFileSync(imagePath, decoded.buffer);
 
-    // Grade the parsing
-    const grade = gradeImageParsing(modelParsing);
+    // Grade the parsing (includes reasoning quality from extended thinking)
+    const grade = gradeImageParsing(modelParsing, thinking);
 
     // Build metadata
     const metadata = {
@@ -213,6 +240,7 @@ function archiveImage(opts) {
       imageIndex,
       userPrompt: safeString(userPrompt, ''),
       modelParsing: safeString(modelParsing, ''),
+      thinking: safeString(thinking, ''),
       parseFields: parseFields && typeof parseFields === 'object' ? parseFields : null,
       triageCard: triageCard && typeof triageCard === 'object' ? triageCard : null,
       grade,

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { transitions, widgetSlideUp, scalePop } from '../utils/motion.js';
 import { getProviderShortLabel } from '../lib/providerCatalog.js';
+import './ChatMiniWidget.css';
 
 function tailLines(text, count = 8) {
   return (text || '').split('\n').slice(-count).join('\n');

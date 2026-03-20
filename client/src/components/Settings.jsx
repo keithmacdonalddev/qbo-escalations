@@ -7,10 +7,11 @@ import {
   getDefaultCalendarAccount,
   getDefaultGmailAccount,
   hasConnectedAccount,
+  loadDefaultsFromServer,
   setDefaultCalendarAccount,
   setDefaultGmailAccount,
 } from '../lib/accountDefaults.js';
-import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import { PROVIDER_FAMILY, PROVIDER_OPTIONS, getReasoningEffortOptions } from '../lib/providerCatalog.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 
 // --- SVG Icons (must be above SETTINGS_SECTIONS for Vite HMR) ---
@@ -197,6 +198,15 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     fetchGoogleAuth();
   }, [fetchGoogleAuth]);
 
+  // Hydrate account defaults from server (survives localStorage clears)
+  useEffect(() => {
+    loadDefaultsFromServer().then((prefs) => {
+      if (!prefs) return;
+      if (prefs.defaultGmailAccount) setDefaultEmailAccountState(prefs.defaultGmailAccount);
+      if (prefs.defaultCalendarAccount) setDefaultCalendarAccountState(prefs.defaultCalendarAccount);
+    });
+  }, []);
+
   const handleGoogleConnect = useCallback(async () => {
     setGoogleConnecting(true);
     try {
@@ -225,20 +235,24 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const handleDefaultEmailAccountChange = useCallback((event) => {
     const nextValue = setDefaultGmailAccount(event.target.value);
     setDefaultEmailAccountState(nextValue);
+    setSavedFlash('email');
+    setTimeout(() => setSavedFlash(prev => prev === 'email' ? null : prev), 2000);
     if (liveRegionRef.current) {
       liveRegionRef.current.textContent = nextValue
-        ? `Default email address set to ${nextValue}`
-        : 'Default email address reset to the Google primary account';
+        ? `Default inbox set to ${nextValue}`
+        : 'Default inbox reset to first connected account';
     }
   }, []);
 
   const handleDefaultCalendarAccountChange = useCallback((event) => {
     const nextValue = setDefaultCalendarAccount(event.target.value);
     setDefaultCalendarAccountState(nextValue);
+    setSavedFlash('calendar');
+    setTimeout(() => setSavedFlash(prev => prev === 'calendar' ? null : prev), 2000);
     if (liveRegionRef.current) {
       liveRegionRef.current.textContent = nextValue
-        ? `Default calendar address set to ${nextValue}`
-        : 'Default calendar address reset to the Google primary account';
+        ? `Default calendar set to ${nextValue}`
+        : 'Default calendar reset to first connected account';
     }
   }, []);
 
@@ -272,9 +286,10 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     : '';
   const missingDefaultEmailAccount = Boolean(defaultEmailAccount) && !selectedDefaultEmailAccount;
   const missingDefaultCalendarAccount = Boolean(defaultCalendarAccount) && !selectedDefaultCalendarAccount;
-  const defaultFallbackLabel = primaryGoogleAccount
-    ? `Use Google primary (${primaryGoogleAccount})`
-    : 'Use Google primary account';
+  const defaultFallbackLabel = connectedAccounts.length > 0
+    ? `Use first connected (${connectedAccounts[0].email})`
+    : 'Use default account';
+  const [savedFlash, setSavedFlash] = useState(null);
 
   return (
     <div className="settings-layout">
@@ -691,7 +706,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                       value={aiSettings.providerStrategy.reasoningEffort}
                       onChange={(e) => updateAiSetting('providerStrategy.reasoningEffort', e.target.value)}
                     >
-                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                      {getReasoningEffortOptions(PROVIDER_FAMILY[aiSettings.providerStrategy.defaultPrimaryProvider] || 'claude').map((option) => (
                         <option key={option.value} value={option.value}>{option.label}</option>
                       ))}
                     </select>
@@ -1306,14 +1321,16 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                     {connectedAccounts.length > 0 && (
                       <div className="settings-accounts-connected-list" aria-label="Connected Google accounts">
                         {connectedAccounts.map((account) => {
-                          const isPrimary = account.email === primaryGoogleAccount;
+                          const isDefault = selectedDefaultEmailAccount
+                            ? account.email === selectedDefaultEmailAccount
+                            : account.email === connectedAccounts[0]?.email;
                           return (
                             <span
                               key={account.email}
-                              className={`settings-accounts-connected-chip${isPrimary ? ' is-primary' : ''}`}
+                              className={`settings-accounts-connected-chip${isDefault ? ' is-primary' : ''}`}
                             >
                               {account.email}
-                              {isPrimary ? ' · Google primary' : ''}
+                              {isDefault ? ' \u2713 Default' : ''}
                             </span>
                           );
                         })}
@@ -1322,15 +1339,20 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
                     <div className="settings-accounts-defaults">
                       <div className="settings-accounts-defaults-header">
-                        <span className="settings-accounts-scopes-label">Preferred defaults</span>
+                        <span className="settings-accounts-scopes-label">Default accounts</span>
                         <p className="settings-accounts-defaults-desc">
-                          Choose which connected address opens first in Workspace Inbox and Workspace Calendar.
+                          Choose which account to use by default across inbox and calendar.
                         </p>
                       </div>
 
                       <div className="settings-accounts-default-grid">
                         <label className="settings-accounts-default-field">
-                          <span className="settings-accounts-default-label">Default email address</span>
+                          <span className="settings-accounts-default-label">
+                            Default inbox
+                            {savedFlash === 'email' && (
+                              <span className="settings-accounts-saved-flash">{'\u2713'} Saved</span>
+                            )}
+                          </span>
                           <select
                             className="settings-accounts-default-select"
                             value={selectedDefaultEmailAccount}
@@ -1343,18 +1365,20 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                               </option>
                             ))}
                           </select>
-                          <span className="settings-accounts-default-hint">
-                            Used when Workspace Inbox opens.
-                          </span>
                           {missingDefaultEmailAccount && (
                             <span className="settings-accounts-default-note">
-                              The saved email default is no longer connected, so the Google primary account will be used instead.
+                              The saved default is no longer connected. The first connected account will be used instead.
                             </span>
                           )}
                         </label>
 
                         <label className="settings-accounts-default-field">
-                          <span className="settings-accounts-default-label">Default calendar address</span>
+                          <span className="settings-accounts-default-label">
+                            Default calendar
+                            {savedFlash === 'calendar' && (
+                              <span className="settings-accounts-saved-flash">{'\u2713'} Saved</span>
+                            )}
+                          </span>
                           <select
                             className="settings-accounts-default-select"
                             value={selectedDefaultCalendarAccount}
@@ -1367,12 +1391,9 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                               </option>
                             ))}
                           </select>
-                          <span className="settings-accounts-default-hint">
-                            Used when Workspace Calendar opens.
-                          </span>
                           {missingDefaultCalendarAccount && (
                             <span className="settings-accounts-default-note">
-                              The saved calendar default is no longer connected, so the Google primary account will be used instead.
+                              The saved default is no longer connected. The first connected account will be used instead.
                             </span>
                           )}
                         </label>

@@ -18,6 +18,11 @@ const messageSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+  // Token usage / cost data (assistant messages only — set by buildWorkspaceUsageSubdoc)
+  usage: {
+    type: mongoose.Schema.Types.Mixed,
+    default: undefined,
+  },
 }, { _id: false });
 
 const workspaceConversationSchema = new mongoose.Schema({
@@ -82,11 +87,16 @@ workspaceConversationSchema.statics.appendMessages = async function (sessionId, 
   }
   for (const msg of newMessages) {
     if (msg && (msg.role === 'user' || msg.role === 'assistant') && typeof msg.content === 'string') {
-      doc.messages.push({
+      const entry = {
         role: msg.role,
         content: msg.content,
         timestamp: msg.timestamp || new Date(),
-      });
+      };
+      // Persist token usage for assistant messages (set by buildWorkspaceUsageSubdoc)
+      if (msg.usage && msg.role === 'assistant') {
+        entry.usage = msg.usage;
+      }
+      doc.messages.push(entry);
     }
   }
   await doc.save(); // pre-save hook enforces sliding window

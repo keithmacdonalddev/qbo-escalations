@@ -1,3 +1,4 @@
+import './CopilotPanel.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Tooltip from './Tooltip.jsx';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
@@ -6,11 +7,13 @@ import {
   DEFAULT_REASONING_EFFORT,
   getAlternateProvider,
   getProviderShortLabel,
+  getReasoningEffortOptions,
   normalizeProvider,
   normalizeReasoningEffort,
+  PROVIDER_FAMILY,
   PROVIDER_OPTIONS,
-  REASONING_EFFORT_OPTIONS,
 } from '../lib/providerCatalog.js';
+import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 import {
   streamAnalyzeEscalation,
   streamFindSimilar,
@@ -234,6 +237,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
     providerMode,
     fallbackProvider,
     reasoningEffort,
+    usage,
   } = session;
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
 
@@ -289,6 +293,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
       error: '',
       statusText: '',
       streaming: true,
+      usage: null,
     });
 
     let streamFn;
@@ -333,6 +338,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
           output: prev.output || data.fullResponse || '',
           statusText: `Completed with ${getProviderShortLabel(data?.providerUsed || data?.provider || provider)}`,
           streaming: false,
+          usage: data?.usage || null,
         }));
       },
       onError: (msg) => {
@@ -417,7 +423,15 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                   key={option.value}
                   type="button"
                   className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                  onClick={() => patchSession({ provider: option.value })}
+                  onClick={() => {
+                    const patch = { provider: option.value };
+                    const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                    const allowed = getReasoningEffortOptions(nextFamily);
+                    if (!allowed.some((o) => o.value === reasoningEffort)) {
+                      patch.reasoningEffort = 'high';
+                    }
+                    patchSession(patch);
+                  }}
                 >
                   <span>{option.label}</span>
                   <span className="check">{provider === option.value ? '\u2713' : ''}</span>
@@ -458,7 +472,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
               )}
               <div className="provider-popover-divider" />
               <div className="provider-popover-label">Reasoning Effort</div>
-              {REASONING_EFFORT_OPTIONS.map((option) => (
+              {getReasoningEffortOptions(PROVIDER_FAMILY[provider] || 'claude').map((option) => (
                 <button
                   key={option.value}
                   type="button"
@@ -578,6 +592,24 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
           <>
             {renderedOutput}
             {streaming && <span className="streaming-cursor" />}
+            {!streaming && usage && (usage.inputTokens > 0 || usage.outputTokens > 0) && (
+              <div className="copilot-usage-badge">
+                <span className="copilot-usage-tokens">
+                  {formatTokenCount((usage.inputTokens || 0) + (usage.outputTokens || 0))} tokens
+                </span>
+                <span className="copilot-usage-detail">
+                  {formatTokenCount(usage.inputTokens || 0)} in / {formatTokenCount(usage.outputTokens || 0)} out
+                </span>
+                {usage.rateFound && usage.totalCostMicros > 0 && (
+                  <span className="copilot-usage-cost">
+                    {formatCost(usage.totalCostMicros / 1_000_000)}
+                  </span>
+                )}
+                {usage.model && (
+                  <span className="copilot-usage-model">{usage.model}</span>
+                )}
+              </div>
+            )}
           </>
         ) : streaming ? (
           <div className="copilot-results-empty">

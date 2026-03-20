@@ -1,8 +1,10 @@
+import './CalendarView.css';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import AgentDock from './AgentDock.jsx';
 import { apiFetch as trackedFetch } from '../api/http.js';
 import { getDefaultCalendarAccount, resolveConnectedAccount } from '../lib/accountDefaults.js';
+import { formatDateCalendar as formatDate } from '../utils/dateFormatting.js';
 
 const API = '/api/calendar';
 
@@ -24,7 +26,6 @@ function startOfWeek(d) { const r = startOfDay(d); r.setDate(r.getDate() - r.get
 function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 function endOfMonth(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
 function isSameDay(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
-function formatDate(d) { return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); }
 function formatTime(d) { return d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
 function formatTimeRange(s, e) { return `${formatTime(s)} - ${formatTime(e)}`; }
 function toLocalISO(d) { const p = n => String(n).padStart(2,'0'); return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; }

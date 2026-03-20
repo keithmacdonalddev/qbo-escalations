@@ -6,6 +6,9 @@ const calendar = require('../services/calendar');
 const { resolvePolicy, startChatOrchestration } = require('../services/chat-orchestrator');
 const { getDefaultProvider, getAlternateProvider, isValidProvider, normalizeProvider } = require('../services/providers/registry');
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { logUsage } = require('../lib/usage-writer');
+const { calculateCost } = require('../lib/pricing');
+const { randomUUID } = require('node:crypto');
 const patternLearner = require('../services/workspace-pattern-learner');
 const actionLog = require('../services/workspace-action-log');
 const {
@@ -23,12 +26,558 @@ const {
 } = require('../services/workspace-runtime');
 
 const router = express.Router();
-const WORKSPACE_CHAT_TIMEOUT_MS = Number.parseInt(process.env.WORKSPACE_CHAT_TIMEOUT_MS || '', 10) > 0
-  ? Number.parseInt(process.env.WORKSPACE_CHAT_TIMEOUT_MS, 10)
-  : 180_000;
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const WORKSPACE_CHAT_TIMEOUT_MS = Math.min(
+  parsePositiveInt(process.env.WORKSPACE_CHAT_TIMEOUT_MS, 600_000),
+  1_800_000
+);
 const WORKSPACE_PRIMARY_PROVIDER = getDefaultProvider();
 const WORKSPACE_FALLBACK_PROVIDER = getAlternateProvider(WORKSPACE_PRIMARY_PROVIDER);
 const WORKSPACE_ALLOWED_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+
+// ---------------------------------------------------------------------------
+// Context-building timeout — prevents Gmail/Calendar hangs from stalling the
+// entire workspace request.  Individual sub-sections use shorter timeouts;
+// this outer guard is the last resort.
+// ---------------------------------------------------------------------------
+const CONTEXT_SECTION_TIMEOUT_MS = 12_000; // 12 s — auto-context (Gmail/Calendar/actions)
+const CONTEXT_MINOR_TIMEOUT_MS = 5_000;    // 5 s  — alerts, memory, conversation history
+
+/**
+ * Race a promise against a timeout.  Returns `fallback` if the promise
+ * doesn't settle within `ms`.  Never rejects — callers get the fallback
+ * value on timeout or error.
+ */
+function withTimeout(promise, ms, fallback = null) {
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(fallback), ms);
+  });
+  return Promise.race([promise, timeout]).then(
+    (v) => { clearTimeout(timer); return v; },
+    () => { clearTimeout(timer); return fallback; }
+  );
+}
+
+const WORKSPACE_TOOL_METADATA = {
+  'gmail.search': {
+    kind: 'read',
+    description: 'Search emails.',
+    params: '{ q, maxResults?, account? }',
+    statusLabel: 'Searching emails',
+  },
+  'gmail.send': {
+    kind: 'write',
+    description: 'Send email.',
+    params: '{ to, subject, body, cc?, bcc?, threadId?, inReplyTo?, references?, account? }',
+    statusLabel: 'Sending email',
+  },
+  'gmail.archive': {
+    kind: 'write',
+    description: 'Archive message (remove from inbox).',
+    params: '{ messageId, account? }',
+    statusLabel: 'Archiving message',
+  },
+  'gmail.trash': {
+    kind: 'write',
+    description: 'Trash message.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Trashing message',
+  },
+  'gmail.star': {
+    kind: 'write',
+    description: 'Star message.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Starring message',
+  },
+  'gmail.unstar': {
+    kind: 'write',
+    description: 'Unstar message.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Unstarring message',
+  },
+  'gmail.markRead': {
+    kind: 'write',
+    description: 'Mark as read.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Marking as read',
+  },
+  'gmail.markUnread': {
+    kind: 'write',
+    description: 'Mark as unread.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Marking as unread',
+  },
+  'gmail.label': {
+    kind: 'write',
+    description: 'Apply a label. Accepts a label ID or label name; missing user labels are created automatically.',
+    params: '{ messageId, labelId?, labelName?, label?, account? }',
+    statusLabel: 'Applying label',
+  },
+  'gmail.removeLabel': {
+    kind: 'write',
+    description: 'Remove a label. Accepts a label ID or label name.',
+    params: '{ messageId, labelId?, labelName?, label?, account? }',
+    statusLabel: 'Removing label',
+  },
+  'gmail.draft': {
+    kind: 'write',
+    description: 'Create draft.',
+    params: '{ to, subject, body, cc?, bcc?, account? }',
+    statusLabel: 'Creating draft',
+  },
+  'gmail.getMessage': {
+    kind: 'read',
+    description: 'Read a specific email by ID.',
+    params: '{ messageId, account? }',
+    statusLabel: 'Reading email',
+  },
+  'gmail.listLabels': {
+    kind: 'read',
+    description: 'List all Gmail labels.',
+    params: '{ account? }',
+    statusLabel: 'Listing labels',
+  },
+  'gmail.createLabel': {
+    kind: 'write',
+    description: 'Create a Gmail label/folder.',
+    params: '{ name, labelListVisibility?, messageListVisibility?, account? }',
+    statusLabel: 'Creating label',
+  },
+  'gmail.createFilter': {
+    kind: 'write',
+    description: 'Create an auto-filter rule.',
+    params: '{ criteria: { from?, to?, subject?, query? }, action: { addLabelIds?: ["label-id"], removeLabelIds?: ["INBOX"] }, account? }',
+    statusLabel: 'Creating filter',
+  },
+  'gmail.listFilters': {
+    kind: 'read',
+    description: 'List all Gmail filters.',
+    params: '{ account? }',
+    statusLabel: 'Listing filters',
+  },
+  'gmail.deleteFilter': {
+    kind: 'write',
+    description: 'Delete a filter.',
+    params: '{ filterId, account? }',
+    statusLabel: 'Deleting filter',
+  },
+  'gmail.batchModify': {
+    kind: 'write',
+    description: 'Bulk modify messages. Accepts label IDs or label names; missing add-labels are created automatically.',
+    params: '{ messageIds: ["id1","id2"], addLabelIds?: ["label-id-or-name"], removeLabelIds?: ["label-id-or-name"], addLabels?: ["name"], removeLabels?: ["name"], account? }',
+    statusLabel: 'Updating messages',
+  },
+  'calendar.listEvents': {
+    kind: 'read',
+    description: 'List events in a time range.',
+    params: '{ timeMin, timeMax, q?, calendarId?, account? }',
+    statusLabel: 'Checking calendar',
+  },
+  'calendar.createEvent': {
+    kind: 'write',
+    description: 'Create event.',
+    params: '{ summary, start, end, location?, description?, attendees?, allDay?, timeZone?, account?, reminders?: { useDefault: false, overrides: [{ method: "popup", minutes: 5 }] } }',
+    statusLabel: 'Creating event',
+  },
+  'calendar.updateEvent': {
+    kind: 'write',
+    description: 'Update event.',
+    params: '{ eventId, summary?, start?, end?, location?, description?, attendees?, calendarId?, account?, reminders?: { useDefault: false, overrides: [{ method: "popup", minutes: 5 }] } }',
+    statusLabel: 'Updating event',
+  },
+  'calendar.deleteEvent': {
+    kind: 'write',
+    description: 'Delete event.',
+    params: '{ eventId, calendarId?, account? }',
+    statusLabel: 'Deleting event',
+  },
+  'calendar.freeTime': {
+    kind: 'read',
+    description: 'Find free time.',
+    params: '{ calendarIds?, timeMin, timeMax, timeZone?, account? }',
+    statusLabel: 'Finding free time',
+  },
+  'memory.save': {
+    kind: 'write',
+    description: 'Save to memory.',
+    params: '{ type, key, content, source? }',
+    statusLabel: 'Saving to memory',
+  },
+  'memory.list': {
+    kind: 'read',
+    description: 'Check memory.',
+    params: '{ query?, type?, limit? }',
+    statusLabel: 'Checking memory',
+  },
+  'memory.delete': {
+    kind: 'write',
+    description: 'Remove memory.',
+    params: '{ key }',
+    statusLabel: 'Removing memory',
+  },
+  'autoAction.createRule': {
+    kind: 'write',
+    description: 'Create an automatic rule for future emails.',
+    params: '{ name, tier, conditionType, conditionValue, actionType, actionValue? }',
+    statusLabel: 'Creating auto-rule',
+  },
+  'autoAction.approve': {
+    kind: 'write',
+    description: 'Approve a learned auto-rule and promote it when appropriate.',
+    params: '{ ruleId }',
+    statusLabel: 'Approving auto-rule',
+  },
+  'shipment.list': {
+    kind: 'read',
+    description: 'List tracked shipments.',
+    params: '{ active?: true, carrier?, status? }',
+    statusLabel: 'Listing shipments',
+  },
+  'shipment.get': {
+    kind: 'read',
+    description: 'Get detailed status for a specific tracking number.',
+    params: '{ trackingNumber }',
+    statusLabel: 'Checking shipment',
+  },
+  'shipment.updateStatus': {
+    kind: 'write',
+    description: 'Manually update a shipment status.',
+    params: '{ trackingNumber, status: "label-created"|"in-transit"|"out-for-delivery"|"delivered"|"exception", location?, description? }',
+    statusLabel: 'Updating shipment',
+  },
+  'shipment.markDelivered': {
+    kind: 'write',
+    description: 'Mark a shipment as delivered.',
+    params: '{ trackingNumber }',
+    statusLabel: 'Marking delivered',
+  },
+  'shipment.track': {
+    kind: 'read',
+    description: 'Get carrier tracking URL and latest info for a package.',
+    params: '{ trackingNumber }',
+    statusLabel: 'Getting tracking info',
+  },
+};
+
+function buildWorkspaceAvailableToolLines() {
+  const lines = [
+    'AVAILABLE TOOLS:',
+    '',
+    'MULTI-ACCOUNT NOTE: Multiple Gmail accounts may be connected. All gmail.* tools accept an optional `account` parameter — the email address of the account to operate on (e.g., account: "work@example.com"). If omitted, the primary (most recently active) account is used. Always specify `account` when operating on a non-primary account. The connected accounts are listed at the top of the auto-context.',
+    'LABEL/FOLDER RULE: If the user asks for a Gmail label or folder and it does not exist, create it. You can call gmail.createLabel directly, or use label names in gmail.label and gmail.batchModify — the system will resolve them and create missing user labels automatically.',
+    'EXECUTION RULE: For requests that span multiple accounts, folders, labels, inbox/trash/archive scopes, or calendar ranges, keep a checklist and do not summarize until each requested scope has been touched or you report the exact blocker.',
+    '',
+  ];
+
+  for (const [tool, meta] of Object.entries(WORKSPACE_TOOL_METADATA)) {
+    lines.push(`- ${tool}: ${meta.description} Params: ${meta.params}`);
+  }
+
+  return lines;
+}
+
+const WORKSPACE_AVAILABLE_TOOL_LINES = buildWorkspaceAvailableToolLines();
+const WORKSPACE_TOOL_STATUS_LABELS = Object.fromEntries(
+  Object.entries(WORKSPACE_TOOL_METADATA).map(([tool, meta]) => [tool, meta.statusLabel || tool])
+);
+
+function normalizeLabelRef(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function dedupeStrings(values) {
+  return [...new Set((values || []).map((value) => normalizeLabelRef(value)).filter(Boolean))];
+}
+
+function getLabelCacheKey(account) {
+  return account || '__primary__';
+}
+
+async function listLabelsForWorkspace(account, executionState) {
+  const cache = executionState?.gmailLabelCache || null;
+  const key = getLabelCacheKey(account);
+  if (cache && cache.has(key)) {
+    return cache.get(key);
+  }
+
+  const result = await gmail.listLabels(account || undefined);
+  if (!result || !result.ok) {
+    throw new Error(result?.error || 'Could not list Gmail labels');
+  }
+
+  const labels = Array.isArray(result.labels) ? result.labels : [];
+  const lookup = new Map();
+  for (const label of labels) {
+    if (!label) continue;
+    for (const ref of [label.id, label.name]) {
+      const normalized = normalizeLabelRef(ref).toLowerCase();
+      if (normalized) lookup.set(normalized, label);
+    }
+  }
+
+  const payload = { labels, lookup };
+  if (cache) cache.set(key, payload);
+  return payload;
+}
+
+function invalidateWorkspaceLabelCache(account, executionState) {
+  const cache = executionState?.gmailLabelCache || null;
+  if (cache) cache.delete(getLabelCacheKey(account));
+}
+
+async function resolveWorkspaceLabelRef(ref, { account, createIfMissing = false, executionState, createOptions } = {}) {
+  const rawRef = normalizeLabelRef(ref);
+  if (!rawRef) return null;
+
+  const systemLabelId = gmail.SYSTEM_LABELS?.[rawRef.toUpperCase()];
+  if (systemLabelId) {
+    return {
+      labelId: systemLabelId,
+      labelName: rawRef.toUpperCase(),
+      created: false,
+    };
+  }
+
+  const { lookup } = await listLabelsForWorkspace(account, executionState);
+  const existing = lookup.get(rawRef.toLowerCase());
+  if (existing) {
+    return {
+      labelId: existing.id,
+      labelName: existing.name,
+      created: false,
+      label: existing,
+    };
+  }
+
+  if (!createIfMissing) {
+    throw new Error(`Gmail label "${rawRef}" was not found`);
+  }
+
+  const created = await gmail.createLabel(rawRef, createOptions || {}, account || undefined);
+  if (!created || !created.ok || !created.label?.id) {
+    throw new Error(created?.error || `Failed to create Gmail label "${rawRef}"`);
+  }
+
+  invalidateWorkspaceLabelCache(account, executionState);
+
+  return {
+    labelId: created.label.id,
+    labelName: created.label.name || rawRef,
+    created: true,
+    label: created.label,
+  };
+}
+
+async function normalizeWorkspaceBatchLabels(params, executionState) {
+  const addRefs = dedupeStrings([
+    ...(Array.isArray(params.addLabels) ? params.addLabels : []),
+    ...(Array.isArray(params.addLabelNames) ? params.addLabelNames : []),
+    ...(Array.isArray(params.addLabelIds) ? params.addLabelIds : []),
+  ]);
+  const removeRefs = dedupeStrings([
+    ...(Array.isArray(params.removeLabels) ? params.removeLabels : []),
+    ...(Array.isArray(params.removeLabelNames) ? params.removeLabelNames : []),
+    ...(Array.isArray(params.removeLabelIds) ? params.removeLabelIds : []),
+  ]);
+
+  const createdLabels = [];
+  const addResolved = [];
+  for (const ref of addRefs) {
+    const resolved = await resolveWorkspaceLabelRef(ref, {
+      account: params.account || undefined,
+      createIfMissing: true,
+      executionState,
+    });
+    if (!resolved) continue;
+    addResolved.push(resolved);
+    if (resolved.created) {
+      createdLabels.push({ id: resolved.labelId, name: resolved.labelName });
+    }
+  }
+
+  const removeResolved = [];
+  for (const ref of removeRefs) {
+    const resolved = await resolveWorkspaceLabelRef(ref, {
+      account: params.account || undefined,
+      createIfMissing: false,
+      executionState,
+    });
+    if (!resolved) continue;
+    removeResolved.push(resolved);
+  }
+
+  return {
+    addLabelIds: dedupeStrings(addResolved.map((item) => item.labelId)),
+    removeLabelIds: dedupeStrings(removeResolved.map((item) => item.labelId)),
+    addLabelNames: dedupeStrings(addResolved.map((item) => item.labelName)),
+    removeLabelNames: dedupeStrings(removeResolved.map((item) => item.labelName)),
+    _labelsCreated: createdLabels,
+  };
+}
+
+async function prepareActionForExecution(action, executionState) {
+  const params = { ...(action.params || {}) };
+
+  if (action.tool === 'gmail.createLabel') {
+    params.name = normalizeLabelRef(params.name || params.labelName || params.label);
+    if (!params.name) {
+      throw new Error('gmail.createLabel requires "name"');
+    }
+  }
+
+  if (action.tool === 'gmail.label' || action.tool === 'gmail.removeLabel') {
+    const labelRef = params.labelId || params.labelName || params.label;
+    const resolved = await resolveWorkspaceLabelRef(labelRef, {
+      account: params.account || undefined,
+      createIfMissing: action.tool === 'gmail.label',
+      executionState,
+    });
+    if (!resolved) {
+      throw new Error(`${action.tool} requires "labelId", "labelName", or "label"`);
+    }
+    params.labelId = resolved.labelId;
+    params.labelName = resolved.labelName;
+    params._labelsCreated = resolved.created ? [{ id: resolved.labelId, name: resolved.labelName }] : [];
+  }
+
+  if (action.tool === 'gmail.batchModify') {
+    Object.assign(params, await normalizeWorkspaceBatchLabels(params, executionState));
+  }
+
+  return { ...action, params };
+}
+
+function createWorkspaceExecutionState({ connectedGmailAccounts = [] } = {}) {
+  const accounts = (Array.isArray(connectedGmailAccounts) ? connectedGmailAccounts : []).filter(Boolean);
+  return {
+    connectedGmailAccounts: accounts,
+    primaryGmailAccount: accounts[0] || null,
+    gmailLabelCache: new Map(),
+    gmailAccountsTouched: new Set(),
+    gmailSearchAccounts: new Set(),
+    gmailWriteAccounts: new Set(),
+    calendarAccountsTouched: new Set(),
+    recentGmailSearches: [],
+    recentCalendarQueries: [],
+    createdLabels: [],
+  };
+}
+
+function resolveWorkspaceAccount(account, executionState) {
+  return normalizeLabelRef(account) || executionState?.primaryGmailAccount || '(primary account)';
+}
+
+function pushBounded(list, entry, limit = 6) {
+  list.push(entry);
+  if (list.length > limit) {
+    list.splice(0, list.length - limit);
+  }
+}
+
+function recordCreatedLabels(executionState, account, labels) {
+  if (!executionState || !Array.isArray(labels)) return;
+  for (const label of labels) {
+    const name = normalizeLabelRef(label?.name);
+    const id = normalizeLabelRef(label?.id);
+    if (!name && !id) continue;
+    const alreadySeen = executionState.createdLabels.some((existing) => existing.id === id && existing.account === account);
+    if (!alreadySeen) {
+      executionState.createdLabels.push({ id, name: name || id, account });
+    }
+  }
+}
+
+function trackWorkspaceExecutionState(executionState, action, result) {
+  if (!executionState || !action || !action.tool) return;
+
+  const account = resolveWorkspaceAccount(action.params?.account, executionState);
+
+  if (action.tool.startsWith('gmail.')) {
+    executionState.gmailAccountsTouched.add(account);
+
+    if (action.tool === 'gmail.search') {
+      executionState.gmailSearchAccounts.add(account);
+      pushBounded(executionState.recentGmailSearches, {
+        account,
+        query: normalizeLabelRef(action.params?.q) || '(no query)',
+      });
+    } else if (!['gmail.getMessage', 'gmail.listLabels', 'gmail.listFilters'].includes(action.tool)) {
+      executionState.gmailWriteAccounts.add(account);
+    }
+
+    if (action.tool === 'gmail.createLabel' && result?.label) {
+      recordCreatedLabels(executionState, account, [result.label]);
+    }
+    if (Array.isArray(result?.labelsCreated) && result.labelsCreated.length > 0) {
+      recordCreatedLabels(executionState, account, result.labelsCreated);
+    }
+  }
+
+  if (action.tool.startsWith('calendar.')) {
+    executionState.calendarAccountsTouched.add(account);
+    if (action.tool === 'calendar.listEvents' || action.tool === 'calendar.freeTime') {
+      pushBounded(executionState.recentCalendarQueries, {
+        account,
+        calendarId: normalizeLabelRef(action.params?.calendarId) || 'primary',
+        window: `${normalizeLabelRef(action.params?.timeMin) || '?'} -> ${normalizeLabelRef(action.params?.timeMax) || '?'}`,
+      });
+    }
+  }
+}
+
+function joinExecutionValues(values) {
+  return values.length > 0 ? values.join(', ') : 'none yet';
+}
+
+function buildWorkspaceExecutionCoverageLines(executionState) {
+  if (!executionState) return [];
+
+  const lines = ['', 'Execution coverage so far:'];
+
+  if (executionState.connectedGmailAccounts.length > 0) {
+    lines.push(`- Connected Gmail accounts: ${executionState.connectedGmailAccounts.join(', ')}`);
+    lines.push(`- Gmail accounts touched: ${joinExecutionValues([...executionState.gmailAccountsTouched])}`);
+    lines.push(`- Gmail accounts searched: ${joinExecutionValues([...executionState.gmailSearchAccounts])}`);
+    lines.push(`- Gmail accounts modified: ${joinExecutionValues([...executionState.gmailWriteAccounts])}`);
+
+    const untouchedAccounts = executionState.connectedGmailAccounts.filter((account) => !executionState.gmailAccountsTouched.has(account));
+    if (untouchedAccounts.length > 0) {
+      lines.push(`- Connected Gmail accounts not yet touched: ${untouchedAccounts.join(', ')}`);
+    }
+  }
+
+  if (executionState.recentGmailSearches.length > 0) {
+    const searches = executionState.recentGmailSearches
+      .map((entry) => `[${entry.account}] ${entry.query}`)
+      .join(' | ');
+    lines.push(`- Recent Gmail searches: ${searches}`);
+  }
+
+  if (executionState.createdLabels.length > 0) {
+    const labels = executionState.createdLabels
+      .map((entry) => `${entry.name} (${entry.account})`)
+      .join(', ');
+    lines.push(`- Labels created this run: ${labels}`);
+  }
+
+  if (executionState.calendarAccountsTouched.size > 0) {
+    lines.push(`- Calendar accounts touched: ${joinExecutionValues([...executionState.calendarAccountsTouched])}`);
+  }
+
+  if (executionState.recentCalendarQueries.length > 0) {
+    const queries = executionState.recentCalendarQueries
+      .map((entry) => `[${entry.account}] ${entry.calendarId}: ${entry.window}`)
+      .join(' | ');
+    lines.push(`- Recent calendar queries: ${queries}`);
+  }
+
+  return lines;
+}
 
 // ---------------------------------------------------------------------------
 // Auto-extraction — passive learning from agent responses and emails
@@ -458,19 +1007,21 @@ const WORKSPACE_ROLE = [
   '- Use memory.list to check what you already know before asking redundant questions',
   '',
   'INBOX TRIAGE PROTOCOL (when user mentions inbox, emails, cleanup, triage, organize):',
-  '1. Look at RECENT INBOX in auto-context',
+  '1. Look at ALL emails in auto-context — there may be up to 100 emails loaded',
   '2. For each email, decide:',
   '   - OBVIOUS CLEANUP: Old read promos, social notifications, marketing → archive immediately',
   '   - CATEGORIZE + ARCHIVE: Known domain match (Amazon→Shopping, Flair→Travel) → label + remove from inbox',
   '   - NEEDS DECISION: Important/ambiguous → present concisely to user',
-  '3. Emit ACTION blocks for categories 1 and 2 in bulk (use gmail.batchModify)',
+  '3. Emit ACTION blocks for categories 1 and 2 in bulk (use gmail.batchModify to handle 10-50 emails per action, NOT one at a time)',
   '4. Present category 3 items as a short list with recommended action per item',
   '5. Ask "Should I proceed with these?" only for truly ambiguous decisions',
+  '6. After each round, search for MORE emails if the task implies a full cleanup — the initial context may not show everything',
   '',
-  'USE YOUR ACTION ROUNDS. You have up to 5 multi-step rounds per conversation:',
-  '  Round 1: Gather info (search, read key emails)',
-  '  Round 2: Bulk actions (archive, label, organize)',
-  '  Round 3: Summary receipt to user',
+  'USE YOUR ACTION ROUNDS. You have up to 15 rounds per conversation — use as many as needed:',
+  '  - BATCH aggressively: use gmail.batchModify to handle 10-50 emails per action, not one at a time',
+  '  - Keep going until ALL matching emails are processed, not just the first batch',
+  '  - Search for more emails between rounds if the inbox had more than what was initially shown',
+  '  - Only summarize when you have genuinely finished ALL the work',
   '',
   'YOUR JOB IS TO BE GENUINELY USEFUL — not to parrot back what\'s on the screen. The user can already SEE their inbox and calendar. Your value is:',
   '1. **Deep analysis**: Read emails thoroughly. Extract dates, confirmation numbers, addresses, phone numbers, policies, deadlines — the actual content that matters.',
@@ -523,27 +1074,7 @@ const WORKSPACE_ROLE = [
   '',
   'Keep briefings concise but information-dense. Every sentence should contain useful information the user didn\'t already know.',
   '',
-  'AVAILABLE TOOLS:',
-  '',
-  'MULTI-ACCOUNT NOTE: Multiple Gmail accounts may be connected. All gmail.* tools accept an optional `account` parameter — the email address of the account to operate on (e.g., account: "work@example.com"). If omitted, the primary (most recently active) account is used. Always specify `account` when operating on a non-primary account. The connected accounts are listed at the top of the auto-context.',
-  '',
-  '- gmail.search: Search emails. Params: { q, account? }',
-  '- gmail.send: Send email. Params: { to, subject, body, cc?, bcc?, threadId?, inReplyTo?, references?, account? }',
-  '- gmail.archive: Archive message (remove from inbox). Params: { messageId, account? }',
-  '- gmail.trash: Trash message. Params: { messageId, account? }',
-  '- gmail.star: Star message. Params: { messageId, account? }',
-  '- gmail.unstar: Unstar message. Params: { messageId, account? }',
-  '- gmail.markRead: Mark as read. Params: { messageId, account? }',
-  '- gmail.markUnread: Mark as unread. Params: { messageId, account? }',
-  '- gmail.label: Apply label. Params: { messageId, labelId, account? }',
-  '- gmail.removeLabel: Remove label. Params: { messageId, labelId, account? }',
-  '- gmail.draft: Create draft. Params: { to, subject, body, cc?, bcc?, account? }',
-  '- gmail.getMessage: Read a specific email by ID. Params: { messageId, account? }',
-  '- gmail.listLabels: List all Gmail labels. Params: { account? }',
-  '- gmail.createFilter: Create an auto-filter rule. Params: { criteria: { from?, to?, subject?, query? }, action: { addLabelIds?: ["label-id"], removeLabelIds?: ["INBOX"] }, account? }',
-  '- gmail.listFilters: List all Gmail filters. Params: { account? }',
-  '- gmail.deleteFilter: Delete a filter. Params: { filterId, account? }',
-  '- gmail.batchModify: Bulk modify messages. Params: { messageIds: ["id1","id2"], addLabelIds?: ["label-id"], removeLabelIds?: ["INBOX"], account? }',
+  ...WORKSPACE_AVAILABLE_TOOL_LINES,
   '- calendar.listEvents: List events in a time range. Params: { timeMin, timeMax, q?, calendarId?, account? }',
   '- calendar.createEvent: Create event. Params: { summary, start, end, location?, description?, attendees?, allDay?, timeZone?, account?, reminders?: { useDefault: false, overrides: [{ method: "popup", minutes: 5 }] } }',
   '- calendar.updateEvent: Update event. Params: { eventId, summary?, start?, end?, location?, description?, attendees?, calendarId?, account?, reminders?: { useDefault: false, overrides: [{ method: "popup", minutes: 5 }] } }',
@@ -554,6 +1085,19 @@ const WORKSPACE_ROLE = [
   '- memory.delete: Delete a saved memory. Params: { key: "memory-key-to-delete" }',
   '- autoAction.createRule: Create a learned auto-action rule. Params: { name: "rule description", conditionType: "domain"|"label"|"age"|"keyword", conditionValue: "the value to match", actionType: "archive"|"markRead"|"label"|"trash", actionValue?: "label ID for label action", tier?: "silent"|"notify"|"ask" }',
   '- autoAction.approve: Approve a learned rule (moves it closer to silent tier). Params: { ruleId: "rule-id" }',
+  '- shipment.list: List tracked shipments (active or all). Params: { active?: true, carrier?, status? }',
+  '- shipment.get: Get detailed status for a specific tracking number. Params: { trackingNumber }',
+  '- shipment.updateStatus: Manually update a shipment status. Params: { trackingNumber, status: "label-created"|"in-transit"|"out-for-delivery"|"delivered"|"exception", location?, description? }',
+  '- shipment.markDelivered: Mark a shipment as delivered. Params: { trackingNumber }',
+  '- shipment.track: Get carrier tracking URL and latest info. Params: { trackingNumber }',
+  '',
+  '**Shipment Tracking:**',
+  '- The system automatically detects shipping notification emails and creates tracking records.',
+  '- Active shipments are shown in auto-context with tracking numbers, carrier info, and ETAs.',
+  '- When the user asks about packages, deliveries, or "where is my order?", check the ACTIVE SHIPMENTS section in auto-context.',
+  '- Use shipment.track to provide direct carrier tracking URLs.',
+  '- When a package arrives, use shipment.markDelivered to update the record.',
+  '- Supported carriers: Canada Post, UPS, FedEx, Purolator, DHL, USPS.',
   '',
   'ACTION FORMAT:',
   'When you need to execute an action, output exactly:',
@@ -565,7 +1109,7 @@ const WORKSPACE_ROLE = [
   'At that point you can either:',
   '1. Emit MORE ACTION blocks to perform follow-up actions based on the results (e.g., search emails → read one → create calendar event from its content)',
   '2. Provide a final user-facing summary with NO ACTION blocks when you have everything you need',
-  'You have up to 5 rounds of action execution. Use them wisely — search first, then act on what you find.',
+  'You have up to 15 rounds of action execution. Use them wisely — search first, then act on what you find.',
   'When chaining, briefly explain what you are doing before each ACTION block so the user sees progress.',
   '',
   'RULES:',
@@ -617,6 +1161,7 @@ const WORKSPACE_ROLE = [
   '- Work schedule changes -> memory.save type:"preference" key:"schedule:work-hours"',
   '- Timezone or location -> memory.save type:"preference" key:"preference:timezone"',
   '- Calendar color preferences -> memory.save type:"preference" key:"preference:calendar-colors"',
+  '- Break/lunch preferences -> memory.save type:"preference" key:"preference:break-schedule"',
   '- Any "I want/don\'t want/always/never" statement -> memory.save type:"preference"',
   '- Contact names and relationships -> memory.save type:"fact" key:"contact:name"',
   '- If you made a mistake and the user corrected you, save the CORRECT information so you don\'t repeat the error.',
@@ -627,6 +1172,19 @@ const WORKSPACE_ROLE = [
   '- Preferences: no expiry (null) -- preferences are permanent unless user changes them',
   '- Facts: 90 days unless clearly permanent',
   '- Contacts: 90 days (refreshed on re-mention)',
+  '',
+  '**Break & Wellness Management:**',
+  '- You are responsible for the user\'s wellbeing during the work day. This is a PROACTIVE responsibility — don\'t wait to be asked.',
+  '- ALWAYS check if breaks are scheduled when reviewing today\'s calendar. If auto-context includes a BREAK ALERT, address it early in your response.',
+  '- If no breaks exist: proactively suggest and offer to create them. Don\'t ask "would you like breaks?" — say "I\'m adding a lunch break at 12:00 and short breaks at 10:30 and 3:00. Want me to adjust the times?"',
+  '- Default break schedule (use if user hasn\'t specified preferences):',
+  '  - 10:15-10:30 AM: Morning break (15 min)',
+  '  - 12:00-12:45 PM: Lunch break (45 min)',
+  '  - 3:00-3:15 PM: Afternoon break (15 min)',
+  '- When creating break events: use title "Break" for short breaks and "Lunch Break" for lunch. Set reminders to 5 minutes.',
+  '- If the day is packed with meetings and there are NO gaps: warn the user and suggest shortening the least important meeting by 15 min to create a break.',
+  '- When the user confirms or adjusts break times, ALWAYS save to memory: memory.save type:"preference" key:"preference:break-schedule" content:"<their preferred break times>"',
+  '- Check memory for existing break preferences (key: "preference:break-schedule") before suggesting defaults.',
   '',
   '**Email Chain Intelligence:**',
   '- When reading a booking/travel email, ALWAYS search for related emails using the confirmation number, sender, or subject keywords.',
@@ -735,7 +1293,7 @@ const WORKSPACE_CHAT_ONLY_ROLE = [
 
 const TOOL_HANDLERS = {
   'gmail.search': async (params) => {
-    return gmail.listMessages({ q: params.q, maxResults: params.maxResults || 10, accountEmail: params.account || undefined });
+    return gmail.listMessages({ q: params.q, maxResults: params.maxResults || 100, accountEmail: params.account || undefined });
   },
   'gmail.send': async (params) => {
     return gmail.sendMessage({
@@ -769,10 +1327,27 @@ const TOOL_HANDLERS = {
     return gmail.modifyMessage(params.messageId, { addLabelIds: ['UNREAD'], accountEmail: params.account || undefined });
   },
   'gmail.label': async (params) => {
-    return gmail.modifyMessage(params.messageId, { addLabelIds: [params.labelId], accountEmail: params.account || undefined });
+    const result = await gmail.modifyMessage(params.messageId, {
+      addLabelIds: [params.labelId],
+      accountEmail: params.account || undefined,
+    });
+    return {
+      ...result,
+      labelId: params.labelId,
+      labelName: params.labelName || null,
+      labelsCreated: params._labelsCreated || [],
+    };
   },
   'gmail.removeLabel': async (params) => {
-    return gmail.modifyMessage(params.messageId, { removeLabelIds: [params.labelId], accountEmail: params.account || undefined });
+    const result = await gmail.modifyMessage(params.messageId, {
+      removeLabelIds: [params.labelId],
+      accountEmail: params.account || undefined,
+    });
+    return {
+      ...result,
+      labelId: params.labelId,
+      labelName: params.labelName || null,
+    };
   },
   'gmail.draft': async (params) => {
     return gmail.createDraft({
@@ -790,6 +1365,12 @@ const TOOL_HANDLERS = {
   'gmail.listLabels': async (params) => {
     return gmail.listLabels(params.account || undefined);
   },
+  'gmail.createLabel': async (params) => {
+    return gmail.createLabel(params.name, {
+      labelListVisibility: params.labelListVisibility,
+      messageListVisibility: params.messageListVisibility,
+    }, params.account || undefined);
+  },
   'gmail.createFilter': async (params) => {
     return gmail.createFilter({
       criteria: params.criteria || {},
@@ -804,11 +1385,19 @@ const TOOL_HANDLERS = {
     return gmail.deleteFilter(params.filterId, params.account || undefined);
   },
   'gmail.batchModify': async (params) => {
-    return gmail.batchModify(params.messageIds, {
+    const result = await gmail.batchModify(params.messageIds, {
       addLabelIds: params.addLabelIds,
       removeLabelIds: params.removeLabelIds,
       accountEmail: params.account || undefined,
     });
+    return {
+      ...result,
+      addLabelIds: params.addLabelIds || [],
+      removeLabelIds: params.removeLabelIds || [],
+      addLabelNames: params.addLabelNames || [],
+      removeLabelNames: params.removeLabelNames || [],
+      labelsCreated: params._labelsCreated || [],
+    };
   },
   'calendar.listEvents': async (params) => {
     return calendar.listEvents({
@@ -884,6 +1473,50 @@ const TOOL_HANDLERS = {
     if (!result) return { ok: false, error: 'Rule not found' };
     return { ok: true, promoted: result.promoted, newTier: result.promoted ? result.newTier : result.rule.tier };
   },
+  'shipment.list': async (params) => {
+    const shipmentTracker = require('../services/shipment-tracker');
+    const options = {};
+    if (params.active !== undefined) options.active = params.active;
+    if (params.carrier) options.carrier = params.carrier;
+    if (params.status) options.status = params.status;
+    const shipments = await shipmentTracker.getAllShipments('default', options);
+    return { ok: true, shipments, count: shipments.length };
+  },
+  'shipment.get': async (params) => {
+    const shipmentTracker = require('../services/shipment-tracker');
+    const shipment = await shipmentTracker.getShipment(params.trackingNumber);
+    if (!shipment) return { ok: false, error: 'Shipment not found' };
+    const trackingUrl = shipmentTracker.getTrackingUrl(shipment.carrier, shipment.trackingNumber);
+    return { ok: true, shipment, trackingUrl };
+  },
+  'shipment.updateStatus': async (params) => {
+    const shipmentTracker = require('../services/shipment-tracker');
+    const updated = await shipmentTracker.updateShipmentStatus(params.trackingNumber, {
+      status: params.status,
+      location: params.location,
+      description: params.description,
+    });
+    if (!updated) return { ok: false, error: 'Shipment not found' };
+    return { ok: true, shipment: updated };
+  },
+  'shipment.markDelivered': async (params) => {
+    const shipmentTracker = require('../services/shipment-tracker');
+    const updated = await shipmentTracker.markDelivered(params.trackingNumber);
+    if (!updated) return { ok: false, error: 'Shipment not found' };
+    return { ok: true, shipment: updated };
+  },
+  'shipment.track': async (params) => {
+    const shipmentTracker = require('../services/shipment-tracker');
+    const shipment = await shipmentTracker.getShipment(params.trackingNumber);
+    if (!shipment) {
+      // Even without a DB record, we can generate a tracking URL from the number
+      const { carrier, name } = shipmentTracker.detectCarrier(params.trackingNumber);
+      const trackingUrl = shipmentTracker.getTrackingUrl(carrier, params.trackingNumber);
+      return { ok: true, trackingNumber: params.trackingNumber, carrier, carrierName: name, trackingUrl, shipment: null };
+    }
+    const trackingUrl = shipmentTracker.getTrackingUrl(shipment.carrier, shipment.trackingNumber);
+    return { ok: true, ...shipment, trackingUrl };
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -929,6 +1562,24 @@ const VERIFICATION_HANDLERS = {
     return { verified: warnings.length === 0, warnings };
   },
 
+  'gmail.createLabel': async (params, result) => {
+    const warnings = [];
+    const listResult = await gmail.listLabels(params.account || undefined);
+    if (!listResult || !listResult.ok) {
+      return { verified: false, warnings: ['Could not re-list labels after creating label'] };
+    }
+
+    const expectedName = normalizeLabelRef(result?.label?.name || params.name).toLowerCase();
+    const found = (listResult.labels || []).find((label) => {
+      if (result?.label?.id && label.id === result.label.id) return true;
+      return expectedName && normalizeLabelRef(label.name).toLowerCase() === expectedName;
+    });
+    if (!found) {
+      warnings.push(`Created label "${params.name}" was not found in Gmail after creation`);
+    }
+    return { verified: warnings.length === 0, warnings };
+  },
+
   'gmail.label': async (params, result) => {
     const warnings = [];
     if (!params.messageId) return { verified: false, warnings: ['No messageId to verify'] };
@@ -936,6 +1587,17 @@ const VERIFICATION_HANDLERS = {
     if (!msg || !msg.ok) return { verified: false, warnings: ['Could not re-read message after labeling'] };
     if (!msg.labels || !msg.labels.includes(params.labelId)) {
       warnings.push(`labelIds does not include "${params.labelId}" after applying label`);
+    }
+    return { verified: warnings.length === 0, warnings };
+  },
+
+  'gmail.removeLabel': async (params, result) => {
+    const warnings = [];
+    if (!params.messageId) return { verified: false, warnings: ['No messageId to verify'] };
+    const msg = await gmail.getMessage(params.messageId, params.account || undefined);
+    if (!msg || !msg.ok) return { verified: false, warnings: ['Could not re-read message after removing label'] };
+    if (msg.labels && msg.labels.includes(params.labelId)) {
+      warnings.push(`labelIds still includes "${params.labelId}" after removing label`);
     }
     return { verified: warnings.length === 0, warnings };
   },
@@ -948,6 +1610,43 @@ const VERIFICATION_HANDLERS = {
     if (msg.labels && msg.labels.includes('INBOX')) {
       warnings.push('Message still has INBOX label after archive');
     }
+    return { verified: warnings.length === 0, warnings };
+  },
+
+  'gmail.batchModify': async (params, result) => {
+    const warnings = [];
+    const sampleIds = Array.isArray(params.messageIds) ? params.messageIds.slice(0, 3) : [];
+    if (sampleIds.length === 0) {
+      return { verified: false, warnings: ['No messageIds to verify'] };
+    }
+
+    const addLabelIds = new Set(params.addLabelIds || []);
+    const removeLabelIds = new Set(params.removeLabelIds || []);
+
+    for (const messageId of sampleIds) {
+      const msg = await gmail.getMessage(messageId, params.account || undefined);
+      if (!msg || !msg.ok) {
+        warnings.push(`Could not re-read message ${messageId} after batchModify`);
+        if (warnings.length >= 3) break;
+        continue;
+      }
+
+      const labels = new Set(msg.labels || []);
+      for (const labelId of addLabelIds) {
+        if (!labels.has(labelId)) {
+          warnings.push(`Message ${messageId} is missing added label "${labelId}" after batchModify`);
+          break;
+        }
+      }
+      for (const labelId of removeLabelIds) {
+        if (labels.has(labelId)) {
+          warnings.push(`Message ${messageId} still has removed label "${labelId}" after batchModify`);
+          break;
+        }
+      }
+      if (warnings.length >= 3) break;
+    }
+
     return { verified: warnings.length === 0, warnings };
   },
 };
@@ -963,7 +1662,7 @@ function isTransientError(err) {
   return TRANSIENT_ERROR_PATTERNS.some((p) => msg.includes(p));
 }
 
-const NON_RETRYABLE_TOOLS = new Set(['gmail.send', 'gmail.trash', 'gmail.draft', 'calendar.deleteEvent']);
+const NON_RETRYABLE_TOOLS = new Set(['gmail.send', 'gmail.trash', 'gmail.draft', 'gmail.createLabel', 'calendar.deleteEvent']);
 
 // ---------------------------------------------------------------------------
 // Fail-fast: repeated failure fingerprinting
@@ -983,10 +1682,11 @@ function getFailureFingerprint(action) {
 // Action dependency ordering
 // ---------------------------------------------------------------------------
 
-const READ_TOOLS = new Set([
-  'gmail.search', 'gmail.getMessage', 'gmail.listLabels', 'gmail.listFilters',
-  'calendar.listEvents', 'calendar.freeTime', 'memory.list',
-]);
+const READ_TOOLS = new Set(
+  Object.entries(WORKSPACE_TOOL_METADATA)
+    .filter(([, meta]) => meta.kind === 'read')
+    .map(([tool]) => tool)
+);
 
 /**
  * Sort actions so reads execute before writes, preserving original order
@@ -1031,7 +1731,7 @@ function parseActions(text) {
  * Execute a list of parsed actions and return results.
  * Includes: dependency ordering, fail-fast, transient retry, post-action verification.
  */
-async function executeActions(actions) {
+async function executeActions(actions, executionState) {
   const ordered = orderActionsByDependency(actions);
   const results = [];
 
@@ -1049,31 +1749,47 @@ async function executeActions(actions) {
       continue;
     }
 
+    let preparedAction;
+    try {
+      preparedAction = await prepareActionForExecution(action, executionState);
+    } catch (prepErr) {
+      const errMsg = prepErr?.message || 'Failed to prepare action';
+      actionLog.logAction({
+        action: action.tool,
+        params: action.params,
+        result: errMsg,
+        status: 'error',
+        durationMs: 0,
+      });
+      results.push({ tool: action.tool, error: errMsg, preparationFailed: true });
+      continue;
+    }
+
     // Fail-fast: skip if this action pattern has already failed 2+ times
-    const fingerprint = getFailureFingerprint(action);
+    const fingerprint = getFailureFingerprint(preparedAction);
     const priorFailure = _failureFingerprints.get(fingerprint);
     if (priorFailure && priorFailure.count >= 2) {
       const failFastMsg = 'This action has failed 2 times with the same approach. The system cannot complete this action.';
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: preparedAction.tool,
+        params: preparedAction.params,
         result: failFastMsg,
         status: 'error',
         durationMs: 0,
       });
-      results.push({ tool: action.tool, error: failFastMsg, failFast: true });
+      results.push({ tool: preparedAction.tool, error: failFastMsg, failFast: true });
       continue;
     }
 
     const startMs = Date.now();
-    const maxAttempts = NON_RETRYABLE_TOOLS.has(action.tool) ? 1 : 3; // 1 initial + 2 retries
+    const maxAttempts = NON_RETRYABLE_TOOLS.has(preparedAction.tool) ? 1 : 3; // 1 initial + 2 retries
     let lastErr = null;
     let succeeded = false;
     let result;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        result = await handler(action.params);
+        result = await handler(preparedAction.params);
         succeeded = true;
         break;
       } catch (err) {
@@ -1091,10 +1807,10 @@ async function executeActions(actions) {
       // Post-action verification
       let verified;
       let warnings;
-      const verifier = VERIFICATION_HANDLERS[action.tool];
+      const verifier = VERIFICATION_HANDLERS[preparedAction.tool];
       if (verifier) {
         try {
-          const vResult = await verifier(action.params, result);
+          const vResult = await verifier(preparedAction.params, result);
           verified = vResult.verified;
           warnings = vResult.warnings || [];
         } catch (vErr) {
@@ -1105,15 +1821,17 @@ async function executeActions(actions) {
       }
 
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: preparedAction.tool,
+        params: preparedAction.params,
         result,
         status: 'ok',
         durationMs: Date.now() - startMs,
         ...(verified !== undefined ? { verified, warnings } : {}),
       });
 
-      const entry = { tool: action.tool, result };
+      trackWorkspaceExecutionState(executionState, preparedAction, result);
+
+      const entry = { tool: preparedAction.tool, result };
       if (verified !== undefined) {
         entry.verified = verified;
         entry.warnings = warnings;
@@ -1121,8 +1839,8 @@ async function executeActions(actions) {
       results.push(entry);
 
       // Mark gmail message IDs as recently processed for monitor coordination
-      if (action.params?.messageId && action.tool.startsWith('gmail.')) {
-        markMessageProcessed(action.params.messageId);
+      if (preparedAction.params?.messageId && preparedAction.tool.startsWith('gmail.')) {
+        markMessageProcessed(preparedAction.params.messageId);
       }
     } else {
       const errMsg = (lastErr && lastErr.message) || 'Execution failed';
@@ -1133,13 +1851,13 @@ async function executeActions(actions) {
       _failureFingerprints.set(fingerprint, existing);
 
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: preparedAction.tool,
+        params: preparedAction.params,
         result: errMsg,
         status: 'error',
         durationMs: Date.now() - startMs,
       });
-      results.push({ tool: action.tool, error: errMsg });
+      results.push({ tool: preparedAction.tool, error: errMsg });
     }
   }
   return results;
@@ -1195,10 +1913,60 @@ function normalizeWorkspaceReasoningEffort(value) {
   return WORKSPACE_ALLOWED_REASONING.has(normalized) ? normalized : 'high';
 }
 
+function logWorkspaceAttempts(attempts, opts) {
+  if (!Array.isArray(attempts)) return;
+  for (let i = 0; i < attempts.length; i++) {
+    const a = attempts[i];
+    if (a.provider === 'regex') continue;
+    const u = a.usage || {};
+    const status = a.status === 'ok' ? 'ok' : (a.errorCode === 'TIMEOUT' ? 'timeout' : (a.errorCode === 'ABORT' ? 'abort' : 'error'));
+    logUsage({
+      requestId: opts.requestId,
+      attemptIndex: i,
+      service: 'workspace',
+      provider: a.provider,
+      model: u.model,
+      inputTokens: u.inputTokens,
+      outputTokens: u.outputTokens,
+      usageAvailable: !!a.usage,
+      usageComplete: u.usageComplete,
+      rawUsage: u.rawUsage,
+      mode: opts.mode,
+      status,
+      latencyMs: a.latencyMs,
+    });
+  }
+}
+
+/**
+ * Build a normalized usage subdocument with totalTokens and totalCostMicros.
+ * Raw usage from the chat orchestrator only contains inputTokens, outputTokens,
+ * and model — this adds the computed fields the client expects.
+ *
+ * @param {Object} usage — raw usage from orchestrator
+ * @param {string} [provider] — provider ID used for this request (e.g. 'claude', 'chatgpt-5.3-codex-high').
+ *   Used as pricing fallback when the model string doesn't match the pricing table directly.
+ *   Defaults to 'claude' since the workspace primarily uses Claude CLI.
+ */
+function buildWorkspaceUsageSubdoc(usage, provider) {
+  if (!usage) return null;
+  const inputTokens = usage.inputTokens || 0;
+  const outputTokens = usage.outputTokens || 0;
+  const cost = calculateCost(inputTokens, outputTokens, usage.model || '', provider || 'claude');
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    model: usage.model || null,
+    totalCostMicros: cost.totalCostMicros,
+    usageAvailable: true,
+  };
+}
+
 /**
  * Collect the full response from a Claude CLI chat() call.
  * Returns a promise that resolves with the full text.
- * Includes a configurable timeout (default 120s) to prevent indefinite hangs.
+ * Includes a configurable timeout (default 600s) to prevent indefinite hangs.
  */
 function startCollectedChat({
   messages,
@@ -1397,6 +2165,7 @@ router.post('/ai', async (req, res) => {
 
   // Reset failure fingerprints at the start of each new request
   clearFailureFingerprints();
+  const connectedAccountsPromise = require('../models/GmailAuth').getAll().catch(() => []);
 
   const session = createWorkspaceSession({ prompt, context, conversationHistory });
   const sessionId = session.id;
@@ -1450,6 +2219,56 @@ router.post('/ai', async (req, res) => {
   let clientDisconnected = false;
   let pass1Request = null;
   let pass2Cleanup = null;
+  let receivedFirstChunk = false;
+  let spawnGuard = null;
+
+  function markAiSubprocessOutputReceived() {
+    if (receivedFirstChunk) return;
+    receivedFirstChunk = true;
+    if (spawnGuard) {
+      clearTimeout(spawnGuard);
+      spawnGuard = null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Spawn guard — if the Claude subprocess fails to start or dies silently
+  // (binary not found, permission error, spawn failure), the SSE stream would
+  // hang forever with zero output.  This timer fires after 30 s of silence
+  // and sends an error event so the client isn't left waiting indefinitely.
+  // -------------------------------------------------------------------------
+  const SPAWN_GUARD_MS = 30000;
+  spawnGuard = setTimeout(() => {
+    if (receivedFirstChunk || clientDisconnected || res.writableEnded) return;
+    console.error('[workspace] spawn guard triggered — no stream output after 30 s');
+    clearInterval(heartbeat);
+    clearInterval(statusTicker);
+    updateWorkspaceSession(sessionId, {
+      phase: 'error',
+      lastError: 'AI subprocess produced no output within 30 seconds',
+    });
+    reportServerError({
+      message: 'Workspace spawn guard: no output after 30 s',
+      detail: 'The Claude subprocess may have failed to start or died silently.',
+      stack: '',
+      source: 'workspace.js',
+      category: 'runtime-error',
+      severity: 'error',
+    });
+    try { pass1Request?.abort('Spawn guard timeout — no output'); } catch { /* ignore */ }
+    try { pass2Cleanup?.(); } catch { /* ignore */ }
+    if (!res.writableEnded) {
+      try {
+        res.write('event: error\ndata: ' + JSON.stringify({
+          ok: false,
+          code: 'SPAWN_TIMEOUT',
+          error: 'AI subprocess produced no output within 30 seconds — it may have failed to start',
+        }) + '\n\n');
+        res.end();
+      } catch { /* client already gone */ }
+    }
+    deleteWorkspaceSession(sessionId);
+  }, SPAWN_GUARD_MS);
   attachWorkspaceSessionController(sessionId, {
     abort: (reason = 'Workspace session aborted by supervisor') => {
       if (clientDisconnected) return;
@@ -1488,6 +2307,10 @@ router.post('/ai', async (req, res) => {
     releaseChatLock();
     clearInterval(heartbeat);
     clearInterval(statusTicker);
+    if (spawnGuard) {
+      clearTimeout(spawnGuard);
+      spawnGuard = null;
+    }
     updateWorkspaceSession(sessionId, { clientConnected: false });
     try { pass1Request?.abort('Workspace client disconnected during pass 1'); } catch { /* ignore */ }
     try { pass2Cleanup?.(); } catch { /* ignore */ }
@@ -1557,6 +2380,7 @@ router.post('/ai', async (req, res) => {
   // on the very first pass, eliminating blind ACTION searches for briefings.
   // -------------------------------------------------------------------------
   let autoContext = '';
+  autoContext = await withTimeout((async () => {
   try {
     const acNow = new Date();
     const nowIso = acNow.toISOString();
@@ -1577,8 +2401,8 @@ router.post('/ai', async (req, res) => {
       }).catch(() => null),
       // Use unified inbox if multiple accounts, single-account otherwise
       connectedEmails.length > 1
-        ? gmail.listUnifiedMessages({ q: 'in:inbox', maxResults: 10 }).catch(() => null)
-        : gmail.listMessages({ q: 'in:inbox', maxResults: 10 }).catch(() => null),
+        ? gmail.listUnifiedMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null)
+        : gmail.listMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null),
       gmail.listDrafts({ maxResults: 10 }).catch(() => null),
     ]);
 
@@ -1602,6 +2426,58 @@ router.post('/ai', async (req, res) => {
         const desc = evt.description ? ` | Details: ${evt.description.slice(0, 500)}` : '';
         contextParts.push(`  - [${evt.id}] ${start}${end ? ' to ' + end : ''}: ${summary}${location}${desc}`);
       }
+    }
+
+    // --- Break gap detection ---
+    // Analyze today's calendar events to detect if any breaks are scheduled
+    try {
+      const bgNow = new Date();
+      const todayDateStr = bgNow.toISOString().slice(0, 10); // YYYY-MM-DD
+      const workDayStart = new Date(todayDateStr + 'T09:00:00');
+      const workDayEnd = new Date(todayDateStr + 'T17:00:00');
+
+      // Filter to today's events only (within working hours)
+      const todayWorkEvents = todayEvents.filter((ev) => {
+        const evStart = new Date(ev.start?.dateTime || ev.start?.date || '');
+        return evStart >= workDayStart && evStart <= workDayEnd;
+      });
+
+      // Check if any events look like breaks
+      const breakKeywords = [
+        'break', 'lunch', 'walk', 'rest', 'pause', 'coffee', 'snack',
+        'stretch', 'nap', 'recharge', 'personal', 'downtime', 'wellness',
+      ];
+      const hasBreaks = todayWorkEvents.some((ev) => {
+        const title = (ev.summary || '').toLowerCase();
+        return breakKeywords.some((kw) => title.includes(kw));
+      });
+
+      // Only flag if we're still in the work day and there are no breaks
+      if (!hasBreaks && bgNow < workDayEnd) {
+        const eventsList = todayWorkEvents.length > 0
+          ? todayWorkEvents.map((ev) => {
+            const s = ev.start?.dateTime || ev.start?.date || 'TBD';
+            const e = ev.end?.dateTime || ev.end?.date || '';
+            return `  - ${ev.summary || '(no title)'}: ${s}${e ? ' → ' + e : ''}`;
+          }).join('\n')
+          : '  (no events found — calendar may be empty or all events are outside 9-5)';
+
+        contextParts.push('');
+        contextParts.push([
+          '⚠️ BREAK ALERT: No breaks detected in today\'s calendar. The user has no rest periods scheduled.',
+          'You MUST proactively address this early in your response:',
+          '- Suggest inserting at least a 15-min morning break, a 30-60 min lunch break, and a 15-min afternoon break',
+          '- Look for gaps between meetings where breaks could fit naturally',
+          '- If there are no gaps, suggest shortening or rescheduling lower-priority events to make room',
+          '- Offer to create the calendar events immediately using calendar.createEvent',
+          '- Be direct: "I noticed you have no breaks today — that\'s not sustainable. Let me add some."',
+          '- If the user has break preferences saved in memory (key: "preference:break-schedule"), use those times instead of defaults',
+          'TODAY\'S WORK-HOURS EVENTS FOR REFERENCE:',
+          eventsList,
+        ].join('\n'));
+      }
+    } catch (breakDetectErr) {
+      console.error('[workspace] break gap detection failed:', breakDetectErr.message);
     }
 
     // Recent inbox messages (may include `account` field if unified)
@@ -1632,9 +2508,9 @@ router.post('/ai', async (req, res) => {
 
     if (inboxMessages.length > 0) {
       contextParts.push('');
-      const inboxLabel = connectedEmails.length > 1 ? 'UNIFIED INBOX (all accounts, latest 10)' : 'RECENT INBOX (latest 10)';
+      const inboxLabel = connectedEmails.length > 1 ? 'UNIFIED INBOX (all accounts, latest 100)' : 'RECENT INBOX (latest 100)';
       contextParts.push(`${inboxLabel}:`);
-      for (const msg of inboxMessages.slice(0, 10)) {
+      for (const msg of inboxMessages.slice(0, 100)) {
         const from = msg.from || msg.fromEmail || 'unknown';
         const subject = msg.subject || '(no subject)';
         const date = msg.date || '';
@@ -1820,6 +2696,29 @@ router.post('/ai', async (req, res) => {
       }
     } catch (entityErr) { console.error('[workspace] entity detection/linking failed:', entityErr.message); }
 
+    // Shipment tracking — scan inbox for shipping notifications and inject active shipments
+    try {
+      const shipmentTracker = require('../services/shipment-tracker');
+
+      // Scan inbox messages for new shipping notifications (creates records for new ones)
+      if (inboxMessages.length > 0) {
+        const scanResult = await shipmentTracker.scanInboxForShipments(inboxMessages);
+        if (scanResult.created > 0) {
+          for (const s of scanResult.shipments) {
+            const itemNames = (s.items || []).map((i) => i.name).filter(Boolean).join(', ') || 'package';
+            proactiveActions.push(`Detected new shipment: ${itemNames} via ${shipmentTracker.CARRIER_LABELS[s.carrier] || s.carrier} (tracking: ${s.trackingNumber})`);
+          }
+        }
+      }
+
+      // Inject active shipments into context
+      const activeShipments = await shipmentTracker.getActiveShipments();
+      const shipmentContext = shipmentTracker.buildShipmentContext(activeShipments);
+      if (shipmentContext) {
+        contextParts.push(shipmentContext);
+      }
+    } catch (shipErr) { console.error('[workspace] shipment tracking failed:', shipErr.message); }
+
     // Stale drafts — drafts older than 3 days that were never sent
     try {
       const drafts = draftsRes?.ok ? (draftsRes.drafts || []) : [];
@@ -1858,9 +2757,12 @@ router.post('/ai', async (req, res) => {
         + contextParts.join('\n')
         + '\n--- End Auto-fetched Data ---\n\n';
     }
+    return autoContext;
   } catch (autoCtxErr) {
     console.error('[workspace] auto-context building failed:', autoCtxErr.message);
+    return '';
   }
+  })(), CONTEXT_SECTION_TIMEOUT_MS, '');
 
   if (autoContext) {
     fullPrompt += autoContext;
@@ -1946,13 +2848,14 @@ router.post('/ai', async (req, res) => {
   messages.push({ role: 'user', content: fullPrompt });
 
   // Helper: persist conversation turn to MongoDB (fire-and-forget)
-  const saveConversationTurn = (assistantResponse) => {
+  // usage is the normalized subdoc from buildWorkspaceUsageSubdoc (optional)
+  const saveConversationTurn = (assistantResponse, usage) => {
     try {
       const cleanPrompt = prompt.trim().replace(/^✓ PM rules loaded\s*/i, '');
       const cleanResponse = assistantResponse.replace(/^✓ PM rules loaded\s*/i, '');
       WorkspaceConversation.appendMessages(persistentSessionId, [
         { role: 'user', content: cleanPrompt },
-        { role: 'assistant', content: cleanResponse },
+        { role: 'assistant', content: cleanResponse, usage: usage || undefined },
       ]).catch((saveErr) => { console.error('[workspace] conversation save failed:', saveErr.message); });
     } catch (saveOuterErr) { console.error('[workspace] conversation save outer failed:', saveOuterErr.message); }
   };
@@ -1968,6 +2871,7 @@ router.post('/ai', async (req, res) => {
         timeoutMs: WORKSPACE_CHAT_TIMEOUT_MS,
         reasoningEffort: effectiveReasoningEffort,
         onChunk: ({ text }) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           recordWorkspaceChunk(sessionId, 'pass1', text);
           try {
@@ -1975,6 +2879,7 @@ router.post('/ai', async (req, res) => {
           } catch { /* client disconnected */ }
         },
         onThinkingChunk: ({ thinking, provider }) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           try {
             res.write('event: thinking\ndata: ' + JSON.stringify({
@@ -1985,21 +2890,53 @@ router.post('/ai', async (req, res) => {
           } catch { /* client disconnected */ }
         },
         onProviderError: (detail) => {
+          markAiSubprocessOutputReceived();
+          if (!clientDisconnected) {
+            try {
+              res.write('event: provider_error\ndata: ' + JSON.stringify({
+                ...(detail || {}),
+                phase: 'direct',
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+            try {
+              res.write('event: status\ndata: ' + JSON.stringify({
+                type: 'provider_error',
+                message: detail?.message || 'Workspace provider error',
+                provider: detail?.provider || null,
+                phase: 'direct',
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+          }
           updateWorkspaceSession(sessionId, {
             lastError: detail?.message || 'Workspace provider error',
           });
         },
         onFallback: ({ from, to }) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           try {
+            res.write('event: fallback\ndata: ' + JSON.stringify({
+              from,
+              to,
+              phase: 'direct',
+              sessionId,
+            }) + '\n\n');
+          } catch { /* client disconnected */ }
+          try {
             res.write('event: status\ndata: ' + JSON.stringify({
+              type: 'fallback',
+              from,
+              to,
               message: `Switching provider from ${from} to ${to}...`,
               phase: 'direct',
               sessionId,
             }) + '\n\n');
           } catch { /* client disconnected */ }
         },
-        onDone: ({ fullResponse, usage }) => {
+        onDone: ({ fullResponse, providerUsed, usage, attempts }) => {
+          markAiSubprocessOutputReceived();
           clearInterval(heartbeat);
           clearInterval(statusTicker);
           completeWorkspacePass(sessionId, 'pass1');
@@ -2008,19 +2945,26 @@ router.post('/ai', async (req, res) => {
           // Passive learning: extract facts from the agent response (fire-and-forget)
           try { autoExtractAndSave(fullResponse); } catch (exErr) { console.error('[workspace] auto-extract (direct) failed:', exErr.message); }
           try { autoExtractConversationMemories(prompt, fullResponse); } catch (exErr) { console.error('[workspace] conversation-extract (direct) failed:', exErr.message); }
-          saveConversationTurn(fullResponse);
+          const usageSubdoc = buildWorkspaceUsageSubdoc(usage, providerUsed || requestedPrimaryProvider);
+          saveConversationTurn(fullResponse, usageSubdoc);
+          // Log usage for workspace direct response
+          logWorkspaceAttempts(attempts, { requestId: randomUUID(), mode: policy.mode });
           if (clientDisconnected) return;
           try {
             res.write('event: done\ndata: ' + JSON.stringify({
               ok: true,
               fullResponse,
               actions: [],
-              usage: usage || null,
+              usage: usageSubdoc,
             }) + '\n\n');
             res.end();
           } catch { /* client write failure — already disconnected */ }
         },
         onError: (err) => {
+          if (spawnGuard) {
+            clearTimeout(spawnGuard);
+            spawnGuard = null;
+          }
           clearInterval(heartbeat);
           clearInterval(statusTicker);
           updateWorkspaceSession(sessionId, {
@@ -2052,44 +2996,18 @@ router.post('/ai', async (req, res) => {
     }
 
     // -----------------------------------------------------------------------
-    // Multi-turn action loop (max 5 iterations)
+    // Multi-turn action loop (max 15 iterations)
     //
     // Each iteration:  collect Claude response -> parse ACTIONs -> execute ->
     // feed results back.  Loop exits when Claude produces a response with
     // NO ACTION blocks (final summary) or after MAX_ACTION_ITERATIONS.
     // -----------------------------------------------------------------------
-    const MAX_ACTION_ITERATIONS = 5;
+    const MAX_ACTION_ITERATIONS = 15;
     const allActionResults = [];       // every action result across all iterations
     const conversationHistory = [];    // assistant/user turns added during the loop
 
     // Human-readable labels for each tool category (used in SSE status)
-    const TOOL_STATUS_LABELS = {
-      'gmail.search': 'Searching emails',
-      'gmail.getMessage': 'Reading email',
-      'gmail.send': 'Sending email',
-      'gmail.archive': 'Archiving message',
-      'gmail.trash': 'Trashing message',
-      'gmail.star': 'Starring message',
-      'gmail.unstar': 'Unstarring message',
-      'gmail.markRead': 'Marking as read',
-      'gmail.markUnread': 'Marking as unread',
-      'gmail.label': 'Applying label',
-      'gmail.removeLabel': 'Removing label',
-      'gmail.draft': 'Creating draft',
-      'gmail.listLabels': 'Listing labels',
-      'gmail.createFilter': 'Creating filter',
-      'gmail.listFilters': 'Listing filters',
-      'gmail.deleteFilter': 'Deleting filter',
-      'gmail.batchModify': 'Updating messages',
-      'calendar.listEvents': 'Checking calendar',
-      'calendar.createEvent': 'Creating event',
-      'calendar.updateEvent': 'Updating event',
-      'calendar.deleteEvent': 'Deleting event',
-      'calendar.freeTime': 'Finding free time',
-      'memory.save': 'Saving to memory',
-      'memory.list': 'Checking memory',
-      'memory.delete': 'Removing memory',
-    };
+    const TOOL_STATUS_LABELS = WORKSPACE_TOOL_STATUS_LABELS;
 
     /**
      * Generate a human-readable status message from a list of action tool names.
@@ -2116,9 +3034,11 @@ router.post('/ai', async (req, res) => {
         fallbackProvider: policy.fallbackProvider,
         reasoningEffort: effectiveReasoningEffort,
         onChunk: (text) => {
+          markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, passLabel, text);
         },
         onThinkingChunk: (thinking, provider) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           try {
             res.write('event: thinking\ndata: ' + JSON.stringify({
@@ -2129,10 +3049,22 @@ router.post('/ai', async (req, res) => {
           } catch { /* client disconnected */ }
         },
         onStatus: (data) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           if (data?.type === 'fallback') {
             try {
+              res.write('event: fallback\ndata: ' + JSON.stringify({
+                from: data.from,
+                to: data.to,
+                phase: passLabel,
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+            try {
               res.write('event: status\ndata: ' + JSON.stringify({
+                type: 'fallback',
+                from: data.from,
+                to: data.to,
                 message: `Switching provider from ${data.from} to ${data.to}...`,
                 phase: passLabel,
                 sessionId,
@@ -2140,6 +3072,22 @@ router.post('/ai', async (req, res) => {
             } catch { /* client disconnected */ }
           }
           if (data?.type === 'provider_error') {
+            try {
+              res.write('event: provider_error\ndata: ' + JSON.stringify({
+                ...(data || {}),
+                phase: passLabel,
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+            try {
+              res.write('event: status\ndata: ' + JSON.stringify({
+                type: 'provider_error',
+                message: data.message || 'Workspace provider error',
+                provider: data.provider || null,
+                phase: passLabel,
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
             updateWorkspaceSession(sessionId, {
               lastError: data.message || 'Workspace provider error',
             });
@@ -2149,6 +3097,7 @@ router.post('/ai', async (req, res) => {
       return pass1Request.promise.then((result) => {
         pass1Request = null;
         completeWorkspacePass(sessionId, passLabel);
+        logWorkspaceAttempts(result.attempts, { requestId: randomUUID(), mode: policy.mode });
         return { text: result.fullResponse || '', usage: result.usage || null };
       });
     }
@@ -2214,6 +3163,7 @@ router.post('/ai', async (req, res) => {
         fallbackProvider: policy.fallbackProvider,
         reasoningEffort: effectiveReasoningEffort,
         onChunk: (text) => {
+          markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, 'pass1', text);
           if (clientDisconnected) return;
 
@@ -2249,6 +3199,7 @@ router.post('/ai', async (req, res) => {
           flushPending(false);
         },
         onThinkingChunk: (thinking, provider) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           try {
             res.write('event: thinking\ndata: ' + JSON.stringify({
@@ -2259,10 +3210,22 @@ router.post('/ai', async (req, res) => {
           } catch { /* client disconnected */ }
         },
         onStatus: (data) => {
+          markAiSubprocessOutputReceived();
           if (clientDisconnected) return;
           if (data?.type === 'fallback') {
             try {
+              res.write('event: fallback\ndata: ' + JSON.stringify({
+                from: data.from,
+                to: data.to,
+                phase: 'pass1',
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+            try {
               res.write('event: status\ndata: ' + JSON.stringify({
+                type: 'fallback',
+                from: data.from,
+                to: data.to,
                 message: `Switching provider from ${data.from} to ${data.to}...`,
                 phase: 'pass1',
                 sessionId,
@@ -2270,6 +3233,22 @@ router.post('/ai', async (req, res) => {
             } catch { /* client disconnected */ }
           }
           if (data?.type === 'provider_error') {
+            try {
+              res.write('event: provider_error\ndata: ' + JSON.stringify({
+                ...(data || {}),
+                phase: 'pass1',
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
+            try {
+              res.write('event: status\ndata: ' + JSON.stringify({
+                type: 'provider_error',
+                message: data.message || 'Workspace provider error',
+                provider: data.provider || null,
+                phase: 'pass1',
+                sessionId,
+              }) + '\n\n');
+            } catch { /* client disconnected */ }
             updateWorkspaceSession(sessionId, {
               lastError: data.message || 'Workspace provider error',
             });
@@ -2335,6 +3314,7 @@ router.post('/ai', async (req, res) => {
           flushPending(true);
         }
         completeWorkspacePass(sessionId, 'pass1');
+        logWorkspaceAttempts(result.attempts, { requestId: randomUUID(), mode: policy.mode });
         return {
           text: result.fullResponse || '',
           usage: result.usage || null,
@@ -2360,9 +3340,10 @@ router.post('/ai', async (req, res) => {
       const cleanedResponse = currentResponse.replace(/ACTION:\s*\{[\s\S]*?\}\s*(?=\n|$)/g, '').trim();
       try { autoExtractAndSave(cleanedResponse); } catch (exErr) { console.error('[workspace] auto-extract (no-action) failed:', exErr.message); }
       try { autoExtractConversationMemories(prompt, cleanedResponse); } catch (exErr) { console.error('[workspace] conversation-extract (no-action) failed:', exErr.message); }
-      saveConversationTurn(cleanedResponse);
+      const noActionUsage = buildWorkspaceUsageSubdoc(aggregatedUsage, requestedPrimaryProvider);
+      saveConversationTurn(cleanedResponse, noActionUsage);
       try {
-        res.write('event: done\ndata: ' + JSON.stringify({ ok: true, fullResponse: cleanedResponse, actions: [], usage: aggregatedUsage }) + '\n\n');
+        res.write('event: done\ndata: ' + JSON.stringify({ ok: true, fullResponse: cleanedResponse, actions: [], usage: noActionUsage }) + '\n\n');
         res.end();
       } catch { /* client write failure — already disconnected */ }
       clearInterval(heartbeat);
@@ -2374,6 +3355,10 @@ router.post('/ai', async (req, res) => {
     // --- Action loop ---
     // Acquire chat lock so the background monitor knows to skip this cycle
     acquireChatLock();
+    const connectedGmailAccounts = ((await connectedAccountsPromise) || [])
+      .map((account) => account?.email)
+      .filter(Boolean);
+    const executionState = createWorkspaceExecutionState({ connectedGmailAccounts });
     let iteration = 1;
     // Strip ACTION blocks from the assistant response before storing in conversation
     // history — prevents the LLM from seeing raw ACTIONs and repeating/describing them.
@@ -2409,7 +3394,7 @@ router.post('/ai', async (req, res) => {
       } catch { /* client disconnected */ }
 
       // Execute this iteration's actions
-      const iterResults = await executeActions(iterationActions);
+      const iterResults = await executeActions(iterationActions, executionState);
       recordWorkspaceActions(sessionId, iterationActions, iterResults);
       allActionResults.push(...iterResults);
 
@@ -2457,6 +3442,7 @@ router.post('/ai', async (req, res) => {
           return compact;
         })),
       ];
+      resultsLines.push(...buildWorkspaceExecutionCoverageLines(executionState));
 
       if (isLastIteration) {
         // Force a final summary — no more ACTION blocks allowed
@@ -2469,6 +3455,7 @@ router.post('/ai', async (req, res) => {
           'Your response here should ONLY be the concise receipt of actions taken.',
           'Format: "[N] actions taken: [brief comma-separated list]. [Any pending items as a single question]."',
           'Maximum 3 sentences. No tables. No bullet points. No repeating what you said before.',
+          'Use the execution coverage above as your checklist. If the user asked for multiple accounts, folders, or ranges and any requested scope is still untouched, say exactly what remains or what blocked you.',
           '**ACCURACY CHECK:** Verify all dates, times, and details match the source data exactly.',
           '**SOURCE ATTRIBUTION:** Indicate where each key detail came from.',
         );
@@ -2482,6 +3469,7 @@ router.post('/ai', async (req, res) => {
           'Your response here should ONLY be the concise receipt of actions taken.',
           'Format: "[N] actions taken: [brief comma-separated list]. [Items needing decision]."',
           'Maximum 3 sentences. No tables. No bullet points. No repeating what you said before.',
+          'Use the execution coverage above as your checklist. If the request spans multiple accounts, folders, or ranges, continue until each requested scope has been touched or you can state the blocker clearly.',
         );
       }
 
@@ -2502,7 +3490,7 @@ router.post('/ai', async (req, res) => {
       // Sliding window: only pass last 6 messages (3 turns) of conversation history
       // to prevent quadratic memory growth. The system prompt + original user prompt
       // in `messages` already provides full context for each loop pass.
-      const recentHistory = conversationHistory.slice(-6);
+      const recentHistory = conversationHistory.slice(-12);
       const loopMessages = [...messages, ...recentHistory];
       const passLabel = isLastIteration ? 'summary' : `loop-${iteration + 1}`;
       const loopResult = await runCollectedPass(loopMessages, passLabel);
@@ -2554,7 +3542,8 @@ router.post('/ai', async (req, res) => {
     // Passive learning from the final summary
     try { autoExtractAndSave(finalResponse); } catch (exErr) { console.error('[workspace] auto-extract (final) failed:', exErr.message); }
     try { autoExtractConversationMemories(prompt, finalResponse); } catch (exErr) { console.error('[workspace] conversation-extract (final) failed:', exErr.message); }
-    saveConversationTurn(finalResponse);
+    const finalUsage = buildWorkspaceUsageSubdoc(aggregatedUsage, requestedPrimaryProvider);
+    saveConversationTurn(finalResponse, finalUsage);
 
     if (clientDisconnected) return;
     try {
@@ -2566,7 +3555,7 @@ router.post('/ai', async (req, res) => {
         ok: true,
         actions: allActionResults,
         iterations: iteration - 1,
-        usage: aggregatedUsage,
+        usage: finalUsage,
       }) + '\n\n');
       res.end();
     } catch { /* client disconnected */ }
@@ -3316,6 +4305,64 @@ router.get('/activity', async (req, res) => {
     .limit(limit)
     .lean();
   res.json({ ok: true, activities, since: since.toISOString() });
+});
+
+// ---------------------------------------------------------------------------
+// Shipment tracking endpoints
+// ---------------------------------------------------------------------------
+
+router.get('/shipments', async (req, res) => {
+  const shipmentTracker = require('../services/shipment-tracker');
+  const options = {};
+  if (req.query.active === 'true') options.active = true;
+  if (req.query.active === 'false') options.active = false;
+  if (req.query.carrier) options.carrier = req.query.carrier;
+  if (req.query.status) options.status = req.query.status;
+  if (req.query.limit) options.limit = parseInt(req.query.limit, 10);
+  const shipments = await shipmentTracker.getAllShipments('default', options);
+  res.json({ ok: true, shipments, count: shipments.length });
+});
+
+router.get('/shipments/:trackingNumber', async (req, res) => {
+  const shipmentTracker = require('../services/shipment-tracker');
+  const shipment = await shipmentTracker.getShipment(req.params.trackingNumber);
+  if (!shipment) return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Shipment not found' });
+  const trackingUrl = shipmentTracker.getTrackingUrl(shipment.carrier, shipment.trackingNumber);
+  res.json({ ok: true, shipment, trackingUrl });
+});
+
+router.post('/shipments', async (req, res) => {
+  const shipmentTracker = require('../services/shipment-tracker');
+  const { trackingNumber, carrier, orderNumber, retailer, items, status, estimatedDelivery, shipTo } = req.body;
+  if (!trackingNumber) return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'trackingNumber is required' });
+  const shipment = await shipmentTracker.createShipment({
+    trackingNumber,
+    carrier,
+    orderNumber,
+    retailer,
+    items,
+    status,
+    estimatedDelivery,
+    shipTo,
+  });
+  const trackingUrl = shipmentTracker.getTrackingUrl(shipment.carrier, shipment.trackingNumber);
+  res.json({ ok: true, shipment, trackingUrl });
+});
+
+router.patch('/shipments/:trackingNumber', async (req, res) => {
+  const shipmentTracker = require('../services/shipment-tracker');
+  const { status, location, description } = req.body;
+  if (!status) return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'status is required' });
+  const updated = await shipmentTracker.updateShipmentStatus(req.params.trackingNumber, { status, location, description });
+  if (!updated) return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Shipment not found' });
+  res.json({ ok: true, shipment: updated });
+});
+
+router.delete('/shipments/:trackingNumber', async (req, res) => {
+  const shipmentTracker = require('../services/shipment-tracker');
+  const deleted = await shipmentTracker.removeShipment(req.params.trackingNumber);
+  if (!deleted) return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Shipment not found' });
+  res.json({ ok: true });
 });
 
 module.exports = router;

@@ -26,6 +26,7 @@ const {
   VALID_PARSE_MODES,
   parseWithPolicy,
 } = require('../services/parse-orchestrator');
+const { transcribeImage } = require('../services/claude');
 const {
   createAiOperation,
   updateAiOperation,
@@ -50,6 +51,11 @@ const {
 } = require('../services/ai-traces');
 const { archiveImages, getArchive, getAllImages, getImageFile, getArchiveStats } = require('../lib/image-archive');
 const { extractQuickActions } = require('../lib/quick-actions');
+const {
+  matchFromParseFields,
+  matchInvestigations,
+  incrementMatchCount,
+} = require('../services/inv-matcher');
 
 const SSE_SAFETY_TIMEOUT_MS = parseInt(process.env.SSE_SAFETY_TIMEOUT_MS, 10) || 300000; // 5 minutes
 
@@ -149,6 +155,37 @@ function buildTriageAction(fields, category) {
   return 'Capture the exact error text/code and reproduce the issue once in an incognito window before escalating.';
 }
 
+/**
+ * Detect whether the user's message indicates a NON-escalation intent.
+ * When true, the server should skip the triage parse, 6-section format
+ * enforcement, response compliance rewriting, and auto-escalation creation.
+ *
+ * Examples: "this is not an escalation", "add these INVs", "list of inv",
+ * "parse these investigation entries", "what does this error mean?", etc.
+ */
+function isNonEscalationIntent(messageText) {
+  const text = safeString(messageText, '').toLowerCase().trim();
+  if (!text) return false;
+
+  // Explicit negation of escalation intent
+  if (/\bnot\s+(an?\s+)?escalation\b/.test(text)) return true;
+  if (/\bdon'?t\s+(triage|parse\s+as\s+escalation|create\s+escalation)\b/.test(text)) return true;
+  if (/\bskip\s+(triage|escalation)\b/.test(text)) return true;
+  if (/\bno\s+triage\b/.test(text)) return true;
+
+  // INV-related requests (adding/listing investigations, not escalation triage)
+  if (/\binv[-\s]?\d{4,}/.test(text) && /\b(add|list|parse|track|import|update|show)\b/.test(text)) return true;
+  if (/\b(add|import|parse)\s+(these\s+)?(inv|investigation)\b/.test(text)) return true;
+  if (/\blist\s+of\s+inv\b/.test(text)) return true;
+  if (/\binvestigation\s+(entries|list|numbers|screenshot)\b/.test(text)) return true;
+
+  // General non-triage intents with images
+  if (/\b(what\s+does\s+this|what\s+is\s+this|can\s+you\s+read|help\s+me\s+understand)\b/.test(text)) return true;
+  if (/\b(summarize|transcribe|translate|extract\s+text)\b/.test(text)) return true;
+
+  return false;
+}
+
 function buildFallbackTriageCard() {
   return {
     agent: 'Unknown',
@@ -198,6 +235,55 @@ function buildTriageRefBlock(parseFields) {
   return lines.split('\n').filter(l => !l.startsWith('---') && l.trim()).length > 0 ? lines : '';
 }
 
+// --- Image Transcription Pipeline ---
+// For ALL image messages, run a fast transcription-only step before anything else.
+// This gives Claude accurate text from the screenshot regardless of whether the
+// intent is escalation triage, INV import, or a general question.
+
+const IMAGE_TRANSCRIBE_TIMEOUT_MS = parsePositiveInt(
+  process.env.CHAT_IMAGE_TRANSCRIBE_TIMEOUT_MS, 45000
+);
+
+/**
+ * Run a fast image-to-text transcription for the first image in the array.
+ * Returns { text, usage, elapsedMs } on success, or null on any failure.
+ * This is intentionally fire-and-continue: if transcription fails, the chat
+ * still proceeds — Claude will see the raw image via temp file + prompt.
+ */
+async function transcribeImageForChat(images, options = {}) {
+  if (!Array.isArray(images) || images.length === 0) return null;
+  const startedAt = Date.now();
+  try {
+    const result = await transcribeImage(images[0], {
+      model: options.model || undefined,
+      reasoningEffort: options.reasoningEffort || 'medium',
+      timeoutMs: options.timeoutMs || IMAGE_TRANSCRIBE_TIMEOUT_MS,
+    });
+    return {
+      text: result && result.text ? result.text : '',
+      usage: result && result.usage ? result.usage : null,
+      elapsedMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    console.warn('[chat] Image transcription failed (non-fatal):', err.message);
+    return null;
+  }
+}
+
+/**
+ * Build a system prompt block with the transcribed image text so Claude has
+ * an accurate textual representation instead of relying solely on vision.
+ */
+function buildTranscriptionRefBlock(transcriptionText) {
+  const text = safeString(transcriptionText, '').trim();
+  if (!text) return '';
+  return [
+    '\n\n--- IMAGE TRANSCRIPTION (server-extracted, use as primary text reference) ---',
+    text,
+    '--- END IMAGE TRANSCRIPTION ---\n',
+  ].join('\n');
+}
+
 function buildImageTurnSystemPrompt(baseSystemPrompt) {
   const runtimeRules = [
     'Image Turn Runtime Contract (server-enforced):',
@@ -215,6 +301,101 @@ function buildImageTurnSystemPrompt(baseSystemPrompt) {
   ].join('\n');
   const base = safeString(baseSystemPrompt, '').trim();
   return base ? `${base}\n\n${runtimeRules}` : runtimeRules;
+}
+
+// ---------------------------------------------------------------------------
+// Live INV Matching — query active investigations for matching known issues
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a system prompt block listing matched INV investigations so Claude
+ * can reference known issues, workarounds, and affected-user counts.
+ */
+function buildInvMatchRefBlock(matches) {
+  if (!Array.isArray(matches) || matches.length === 0) return '';
+  const entries = matches.map((m) => {
+    const inv = m.investigation || m;
+    const lines = [`- **${inv.invNumber}** — ${inv.subject || '(no subject)'}`];
+    if (inv.status) lines.push(`  Status: ${inv.status}`);
+    if (inv.details) lines.push(`  Details: ${inv.details}`);
+    if (inv.resolution) lines.push(`  Resolution: ${inv.resolution}`);
+    if (inv.workaround) lines.push(`  Workaround: ${inv.workaround}`);
+    if (inv.notes) lines.push(`  Notes: ${inv.notes}`);
+    if (inv.affectedCount > 0) lines.push(`  Affected users: ${inv.affectedCount}`);
+    if (inv.category) lines.push(`  Category: ${inv.category}`);
+    return lines.join('\n');
+  });
+  return [
+    '\n\n--- KNOWN ISSUE MATCHES (active INV investigations) ---',
+    'The following known issues were automatically matched to this escalation.',
+    'Reference them in your response when relevant. Tell the agent to give the',
+    'customer the INV number and add them to affected users if the issue matches.',
+    '',
+    ...entries,
+    '--- END KNOWN ISSUE MATCHES ---\n',
+  ].join('\n');
+}
+
+/**
+ * Run INV matching against the user message and/or triage parse fields.
+ * Returns { matches, ssPayload } where matches is the raw scored array
+ * and ssPayload is the flattened array for the SSE event.
+ * Designed to be fast and non-blocking — failures return empty results.
+ */
+async function runInvMatching({ message, parseFields, category }) {
+  try {
+    let matches = [];
+
+    // Strategy 1: If we have structured parse fields, use them (best signal)
+    if (parseFields && typeof parseFields === 'object') {
+      const pfWithCategory = { ...parseFields };
+      if (category && !pfWithCategory.category) pfWithCategory.category = category;
+      matches = await matchFromParseFields(pfWithCategory);
+    }
+
+    // Strategy 2: Fall back to free-text matching on the user message
+    if (matches.length === 0 && message && typeof message === 'string' && message.trim()) {
+      matches = await matchInvestigations(message.trim(), {
+        category: category || null,
+        limit: 5,
+      });
+      // Assign confidence levels for text-only matches
+      matches = matches.map((m) => ({
+        ...m,
+        confidence: m.confidence || (m.score >= 40 ? 'exact' : m.score >= 20 ? 'likely' : 'possible'),
+      }));
+    }
+
+    if (matches.length === 0) return { matches: [], ssePayload: [] };
+
+    // Increment match counts (fire-and-forget, non-blocking)
+    for (const m of matches) {
+      const inv = m.investigation || m;
+      if (inv._id) incrementMatchCount(inv._id).catch(() => {});
+    }
+
+    // Build SSE payload (flattened for client)
+    const ssePayload = matches.map((m) => {
+      const inv = m.investigation || m;
+      return {
+        _id: inv._id ? inv._id.toString() : undefined,
+        invNumber: inv.invNumber,
+        subject: inv.subject,
+        workaround: inv.workaround || '',
+        notes: inv.notes || '',
+        category: inv.category || '',
+        status: inv.status || '',
+        affectedCount: inv.affectedCount || 0,
+        confidence: m.confidence || 'possible',
+        score: m.score || 0,
+      };
+    });
+
+    return { matches, ssePayload };
+  } catch (err) {
+    console.warn('[chat] INV matching failed (non-fatal):', err.message);
+    return { matches: [], ssePayload: [] };
+  }
 }
 
 function responseHasQuickParseSections(text) {
@@ -1123,10 +1304,50 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     'X-Accel-Buffering': 'no',
   });
 
+  // Detect whether the user is requesting something other than escalation triage.
+  // When true, skip the expensive pre-parse, 6-section format enforcement, and
+  // auto-escalation creation — just let the model respond naturally.
+  const nonEscalationIntent = isNonEscalationIntent(message);
+
+  // --- Image Transcription Pipeline (runs for ALL image messages) ---
+  // Step 1: Fast transcription — extract all visible text from the image.
+  // This runs regardless of intent so Claude always has accurate OCR text.
+  let imageTranscription = null;
   if (normalizedImages.length > 0) {
-    // Emit a status event so the client sees activity during triage
     try {
-      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation image...' }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Reading image text...' }) + '\n\n');
+    } catch { /* client disconnected */ }
+    await appendTraceEvent(trace?._id, {
+      key: 'transcription_started',
+      label: 'Image transcription started',
+      status: 'info',
+      provider: policy.primaryProvider,
+      model: getProviderModelId(policy.primaryProvider),
+      message: 'Running fast image-to-text transcription.',
+    }, traceStartedAt);
+
+    imageTranscription = await transcribeImageForChat(normalizedImages, {
+      model: getProviderModelId(policy.primaryProvider),
+      reasoningEffort: 'medium',
+      timeoutMs: IMAGE_TRANSCRIBE_TIMEOUT_MS,
+    });
+
+    await appendTraceEvent(trace?._id, {
+      key: imageTranscription ? 'transcription_completed' : 'transcription_failed',
+      label: imageTranscription ? 'Image transcription completed' : 'Image transcription failed',
+      status: imageTranscription ? 'success' : 'warning',
+      provider: policy.primaryProvider,
+      model: getProviderModelId(policy.primaryProvider),
+      message: imageTranscription
+        ? `Image transcribed in ${imageTranscription.elapsedMs || 0}ms (${(imageTranscription.text || '').length} chars).`
+        : 'Image transcription failed — Claude will rely on raw image vision.',
+    }, traceStartedAt);
+  }
+
+  // Step 2: For escalation intent, also run the structured triage parse.
+  if (normalizedImages.length > 0 && !nonEscalationIntent) {
+    try {
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation fields...' }) + '\n\n');
     } catch { /* client disconnected */ }
     await appendTraceEvent(trace?._id, {
       key: 'triage_started',
@@ -1134,13 +1355,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       status: 'info',
       provider: policy.primaryProvider,
       model: getProviderModelId(policy.primaryProvider),
-      message: 'Running the lightweight pre-response image triage.',
+      message: 'Running structured escalation field extraction.',
     }, traceStartedAt);
   }
-  // When images are present, await triage BEFORE starting chat so parsed data
-  // can be injected into the system prompt. This changes the flow from parallel
-  // (triage + chat racing) to sequential (triage -> chat) for image turns only.
-  const imageTriageContext = normalizedImages.length > 0
+  const imageTriageContext = (normalizedImages.length > 0 && !nonEscalationIntent)
     ? await buildImageTriageContext({
       images: normalizedImages,
       mode: policy.mode,
@@ -1150,14 +1368,43 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       timeoutMs: effectiveTimeoutMs,
     }).catch(() => null)
     : null;
-  let effectiveSystemPrompt = normalizedImages.length > 0
+
+  // Step 3: Build the effective system prompt with transcription and triage data.
+  let effectiveSystemPrompt = (normalizedImages.length > 0 && !nonEscalationIntent)
     ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
     : contextBundle.systemPrompt;
+  // Always inject transcription text when available — gives Claude accurate
+  // OCR text regardless of escalation vs non-escalation intent.
+  if (imageTranscription && imageTranscription.text) {
+    const transcriptionBlock = buildTranscriptionRefBlock(imageTranscription.text);
+    if (transcriptionBlock) effectiveSystemPrompt = effectiveSystemPrompt + transcriptionBlock;
+  }
   // Inject pre-parsed triage fields into the system prompt so Claude has
   // canonical reference data instead of squinting at the image.
   if (imageTriageContext && imageTriageContext.parseFields) {
     const refBlock = buildTriageRefBlock(imageTriageContext.parseFields);
     if (refBlock) effectiveSystemPrompt = effectiveSystemPrompt + refBlock;
+  }
+
+  // Step 4: Live INV matching — query active investigations for known issues.
+  // Uses triage parse fields when available (best signal), falls back to
+  // free-text matching on the user message. Results injected into system
+  // prompt and emitted as SSE event for the client UI.
+  const triageCategory = imageTriageContext?.triageCard?.category || null;
+  const invMatchResult = await runInvMatching({
+    message: message || (imageTranscription && imageTranscription.text) || '',
+    parseFields: imageTriageContext?.parseFields || null,
+    category: triageCategory,
+  });
+  if (invMatchResult.matches.length > 0) {
+    const invBlock = buildInvMatchRefBlock(invMatchResult.matches);
+    if (invBlock) effectiveSystemPrompt = effectiveSystemPrompt + invBlock;
+    await appendTraceEvent(trace?._id, {
+      key: 'inv_match_completed',
+      label: 'INV matching completed',
+      status: 'success',
+      message: `${invMatchResult.matches.length} known issue(s) matched.`,
+    }, traceStartedAt);
   }
 
   if (conversation.provider !== policy.primaryProvider) {
@@ -1218,6 +1465,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
+  // Emit transcription result as an SSE event so the client knows text was extracted.
+  if (imageTranscription && imageTranscription.text && !responseClosed) {
+    try {
+      res.write('event: image_transcription\ndata: ' + JSON.stringify({
+        text: imageTranscription.text,
+        elapsedMs: imageTranscription.elapsedMs || 0,
+        charCount: imageTranscription.text.length,
+      }) + '\n\n');
+    } catch { /* client disconnected */ }
+  }
   // Triage is already awaited — emit trace events and triage card SSE synchronously.
   if (imageTriageContext) {
     const triageMeta = imageTriageContext.parseMeta;
@@ -1252,6 +1509,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
       } catch { /* client disconnected */ }
     }
+  }
+  // Emit INV matches SSE event so the client can show the InvMatchBanner.
+  if (!responseClosed && invMatchResult.ssePayload.length > 0) {
+    try {
+      res.write('event: inv_matches\ndata: ' + JSON.stringify(invMatchResult.ssePayload) + '\n\n');
+    } catch { /* client disconnected */ }
   }
   const turnStartedAt = Date.now();
   const requestId = req.requestId;
@@ -1404,7 +1667,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       });
       const latencyMs = Date.now() - turnStartedAt;
       // imageTriageContext is already resolved in the outer scope (awaited before orchestration).
-      const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
+      // Skip response compliance rewriting for non-escalation intents — the model's
+      // natural response should not be forced into the 6-section triage format.
+      const compliantData = (imageTriageContext && !nonEscalationIntent)
+        ? applyImageResponseCompliance(data, imageTriageContext)
+        : { ...data, responseRepaired: false };
       const attempts = compliantData.attempts || [];
       const providerThinking = normalizeProviderThinking(compliantData.providerThinking);
       logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });
@@ -1489,6 +1756,45 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         if (conversation.title === 'New Conversation' && conversation.messages.length >= 2) {
           const firstUserMsg = conversation.messages.find((m) => m.role === 'user');
           if (firstUserMsg) conversation.title = safeString(firstUserMsg.content, '').slice(0, 80);
+        }
+
+        // Persist Escalation record when image triage produced valid parseFields.
+        // This mirrors the persist logic in /parse-escalation but runs automatically
+        // for screenshots sent through the main chat flow.
+        // Skip for non-escalation intents — user explicitly said this isn't an escalation.
+        if (
+          imageTriageContext
+          && !nonEscalationIntent
+          && imageTriageContext.parseFields
+          && Object.keys(imageTriageContext.parseFields).length > 0
+          && !conversation.escalationId // avoid duplicates on retries
+        ) {
+          try {
+            const triageMeta = imageTriageContext.parseMeta || {};
+            const escalation = new Escalation({
+              ...imageTriageContext.parseFields,
+              source: 'screenshot',
+              conversationId: conversation._id,
+              parseMeta: {
+                mode: triageMeta.mode || '',
+                providerUsed: triageMeta.providerUsed || '',
+                winner: triageMeta.winner || triageMeta.providerUsed || '',
+                fallbackUsed: Boolean(triageMeta.fallbackUsed),
+                fallbackFrom: triageMeta.fallbackFrom || '',
+                validationScore: triageMeta.validation ? triageMeta.validation.score : null,
+                validationConfidence: triageMeta.validation ? triageMeta.validation.confidence : '',
+                validationIssues: triageMeta.validation ? triageMeta.validation.issues : [],
+                usedRegexFallback: Boolean(triageMeta.usedRegexFallback),
+                attempts: triageMeta.attempts || [],
+              },
+            });
+            await escalation.save();
+            conversation.escalationId = escalation._id;
+            console.log('[chat] Escalation persisted from chat triage: %s (conv %s)', escalation._id, conversation._id);
+          } catch (escErr) {
+            // Non-fatal — do not break the chat flow if escalation persist fails
+            console.warn('[chat] Failed to persist escalation from triage (non-fatal):', escErr.message);
+          }
         }
 
         await saveConversationLenient(conversation);
@@ -1580,6 +1886,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             contextDebug: contextDebugPayload,
             citations: contextBundle.citations || [],
             quickActions,
+            escalationId: conversation.escalationId ? conversation.escalationId.toString() : null,
           }) + '\n\n');
           res.end();
         } catch { /* client gone */ }
@@ -2707,13 +3014,31 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     'X-Accel-Buffering': 'no',
   });
 
-  // Sequential triage -> chat for image turns (same pattern as main chat handler).
+  // Detect non-escalation intent from the original user message being retried.
+  const nonEscalationIntent = isNonEscalationIntent(safeString(lastUserMsg.content, ''));
+
+  // --- Image Transcription Pipeline (retry handler, same pattern as main handler) ---
+  // Step 1: Fast transcription for ALL image messages.
+  let imageTranscription = null;
   if (normalizedImages.length > 0) {
     try {
-      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation image...' }) + '\n\n');
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Reading image text...' }) + '\n\n');
+    } catch { /* client disconnected */ }
+
+    imageTranscription = await transcribeImageForChat(normalizedImages, {
+      model: getProviderModelId(policy.primaryProvider),
+      reasoningEffort: 'medium',
+      timeoutMs: IMAGE_TRANSCRIBE_TIMEOUT_MS,
+    });
+  }
+
+  // Step 2: For escalation intent, also run structured triage parse.
+  if (normalizedImages.length > 0 && !nonEscalationIntent) {
+    try {
+      res.write('data: ' + JSON.stringify({ type: 'status', message: 'Parsing escalation fields...' }) + '\n\n');
     } catch { /* client disconnected */ }
   }
-  const imageTriageContext = normalizedImages.length > 0
+  const imageTriageContext = (normalizedImages.length > 0 && !nonEscalationIntent)
     ? await buildImageTriageContext({
       images: normalizedImages,
       mode: policy.mode,
@@ -2723,12 +3048,37 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       timeoutMs: effectiveTimeoutMs,
     }).catch(() => null)
     : null;
-  let effectiveSystemPrompt = normalizedImages.length > 0
+
+  // Step 3: Build effective system prompt with transcription + triage data.
+  let effectiveSystemPrompt = (normalizedImages.length > 0 && !nonEscalationIntent)
     ? buildImageTurnSystemPrompt(contextBundle.systemPrompt)
     : contextBundle.systemPrompt;
+  if (imageTranscription && imageTranscription.text) {
+    const transcriptionBlock = buildTranscriptionRefBlock(imageTranscription.text);
+    if (transcriptionBlock) effectiveSystemPrompt = effectiveSystemPrompt + transcriptionBlock;
+  }
   if (imageTriageContext && imageTriageContext.parseFields) {
     const refBlock = buildTriageRefBlock(imageTriageContext.parseFields);
     if (refBlock) effectiveSystemPrompt = effectiveSystemPrompt + refBlock;
+  }
+
+  // Step 4: Live INV matching (retry handler — same logic as main handler).
+  const triageCategory = imageTriageContext?.triageCard?.category || null;
+  const lastUserContent = safeString(lastUserMsg && lastUserMsg.content, '');
+  const invMatchResult = await runInvMatching({
+    message: lastUserContent || (imageTranscription && imageTranscription.text) || '',
+    parseFields: imageTriageContext?.parseFields || null,
+    category: triageCategory,
+  });
+  if (invMatchResult.matches.length > 0) {
+    const invBlock = buildInvMatchRefBlock(invMatchResult.matches);
+    if (invBlock) effectiveSystemPrompt = effectiveSystemPrompt + invBlock;
+    await appendTraceEvent(trace?._id, {
+      key: 'inv_match_completed',
+      label: 'INV matching completed',
+      status: 'success',
+      message: `${invMatchResult.matches.length} known issue(s) matched.`,
+    }, traceStartedAt);
   }
 
   let shouldSaveConversation = false;
@@ -2793,6 +3143,16 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
   }) + '\n\n');
+  // Emit transcription result SSE for retry handler.
+  if (imageTranscription && imageTranscription.text && !responseClosed) {
+    try {
+      res.write('event: image_transcription\ndata: ' + JSON.stringify({
+        text: imageTranscription.text,
+        elapsedMs: imageTranscription.elapsedMs || 0,
+        charCount: imageTranscription.text.length,
+      }) + '\n\n');
+    } catch { /* client disconnected */ }
+  }
   // Triage already resolved — emit trace events and triage card SSE synchronously.
   if (imageTriageContext) {
     const triageMeta = imageTriageContext.parseMeta;
@@ -2827,6 +3187,12 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
       } catch { /* gone */ }
     }
+  }
+  // Emit INV matches SSE event (retry handler).
+  if (!responseClosed && invMatchResult.ssePayload.length > 0) {
+    try {
+      res.write('event: inv_matches\ndata: ' + JSON.stringify(invMatchResult.ssePayload) + '\n\n');
+    } catch { /* gone */ }
   }
 
   const turnStartedAt = Date.now();
@@ -2971,7 +3337,10 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       });
       const latencyMs = Date.now() - turnStartedAt;
       // imageTriageContext is already resolved in the outer scope (awaited before orchestration).
-      const compliantData = imageTriageContext ? applyImageResponseCompliance(data, imageTriageContext) : { ...data, responseRepaired: false };
+      // Skip response compliance rewriting for non-escalation intents.
+      const compliantData = (imageTriageContext && !nonEscalationIntent)
+        ? applyImageResponseCompliance(data, imageTriageContext)
+        : { ...data, responseRepaired: false };
       const attempts = compliantData.attempts || [];
       const providerThinking = normalizeProviderThinking(compliantData.providerThinking);
       logAttemptsUsage(attempts, { requestId: retryRequestId, service: 'chat', conversationId: conversation._id, mode: compliantData.mode || policy.mode });

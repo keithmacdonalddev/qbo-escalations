@@ -1,0 +1,353 @@
+/* ============================================================
+   Dev Mode Mini Widget — floating background process monitor
+   Always dark regardless of theme (terminal overlay aesthetic)
+   ============================================================ */
+
+.dev-mini-widget {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1000;
+  font-family: var(--font-mono);
+}
+
+/* — Collapsed pill — */
+
+.dev-mini-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1a1d23;
+  color: #c9d1d9;
+  border: 1px solid rgba(78, 201, 181, 0.25);
+  border-radius: 28px;
+  padding: 10px 16px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.dev-mini-pill:hover {
+  border-color: #4ec9b5;
+  box-shadow:
+    0 6px 32px rgba(0, 0, 0, 0.5),
+    0 0 16px rgba(78, 201, 181, 0.1);
+  transform: translateY(-2px);
+}
+
+.dev-mini-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(78, 201, 181, 0.25);
+  border-top-color: #4ec9b5;
+  border-radius: 50%;
+  animation: devMiniSpin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes devMiniSpin {
+  to { transform: rotate(360deg); }
+}
+
+.dev-mini-badge {
+  background: rgba(78, 201, 181, 0.15);
+  color: #4ec9b5;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.dev-mini-status {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.dev-mini-elapsed {
+  color: #6e7681;
+  font-size: 10px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dev-mini-close {
+  background: none;
+  border: none;
+  color: #6e7681;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s ease;
+}
+
+.dev-mini-close:hover {
+  color: #c9d1d9;
+}
+
+/* — Expanded card — */
+
+.dev-mini-card {
+  background: #1a1d23;
+  border: 1px solid rgba(78, 201, 181, 0.2);
+  border-radius: 14px;
+  width: 380px;
+  max-width: calc(100vw - 40px);
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    0 0 24px rgba(78, 201, 181, 0.04);
+  overflow: hidden;
+}
+
+.dev-mini-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: #161920;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.dev-mini-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #c9d1d9;
+}
+
+.dev-mini-header-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.dev-mini-header-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8b949e;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dev-mini-header-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #c9d1d9;
+}
+
+/* Terminal area */
+
+.dev-mini-terminal {
+  height: 200px;
+  background: #0d1117;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #c9d1d9;
+  line-height: 1.65;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.dev-mini-terminal::-webkit-scrollbar { width: 4px; }
+.dev-mini-terminal::-webkit-scrollbar-track { background: transparent; }
+.dev-mini-terminal::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.dev-mini-tool-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #4ec9b5;
+  margin-bottom: 2px;
+  font-size: 11px;
+}
+
+.dev-mini-tool-icon {
+  font-size: 8px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.dev-mini-tool-name {
+  font-weight: 500;
+}
+
+.dev-mini-tool-status {
+  font-size: 9px;
+  color: #3fb950;
+  margin-left: auto;
+}
+
+.dev-mini-tool-status--error {
+  color: #f85149;
+}
+
+.dev-mini-text {
+  margin-top: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c9d1d9;
+}
+
+.dev-mini-text--dim {
+  color: #484f58;
+  font-style: italic;
+}
+
+.dev-mini-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  background: #4ec9b5;
+  animation: devMiniCursorBlink 1s step-end infinite;
+  vertical-align: text-bottom;
+  margin-left: 2px;
+  border-radius: 1px;
+}
+
+@keyframes devMiniCursorBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Footer */
+
+.dev-mini-footer {
+  padding: 8px 14px;
+  background: #161920;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dev-mini-tool-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.dev-mini-tool-badge {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dev-mini-tool-badge--read {
+  background: rgba(96, 165, 250, 0.12);
+  color: #79c0ff;
+}
+
+.dev-mini-tool-badge--write {
+  background: rgba(210, 153, 34, 0.12);
+  color: #e3b341;
+}
+
+.dev-mini-tool-badge--bash {
+  background: rgba(63, 185, 80, 0.12);
+  color: #3fb950;
+}
+
+.dev-mini-tool-badge--default {
+  background: rgba(139, 148, 158, 0.12);
+  color: #8b949e;
+}
+
+.dev-mini-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dev-mini-stop-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(248, 81, 73, 0.12);
+  color: #f85149;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.dev-mini-stop-btn:hover {
+  background: rgba(248, 81, 73, 0.25);
+}
+
+.dev-mini-open-btn {
+  background: rgba(78, 201, 181, 0.12);
+  color: #4ec9b5;
+  border: none;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dev-mini-open-btn:hover {
+  background: rgba(78, 201, 181, 0.22);
+  color: #6ee7d0;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .chat-mini-widget {
+    bottom: 82px;
+    right: 12px;
+  }
+  .chat-mini-card {
+    width: calc(100vw - 24px);
+  }
+  .chat-mini-preview {
+    max-width: 120px;
+  }
+
+  .dev-mini-widget {
+    bottom: 12px;
+    right: 12px;
+  }
+  .dev-mini-card {
+    width: calc(100vw - 24px);
+  }
+  .dqc {
+    top: 48px;
+    right: 8px;
+    width: calc(100vw - 16px);
+    border-radius: 12px;
+  }
+  .dqc-backdrop {
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+

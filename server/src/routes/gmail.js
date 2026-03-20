@@ -12,6 +12,9 @@ const {
   deleteAiOperation,
 } = require('../services/ai-runtime');
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { logUsage } = require('../lib/usage-writer');
+const { calculateCost } = require('../lib/pricing');
+const { randomUUID } = require('node:crypto');
 
 const router = express.Router();
 
@@ -243,15 +246,17 @@ router.get('/subscriptions', async (req, res) => {
   }
 });
 
-// GET /api/gmail/messages?q=...&maxResults=...&pageToken=...&labelIds=...&account=...
+// GET /api/gmail/messages?q=...&maxResults=...&pageToken=...&labelIds=...&account=...&includeSpamTrash=...&idsOnly=...
 router.get('/messages', async (req, res) => {
   try {
-    const { q, maxResults, pageToken, labelIds, account } = req.query;
+    const { q, maxResults, pageToken, labelIds, account, includeSpamTrash, idsOnly } = req.query;
     const result = await gmail.listMessages({
       q: q || undefined,
       maxResults: maxResults && Number.isFinite(parseInt(maxResults, 10)) ? parseInt(maxResults, 10) : 20,
       pageToken: pageToken || undefined,
       labelIds: labelIds || undefined,
+      includeSpamTrash: includeSpamTrash === 'true' || includeSpamTrash === '1' || false,
+      idsOnly: idsOnly === 'true' || idsOnly === '1' || false,
       accountEmail: account || undefined,
     });
     res.json(result);
@@ -524,15 +529,45 @@ router.post('/ai', async (req, res) => {
         res.write('event: chunk\ndata: ' + JSON.stringify({ text }) + '\n\n');
       } catch { /* client disconnected */ }
     },
-    onDone: (fullResponse) => {
+    onDone: (fullResponse, usageMeta) => {
       streamSettled = true;
       clearInterval(heartbeat);
       recordAiEvent(runtimeOperationId, 'completed', { provider: 'claude' });
+      // Build usage payload for client
+      const usageForClient = usageMeta ? (() => {
+        const inp = usageMeta.inputTokens || 0;
+        const out = usageMeta.outputTokens || 0;
+        const c = calculateCost(inp, out, usageMeta.model || '', 'claude');
+        return {
+          inputTokens: inp,
+          outputTokens: out,
+          totalTokens: inp + out,
+          model: usageMeta.model || '',
+          totalCostMicros: c.totalCostMicros,
+        };
+      })() : null;
       try {
-        res.write('event: done\ndata: ' + JSON.stringify({ ok: true, fullResponse }) + '\n\n');
+        res.write('event: done\ndata: ' + JSON.stringify({ ok: true, fullResponse, usage: usageForClient }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
       deleteAiOperation(runtimeOperationId);
+      // Log usage for Gmail AI
+      const u = usageMeta || {};
+      logUsage({
+        requestId: randomUUID(),
+        attemptIndex: 0,
+        service: 'gmail',
+        provider: 'claude',
+        model: u.model,
+        inputTokens: u.inputTokens,
+        outputTokens: u.outputTokens,
+        usageAvailable: !!usageMeta,
+        usageComplete: u.usageComplete,
+        rawUsage: u.rawUsage,
+        mode: 'single',
+        status: 'ok',
+        latencyMs: 0,
+      });
     },
     onError: (err) => {
       streamSettled = true;
@@ -561,6 +596,23 @@ router.post('/ai', async (req, res) => {
         res.end();
       } catch { /* client disconnected */ }
       deleteAiOperation(runtimeOperationId);
+      // Log usage for Gmail AI error
+      const eu = (err && err._usage) || {};
+      logUsage({
+        requestId: randomUUID(),
+        attemptIndex: 0,
+        service: 'gmail',
+        provider: 'claude',
+        model: eu.model,
+        inputTokens: eu.inputTokens,
+        outputTokens: eu.outputTokens,
+        usageAvailable: !!(err && err._usage),
+        usageComplete: eu.usageComplete,
+        rawUsage: eu.rawUsage,
+        mode: 'single',
+        status: 'error',
+        latencyMs: 0,
+      });
     },
   });
 

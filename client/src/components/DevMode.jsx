@@ -4,9 +4,10 @@ import Tooltip from './Tooltip.jsx';
 import AgentActivityLog from './AgentActivityLog.jsx';
 import PromptInspector from './PromptInspector.jsx';
 import AgentDock from './AgentDock.jsx';
-import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel } from '../lib/providerCatalog.js';
+import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getProviderLabel, getReasoningEffortOptions } from '../lib/providerCatalog.js';
 import { useDevAgent } from '../context/DevAgentContext.jsx';
 import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
+import './DevMode.css';
 
 /** Quick dev prompts for common tasks */
 const DEV_PROMPTS = [
@@ -43,7 +44,7 @@ function readFileAsDataUrl(file) {
 
 /** Compact token usage bar between messages and input */
 function TokenMonitorBar({ tokenStats }) {
-  if (!tokenStats || tokenStats.combined.total === 0) return null;
+  if (!tokenStats || !tokenStats.combined || tokenStats.combined.total === 0) return null;
 
   const { foreground: fg, background: bg, combined, budget } = tokenStats;
   const hasBudget = budget && budget.maxPercent > 0;
@@ -718,7 +719,14 @@ export default function DevMode({ chat = null }) {
                         <button
                           key={option.value}
                           className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                          onClick={() => setProvider(option.value)}
+                          onClick={() => {
+                            setProvider(option.value);
+                            const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                            const allowed = getReasoningEffortOptions(nextFamily);
+                            if (!allowed.some((o) => o.value === reasoningEffort)) {
+                              setReasoningEffort('high');
+                            }
+                          }}
                           type="button"
                         >
                           <span className="check">{provider === option.value ? '\u2713' : ''}</span>
@@ -759,7 +767,7 @@ export default function DevMode({ chat = null }) {
                       )}
                       <div className="provider-popover-divider" />
                       <div className="provider-popover-label">Reasoning Effort</div>
-                      {REASONING_EFFORT_OPTIONS.map((option) => (
+                      {getReasoningEffortOptions(PROVIDER_FAMILY[provider] || 'claude').map((option) => (
                         <button
                           key={option.value}
                           className={`provider-popover-option${reasoningEffort === option.value ? ' is-selected' : ''}`}
@@ -770,11 +778,6 @@ export default function DevMode({ chat = null }) {
                           {option.label}
                         </button>
                       ))}
-                      {selectionIncludesClaude && reasoningEffort === 'xhigh' && (
-                        <div style={{ fontSize: '0.7rem', color: 'var(--ink-tertiary)', padding: '2px 8px 0' }}>
-                          Claude providers use High when Extra High is selected.
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>

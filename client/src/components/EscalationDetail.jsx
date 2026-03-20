@@ -326,9 +326,9 @@ export default function EscalationDetail({ escalationId }) {
   }
 
   return (
-    <div className="app-content-constrained">
+    <div className="esc-detail-shell">
       {/* Header */}
-      <div className="page-header">
+      <div className="esc-detail-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
           <button
             className="btn btn-ghost btn-sm"
@@ -354,11 +354,11 @@ export default function EscalationDetail({ escalationId }) {
         </div>
       </div>
 
-      {/* Two-column layout: escalation info + chat transcript */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: 'var(--sp-5)', alignItems: 'start' }}>
+      {/* Two-column layout: escalation info (scrollable) + chat transcript (fixed) */}
+      <div className="esc-detail-columns">
 
-        {/* Left: Escalation details */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
+        {/* Left: Escalation details — independently scrollable */}
+        <div className="esc-detail-left">
           {/* Status + meta card */}
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--sp-4)' }}>
@@ -867,9 +867,9 @@ export default function EscalationDetail({ escalationId }) {
           </div>
         </div>
 
-        {/* Right: Chat transcript + copilot */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-5)' }}>
-          <div className="card" style={{ maxHeight: 'calc(100vh - 320px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* Right: Chat transcript + copilot — fixed in viewport */}
+        <div className="esc-detail-right">
+          <div className="card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
             <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>
               Chat Transcript
             </h2>

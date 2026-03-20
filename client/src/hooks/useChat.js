@@ -123,6 +123,7 @@ export function useChat(options = {}) {
   const [contextDebug, setContextDebug] = useState(null);
   const [runtimeWarnings, setRuntimeWarnings] = useState([]);
   const [triageCard, setTriageCard] = useState(null);
+  const [invMatches, setInvMatches] = useState(null);
   const [processEvents, setProcessEvents] = useState([]);
   const [thinkingText, setThinkingText] = useState('');
   const [isThinking, setIsThinking] = useState(false);
@@ -431,6 +432,8 @@ export function useChat(options = {}) {
 
       setError(null);
       setFallbackNotice(null);
+      setTriageCard(null);
+      setInvMatches(null);
       setContextDebug(null);
       setRuntimeWarnings([]);
       resetProcessEvents();
@@ -479,12 +482,15 @@ export function useChat(options = {}) {
     setConversationId(null);
     conversationIdRef.current = null;
     setMessages([]);
+    // Clear global immediately so a coincidental HMR/reload can't snapshot stale messages
+    window.__qboChatMessages = [];
     setStreamingText('');
     streamingTextRef.current = '';
     setParallelStreaming({});
     parallelStreamingRef.current = {};
     setFallbackNotice(null);
     setTriageCard(null);
+    setInvMatches(null);
     setError(null);
     setContextDebug(null);
     setRuntimeWarnings([]);
@@ -512,6 +518,7 @@ export function useChat(options = {}) {
     setError(null);
     setFallbackNotice(null);
     setTriageCard(null);
+    setInvMatches(null);
     setRuntimeWarnings([]);
     resetProcessEvents([{
       level: 'info',
@@ -605,6 +612,18 @@ export function useChat(options = {}) {
             message: `${data.severity || '?'} ${data.category || 'unknown'} — ${(data.read || '').slice(0, 80)}`,
             code: 'TRIAGE_CARD',
           });
+        },
+        onInvMatches: (data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setInvMatches(data);
+            const topMatch = data[0];
+            pushProcessEvent({
+              level: 'warning',
+              title: 'Known issue match',
+              message: `${data.length} INV match(es) found — top: ${topMatch.invNumber} (${topMatch.confidence || 'possible'})`,
+              code: 'INV_MATCH',
+            });
+          }
         },
         onThinking: (data) => {
           if (!isThinkingRef.current) {
@@ -925,6 +944,18 @@ export function useChat(options = {}) {
             code: 'TRIAGE_CARD',
           });
         },
+        onInvMatches: (data) => {
+          if (Array.isArray(data) && data.length > 0) {
+            setInvMatches(data);
+            const topMatch = data[0];
+            pushProcessEvent({
+              level: 'warning',
+              title: 'Known issue match',
+              message: `${data.length} INV match(es) found — top: ${topMatch.invNumber} (${topMatch.confidence || 'possible'})`,
+              code: 'INV_MATCH',
+            });
+          }
+        },
         onThinking: (data) => {
           if (!isThinkingRef.current) {
             isThinkingRef.current = true;
@@ -1152,6 +1183,7 @@ export function useChat(options = {}) {
     setIsStreaming(false);
     isStreamingRef.current = false;
     setTriageCard(null);
+    setInvMatches(null);
     setStreamingText('');
     streamingTextRef.current = '';
     setParallelStreaming({});
@@ -1287,6 +1319,7 @@ export function useChat(options = {}) {
     acceptParallelTurn,
     unacceptParallelTurn,
     triageCard,
+    invMatches,
     abortStream,
     selectConversation,
     newConversation,

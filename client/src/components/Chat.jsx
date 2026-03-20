@@ -16,14 +16,16 @@ import { listTemplates, trackTemplateUsage } from '../api/templatesApi.js';
 import ChatMessage from './ChatMessage.jsx';
 import ParallelResponsePair from './ParallelResponsePair.jsx';
 import TriageCard from './TriageCard.jsx';
+import InvMatchBanner from './InvMatchBanner.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import AgentDock from './AgentDock.jsx';
 import WebcamCapture from './WebcamCapture.jsx';
 import { computeGhostText } from '../data/smartComposeSuggestions.js';
 import { getProviderLabel } from '../utils/markdown.jsx';
-import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import { PROVIDER_FAMILY, PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS, getReasoningEffortOptions } from '../lib/providerCatalog.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 import { prepareImageForChat } from '../lib/chatImagePrep.js';
+import './Chat.css';
 
 /**
  * Group messages for rendering: parallel messages with the same turnId become a single group.
@@ -202,6 +204,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
     acceptParallelTurn,
     unacceptParallelTurn,
     triageCard,
+    invMatches,
     abortStream,
     selectConversation,
     newConversation,
@@ -304,6 +307,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const previousRouteConversationIdRef = useRef(conversationIdFromRoute);
+  const intentionalClearRef = useRef(false);
   const scrollFrameRef = useRef(0);
 
   // Check if current conversation has a linked escalation or fork parent
@@ -358,14 +362,20 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
   }, [isStreaming, streamingText, parallelStreaming, provider, conversationId]);
 
   useEffect(() => {
-    const previousRouteConversationId = previousRouteConversationIdRef.current;
+    const prev = previousRouteConversationIdRef.current;
+    previousRouteConversationIdRef.current = conversationIdFromRoute;
+
+    // Only react when the ROUTE conversation ID actually changed.
+    // Without this guard, internal conversationId going null (from newConversation)
+    // while the hash hasn't updated yet causes the stale route ID to reload the old chat.
+    if (conversationIdFromRoute === prev) return;
+
     if (conversationIdFromRoute && conversationIdFromRoute !== conversationId) {
       tel(TEL.USER_ACTION, 'Switched conversation', { conversationId: conversationIdFromRoute });
       selectConversation(conversationIdFromRoute);
-    } else if (previousRouteConversationId && conversationIdFromRoute === null) {
+    } else if (prev && !conversationIdFromRoute) {
       newConversation();
     }
-    previousRouteConversationIdRef.current = conversationIdFromRoute;
   }, [conversationIdFromRoute, conversationId, selectConversation, newConversation]);
 
   // Auto-scroll to bottom
@@ -836,12 +846,19 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           ['xhigh', 'xhigh'],
           ['extrahigh', 'xhigh'],
         ]);
+        const currentFamily = PROVIDER_FAMILY[provider] || 'claude';
+        const allowedEfforts = getReasoningEffortOptions(currentFamily);
         if (!argToken || !effortAliases.has(argToken)) {
+          const names = allowedEfforts.map((o) => o.value).join(', ');
           focusComposerWithValue('/effort ');
-          toast.info('Try /effort low, /effort medium, /effort high, or /effort xhigh.');
+          toast.info(`Try /effort ${names}.`);
           return true;
         }
         const nextEffort = effortAliases.get(argToken);
+        if (!allowedEfforts.some((o) => o.value === nextEffort)) {
+          toast.warning(`"${nextEffort}" is not supported by ${getProviderLabel(provider)}. Use: ${allowedEfforts.map((o) => o.value).join(', ')}.`);
+          return true;
+        }
         setReasoningEffort(nextEffort);
         setInput('');
         setGhostText('');
@@ -1733,6 +1750,13 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
           <TriageCard triageCard={triageCard} />
         )}
 
+        {/* INV match banner — known issue matches from INV database */}
+        {Array.isArray(invMatches) && invMatches.length > 0 && (
+          <motion.div key="inv-match-banner" {...fadeSlideUp} transition={transitions.normal}>
+            <InvMatchBanner matches={invMatches} />
+          </motion.div>
+        )}
+
         {isStreaming && effectiveMode === 'parallel' && liveParallelResponses.length > 0 ? (
           <motion.div key="live-parallel-stream" {...fadeSlideUp} transition={transitions.normal}>
             <ParallelResponsePair responses={liveParallelResponses} />
@@ -2033,7 +2057,14 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                     <button
                       key={option.value}
                       className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                      onClick={() => { setProvider(option.value); }}
+                      onClick={() => {
+                        setProvider(option.value);
+                        const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                        const allowed = getReasoningEffortOptions(nextFamily);
+                        if (!allowed.some((o) => o.value === reasoningEffort)) {
+                          setReasoningEffort('high');
+                        }
+                      }}
                       type="button"
                     >
                       <span className="check">{provider === option.value ? '\u2713' : ''}</span>
@@ -2128,7 +2159,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                   )}
                   <div className="provider-popover-divider" />
                   <div className="provider-popover-label">Reasoning Effort</div>
-                  {REASONING_EFFORT_OPTIONS.map((option) => (
+                  {getReasoningEffortOptions(PROVIDER_FAMILY[provider] || 'claude').map((option) => (
                     <button
                       key={option.value}
                       className={`provider-popover-option${reasoningEffort === option.value ? ' is-selected' : ''}`}
@@ -2139,11 +2170,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null }) {
                       {option.label}
                     </button>
                   ))}
-                  {selectionIncludesClaude && reasoningEffort === 'xhigh' && (
-                    <div style={{ fontSize: '0.7rem', color: 'var(--ink-tertiary)', padding: '2px 8px 0' }}>
-                      Claude providers use High when Extra High is selected.
-                    </div>
-                  )}
                 </motion.div>
               )}
               </AnimatePresence>

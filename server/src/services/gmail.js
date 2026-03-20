@@ -214,8 +214,8 @@ async function disconnect(email) {
     // Remove only this account
     await GmailAuth.removeByEmail(stored.email);
   } else if (!email) {
-    // Fallback: if no email and no primary, clear all (safety net)
-    await GmailAuth.clearAll();
+    // No email specified and no primary found — nothing to disconnect
+    console.warn('[Gmail] disconnect() called with no email and no primary account found — no action taken');
   }
 }
 
@@ -552,20 +552,26 @@ async function getProfile(accountEmail) {
  * @param {string} [opts.labelIds] - comma-separated label IDs to filter by
  * @param {string} [opts.accountEmail] - optional account to use
  */
-async function listMessages({ q, maxResults = 20, pageToken, labelIds, accountEmail } = {}) {
+async function listMessages({ q, maxResults = 20, pageToken, labelIds, includeSpamTrash, idsOnly, accountEmail } = {}) {
   const auth = await getAuth(accountEmail);
   if (!auth) return notConnected();
 
   const gmail = getGmailClient(auth);
-  const params = { userId: 'me', maxResults: Math.min(maxResults, 100) };
+  const params = { userId: 'me', maxResults: Math.min(maxResults, 500) };
   if (q) params.q = q;
   if (pageToken) params.pageToken = pageToken;
   if (labelIds) params.labelIds = labelIds.split(',').map((s) => s.trim());
+  if (includeSpamTrash) params.includeSpamTrash = true;
 
   const listRes = await gmail.users.messages.list(params);
   const messages = listRes.data.messages || [];
   const nextPageToken = listRes.data.nextPageToken || null;
   const resultSizeEstimate = listRes.data.resultSizeEstimate || 0;
+
+  // idsOnly mode: skip metadata enrichment, return just { id, threadId } — much faster for bulk ops
+  if (idsOnly) {
+    return { ok: true, messages: messages.map((m) => ({ id: m.id, threadId: m.threadId })), nextPageToken, resultSizeEstimate };
+  }
 
   // Fetch metadata for each message in parallel (rate-limited to 10 concurrent)
   const detailed = await parallelLimit(
@@ -1302,18 +1308,13 @@ async function getUnifiedUnreadCounts() {
   await Promise.all(
     allAccounts.map(async (account) => {
       try {
-        const result = await listMessages({
-          q: 'in:inbox is:unread',
-          maxResults: 1,
-          accountEmail: account.email,
-        });
-        if (result.ok) {
-          const count = result.resultSizeEstimate || 0;
-          counts[account.email] = count;
-          total += count;
-        } else {
-          counts[account.email] = 0;
-        }
+        const auth = await getAuth(account.email);
+        if (!auth) { counts[account.email] = 0; return; }
+        const gmail = getGmailClient(auth);
+        const res = await gmail.users.labels.get({ userId: 'me', id: 'INBOX' });
+        const count = res.data.messagesUnread || 0;
+        counts[account.email] = count;
+        total += count;
       } catch {
         counts[account.email] = 0;
       }

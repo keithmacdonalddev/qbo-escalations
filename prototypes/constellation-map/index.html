@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INV Constellation Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg-deep: #060a14;
+    --bg-primary: #0a0e1a;
+    --bg-surface: rgba(15, 22, 42, 0.85);
+    --bg-glass: rgba(15, 22, 42, 0.65);
+    --border-glass: rgba(100, 140, 255, 0.12);
+    --border-glow: rgba(100, 140, 255, 0.25);
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-blue: #3b82f6;
+    --accent-cyan: #22d3ee;
+    --cat-bank-feeds: #3b82f6;
+    --cat-payroll: #22c55e;
+    --cat-billing: #f59e0b;
+    --cat-invoicing: #a855f7;
+    --cat-reports: #ec4899;
+    --cat-inventory: #14b8a6;
+  }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: default;
+    user-select: none;
+  }
+
+  canvas {
+    display: block;
+    position: absolute;
+    top: 0; left: 0;
+  }
+
+  /* ---------- Top bar stats ---------- */
+  .stats-bar {
+    position: fixed;
+    top: 16px; right: 16px;
+    display: flex; gap: 12px;
+    z-index: 20;
+  }
+  .stat-card {
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-glass);
+    border-radius: 10px;
+    padding: 10px 16px;
+    text-align: center;
+    min-width: 100px;
+  }
+  .stat-card .value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent-cyan);
+    line-height: 1.1;
+  }
+  .stat-card .label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  /* ---------- Legend ---------- */
+  .legend {
+    position: fixed;
+    top: 16px; left: 16px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border-glass);
+    border-radius: 12px;
+    padding: 14px 18px;
+    z-index: 20;
+    min-width: 180px;
+  }
+  .legend h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .legend-item {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  .legend-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    box-shadow: 0 0 6px currentColor;
+  }
+
+  /* ---------- Tooltip ---------- */
+  .tooltip {
+    position: fixed;
+    pointer-events: none;
+    background: rgba(8, 12, 28, 0.92);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glow);
+    border-radius: 10px;
+    padding: 12px 16px;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    max-width: 300px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 12px rgba(59,130,246,0.1);
+  }
+  .tooltip.visible { opacity: 1; }
+  .tooltip .inv-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-cyan);
+    letter-spacing: 0.5px;
+  }
+  .tooltip .inv-subject {
+    font-size: 13px;
+    color: var(--text-primary);
+    margin: 4px 0;
+    line-height: 1.3;
+  }
+  .tooltip .inv-meta {
+    display: flex; gap: 8px; align-items: center;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .tooltip .inv-meta .status {
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .tooltip .inv-meta .status.new { background: rgba(59,130,246,0.2); color: #60a5fa; }
+  .tooltip .inv-meta .status.active { background: rgba(234,179,8,0.2); color: #fbbf24; }
+  .tooltip .inv-meta .status.monitoring { background: rgba(34,197,94,0.2); color: #4ade80; }
+
+  /* ---------- Detail Panel ---------- */
+  .detail-panel {
+    position: fixed;
+    top: 0; right: 0;
+    width: 400px;
+    height: 100vh;
+    background: rgba(10, 14, 30, 0.88);
+    backdrop-filter: blur(32px) saturate(1.2);
+    border-left: 1px solid var(--border-glow);
+    z-index: 50;
+    transform: translateX(420px);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow-y: auto;
+    box-shadow: -16px 0 64px rgba(0,0,0,0.4);
+  }
+  .detail-panel.open { transform: translateX(0); }
+  .detail-panel::-webkit-scrollbar { width: 4px; }
+  .detail-panel::-webkit-scrollbar-track { background: transparent; }
+  .detail-panel::-webkit-scrollbar-thumb { background: var(--border-glow); border-radius: 2px; }
+
+  .panel-header {
+    padding: 24px 24px 16px;
+    border-bottom: 1px solid var(--border-glass);
+    position: relative;
+  }
+  .panel-close {
+    position: absolute;
+    top: 16px; right: 16px;
+    width: 32px; height: 32px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+  }
+  .panel-close:hover { background: rgba(255,255,255,0.1); color: var(--text-primary); }
+  .panel-header .constellation-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    padding-right: 40px;
+  }
+  .panel-header .constellation-meta {
+    display: flex; gap: 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .panel-header .constellation-meta span {
+    display: flex; align-items: center; gap: 4px;
+  }
+
+  .panel-section {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border-glass);
+  }
+  .panel-section h4 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  .symptom-pills {
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .symptom-pill {
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(59,130,246,0.12);
+    color: #60a5fa;
+    border: 1px solid rgba(59,130,246,0.2);
+  }
+
+  .inv-list-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(100,140,255,0.06);
+  }
+  .inv-list-item:last-child { border-bottom: none; }
+  .inv-list-item .node-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-top: 5px;
+    flex-shrink: 0;
+  }
+  .inv-list-item .inv-info .id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent-cyan);
+  }
+  .inv-list-item .inv-info .subj {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.3;
+    margin-top: 2px;
+  }
+  .inv-list-item .inv-info .count {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+  }
+
+  .workaround-text {
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    background: rgba(34,211,238,0.05);
+    border: 1px solid rgba(34,211,238,0.12);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .merge-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(59,130,246,0.25), rgba(34,211,238,0.15));
+    border: 1px solid rgba(59,130,246,0.35);
+    border-radius: 10px;
+    color: var(--accent-cyan);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.25s;
+    letter-spacing: 0.3px;
+    margin-top: 4px;
+  }
+  .merge-btn:hover {
+    background: linear-gradient(135deg, rgba(59,130,246,0.4), rgba(34,211,238,0.25));
+    border-color: rgba(59,130,246,0.5);
+    box-shadow: 0 0 24px rgba(59,130,246,0.2);
+    transform: translateY(-1px);
+  }
+  .merge-btn:active { transform: translateY(0); }
+
+  /* ---------- Help hint ---------- */
+  .help-hint {
+    position: fixed;
+    bottom: 16px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-glass);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glass);
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 11px;
+    color: var(--text-muted);
+    z-index: 20;
+    letter-spacing: 0.3px;
+    opacity: 0.7;
+    transition: opacity 0.3s;
+  }
+  .help-hint:hover { opacity: 1; }
+  .help-hint kbd {
+    display: inline-block;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    margin: 0 2px;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="canvas"></canvas>
+
+<!-- Stats -->
+<div class="stats-bar">
+  <div class="stat-card"><div class="value" id="statNodes">0</div><div class="label">Investigations</div></div>
+  <div class="stat-card"><div class="value" id="statClusters">0</div><div class="label">Clusters</div></div>
+  <div class="stat-card"><div class="value" id="statAffected">0</div><div class="label">Users Affected</div></div>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <h3>Categories</h3>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6;color:#3b82f6"></div>Bank Feeds</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#22c55e;color:#22c55e"></div>Payroll</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b;color:#f59e0b"></div>Billing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#a855f7;color:#a855f7"></div>Invoicing</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ec4899;color:#ec4899"></div>Reports</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#14b8a6;color:#14b8a6"></div>Inventory</div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip" id="tooltip">
+  <div class="inv-id" id="tipId"></div>
+  <div class="inv-subject" id="tipSubject"></div>
+  <div class="inv-meta">
+    <span class="status" id="tipStatus"></span>
+    <span id="tipAffected"></span>
+    <span id="tipDate"></span>
+  </div>
+</div>
+
+<!-- Detail Panel -->
+<div class="detail-panel" id="detailPanel">
+  <div class="panel-header">
+    <button class="panel-close" id="panelClose">&times;</button>
+    <div class="constellation-name" id="panelName"></div>
+    <div class="constellation-meta">
+      <span id="panelInvCount"></span>
+      <span id="panelAffectedCount"></span>
+    </div>
+  </div>
+  <div class="panel-section">
+    <h4>Shared Symptoms</h4>
+    <div class="symptom-pills" id="panelSymptoms"></div>
+  </div>
+  <div class="panel-section">
+    <h4>Member Investigations</h4>
+    <div id="panelInvList"></div>
+  </div>
+  <div class="panel-section">
+    <h4>Common Workaround</h4>
+    <div class="workaround-text" id="panelWorkaround"></div>
+  </div>
+  <div class="panel-section">
+    <button class="merge-btn" id="mergeBtn">Propose Merge into Master INV</button>
+  </div>
+</div>
+
+<!-- Help -->
+<div class="help-hint">
+  <kbd>Scroll</kbd> Zoom &nbsp; <kbd>Drag</kbd> Pan &nbsp; <kbd>Click node</kbd> Drag &nbsp; <kbd>Dbl-click</kbd> Unpin &nbsp; <kbd>Click cluster label</kbd> Details
+</div>
+
+<script>
+// ============================================================
+//  DATA
+// ============================================================
+const CATEGORIES = {
+  'bank-feeds': { color: '#3b82f6', label: 'Bank Feeds' },
+  'payroll':    { color: '#22c55e', label: 'Payroll' },
+  'billing':    { color: '#f59e0b', label: 'Billing' },
+  'invoicing':  { color: '#a855f7', label: 'Invoicing' },
+  'reports':    { color: '#ec4899', label: 'Reports' },
+  'inventory':  { color: '#14b8a6', label: 'Inventory' },
+};
+
+const NODES_DATA = [
+  // --- Bank Feeds cluster ---
+  { id:'INV-148001', subject:'Bank feed connection failing for TD Canada Trust', category:'bank-feeds', status:'active', symptoms:['disconnection','oauth-error','timeout','td-specific'], affectedCount:34, reportedDate:'2026-03-15', workaround:'Reconnect manually via Banking > Bank Feeds > Update' },
+  { id:'INV-148003', subject:'RBC bank feed showing duplicate transactions after reconnect', category:'bank-feeds', status:'new', symptoms:['duplicates','oauth-error','reconnection-loop'], affectedCount:18, reportedDate:'2026-03-14', workaround:'Delete duplicate transactions, disconnect and wait 24hrs before reconnecting' },
+  { id:'INV-148007', subject:'Bank feed OAuth token expiring prematurely for credit unions', category:'bank-feeds', status:'active', symptoms:['oauth-error','token-expiry','credit-union'], affectedCount:22, reportedDate:'2026-03-13', workaround:'Sign out of QBO completely, clear cache, reconnect' },
+  { id:'INV-148012', subject:'Scotiabank feed stuck syncing since March 10', category:'bank-feeds', status:'monitoring', symptoms:['disconnection','sync-stall','timeout'], affectedCount:41, reportedDate:'2026-03-12', workaround:'Disconnect feed, wait 2 hours, reconnect with new credentials' },
+  { id:'INV-148019', subject:'Bank rules not applying to new feed transactions', category:'bank-feeds', status:'new', symptoms:['rules-broken','sync-stall','categorization'], affectedCount:9, reportedDate:'2026-03-16', workaround:'Manually recategorize; rules should re-apply after next sync' },
+
+  // --- Payroll cluster ---
+  { id:'INV-148002', subject:'Payroll tax calculation error for Q1 2026 remittances', category:'payroll', status:'active', symptoms:['tax-calculation','cpp2-error','remittance-mismatch'], affectedCount:27, reportedDate:'2026-03-14', workaround:'Manually adjust tax amounts in payroll settings before next run' },
+  { id:'INV-148006', subject:'CPP2 contributions not calculating for employees over threshold', category:'payroll', status:'active', symptoms:['cpp2-error','tax-calculation','threshold-bug'], affectedCount:15, reportedDate:'2026-03-13', workaround:'Enter CPP2 manually as an adjustment on each pay stub' },
+  { id:'INV-148011', subject:'T4 slips showing wrong box 14 amounts for salaried employees', category:'payroll', status:'new', symptoms:['t4-error','tax-calculation','year-end'], affectedCount:8, reportedDate:'2026-03-11', workaround:'Cross-reference with payroll register and file amended T4s' },
+  { id:'INV-148020', subject:'Direct deposit failing for employees at Desjardins', category:'payroll', status:'new', symptoms:['direct-deposit','bank-rejection','desjardins'], affectedCount:6, reportedDate:'2026-03-16', workaround:'Issue manual cheques while investigating; verify transit numbers' },
+
+  // --- Billing cluster ---
+  { id:'INV-148004', subject:'QBO Plus subscription charged twice in March billing cycle', category:'billing', status:'active', symptoms:['double-charge','subscription-error','payment-processing'], affectedCount:52, reportedDate:'2026-03-12', workaround:'Contact billing support for refund; do not cancel subscription' },
+  { id:'INV-148008', subject:'Promo pricing not applied after trial-to-paid conversion', category:'billing', status:'new', symptoms:['subscription-error','promo-missing','conversion-bug'], affectedCount:31, reportedDate:'2026-03-14', workaround:'Apply promo code manually via Account > Billing; escalate if rejected' },
+  { id:'INV-148015', subject:'Unable to downgrade from Advanced to Plus after renewal', category:'billing', status:'monitoring', symptoms:['subscription-error','downgrade-blocked','plan-change'], affectedCount:14, reportedDate:'2026-03-15', workaround:'Wait for current billing cycle to end, then retry downgrade' },
+  { id:'INV-148023', subject:'HST charges appearing on invoices for exempt clients', category:'billing', status:'new', symptoms:['tax-calculation','hst-exempt','invoice-tax'], affectedCount:7, reportedDate:'2026-03-16', workaround:'Set customer tax exemption in Customer Details before invoicing' },
+
+  // --- Invoicing cluster ---
+  { id:'INV-148005', subject:'Invoice payment status stuck on Pending for 5+ days', category:'invoicing', status:'active', symptoms:['payment-stuck','status-bug','qbo-payments'], affectedCount:19, reportedDate:'2026-03-13', workaround:'Void and re-create invoice; payment will process on new one' },
+  { id:'INV-148009', subject:'Custom invoice templates resetting to default after save', category:'invoicing', status:'new', symptoms:['template-reset','customization-bug','save-failure'], affectedCount:11, reportedDate:'2026-03-14', workaround:'Use browser other than Safari; clear QBO cache before editing template' },
+  { id:'INV-148016', subject:'Batch invoice send failing with timeout for 20+ invoices', category:'invoicing', status:'monitoring', symptoms:['batch-failure','timeout','email-delivery'], affectedCount:8, reportedDate:'2026-03-15', workaround:'Send invoices in batches of 10 or fewer' },
+  { id:'INV-148025', subject:'Invoice PDF download producing blank pages', category:'invoicing', status:'new', symptoms:['pdf-blank','template-reset','rendering-bug'], affectedCount:5, reportedDate:'2026-03-17', workaround:'Use Print > Save as PDF from browser as temporary fix' },
+
+  // --- Reports cluster ---
+  { id:'INV-148010', subject:'Profit & Loss report showing negative inventory values', category:'reports', status:'active', symptoms:['negative-values','inventory-sync','report-calculation'], affectedCount:13, reportedDate:'2026-03-12', workaround:'Run inventory valuation report separately and cross-reference' },
+  { id:'INV-148014', subject:'Balance Sheet out of balance after multicurrency transactions', category:'reports', status:'active', symptoms:['out-of-balance','multicurrency','report-calculation'], affectedCount:10, reportedDate:'2026-03-14', workaround:'Re-run home currency adjustment from the gear icon' },
+  { id:'INV-148022', subject:'Custom report columns disappearing after export to Excel', category:'reports', status:'new', symptoms:['export-bug','customization-bug','column-loss'], affectedCount:4, reportedDate:'2026-03-16', workaround:'Export to PDF instead of Excel; manually reformat if needed' },
+
+  // --- Inventory cluster ---
+  { id:'INV-148013', subject:'Inventory quantities not updating after sales receipts', category:'inventory', status:'active', symptoms:['quantity-mismatch','inventory-sync','sales-receipt'], affectedCount:16, reportedDate:'2026-03-13', workaround:'Manually adjust inventory quantities; check item mapping on sales forms' },
+  { id:'INV-148018', subject:'Bundle items showing incorrect COGS after March update', category:'inventory', status:'new', symptoms:['cogs-error','inventory-sync','bundle-bug'], affectedCount:7, reportedDate:'2026-03-15', workaround:'Unbundle and re-create bundle items; COGS should recalculate' },
+  { id:'INV-148026', subject:'Inventory tracking disabled silently for service items converted to products', category:'inventory', status:'new', symptoms:['tracking-disabled','conversion-bug','quantity-mismatch'], affectedCount:3, reportedDate:'2026-03-17', workaround:'Re-enable inventory tracking manually in product/service details' },
+
+  // --- Bridge nodes (cross-cluster) ---
+  { id:'INV-148017', subject:'Bank feed transactions creating wrong expense categories affecting P&L', category:'bank-feeds', status:'active', symptoms:['categorization','rules-broken','report-calculation','negative-values'], affectedCount:21, reportedDate:'2026-03-15', workaround:'Review and recategorize bank feed transactions; re-run P&L' },
+  { id:'INV-148021', subject:'QBO Payments deposit not matching bank feed amount due to fee calculation', category:'billing', status:'new', symptoms:['payment-processing','disconnection','qbo-payments','fee-mismatch'], affectedCount:11, reportedDate:'2026-03-16', workaround:'Match transactions manually; check QBO Payments fee schedule' },
+  { id:'INV-148024', subject:'Payroll journal entries not syncing to correct chart of accounts', category:'payroll', status:'monitoring', symptoms:['sync-stall','report-calculation','journal-entry','remittance-mismatch'], affectedCount:9, reportedDate:'2026-03-16', workaround:'Delete and recreate payroll journal entries; verify COA mapping' },
+
+  // --- Isolated nodes ---
+  { id:'INV-148027', subject:'QBO mobile app crashing on launch after iOS 19.4 update', category:'reports', status:'new', symptoms:['mobile-crash','ios-update'], affectedCount:45, reportedDate:'2026-03-17', workaround:'Use QBO via Safari mobile until app update is released' },
+  { id:'INV-148028', subject:'Two-factor authentication codes not arriving for Google Workspace SSO', category:'billing', status:'new', symptoms:['2fa-failure','sso-google'], affectedCount:6, reportedDate:'2026-03-17', workaround:'Use backup codes; re-enroll in 2FA from a fresh session' },
+  { id:'INV-148029', subject:'Accountant invite link expiring before acceptance in firm view', category:'invoicing', status:'new', symptoms:['invite-expired','firm-access'], affectedCount:3, reportedDate:'2026-03-17', workaround:'Resend invite; ensure accountant checks spam folder' },
+];
+
+// ============================================================
+//  GRAPH SETUP
+// ============================================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let W, H, dpr;
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  W = window.innerWidth;
+  H = window.innerHeight;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- Nodes ---
+const nodes = NODES_DATA.map((d, i) => {
+  const angle = (i / NODES_DATA.length) * Math.PI * 2;
+  const radius = Math.min(W, H) * 0.28;
+  return {
+    ...d,
+    x: W / 2 + Math.cos(angle) * radius + (Math.random() - 0.5) * 120,
+    y: H / 2 + Math.sin(angle) * radius + (Math.random() - 0.5) * 120,
+    vx: 0, vy: 0,
+    radius: Math.max(6, Math.min(22, 4 + Math.sqrt(d.affectedCount) * 2.2)),
+    pinned: false,
+    glowPhase: Math.random() * Math.PI * 2,
+  };
+});
+
+// --- Edges (shared symptoms) ---
+const edges = [];
+for (let i = 0; i < nodes.length; i++) {
+  for (let j = i + 1; j < nodes.length; j++) {
+    const shared = nodes[i].symptoms.filter(s => nodes[j].symptoms.includes(s));
+    if (shared.length >= 1) {
+      edges.push({ source: i, target: j, shared, weight: shared.length });
+    }
+  }
+}
+
+// --- Constellation detection (connected components with 2+ shared edges within) ---
+function detectConstellations() {
+  // Build adjacency with weight >= 2
+  const strongAdj = new Map();
+  nodes.forEach((_, i) => strongAdj.set(i, new Set()));
+  edges.forEach(e => {
+    if (e.weight >= 2) {
+      strongAdj.get(e.source).add(e.target);
+      strongAdj.get(e.target).add(e.source);
+    }
+  });
+  // BFS components
+  const visited = new Set();
+  const clusters = [];
+  for (let i = 0; i < nodes.length; i++) {
+    if (visited.has(i) || strongAdj.get(i).size === 0) continue;
+    const queue = [i];
+    const component = [];
+    visited.add(i);
+    while (queue.length) {
+      const n = queue.shift();
+      component.push(n);
+      for (const nb of strongAdj.get(n)) {
+        if (!visited.has(nb)) { visited.add(nb); queue.push(nb); }
+      }
+    }
+    if (component.length >= 2) clusters.push(component);
+  }
+  return clusters;
+}
+
+let constellations = detectConstellations();
+
+// Name generator
+function constellationName(members) {
+  // Find most common symptoms
+  const freq = {};
+  members.forEach(i => nodes[i].symptoms.forEach(s => { freq[s] = (freq[s]||0) + 1; }));
+  const sorted = Object.entries(freq).sort((a,b) => b[1]-a[1]);
+  const top = sorted.slice(0, 2).map(([s]) => s.replace(/-/g,' ').replace(/\b\w/g, c=>c.toUpperCase()));
+  // Find dominant category
+  const catFreq = {};
+  members.forEach(i => { catFreq[nodes[i].category] = (catFreq[nodes[i].category]||0)+1; });
+  const topCat = Object.entries(catFreq).sort((a,b)=>b[1]-a[1])[0];
+  const catLabel = CATEGORIES[topCat[0]]?.label || '';
+  return `${catLabel}: ${top.join(' + ')} Cluster`;
+}
+
+// Pre-compute constellation metadata
+function getConstellationMeta(members) {
+  const name = constellationName(members);
+  const totalAffected = members.reduce((s,i) => s + nodes[i].affectedCount, 0);
+  const allSymptoms = {};
+  members.forEach(i => nodes[i].symptoms.forEach(s => { allSymptoms[s] = (allSymptoms[s]||0)+1; }));
+  const sharedSymptoms = Object.entries(allSymptoms).filter(([,c]) => c >= 2).sort((a,b)=>b[1]-a[1]).map(([s])=>s);
+  // Most common workaround
+  const wFreq = {};
+  members.forEach(i => { wFreq[nodes[i].workaround] = (wFreq[nodes[i].workaround]||0)+1; });
+  const topWorkaround = Object.entries(wFreq).sort((a,b)=>b[1]-a[1])[0][0];
+  return { name, members, totalAffected, sharedSymptoms, topWorkaround };
+}
+
+// --- Stats ---
+function updateStats() {
+  document.getElementById('statNodes').textContent = nodes.length;
+  document.getElementById('statClusters').textContent = constellations.length;
+  document.getElementById('statAffected').textContent = nodes.reduce((s,n)=>s+n.affectedCount,0).toLocaleString();
+}
+updateStats();
+
+// ============================================================
+//  CAMERA (pan/zoom)
+// ============================================================
+let cam = { x: 0, y: 0, zoom: 1 };
+
+function screenToWorld(sx, sy) {
+  return { x: (sx - W/2) / cam.zoom + W/2 - cam.x, y: (sy - H/2) / cam.zoom + H/2 - cam.y };
+}
+function worldToScreen(wx, wy) {
+  return { x: (wx - W/2 + cam.x) * cam.zoom + W/2, y: (wy - H/2 + cam.y) * cam.zoom + H/2 };
+}
+
+// ============================================================
+//  INTERACTION
+// ============================================================
+let dragNode = null;
+let isPanning = false;
+let panStart = { x: 0, y: 0 };
+let hoveredNode = null;
+let selectedConstellation = null;
+const tooltip = document.getElementById('tooltip');
+
+function findNodeAt(wx, wy) {
+  for (let i = nodes.length - 1; i >= 0; i--) {
+    const n = nodes[i];
+    const dx = n.x - wx, dy = n.y - wy;
+    if (dx*dx + dy*dy < (n.radius + 4) * (n.radius + 4)) return n;
+  }
+  return null;
+}
+
+function findConstellationLabelAt(sx, sy) {
+  for (let ci = 0; ci < constellations.length; ci++) {
+    const members = constellations[ci];
+    let cx = 0, cy = 0;
+    members.forEach(i => { cx += nodes[i].x; cy += nodes[i].y; });
+    cx /= members.length; cy /= members.length;
+    // find topmost node
+    let minY = Infinity;
+    members.forEach(i => { if (nodes[i].y < minY) minY = nodes[i].y; });
+    const labelWorld = { x: cx, y: minY - 30 };
+    const labelScreen = worldToScreen(labelWorld.x, labelWorld.y);
+    const name = constellationName(members);
+    const textW = ctx.measureText ? name.length * 5.5 : 100;
+    if (Math.abs(sx - labelScreen.x) < textW && Math.abs(sy - labelScreen.y) < 14) {
+      return ci;
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e => {
+  const wp = screenToWorld(e.clientX, e.clientY);
+  const node = findNodeAt(wp.x, wp.y);
+  if (node) {
+    dragNode = node;
+    node.pinned = true;
+    canvas.style.cursor = 'grabbing';
+  } else {
+    // Check constellation label click
+    const ci = findConstellationLabelAt(e.clientX, e.clientY);
+    if (ci !== null) {
+      openDetailPanel(ci);
+    } else {
+      isPanning = true;
+      panStart = { x: e.clientX - cam.x * cam.zoom, y: e.clientY - cam.y * cam.zoom };
+      canvas.style.cursor = 'grabbing';
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', e => {
+  const wp = screenToWorld(e.clientX, e.clientY);
+  if (dragNode) {
+    dragNode.x = wp.x;
+    dragNode.y = wp.y;
+    dragNode.vx = 0; dragNode.vy = 0;
+    return;
+  }
+  if (isPanning) {
+    cam.x = (e.clientX - panStart.x) / cam.zoom;
+    cam.y = (e.clientY - panStart.y) / cam.zoom;
+    return;
+  }
+
+  const node = findNodeAt(wp.x, wp.y);
+  if (node !== hoveredNode) {
+    hoveredNode = node;
+    if (node) {
+      canvas.style.cursor = 'pointer';
+      tooltip.classList.add('visible');
+      document.getElementById('tipId').textContent = node.id;
+      document.getElementById('tipSubject').textContent = node.subject;
+      const statusEl = document.getElementById('tipStatus');
+      statusEl.textContent = node.status;
+      statusEl.className = 'status ' + node.status;
+      document.getElementById('tipAffected').textContent = node.affectedCount + ' users affected';
+      document.getElementById('tipDate').textContent = node.reportedDate;
+    } else {
+      const ci = findConstellationLabelAt(e.clientX, e.clientY);
+      canvas.style.cursor = ci !== null ? 'pointer' : 'default';
+      tooltip.classList.remove('visible');
+    }
+  }
+  if (hoveredNode) {
+    const offset = 16;
+    let tx = e.clientX + offset;
+    let ty = e.clientY + offset;
+    if (tx + 300 > W) tx = e.clientX - 300 - offset;
+    if (ty + 80 > H) ty = e.clientY - 80 - offset;
+    tooltip.style.left = tx + 'px';
+    tooltip.style.top = ty + 'px';
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  dragNode = null;
+  isPanning = false;
+  canvas.style.cursor = 'default';
+});
+
+canvas.addEventListener('dblclick', e => {
+  const wp = screenToWorld(e.clientX, e.clientY);
+  const node = findNodeAt(wp.x, wp.y);
+  if (node) node.pinned = false;
+});
+
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const factor = e.deltaY > 0 ? 0.92 : 1.08;
+  cam.zoom = Math.max(0.3, Math.min(3, cam.zoom * factor));
+}, { passive: false });
+
+// --- Detail Panel ---
+function openDetailPanel(ci) {
+  const meta = getConstellationMeta(constellations[ci]);
+  selectedConstellation = ci;
+  document.getElementById('panelName').textContent = meta.name;
+  document.getElementById('panelInvCount').textContent = meta.members.length + ' investigations';
+  document.getElementById('panelAffectedCount').textContent = meta.totalAffected + ' users affected';
+  const sympContainer = document.getElementById('panelSymptoms');
+  sympContainer.innerHTML = meta.sharedSymptoms.map(s =>
+    `<span class="symptom-pill">${s.replace(/-/g,' ')}</span>`
+  ).join('');
+  const listContainer = document.getElementById('panelInvList');
+  listContainer.innerHTML = meta.members.map(i => {
+    const n = nodes[i];
+    const c = CATEGORIES[n.category].color;
+    return `<div class="inv-list-item">
+      <div class="node-dot" style="background:${c};box-shadow:0 0 6px ${c}"></div>
+      <div class="inv-info">
+        <div class="id">${n.id}</div>
+        <div class="subj">${n.subject}</div>
+        <div class="count">${n.affectedCount} users &middot; ${n.reportedDate}</div>
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('panelWorkaround').textContent = meta.topWorkaround;
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+document.getElementById('panelClose').addEventListener('click', () => {
+  document.getElementById('detailPanel').classList.remove('open');
+  selectedConstellation = null;
+});
+
+document.getElementById('mergeBtn').addEventListener('click', () => {
+  if (selectedConstellation === null) return;
+  const meta = getConstellationMeta(constellations[selectedConstellation]);
+  console.log('[Constellation Map] Propose merge:', {
+    constellation: meta.name,
+    memberIds: meta.members.map(i => nodes[i].id),
+    totalAffected: meta.totalAffected,
+    sharedSymptoms: meta.sharedSymptoms,
+  });
+  const btn = document.getElementById('mergeBtn');
+  btn.textContent = 'Merge Proposed (see console)';
+  btn.style.borderColor = 'rgba(34,197,94,0.5)';
+  btn.style.color = '#4ade80';
+  setTimeout(() => {
+    btn.textContent = 'Propose Merge into Master INV';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  }, 2500);
+});
+
+// ============================================================
+//  PARTICLES (ambient sparkle)
+// ============================================================
+const particles = [];
+const PARTICLE_COUNT = 80;
+for (let i = 0; i < PARTICLE_COUNT; i++) {
+  particles.push({
+    x: Math.random() * W * 1.5 - W * 0.25,
+    y: Math.random() * H * 1.5 - H * 0.25,
+    vx: (Math.random() - 0.5) * 0.15,
+    vy: (Math.random() - 0.5) * 0.15,
+    size: Math.random() * 1.5 + 0.3,
+    alpha: Math.random() * 0.4 + 0.1,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+// ============================================================
+//  PHYSICS
+// ============================================================
+const SPRING_LENGTH = 140;
+const SPRING_K = 0.003;
+const REPULSION = 3500;
+const DAMPING = 0.88;
+const CENTER_GRAVITY = 0.0003;
+const VELOCITY_CAP = 4;
+
+function physicsTick() {
+  // Repulsion between all nodes
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const dx = nodes[j].x - nodes[i].x;
+      const dy = nodes[j].y - nodes[i].y;
+      const distSq = dx * dx + dy * dy + 1;
+      const force = REPULSION / distSq;
+      const fx = dx / Math.sqrt(distSq) * force;
+      const fy = dy / Math.sqrt(distSq) * force;
+      if (!nodes[i].pinned) { nodes[i].vx -= fx; nodes[i].vy -= fy; }
+      if (!nodes[j].pinned) { nodes[j].vx += fx; nodes[j].vy += fy; }
+    }
+  }
+
+  // Spring forces along edges
+  edges.forEach(e => {
+    const a = nodes[e.source], b = nodes[e.target];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const dist = Math.sqrt(dx * dx + dy * dy) + 0.1;
+    const targetLen = SPRING_LENGTH / (e.weight * 0.5 + 0.5);
+    const force = (dist - targetLen) * SPRING_K * e.weight;
+    const fx = (dx / dist) * force;
+    const fy = (dy / dist) * force;
+    if (!a.pinned) { a.vx += fx; a.vy += fy; }
+    if (!b.pinned) { b.vx -= fx; b.vy -= fy; }
+  });
+
+  // Center gravity
+  nodes.forEach(n => {
+    if (n.pinned) return;
+    n.vx += (W / 2 - n.x) * CENTER_GRAVITY;
+    n.vy += (H / 2 - n.y) * CENTER_GRAVITY;
+  });
+
+  // Integrate
+  nodes.forEach(n => {
+    if (n.pinned) return;
+    n.vx *= DAMPING;
+    n.vy *= DAMPING;
+    const speed = Math.sqrt(n.vx*n.vx + n.vy*n.vy);
+    if (speed > VELOCITY_CAP) {
+      n.vx = (n.vx / speed) * VELOCITY_CAP;
+      n.vy = (n.vy / speed) * VELOCITY_CAP;
+    }
+    n.x += n.vx;
+    n.y += n.vy;
+  });
+
+  // Update particles
+  particles.forEach(p => {
+    p.x += p.vx;
+    p.y += p.vy;
+    if (p.x < -50) p.x = W + 50;
+    if (p.x > W + 50) p.x = -50;
+    if (p.y < -50) p.y = H + 50;
+    if (p.y > H + 50) p.y = -50;
+  });
+}
+
+// ============================================================
+//  RENDER
+// ============================================================
+let time = 0;
+
+function render() {
+  time += 0.016;
+  ctx.save();
+  // Clear
+  ctx.fillStyle = '#060a14';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle grid (screen-space, before camera)
+  const gridSpacing = 60;
+  const gridAlpha = 0.025;
+  ctx.strokeStyle = `rgba(100, 150, 255, ${gridAlpha})`;
+  ctx.lineWidth = 0.5;
+  const gridOffX = (cam.x * cam.zoom) % gridSpacing;
+  const gridOffY = (cam.y * cam.zoom) % gridSpacing;
+  for (let gx = gridOffX; gx < W; gx += gridSpacing) {
+    ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+  }
+  for (let gy = gridOffY; gy < H; gy += gridSpacing) {
+    ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+  }
+
+  // Camera transform
+  ctx.translate(W/2, H/2);
+  ctx.scale(cam.zoom, cam.zoom);
+  ctx.translate(-W/2 + cam.x, -H/2 + cam.y);
+
+  // --- Particles ---
+  particles.forEach(p => {
+    const flicker = 0.5 + 0.5 * Math.sin(time * 1.5 + p.phase);
+    ctx.fillStyle = `rgba(140, 180, 255, ${p.alpha * flicker})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  // --- Constellation halos ---
+  constellations.forEach((members, ci) => {
+    let cx = 0, cy = 0;
+    members.forEach(i => { cx += nodes[i].x; cy += nodes[i].y; });
+    cx /= members.length; cy /= members.length;
+    let maxR = 0;
+    members.forEach(i => {
+      const dx = nodes[i].x - cx, dy = nodes[i].y - cy;
+      const d = Math.sqrt(dx*dx + dy*dy) + nodes[i].radius;
+      if (d > maxR) maxR = d;
+    });
+    maxR += 40;
+
+    const pulse = 0.8 + 0.2 * Math.sin(time * 0.8 + ci * 1.3);
+    const isSelected = selectedConstellation === ci;
+    const alpha = isSelected ? 0.12 * pulse : 0.06 * pulse;
+
+    // Determine dominant color
+    const catFreq = {};
+    members.forEach(i => { catFreq[nodes[i].category] = (catFreq[nodes[i].category]||0)+1; });
+    const topCat = Object.entries(catFreq).sort((a,b)=>b[1]-a[1])[0][0];
+    const haloColor = CATEGORIES[topCat].color;
+
+    // Parse hex color to rgba
+    const r = parseInt(haloColor.slice(1,3),16);
+    const g = parseInt(haloColor.slice(3,5),16);
+    const b2 = parseInt(haloColor.slice(5,7),16);
+    const grad2 = ctx.createRadialGradient(cx, cy, maxR * 0.1, cx, cy, maxR);
+    grad2.addColorStop(0, `rgba(${r},${g},${b2},${alpha * 2})`);
+    grad2.addColorStop(0.5, `rgba(${r},${g},${b2},${alpha * 0.8})`);
+    grad2.addColorStop(1, `rgba(${r},${g},${b2},0)`);
+
+    ctx.fillStyle = grad2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Constellation boundary ring
+    ctx.strokeStyle = `rgba(${r},${g},${b2},${alpha * 3})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, maxR - 10, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    let minY = Infinity;
+    members.forEach(i => { if (nodes[i].y < minY) minY = nodes[i].y; });
+    const labelY = minY - 30;
+    ctx.fillStyle = `rgba(${r},${g},${b2},${0.6 + 0.2 * pulse})`;
+    ctx.font = '500 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const labelText = constellationName(members);
+    // Background pill
+    const tw = ctx.measureText(labelText).width + 16;
+    ctx.fillStyle = `rgba(${r},${g},${b2},0.08)`;
+    ctx.beginPath();
+    const pillR = 10;
+    const px = cx - tw/2, py = labelY - 10, pw = tw, ph = 20;
+    ctx.moveTo(px + pillR, py);
+    ctx.lineTo(px + pw - pillR, py);
+    ctx.quadraticCurveTo(px + pw, py, px + pw, py + pillR);
+    ctx.lineTo(px + pw, py + ph - pillR);
+    ctx.quadraticCurveTo(px + pw, py + ph, px + pw - pillR, py + ph);
+    ctx.lineTo(px + pillR, py + ph);
+    ctx.quadraticCurveTo(px, py + ph, px, py + ph - pillR);
+    ctx.lineTo(px, py + pillR);
+    ctx.quadraticCurveTo(px, py, px + pillR, py);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(${r},${g},${b2},0.2)`;
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.fillStyle = `rgba(${r},${g},${b2},${0.6 + 0.25 * pulse})`;
+    ctx.fillText(labelText, cx, labelY);
+  });
+
+  // --- Edges ---
+  edges.forEach(e => {
+    const a = nodes[e.source], b = nodes[e.target];
+    const isHovered = hoveredNode && (hoveredNode === a || hoveredNode === b);
+    const catA = CATEGORIES[a.category].color;
+    const catB = CATEGORIES[b.category].color;
+
+    // Parse colors
+    function hexToRgb(hex) {
+      return [parseInt(hex.slice(1,3),16), parseInt(hex.slice(3,5),16), parseInt(hex.slice(5,7),16)];
+    }
+    const [r1,g1,b1] = hexToRgb(catA);
+    const [r2,g2,b2] = hexToRgb(catB);
+
+    const baseAlpha = isHovered ? 0.5 : 0.08 + e.weight * 0.04;
+    const lineWidth = isHovered ? 1.5 + e.weight * 0.4 : 0.5 + e.weight * 0.3;
+
+    const grad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+    grad.addColorStop(0, `rgba(${r1},${g1},${b1},${baseAlpha})`);
+    grad.addColorStop(1, `rgba(${r2},${g2},${b2},${baseAlpha})`);
+
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+
+    // Glow layer for hovered
+    if (isHovered) {
+      const glowGrad = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+      glowGrad.addColorStop(0, `rgba(${r1},${g1},${b1},0.15)`);
+      glowGrad.addColorStop(1, `rgba(${r2},${g2},${b2},0.15)`);
+      ctx.strokeStyle = glowGrad;
+      ctx.lineWidth = lineWidth + 4;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    }
+  });
+
+  // --- Edge pulse particles (data flowing along connections) ---
+  edges.forEach((e, ei) => {
+    if (e.weight < 2) return; // only strong connections get pulses
+    const a = nodes[e.source], b = nodes[e.target];
+    const numPulses = e.weight;
+    for (let p = 0; p < numPulses; p++) {
+      const t = ((time * 0.3 + ei * 0.7 + p * (1 / numPulses)) % 1);
+      const px = a.x + (b.x - a.x) * t;
+      const py = a.y + (b.y - a.y) * t;
+      const catColor = CATEGORIES[a.category].color;
+      const pr = parseInt(catColor.slice(1,3),16);
+      const pg = parseInt(catColor.slice(3,5),16);
+      const pb = parseInt(catColor.slice(5,7),16);
+      const pulseAlpha = Math.sin(t * Math.PI) * 0.6;
+      const pulseGrad = ctx.createRadialGradient(px, py, 0, px, py, 4);
+      pulseGrad.addColorStop(0, `rgba(${pr},${pg},${pb},${pulseAlpha})`);
+      pulseGrad.addColorStop(1, `rgba(${pr},${pg},${pb},0)`);
+      ctx.fillStyle = pulseGrad;
+      ctx.beginPath();
+      ctx.arc(px, py, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  // --- Nodes ---
+  nodes.forEach(n => {
+    const catColor = CATEGORIES[n.category].color;
+    const [r,g,b2] = [parseInt(catColor.slice(1,3),16), parseInt(catColor.slice(3,5),16), parseInt(catColor.slice(5,7),16)];
+    const isHovered = hoveredNode === n;
+    const glowPulse = 0.6 + 0.4 * Math.sin(time * 1.2 + n.glowPhase);
+
+    // Outer glow
+    const glowR = n.radius * (isHovered ? 4 : 2.5);
+    const glowAlpha = isHovered ? 0.25 : 0.08 * glowPulse;
+    const glowGrad = ctx.createRadialGradient(n.x, n.y, n.radius * 0.5, n.x, n.y, glowR);
+    glowGrad.addColorStop(0, `rgba(${r},${g},${b2},${glowAlpha})`);
+    glowGrad.addColorStop(1, `rgba(${r},${g},${b2},0)`);
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Node body
+    const bodyGrad = ctx.createRadialGradient(n.x - n.radius * 0.3, n.y - n.radius * 0.3, 0, n.x, n.y, n.radius);
+    bodyGrad.addColorStop(0, `rgba(${Math.min(255,r+60)},${Math.min(255,g+60)},${Math.min(255,b2+60)},0.95)`);
+    bodyGrad.addColorStop(1, `rgba(${r},${g},${b2},0.85)`);
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Border
+    ctx.strokeStyle = `rgba(${Math.min(255,r+80)},${Math.min(255,g+80)},${Math.min(255,b2+80)},${isHovered ? 0.9 : 0.4})`;
+    ctx.lineWidth = isHovered ? 2 : 1;
+    ctx.stroke();
+
+    // Inner highlight
+    const hlGrad = ctx.createRadialGradient(n.x - n.radius*0.25, n.y - n.radius*0.35, 0, n.x, n.y, n.radius * 0.7);
+    hlGrad.addColorStop(0, 'rgba(255,255,255,0.25)');
+    hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = hlGrad;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.radius * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pin indicator
+    if (n.pinned) {
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  });
+
+  ctx.restore();
+
+  // --- Vignette overlay (screen space) ---
+  const vigGrad = ctx.createRadialGradient(W/2, H/2, W * 0.25, W/2, H/2, W * 0.75);
+  vigGrad.addColorStop(0, 'rgba(6,10,20,0)');
+  vigGrad.addColorStop(1, 'rgba(6,10,20,0.6)');
+  ctx.fillStyle = vigGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// ============================================================
+//  MAIN LOOP
+// ============================================================
+function loop() {
+  physicsTick();
+  render();
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

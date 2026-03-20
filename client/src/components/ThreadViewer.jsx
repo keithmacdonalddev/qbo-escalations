@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getDevConversation } from '../api/devApi.js';
 import { CopyButton } from '../utils/markdown.jsx';
+import { formatDateWithTime as formatDate } from '../utils/dateFormatting.js';
+import './ThreadViewer.css';
 
 /**
  * localStorage key map — mirrors useBackgroundConversations.js CHANNEL_KEYS.
@@ -29,17 +31,6 @@ function formatTimestamp(ts) {
   });
 }
 
-function formatDate(ts) {
-  if (!ts) return '';
-  const d = new Date(ts);
-  return d.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
 
 /**
  * Read-only slide-over panel that shows the full conversation thread

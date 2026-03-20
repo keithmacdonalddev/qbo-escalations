@@ -5,6 +5,7 @@ import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import { tel, TEL } from '../lib/devTelemetry.js';
+import './EscalationDashboard.css';
 
 const STATUSES = ['', 'open', 'in-progress', 'resolved', 'escalated-further'];
 const STATUS_LABELS = { '': 'All Statuses', 'open': 'Open', 'in-progress': 'In Progress', 'resolved': 'Resolved', 'escalated-further': 'Escalated' };

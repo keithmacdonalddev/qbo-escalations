@@ -9,6 +9,11 @@ import App from './App.jsx';
 import './App.css';
 import './settings.css';
 import './depth-effects.css';
+import './design-system.css';
+import './design-system-v2.css';
+import './themes/atmospherics.css';
+import './themes/new-atmospherics.css';
+import './themes/apple.css';
 
 // ── HMR desync detection ─────────────────────────────────────
 // Catches React hook invariant violations caused by Vite HMR.

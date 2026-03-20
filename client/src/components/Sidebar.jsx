@@ -1,3 +1,4 @@
+import './Sidebar.css';
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { listConversations, deleteConversation, updateConversation, exportConversation } from '../api/chatApi.js';
@@ -16,9 +17,11 @@ const POLL_ACTIVE_WINDOW_MS = 60_000;
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
+  { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
   { hash: '#/templates', label: 'Templates', short: 'Tmpl', icon: IconTemplate },
   { hash: '#/analytics', label: 'Analytics', short: 'Stats', icon: IconChart },
+  { hash: '#/model-lab', label: 'Model Lab', short: 'Lab', icon: IconLab },
   { hash: '#/gallery', label: 'Gallery', short: 'Gal', icon: IconImage },
   { hash: '#/usage', label: 'Usage', short: 'Usage', icon: IconDollar },
   { hash: '#/workspace', label: 'Workspace', short: 'Work', icon: IconWorkspace },
@@ -757,6 +760,17 @@ function IconCalendar({ size = 16 }) {
   );
 }
 
+function IconInvestigation({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      <line x1="11" y1="8" x2="11" y2="14" />
+      <line x1="8" y1="11" x2="14" y2="11" />
+    </svg>
+  );
+}
+
 function IconImage({ size = 16 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -767,3 +781,14 @@ function IconImage({ size = 16 }) {
   );
 }
 
+function IconLab({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 2v7.31" />
+      <path d="M14 2v7.31" />
+      <path d="M8.5 2h7" />
+      <path d="M5 15a4 4 0 003.2 3.92A22.53 22.53 0 0012 19.25c1.33 0 2.6-.11 3.8-.33A4 4 0 0019 15l-4.1-6.84a2 2 0 00-1.72-.98h-2.36a2 2 0 00-1.72.98L5 15z" />
+      <path d="M8 14h8" />
+    </svg>
+  );
+}

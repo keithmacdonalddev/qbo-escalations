@@ -1,3 +1,4 @@
+import './AgentDock.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import { getProviderShortLabel } from '../lib/providerCatalog.js';

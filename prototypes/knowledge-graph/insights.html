@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Knowledge Graph — Insights</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.79.1"></script>
+  <style>
+    /* ================================================================
+       DESIGN TOKENS — Deep Space Sci-Fi
+       ================================================================ */
+    :root {
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+
+      --bg-deep: #06060f;
+      --bg-card: rgba(12, 12, 25, 0.8);
+      --bg-card-hover: rgba(18, 18, 35, 0.9);
+      --border-subtle: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+
+      --text-primary: #e8e0d6;
+      --text-secondary: rgba(255, 255, 255, 0.5);
+      --text-tertiary: rgba(255, 255, 255, 0.3);
+
+      --accent-red: #ff4961;
+      --accent-amber: #ffd866;
+      --accent-blue: #3dc2ff;
+      --accent-purple: #b366ff;
+      --accent-green: #00d68f;
+
+      --node-escalation: #ff6b35;
+      --node-conversation: #3dc2ff;
+      --node-investigation: #ff4961;
+      --node-playbook: #00d68f;
+      --node-email: #b366ff;
+      --node-template: #2dd4a8;
+      --node-knowledge: #ffd866;
+
+      --r-sm: 4px;
+      --r-md: 8px;
+      --r-lg: 12px;
+      --r-xl: 16px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { height: 100%; overflow-x: hidden; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* Subtle grid overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 0%, rgba(61, 194, 255, 0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(179, 102, 255, 0.03) 0%, transparent 50%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ================================================================
+       LAYOUT
+       ================================================================ */
+    .page-wrapper {
+      position: relative;
+      z-index: 1;
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px 28px 40px;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .header h1 {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: var(--text-primary);
+    }
+    .header h1 span {
+      color: var(--text-tertiary);
+      font-weight: 400;
+      margin-left: 6px;
+    }
+    .theme-btn {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 6px 14px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: var(--font-sans);
+      transition: all 0.2s ease;
+      backdrop-filter: blur(12px);
+    }
+    .theme-btn:hover {
+      border-color: var(--border-hover);
+      color: var(--text-primary);
+    }
+
+    /* Stats Row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-lg);
+      padding: 16px 18px;
+      backdrop-filter: blur(16px);
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s ease;
+    }
+    .stat-card:hover {
+      border-color: var(--border-hover);
+    }
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 60px;
+      height: 100%;
+      opacity: 0.4;
+    }
+    .stat-label {
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-tertiary);
+      margin-bottom: 6px;
+    }
+    .stat-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+    .stat-value {
+      font-family: var(--font-mono);
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .stat-delta {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 999px;
+      line-height: 1.4;
+    }
+    .stat-delta.positive {
+      background: rgba(0, 214, 143, 0.12);
+      color: #00d68f;
+      box-shadow: 0 0 8px rgba(0, 214, 143, 0.15);
+    }
+    .stat-delta.negative {
+      background: rgba(255, 73, 97, 0.12);
+      color: #ff4961;
+      box-shadow: 0 0 8px rgba(255, 73, 97, 0.15);
+    }
+    .stat-sparkline {
+      position: absolute;
+      bottom: 12px;
+      right: 14px;
+      opacity: 0.5;
+    }
+
+    /* Main Layout — Two Columns */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 45% 55%;
+      gap: 20px;
+      margin-bottom: 24px;
+    }
+
+    /* Left Column — Pattern Cards */
+    .patterns-col {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .pattern-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-lg);
+      padding: 18px 20px;
+      backdrop-filter: blur(16px);
+      cursor: pointer;
+      transition: all 0.25s ease;
+      position: relative;
+      overflow: hidden;
+      border-left: 4px solid transparent;
+    }
+    .pattern-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: var(--r-lg);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    }
+    .pattern-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-1px);
+    }
+    .pattern-card:hover::before {
+      opacity: 1;
+    }
+    .pattern-card.type-cluster { border-left-color: var(--accent-red); }
+    .pattern-card.type-cluster::before { background: radial-gradient(ellipse at left center, rgba(255,73,97,0.06), transparent 70%); }
+    .pattern-card.type-trending { border-left-color: var(--accent-amber); }
+    .pattern-card.type-trending::before { background: radial-gradient(ellipse at left center, rgba(255,216,102,0.06), transparent 70%); }
+    .pattern-card.type-hub { border-left-color: var(--accent-blue); }
+    .pattern-card.type-hub::before { background: radial-gradient(ellipse at left center, rgba(61,194,255,0.06), transparent 70%); }
+    .pattern-card.type-ai { border-left-color: var(--accent-purple); }
+    .pattern-card.type-ai::before { background: radial-gradient(ellipse at left center, rgba(179,102,255,0.06), transparent 70%); }
+    .pattern-card.type-gap { border-left-color: var(--accent-green); }
+    .pattern-card.type-gap::before { background: radial-gradient(ellipse at left center, rgba(0,214,143,0.06), transparent 70%); }
+
+    .pattern-card:hover.type-cluster { box-shadow: 0 4px 24px rgba(255,73,97,0.12), inset 0 0 0 1px rgba(255,73,97,0.1); }
+    .pattern-card:hover.type-trending { box-shadow: 0 4px 24px rgba(255,216,102,0.12), inset 0 0 0 1px rgba(255,216,102,0.1); }
+    .pattern-card:hover.type-hub { box-shadow: 0 4px 24px rgba(61,194,255,0.12), inset 0 0 0 1px rgba(61,194,255,0.1); }
+    .pattern-card:hover.type-ai { box-shadow: 0 4px 24px rgba(179,102,255,0.12), inset 0 0 0 1px rgba(179,102,255,0.1); }
+    .pattern-card:hover.type-gap { box-shadow: 0 4px 24px rgba(0,214,143,0.12), inset 0 0 0 1px rgba(0,214,143,0.1); }
+
+    .pattern-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .pattern-icon {
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .pattern-type {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .type-cluster .pattern-type { color: var(--accent-red); }
+    .type-trending .pattern-type { color: var(--accent-amber); }
+    .type-hub .pattern-type { color: var(--accent-blue); }
+    .type-ai .pattern-type { color: var(--accent-purple); }
+    .type-gap .pattern-type { color: var(--accent-green); }
+
+    .pattern-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: var(--text-primary);
+    }
+    .pattern-desc {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+    .pattern-action {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      transition: color 0.2s ease;
+    }
+    .pattern-card:hover .pattern-action {
+      color: var(--text-secondary);
+    }
+
+    /* Right Column — Graph Container */
+    .graph-col {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .graph-container {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-lg);
+      overflow: hidden;
+      position: relative;
+      height: 480px;
+      backdrop-filter: blur(16px);
+      transition: border-color 0.3s ease, box-shadow 0.3s ease;
+    }
+    .graph-container:hover {
+      border-color: rgba(61, 194, 255, 0.15);
+      box-shadow: 0 0 40px rgba(61, 194, 255, 0.05);
+    }
+    .graph-container canvas {
+      border-radius: var(--r-lg);
+    }
+
+    /* Node tooltip */
+    .node-tooltip {
+      position: fixed;
+      background: rgba(8, 8, 18, 0.95);
+      border: 1px solid var(--border-hover);
+      border-radius: var(--r-md);
+      padding: 10px 14px;
+      pointer-events: none;
+      z-index: 1000;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      max-width: 260px;
+    }
+    .node-tooltip.visible { opacity: 1; }
+    .node-tooltip .tt-type {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 4px;
+    }
+    .node-tooltip .tt-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+    }
+    .node-tooltip .tt-detail {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    /* Legend */
+    .graph-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      padding: 0 4px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11.5px;
+      color: var(--text-secondary);
+    }
+    .legend-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .expand-btn {
+      align-self: flex-end;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+      padding: 8px 18px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      transition: all 0.2s ease;
+      backdrop-filter: blur(12px);
+    }
+    .expand-btn:hover {
+      border-color: var(--accent-blue);
+      color: var(--accent-blue);
+      box-shadow: 0 0 16px rgba(61, 194, 255, 0.1);
+    }
+
+    /* Timeline */
+    .timeline-section {
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--r-lg);
+      padding: 20px 24px;
+      backdrop-filter: blur(16px);
+    }
+    .timeline-header {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-tertiary);
+      margin-bottom: 16px;
+    }
+    .timeline-list {
+      position: relative;
+      padding-left: 24px;
+    }
+    /* Glowing vertical line */
+    .timeline-list::before {
+      content: '';
+      position: absolute;
+      left: 5px;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      background: linear-gradient(to bottom, var(--accent-blue), var(--accent-purple), var(--accent-blue));
+      border-radius: 2px;
+      box-shadow: 0 0 8px rgba(61, 194, 255, 0.3);
+    }
+    .timeline-entry {
+      position: relative;
+      display: grid;
+      grid-template-columns: 50px 1fr auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      cursor: pointer;
+      transition: background 0.15s ease;
+      border-radius: var(--r-sm);
+      margin: 0 -8px;
+      padding-left: 8px;
+      padding-right: 8px;
+    }
+    .timeline-entry:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    /* Dot on the line */
+    .timeline-entry::before {
+      content: '';
+      position: absolute;
+      left: -23px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-blue);
+      border: 2px solid var(--bg-deep);
+      box-shadow: 0 0 6px rgba(61, 194, 255, 0.4);
+    }
+    .tl-time {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-tertiary);
+      text-align: right;
+    }
+    .tl-connection {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .tl-node-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .tl-arrow {
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+    .tl-edge-type {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+    .tl-weight {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-tertiary);
+      flex-shrink: 0;
+    }
+
+    /* ================================================================
+       RESPONSIVE — 2-col → 1-col below 1100px
+       ================================================================ */
+    @media (max-width: 1100px) {
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+      .stats-row {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .graph-container {
+        height: 400px;
+      }
+    }
+    @media (max-width: 640px) {
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .page-wrapper {
+        padding: 16px;
+      }
+      .timeline-entry {
+        grid-template-columns: 40px 1fr auto;
+      }
+      .tl-weight { display: none; }
+    }
+
+    /* ================================================================
+       ANIMATIONS
+       ================================================================ */
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .stat-card, .pattern-card, .timeline-section {
+      animation: fadeInUp 0.5s ease both;
+    }
+    .stat-card:nth-child(1) { animation-delay: 0.05s; }
+    .stat-card:nth-child(2) { animation-delay: 0.1s; }
+    .stat-card:nth-child(3) { animation-delay: 0.15s; }
+    .stat-card:nth-child(4) { animation-delay: 0.2s; }
+    .stat-card:nth-child(5) { animation-delay: 0.25s; }
+    .pattern-card:nth-child(1) { animation-delay: 0.15s; }
+    .pattern-card:nth-child(2) { animation-delay: 0.22s; }
+    .pattern-card:nth-child(3) { animation-delay: 0.29s; }
+    .pattern-card:nth-child(4) { animation-delay: 0.36s; }
+    .pattern-card:nth-child(5) { animation-delay: 0.43s; }
+    .timeline-section { animation-delay: 0.3s; }
+  </style>
+</head>
+<body>
+
+<div class="page-wrapper">
+  <!-- Header -->
+  <header class="header">
+    <h1>Knowledge Graph<span>Insights</span></h1>
+    <button class="theme-btn" id="themeToggle">&#9790; Theme</button>
+  </header>
+
+  <!-- Stats Row -->
+  <div class="stats-row" id="statsRow"></div>
+
+  <!-- Main Grid -->
+  <div class="main-grid">
+    <!-- Left: Pattern Cards -->
+    <div class="patterns-col" id="patternsCol"></div>
+
+    <!-- Right: Graph + Legend -->
+    <div class="graph-col">
+      <div class="graph-container" id="graphContainer"></div>
+      <div class="graph-legend" id="graphLegend"></div>
+      <button class="expand-btn" id="expandBtn">Expand to Full Graph &rarr;</button>
+    </div>
+  </div>
+
+  <!-- Recent Connections Timeline -->
+  <div class="timeline-section">
+    <div class="timeline-header">Recent Connections</div>
+    <div class="timeline-list" id="timelineList"></div>
+  </div>
+</div>
+
+<!-- Node Tooltip -->
+<div class="node-tooltip" id="nodeTooltip">
+  <div class="tt-type"></div>
+  <div class="tt-name"></div>
+  <div class="tt-detail"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { UnrealBloomPass } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+// ================================================================
+// MOCK DATA — 45 nodes, ~100 edges
+// ================================================================
+
+const NODE_COLORS = {
+  escalation:    '#ff6b35',
+  conversation:  '#3dc2ff',
+  investigation: '#ff4961',
+  playbook:      '#00d68f',
+  email:         '#b366ff',
+  template:      '#2dd4a8',
+  knowledge:     '#ffd866'
+};
+
+const nodes = [
+  // 15 Escalations
+  { id: 'esc-001', type: 'escalation', label: 'OL-301 Bank Timeout', detail: 'Bank feed API timeout during sync — 3 affected users', group: 'ol301' },
+  { id: 'esc-002', type: 'escalation', label: 'OL-301 Sync Failure', detail: 'Chase connection dropping mid-sync repeatedly', group: 'ol301' },
+  { id: 'esc-003', type: 'escalation', label: 'OL-301 Duplicate Txns', detail: 'Duplicate transactions appearing after reconnect', group: 'ol301' },
+  { id: 'esc-004', type: 'escalation', label: 'OL-301 Auth Loop', detail: 'Bank feed stuck in authentication loop', group: 'ol301' },
+  { id: 'esc-005', type: 'escalation', label: 'Payroll Tax Calc', detail: 'State tax calculation incorrect for CA employees', group: 'payroll' },
+  { id: 'esc-006', type: 'escalation', label: 'Payroll Direct Deposit', detail: 'DD not processing for 2 pay periods', group: 'payroll' },
+  { id: 'esc-007', type: 'escalation', label: 'Payroll W-2 Error', detail: 'W-2 showing wrong federal withholding amount', group: 'payroll' },
+  { id: 'esc-008', type: 'escalation', label: 'Recon Mismatch', detail: 'Reconciliation off by $1,247.30 — COID 1234567', group: 'hub' },
+  { id: 'esc-009', type: 'escalation', label: 'Invoice Not Sending', detail: 'Email invoices stuck in queue — COID 1234567', group: 'hub' },
+  { id: 'esc-010', type: 'escalation', label: 'Billing Double Charge', detail: 'Customer billed twice for Advanced plan — COID 1234567', group: 'hub' },
+  { id: 'esc-011', type: 'escalation', label: 'Mobile Crash', detail: 'iOS app crashing on receipt capture', group: 'misc' },
+  { id: 'esc-012', type: 'escalation', label: 'Tax Filing Rejected', detail: '941 filing rejected by IRS e-file — COID 1234567', group: 'hub' },
+  { id: 'esc-013', type: 'escalation', label: 'Bank Feed Reconnect', detail: 'Wells Fargo connection needs manual reauth weekly', group: 'ol301' },
+  { id: 'esc-014', type: 'escalation', label: 'Permission Error', detail: 'Accountant role missing journal entry access', group: 'misc' },
+  { id: 'esc-015', type: 'escalation', label: 'Report Mismatch', detail: 'P&L does not match balance sheet — COID 1234567', group: 'hub' },
+
+  // 8 Conversations
+  { id: 'conv-001', type: 'conversation', label: 'Bank Feed Troubleshoot', detail: 'Agent: Maria K. — 45 min call about OL-301', group: 'ol301' },
+  { id: 'conv-002', type: 'conversation', label: 'Payroll Setup Review', detail: 'Agent: James T. — New payroll config walkthrough', group: 'payroll' },
+  { id: 'conv-003', type: 'conversation', label: 'Tax Filing Help', detail: 'Agent: Sarah P. — 941 correction guidance', group: 'hub' },
+  { id: 'conv-004', type: 'conversation', label: 'Recon Deep Dive', detail: 'Agent: Chris D. — Tracking $1,247 discrepancy', group: 'hub' },
+  { id: 'conv-005', type: 'conversation', label: 'OL-301 Batch Review', detail: 'Agent: Lisa R. — 4 cases with same error code', group: 'ol301' },
+  { id: 'conv-006', type: 'conversation', label: 'Payroll Tax Config', detail: 'Agent: Mike H. — CA state tax table issue', group: 'payroll' },
+  { id: 'conv-007', type: 'conversation', label: 'Billing Dispute', detail: 'Agent: Anna W. — Double charge investigation', group: 'hub' },
+  { id: 'conv-008', type: 'conversation', label: 'Mobile Bug Report', detail: 'Agent: Tom B. — iOS crash reproduction steps', group: 'misc' },
+
+  // 4 Investigations
+  { id: 'inv-038291', type: 'investigation', label: 'INV-038291', detail: 'Bank feed API partner issue — Yodlee timeout', group: 'ol301' },
+  { id: 'inv-038305', type: 'investigation', label: 'INV-038305', detail: 'Payroll tax engine regression — CA withholding', group: 'payroll' },
+  { id: 'inv-038287', type: 'investigation', label: 'INV-038287', detail: 'Reconciliation rounding errors post-migration', group: 'hub' },
+  { id: 'inv-038312', type: 'investigation', label: 'INV-038312', detail: 'Mobile receipt OCR service degradation', group: 'misc' },
+
+  // 6 Playbook entries
+  { id: 'pb-bank', type: 'playbook', label: 'Bank Feeds', detail: 'Troubleshooting guide for bank connection issues', group: 'ol301' },
+  { id: 'pb-payroll', type: 'playbook', label: 'Payroll', detail: 'Payroll setup, tax config, and DD troubleshooting', group: 'payroll' },
+  { id: 'pb-recon', type: 'playbook', label: 'Reconciliation', detail: 'Reconciliation procedures and mismatch resolution', group: 'recon' },
+  { id: 'pb-tax', type: 'playbook', label: 'Tax', detail: 'Tax filing, 941/940, and IRS e-file guidance', group: 'tax' },
+  { id: 'pb-billing', type: 'playbook', label: 'Billing', detail: 'Subscription management and billing disputes', group: 'billing' },
+  { id: 'pb-mobile', type: 'playbook', label: 'Mobile', detail: 'iOS/Android app troubleshooting', group: 'misc' },
+
+  // 8 Emails
+  { id: 'em-001', type: 'email', label: 'OL-301 Customer Email', detail: 'Customer complaint about bank sync downtime', group: 'ol301' },
+  { id: 'em-002', type: 'email', label: 'Payroll Deadline Alert', detail: 'Urgent: payroll processing deadline approaching', group: 'payroll' },
+  { id: 'em-003', type: 'email', label: 'COID 1234567 History', detail: 'Customer email thread with 8 prior interactions', group: 'hub' },
+  { id: 'em-004', type: 'email', label: 'Billing Refund Request', detail: 'Customer requesting refund for double charge', group: 'hub' },
+  { id: 'em-005', type: 'email', label: 'Bank Partner Update', detail: 'Yodlee status update on API degradation', group: 'ol301' },
+  { id: 'em-006', type: 'email', label: 'Tax Filing Confirmation', detail: 'IRS acceptance notice for corrected 941', group: 'tax' },
+  { id: 'em-007', type: 'email', label: 'Recon Audit Request', detail: 'Internal audit flagging recon discrepancy', group: 'hub' },
+  { id: 'em-008', type: 'email', label: 'Mobile Crash Report', detail: 'Apple crash report forwarded by QA', group: 'misc' },
+
+  // 2 Templates
+  { id: 'tmpl-001', type: 'template', label: 'Bank Feed Resolution', detail: 'Standard response template for OL-301 resolution', group: 'ol301' },
+  { id: 'tmpl-002', type: 'template', label: 'Payroll Delay Notice', detail: 'Customer notification template for payroll delays', group: 'payroll' },
+
+  // 2 Knowledge candidates
+  { id: 'know-001', type: 'knowledge', label: 'OL-301 Root Cause', detail: 'Candidate article: Yodlee API timeout patterns', group: 'ol301' },
+  { id: 'know-002', type: 'knowledge', label: 'Recon Best Practices', detail: 'Candidate article: Monthly recon workflow', group: 'recon' },
+];
+
+const edges = [
+  // OL-301 Cluster (dense interconnections)
+  { source: 'esc-001', target: 'inv-038291', type: 'error_code',  weight: 0.92 },
+  { source: 'esc-002', target: 'inv-038291', type: 'error_code',  weight: 0.88 },
+  { source: 'esc-003', target: 'inv-038291', type: 'symptom',     weight: 0.76 },
+  { source: 'esc-004', target: 'inv-038291', type: 'error_code',  weight: 0.85 },
+  { source: 'esc-013', target: 'inv-038291', type: 'error_code',  weight: 0.80 },
+  { source: 'esc-001', target: 'conv-001',   type: 'discussed',   weight: 0.95 },
+  { source: 'esc-002', target: 'conv-001',   type: 'discussed',   weight: 0.90 },
+  { source: 'esc-001', target: 'conv-005',   type: 'discussed',   weight: 0.87 },
+  { source: 'esc-003', target: 'conv-005',   type: 'discussed',   weight: 0.82 },
+  { source: 'esc-004', target: 'conv-005',   type: 'discussed',   weight: 0.78 },
+  { source: 'esc-001', target: 'em-001',     type: 'customer',    weight: 0.93 },
+  { source: 'esc-001', target: 'em-005',     type: 'reference',   weight: 0.70 },
+  { source: 'inv-038291', target: 'em-005',  type: 'reference',   weight: 0.88 },
+  { source: 'esc-001', target: 'pb-bank',    type: 'reference',   weight: 0.65 },
+  { source: 'esc-002', target: 'pb-bank',    type: 'reference',   weight: 0.60 },
+  { source: 'conv-001', target: 'pb-bank',   type: 'reference',   weight: 0.72 },
+  { source: 'esc-001', target: 'tmpl-001',   type: 'used',        weight: 0.90 },
+  { source: 'esc-002', target: 'tmpl-001',   type: 'used',        weight: 0.85 },
+  { source: 'esc-001', target: 'know-001',   type: 'generated',   weight: 0.95 },
+  { source: 'inv-038291', target: 'know-001', type: 'generated',  weight: 0.92 },
+  { source: 'esc-013', target: 'conv-001',   type: 'discussed',   weight: 0.74 },
+  { source: 'esc-013', target: 'pb-bank',    type: 'reference',   weight: 0.58 },
+
+  // Payroll Cluster
+  { source: 'esc-005', target: 'inv-038305', type: 'error_code',  weight: 0.90 },
+  { source: 'esc-006', target: 'inv-038305', type: 'symptom',     weight: 0.72 },
+  { source: 'esc-007', target: 'inv-038305', type: 'error_code',  weight: 0.68 },
+  { source: 'esc-005', target: 'conv-002',   type: 'discussed',   weight: 0.88 },
+  { source: 'esc-005', target: 'conv-006',   type: 'discussed',   weight: 0.92 },
+  { source: 'esc-006', target: 'conv-002',   type: 'discussed',   weight: 0.80 },
+  { source: 'esc-007', target: 'conv-006',   type: 'discussed',   weight: 0.75 },
+  { source: 'esc-005', target: 'pb-payroll', type: 'reference',   weight: 0.70 },
+  { source: 'esc-006', target: 'pb-payroll', type: 'reference',   weight: 0.65 },
+  { source: 'conv-002', target: 'pb-payroll', type: 'reference',  weight: 0.78 },
+  { source: 'esc-006', target: 'em-002',     type: 'customer',    weight: 0.85 },
+  { source: 'esc-006', target: 'tmpl-002',   type: 'used',        weight: 0.88 },
+  { source: 'esc-007', target: 'em-002',     type: 'reference',   weight: 0.62 },
+  { source: 'inv-038305', target: 'pb-payroll', type: 'reference', weight: 0.80 },
+
+  // COID 1234567 Hub (8 nodes sharing customer)
+  { source: 'esc-008', target: 'esc-009',    type: 'customer',    weight: 0.95 },
+  { source: 'esc-008', target: 'esc-010',    type: 'customer',    weight: 0.95 },
+  { source: 'esc-008', target: 'esc-012',    type: 'customer',    weight: 0.90 },
+  { source: 'esc-008', target: 'esc-015',    type: 'customer',    weight: 0.92 },
+  { source: 'esc-009', target: 'esc-010',    type: 'customer',    weight: 0.88 },
+  { source: 'esc-012', target: 'esc-015',    type: 'customer',    weight: 0.85 },
+  { source: 'esc-008', target: 'conv-004',   type: 'discussed',   weight: 0.93 },
+  { source: 'esc-010', target: 'conv-007',   type: 'discussed',   weight: 0.90 },
+  { source: 'esc-012', target: 'conv-003',   type: 'discussed',   weight: 0.88 },
+  { source: 'esc-008', target: 'em-003',     type: 'customer',    weight: 0.95 },
+  { source: 'esc-010', target: 'em-004',     type: 'customer',    weight: 0.92 },
+  { source: 'esc-008', target: 'em-007',     type: 'reference',   weight: 0.78 },
+  { source: 'esc-008', target: 'inv-038287', type: 'error_code',  weight: 0.82 },
+  { source: 'esc-015', target: 'inv-038287', type: 'symptom',     weight: 0.70 },
+  { source: 'esc-009', target: 'em-003',     type: 'customer',    weight: 0.88 },
+  { source: 'esc-012', target: 'em-003',     type: 'customer',    weight: 0.84 },
+  { source: 'esc-015', target: 'conv-004',   type: 'discussed',   weight: 0.76 },
+
+  // Recon ↔ Bank Feeds (AI discovery link)
+  { source: 'pb-recon', target: 'pb-bank',   type: 'ai_discovered', weight: 0.67 },
+  { source: 'know-002', target: 'pb-recon',  type: 'generated',   weight: 0.85 },
+
+  // Cross-cluster connections
+  { source: 'esc-008', target: 'pb-recon',   type: 'reference',   weight: 0.75 },
+  { source: 'conv-004', target: 'pb-recon',  type: 'reference',   weight: 0.70 },
+  { source: 'esc-012', target: 'pb-tax',     type: 'reference',   weight: 0.72 },
+  { source: 'conv-003', target: 'pb-tax',    type: 'reference',   weight: 0.80 },
+  { source: 'em-006', target: 'pb-tax',      type: 'reference',   weight: 0.65 },
+  { source: 'esc-010', target: 'pb-billing', type: 'reference',   weight: 0.78 },
+  { source: 'conv-007', target: 'pb-billing', type: 'reference',  weight: 0.72 },
+  { source: 'esc-011', target: 'inv-038312', type: 'error_code',  weight: 0.88 },
+  { source: 'esc-011', target: 'conv-008',   type: 'discussed',   weight: 0.92 },
+  { source: 'esc-011', target: 'pb-mobile',  type: 'reference',   weight: 0.60 },
+  { source: 'esc-011', target: 'em-008',     type: 'reference',   weight: 0.85 },
+  { source: 'inv-038312', target: 'em-008',  type: 'reference',   weight: 0.80 },
+  { source: 'conv-008', target: 'pb-mobile', type: 'reference',   weight: 0.55 },
+  { source: 'esc-014', target: 'conv-004',   type: 'discussed',   weight: 0.50 },
+
+  // More cross-links to reach ~100
+  { source: 'esc-003', target: 'pb-bank',    type: 'reference',   weight: 0.55 },
+  { source: 'esc-004', target: 'em-001',     type: 'customer',    weight: 0.70 },
+  { source: 'conv-005', target: 'tmpl-001',  type: 'used',        weight: 0.80 },
+  { source: 'conv-006', target: 'tmpl-002',  type: 'used',        weight: 0.75 },
+  { source: 'em-001', target: 'know-001',    type: 'reference',   weight: 0.60 },
+  { source: 'em-003', target: 'know-002',    type: 'reference',   weight: 0.55 },
+  { source: 'esc-005', target: 'em-002',     type: 'customer',    weight: 0.78 },
+  { source: 'inv-038287', target: 'know-002', type: 'generated',  weight: 0.75 },
+  { source: 'esc-009', target: 'pb-billing', type: 'reference',   weight: 0.52 },
+  { source: 'esc-015', target: 'pb-recon',   type: 'reference',   weight: 0.68 },
+  { source: 'conv-003', target: 'em-006',    type: 'reference',   weight: 0.60 },
+  { source: 'conv-007', target: 'em-004',    type: 'reference',   weight: 0.72 },
+  { source: 'esc-013', target: 'em-005',     type: 'reference',   weight: 0.65 },
+  { source: 'esc-004', target: 'conv-001',   type: 'discussed',   weight: 0.72 },
+  { source: 'esc-014', target: 'pb-recon',   type: 'reference',   weight: 0.48 },
+  { source: 'esc-007', target: 'pb-payroll', type: 'reference',   weight: 0.62 },
+
+  // Additional cross-cluster edges to reach ~100
+  { source: 'esc-002', target: 'em-001',     type: 'customer',    weight: 0.82 },
+  { source: 'esc-003', target: 'conv-001',   type: 'discussed',   weight: 0.68 },
+  { source: 'esc-004', target: 'tmpl-001',   type: 'used',        weight: 0.75 },
+  { source: 'esc-006', target: 'conv-006',   type: 'discussed',   weight: 0.83 },
+  { source: 'esc-009', target: 'conv-007',   type: 'discussed',   weight: 0.77 },
+  { source: 'esc-010', target: 'em-003',     type: 'customer',    weight: 0.80 },
+  { source: 'tmpl-001', target: 'pb-bank',    type: 'reference',   weight: 0.55 },
+  { source: 'esc-012', target: 'pb-billing', type: 'reference',   weight: 0.50 },
+  { source: 'esc-014', target: 'esc-008',    type: 'customer',    weight: 0.45 },
+  { source: 'esc-015', target: 'em-007',     type: 'reference',   weight: 0.72 },
+  { source: 'conv-004', target: 'em-007',    type: 'reference',   weight: 0.58 },
+  { source: 'conv-008', target: 'em-008',    type: 'reference',   weight: 0.80 },
+  { source: 'inv-038287', target: 'pb-recon', type: 'reference',  weight: 0.85 },
+  { source: 'inv-038312', target: 'pb-mobile', type: 'reference', weight: 0.70 },
+  { source: 'know-001', target: 'pb-bank',   type: 'generated',   weight: 0.88 },
+];
+
+// ================================================================
+// PATTERN DEFINITIONS (pre-computed)
+// ================================================================
+const patterns = [
+  {
+    id: 'pat-cluster',
+    type: 'cluster',
+    cssClass: 'type-cluster',
+    icon: '\u26A1',
+    label: 'CLUSTER ALERT',
+    title: 'OL-301 Surge',
+    desc: '5 escalations + 1 INV tied to bank feed API timeout. All share error code OL-301 with Yodlee partner degradation.',
+    action: 'View cluster \u2192',
+    nodeIds: ['esc-001','esc-002','esc-003','esc-004','esc-013','inv-038291','conv-001','conv-005','em-001','em-005','tmpl-001','know-001','pb-bank'],
+    accent: '#ff4961'
+  },
+  {
+    id: 'pat-trending',
+    type: 'trending',
+    cssClass: 'type-trending',
+    icon: '\uD83D\uDD25',
+    label: 'TRENDING',
+    title: 'Payroll Tax Errors',
+    desc: '3 escalations in 1 week around CA state withholding. Tax engine regression confirmed in INV-038305.',
+    action: 'View cluster \u2192',
+    nodeIds: ['esc-005','esc-006','esc-007','inv-038305','conv-002','conv-006','pb-payroll','em-002','tmpl-002'],
+    accent: '#ffd866'
+  },
+  {
+    id: 'pat-hub',
+    type: 'hub',
+    cssClass: 'type-hub',
+    icon: '\uD83D\uDD17',
+    label: 'HUB NODE',
+    title: 'COID 1234567',
+    desc: '1 customer across 8 nodes spanning recon, billing, tax, and invoicing. Highest connection density in graph.',
+    action: 'View neighborhood \u2192',
+    nodeIds: ['esc-008','esc-009','esc-010','esc-012','esc-015','conv-003','conv-004','conv-007','em-003','em-004','em-007','inv-038287'],
+    accent: '#3dc2ff'
+  },
+  {
+    id: 'pat-ai',
+    type: 'ai',
+    cssClass: 'type-ai',
+    icon: '\uD83E\uDDE0',
+    label: 'AI DISCOVERY',
+    title: 'Reconciliation \u2194 Bank Feeds',
+    desc: 'Hidden link discovered between playbook categories. Recon failures often trace back to bank feed sync issues.',
+    action: 'View connection \u2192',
+    nodeIds: ['pb-recon','pb-bank','know-002'],
+    accent: '#b366ff'
+  },
+  {
+    id: 'pat-gap',
+    type: 'gap',
+    cssClass: 'type-gap',
+    icon: '\uD83D\uDCD6',
+    label: 'PLAYBOOK GAP',
+    title: 'No OL-301 Entry',
+    desc: '5 escalations reference error code OL-301 but no dedicated playbook entry exists. Knowledge candidate ready.',
+    action: 'Create entry \u2192',
+    nodeIds: ['esc-001','esc-002','esc-003','esc-004','esc-013','know-001','inv-038291'],
+    accent: '#00d68f'
+  }
+];
+
+// ================================================================
+// TIMELINE DATA
+// ================================================================
+const timelineData = [
+  { time: '12m', source: { id: 'esc-001', label: 'OL-301 Bank Timeout', type: 'escalation' }, target: { id: 'inv-038291', label: 'INV-038291', type: 'investigation' }, edgeType: 'error_code', weight: 0.92 },
+  { time: '34m', source: { id: 'esc-005', label: 'Payroll Tax Calc', type: 'escalation' }, target: { id: 'conv-006', label: 'Payroll Tax Config', type: 'conversation' }, edgeType: 'discussed', weight: 0.92 },
+  { time: '2h',  source: { id: 'conv-002', label: 'Payroll Setup', type: 'conversation' }, target: { id: 'pb-payroll', label: 'Payroll Playbook', type: 'playbook' }, edgeType: 'reference', weight: 0.78 },
+  { time: '3h',  source: { id: 'esc-010', label: 'Billing Double Charge', type: 'escalation' }, target: { id: 'em-004', label: 'Refund Request', type: 'email' }, edgeType: 'customer', weight: 0.92 },
+  { time: '5h',  source: { id: 'pb-recon', label: 'Reconciliation PB', type: 'playbook' }, target: { id: 'pb-bank', label: 'Bank Feeds PB', type: 'playbook' }, edgeType: 'ai_discovered', weight: 0.67 },
+  { time: '8h',  source: { id: 'esc-011', label: 'Mobile Crash', type: 'escalation' }, target: { id: 'inv-038312', label: 'INV-038312', type: 'investigation' }, edgeType: 'error_code', weight: 0.88 },
+  { time: '1d',  source: { id: 'esc-008', label: 'Recon Mismatch', type: 'escalation' }, target: { id: 'em-003', label: 'COID 1234567 Email', type: 'email' }, edgeType: 'customer', weight: 0.95 },
+  { time: '1d',  source: { id: 'esc-013', label: 'Bank Feed Reconnect', type: 'escalation' }, target: { id: 'em-005', label: 'Bank Partner Update', type: 'email' }, edgeType: 'reference', weight: 0.65 },
+  { time: '2d',  source: { id: 'inv-038291', label: 'INV-038291', type: 'investigation' }, target: { id: 'know-001', label: 'OL-301 Root Cause', type: 'knowledge' }, edgeType: 'generated', weight: 0.92 },
+  { time: '3d',  source: { id: 'esc-007', label: 'Payroll W-2 Error', type: 'escalation' }, target: { id: 'inv-038305', label: 'INV-038305', type: 'investigation' }, edgeType: 'error_code', weight: 0.68 },
+];
+
+// ================================================================
+// STATS CONFIG
+// ================================================================
+const stats = [
+  { label: 'Nodes',    value: 45,  delta: '+12%', positive: true,  sparkData: [28,31,33,36,39,42,45] },
+  { label: 'Edges',    value: 98,  delta: '+8%',  positive: true,  sparkData: [70,74,78,82,87,93,98] },
+  { label: 'Clusters', value: 5,   delta: '+2',   positive: true,  sparkData: [2,2,3,3,4,4,5] },
+  { label: 'Trending', value: 3,   delta: '+1',   positive: true,  sparkData: [1,1,1,2,2,3,3] },
+  { label: 'Density',  value: 89,  delta: '-2%',  positive: false, sparkData: [94,93,92,91,90,90,89] },
+];
+
+// ================================================================
+// SPARKLINE SVG GENERATOR
+// ================================================================
+function generateSparkline(data, color) {
+  const w = 44, h = 22;
+  const max = Math.max(...data), min = Math.min(...data);
+  const range = max - min || 1;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = h - ((v - min) / range) * (h - 4) - 2;
+    return `${x},${y}`;
+  }).join(' ');
+  return `<svg class="stat-sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>`;
+}
+
+// ================================================================
+// ANIMATED COUNT-UP
+// ================================================================
+function animateValue(el, start, end, duration, suffix = '') {
+  const range = end - start;
+  const startTime = performance.now();
+  function update(now) {
+    const elapsed = now - startTime;
+    const progress = Math.min(elapsed / duration, 1);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    el.textContent = Math.floor(start + range * eased) + suffix;
+    if (progress < 1) requestAnimationFrame(update);
+  }
+  requestAnimationFrame(update);
+}
+
+// ================================================================
+// RENDER STATS ROW
+// ================================================================
+function renderStats() {
+  const row = document.getElementById('statsRow');
+  stats.forEach((s, i) => {
+    const card = document.createElement('div');
+    card.className = 'stat-card';
+    const sparkColor = s.positive ? '#00d68f' : '#ff4961';
+    const suffix = s.label === 'Density' ? '%' : '';
+    card.innerHTML = `
+      <div class="stat-label">${s.label}</div>
+      <div class="stat-value-row">
+        <div class="stat-value" data-target="${s.value}" data-suffix="${suffix}">0${suffix}</div>
+        <span class="stat-delta ${s.positive ? 'positive' : 'negative'}">${s.delta}</span>
+      </div>
+      ${generateSparkline(s.sparkData, sparkColor)}
+    `;
+    row.appendChild(card);
+  });
+
+  // Trigger count-up after a brief delay for stagger effect
+  setTimeout(() => {
+    row.querySelectorAll('.stat-value').forEach(el => {
+      const target = parseInt(el.dataset.target);
+      const suffix = el.dataset.suffix || '';
+      animateValue(el, 0, target, 1200, suffix);
+    });
+  }, 400);
+}
+
+// ================================================================
+// RENDER PATTERN CARDS
+// ================================================================
+let activePatternId = null;
+
+function renderPatterns() {
+  const col = document.getElementById('patternsCol');
+  patterns.forEach(p => {
+    const card = document.createElement('div');
+    card.className = `pattern-card ${p.cssClass}`;
+    card.dataset.patternId = p.id;
+    card.innerHTML = `
+      <div class="pattern-header">
+        <span class="pattern-icon">${p.icon}</span>
+        <span class="pattern-type">${p.label}</span>
+      </div>
+      <div class="pattern-title">${p.title}</div>
+      <div class="pattern-desc">${p.desc}</div>
+      <div class="pattern-action">${p.action}</div>
+    `;
+
+    card.addEventListener('mouseenter', () => highlightGraphNodes(p));
+    card.addEventListener('mouseleave', () => clearHighlight());
+    card.addEventListener('click', () => zoomToPattern(p));
+
+    col.appendChild(card);
+  });
+}
+
+// ================================================================
+// RENDER TIMELINE
+// ================================================================
+function renderTimeline() {
+  const list = document.getElementById('timelineList');
+  timelineData.forEach(t => {
+    const entry = document.createElement('div');
+    entry.className = 'timeline-entry';
+    entry.dataset.sourceId = t.source.id;
+    entry.dataset.targetId = t.target.id;
+
+    const srcColor = NODE_COLORS[t.source.type];
+    const tgtColor = NODE_COLORS[t.target.type];
+
+    entry.innerHTML = `
+      <span class="tl-time">${t.time}</span>
+      <span class="tl-connection">
+        <span class="tl-node-dot" style="background:${srcColor}"></span>
+        <span>${t.source.label}</span>
+        <span class="tl-arrow">\u2194</span>
+        <span class="tl-node-dot" style="background:${tgtColor}"></span>
+        <span>${t.target.label}</span>
+      </span>
+      <span class="tl-edge-type">${t.edgeType.replace('_',' ')}</span>
+      <span class="tl-weight">w:${t.weight.toFixed(2)}</span>
+    `;
+
+    entry.addEventListener('click', () => {
+      highlightTimelineNodes(t.source.id, t.target.id);
+    });
+
+    list.appendChild(entry);
+  });
+}
+
+// ================================================================
+// RENDER LEGEND
+// ================================================================
+function renderLegend() {
+  const legend = document.getElementById('graphLegend');
+  const types = [
+    { key: 'Escalation', color: NODE_COLORS.escalation },
+    { key: 'Conversation', color: NODE_COLORS.conversation },
+    { key: 'Investigation', color: NODE_COLORS.investigation },
+    { key: 'Playbook', color: NODE_COLORS.playbook },
+    { key: 'Email', color: NODE_COLORS.email },
+    { key: 'Template', color: NODE_COLORS.template },
+    { key: 'Knowledge', color: NODE_COLORS.knowledge },
+  ];
+  types.forEach(t => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<span class="legend-dot" style="background:${t.color};box-shadow:0 0 6px ${t.color}60"></span>${t.key}`;
+    legend.appendChild(item);
+  });
+}
+
+// ================================================================
+// 3D FORCE GRAPH SETUP
+// ================================================================
+let graph;
+const graphEl = document.getElementById('graphContainer');
+const tooltip = document.getElementById('nodeTooltip');
+
+// Node size by type
+const NODE_SIZES = {
+  escalation: 4,
+  conversation: 3.5,
+  investigation: 5,
+  playbook: 4.5,
+  email: 3,
+  template: 3,
+  knowledge: 3.5
+};
+
+function initGraph() {
+  const graphData = {
+    nodes: nodes.map(n => ({ ...n })),
+    links: edges.map(e => ({ source: e.source, target: e.target, edgeType: e.type, weight: e.weight }))
+  };
+
+  graph = ForceGraph3D()(graphEl)
+    .graphData(graphData)
+    .backgroundColor('rgba(0,0,0,0)')
+    .width(graphEl.clientWidth)
+    .height(graphEl.clientHeight)
+    .showNavInfo(false)
+
+    // Node rendering — glowing sprites
+    .nodeThreeObject(node => {
+      const size = (NODE_SIZES[node.type] || 3) * 6;
+      const color = NODE_COLORS[node.type] || '#ffffff';
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 64;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+
+      // Outer glow
+      const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gradient.addColorStop(0, color);
+      gradient.addColorStop(0.3, color + 'cc');
+      gradient.addColorStop(0.6, color + '44');
+      gradient.addColorStop(1, color + '00');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 64, 64);
+
+      // Core
+      ctx.beginPath();
+      ctx.arc(32, 32, 8, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      const texture = new THREE.CanvasTexture(canvas);
+      const material = new THREE.SpriteMaterial({
+        map: texture,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.scale.set(size, size, 1);
+      sprite.userData = { baseScale: size, nodeId: node.id };
+      return sprite;
+    })
+    .nodeThreeObjectExtend(false)
+
+    // Link rendering
+    .linkColor(link => {
+      const colors = {
+        error_code: '#ff496140',
+        customer: '#3dc2ff40',
+        discussed: '#ffffff20',
+        reference: '#00d68f30',
+        symptom: '#ffd86640',
+        used: '#2dd4a830',
+        generated: '#b366ff40',
+        ai_discovered: '#b366ff60'
+      };
+      return colors[link.edgeType] || '#ffffff15';
+    })
+    .linkWidth(link => Math.max(0.3, link.weight * 1.2))
+    .linkOpacity(0.6);
+
+  // Forces — must be set separately since d3Force() returns the force object, not the graph
+  setTimeout(() => {
+    const chargeForce = graph.d3Force('charge');
+    if (chargeForce) chargeForce.strength(-80);
+    const linkForce = graph.d3Force('link');
+    if (linkForce) linkForce.distance(link => 40 + (1 - link.weight) * 60);
+  }, 200);
+
+  // Auto-orbit
+  graph.controls().autoRotate = true;
+  graph.controls().autoRotateSpeed = 0.3;
+  graph.controls().enableDamping = true;
+  graph.controls().dampingFactor = 0.1;
+
+  // Bloom postprocessing
+  setTimeout(() => {
+    const renderer = graph.renderer();
+    const scene = graph.scene();
+    const camera = graph.camera();
+    if (renderer && scene && camera) {
+      const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(graphEl.clientWidth, graphEl.clientHeight),
+        2.0,    // strength
+        0.8,    // radius
+        0.15    // threshold
+      );
+      const composer = graph.postProcessingComposer();
+      composer.addPass(bloomPass);
+    }
+  }, 500);
+
+  // Hover tooltip
+  graph.onNodeHover(node => {
+    graphEl.style.cursor = node ? 'pointer' : 'default';
+    if (node) {
+      const ttType = tooltip.querySelector('.tt-type');
+      const ttName = tooltip.querySelector('.tt-name');
+      const ttDetail = tooltip.querySelector('.tt-detail');
+      ttType.textContent = node.type.toUpperCase();
+      ttType.style.color = NODE_COLORS[node.type];
+      ttName.textContent = node.label;
+      ttDetail.textContent = node.detail || '';
+      tooltip.classList.add('visible');
+    } else {
+      tooltip.classList.remove('visible');
+    }
+  });
+
+  // Track mouse for tooltip positioning
+  graphEl.addEventListener('mousemove', e => {
+    tooltip.style.left = (e.clientX + 14) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
+  });
+
+  // Click node
+  graph.onNodeClick(node => {
+    if (!node) return;
+    const distance = 120;
+    const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
+    graph.cameraPosition(
+      { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio },
+      node,
+      1200
+    );
+  });
+
+  // Add particles on edges
+  graph
+    .linkDirectionalParticles(link => link.weight > 0.7 ? 2 : 1)
+    .linkDirectionalParticleWidth(1.2)
+    .linkDirectionalParticleSpeed(0.004)
+    .linkDirectionalParticleColor(link => {
+      const colors = {
+        error_code: '#ff4961',
+        customer: '#3dc2ff',
+        discussed: '#ffffff',
+        reference: '#00d68f',
+        symptom: '#ffd866',
+        used: '#2dd4a8',
+        generated: '#b366ff',
+        ai_discovered: '#b366ff'
+      };
+      return colors[link.edgeType] || '#ffffff';
+    });
+
+  // Resize handler
+  const resizeObserver = new ResizeObserver(() => {
+    graph.width(graphEl.clientWidth);
+    graph.height(graphEl.clientHeight);
+  });
+  resizeObserver.observe(graphEl);
+}
+
+// ================================================================
+// GRAPH HIGHLIGHTING
+// ================================================================
+function highlightGraphNodes(pattern) {
+  if (!graph || typeof graph.nodeThreeObject !== 'function') return;
+  activePatternId = pattern.id;
+  const targetIds = new Set(pattern.nodeIds);
+
+  graph.nodeThreeObject(node => {
+    const isHighlighted = targetIds.has(node.id);
+    const baseSize = (NODE_SIZES[node.type] || 3) * 6;
+    const size = isHighlighted ? baseSize * 1.5 : baseSize * 0.5;
+    const color = NODE_COLORS[node.type] || '#ffffff';
+    const alpha = isHighlighted ? 1.0 : 0.15;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    if (isHighlighted) {
+      gradient.addColorStop(0, '#ffffff');
+      gradient.addColorStop(0.15, color);
+      gradient.addColorStop(0.4, color + 'cc');
+      gradient.addColorStop(0.7, color + '44');
+      gradient.addColorStop(1, color + '00');
+    } else {
+      gradient.addColorStop(0, color + '40');
+      gradient.addColorStop(0.5, color + '15');
+      gradient.addColorStop(1, color + '00');
+    }
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+
+    if (isHighlighted) {
+      ctx.beginPath();
+      ctx.arc(32, 32, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      opacity: alpha,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(size, size, 1);
+    return sprite;
+  });
+
+  // Dim non-relevant links
+  graph.linkOpacity(link => {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+    return (targetIds.has(srcId) && targetIds.has(tgtId)) ? 0.8 : 0.05;
+  });
+}
+
+function clearHighlight() {
+  if (!graph || typeof graph.nodeThreeObject !== 'function') return;
+  activePatternId = null;
+
+  graph.nodeThreeObject(node => {
+    const size = (NODE_SIZES[node.type] || 3) * 6;
+    const color = NODE_COLORS[node.type] || '#ffffff';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(0.3, color + 'cc');
+    gradient.addColorStop(0.6, color + '44');
+    gradient.addColorStop(1, color + '00');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+
+    ctx.beginPath();
+    ctx.arc(32, 32, 8, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(size, size, 1);
+    return sprite;
+  });
+
+  graph.linkOpacity(0.6);
+}
+
+function zoomToPattern(pattern) {
+  if (!graph || typeof graph.graphData !== 'function') return;
+  const targetIds = new Set(pattern.nodeIds);
+  const gd = graph.graphData();
+  const targetNodes = gd.nodes.filter(n => targetIds.has(n.id));
+
+  if (targetNodes.length === 0) return;
+
+  // Calculate centroid
+  const cx = targetNodes.reduce((s, n) => s + (n.x || 0), 0) / targetNodes.length;
+  const cy = targetNodes.reduce((s, n) => s + (n.y || 0), 0) / targetNodes.length;
+  const cz = targetNodes.reduce((s, n) => s + (n.z || 0), 0) / targetNodes.length;
+
+  // Calculate spread for distance
+  const maxDist = Math.max(...targetNodes.map(n =>
+    Math.hypot((n.x || 0) - cx, (n.y || 0) - cy, (n.z || 0) - cz)
+  )) || 50;
+
+  const distance = maxDist * 2.5 + 80;
+  const distRatio = 1 + distance / (Math.hypot(cx, cy, cz) || 1);
+
+  graph.cameraPosition(
+    { x: cx * distRatio || distance, y: cy * distRatio || distance * 0.3, z: cz * distRatio || distance },
+    { x: cx, y: cy, z: cz },
+    1500
+  );
+
+  // Also highlight
+  highlightGraphNodes(pattern);
+  // Clear after 4 seconds
+  setTimeout(() => clearHighlight(), 4000);
+}
+
+function highlightTimelineNodes(sourceId, targetId) {
+  if (!graph || typeof graph.graphData !== 'function') return;
+  const targetIds = new Set([sourceId, targetId]);
+  const fakePattern = { id: 'timeline', nodeIds: [sourceId, targetId], accent: '#3dc2ff' };
+  highlightGraphNodes(fakePattern);
+
+  // Zoom to midpoint
+  const gd = graph.graphData();
+  const src = gd.nodes.find(n => n.id === sourceId);
+  const tgt = gd.nodes.find(n => n.id === targetId);
+  if (src && tgt) {
+    const mx = ((src.x || 0) + (tgt.x || 0)) / 2;
+    const my = ((src.y || 0) + (tgt.y || 0)) / 2;
+    const mz = ((src.z || 0) + (tgt.z || 0)) / 2;
+    const dist = Math.hypot((src.x||0)-(tgt.x||0), (src.y||0)-(tgt.y||0), (src.z||0)-(tgt.z||0));
+    const camDist = Math.max(dist * 2, 120);
+    graph.cameraPosition(
+      { x: mx + camDist * 0.5, y: my + camDist * 0.3, z: mz + camDist },
+      { x: mx, y: my, z: mz },
+      1200
+    );
+  }
+
+  setTimeout(() => clearHighlight(), 3000);
+}
+
+// ================================================================
+// INIT
+// ================================================================
+renderStats();
+renderPatterns();
+renderTimeline();
+renderLegend();
+
+// Delay graph init slightly so DOM is fully painted
+setTimeout(() => initGraph(), 100);
+
+// Theme toggle (visual only)
+document.getElementById('themeToggle').addEventListener('click', () => {
+  // Just a flash effect since this is always dark
+  const btn = document.getElementById('themeToggle');
+  btn.textContent = btn.textContent.includes('\u263E') ? '\u2600 Theme' : '\u263E Theme';
+});
+
+// Expand button
+document.getElementById('expandBtn').addEventListener('click', () => {
+  const container = document.querySelector('.graph-container');
+  if (container.style.height === '90vh') {
+    container.style.height = '480px';
+    document.getElementById('expandBtn').innerHTML = 'Expand to Full Graph &rarr;';
+  } else {
+    container.style.height = '90vh';
+    document.getElementById('expandBtn').innerHTML = 'Collapse Graph &larr;';
+    graph.width(graphEl.clientWidth);
+    graph.height(graphEl.clientHeight);
+  }
+  setTimeout(() => {
+    graph.width(graphEl.clientWidth);
+    graph.height(graphEl.clientHeight);
+  }, 50);
+});
+
+</script>
+</body>
+</html>

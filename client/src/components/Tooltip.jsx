@@ -1,4 +1,5 @@
 import { useTooltipLevel, shouldShowTooltip } from '../hooks/useTooltipLevel.jsx';
+import './Tooltip.css';
 
 export default function Tooltip({ text, level = 'low', position = 'top', children }) {
   const { level: activeLevel } = useTooltipLevel();

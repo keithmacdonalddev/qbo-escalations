@@ -33,7 +33,8 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
         return;
       }
 
-      await consumeSSEStream(res, (eventType, data) => {
+      let streamSettled = false;
+      const streamMeta = await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') {
           activeConversationId = data.conversationId || activeConversationId;
           onInit?.({
@@ -56,6 +57,7 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
         }
 
         if (eventType === 'done') {
+          streamSettled = true;
           onDone?.({
             ...data,
             conversationId: data.conversationId || activeConversationId || null,
@@ -65,6 +67,7 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
         }
 
         if (eventType === 'error') {
+          streamSettled = true;
           onError?.(normalizeError(data));
           return;
         }
@@ -87,6 +90,20 @@ export function sendDevMessage(body, { onInit, onChunk, onToolUse, onDone, onErr
           onToolUse?.({ ...event, provider: data.provider || event.provider || null });
         }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        const error = normalizeError({
+          code: 'STREAM_INCOMPLETE',
+          error: 'The dev chat stream ended before completion.',
+          detail: streamMeta?.malformedEventCount > 0
+            ? `The connection closed without a final done/error event and ${streamMeta.malformedEventCount} malformed SSE payload${streamMeta.malformedEventCount === 1 ? ' was' : 's were'} ignored.`
+            : 'The connection closed without a final done/error event.',
+        }, 'The dev chat stream ended before completion.');
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url: `${BASE}/dev/chat`, error: error.message, code: error.code },
+        }));
+        onError?.(error);
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         window.dispatchEvent(new CustomEvent('sse-stream-error', {

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import './HealthToast.css';
 
 /**
  * HealthToast — bottom-right toast notifications for request failures.

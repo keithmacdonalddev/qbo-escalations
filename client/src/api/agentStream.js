@@ -32,7 +32,8 @@ export function streamAgentRequest(url, body, {
         return;
       }
 
-      await consumeSSEStream(res, (eventType, data) => {
+      let streamSettled = false;
+      const streamMeta = await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onStart?.(data);
         else if (eventType === 'status') onStatus?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
@@ -40,9 +41,28 @@ export function streamAgentRequest(url, body, {
         else if (eventType === 'actions') onActions?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
-        else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Request failed'));
+        else if (eventType === 'done') {
+          streamSettled = true;
+          onDone?.(data);
+        } else if (eventType === 'error') {
+          streamSettled = true;
+          onError?.(normalizeError(data, data?.error || 'Request failed'));
+        }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        const error = normalizeError({
+          code: 'STREAM_INCOMPLETE',
+          error: 'The response stream ended before completion.',
+          detail: streamMeta?.malformedEventCount > 0
+            ? `The connection closed without a final done/error event and ${streamMeta.malformedEventCount} malformed SSE payload${streamMeta.malformedEventCount === 1 ? ' was' : 's were'} ignored.`
+            : 'The connection closed without a final done/error event.',
+        }, 'The response stream ended before completion.');
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: error.message, code: error.code },
+        }));
+        onError?.(error);
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         window.dispatchEvent(new CustomEvent('sse-stream-error', {
@@ -99,7 +119,8 @@ export function streamAgentSession(url, {
         return;
       }
 
-      await consumeSSEStream(res, (eventType, data) => {
+      let streamSettled = false;
+      const streamMeta = await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'session') onSession?.(data);
         else if (eventType === 'start' || eventType === 'init') onStart?.(data);
         else if (eventType === 'status') onStatus?.(data);
@@ -108,9 +129,28 @@ export function streamAgentSession(url, {
         else if (eventType === 'actions') onActions?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
         else if (eventType === 'fallback') onFallback?.(data);
-        else if (eventType === 'done') onDone?.(data);
-        else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Session stream failed'));
+        else if (eventType === 'done') {
+          streamSettled = true;
+          onDone?.(data);
+        } else if (eventType === 'error') {
+          streamSettled = true;
+          onError?.(normalizeError(data, data?.error || 'Session stream failed'));
+        }
       });
+
+      if (!streamSettled && !controller.signal.aborted) {
+        const error = normalizeError({
+          code: 'STREAM_INCOMPLETE',
+          error: 'The session stream ended before completion.',
+          detail: streamMeta?.malformedEventCount > 0
+            ? `The connection closed without a final done/error event and ${streamMeta.malformedEventCount} malformed SSE payload${streamMeta.malformedEventCount === 1 ? ' was' : 's were'} ignored.`
+            : 'The connection closed without a final done/error event.',
+        }, 'The session stream ended before completion.');
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: error.message, code: error.code },
+        }));
+        onError?.(error);
+      }
     } catch (err) {
       if (err.name !== 'AbortError') {
         window.dispatchEvent(new CustomEvent('sse-stream-error', {

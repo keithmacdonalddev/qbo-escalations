@@ -2,6 +2,9 @@ export function createSSEDecoder(onEvent) {
   let buffer = '';
   let currentEvent = '';
   let dataLines = [];
+  let eventCount = 0;
+  let malformedEventCount = 0;
+  let terminalEventType = null;
 
   function resetEvent() {
     currentEvent = '';
@@ -16,12 +19,21 @@ export function createSSEDecoder(onEvent) {
       return;
     }
 
+    let data;
     try {
-      const data = JSON.parse(rawData);
-      onEvent?.(currentEvent, data);
+      data = JSON.parse(rawData);
     } catch {
-      // ignore malformed payloads
+      malformedEventCount += 1;
+      resetEvent();
+      return;
     }
+
+    const eventType = currentEvent || 'message';
+    eventCount += 1;
+    if (eventType === 'done' || eventType === 'error') {
+      terminalEventType = eventType;
+    }
+    onEvent?.(eventType, data);
 
     resetEvent();
   }
@@ -54,13 +66,24 @@ export function createSSEDecoder(onEvent) {
   function finish() {
     if (buffer) processLine(buffer);
     flushEvent();
+    return {
+      eventCount,
+      malformedEventCount,
+      terminalEventType,
+    };
   }
 
   return { pushChunk, finish };
 }
 
 export async function consumeSSEStream(res, onEvent) {
-  if (!res.body) return;
+  if (!res.body) {
+    return {
+      eventCount: 0,
+      malformedEventCount: 0,
+      terminalEventType: null,
+    };
+  }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -72,5 +95,7 @@ export async function consumeSSEStream(res, onEvent) {
     parser.pushChunk(decoder.decode(value, { stream: true }));
   }
 
-  parser.finish();
+  const trailing = decoder.decode();
+  if (trailing) parser.pushChunk(trailing);
+  return parser.finish();
 }

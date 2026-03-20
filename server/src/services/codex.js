@@ -96,11 +96,12 @@ function formatCliFailure(code, stderr) {
  * @param {function} opts.onError
  * @returns {function} cleanup
  */
-function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError }) {
   const prompt = buildPrompt(messages, systemPrompt);
   const tempFiles = writeImageTempFiles(images);
   const effectiveModel = model || DEFAULT_MODEL;
   const effectiveReasoningEffort = normalizeCodexReasoningEffort(reasoningEffort);
+  const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
 
   const args = [
     'exec',
@@ -150,10 +151,10 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, onChunk,
   const timeout = setTimeout(() => {
     if (killed || settled) return;
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
-    const timeoutErr = new Error('Codex CLI timed out after ' + CHAT_TIMEOUT_MS + 'ms');
+    const timeoutErr = new Error('Codex CLI timed out after ' + effectiveTimeoutMs + 'ms');
     timeoutErr.code = 'TIMEOUT';
     finishWithError(timeoutErr);
-  }, CHAT_TIMEOUT_MS);
+  }, effectiveTimeoutMs);
 
   let stdoutBuffer = '';
   child.stdout.on('data', (data) => {
@@ -415,6 +416,165 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   });
 }
 
+/**
+ * Fast image transcription — extracts visible text from an image without
+ * converting it into structured fields.
+ *
+ * Accepts a base64 image string (with or without data-URI prefix) or an
+ * absolute file path to an image on disk.
+ *
+ * @param {string} imageBase64OrPath
+ * @param {Object} [options]
+ * @param {string} [options.model]
+ * @param {string} [options.reasoningEffort]
+ * @param {number} [options.timeoutMs]
+ * @returns {Promise<{text: string, usage: Object|null}>}
+ */
+async function transcribeImage(imageBase64OrPath, options = {}) {
+  const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
+  if (!input) throw new Error('transcribeImage: image input is empty');
+
+  const effectiveModel = options.model || PARSE_MODEL;
+  const effectiveReasoningEffort = normalizeCodexReasoningEffort(
+    options.reasoningEffort,
+    PARSE_REASONING_EFFORT
+  );
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : PARSE_TIMEOUT_MS;
+
+  const transcribePrompt = [
+    'Transcribe ALL text visible in this image exactly as written.',
+    'Preserve line breaks, section labels, spacing, and formatting as closely as possible.',
+    'Do not summarize, interpret, or clean up the wording.',
+    'Pay special attention to IDs, case numbers, and any numeric strings.',
+    'Return only the transcribed text.',
+  ].join('\n');
+
+  const isFilePath = !input.startsWith('data:image')
+    && !/^[A-Za-z0-9+/=]{100,}$/.test(input)
+    && (path.isAbsolute(input) || /^[a-zA-Z]:[/\\]/.test(input));
+
+  let tempFiles = [];
+  const imagePaths = [];
+
+  if (isFilePath) {
+    if (!fs.existsSync(input)) {
+      throw new Error('transcribeImage: file not found: ' + input);
+    }
+    imagePaths.push(input);
+  } else {
+    tempFiles = writeImageTempFiles([input]);
+    imagePaths.push(...tempFiles);
+  }
+
+  const args = [
+    'exec',
+    '--json',
+    '--model', effectiveModel,
+    '-c', `reasoning_effort="${effectiveReasoningEffort}"`,
+    '--skip-git-repo-check',
+  ];
+  for (const file of imagePaths) {
+    args.push('--image', shellEscapeArg(file));
+  }
+  args.push('-');
+
+  return new Promise((resolve, reject) => {
+    const child = spawn('codex', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env, CLAUDECODE: undefined },
+    });
+
+    let settled = false;
+    let stdoutBuffer = '';
+    let stderrOutput = '';
+    let fullResponse = '';
+    let capturedUsage = null;
+    const seenAgentTextByItem = new Map();
+
+    function finishOk(text) {
+      if (settled) return;
+      settled = true;
+      cleanupTempFiles(tempFiles);
+      resolve({ text: String(text || '').trim(), usage: capturedUsage });
+    }
+
+    function finishErr(err) {
+      if (settled) return;
+      settled = true;
+      cleanupTempFiles(tempFiles);
+      const error = err instanceof Error ? err : new Error(String(err));
+      error._usage = capturedUsage || null;
+      reject(error);
+    }
+
+    try {
+      child.stdin.write(transcribePrompt);
+      child.stdin.end();
+    } catch (err) {
+      finishErr(err);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      const timeoutErr = new Error('Codex CLI transcription timed out after ' + timeoutMs + 'ms');
+      timeoutErr.code = 'TIMEOUT';
+      finishErr(timeoutErr);
+    }, timeoutMs);
+
+    child.stdout.on('data', (data) => {
+      if (settled) return;
+      stdoutBuffer += data.toString();
+      const lines = stdoutBuffer.split('\n');
+      stdoutBuffer = lines.pop() || '';
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line);
+          const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
+          if (usage) capturedUsage = usage;
+        } catch { /* ignore non-JSON lines */ }
+        const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
+        if (delta) fullResponse += delta;
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      if (settled) return;
+      if (stderrOutput.length < 10240) stderrOutput += data.toString();
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (settled) return;
+
+      try {
+        const event = JSON.parse(stdoutBuffer);
+        const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
+        if (usage) capturedUsage = usage;
+      } catch { /* ignore */ }
+
+      const tailDelta = extractDeltaFromEventLine(stdoutBuffer, seenAgentTextByItem);
+      if (tailDelta) fullResponse += tailDelta;
+
+      if (code !== 0 && !fullResponse.trim()) {
+        finishErr(new Error(formatCliFailure(code, stderrOutput)));
+        return;
+      }
+
+      finishOk(fullResponse);
+    });
+
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      finishErr(err);
+    });
+  });
+}
+
 function buildPrompt(messages, systemPrompt) {
   const parts = [];
   if (systemPrompt && systemPrompt.trim()) {
@@ -534,5 +694,5 @@ function shellEscapeArg(value) {
   return "'" + value.replace(/'/g, `'\\''`) + "'";
 }
 
-module.exports = { chat, parseEscalation, warmUp };
+module.exports = { chat, parseEscalation, transcribeImage, warmUp };
 module.exports._internal = { parsePositiveInt, didCliExitSuccessfully };

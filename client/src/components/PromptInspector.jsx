@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { apiFetch } from '../api/http.js';
+import './PromptInspector.css';
 
 const API_URL = '/api/dev/prompt-inspector';
 const VERSIONS_API = '/api/dev/prompt-versions';

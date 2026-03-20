@@ -23,6 +23,7 @@ const { getSystemPrompt, getCategories } = require('../lib/playbook-loader');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { reportServerError } = require('../lib/server-error-pipeline');
 const { logUsage } = require('../lib/usage-writer');
+const { calculateCost } = require('../lib/pricing');
 const { randomUUID } = require('node:crypto');
 
 // All copilot endpoints return SSE streams for real-time feedback.
@@ -197,6 +198,16 @@ function streamCopilotChat({
           category: copilotAction, status: 'ok',
         });
       }
+      // Calculate cost from usage tokens + model/provider
+      let costData = null;
+      if (usage && (usage.inputTokens || usage.outputTokens)) {
+        costData = calculateCost(
+          usage.inputTokens || 0,
+          usage.outputTokens || 0,
+          usage.model || '',
+          providerUsed || policy.primaryProvider,
+        );
+      }
       try {
         res.write('event: done\ndata: ' + JSON.stringify({
           fullResponse,
@@ -206,7 +217,13 @@ function streamCopilotChat({
           fallbackFrom: fallbackFrom || null,
           mode: mode || policy.mode,
           attempts: Array.isArray(attempts) ? attempts : [],
-          usage: usage || null,
+          usage: usage ? {
+            ...usage,
+            totalCostMicros: costData ? costData.totalCostMicros : 0,
+            inputCostMicros: costData ? costData.inputCostMicros : 0,
+            outputCostMicros: costData ? costData.outputCostMicros : 0,
+            rateFound: costData ? costData.rateFound : false,
+          } : null,
           usageAvailable: !!usage,
         }) + '\n\n');
         res.end();

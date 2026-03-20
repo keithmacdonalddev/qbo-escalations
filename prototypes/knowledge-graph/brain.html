@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Second Brain — QBO Assist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.79.1"></script>
+
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --bg: #000008;
+  --glass: rgba(6, 6, 20, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-border-bright: rgba(255, 255, 255, 0.12);
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.55);
+  --text-tertiary: rgba(255, 255, 255, 0.32);
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Vignette overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,8,0.6) 100%);
+  pointer-events: none;
+  z-index: 1;
+}
+
+#graph-container {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+}
+
+/* ---- Loading Screen ---- */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  transition: opacity 0.8s ease, visibility 0.8s ease;
+}
+#loading-screen.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+.loader-ring {
+  width: 64px;
+  height: 64px;
+  border: 2px solid rgba(255,255,255,0.06);
+  border-top-color: rgba(61, 194, 255, 0.6);
+  border-radius: 50%;
+  animation: spin 1.2s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loader-text {
+  margin-top: 20px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+}
+.loader-sub {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* ---- Glass utility ---- */
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border);
+}
+
+/* ---- Top Bar ---- */
+.top-bar {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 14px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.top-bar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  border-right: 1px solid var(--glass-border);
+}
+.top-bar-brand svg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.8;
+}
+.top-bar-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+}
+.top-bar-search svg {
+  width: 14px;
+  height: 14px;
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+.top-bar-search input {
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  width: 180px;
+}
+.top-bar-search input::placeholder {
+  color: var(--text-tertiary);
+}
+.top-bar-key {
+  padding: 10px 14px;
+  border-left: 1px solid var(--glass-border);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.top-bar-key:hover { color: var(--text-secondary); }
+
+/* ---- Bottom Bar ---- */
+.bottom-bar {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.bottom-bar-stats {
+  padding: 9px 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  border-right: 1px solid var(--glass-border);
+  font-family: var(--font-mono);
+}
+.bottom-bar-stats span {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.bottom-bar-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 18px;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: opacity 0.2s;
+  white-space: nowrap;
+}
+.legend-item:hover { opacity: 0.8; }
+.legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* ---- Detail Panel ---- */
+.detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 380px;
+  height: 100vh;
+  z-index: 200;
+  padding: 24px;
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  border-left: 1px solid var(--glass-border);
+  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+}
+.detail-panel.open {
+  transform: translateX(0);
+}
+.detail-panel::-webkit-scrollbar { width: 4px; }
+.detail-panel::-webkit-scrollbar-track { background: transparent; }
+.detail-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+
+.detail-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+.detail-close:hover {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-primary);
+}
+
+.detail-title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.3;
+  margin-bottom: 14px;
+  padding-right: 36px;
+}
+
+.detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.badge {
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.badge-type {
+  color: #000;
+  font-weight: 600;
+}
+.badge-status {
+  background: rgba(255,255,255,0.05);
+  color: var(--text-secondary);
+}
+.badge-category {
+  background: rgba(255,255,255,0.03);
+  color: var(--text-tertiary);
+}
+.badge-date {
+  background: rgba(255,255,255,0.03);
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.detail-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin: 20px 0 8px;
+}
+
+.detail-summary {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.detail-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.entity-tag {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-secondary);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+.detail-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.connection-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+  border: 1px solid transparent;
+}
+.connection-item:hover {
+  background: rgba(255,255,255,0.04);
+  border-color: var(--glass-border);
+}
+.connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.connection-label {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-weight {
+  width: 40px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.connection-weight-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.25);
+}
+
+.detail-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 16px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border-bright);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.detail-btn:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text-primary);
+  border-color: rgba(255,255,255,0.18);
+}
+
+/* ---- Region Labels ---- */
+.region-label {
+  position: fixed;
+  pointer-events: none;
+  z-index: 50;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: rgba(120, 90, 180, 0.5);
+  text-shadow: 0 0 12px rgba(120, 90, 180, 0.3);
+  white-space: nowrap;
+  transition: opacity 0.3s;
+}
+.region-label .region-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 400;
+  color: rgba(120, 90, 180, 0.3);
+  margin-left: 6px;
+}
+
+/* ---- Tooltip ---- */
+.tooltip {
+  position: fixed;
+  pointer-events: none;
+  z-index: 300;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.15s;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.tooltip.visible { opacity: 1; }
+.tooltip-type {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<!-- Loading Screen -->
+<div id="loading-screen">
+  <div class="loader-ring"></div>
+  <div class="loader-text">Initializing neural network</div>
+  <div class="loader-sub" id="loading-status">Loading brain geometry...</div>
+</div>
+
+<!-- Graph Container -->
+<div id="graph-container"></div>
+
+<!-- Top Bar -->
+<div class="top-bar glass" id="top-bar">
+  <div class="top-bar-brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+      <path d="M12 6c-2.2 0-4 1.8-4 4 0 1.5.8 2.7 2 3.4V16h4v-2.6c1.2-.7 2-1.9 2-3.4 0-2.2-1.8-4-4-4z"/>
+      <circle cx="12" cy="10" r="1.5"/>
+    </svg>
+    Second Brain
+  </div>
+  <div class="top-bar-search">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input type="text" id="search-input" placeholder="Search neurons..." />
+  </div>
+  <div class="top-bar-key" id="esc-btn">Esc</div>
+</div>
+
+<!-- Bottom Bar -->
+<div class="bottom-bar glass" id="bottom-bar">
+  <div class="bottom-bar-stats" id="stats-bar">
+    <span id="stat-neurons">0</span> neurons &middot; <span id="stat-synapses">0</span> synapses &middot; <span id="stat-regions">0</span> regions
+  </div>
+  <div class="bottom-bar-legend" id="legend-bar"></div>
+</div>
+
+<!-- Detail Panel -->
+<div class="detail-panel glass" id="detail-panel">
+  <button class="detail-close" id="detail-close">&times;</button>
+  <div id="detail-content"></div>
+</div>
+
+<!-- Tooltip -->
+<div class="tooltip glass" id="tooltip"></div>
+
+<!-- Region Labels Container -->
+<div id="region-labels"></div>
+
+<script type="module">
+import { UnrealBloomPass } from 'https://esm.sh/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OBJLoader } from 'https://esm.sh/three@0.160.0/examples/jsm/loaders/OBJLoader.js';
+
+// ============================================================
+// Constants
+// ============================================================
+const NODE_COLORS = {
+  escalation:    '#ff6b35',
+  conversation:  '#3dc2ff',
+  investigation: '#ff4961',
+  playbook:      '#00d68f',
+  email:         '#b366ff',
+  template:      '#2dd4a8',
+  knowledge:     '#ffd866',
+};
+
+const NODE_LABELS = {
+  escalation:    'Escalations',
+  conversation:  'Conversations',
+  investigation: 'Investigations',
+  playbook:      'Playbooks',
+  email:         'Emails',
+  template:      'Templates',
+  knowledge:     'Knowledge',
+};
+
+const BRAIN_REGIONS = {
+  'bank-feeds':     { x: -25, y: 15, z: 25 },
+  'payroll':        { x: 25, y: 15, z: 25 },
+  'reconciliation': { x: -20, y: 10, z: -20 },
+  'tax':            { x: 20, y: 10, z: -20 },
+  'billing':        { x: -28, y: -5, z: 5 },
+  'technical':      { x: 28, y: -5, z: 5 },
+};
+
+const REGION_LABELS = {
+  'bank-feeds':     'Bank Feeds',
+  'payroll':        'Payroll',
+  'reconciliation': 'Reconciliation',
+  'tax':            'Tax',
+  'billing':        'Billing',
+  'technical':      'Technical',
+};
+
+// ============================================================
+// Mock Data
+// ============================================================
+function generateMockData() {
+  const nodes = [];
+  const edges = [];
+  let id = 0;
+  function nid() { return 'n' + (id++); }
+
+  const escalations = [
+    { id: nid(), type: 'escalation', label: 'OL-301 Bank Feed Disconnect', category: 'bank-feeds', status: 'open', summary: 'Chase bank feed returning OL-301 after OAuth migration. Customer reports feeds stopped syncing 3 days ago. Multiple reconnection attempts failed with token refresh error.', entities: ['OL-301', 'COID:4829371', 'Chase'], date: '2026-03-12' },
+    { id: nid(), type: 'escalation', label: 'OLSU-1024 Multi-User Sync', category: 'bank-feeds', status: 'in-progress', summary: 'Wells Fargo multi-user company shows OLSU-1024 on secondary user login. Primary accountant can sync fine. Firewall rule change suspected after office network migration.', entities: ['OLSU-1024', 'COID:8827165', 'Wells Fargo'], date: '2026-03-11' },
+    { id: nid(), type: 'escalation', label: 'Payroll Tax Table Mismatch', category: 'payroll', status: 'escalated', summary: 'State tax withholding using 2025 tables instead of 2026 for California employees. Affects W-2 prep and quarterly filings. 12 employees impacted, corrections needed before April 15 deadline.', entities: ['COID:3301284', 'CA-SIT', 'Q1-2026'], date: '2026-03-13' },
+    { id: nid(), type: 'escalation', label: 'Error 324 Duplicate Transactions', category: 'reconciliation', status: 'open', summary: 'Downloaded transactions appearing twice in register after bank feed refresh. Error 324 on attempted delete. Affects 47 transactions from Feb statement.', entities: ['Error 324', 'COID:5519023', 'BoA'], date: '2026-03-10' },
+    { id: nid(), type: 'escalation', label: 'Permission Denied — Accountant Invite', category: 'billing', status: 'resolved', summary: 'Primary admin cannot invite accountant as firm user. Gets "Permission denied: subscription tier does not support this action." Company on Plus subscription, which should support 5 accountant seats.', entities: ['COID:9912847', 'Plus Plan'], date: '2026-03-08' },
+    { id: nid(), type: 'escalation', label: 'Sales Tax Calculation Wrong', category: 'tax', status: 'open', summary: 'Nexus not calculating correctly for multi-state e-commerce company. Colorado sales showing 0% tax on physical goods shipped to Denver. Tax code mapping verified correct in settings.', entities: ['COID:6671039', 'CO-Sales Tax', 'Avalara'], date: '2026-03-13' },
+    { id: nid(), type: 'escalation', label: 'Bank Rule Auto-Match Broken', category: 'bank-feeds', status: 'in-progress', summary: 'Auto-match rules stopped working after recent QBO update. Rules exist and are enabled, but downloaded transactions are not being matched. Manual categorization still works.', entities: ['COID:2248711', 'Citi Bank'], date: '2026-03-12' },
+    { id: nid(), type: 'escalation', label: 'Payroll Direct Deposit Rejected', category: 'payroll', status: 'escalated', summary: 'Two employees did not receive direct deposit. NACHA file shows reject code R03 (No Account/Unable to Locate). Verified routing and account numbers match employee bank confirmations.', entities: ['COID:7743920', 'R03', 'Payroll Run #2847'], date: '2026-03-14' },
+    { id: nid(), type: 'escalation', label: 'Reconciliation Discrepancy $0.01', category: 'reconciliation', status: 'open', summary: 'Persistent one-cent discrepancy in January bank reconciliation that cannot be resolved. Likely a rounding issue in multi-currency transaction conversion from CAD to USD.', entities: ['COID:1158394', 'Multi-Currency', 'CAD/USD'], date: '2026-03-09' },
+    { id: nid(), type: 'escalation', label: 'Cannot Print 1099-NEC', category: 'tax', status: 'resolved', summary: 'Tax form printing fails with generic error. PDF generation returns blank pages for 1099-NEC forms. 1099-MISC prints fine. Issue traced to contractor with special characters in legal name.', entities: ['COID:3387612', '1099-NEC'], date: '2026-03-07' },
+    { id: nid(), type: 'escalation', label: 'Mobile App Crash on Receipt Upload', category: 'technical', status: 'open', summary: 'iOS app crashes immediately on camera activation for receipt capture. Started after iOS 19.3 update. Android version works. Tried reinstall, cleared cache, same behavior.', entities: ['COID:5501829', 'iOS 19.3', 'Receipt Capture'], date: '2026-03-13' },
+    { id: nid(), type: 'escalation', label: 'OL-301 Chase OAuth Token Expired', category: 'bank-feeds', status: 'in-progress', summary: 'Second report of OL-301 with Chase connection this week. OAuth token failing to refresh after 90-day rotation. Likely related to Chase API policy change on March 1st.', entities: ['OL-301', 'COID:8291045', 'Chase OAuth'], date: '2026-03-13' },
+    { id: nid(), type: 'escalation', label: 'Inventory Qty Mismatch After Transfer', category: 'reconciliation', status: 'open', summary: 'Inventory quantity on hand shows negative after warehouse transfer. Physical count confirms 45 units, QBO shows -3. Transfer order posted correctly but receiving warehouse did not increment.', entities: ['COID:4472918', 'Warehouse Transfer', 'SKU-A2847'], date: '2026-03-11' },
+    { id: nid(), type: 'escalation', label: 'Payroll State Filing Deadline Alert', category: 'payroll', status: 'open', summary: 'Customer in New York receiving incorrect filing deadline notifications. System shows Feb 28 deadline for Q4 filing that was already submitted and accepted. Notification engine not clearing acknowledged filings.', entities: ['COID:6619382', 'NY-SUI', 'Q4-2025'], date: '2026-03-10' },
+    { id: nid(), type: 'escalation', label: 'API Rate Limit — Third Party App', category: 'technical', status: 'in-progress', summary: 'Customer third-party integration hitting API rate limits during nightly sync. 500+ invoices failing to push. App developer contacted, confirmed they throttle to 10 req/s. QBO throttle appears to be at 5/s.', entities: ['COID:9938271', 'API Rate Limit', 'Invoice Sync'], date: '2026-03-12' },
+  ];
+
+  const conversations = [
+    { id: nid(), type: 'conversation', label: 'Chat: OL-301 Troubleshooting', category: 'bank-feeds', status: 'resolved', summary: 'Agent walked through OAuth re-authentication steps. Customer cleared browser cache, removed and re-added Chase connection. Connection restored but monitoring for 48 hours.', entities: ['Agent: TM-4829', 'COID:4829371'], date: '2026-03-12' },
+    { id: nid(), type: 'conversation', label: 'Chat: Payroll Tax Table Fix', category: 'payroll', status: 'in-progress', summary: 'Escalation specialist confirming which tax table version is loaded. Checking if manual override was applied. Need to verify SUI rate and state withholding table against 2026 published rates.', entities: ['Agent: KL-9201', 'COID:3301284'], date: '2026-03-13' },
+    { id: nid(), type: 'conversation', label: 'Chat: Error 324 Investigation', category: 'reconciliation', status: 'open', summary: 'Gathered transaction IDs for duplicated entries. Agent requesting backend team check for duplicate import job. May need to manually void and re-import affected date range.', entities: ['Agent: RJ-3847', 'COID:5519023'], date: '2026-03-10' },
+    { id: nid(), type: 'conversation', label: 'Chat: Permission Tier Clarification', category: 'billing', status: 'resolved', summary: 'Confirmed Plus plan includes 5 accountant seats. Issue was stale subscription cache on server side. Hard refresh of subscription status resolved the permission block.', entities: ['Agent: AS-7712', 'COID:9912847'], date: '2026-03-08' },
+    { id: nid(), type: 'conversation', label: 'Chat: Sales Tax Nexus Config', category: 'tax', status: 'in-progress', summary: 'Reviewing Avalara integration settings. Nexus registration shows Colorado enabled. Checking if economic nexus threshold was exceeded and if tax code assignment for product categories is correct.', entities: ['Agent: DM-2219', 'COID:6671039'], date: '2026-03-13' },
+    { id: nid(), type: 'conversation', label: 'Chat: Direct Deposit NACHA Debug', category: 'payroll', status: 'escalated', summary: 'Pulled NACHA trace number for rejected transactions. R03 code typically means wrong account number but customer insists numbers are correct. Requesting bank verification letter from employee bank.', entities: ['Agent: BW-5501', 'COID:7743920'], date: '2026-03-14' },
+    { id: nid(), type: 'conversation', label: 'Chat: iOS Crash Reproduction', category: 'technical', status: 'open', summary: 'Agent collected crash logs from customer device. Stack trace points to camera permission handling in iOS 19.3. Known Apple bug FB14229381 may be related. Workaround: use photo library upload instead.', entities: ['Agent: NP-3308', 'COID:5501829'], date: '2026-03-13' },
+    { id: nid(), type: 'conversation', label: 'Chat: Multi-Currency Rounding', category: 'reconciliation', status: 'in-progress', summary: 'Tracing the one-cent discrepancy to a specific invoice paid in CAD and converted at daily rate. QBO used 4 decimal places, bank used 2. Need to create manual adjustment entry.', entities: ['Agent: LR-8854', 'COID:1158394'], date: '2026-03-09' },
+    { id: nid(), type: 'conversation', label: 'Chat: Chase OAuth Pattern', category: 'bank-feeds', status: 'in-progress', summary: 'Second OL-301 case this week with Chase. Cross-referencing with first case. Both customers on Chase Business checking. Possible systemic issue with Chase Business OAuth endpoints after March 1 change.', entities: ['Agent: TM-4829', 'COID:8291045'], date: '2026-03-13' },
+    { id: nid(), type: 'conversation', label: 'Chat: API Rate Limit Negotiation', category: 'technical', status: 'in-progress', summary: 'Reviewing customer app usage patterns. Recommending batch API calls instead of individual requests. Preparing request to platform team for temporary rate limit increase during migration window.', entities: ['Agent: JC-6647', 'COID:9938271'], date: '2026-03-12' },
+  ];
+
+  const investigations = [
+    { id: nid(), type: 'investigation', label: 'INV-038291 Chase OAuth March Outage', category: 'bank-feeds', status: 'in-progress', summary: 'Tracking multiple Chase OL-301 reports since March 1st. Chase confirmed API endpoint migration for business accounts. ETA for full rollover: March 20. Affected customers should re-auth after that date.', entities: ['INV-038291', 'OL-301', 'Chase'], date: '2026-03-11' },
+    { id: nid(), type: 'investigation', label: 'INV-038305 Payroll Tax Table 2026', category: 'payroll', status: 'escalated', summary: 'Engineering confirmed delayed rollout of 2026 state tax tables for CA, NY, NJ. Hotfix build 2026.3.14.1 scheduled for March 15 deployment. Manual workaround: apply tax override per employee.', entities: ['INV-038305', 'CA-SIT', 'NY-SIT', 'NJ-SIT'], date: '2026-03-13' },
+    { id: nid(), type: 'investigation', label: 'INV-038287 Error 324 Batch Import', category: 'reconciliation', status: 'open', summary: 'Backend team found race condition in bank feed import job. When two import threads process overlapping date ranges, duplicate detection fails. Fix in review, affects ~200 companies on BoA and Chase feeds.', entities: ['INV-038287', 'Error 324', 'Race Condition'], date: '2026-03-10' },
+    { id: nid(), type: 'investigation', label: 'INV-038312 iOS 19.3 Camera Crash', category: 'technical', status: 'open', summary: 'Apple confirmed regression in AVCaptureSession initialization under iOS 19.3 (FB14229381). Workaround shipped in QBO iOS 12.4.1 beta. Production build expected March 18.', entities: ['INV-038312', 'iOS 19.3', 'FB14229381'], date: '2026-03-13' },
+    { id: nid(), type: 'investigation', label: 'INV-038298 NACHA R03 Pattern', category: 'payroll', status: 'in-progress', summary: 'Three R03 rejects in past week from different banks. Payroll service processor changed routing validation. Some older routing numbers now flagging as invalid despite being active. Coordinating with processor.', entities: ['INV-038298', 'R03', 'NACHA'], date: '2026-03-14' },
+  ];
+
+  const playbooks = [
+    { id: nid(), type: 'playbook', label: 'Bank Feed Troubleshooting Guide', category: 'bank-feeds', status: null, summary: 'Step-by-step guide for diagnosing and resolving bank feed connection issues. Covers OL-series errors, OAuth re-authentication, cache clearing, and when to escalate to Tier 3.', entities: ['OL-301', 'OLSU-1024', 'OAuth'], date: '2026-02-15' },
+    { id: nid(), type: 'playbook', label: 'Payroll Tax Resolution Workflow', category: 'payroll', status: null, summary: 'Decision tree for payroll tax discrepancies. Includes state tax table verification, override procedures, filing deadline management, and penalty waiver request process.', entities: ['SIT', 'SUI', 'Tax Tables'], date: '2026-01-20' },
+    { id: nid(), type: 'playbook', label: 'Reconciliation Discrepancy Diagnosis', category: 'reconciliation', status: null, summary: 'Flowchart for tracking down reconciliation differences. Multi-currency rounding, duplicate transaction detection, opening balance verification, and manual adjustment procedures.', entities: ['Reconciliation', 'Multi-Currency', 'Adjustments'], date: '2026-02-01' },
+    { id: nid(), type: 'playbook', label: 'Permission & Billing Escalation Path', category: 'billing', status: null, summary: 'Guide for resolving subscription-tier permission issues. Includes cache refresh procedures, manual subscription verification, and escalation path to billing engineering team.', entities: ['Subscriptions', 'Permissions', 'Tier'], date: '2026-01-10' },
+    { id: nid(), type: 'playbook', label: 'Sales Tax Nexus Configuration', category: 'tax', status: null, summary: 'Reference for setting up multi-state sales tax nexus. Covers economic nexus thresholds, Avalara integration, tax code mapping, and common misconfigurations.', entities: ['Nexus', 'Avalara', 'Tax Codes'], date: '2026-02-20' },
+    { id: nid(), type: 'playbook', label: 'Mobile App Troubleshooting', category: 'technical', status: null, summary: 'Standard diagnostic steps for QBO mobile issues. Covers iOS and Android, camera permissions, receipt capture, offline mode, and crash log collection procedures.', entities: ['iOS', 'Android', 'Crash Logs'], date: '2026-03-01' },
+  ];
+
+  const emails = [
+    { id: nid(), type: 'email', label: 'RE: Chase OL-301 Cluster Report', category: 'bank-feeds', status: null, summary: 'From: Tier 3 Bank Feeds Team. Summary of Chase OAuth migration impact. 47 companies affected in past 2 weeks. Workaround doc attached. Chase ETA for fix: March 20.', entities: ['Chase', 'OL-301', 'Tier 3'], date: '2026-03-12' },
+    { id: nid(), type: 'email', label: 'FWD: Payroll Tax Hotfix Timeline', category: 'payroll', status: null, summary: 'From: Engineering Lead. Hotfix for 2026 state tax tables entering QA today. Expected deployment March 15 at 2am PT. Rollback plan in place. Affected states: CA, NY, NJ, PA.', entities: ['Hotfix', 'Tax Tables', 'March 15'], date: '2026-03-13' },
+    { id: nid(), type: 'email', label: 'Agent Feedback: Error 324 Workaround', category: 'reconciliation', status: null, summary: 'From: Agent RJ-3847. The void-and-reimport workaround is taking 45min per customer. Requesting prioritized backend fix. Already have 6 customers waiting.', entities: ['Error 324', 'Agent: RJ-3847'], date: '2026-03-11' },
+    { id: nid(), type: 'email', label: 'RE: iOS Crash — Apple Response', category: 'technical', status: null, summary: 'From: Mobile Engineering. Apple acknowledged FB14229381 as known regression. Fix included in iOS 19.3.1 beta 2. Our app-side workaround (12.4.1 beta) available for TestFlight.', entities: ['FB14229381', 'iOS 19.3.1', 'TestFlight'], date: '2026-03-13' },
+    { id: nid(), type: 'email', label: 'Customer Complaint: DD Not Received', category: 'payroll', status: null, summary: 'From: Priority Account Manager. VIP customer (COID:7743920) CEO directly contacted account manager about missed direct deposits. Needs resolution within 24 hours or risk churn.', entities: ['COID:7743920', 'VIP', 'Direct Deposit'], date: '2026-03-14' },
+  ];
+
+  const templates = [
+    { id: nid(), type: 'template', label: 'Bank Feed Reconnection Steps', category: 'bank-feeds', status: null, summary: 'Customer-facing template for walking through bank feed reconnection. Includes screenshots for each step, browser cache clearing instructions, and expected timeline for sync recovery.', entities: ['Reconnection', 'Template'], date: '2026-02-10' },
+    { id: nid(), type: 'template', label: 'Payroll Tax Override Instructions', category: 'payroll', status: null, summary: 'Step-by-step agent template for applying manual tax overrides. Includes calculation verification checklist and instructions for setting expiration date on override once tax table fix is deployed.', entities: ['Tax Override', 'Template'], date: '2026-03-13' },
+    { id: nid(), type: 'template', label: 'Escalation Acknowledgment Response', category: null, status: null, summary: 'Standard acknowledgment template for escalated issues. Sets customer expectations for timeline, provides reference number, and lists information gathering needed for investigation.', entities: ['Acknowledgment', 'Template'], date: '2026-01-05' },
+  ];
+
+  const knowledgeItems = [
+    { id: nid(), type: 'knowledge', label: 'Chase OAuth Migration Pattern', category: 'bank-feeds', status: null, summary: 'Emerging pattern: Chase migrating business account OAuth endpoints quarterly. Each migration causes 2-3 week disruption. Recommend proactive re-auth notification to affected customers before next rotation (est. June 2026).', entities: ['Chase', 'OAuth', 'Pattern'], date: '2026-03-13' },
+    { id: nid(), type: 'knowledge', label: 'NACHA R03 Bank Routing Changes', category: 'payroll', status: null, summary: 'Payroll processor updated routing number validation database. Some legacy routing numbers for community banks and credit unions now flagging incorrectly. Pattern emerging across 3+ cases this week.', entities: ['NACHA', 'R03', 'Routing'], date: '2026-03-14' },
+    { id: nid(), type: 'knowledge', label: 'Multi-Currency Rounding Best Practice', category: 'reconciliation', status: null, summary: 'When QBO converts currencies using 4 decimal places but bank uses 2, discrepancies of $0.01-0.03 are expected. Recommend creating standing journal entry template for monthly FX rounding adjustments.', entities: ['Multi-Currency', 'Rounding', 'FX'], date: '2026-03-09' },
+  ];
+
+  const allNodes = [...escalations, ...conversations, ...investigations, ...playbooks, ...emails, ...templates, ...knowledgeItems];
+  allNodes.forEach(n => { n.connections = 0; });
+  const nodeMap = new Map(allNodes.map(n => [n.id, n]));
+
+  function addEdge(s, t, type, weight, reason) {
+    if (s === t) return;
+    const key = [s, t].sort().join('-');
+    if (edges.find(e => [e.source, e.target].sort().join('-') === key)) return;
+    edges.push({ source: s, target: t, type, weight, reason });
+    if (nodeMap.has(s)) nodeMap.get(s).connections++;
+    if (nodeMap.has(t)) nodeMap.get(t).connections++;
+  }
+
+  addEdge(escalations[0].id, conversations[0].id, 'fk_link', 0.95, 'Direct conversation about this escalation');
+  addEdge(escalations[2].id, conversations[1].id, 'fk_link', 0.95, 'Tax table fix discussion');
+  addEdge(escalations[3].id, conversations[2].id, 'fk_link', 0.95, 'Error 324 investigation chat');
+  addEdge(escalations[4].id, conversations[3].id, 'fk_link', 0.90, 'Permission issue resolution');
+  addEdge(escalations[5].id, conversations[4].id, 'fk_link', 0.95, 'Sales tax nexus config chat');
+  addEdge(escalations[7].id, conversations[5].id, 'fk_link', 0.95, 'DD rejection debug session');
+  addEdge(escalations[10].id, conversations[6].id, 'fk_link', 0.90, 'iOS crash reproduction');
+  addEdge(escalations[8].id, conversations[7].id, 'fk_link', 0.90, 'Multi-currency rounding trace');
+  addEdge(escalations[11].id, conversations[8].id, 'fk_link', 0.95, 'Second OL-301 case');
+  addEdge(escalations[14].id, conversations[9].id, 'fk_link', 0.90, 'API rate limit discussion');
+  addEdge(escalations[0].id, investigations[0].id, 'investigation', 0.92, 'Both reference OL-301 Chase issue');
+  addEdge(escalations[11].id, investigations[0].id, 'investigation', 0.94, 'Second OL-301 case, same root cause');
+  addEdge(escalations[2].id, investigations[1].id, 'investigation', 0.88, 'Payroll tax table investigation');
+  addEdge(escalations[3].id, investigations[2].id, 'investigation', 0.90, 'Error 324 batch import bug');
+  addEdge(escalations[10].id, investigations[3].id, 'investigation', 0.85, 'iOS crash linked to Apple bug');
+  addEdge(escalations[7].id, investigations[4].id, 'investigation', 0.87, 'NACHA R03 pattern match');
+  addEdge(escalations[0].id, escalations[11].id, 'error_code', 0.96, 'Both OL-301 with Chase');
+  addEdge(escalations[0].id, escalations[6].id, 'symptom', 0.55, 'Both bank feed connection issues');
+  addEdge(escalations[1].id, escalations[6].id, 'symptom', 0.50, 'Both bank feed sync failures');
+  addEdge(escalations[0].id, playbooks[0].id, 'semantic', 0.78, 'Relevant troubleshooting guide');
+  addEdge(escalations[1].id, playbooks[0].id, 'semantic', 0.72, 'OLSU error in bank feeds guide');
+  addEdge(escalations[6].id, playbooks[0].id, 'semantic', 0.75, 'Bank rule issue covered in guide');
+  addEdge(escalations[11].id, playbooks[0].id, 'semantic', 0.80, 'OL-301 in troubleshooting guide');
+  addEdge(escalations[2].id, playbooks[1].id, 'semantic', 0.85, 'Tax table fix in payroll workflow');
+  addEdge(escalations[7].id, playbooks[1].id, 'semantic', 0.60, 'DD rejection tangentially related');
+  addEdge(escalations[13].id, playbooks[1].id, 'semantic', 0.65, 'Filing deadline in payroll guide');
+  addEdge(escalations[3].id, playbooks[2].id, 'semantic', 0.82, 'Duplicate transactions in recon guide');
+  addEdge(escalations[8].id, playbooks[2].id, 'semantic', 0.88, 'Rounding discrepancy in recon guide');
+  addEdge(escalations[12].id, playbooks[2].id, 'semantic', 0.55, 'Inventory qty mismatch tangential');
+  addEdge(escalations[4].id, playbooks[3].id, 'semantic', 0.90, 'Permission issue in billing guide');
+  addEdge(escalations[5].id, playbooks[4].id, 'semantic', 0.85, 'Nexus config in tax guide');
+  addEdge(escalations[10].id, playbooks[5].id, 'semantic', 0.88, 'Mobile crash in app guide');
+  addEdge(emails[0].id, investigations[0].id, 'fk_link', 0.90, 'Email about Chase OL-301 cluster');
+  addEdge(emails[0].id, escalations[0].id, 'semantic', 0.75, 'Email references same error');
+  addEdge(emails[0].id, escalations[11].id, 'semantic', 0.75, 'Email covers both OL-301 cases');
+  addEdge(emails[1].id, investigations[1].id, 'fk_link', 0.92, 'Hotfix timeline for tax table INV');
+  addEdge(emails[1].id, escalations[2].id, 'semantic', 0.70, 'Hotfix addresses this escalation');
+  addEdge(emails[2].id, escalations[3].id, 'fk_link', 0.88, 'Agent feedback about Error 324');
+  addEdge(emails[2].id, conversations[2].id, 'semantic', 0.60, 'Same agent same issue');
+  addEdge(emails[3].id, investigations[3].id, 'fk_link', 0.90, 'Apple response about iOS crash');
+  addEdge(emails[3].id, escalations[10].id, 'semantic', 0.72, 'References same iOS crash');
+  addEdge(emails[4].id, escalations[7].id, 'customer', 0.95, 'Same customer COID:7743920');
+  addEdge(emails[4].id, conversations[5].id, 'customer', 0.85, 'About same DD rejection');
+  addEdge(emails[4].id, investigations[4].id, 'semantic', 0.65, 'Part of NACHA R03 pattern');
+  addEdge(templates[0].id, playbooks[0].id, 'template_match', 0.82, 'Template follows playbook steps');
+  addEdge(templates[0].id, escalations[0].id, 'semantic', 0.55, 'Reconnection template for OL-301');
+  addEdge(templates[0].id, escalations[11].id, 'semantic', 0.55, 'Reconnection template applicable');
+  addEdge(templates[1].id, playbooks[1].id, 'template_match', 0.85, 'Override template from payroll workflow');
+  addEdge(templates[1].id, escalations[2].id, 'semantic', 0.72, 'Tax override for this escalation');
+  addEdge(templates[1].id, investigations[1].id, 'semantic', 0.60, 'Workaround template for INV');
+  addEdge(templates[2].id, escalations[7].id, 'semantic', 0.45, 'Acknowledgment for DD issue');
+  addEdge(templates[2].id, escalations[2].id, 'semantic', 0.40, 'Acknowledgment for tax issue');
+  addEdge(knowledgeItems[0].id, investigations[0].id, 'knowledge', 0.92, 'Pattern discovered from investigation');
+  addEdge(knowledgeItems[0].id, escalations[0].id, 'knowledge', 0.78, 'Pattern explains this escalation');
+  addEdge(knowledgeItems[0].id, escalations[11].id, 'knowledge', 0.80, 'Pattern explains second case');
+  addEdge(knowledgeItems[0].id, emails[0].id, 'knowledge', 0.70, 'Email data supports pattern');
+  addEdge(knowledgeItems[1].id, investigations[4].id, 'knowledge', 0.90, 'Pattern from NACHA investigation');
+  addEdge(knowledgeItems[1].id, escalations[7].id, 'knowledge', 0.75, 'Pattern explains DD rejection');
+  addEdge(knowledgeItems[1].id, emails[4].id, 'knowledge', 0.60, 'Email is data point for pattern');
+  addEdge(knowledgeItems[2].id, escalations[8].id, 'knowledge', 0.88, 'Best practice for this exact issue');
+  addEdge(knowledgeItems[2].id, playbooks[2].id, 'knowledge', 0.75, 'Should be added to playbook');
+  addEdge(knowledgeItems[2].id, conversations[7].id, 'knowledge', 0.65, 'Conversation that surfaced this');
+  addEdge(escalations[2].id, escalations[13].id, 'symptom', 0.62, 'Both payroll tax related in same period');
+  addEdge(escalations[7].id, escalations[13].id, 'symptom', 0.40, 'Both payroll issues, different symptoms');
+  addEdge(escalations[3].id, escalations[12].id, 'symptom', 0.35, 'Both quantity/count discrepancies');
+  addEdge(escalations[10].id, escalations[14].id, 'symptom', 0.30, 'Both technical platform issues');
+  addEdge(conversations[0].id, conversations[8].id, 'semantic', 0.80, 'Same agent handling both OL-301 cases');
+  addEdge(conversations[1].id, conversations[5].id, 'semantic', 0.35, 'Both payroll conversations');
+  addEdge(investigations[0].id, investigations[2].id, 'semantic', 0.42, 'Both bank feed backend issues');
+  addEdge(investigations[1].id, investigations[4].id, 'semantic', 0.48, 'Both payroll infrastructure issues');
+  addEdge(escalations[0].id, conversations[0].id, 'customer', 0.98, 'Same customer COID:4829371');
+  addEdge(escalations[5].id, conversations[4].id, 'customer', 0.97, 'Same customer COID:6671039');
+  addEdge(playbooks[0].id, playbooks[2].id, 'semantic', 0.30, 'Both involve transaction matching');
+  addEdge(playbooks[1].id, playbooks[4].id, 'semantic', 0.35, 'Both tax-related playbooks');
+  addEdge(templates[0].id, conversations[0].id, 'semantic', 0.50, 'Template used in this conversation');
+  addEdge(templates[0].id, conversations[8].id, 'semantic', 0.48, 'Template applicable to this chat');
+  addEdge(knowledgeItems[0].id, playbooks[0].id, 'knowledge', 0.68, 'Pattern should update playbook');
+  addEdge(conversations[1].id, templates[1].id, 'template_match', 0.72, 'Agent used tax override template in chat');
+  addEdge(conversations[4].id, playbooks[4].id, 'semantic', 0.68, 'Nexus config discussed using playbook');
+  addEdge(conversations[6].id, playbooks[5].id, 'semantic', 0.70, 'Used mobile troubleshooting guide');
+  addEdge(escalations[9].id, escalations[5].id, 'symptom', 0.38, 'Both tax form related issues');
+  addEdge(escalations[1].id, investigations[0].id, 'semantic', 0.45, 'OLSU may share Chase root cause');
+  addEdge(escalations[12].id, escalations[3].id, 'symptom', 0.42, 'Both quantity discrepancy issues');
+  addEdge(knowledgeItems[1].id, conversations[5].id, 'knowledge', 0.72, 'Pattern surfaced in DD debug conversation');
+  addEdge(knowledgeItems[2].id, templates[2].id, 'semantic', 0.38, 'Knowledge informs acknowledgment template');
+  addEdge(emails[1].id, conversations[1].id, 'semantic', 0.65, 'Email timeline discussed in payroll chat');
+  addEdge(emails[3].id, conversations[6].id, 'semantic', 0.70, 'Apple response shared in iOS crash chat');
+  addEdge(investigations[2].id, conversations[2].id, 'investigation', 0.82, 'Investigation spawned from this chat');
+  addEdge(investigations[3].id, conversations[6].id, 'investigation', 0.80, 'Investigation linked to crash reproduction');
+  addEdge(templates[2].id, conversations[3].id, 'template_match', 0.55, 'Acknowledgment template used');
+  addEdge(escalations[6].id, investigations[0].id, 'semantic', 0.38, 'Bank rule issue may share Chase root cause');
+  addEdge(playbooks[3].id, conversations[3].id, 'semantic', 0.58, 'Permission billing guide used in chat');
+  addEdge(playbooks[5].id, investigations[3].id, 'semantic', 0.62, 'Mobile guide references known iOS bugs');
+
+  return { nodes: allNodes, edges };
+}
+
+// ============================================================
+// State
+// ============================================================
+const state = {
+  selectedNode: null,
+  neighborSet: null,
+  searchText: '',
+  brainReady: false,
+  graphReady: false,
+};
+
+// ============================================================
+// Star texture
+// ============================================================
+const starTextureCache = {};
+function createStarTexture(color) {
+  if (starTextureCache[color]) return starTextureCache[color];
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.15, color);
+  g.addColorStop(0.4, color + '99');
+  g.addColorStop(0.7, color + '22');
+  g.addColorStop(1, 'transparent');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
+  const tex = new THREE.CanvasTexture(c);
+  starTextureCache[color] = tex;
+  return tex;
+}
+
+// ============================================================
+// Data setup
+// ============================================================
+const mockData = generateMockData();
+const nodeById = new Map(mockData.nodes.map(n => [n.id, n]));
+
+// Count nodes per region
+const regionCounts = {};
+for (const cat of Object.keys(BRAIN_REGIONS)) regionCounts[cat] = 0;
+
+// Pin node positions to brain regions
+mockData.nodes.forEach(node => {
+  const cat = node.category || 'technical';
+  const region = BRAIN_REGIONS[cat] || { x: 0, y: -15, z: -25 };
+  node.fx = region.x + (Math.random() - 0.5) * 30;
+  node.fy = region.y + (Math.random() - 0.5) * 30;
+  node.fz = region.z + (Math.random() - 0.5) * 30;
+  if (regionCounts[cat] !== undefined) regionCounts[cat]++;
+  else regionCounts[cat] = 1;
+});
+
+// Build adjacency map
+const adjacencyMap = new Map();
+mockData.edges.forEach(edge => {
+  const s = edge.source;
+  const t = edge.target;
+  if (!adjacencyMap.has(s)) adjacencyMap.set(s, []);
+  if (!adjacencyMap.has(t)) adjacencyMap.set(t, []);
+  adjacencyMap.get(s).push({ id: t, weight: edge.weight, reason: edge.reason });
+  adjacencyMap.get(t).push({ id: s, weight: edge.weight, reason: edge.reason });
+});
+
+// ============================================================
+// Update stats
+// ============================================================
+document.getElementById('stat-neurons').textContent = mockData.nodes.length;
+document.getElementById('stat-synapses').textContent = mockData.edges.length;
+document.getElementById('stat-regions').textContent = Object.keys(BRAIN_REGIONS).length;
+
+// ============================================================
+// Build legend
+// ============================================================
+const legendBar = document.getElementById('legend-bar');
+for (const [type, color] of Object.entries(NODE_COLORS)) {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${color};box-shadow:0 0 6px ${color}88"></div>${NODE_LABELS[type]}`;
+  legendBar.appendChild(item);
+}
+
+// ============================================================
+// 3D Force Graph
+// ============================================================
+const container = document.getElementById('graph-container');
+
+const graph = ForceGraph3D()(container)
+  .backgroundColor('#00000000')
+  .width(window.innerWidth)
+  .height(window.innerHeight)
+  .showNavInfo(false)
+  .nodeThreeObject(node => {
+    const color = NODE_COLORS[node.type] || '#ffffff';
+    const texture = createStarTexture(color);
+    const mat = new THREE.SpriteMaterial({
+      map: texture,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.5,
+    });
+    const sprite = new THREE.Sprite(mat);
+    const sz = 3 + Math.min((node.connections || 0) * 0.5, 4);
+    sprite.scale.set(sz, sz, 1);
+    sprite.renderOrder = 1;
+    return sprite;
+  })
+  .nodeThreeObjectExtend(false)
+  .linkCurvature(0.25)
+  .linkCurveRotation(link => (link.weight || 0.5) * Math.PI)
+  .linkColor(() => 'rgba(255,255,255,0.04)')
+  .linkWidth(0.3)
+  .linkOpacity(0.08)
+  .linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3))
+  .linkDirectionalParticleSpeed(0.004)
+  .linkDirectionalParticleWidth(1)
+  .linkDirectionalParticleColor(link => {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const srcNode = nodeById.get(srcId);
+    return NODE_COLORS[srcNode?.type] || '#ffffff';
+  })
+  .onNodeHover(handleNodeHover)
+  .onNodeClick(handleNodeClick)
+  .onBackgroundClick(handleBackgroundClick)
+  .graphData({ nodes: [...mockData.nodes], links: [...mockData.edges] });
+
+// Disable forces since nodes are pinned
+graph.d3Force('charge', null);
+graph.d3Force('link', null);
+graph.d3Force('center', null);
+
+// Camera starting position
+graph.cameraPosition({ x: 0, y: 0, z: 120 });
+
+// ============================================================
+// Bloom
+// ============================================================
+let bloomPass = null;
+try {
+  bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    1.0,
+    0.3,
+    0.6
+  );
+  graph.postProcessingComposer().addPass(bloomPass);
+} catch (e) {
+  console.warn('Bloom init:', e);
+}
+
+// ============================================================
+// Fog
+// ============================================================
+try {
+  graph.scene().fog = new THREE.FogExp2(0x000008, 0.003);
+} catch (e) {}
+
+// ============================================================
+// Auto-rotation
+// ============================================================
+graph.controls().autoRotate = true;
+graph.controls().autoRotateSpeed = 0.3;
+graph.controls().enableDamping = true;
+graph.controls().dampingFactor = 0.1;
+
+// ============================================================
+// Load Brain OBJ Wireframe
+// ============================================================
+const loadingStatus = document.getElementById('loading-status');
+const loadingScreen = document.getElementById('loading-screen');
+
+const objLoader = new OBJLoader();
+objLoader.load(
+  'https://cdn.jsdelivr.net/gh/victors1681/3dbrain@master/static/models/brain_vertex_low.obj',
+  (obj) => {
+    obj.traverse(child => {
+      if (child.isMesh) {
+        child.material = new THREE.MeshBasicMaterial({
+          color: 0x0a0515,
+          transparent: true,
+          opacity: 0.03,
+          wireframe: true,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        child.renderOrder = 0;
+      }
+    });
+    // Scale and center the brain
+    const box = new THREE.Box3().setFromObject(obj);
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 80 / maxDim;
+    obj.scale.set(scale, scale, scale);
+    // Recenter
+    const boxScaled = new THREE.Box3().setFromObject(obj);
+    const center = boxScaled.getCenter(new THREE.Vector3());
+    obj.position.sub(center);
+
+    graph.scene().add(obj);
+    state.brainReady = true;
+    checkReady();
+  },
+  (progress) => {
+    if (progress.total) {
+      const pct = Math.round(progress.loaded / progress.total * 100);
+      loadingStatus.textContent = `Loading brain geometry... ${pct}%`;
+    }
+  },
+  (err) => {
+    console.warn('OBJ load failed:', err);
+    state.brainReady = true;
+    checkReady();
+  }
+);
+
+// Mark graph as ready after short delay
+setTimeout(() => {
+  state.graphReady = true;
+  loadingStatus.textContent = 'Mapping neural connections...';
+  checkReady();
+}, 800);
+
+function checkReady() {
+  if (state.brainReady && state.graphReady) {
+    setTimeout(() => {
+      loadingScreen.classList.add('hidden');
+    }, 400);
+  }
+}
+
+// ============================================================
+// Region Labels
+// ============================================================
+const regionLabelsContainer = document.getElementById('region-labels');
+const regionLabelEls = {};
+
+for (const [cat, pos] of Object.entries(BRAIN_REGIONS)) {
+  const el = document.createElement('div');
+  el.className = 'region-label';
+  el.innerHTML = `${REGION_LABELS[cat]} <span class="region-count">${regionCounts[cat] || 0}</span>`;
+  regionLabelsContainer.appendChild(el);
+  regionLabelEls[cat] = { el, pos: new THREE.Vector3(pos.x, pos.y + 18, pos.z) };
+}
+
+function updateRegionLabels() {
+  const camera = graph.camera();
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  for (const [cat, data] of Object.entries(regionLabelEls)) {
+    const projected = data.pos.clone().project(camera);
+    const x = (projected.x * 0.5 + 0.5) * width;
+    const y = (-projected.y * 0.5 + 0.5) * height;
+
+    if (projected.z > 1) {
+      data.el.style.opacity = '0';
+      continue;
+    }
+
+    const dist = Math.sqrt(Math.pow(projected.x, 2) + Math.pow(projected.y, 2));
+    const opacity = Math.max(0, Math.min(1, 1.2 - dist * 0.8));
+
+    data.el.style.opacity = state.selectedNode ? '0.1' : String(opacity * 0.7);
+    data.el.style.left = x + 'px';
+    data.el.style.top = y + 'px';
+    data.el.style.transform = 'translate(-50%, -50%)';
+  }
+}
+
+// ============================================================
+// Animation tick
+// ============================================================
+function animationTick() {
+  requestAnimationFrame(animationTick);
+
+  const t = Date.now() * 0.001;
+  const gd = graph.graphData();
+
+  gd.nodes.forEach((node, i) => {
+    if (node.__threeObj) {
+      const base = 3 + Math.min((node.connections || 0) * 0.5, 4);
+      const pulse = base * (1 + 0.05 * Math.sin(t * 2.5 + i * 0.7));
+
+      if (state.selectedNode && state.neighborSet) {
+        if (!state.neighborSet.has(node.id)) {
+          node.__threeObj.material.opacity = 0.05;
+          node.__threeObj.scale.set(pulse * 0.5, pulse * 0.5, 1);
+        } else {
+          node.__threeObj.material.opacity = 0.6;
+          node.__threeObj.scale.set(pulse, pulse, 1);
+        }
+      } else if (state.searchText) {
+        const matches = nodeMatchesSearch(node, state.searchText);
+        if (matches) {
+          node.__threeObj.material.opacity = 0.7;
+          const searchPulse = base * (1 + 0.12 * Math.sin(t * 4 + i * 0.5));
+          node.__threeObj.scale.set(searchPulse, searchPulse, 1);
+        } else {
+          node.__threeObj.material.opacity = 0.04;
+          node.__threeObj.scale.set(pulse * 0.4, pulse * 0.4, 1);
+        }
+      } else {
+        node.__threeObj.material.opacity = 0.5;
+        node.__threeObj.scale.set(pulse, pulse, 1);
+      }
+    }
+  });
+
+  updateRegionLabels();
+}
+animationTick();
+
+// ============================================================
+// Interactions
+// ============================================================
+const tooltip = document.getElementById('tooltip');
+
+function handleNodeHover(node, prevNode) {
+  container.style.cursor = node ? 'pointer' : 'default';
+
+  if (node) {
+    const color = NODE_COLORS[node.type] || '#ffffff';
+    tooltip.innerHTML = `<div class="tooltip-type" style="color:${color}">${node.type}</div>${node.label}`;
+    tooltip.classList.add('visible');
+    tooltip.style.borderColor = color + '30';
+  } else {
+    tooltip.classList.remove('visible');
+  }
+}
+
+document.addEventListener('mousemove', (e) => {
+  if (tooltip.classList.contains('visible')) {
+    tooltip.style.left = (e.clientX + 16) + 'px';
+    tooltip.style.top = (e.clientY - 10) + 'px';
+  }
+});
+
+function handleNodeClick(node) {
+  if (!node) return;
+
+  graph.controls().autoRotate = false;
+
+  const neighbors = new Set([node.id]);
+  const adj = adjacencyMap.get(node.id) || [];
+  adj.forEach(a => neighbors.add(a.id));
+
+  state.selectedNode = node;
+  state.neighborSet = neighbors;
+
+  const distance = 50;
+  const distRatio = 1 + distance / Math.hypot(node.fx, node.fy, node.fz);
+  graph.cameraPosition(
+    { x: node.fx * distRatio, y: node.fy * distRatio, z: node.fz * distRatio },
+    { x: node.fx, y: node.fy, z: node.fz },
+    1200
+  );
+
+  graph.linkDirectionalParticles(link => {
+    const sId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tId = typeof link.target === 'object' ? link.target.id : link.target;
+    if (neighbors.has(sId) && neighbors.has(tId)) {
+      return Math.ceil((link.weight || 0.5) * 3);
+    }
+    return 0;
+  });
+  graph.linkColor(link => {
+    const sId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tId = typeof link.target === 'object' ? link.target.id : link.target;
+    if (neighbors.has(sId) && neighbors.has(tId)) {
+      return 'rgba(255,255,255,0.12)';
+    }
+    return 'rgba(255,255,255,0.01)';
+  });
+
+  openDetailPanel(node);
+}
+
+function handleBackgroundClick() {
+  deselectAll();
+}
+
+function deselectAll() {
+  state.selectedNode = null;
+  state.neighborSet = null;
+
+  graph.controls().autoRotate = true;
+
+  graph.linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3));
+  graph.linkColor(() => 'rgba(255,255,255,0.04)');
+
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+// ============================================================
+// Detail Panel
+// ============================================================
+function openDetailPanel(node) {
+  const panel = document.getElementById('detail-panel');
+  const content = document.getElementById('detail-content');
+  const color = NODE_COLORS[node.type] || '#ffffff';
+
+  const adj = adjacencyMap.get(node.id) || [];
+  const sortedAdj = [...adj].sort((a, b) => b.weight - a.weight);
+
+  let connectionsHtml = '';
+  sortedAdj.forEach(conn => {
+    const target = nodeById.get(conn.id);
+    if (!target) return;
+    const tColor = NODE_COLORS[target.type] || '#ffffff';
+    const pct = Math.round(conn.weight * 100);
+    connectionsHtml += `
+      <div class="connection-item" data-node-id="${conn.id}">
+        <div class="connection-dot" style="background:${tColor};box-shadow:0 0 4px ${tColor}66"></div>
+        <div class="connection-label" title="${target.label}">${target.label}</div>
+        <div class="connection-weight">
+          <div class="connection-weight-fill" style="width:${pct}%;background:${tColor}88"></div>
+        </div>
+      </div>
+    `;
+  });
+
+  const statusBadge = node.status ? `<div class="badge badge-status">${node.status}</div>` : '';
+  const categoryBadge = node.category ? `<div class="badge badge-category">${node.category}</div>` : '';
+
+  content.innerHTML = `
+    <div class="detail-title" style="color:${color};text-shadow:0 0 20px ${color}44">${node.label}</div>
+    <div class="detail-badges">
+      <div class="badge badge-type" style="background:${color}">${node.type}</div>
+      ${statusBadge}
+      ${categoryBadge}
+      <div class="badge badge-date">${node.date || ''}</div>
+    </div>
+
+    <div class="detail-section-label">Summary</div>
+    <div class="detail-summary">${node.summary || 'No summary available.'}</div>
+
+    ${node.entities && node.entities.length ? `
+      <div class="detail-section-label">Entities</div>
+      <div class="detail-entities">
+        ${node.entities.map(e => `<span class="entity-tag">${e}</span>`).join('')}
+      </div>
+    ` : ''}
+
+    <div class="detail-section-label">Connections (${sortedAdj.length})</div>
+    <div class="detail-connections">
+      ${connectionsHtml || '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0">No connections</div>'}
+    </div>
+
+    <button class="detail-btn" id="btn-neighborhood">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="3"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/>
+      </svg>
+      View Neighborhood
+    </button>
+  `;
+
+  panel.classList.add('open');
+
+  content.querySelectorAll('.connection-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const targetId = item.dataset.nodeId;
+      const targetNode = nodeById.get(targetId);
+      if (targetNode) handleNodeClick(targetNode);
+    });
+  });
+
+  const neighborhoodBtn = document.getElementById('btn-neighborhood');
+  if (neighborhoodBtn) {
+    neighborhoodBtn.addEventListener('click', () => {
+      graph.cameraPosition(
+        { x: node.fx * 2.5, y: node.fy * 2.5, z: node.fz * 2.5 },
+        { x: node.fx, y: node.fy, z: node.fz },
+        1500
+      );
+    });
+  }
+}
+
+document.getElementById('detail-close').addEventListener('click', deselectAll);
+
+// ============================================================
+// Search
+// ============================================================
+const searchInput = document.getElementById('search-input');
+
+function nodeMatchesSearch(node, text) {
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (node.label.toLowerCase().includes(lower)) return true;
+  if (node.type.toLowerCase().includes(lower)) return true;
+  if (node.category && node.category.toLowerCase().includes(lower)) return true;
+  if (node.summary && node.summary.toLowerCase().includes(lower)) return true;
+  if (node.entities) {
+    for (const e of node.entities) {
+      if (e.toLowerCase().includes(lower)) return true;
+    }
+  }
+  return false;
+}
+
+searchInput.addEventListener('input', (e) => {
+  state.searchText = e.target.value.trim();
+
+  if (state.searchText && state.selectedNode) {
+    state.selectedNode = null;
+    state.neighborSet = null;
+    graph.controls().autoRotate = true;
+    graph.linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3));
+    graph.linkColor(() => 'rgba(255,255,255,0.04)');
+    document.getElementById('detail-panel').classList.remove('open');
+  }
+
+  if (state.searchText) {
+    graph.linkColor(link => {
+      const sId = typeof link.source === 'object' ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' ? link.target.id : link.target;
+      const sNode = nodeById.get(sId);
+      const tNode = nodeById.get(tId);
+      if (sNode && tNode && nodeMatchesSearch(sNode, state.searchText) && nodeMatchesSearch(tNode, state.searchText)) {
+        return 'rgba(255,255,255,0.12)';
+      }
+      return 'rgba(255,255,255,0.01)';
+    });
+    graph.linkDirectionalParticles(link => {
+      const sId = typeof link.source === 'object' ? link.source.id : link.source;
+      const tId = typeof link.target === 'object' ? link.target.id : link.target;
+      const sNode = nodeById.get(sId);
+      const tNode = nodeById.get(tId);
+      if (sNode && tNode && (nodeMatchesSearch(sNode, state.searchText) || nodeMatchesSearch(tNode, state.searchText))) {
+        return Math.ceil((link.weight || 0.5) * 3);
+      }
+      return 0;
+    });
+  } else {
+    graph.linkColor(() => 'rgba(255,255,255,0.04)');
+    graph.linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3));
+  }
+});
+
+// ============================================================
+// Keyboard
+// ============================================================
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    searchInput.value = '';
+    state.searchText = '';
+    deselectAll();
+    graph.linkColor(() => 'rgba(255,255,255,0.04)');
+    graph.linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3));
+    searchInput.blur();
+  }
+  if (e.key === '/' && document.activeElement !== searchInput) {
+    e.preventDefault();
+    searchInput.focus();
+  }
+  if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    searchInput.focus();
+  }
+});
+
+document.getElementById('esc-btn').addEventListener('click', () => {
+  searchInput.value = '';
+  state.searchText = '';
+  deselectAll();
+  graph.linkColor(() => 'rgba(255,255,255,0.04)');
+  graph.linkDirectionalParticles(link => Math.ceil((link.weight || 0.5) * 3));
+});
+
+// ============================================================
+// Resize
+// ============================================================
+window.addEventListener('resize', () => {
+  graph.width(window.innerWidth).height(window.innerHeight);
+  if (bloomPass) {
+    bloomPass.resolution.set(window.innerWidth, window.innerHeight);
+  }
+});
+
+</script>
+</body>
+</html>

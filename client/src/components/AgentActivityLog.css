@@ -1,0 +1,557 @@
+/* ============================================================
+   Agent Activity Log — terminal-style streaming event log
+   ============================================================ */
+
+/* ---- Full panel (inside DevMode) ---- */
+.aal-panel {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  height: 220px;
+  min-height: 44px;
+  border-top: 1px solid #2e3340;
+  background: #12141a;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #8b93a5;
+  transition: height 0.15s ease;
+  position: relative;
+}
+
+.aal-panel--collapsed {
+  height: 36px;
+  overflow: hidden;
+}
+
+/* ---- Header bar ---- */
+.aal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid #1e222c;
+  background: #14171f;
+  flex-shrink: 0;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.aal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.aal-collapse-btn {
+  background: none;
+  border: none;
+  color: #5a6275;
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.aal-collapse-btn:hover {
+  color: #d8dce6;
+  background: #1e222c;
+}
+
+.aal-title {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6b7385;
+}
+
+.aal-count {
+  background: #1e222c;
+  color: #5a6275;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.aal-filtered-count {
+  color: #4a5265;
+  font-size: 10px;
+}
+
+/* ---- Filter chips ---- */
+.aal-filters {
+  display: flex;
+  gap: 3px;
+}
+
+.aal-filter-chip {
+  background: none;
+  border: 1px solid transparent;
+  color: #5a6275;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.aal-filter-chip:hover {
+  color: #8b93a5;
+  background: #1a1e28;
+}
+
+.aal-filter-chip.is-active {
+  color: #4eca8a;
+  border-color: #2a4a35;
+  background: #1a2e22;
+}
+
+.aal-filter-badge {
+  background: #2e3340;
+  color: #6b7385;
+  font-size: 9px;
+  padding: 0 4px;
+  border-radius: 4px;
+  min-width: 14px;
+  text-align: center;
+}
+
+.aal-filter-chip.is-active .aal-filter-badge {
+  background: #2a4a35;
+  color: #4eca8a;
+}
+
+/* ---- Control buttons ---- */
+.aal-ctrl-btn {
+  background: none;
+  border: 1px solid #2e3340;
+  color: #5a6275;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.aal-ctrl-btn:hover {
+  color: #d8dce6;
+  border-color: #5a6275;
+  background: #1e222c;
+}
+
+.aal-ctrl-btn.is-active {
+  color: #f0c040;
+  border-color: #5a4a10;
+  background: #2a2610;
+}
+
+/* ---- Log body ---- */
+.aal-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  scroll-behavior: smooth;
+}
+
+.aal-body::-webkit-scrollbar {
+  width: 5px;
+}
+
+.aal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aal-body::-webkit-scrollbar-thumb {
+  background: #2e3340;
+  border-radius: 3px;
+}
+
+.aal-body {
+  scrollbar-width: thin;
+  scrollbar-color: #2e3340 transparent;
+}
+
+/* ---- Empty state ---- */
+.aal-empty {
+  padding: 16px 12px;
+  color: #3a4255;
+  font-style: italic;
+  text-align: center;
+}
+
+/* ---- Log entry ---- */
+.aal-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 12px;
+  border-bottom: 1px solid #1a1e26;
+  transition: background 0.08s ease;
+  flex-wrap: wrap;
+  cursor: default;
+  line-height: 1.5;
+}
+
+.aal-entry:hover {
+  background: #1a1e28;
+}
+
+.aal-entry[role="button"] {
+  cursor: pointer;
+}
+
+.aal-entry.is-expanded {
+  background: #1a1e28;
+}
+
+/* ---- Time stamp ---- */
+.aal-time {
+  color: #3a4255;
+  font-size: 10px;
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+/* ---- Type tag ---- */
+.aal-type-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Color classes */
+.aal-red .aal-type-tag,
+.aal-type-tag.aal-red {
+  color: #f87171;
+  background: #2e1a17;
+}
+
+.aal-amber .aal-type-tag,
+.aal-type-tag.aal-amber {
+  color: #fbbf24;
+  background: #2a2610;
+}
+
+.aal-green .aal-type-tag,
+.aal-type-tag.aal-green {
+  color: #4ade80;
+  background: #1a2e22;
+}
+
+.aal-blue .aal-type-tag,
+.aal-type-tag.aal-blue {
+  color: #60a5fa;
+  background: #1a2030;
+}
+
+.aal-gray .aal-type-tag,
+.aal-type-tag.aal-gray {
+  color: #6b7385;
+  background: #1e222c;
+}
+
+/* ---- Message text ---- */
+.aal-msg {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9ca3b5;
+}
+
+.aal-red .aal-msg { color: #f87171; }
+.aal-amber .aal-msg { color: #d4a020; }
+.aal-green .aal-msg { color: #4ade80; }
+
+/* ---- Channel badge ---- */
+.aal-channel {
+  font-size: 9px;
+  color: #4a5265;
+  background: #1a1e28;
+  padding: 0 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+/* ---- Resolution badges ---- */
+.aal-badge {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+}
+.aal-badge--unresolved {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.15);
+  border: 1px solid rgba(255, 77, 79, 0.3);
+  animation: aal-pulse-red 2s ease-in-out infinite;
+}
+.aal-badge--resolved {
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.15);
+  border: 1px solid rgba(82, 196, 26, 0.3);
+}
+@keyframes aal-pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ---- Expand hint ---- */
+.aal-expand-hint {
+  color: #3a4255;
+  font-size: 10px;
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+}
+
+/* ---- Expanded detail ---- */
+.aal-detail {
+  width: 100%;
+  padding: 8px 12px 8px 62px;
+  color: #9ca3af;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #0d0f14;
+  border-left: 2px solid var(--accent, #4ec9b5);
+  border-radius: 0 3px 3px 0;
+  margin-top: 4px;
+  max-height: 400px;
+  overflow-y: auto;
+  cursor: text;
+  user-select: text;
+}
+
+/* ---- Compact mode (DevMiniWidget) ---- */
+.aal-compact {
+  border-top: 1px solid #2e3340;
+  background: #12141a;
+  font-family: var(--font-mono);
+  max-height: 100px;
+}
+
+.aal-compact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  border-bottom: 1px solid #1a1e28;
+}
+
+.aal-compact-title {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #4a5265;
+}
+
+.aal-compact-count {
+  font-size: 9px;
+  color: #3a4255;
+  background: #1a1e28;
+  padding: 0 5px;
+  border-radius: 6px;
+}
+
+.aal-compact-list {
+  padding: 2px 0;
+  overflow: hidden;
+}
+
+.aal-compact-line {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 1px 10px;
+  font-size: 10px;
+  color: #6b7385;
+  line-height: 1.5;
+}
+
+.aal-compact-line .aal-time {
+  font-size: 9px;
+  min-width: 48px;
+}
+
+.aal-compact-line .aal-type-tag {
+  font-size: 8px;
+}
+
+.aal-compact-line .aal-msg {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+}
+
+/* ---- Emergency banner ---- */
+
+.aal-emergency-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: linear-gradient(90deg, #7f1d1d, #991b1b);
+  border-bottom: 1px solid #dc2626;
+  color: #fecaca;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  animation: aal-emergency-pulse 2s ease-in-out infinite;
+}
+
+@keyframes aal-emergency-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
+}
+
+.aal-emergency-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #dc2626;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.aal-emergency-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.aal-emergency-reset {
+  padding: 2px 10px;
+  border: 1px solid #f87171;
+  border-radius: 4px;
+  background: transparent;
+  color: #fca5a5;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.aal-emergency-reset:hover {
+  background: #dc2626;
+  color: #fff;
+}
+
+/* ---- Responsive ---- */
+@media (max-width: 760px) {
+  .aal-panel {
+    height: 160px;
+  }
+  .aal-filters {
+    display: none;
+  }
+}
+
+/* ---- Severity badges ---- */
+.aal-sev {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+
+.aal-sev--critical {
+  color: #ff4444;
+  background: #3a1010;
+  border: 1px solid #6b1a1a;
+  animation: aal-sev-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes aal-sev-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.aal-sev--urgent {
+  color: #f87171;
+  background: #2e1a17;
+  border: 1px solid #5a2020;
+}
+
+.aal-sev--elevated {
+  color: #fb923c;
+  background: #2a1e10;
+  border: 1px solid #5a3a10;
+}
+
+.aal-sev--monitoring {
+  color: #fbbf24;
+  background: #2a2610;
+  border: 1px solid #4a4010;
+}
+
+.aal-sev--info {
+  color: #6b7385;
+  background: #1e222c;
+  border: 1px solid #2e3340;
+}
+
+/* ---- View Thread button (inside expanded entries) ---- */
+.aal-thread-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  margin-left: 62px;
+  padding: 3px 10px;
+  background: #1a2030;
+  border: 1px solid #2a3550;
+  border-radius: 4px;
+  color: #60a5fa;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: auto;
+}
+
+.aal-thread-btn:hover {
+  background: #1e2a40;
+  border-color: #3b5998;
+  color: #93c5fd;
+}
+
