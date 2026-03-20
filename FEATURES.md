@@ -2623,3 +2623,8 @@ Special Feature: Shift Debrief — Hit a button at end-of-shift (or auto-prompte
 Is duplicate?: No
 Complexity: medium
 Special Feature: Walk-Away Lock — Webcam detects when you leave your desk (face disappears for 10+ seconds) and automatically blurs the entire app with a frosted-glass overlay to protect sensitive customer data on screen. When you sit back down and your face reappears, it unlocks instantly — zero-click security using the webcam hardware you already have. Perfect for open-office back-office environments where customer account info is visible.
+
+### Special Feature #172 — AI Déjà Vu (2026-03-20 05:16 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Déjà Vu — When you start typing a message in chat, the AI scans your entire conversation history and silently detects if you've asked something similar before. Instead of re-answering from scratch, it surfaces a ghost card: "You asked this on March 3rd — here's what worked last time" with the previous answer, what resolution you chose, and whether it was successful. Saves you from re-researching the same tricky edge cases you've already solved but forgot about.
