@@ -30,12 +30,12 @@ const FIELD_WEIGHTS = {
 };
 
 const CATEGORY_HINTS = [
-  { category: 'payroll', terms: ['payroll', 'paycheck', 'w-2', 'w2', 'direct deposit', 'employee'] },
+  { category: 'payroll', terms: ['payroll', 'paycheck', 'w-2', 'w2', 't4', 't4a', 'direct deposit', 'employee'] },
   { category: 'bank-feeds', terms: ['bank feed', 'bank connection', 'plaid', 'bank match', 'downloaded transaction'] },
   { category: 'reconciliation', terms: ['reconciliation', 'reconcile', 'beginning balance', 'statement'] },
   { category: 'permissions', terms: ['permission', 'access', 'role', 'admin', 'invite user'] },
   { category: 'billing', terms: ['billing', 'subscription', 'plan', 'renewal', 'payment method'] },
-  { category: 'tax', terms: ['tax', '1099', 'sales tax', 'vat', 'gst'] },
+  { category: 'tax', terms: ['tax', '1099', 'sales tax', 'vat', 'gst', 'cra'] },
   { category: 'invoicing', terms: ['invoice', 'estimate', 'quote', 'receive payment'] },
   { category: 'reporting', terms: ['report', 'profit and loss', 'balance sheet', 'cash flow'] },
   { category: 'inventory', terms: ['inventory', 'quantity on hand', 'sku', 'stock'] },

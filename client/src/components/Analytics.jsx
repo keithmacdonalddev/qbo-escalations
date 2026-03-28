@@ -1,20 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import {
-  getSummary,
-  getCategoryBreakdown,
-  getTopAgents,
-  getRecurringIssues,
-  getResolutionTimes,
-  getTrends,
-  getTodaySnapshot,
-  getStatusFlow,
-  getModelPerformance,
-} from '../api/analyticsApi.js';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
 import { getProviderLabel, isClaudeProvider } from '../lib/providerCatalog.js';
-
-const ANALYTICS_SECTION_TIMEOUT_MS = 12_000;
+import AnalyticsStatCard from './AnalyticsStatCard.jsx';
+import useAnalytics from '../hooks/useAnalytics.js';
 
 const CAT_BADGE_MAP = {
   payroll: 'cat-payroll',
@@ -37,74 +25,21 @@ const STATUS_LABELS = {
   'escalated-further': 'Escalated',
 };
 
-function withSectionTimeout(label, promise, timeoutMs = ANALYTICS_SECTION_TIMEOUT_MS) {
-  let timeoutId = null;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(`${label} timed out`)), timeoutMs);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
-}
-
 export default function Analytics() {
-  const [summary, setSummary] = useState(null);
-  const [categories, setCategories] = useState([]);
-  const [agents, setAgents] = useState([]);
-  const [recurring, setRecurring] = useState([]);
-  const [resolutionTimes, setResolutionTimes] = useState([]);
-  const [trends, setTrends] = useState([]);
-  const [today, setToday] = useState(null);
-  const [statusFlow, setStatusFlow] = useState({ total: 0, flow: {} });
-  const [modelPerf, setModelPerf] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [fetchError, setFetchError] = useState(null);
-  const loadData = useCallback(async (signal) => {
-    setLoading(true);
-    setFetchError(null);
-    const sections = [
-      { key: 'summary', label: 'summary', load: () => getSummary(), apply: setSummary, fallback: null },
-      { key: 'categories', label: 'categories', load: () => getCategoryBreakdown(), apply: setCategories, fallback: [] },
-      { key: 'agents', label: 'agents', load: () => getTopAgents(10), apply: setAgents, fallback: [] },
-      { key: 'recurring', label: 'recurring issues', load: () => getRecurringIssues(8), apply: setRecurring, fallback: [] },
-      { key: 'resolutionTimes', label: 'resolution times', load: () => getResolutionTimes(), apply: setResolutionTimes, fallback: [] },
-      { key: 'trends', label: 'daily trends', load: () => getTrends('daily'), apply: setTrends, fallback: [] },
-      { key: 'today', label: 'today snapshot', load: () => getTodaySnapshot(), apply: setToday, fallback: null },
-      { key: 'statusFlow', label: 'status flow', load: () => getStatusFlow(), apply: setStatusFlow, fallback: { total: 0, flow: {} } },
-      { key: 'modelPerf', label: 'model performance', load: () => getModelPerformance(), apply: setModelPerf, fallback: null },
-    ];
-
-    const results = await Promise.allSettled(
-      sections.map((section) => withSectionTimeout(section.label, section.load())),
-    );
-
-    if (signal?.aborted) return;
-
-    const failedSections = [];
-    results.forEach((result, index) => {
-      const section = sections[index];
-      if (result.status === 'fulfilled') {
-        section.apply(result.value);
-        return;
-      }
-      section.apply(section.fallback);
-      failedSections.push(section.label);
-    });
-
-    if (failedSections.length > 0) {
-      setFetchError(
-        failedSections.length === sections.length
-          ? 'Failed to load analytics data'
-          : `Some analytics sections could not load: ${failedSections.join(', ')}`
-      );
-    }
-
-    setLoading(false);
-  }, []);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    loadData(ac.signal);
-    return () => ac.abort();
-  }, [loadData]);
+  const {
+    summary,
+    categories,
+    agents,
+    recurring,
+    resolutionTimes,
+    trends,
+    today,
+    statusFlow,
+    modelPerf,
+    loading,
+    fetchError,
+    loadData,
+  } = useAnalytics();
 
   if (loading) {
     return (
@@ -134,12 +69,12 @@ export default function Analytics() {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
-        <StatCard label="Total Escalations" value={summary?.total ?? '--'} />
-        <StatCard label="Resolution Rate" value={summary?.total > 0 ? `${Math.round((summary.resolved / summary.total) * 100)}%` : '--'} />
-        <StatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
-        <StatCard label="Open Backlog" value={summary?.open ?? '--'} />
-        <StatCard label="Created Today" value={today?.created ?? '--'} />
-        <StatCard label="Resolved Today" value={today?.resolved ?? '--'} />
+        <AnalyticsStatCard label="Total Escalations" value={summary?.total ?? '--'} />
+        <AnalyticsStatCard label="Resolution Rate" value={summary?.total > 0 ? `${Math.round((summary.resolved / summary.total) * 100)}%` : '--'} />
+        <AnalyticsStatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
+        <AnalyticsStatCard label="Open Backlog" value={summary?.open ?? '--'} />
+        <AnalyticsStatCard label="Created Today" value={today?.created ?? '--'} />
+        <AnalyticsStatCard label="Resolved Today" value={today?.resolved ?? '--'} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 'var(--sp-6)' }}>
@@ -303,7 +238,7 @@ export default function Analytics() {
               </h2>
             </Tooltip>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-5)' }}>
-              <StatCard label="Total Parallel Decisions" value={modelPerf.totalDecisions} />
+              <AnalyticsStatCard label="Total Parallel Decisions" value={modelPerf.totalDecisions} />
               {modelPerf.providers.map(p => (
                 <div key={p.provider} className="stat-card">
                   <div className="stat-card-value" style={{ color: isClaudeProvider(p.provider) ? 'var(--provider-a)' : 'var(--provider-b)' }}>
@@ -369,15 +304,6 @@ export default function Analytics() {
 
         <CopilotPanel title="Analytics Co-pilot" />
       </div>
-    </div>
-  );
-}
-
-function StatCard({ label, value }) {
-  return (
-    <div className="stat-card">
-      <div className="stat-card-value">{value}</div>
-      <div className="stat-card-label">{label}</div>
     </div>
   );
 }

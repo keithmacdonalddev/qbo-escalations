@@ -1,170 +1,41 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
+import TemplateCard from './TemplateCard.jsx';
 import {
-  listTemplates,
-  createTemplate,
-  updateTemplate,
-  deleteTemplate,
-  duplicateTemplate,
-  renderTemplate,
-  trackTemplateUsage,
-} from '../api/templatesApi.js';
-
-const CATEGORY_FILTER_OPTIONS = [
-  '', 'acknowledgment', 'follow-up', 'escalation-up',
-  'payroll', 'bank-feeds', 'reconciliation', 'permissions',
-  'billing', 'tax', 'invoicing', 'reporting', 'technical', 'general',
-];
-
-const EMPTY_FORM = { category: 'general', title: '', body: '', variables: '' };
+  CATEGORY_FILTER_OPTIONS,
+  useTemplates,
+} from '../hooks/useTemplates.js';
 
 export default function TemplateLibrary() {
-  const [templates, setTemplates] = useState([]);
-  const [category, setCategory] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [copiedId, setCopiedId] = useState(null);
-  const [isFormOpen, setIsFormOpen] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [renderVars, setRenderVars] = useState({});
-  const [rendered, setRendered] = useState('');
-  const [renderUnresolved, setRenderUnresolved] = useState([]);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const list = await listTemplates(category || undefined);
-      setTemplates(list);
-    } catch (err) {
-      setError(err.message);
-    }
-    setLoading(false);
-  }, [category]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const currentVariableList = useMemo(() => {
-    const src = editingTemplate ? editingTemplate.variables || [] : [];
-    return src;
-  }, [editingTemplate]);
-
-  const openCreateForm = useCallback(() => {
-    setIsFormOpen(true);
-    setEditingTemplate(null);
-    setForm(EMPTY_FORM);
-    setRenderVars({});
-    setRendered('');
-    setRenderUnresolved([]);
-    setError('');
-  }, []);
-
-  const openEditForm = useCallback((template) => {
-    setIsFormOpen(true);
-    setEditingTemplate(template);
-    setForm({
-      category: template.category || 'general',
-      title: template.title || '',
-      body: template.body || '',
-      variables: (template.variables || []).join(', '),
-    });
-    const initialVars = {};
-    for (const v of template.variables || []) initialVars[v] = '';
-    setRenderVars(initialVars);
-    setRendered('');
-    setRenderUnresolved([]);
-    setError('');
-  }, []);
-
-  const closeForm = useCallback(() => {
-    setIsFormOpen(false);
-    setEditingTemplate(null);
-    setForm(EMPTY_FORM);
-    setRenderVars({});
-    setRendered('');
-    setRenderUnresolved([]);
-    setError('');
-  }, []);
-
-  const handleCopy = useCallback(async (template, textOverride) => {
-    const text = textOverride || template.body;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(template._id);
-      setTimeout(() => setCopiedId(null), 2000);
-      trackTemplateUsage(template._id).catch(() => {});
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      setCopiedId(template._id);
-      setTimeout(() => setCopiedId(null), 2000);
-    }
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setError('');
-    try {
-      const payload = {
-        category: form.category.trim(),
-        title: form.title.trim(),
-        body: form.body,
-        variables: form.variables
-          .split(',')
-          .map((v) => v.trim())
-          .filter(Boolean),
-      };
-      if (editingTemplate) {
-        await updateTemplate(editingTemplate._id, payload);
-      } else {
-        await createTemplate(payload);
-      }
-      await load();
-      closeForm();
-    } catch (err) {
-      setError(err.message);
-    }
-    setSaving(false);
-  }, [form, editingTemplate, load, closeForm]);
-
-  const confirmDeleteTemplate = useCallback(async () => {
-    if (!deleteTarget) return;
-    try {
-      await deleteTemplate(deleteTarget);
-      await load();
-      if (editingTemplate && editingTemplate._id === deleteTarget) closeForm();
-    } catch (err) {
-      setError(err.message);
-    }
-    setDeleteTarget(null);
-  }, [deleteTarget, load, editingTemplate, closeForm]);
-
-  const handleDuplicate = useCallback(async (templateId) => {
-    try {
-      await duplicateTemplate(templateId);
-      await load();
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [load]);
-
-  const handleRender = useCallback(async () => {
-    if (!editingTemplate) return;
-    try {
-      const result = await renderTemplate(editingTemplate._id, renderVars);
-      setRendered(result.rendered || '');
-      setRenderUnresolved(result.unresolvedVars || []);
-    } catch (err) {
-      setError(err.message);
-    }
-  }, [editingTemplate, renderVars]);
+  const {
+    templates,
+    category,
+    setCategory,
+    loading,
+    copiedId,
+    isFormOpen,
+    editingTemplate,
+    form,
+    setForm,
+    renderVars,
+    setRenderVars,
+    rendered,
+    renderUnresolved,
+    saving,
+    error,
+    deleteTarget,
+    currentVariableList,
+    load,
+    openCreateForm,
+    openEditForm,
+    closeForm,
+    handleCopy,
+    handleSave,
+    confirmDeleteTemplate,
+    handleDuplicate,
+    handleRender,
+    setDeleteTarget,
+  } = useTemplates();
 
   return (
     <div className="app-content-constrained">
@@ -218,50 +89,15 @@ export default function TemplateLibrary() {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--sp-5)' }}>
               {templates.map((tmpl) => (
-                <div key={tmpl._id} className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', marginBottom: 'var(--sp-1)' }}>
-                        {tmpl.title}
-                      </div>
-                      <span className={`cat-badge cat-${tmpl.category || 'general'}`}>
-                        {(tmpl.category || 'general').replace('-', ' ')}
-                      </span>
-                    </div>
-                    <button
-                      className={`copy-btn${copiedId === tmpl._id ? ' is-copied' : ''}`}
-                      onClick={() => handleCopy(tmpl)}
-                      type="button"
-                    >
-                      {copiedId === tmpl._id ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-
-                  <div style={{
-                    fontSize: 'var(--text-sm)',
-                    color: 'var(--ink-secondary)',
-                    whiteSpace: 'pre-wrap',
-                    maxHeight: 160,
-                    overflow: 'hidden',
-                    lineHeight: 1.6,
-                    background: 'var(--bg-sunken)',
-                    padding: 'var(--sp-4)',
-                    borderRadius: 'var(--radius-md)',
-                  }}>
-                    {tmpl.body}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-                    <button className="btn btn-secondary btn-sm" onClick={() => openEditForm(tmpl)} type="button">Edit</button>
-                    <Tooltip text="Create a copy of this template" level="medium"><button className="btn btn-secondary btn-sm" onClick={() => handleDuplicate(tmpl._id)} type="button">Duplicate</button></Tooltip>
-                    <button className="btn btn-ghost btn-sm" style={{ color: 'var(--danger)' }} onClick={() => setDeleteTarget(tmpl._id)} type="button">Delete</button>
-                  </div>
-
-                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
-                    Used {tmpl.usageCount || 0} time{(tmpl.usageCount || 0) !== 1 ? 's' : ''}
-                    {tmpl.lastUsed && ` · Last: ${new Date(tmpl.lastUsed).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`}
-                  </div>
-                </div>
+                <TemplateCard
+                  key={tmpl._id}
+                  template={tmpl}
+                  copied={copiedId === tmpl._id}
+                  onCopy={handleCopy}
+                  onEdit={openEditForm}
+                  onDuplicate={handleDuplicate}
+                  onDelete={setDeleteTarget}
+                />
               ))}
             </div>
           )}

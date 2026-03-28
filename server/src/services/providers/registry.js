@@ -1,5 +1,6 @@
 const claude = require('../claude');
 const codex = require('../codex');
+const lmStudio = require('../lm-studio');
 const { createChatAdapter } = require('./chat-provider');
 const {
   PROVIDER_IDS,
@@ -13,6 +14,11 @@ const {
   normalizeProvider: normalizeCatalogProvider,
   getAlternateProvider: getCatalogAlternateProvider,
   getProviderOptions,
+  getSelectableProviderIds,
+  getAllowedEfforts,
+  getSupportsThinking,
+  isAllowedEffort,
+  getProviderCapabilities,
 } = require('./catalog');
 
 const DEFAULT_PROVIDER = DEFAULT_PROVIDER_ID;
@@ -36,14 +42,22 @@ const PROVIDER_DEFS = Object.freeze(
     const transport = meta?.transport || 'claude';
     const model = getProviderModelId(id);
     const isCodex = transport === 'codex';
+    const isLmStudio = transport === 'lm-studio';
     acc[id] = {
       id,
       label: getCatalogProviderLabel(id),
       family: getCatalogProviderFamily(id),
-      supportsImageInput: isCodex
-        ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
-        : toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
+      supportsImageInput: isLmStudio
+        ? toBool(process.env.LM_STUDIO_SUPPORTS_IMAGE_INPUT, true)
+        : isCodex
+          ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
+          : toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
       getChat: () => {
+        if (isLmStudio) {
+          return model
+            ? (opts) => lmStudio.chat({ ...opts, model })
+            : lmStudio.chat;
+        }
         if (isCodex) {
           return model
             ? (opts) => codex.chat({ ...opts, model })
@@ -54,10 +68,17 @@ const PROVIDER_DEFS = Object.freeze(
           : claude.chat;
       },
       getDefaultTimeoutMs: () => toInt(
-        isCodex ? process.env.CODEX_CHAT_TIMEOUT_MS : process.env.CLAUDE_CHAT_TIMEOUT_MS,
+        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
+          : isCodex ? process.env.CODEX_CHAT_TIMEOUT_MS
+          : process.env.CLAUDE_CHAT_TIMEOUT_MS,
         120_000
       ),
       getParse: () => {
+        if (isLmStudio) {
+          return model
+            ? (input, options) => lmStudio.parseEscalation(input, { ...options, model })
+            : lmStudio.parseEscalation;
+        }
         if (isCodex) {
           return model
             ? (input, options) => codex.parseEscalation(input, { ...options, model })
@@ -68,6 +89,11 @@ const PROVIDER_DEFS = Object.freeze(
           : claude.parseEscalation;
       },
       getTranscribe: () => {
+        if (isLmStudio) {
+          return model
+            ? (input, options) => lmStudio.transcribeImage(input, { ...options, model })
+            : lmStudio.transcribeImage;
+        }
         if (isCodex) {
           return model
             ? (input, options) => codex.transcribeImage(input, { ...options, model })
@@ -78,11 +104,15 @@ const PROVIDER_DEFS = Object.freeze(
           : claude.transcribeImage;
       },
       getDefaultParseTimeoutMs: () => toInt(
-        isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS,
+        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
+          : isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS
+          : process.env.CLAUDE_PARSE_TIMEOUT_MS,
         120_000
       ),
       getDefaultTranscribeTimeoutMs: () => toInt(
-        isCodex ? process.env.CODEX_TRANSCRIBE_TIMEOUT_MS : process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS,
+        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
+          : isCodex ? process.env.CODEX_TRANSCRIBE_TIMEOUT_MS
+          : process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS,
         toInt(isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS, 60_000)
       ),
     };
@@ -111,10 +141,14 @@ function normalizeProvider(provider) {
 function getProvider(provider) {
   const normalized = normalizeProvider(provider);
   const def = PROVIDER_DEFS[normalized];
+  const capabilities = getProviderCapabilities(normalized);
   return {
     id: def.id,
     label: def.label,
     supportsImageInput: Boolean(def.supportsImageInput),
+    supportsThinking: capabilities.supportsThinking,
+    allowedEfforts: capabilities.allowedEfforts,
+    isAllowedEffort: (effort) => capabilities.allowedEfforts.includes(effort),
     chat: createChatAdapter(def.id, def.getChat()),
     defaultTimeoutMs: def.getDefaultTimeoutMs(),
     parseEscalation: def.getParse ? def.getParse() : null,
@@ -158,4 +192,8 @@ module.exports = {
   getAlternateProvider,
   providerSupportsImageInput,
   getProviderOptions,
+  getSelectableProviderIds,
+  getAllowedEfforts,
+  getSupportsThinking,
+  isAllowedEffort,
 };

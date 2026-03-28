@@ -1,6 +1,5 @@
 import './CopilotPanel.css';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Tooltip from './Tooltip.jsx';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
 import {
   DEFAULT_PROVIDER,
@@ -8,25 +7,18 @@ import {
   getAlternateProvider,
   getProviderShortLabel,
   getReasoningEffortOptions,
-  normalizeProvider,
-  normalizeReasoningEffort,
   PROVIDER_FAMILY,
   PROVIDER_OPTIONS,
 } from '../lib/providerCatalog.js';
-import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 import {
-  streamAnalyzeEscalation,
-  streamFindSimilar,
-  streamSuggestTemplate,
-  streamGenerateTemplate,
-  streamImproveTemplate,
-  streamExplainTrends,
-  streamPlaybookCheck,
-  streamSemanticSearch,
-} from '../api/copilotApi.js';
+  readSurfacePreferences,
+  writeStoredPreference,
+} from '../lib/surfacePreferences.js';
+import { formatTokenCount, formatCost } from '../hooks/useTokenMonitor.js';
 import {
   useSharedAgentSession,
 } from '../lib/agentSessions.js';
+import useCopilotRun from '../hooks/useCopilotRun.js';
 
 /* SVG icons for mode buttons and empty states */
 const CopilotIcon = () => (
@@ -109,100 +101,22 @@ const QUERY_PLACEHOLDERS = {
   improve: 'Paste the template content to improve...',
 };
 
-/**
- * Custom hook to batch high-frequency SSE updates via requestAnimationFrame.
- * Accumulates text in a ref and flushes into patchSession at most once per
- * animation frame, preventing per-chunk re-renders that freeze the UI.
- */
-function useChunkBatcher(patchSession) {
-  const pendingOutputRef = useRef('');
-  const pendingThinkingRef = useRef('');
-  const pendingThinkingPhaseRef = useRef(null);
-  const rafRef = useRef(null);
-
-  const scheduleFlush = useCallback(() => {
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      const outputChunk = pendingOutputRef.current;
-      const thinkingChunk = pendingThinkingRef.current;
-      const phase = pendingThinkingPhaseRef.current;
-      pendingOutputRef.current = '';
-      pendingThinkingRef.current = '';
-      pendingThinkingPhaseRef.current = null;
-      rafRef.current = null;
-
-      if (outputChunk || thinkingChunk) {
-        patchSession((prev) => {
-          const next = { ...prev };
-          if (outputChunk) next.output = `${prev.output || ''}${outputChunk}`;
-          if (thinkingChunk) {
-            next.thinkingText = `${prev.thinkingText || ''}${thinkingChunk}`;
-            next.statusText = phase === 'pass2' ? 'Summarizing...' : 'Reasoning...';
-          }
-          return next;
-        });
-      }
-    });
-  }, [patchSession]);
-
-  const appendOutput = useCallback((text) => {
-    pendingOutputRef.current += text;
-    scheduleFlush();
-  }, [scheduleFlush]);
-
-  const appendThinking = useCallback((text, phase) => {
-    pendingThinkingRef.current += text;
-    if (phase) pendingThinkingPhaseRef.current = phase;
-    scheduleFlush();
-  }, [scheduleFlush]);
-
-  const cancelBatcher = useCallback(() => {
-    if (rafRef.current) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-    pendingOutputRef.current = '';
-    pendingThinkingRef.current = '';
-    pendingThinkingPhaseRef.current = null;
-  }, []);
-
-  // Clean up on unmount
-  useEffect(() => cancelBatcher, [cancelBatcher]);
-
-  return { appendOutput, appendThinking, cancelBatcher };
-}
-
 export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }) {
   const sessionKey = useMemo(() => {
     if (escalationId) return `copilot:escalation:${escalationId}`;
     return `copilot:${String(title || 'general').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
   }, [escalationId, title]);
   const initialSession = useMemo(() => {
-    let initialProvider = DEFAULT_PROVIDER;
-    let initialMode = 'fallback';
-    let initialFallbackProvider = getAlternateProvider(DEFAULT_PROVIDER);
-    let initialReasoningEffort = DEFAULT_REASONING_EFFORT;
-    try {
-      initialProvider = normalizeProvider(
-        window.localStorage.getItem('qbo-copilot-provider')
-        || window.localStorage.getItem('qbo-chat-provider')
-        || DEFAULT_PROVIDER
-      );
-      const savedMode = window.localStorage.getItem('qbo-copilot-mode') || window.localStorage.getItem('qbo-chat-mode');
-      initialMode = savedMode === 'single' ? 'single' : 'fallback';
-      initialFallbackProvider = normalizeProvider(
-        window.localStorage.getItem('qbo-copilot-fallback-provider')
-        || window.localStorage.getItem('qbo-chat-fallback-provider')
-        || getAlternateProvider(initialProvider)
-      );
-      initialReasoningEffort = normalizeReasoningEffort(
-        window.localStorage.getItem('qbo-copilot-reasoning-effort')
-        || window.localStorage.getItem('qbo-chat-reasoning-effort')
-        || DEFAULT_REASONING_EFFORT
-      );
-    } catch {
-      // Ignore storage failures and keep defaults.
-    }
+    const storedPreferences = readSurfacePreferences({
+      providerKeys: ['qbo-copilot-provider', 'qbo-chat-provider'],
+      modeKeys: ['qbo-copilot-mode', 'qbo-chat-mode'],
+      fallbackProviderKeys: ['qbo-copilot-fallback-provider', 'qbo-chat-fallback-provider'],
+      reasoningEffortKeys: ['qbo-copilot-reasoning-effort', 'qbo-chat-reasoning-effort'],
+      defaultMode: 'fallback',
+      supportedModes: ['single', 'fallback'],
+      defaultProvider: DEFAULT_PROVIDER,
+      reasoningEffortFallback: DEFAULT_REASONING_EFFORT,
+    });
     return {
       mode: escalationId ? 'analyze' : 'search',
       query: '',
@@ -211,12 +125,10 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
       thinkingText: '',
       error: '',
       statusText: '',
-      provider: initialProvider,
-      providerMode: initialMode,
-      fallbackProvider: initialFallbackProvider === initialProvider
-        ? getAlternateProvider(initialProvider)
-        : initialFallbackProvider,
-      reasoningEffort: initialReasoningEffort,
+      provider: storedPreferences.provider,
+      providerMode: storedPreferences.mode,
+      fallbackProvider: storedPreferences.fallbackProvider,
+      reasoningEffort: storedPreferences.reasoningEffort,
     };
   }, [escalationId]);
   const {
@@ -259,9 +171,22 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
         ]
   ), [escalationId]);
 
-  const { appendOutput, appendThinking, cancelBatcher } = useChunkBatcher(patchSession);
-
   const needsQuery = MODES_WITH_QUERY.has(mode);
+
+  const { handleRun, handleStop } = useCopilotRun({
+    escalationId,
+    query,
+    mode,
+    streaming,
+    provider,
+    providerMode,
+    fallbackProvider,
+    reasoningEffort,
+    needsQuery,
+    patchSession,
+    setController,
+    abortSession,
+  });
 
   useEffect(() => {
     const nextFallback = fallbackProvider === provider
@@ -273,115 +198,11 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
   }, [provider, fallbackProvider, patchSession]);
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem('qbo-copilot-provider', provider);
-      window.localStorage.setItem('qbo-copilot-mode', providerMode);
-      window.localStorage.setItem('qbo-copilot-fallback-provider', fallbackProvider);
-      window.localStorage.setItem('qbo-copilot-reasoning-effort', reasoningEffort);
-    } catch {
-      // ignore localStorage failures
-    }
+    writeStoredPreference('qbo-copilot-provider', provider);
+    writeStoredPreference('qbo-copilot-mode', providerMode);
+    writeStoredPreference('qbo-copilot-fallback-provider', fallbackProvider);
+    writeStoredPreference('qbo-copilot-reasoning-effort', reasoningEffort);
   }, [provider, providerMode, fallbackProvider, reasoningEffort]);
-
-  const handleRun = useCallback(() => {
-    if (streaming) return;
-    if (needsQuery && !query.trim()) return;
-
-    patchSession({
-      output: '',
-      thinkingText: '',
-      error: '',
-      statusText: '',
-      streaming: true,
-      usage: null,
-    });
-
-    let streamFn;
-    if (mode === 'analyze') streamFn = (handlers, options) => streamAnalyzeEscalation(escalationId, handlers, options);
-    else if (mode === 'similar') streamFn = (handlers, options) => streamFindSimilar(escalationId, handlers, options);
-    else if (mode === 'template') streamFn = (handlers, options) => streamSuggestTemplate(escalationId, handlers, options);
-    else if (mode === 'generate') streamFn = (handlers, options) => streamGenerateTemplate('general', query.trim(), handlers, options);
-    else if (mode === 'improve') streamFn = (handlers, options) => streamImproveTemplate(query.trim(), handlers, options);
-    else if (mode === 'trends') streamFn = (handlers, options) => streamExplainTrends(handlers, options);
-    else if (mode === 'playbook') streamFn = (handlers, options) => streamPlaybookCheck(handlers, options);
-    else streamFn = (handlers, options) => streamSemanticSearch(query.trim(), handlers, options);
-
-    const { abort } = streamFn({
-      onStart: (data) => {
-        patchSession({
-          statusText:
-          `Running with ${getProviderShortLabel(data?.primaryProvider || provider)}`
-          + (data?.fallbackProvider ? ` + ${getProviderShortLabel(data.fallbackProvider)}` : '')
-        });
-      },
-      onStatus: (data) => {
-        patchSession({ statusText: data?.message || '' });
-      },
-      onThinking: (data) => {
-        appendThinking(data?.thinking || '', data?.phase);
-      },
-      onChunk: (data) => {
-        appendOutput(data.text || '');
-      },
-      onProviderError: (data) => {
-        patchSession({ statusText: data?.message || 'Provider attempt failed' });
-      },
-      onFallback: (data) => {
-        patchSession({
-          statusText: `Switched from ${getProviderShortLabel(data?.from || provider)} to ${getProviderShortLabel(data?.to || fallbackProvider)}`,
-        });
-      },
-      onDone: (data) => {
-        setController(null);
-        patchSession((prev) => ({
-          ...prev,
-          output: prev.output || data.fullResponse || '',
-          statusText: `Completed with ${getProviderShortLabel(data?.providerUsed || data?.provider || provider)}`,
-          streaming: false,
-          usage: data?.usage || null,
-        }));
-      },
-      onError: (msg) => {
-        setController(null);
-        patchSession({
-          error: typeof msg === 'string' ? msg : (msg?.message || 'Copilot request failed'),
-          statusText: '',
-          streaming: false,
-        });
-      },
-    }, {
-      provider,
-      mode: providerMode,
-      fallbackProvider: providerMode === 'fallback' ? fallbackProvider : undefined,
-      reasoningEffort,
-    });
-
-    setController(abort);
-  }, [
-    streaming,
-    needsQuery,
-    query,
-    mode,
-    escalationId,
-    provider,
-    providerMode,
-    fallbackProvider,
-    reasoningEffort,
-    patchSession,
-    setController,
-    appendOutput,
-    appendThinking,
-  ]);
-
-  function handleStop() {
-    cancelBatcher();
-    abortSession();
-    setController(null);
-    patchSession({
-      streaming: false,
-      statusText: '',
-    });
-  }
 
   const renderedOutput = useMemo(() => {
     if (!output) return null;

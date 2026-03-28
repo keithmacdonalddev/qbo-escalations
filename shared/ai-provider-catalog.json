@@ -110,5 +110,18 @@
     "order": 70,
     "allowedEfforts": ["low", "medium", "high", "xhigh"],
     "supportsThinking": false
+  },
+  {
+    "id": "lm-studio",
+    "label": "LM Studio (Local)",
+    "shortLabel": "LM Studio",
+    "family": "lm-studio",
+    "transport": "lm-studio",
+    "model": "local",
+    "selectable": true,
+    "order": 50,
+    "supportsThinking": false,
+    "supportsImageInput": true,
+    "allowedEfforts": ["low", "medium", "high"]
   }
 ]

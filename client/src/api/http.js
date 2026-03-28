@@ -11,8 +11,7 @@
 
 // ---- API error event system ------------------------------------------------
 // Lets consumers subscribe to every non-ok response and network failure
-// without monkeypatching fetch. Used by useDevToolsBridge for auto-error
-// reporting to the dev agent.
+// without monkeypatching fetch.
 
 /** @type {Set<(event: object) => void>} */
 const _errorListeners = new Set();
@@ -305,6 +304,11 @@ export function apiFetch(url, options = {}) {
 
   // Non-GET requests (POST, PATCH, DELETE) get a single retry on 5xx.
   // SSE / streaming callers already attach their own AbortController signal.
+  // Callers can pass `noRetry: true` to skip mutation retry (e.g. long-running
+  // vision inference where a retry would waste time and provider tokens).
+  if (options.noRetry) {
+    return _trackedFetch(url, method, options, _fetchWithTimeout(url, options));
+  }
   return _trackedFetch(url, method, options, _fetchMutationWithRetry(url, options));
 }
 
@@ -377,10 +381,12 @@ async function _fetchWithRetry(url, options) {
  * Single retry for mutation requests (POST/PATCH/DELETE) on 5xx.
  * Does NOT retry on 4xx (client errors) or AbortError (timeout/cancel).
  * Does NOT participate in the circuit breaker.
+ * On final 5xx failure, returns the response so callers can read the body.
  */
 async function _fetchMutationWithRetry(url, options) {
   const method = (options.method || 'POST').toUpperCase();
   let lastError;
+  let lastResponse;
   let lastStatus = 0;
   let lastStatusText = '';
   for (let attempt = 0; attempt <= MAX_MUTATION_RETRIES; attempt++) {
@@ -398,11 +404,14 @@ async function _fetchMutationWithRetry(url, options) {
         });
         return res;
       }
+      // 5xx — retriable server error, keep reference to response
+      lastResponse = res;
       lastError = new Error(`HTTP ${res.status}`);
       lastStatus = res.status;
       lastStatusText = res.statusText;
     } catch (err) {
       lastError = err;
+      lastResponse = null;
       if (err.name === 'AbortError') {
         _notifyApiError({
           url, method, status: 0, statusText: err.message,
@@ -422,6 +431,9 @@ async function _fetchMutationWithRetry(url, options) {
       });
     }
   }
+  // Return the last 5xx response so callers can read the error body,
+  // instead of throwing a bare Error("HTTP 500") that loses the message.
+  if (lastResponse) return lastResponse;
   throw lastError;
 }
 

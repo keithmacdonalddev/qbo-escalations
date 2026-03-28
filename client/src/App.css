@@ -494,94 +494,6 @@ a:hover {
   box-shadow: 0 0 0 2px var(--bg-raised);
 }
 
-/* Dev agent header icon */
-.app-header-dev-btn {
-  position: relative;
-}
-
-.app-header-dev-btn svg {
-  color: #4ec9b5;
-  transition: filter 0.3s ease, transform 0.3s ease;
-}
-
-/* Streaming state — icon glows + breathes */
-.app-header-dev-btn.is-streaming svg {
-  filter: drop-shadow(0 0 4px rgba(78, 201, 181, 0.6));
-  animation: headerDevIconBreathe 2s ease-in-out infinite;
-}
-
-/* Streaming state — button gets glow ring */
-.app-header-dev-btn.is-streaming {
-  background: color-mix(in srgb, #4ec9b5 8%, transparent);
-  border-color: color-mix(in srgb, #4ec9b5 30%, transparent);
-  box-shadow: 0 0 0 0 rgba(78, 201, 181, 0.3);
-  animation: headerDevRingPulse 2.5s ease-out infinite;
-}
-
-/* Status dot — base */
-.app-header-dev-dot {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--success);
-  border: 1.5px solid var(--bg-raised);
-}
-
-/* Warning dot */
-.app-header-dev-dot--warn {
-  background: var(--warning);
-  animation: headerDevWarnPulse 2s ease-in-out infinite;
-}
-
-/* Streaming dot — ripple ring */
-.app-header-dev-dot--streaming {
-  background: #4ec9b5;
-  animation: headerDevDotPulse 1.5s ease-in-out infinite;
-}
-
-.app-header-dev-dot--streaming::after {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1.5px solid #4ec9b5;
-  animation: headerDevRipple 2s ease-out infinite;
-}
-
-/* Icon breathe — subtle scale */
-@keyframes headerDevIconBreathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.06); }
-}
-
-/* Button ring pulse — expanding glow ring */
-@keyframes headerDevRingPulse {
-  0% { box-shadow: 0 0 0 0 rgba(78, 201, 181, 0.3); }
-  70% { box-shadow: 0 0 0 6px rgba(78, 201, 181, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(78, 201, 181, 0); }
-}
-
-/* Dot pulse — opacity + scale */
-@keyframes headerDevDotPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.75); }
-}
-
-/* Ripple ring expanding outward from dot */
-@keyframes headerDevRipple {
-  0% { transform: scale(1); opacity: 0.7; }
-  100% { transform: scale(2.8); opacity: 0; }
-}
-
-/* Warning pulse */
-@keyframes headerDevWarnPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 /* Mobile sidebar toggle in header */
 .app-header .sidebar-toggle-header {
   display: none;
@@ -1913,6 +1825,8 @@ textarea {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* ==========================================================
    WATERFALL STATUS WORDS — color helpers for friendly status
    ========================================================== */
 

@@ -5,7 +5,6 @@ const { createApp } = require('./app');
 const UsageLog = require('./models/UsageLog');
 const { drainPendingWrites } = require('./lib/usage-writer');
 const { reportServerError } = require('./lib/server-error-pipeline');
-const { startCleanupSchedule, stopCleanupSchedule } = require('./lib/cleanup');
 const { startScheduler: startBriefingScheduler, stopScheduler: stopBriefingScheduler } = require('./services/workspace-scheduler');
 const { startMonitor: startWorkspaceMonitor, stopMonitor: stopWorkspaceMonitor } = require('./services/workspace-monitor');
 const {
@@ -20,8 +19,6 @@ const { stopPruning: stopWorkspacePruning } = require('./services/workspace-runt
 const { stopPruning: stopAgentSessionPruning } = require('./services/agent-session-runtime');
 const { stopErrorPipeline } = require('./lib/server-error-pipeline');
 const { stopChainCleanup: stopUsageChainCleanup } = require('./lib/usage-writer');
-const { stopIncidentPruning } = require('./services/monitor-incidents');
-const { stopDevSessionPruning } = require('./routes/dev');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -90,14 +87,40 @@ async function start() {
       .then(() => completeBackgroundTask(codexWarmTaskId, { ok: true }))
       .catch((err) => failBackgroundTask(codexWarmTaskId, err, { ok: false }));
 
-    // Start periodic DB cleanup (30s delay, then every 6h)
-    startCleanupSchedule();
-
     // Start workspace morning briefing scheduler (checks every 5 min)
     startBriefingScheduler();
 
     // Start workspace background monitor (5-min alert scans + SSE push)
     startWorkspaceMonitor();
+
+    // Image parser provider self-check on startup
+    const { checkProviderAvailability } = require('./services/image-parser');
+    checkProviderAvailability({ forceRefresh: true }).then((providers) => {
+      const lines = Object.entries(providers).map(([name, info]) => {
+        const tag = info.available ? 'AVAILABLE' : 'UNAVAILABLE';
+        const model = info.model ? ` (${info.model})` : '';
+        return `  ${name}: ${tag}${model} — ${info.reason}`;
+      });
+      console.log(`[image-parser] Provider availability:\n${lines.join('\n')}`);
+    }).catch((err) => {
+      console.warn('[image-parser] Startup self-check failed:', err.message);
+    });
+
+    // Scheduled image parser health check — every 5 minutes
+    const IMAGE_PARSER_HEALTH_INTERVAL = 5 * 60 * 1000;
+    let _imageParserHealthTimer = setInterval(async () => {
+      try {
+        const status = await checkProviderAvailability({ forceRefresh: true });
+        const down = Object.entries(status).filter(([, info]) => !info.available);
+        if (down.length > 0) {
+          const names = down.map(([name, info]) => `${name} (${info.reason})`).join(', ');
+          console.warn(`[image-parser] Health check: ${down.length} provider(s) down — ${names}`);
+        }
+      } catch (err) {
+        console.warn('[image-parser] Health check error:', err.message);
+      }
+    }, IMAGE_PARSER_HEALTH_INTERVAL);
+    _imageParserHealthTimer.unref(); // Don't block process exit
   });
 }
 
@@ -151,7 +174,6 @@ mongoose.connection.on('reconnected', () => {
 // Graceful shutdown
 function shutdown(signal) {
   console.log(`\n${signal} received — shutting down`);
-  stopCleanupSchedule();
   stopBriefingScheduler();
   stopWorkspaceMonitor();
   stopAiPruning();
@@ -160,8 +182,6 @@ function shutdown(signal) {
   stopAgentSessionPruning();
   stopErrorPipeline();
   stopUsageChainCleanup();
-  stopIncidentPruning();
-  stopDevSessionPruning();
   if (httpServer) {
     httpServer.close(async () => {
       console.log('HTTP server closed');

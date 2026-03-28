@@ -102,6 +102,18 @@ This applies to EVERYTHING — code, APIs, product specs, pricing, hardware deta
 - **Instruct ALL subagents** to verify their own findings and flag what they couldn't confirm.
 - **Accuracy over speed — ALWAYS.** A slower correct answer beats a fast wrong one. Nobody asked for speed.
 
+## Delegation Model
+
+The main chat agent is a **PM/coordinator**. It does not implement or research directly.
+
+- **Main chat does**: read MEMORY.md, create tasks, spawn agents/teams, send messages, respond to the user
+- **Main chat delegates**: all file reads (except memory), grep/glob, edits, writes, bash commands, web searches/fetches
+- **Even trivial lookups** ("what's in X file?") go to a quick subagent — main chat reports the answer
+- **Agent teams** are mandatory for non-trivial work: 1 lead + workers, lead verifies all output
+- **Main chat critically reviews** all subagent output before presenting to user — never parrots raw results
+
+This keeps the main conversation context clean and ensures the user always has a responsive agent.
+
 ## Environment Variables
 
 Copy `server/.env.example` to `server/.env`:

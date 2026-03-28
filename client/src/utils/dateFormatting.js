@@ -50,7 +50,7 @@ export function formatDateShort(dateStr) {
 }
 
 /**
- * ThreadViewer format — expects a timestamp/date string.
+ * Conversation thread format — expects a timestamp/date string.
  * Returns e.g. "Mar 4, 14:30" (en-US, 24-hour).
  */
 export function formatDateWithTime(ts) {

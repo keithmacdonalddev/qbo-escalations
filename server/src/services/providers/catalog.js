@@ -22,8 +22,36 @@ const SELECTABLE_PROVIDER_IDS = Object.freeze(
 const DEFAULT_PROVIDER_ID = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
 const PREFERRED_CODEX_FALLBACK = 'chatgpt-5.3-codex-high';
 
-function getProviderMeta(providerId) {
-  return PROVIDER_MAP[providerId] || PROVIDER_MAP[DEFAULT_PROVIDER_ID] || null;
+function buildProviderOption(entry) {
+  return {
+    id: entry.id,
+    value: entry.id,
+    label: entry.label,
+    shortLabel: entry.shortLabel || entry.label,
+    family: entry.family,
+    transport: entry.transport,
+    model: entry.model || null,
+    availabilityNote: entry.availabilityNote || '',
+    supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
+    allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
+  };
+}
+
+function getDefaultProviderMeta() {
+  return PROVIDER_MAP[DEFAULT_PROVIDER_ID] || PROVIDER_CATALOG[0] || null;
+}
+
+function resolveProviderMeta(providerOrFamily) {
+  if (typeof providerOrFamily === 'string' && providerOrFamily) {
+    if (PROVIDER_MAP[providerOrFamily]) return PROVIDER_MAP[providerOrFamily];
+    const familyMatch = PROVIDER_CATALOG.find((entry) => entry.family === providerOrFamily);
+    if (familyMatch) return familyMatch;
+  }
+  return getDefaultProviderMeta();
+}
+
+function getProviderMeta(providerOrFamily) {
+  return resolveProviderMeta(providerOrFamily);
 }
 
 function getProviderModelId(providerId) {
@@ -47,15 +75,33 @@ function getProviderShortLabel(providerId) {
 }
 
 function getProviderOptions() {
-  return PROVIDER_CATALOG.filter((entry) => entry.selectable !== false).map((entry) => ({
-    id: entry.id,
-    label: entry.label,
-    shortLabel: entry.shortLabel || entry.label,
-    family: entry.family,
-    transport: entry.transport,
-    model: entry.model || null,
-    availabilityNote: entry.availabilityNote || '',
-  }));
+  return PROVIDER_CATALOG.filter((entry) => entry.selectable !== false).map(buildProviderOption);
+}
+
+function getProviderCapabilities(providerOrFamily) {
+  const meta = resolveProviderMeta(providerOrFamily);
+  const defaultMeta = getDefaultProviderMeta();
+  const allowedEfforts = Array.isArray(meta?.allowedEfforts) && meta.allowedEfforts.length > 0
+    ? [...meta.allowedEfforts]
+    : Array.isArray(defaultMeta?.allowedEfforts) && defaultMeta.allowedEfforts.length > 0
+      ? [...defaultMeta.allowedEfforts]
+      : ['low', 'medium', 'high'];
+
+  return {
+    providerId: meta?.id || DEFAULT_PROVIDER_ID,
+    label: getProviderLabel(providerOrFamily),
+    shortLabel: getProviderShortLabel(providerOrFamily),
+    family: getProviderFamily(providerOrFamily),
+    transport: getProviderTransport(providerOrFamily),
+    model: getProviderModelId(providerOrFamily),
+    supportsThinking: typeof meta?.supportsThinking === 'boolean'
+      ? meta.supportsThinking
+      : typeof defaultMeta?.supportsThinking === 'boolean'
+        ? defaultMeta.supportsThinking
+        : false,
+    allowedEfforts,
+    alternateProvider: getAlternateProvider(providerOrFamily),
+  };
 }
 
 function isValidProvider(providerId) {
@@ -91,22 +137,15 @@ function isSelectableProvider(providerId) {
 }
 
 function getAllowedEfforts(providerId) {
-  const meta = getProviderMeta(providerId);
-  if (meta && Array.isArray(meta.allowedEfforts)) return meta.allowedEfforts;
-  // Fallback based on family
-  return getProviderFamily(providerId) === 'codex'
-    ? ['low', 'medium', 'high', 'xhigh']
-    : ['low', 'medium', 'high'];
+  return [...getProviderCapabilities(providerId).allowedEfforts];
 }
 
 function getSupportsThinking(providerId) {
-  const meta = getProviderMeta(providerId);
-  if (meta && typeof meta.supportsThinking === 'boolean') return meta.supportsThinking;
-  return getProviderFamily(providerId) === 'claude';
+  return getProviderCapabilities(providerId).supportsThinking;
 }
 
 function isAllowedEffort(providerId, effort) {
-  return getAllowedEfforts(providerId).includes(effort);
+  return getProviderCapabilities(providerId).allowedEfforts.includes(effort);
 }
 
 module.exports = {
@@ -124,6 +163,7 @@ module.exports = {
   isValidProvider,
   normalizeProvider,
   getAlternateProvider,
+  getProviderCapabilities,
   getClaudeProviderIds,
   getCodexProviderIds,
   getSelectableProviderIds,

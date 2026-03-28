@@ -1,6 +1,10 @@
 'use strict';
 
 const Investigation = require('../models/Investigation');
+const {
+  parseEscalationText,
+  looksLikeEscalation,
+} = require('../lib/escalation-parser');
 
 // ---------------------------------------------------------------------------
 // QBO domain vocabulary for symptom extraction
@@ -86,9 +90,106 @@ const STOP_WORDS = new Set([
   'like', 'just', 'well', 'way', 'thing',
 ]);
 
+const HIGH_SIGNAL_SHORT_TOKENS = new Set([
+  't4', 't4a', 't5', 'w2', 'w-2', '1099', '2fa', 'cra', 'xml', 'csv', 'pdf',
+]);
+
+const NOISE_TERMS = new Set([
+  'coid', 'mid', 'case', 'client', 'contact', 'agent',
+  'attempting', 'expected', 'actual', 'outcome',
+  'tools', 'kb', 'used', 'tried', 'test', 'steps',
+  'calling', 'wanted', 'reason', 'gone', 'panel',
+  'articles', 'google', 'screen', 'share',
+]);
+
+const CATEGORY_ALIASES = new Map([
+  ['report', 'reporting'],
+  ['reports', 'reporting'],
+  ['reporting', 'reporting'],
+]);
+
+const BROAD_CATEGORIES = new Set(['unknown', 'general', 'technical']);
+const MIN_BASE_MATCH_SCORE = 10;
+const MIN_FINAL_MATCH_SCORE = 18;
+
 // ---------------------------------------------------------------------------
 // Symptom extraction — simple NLP tuned for QBO domain
 // ---------------------------------------------------------------------------
+
+function normalizeToken(token) {
+  return String(token || '')
+    .toLowerCase()
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '');
+}
+
+function isPureNumber(token) {
+  return /^\d+$/.test(token);
+}
+
+function isHighSignalShortToken(token) {
+  if (!token) return false;
+  if (HIGH_SIGNAL_SHORT_TOKENS.has(token)) return true;
+  return token.length >= 2 && token.length <= 8 && /[a-z]/.test(token) && /\d/.test(token);
+}
+
+function isSearchableToken(token) {
+  if (!token) return false;
+  if (NOISE_TERMS.has(token) || STOP_WORDS.has(token)) return false;
+  if (isPureNumber(token)) return false;
+  if (token.length >= 3) return true;
+  return isHighSignalShortToken(token);
+}
+
+function normalizeMatchCategory(rawCategory) {
+  const normalized = String(rawCategory || '').trim().toLowerCase();
+  if (!normalized) return null;
+  return CATEGORY_ALIASES.get(normalized) || normalized;
+}
+
+function canHardFilterByCategory(category) {
+  return Boolean(category) && !BROAD_CATEGORIES.has(category);
+}
+
+function buildStructuredSearchText(fields) {
+  const source = fields && typeof fields === 'object' ? fields : {};
+  const parts = [];
+
+  if (source.attemptingTo) parts.push(source.attemptingTo);
+  if (source.actualOutcome) parts.push(source.actualOutcome);
+  if (source.expectedOutcome) parts.push(source.expectedOutcome);
+  if (source.subject) parts.push(source.subject);
+
+  const tsTerms = extractSymptoms(source.tsSteps || '').slice(0, 5);
+  if (tsTerms.length > 0) parts.push(tsTerms.join(' '));
+
+  return parts
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function buildSearchContext(text, options = {}) {
+  const rawText = String(text || '').trim();
+  let searchText = rawText;
+  let normalizedCategory = normalizeMatchCategory(options.category);
+
+  if (rawText && looksLikeEscalation(rawText)) {
+    const parsed = parseEscalationText(rawText);
+    const narrative = buildStructuredSearchText(parsed);
+    if (narrative) searchText = narrative;
+
+    if (!normalizedCategory) {
+      const parsedCategory = normalizeMatchCategory(parsed.category);
+      if (canHardFilterByCategory(parsedCategory)) normalizedCategory = parsedCategory;
+    }
+  }
+
+  return {
+    searchText,
+    category: normalizedCategory,
+  };
+}
 
 /**
  * Auto-extract symptoms from free text.
@@ -103,34 +204,42 @@ function extractSymptoms(text) {
 
   // Multi-word phrase matching (longest match first)
   for (const phrase of PRODUCT_AREAS) {
-    if (lower.includes(phrase)) symptoms.add(phrase);
+    if (lower.includes(phrase) && !NOISE_TERMS.has(phrase)) symptoms.add(phrase);
   }
   for (const phrase of PLATFORMS) {
-    if (lower.includes(phrase)) symptoms.add(phrase);
+    if (lower.includes(phrase) && !NOISE_TERMS.has(phrase)) symptoms.add(phrase);
   }
   for (const phrase of ERROR_TERMS) {
-    if (lower.includes(phrase)) symptoms.add(phrase);
+    if (lower.includes(phrase) && !NOISE_TERMS.has(phrase)) symptoms.add(phrase);
   }
 
   // Single-word action verbs
   const words = lower.split(/\s+/).filter(Boolean);
   for (const word of words) {
-    if (ACTION_VERBS.includes(word)) symptoms.add(word);
+    const normalizedWord = normalizeToken(word);
+    if (ACTION_VERBS.includes(normalizedWord) && isSearchableToken(normalizedWord)) {
+      symptoms.add(normalizedWord);
+    }
   }
 
   // Extract remaining non-stop-word tokens as potential domain keywords
-  // Only keep tokens 3+ chars that aren't already captured
+  // Keep tokens 3+ chars, plus short alphanumeric domain tokens like T4/W2/2FA.
   for (const word of words) {
-    if (word.length >= 3 && !STOP_WORDS.has(word) && !symptoms.has(word)) {
-      // Check if this word is part of an already-captured multi-word phrase
-      let partOfPhrase = false;
-      for (const s of symptoms) {
-        if (s.includes(' ') && s.includes(word)) {
-          partOfPhrase = true;
-          break;
-        }
+    const normalizedWord = normalizeToken(word);
+    if (!isSearchableToken(normalizedWord) || symptoms.has(normalizedWord)) {
+      continue;
+    }
+
+    // Check if this word is part of an already-captured multi-word phrase
+    let partOfPhrase = false;
+    for (const symptom of symptoms) {
+      if (symptom.includes(' ') && symptom.includes(normalizedWord)) {
+        partOfPhrase = true;
+        break;
       }
-      if (!partOfPhrase) symptoms.add(word);
+    }
+    if (!partOfPhrase) {
+      symptoms.add(normalizedWord);
     }
   }
 
@@ -151,6 +260,10 @@ function escapeRegex(str) {
  */
 function scoreMatch(inv, searchTerms, options = {}) {
   let score = 0;
+  let baseScore = 0;
+  let phraseHitCount = 0;
+  let exactSymptomHits = 0;
+  const matchedTerms = new Set();
   const subjectLower = (inv.subject || '').toLowerCase();
   const detailsLower = (inv.details || '').toLowerCase();
   const notesLower = (inv.notes || '').toLowerCase();
@@ -158,27 +271,66 @@ function scoreMatch(inv, searchTerms, options = {}) {
   const symptomsLower = (inv.symptoms || []).map(s => s.toLowerCase());
 
   for (const term of searchTerms) {
-    const termLower = term.toLowerCase();
+    const termLower = normalizeToken(term);
+    if (!isSearchableToken(termLower)) continue;
+
+    const isPhrase = termLower.includes(' ');
+    let matched = false;
 
     // Subject match is highest signal
-    if (subjectLower.includes(termLower)) score += 10;
+    if (subjectLower.includes(termLower)) {
+      baseScore += isPhrase ? 12 : 10;
+      matched = true;
+      if (isPhrase) phraseHitCount += 1;
+    }
 
     // Symptom array exact match
-    if (symptomsLower.includes(termLower)) score += 8;
+    if (symptomsLower.includes(termLower)) {
+      baseScore += isPhrase ? 10 : 8;
+      matched = true;
+      exactSymptomHits += 1;
+      if (isPhrase) phraseHitCount += 1;
+    }
 
     // Details match — high signal, full issue description
-    if (detailsLower.includes(termLower)) score += 6;
+    if (detailsLower.includes(termLower)) {
+      baseScore += isPhrase ? 8 : 6;
+      matched = true;
+      if (isPhrase) phraseHitCount += 1;
+    }
 
     // Notes match
-    if (notesLower.includes(termLower)) score += 4;
+    if (notesLower.includes(termLower)) {
+      baseScore += isPhrase ? 5 : 4;
+      matched = true;
+      if (isPhrase) phraseHitCount += 1;
+    }
 
     // Workaround match
-    if (workaroundLower.includes(termLower)) score += 3;
+    if (workaroundLower.includes(termLower)) {
+      baseScore += isPhrase ? 4 : 3;
+      matched = true;
+      if (isPhrase) phraseHitCount += 1;
+    }
+
+    if (matched) matchedTerms.add(termLower);
   }
 
+  // Require real textual evidence before recency / trending can help.
+  if (baseScore < MIN_BASE_MATCH_SCORE) {
+    return 0;
+  }
+
+  if (matchedTerms.size < 2 && phraseHitCount === 0 && exactSymptomHits === 0) {
+    return 0;
+  }
+
+  score += baseScore;
+
   // Category match bonus
-  if (options.category && inv.category === options.category) {
-    score += 15;
+  const normalizedCategory = normalizeMatchCategory(options.category);
+  if (normalizedCategory && inv.category === normalizedCategory) {
+    score += BROAD_CATEGORIES.has(normalizedCategory) ? 5 : 15;
   }
 
   // Recency boost: INVs reported in last 30 days get a bonus
@@ -199,7 +351,7 @@ function scoreMatch(inv, searchTerms, options = {}) {
     score += Math.round(inv.score * 5);
   }
 
-  return score;
+  return score >= MIN_FINAL_MATCH_SCORE ? score : 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -216,12 +368,14 @@ const ACTIVE_STATUSES = ['new', 'in-progress'];
 async function matchInvestigations(text, options = {}) {
   if (!text || typeof text !== 'string' || !text.trim()) return [];
 
-  const term = text.trim();
+  const {
+    searchText,
+    category,
+  } = buildSearchContext(text, options);
   const limit = options.limit || 5;
-  const category = options.category || null;
 
   const statusFilter = { status: { $in: ACTIVE_STATUSES } };
-  if (category) statusFilter.category = category;
+  if (canHardFilterByCategory(category)) statusFilter.category = category;
 
   let results = [];
   let matchType = 'text';
@@ -229,7 +383,7 @@ async function matchInvestigations(text, options = {}) {
   // Strategy 1: MongoDB $text search (leverages text index on subject + notes + workaround)
   try {
     results = await Investigation.find(
-      { $text: { $search: term }, ...statusFilter },
+      { $text: { $search: searchText }, ...statusFilter },
       { score: { $meta: 'textScore' } },
     )
       .sort({ score: { $meta: 'textScore' } })
@@ -242,10 +396,14 @@ async function matchInvestigations(text, options = {}) {
   // Strategy 2: Regex fallback — try matching individual significant words
   if (results.length === 0) {
     matchType = 'regex';
-    const searchSymptoms = extractSymptoms(term);
+    const searchSymptoms = extractSymptoms(searchText);
     const significantTerms = searchSymptoms.length > 0
       ? searchSymptoms.slice(0, 8) // limit regex patterns
-      : term.split(/\s+/).filter(w => w.length >= 3 && !STOP_WORDS.has(w.toLowerCase())).slice(0, 8);
+      : searchText
+        .split(/\s+/)
+        .map(normalizeToken)
+        .filter(isSearchableToken)
+        .slice(0, 8);
 
     if (significantTerms.length === 0) return [];
 
@@ -269,7 +427,7 @@ async function matchInvestigations(text, options = {}) {
   // Strategy 3: Symptom array overlap (if we still have few results)
   if (results.length < 3) {
     matchType = results.length > 0 ? matchType : 'symptom';
-    const searchSymptoms = extractSymptoms(term);
+    const searchSymptoms = extractSymptoms(searchText);
     if (searchSymptoms.length > 0) {
       const symptomResults = await Investigation.find({
         ...statusFilter,
@@ -293,17 +451,23 @@ async function matchInvestigations(text, options = {}) {
   if (results.length === 0) return [];
 
   // Score and sort all candidates
-  const searchTerms = extractSymptoms(term);
+  const searchTerms = extractSymptoms(searchText);
   if (searchTerms.length === 0) {
     // Fallback: use raw words
-    searchTerms.push(...term.split(/\s+/).filter(w => w.length >= 3));
+    searchTerms.push(
+      ...searchText
+        .split(/\s+/)
+        .map(normalizeToken)
+        .filter(isSearchableToken)
+    );
   }
 
   const scored = results.map(inv => ({
     investigation: inv,
     score: scoreMatch(inv, searchTerms, { category }),
     matchType,
-  }));
+  }))
+    .filter(match => match.score > 0);
 
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, limit);
@@ -317,22 +481,16 @@ async function matchInvestigations(text, options = {}) {
 async function matchFromParseFields(parseFields) {
   if (!parseFields || typeof parseFields !== 'object') return [];
 
-  const parts = [];
-  if (parseFields.attemptingTo) parts.push(parseFields.attemptingTo);
-  if (parseFields.actualOutcome) parts.push(parseFields.actualOutcome);
-  if (parseFields.tsSteps) {
-    const steps = Array.isArray(parseFields.tsSteps)
-      ? parseFields.tsSteps.join(' ')
-      : parseFields.tsSteps;
-    parts.push(steps);
+  const normalizedFields = { ...parseFields };
+  if (Array.isArray(normalizedFields.tsSteps)) {
+    normalizedFields.tsSteps = normalizedFields.tsSteps.join(' ');
   }
-  if (parseFields.subject) parts.push(parseFields.subject);
 
-  const searchText = parts.join(' ').trim();
+  const searchText = buildStructuredSearchText(normalizedFields);
   if (!searchText) return [];
 
   // Map parse category to investigation category
-  const category = parseFields.category || null;
+  const category = normalizeMatchCategory(parseFields.category);
 
   const matches = await matchInvestigations(searchText, { category, limit: 5 });
 

@@ -17,7 +17,7 @@
 // Label patterns found in real QBO escalation DMs
 const FIELD_PATTERNS = [
   { field: 'coid',            patterns: [/COID\/MID[:\s]*([^\n/]+)/i, /(?:COID|CO\s*ID|COMPANY\s*ID)[:\s]*([^\n/]+)/i] },
-  { field: 'mid',             patterns: [/COID\/MID[:\s]*[^/]+\/\s*([^\n]+)/i, /(?:MID|MASTER\s*ID)[:\s]*([^\n]+)/i] },
+  { field: 'mid',             patterns: [/COID\/MID[:\s]*[^/\n]+\/\s*([^\n]+)/i, /(?:^|\n)\s*(?:MID|MASTER\s*ID)[:\s]*([^\n]+)/i] },
   { field: 'caseNumber',      patterns: [/(?:CASE(?:\s*(?:#|NUMBER|NUM))?)[:\s]*([^\n]+)/i, /(?:CS-\d{4}-\d+)/i] },
   { field: 'clientContact',   patterns: [/(?:CLIENT(?:\s*\/\s*CONTACT)?|CONTACT|CUSTOMER|CX\s*NAME)[:\s]*([^\n]+)/i] },
   { field: 'agentName',       patterns: [/(?:AGENT(?:\s*NAME)?|FROM|SENT\s*BY)[:\s]*([^\n]+)/i] },
@@ -30,12 +30,12 @@ const FIELD_PATTERNS = [
 
 // Category keywords for auto-classification
 const CATEGORY_KEYWORDS = {
-  'payroll':         ['payroll', 'paycheck', 'w-2', 'w2', 'direct deposit', 'pay run', 'pay schedule', 'employee pay', 'tax filing', 'payroll tax', 'pto', 'time off', 'garnishment'],
+  'payroll':         ['payroll', 'paycheck', 'w-2', 'w2', 't4', 't4a', 'direct deposit', 'pay run', 'pay schedule', 'employee pay', 'tax filing', 'payroll tax', 'pto', 'time off', 'garnishment'],
   'bank-feeds':      ['bank feed', 'bank connection', 'plaid', 'yodlee', 'bank rule', 'bank transaction', 'bank reconcil', 'downloaded transaction', 'bank match'],
   'reconciliation':  ['reconcil', 'unreconcil', 'beginning balance', 'opening balance', 'bank statement', 'discrepancy'],
   'permissions':     ['permission', 'user role', 'access', 'invite user', 'remove user', 'custom role', 'admin', 'accountant access', 'master admin'],
   'billing':         ['billing', 'subscription', 'cancel', 'downgrade', 'upgrade', 'payment method', 'charge', 'invoice from intuit', 'renewal', 'plan change'],
-  'tax':             ['1099', 'sales tax', 'tax rate', 'tax agency', 'tax form', 'tax filing', 'vat', 'gst', 'tax code'],
+  'tax':             ['1099', 'sales tax', 'tax rate', 'tax agency', 'tax form', 'tax filing', 'vat', 'gst', 'tax code', 'cra'],
   'invoicing':       ['invoice', 'estimate', 'quote', 'payment link', 'recurring invoice', 'send invoice', 'customer payment', 'receive payment'],
   'reporting':       ['report', 'profit and loss', 'balance sheet', 'cash flow', 'custom report', 'export report', 'chart of accounts'],
   'inventory':       ['inventory', 'product', 'service item', 'stock', 'quantity on hand', 'bundle', 'sku'],

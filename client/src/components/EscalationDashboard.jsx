@@ -1,115 +1,49 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { listEscalations, updateEscalation, deleteEscalation, getKnowledgeGaps, listKnowledgeCandidates } from '../api/escalationsApi.js';
-import { getSummary } from '../api/analyticsApi.js';
-import { useToast } from '../hooks/useToast.jsx';
+import { useEffect, useState } from 'react';
+import { getKnowledgeGaps } from '../api/escalationsApi.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
-import { tel, TEL } from '../lib/devTelemetry.js';
+import EscalationCard from './EscalationCard.jsx';
+import useEscalations, {
+  ESCALATION_CATEGORIES,
+  ESCALATION_STATUSES,
+  ESCALATION_STATUS_LABELS,
+  REVIEW_STATUS_COLORS,
+  REVIEW_STATUS_LABELS,
+} from '../hooks/useEscalations.js';
 import './EscalationDashboard.css';
 
-const STATUSES = ['', 'open', 'in-progress', 'resolved', 'escalated-further'];
-const STATUS_LABELS = { '': 'All Statuses', 'open': 'Open', 'in-progress': 'In Progress', 'resolved': 'Resolved', 'escalated-further': 'Escalated' };
-const CATEGORIES = ['', 'payroll', 'bank-feeds', 'reconciliation', 'permissions', 'billing', 'tax', 'invoicing', 'reporting', 'technical', 'general', 'unknown'];
-
-const STATUS_BADGE_MAP = {
-  'open': 'badge-open',
-  'in-progress': 'badge-progress',
-  'resolved': 'badge-resolved',
-  'escalated-further': 'badge-escalated',
-};
-
-const REVIEW_STATUS_LABELS = { draft: 'Draft', approved: 'Approved', published: 'Published', rejected: 'Rejected' };
-const REVIEW_STATUS_COLORS = { draft: 'var(--ink-secondary)', approved: 'var(--success, #22c55e)', published: 'var(--accent)', rejected: 'var(--danger)' };
-
 export default function EscalationDashboard() {
-  const toast = useToast();
-  const toastRef = useRef(toast);
-  toastRef.current = toast;
-  const [activeTab, setActiveTab] = useState('escalations');
-  const [escalations, setEscalations] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [summary, setSummary] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-
-  // Knowledge Queue state
-  const [kqCandidates, setKqCandidates] = useState([]);
-  const [kqTotal, setKqTotal] = useState(0);
-  const [kqCounts, setKqCounts] = useState({ draft: 0, approved: 0, published: 0, rejected: 0 });
-  const [kqStatusFilter, setKqStatusFilter] = useState('');
-  const [kqCategoryFilter, setKqCategoryFilter] = useState('');
-  const [kqLoading, setKqLoading] = useState(false);
-  const [kqError, setKqError] = useState(null);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  const loadData = useCallback(async (signal) => {
-    setLoading(true);
-    try {
-      const [escData, summaryData] = await Promise.all([
-        listEscalations({ status: statusFilter || undefined, category: categoryFilter || undefined, search: debouncedSearch || undefined }),
-        getSummary(),
-      ]);
-      if (signal?.aborted) return;
-      setEscalations(escData.escalations);
-      setTotal(escData.total);
-      setSummary(summaryData);
-      setLoadError(null);
-      tel(TEL.DATA_LOAD, `Loaded ${escData.escalations.length} escalations`, { total: escData.total });
-      if (escData.escalations.length === 0) {
-        tel(TEL.DATA_EMPTY, 'No escalations found', { hasFilters: !!(statusFilter || categoryFilter || debouncedSearch) });
-      }
-    } catch {
-      if (signal?.aborted) return;
-      setLoadError('Failed to load escalations');
-      tel(TEL.DATA_ERROR, 'Failed to load escalations', { statusFilter, categoryFilter, search: debouncedSearch });
-    }
-    if (signal?.aborted) return;
-    setLoading(false);
-  }, [statusFilter, categoryFilter, debouncedSearch]);
-
-  useEffect(() => {
-    const ac = new AbortController();
-    loadData(ac.signal);
-    return () => ac.abort();
-  }, [loadData]);
-
-  // Knowledge Queue loader
-  const loadKnowledgeQueue = useCallback(async () => {
-    setKqLoading(true);
-    try {
-      const data = await listKnowledgeCandidates({
-        reviewStatus: kqStatusFilter || undefined,
-        category: kqCategoryFilter || undefined,
-      });
-      setKqCandidates(data.candidates);
-      setKqTotal(data.total);
-      setKqCounts(data.counts);
-      setKqError(null);
-    } catch {
-      setKqError('Failed to load knowledge candidates');
-    }
-    setKqLoading(false);
-  }, [kqStatusFilter, kqCategoryFilter]);
-
-  useEffect(() => {
-    if (activeTab === 'knowledge') loadKnowledgeQueue();
-  }, [activeTab, loadKnowledgeQueue]);
-
-  const handleStatusChange = useCallback(async (id, newStatus) => {
-    tel(TEL.USER_ACTION, `Changed escalation status to ${newStatus}`, { escalationId: id, newStatus });
-    try {
-      await updateEscalation(id, { status: newStatus });
-      loadData();
-    } catch { toastRef.current.error('Failed to update status'); }
-  }, [loadData]);
+  const {
+    activeTab,
+    setActiveTab,
+    escalations,
+    total,
+    summary,
+    statusFilter,
+    setStatusFilter,
+    categoryFilter,
+    setCategoryFilter,
+    search,
+    setSearch,
+    loading,
+    loadError,
+    kqCandidates,
+    kqTotal,
+    kqCounts,
+    kqStatusFilter,
+    setKqStatusFilter,
+    kqCategoryFilter,
+    setKqCategoryFilter,
+    kqLoading,
+    kqError,
+    kqTotalAll,
+    requestDelete,
+    deleteTarget,
+    confirmDelete,
+    cancelDelete,
+    handleStatusChange,
+    refresh,
+  } = useEscalations();
 
   const [gaps, setGaps] = useState(null);
   const [gapsOpen, setGapsOpen] = useState(false);
@@ -121,19 +55,6 @@ export default function EscalationDashboard() {
       .catch(() => setGaps(null));
   }, [gapsDays]);
 
-  const [deleteTarget, setDeleteTarget] = useState(null);
-
-  const handleDelete = useCallback(async () => {
-    if (!deleteTarget) return;
-    try {
-      await deleteEscalation(deleteTarget);
-      loadData();
-    } catch { toastRef.current.error('Failed to delete escalation'); }
-    setDeleteTarget(null);
-  }, [deleteTarget, loadData]);
-
-  const kqTotalAll = kqCounts.draft + kqCounts.approved + kqCounts.published + kqCounts.rejected;
-
   return (
     <div className="app-content-constrained">
       <div className="page-header">
@@ -144,13 +65,12 @@ export default function EscalationDashboard() {
             : 'Review and track AI-generated knowledge drafts across all escalations.'}
         </span>
         <Tooltip text={activeTab === 'escalations' ? 'Reload escalation data' : 'Reload knowledge queue'} level="medium">
-          <button className="btn btn-secondary" onClick={activeTab === 'escalations' ? loadData : loadKnowledgeQueue} type="button">
+          <button className="btn btn-secondary" onClick={refresh} type="button">
             Refresh
           </button>
         </Tooltip>
       </div>
 
-      {/* Tab switcher */}
       <div style={{ display: 'flex', gap: 'var(--sp-2)', marginBottom: 'var(--sp-6)', borderBottom: '1px solid var(--border)' }}>
         <button
           type="button"
@@ -210,11 +130,10 @@ export default function EscalationDashboard() {
           {loadError && (
             <div className="error-banner">
               <span>{loadError}</span>
-              <button onClick={loadData} type="button">Retry</button>
+              <button onClick={refresh} type="button">Retry</button>
             </div>
           )}
 
-          {/* Summary stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
             <StatCard label="Open" value={summary?.open ?? '--'} />
             <StatCard label="In Progress" value={summary?.inProgress ?? '--'} />
@@ -223,7 +142,6 @@ export default function EscalationDashboard() {
             <StatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
           </div>
 
-          {/* Knowledge Gaps */}
           {gaps && gaps.gaps && gaps.gaps.length > 0 && (
             <div className="knowledge-gaps">
               <button
@@ -309,27 +227,26 @@ export default function EscalationDashboard() {
             </div>
           )}
 
-          {/* Filters */}
           <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
             <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
               <select
                 value={statusFilter}
-                onChange={(e) => { tel(TEL.USER_ACTION, `Filtered by status: ${e.target.value || 'all'}`, { filterType: 'status', filterValue: e.target.value }); setStatusFilter(e.target.value); }}
+                onChange={(e) => setStatusFilter(e.target.value)}
                 aria-label="Filter by status"
                 style={{ width: 'auto', minWidth: 140 }}
               >
-                {STATUSES.map(s => (
-                  <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>
+                {ESCALATION_STATUSES.map(s => (
+                  <option key={s} value={s}>{ESCALATION_STATUS_LABELS[s] || s}</option>
                 ))}
               </select>
               <select
                 value={categoryFilter}
-                onChange={(e) => { tel(TEL.USER_ACTION, `Filtered by category: ${e.target.value || 'all'}`, { filterType: 'category', filterValue: e.target.value }); setCategoryFilter(e.target.value); }}
+                onChange={(e) => setCategoryFilter(e.target.value)}
                 aria-label="Filter by category"
                 style={{ width: 'auto', minWidth: 140 }}
               >
                 <option value="">All Categories</option>
-                {CATEGORIES.slice(1).map(c => (
+                {ESCALATION_CATEGORIES.slice(1).map(c => (
                   <option key={c} value={c}>{c.replace('-', ' ')}</option>
                 ))}
               </select>
@@ -346,7 +263,6 @@ export default function EscalationDashboard() {
             </div>
           </div>
 
-          {/* Escalation list */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {loading ? (
               <div style={{ padding: 'var(--sp-8)', textAlign: 'center' }}>
@@ -377,59 +293,15 @@ export default function EscalationDashboard() {
                   </thead>
                   <tbody>
                     {escalations.map(esc => (
-                      <tr
+                      <EscalationCard
                         key={esc._id}
-                        className="table-clickable-row"
-                        onClick={() => {
+                        escalation={esc}
+                        onOpen={() => {
                           window.location.hash = `#/escalations/${esc._id}`;
                         }}
-                        style={{ cursor: 'pointer' }}
-                      >
-                        <td>
-                          <select
-                            value={esc.status}
-                            onChange={(e) => { e.stopPropagation(); handleStatusChange(esc._id, e.target.value); }}
-                            className={`badge ${STATUS_BADGE_MAP[esc.status] || ''}`}
-                            style={{ border: 'none', cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '2px 6px' }}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {STATUSES.slice(1).map(s => (
-                              <option key={s} value={s}>{STATUS_LABELS[s]}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td>
-                          <span className={`cat-badge cat-${esc.category || 'general'}`}>
-                            {(esc.category || 'general').replace('-', ' ')}
-                          </span>
-                        </td>
-                        <td className="truncate" style={{ maxWidth: 120 }}>{esc.agentName || '--'}</td>
-                        <td className="truncate" style={{ maxWidth: 250 }}>
-                          {esc.attemptingTo || '--'}
-                          {esc.conversationId && (
-                            <Tooltip text="This escalation has a linked conversation" level="medium">
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 4, verticalAlign: 'middle' }}>
-                                <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-                              </svg>
-                            </Tooltip>
-                          )}
-                        </td>
-                        <td><span className="mono">{esc.coid || '--'}</span></td>
-                        <td style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', color: 'var(--ink-secondary)' }}>
-                          {new Date(esc.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                        </td>
-                        <td>
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={(e) => { e.stopPropagation(); setDeleteTarget(esc._id); }}
-                            title="Delete escalation"
-                            type="button"
-                            style={{ color: 'var(--danger)', opacity: 0.6 }}
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
+                        onChangeStatus={handleStatusChange}
+                        onDelete={requestDelete}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -442,8 +314,8 @@ export default function EscalationDashboard() {
             message="This escalation will be permanently deleted. This cannot be undone."
             confirmLabel="Delete"
             danger={true}
-            onConfirm={handleDelete}
-            onCancel={() => setDeleteTarget(null)}
+            onConfirm={confirmDelete}
+            onCancel={cancelDelete}
           />
         </>
       )}
@@ -453,11 +325,10 @@ export default function EscalationDashboard() {
           {kqError && (
             <div className="error-banner">
               <span>{kqError}</span>
-              <button onClick={loadKnowledgeQueue} type="button">Retry</button>
+              <button onClick={refresh} type="button">Retry</button>
             </div>
           )}
 
-          {/* Knowledge status counts */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
             {['draft', 'approved', 'published', 'rejected'].map(st => (
               <button
@@ -482,7 +353,6 @@ export default function EscalationDashboard() {
             ))}
           </div>
 
-          {/* Knowledge filters */}
           <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
             <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
               <select
@@ -503,7 +373,7 @@ export default function EscalationDashboard() {
                 style={{ width: 'auto', minWidth: 140 }}
               >
                 <option value="">All Categories</option>
-                {CATEGORIES.slice(1).map(c => (
+                {ESCALATION_CATEGORIES.slice(1).map(c => (
                   <option key={c} value={c}>{c.replace('-', ' ')}</option>
                 ))}
               </select>
@@ -513,7 +383,6 @@ export default function EscalationDashboard() {
             </div>
           </div>
 
-          {/* Knowledge candidates list */}
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {kqLoading ? (
               <div style={{ padding: 'var(--sp-8)', textAlign: 'center' }}>

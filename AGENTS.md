@@ -29,14 +29,17 @@ The user is not a professional developer. The user has minimal programming exper
 - Keep prototype files and experiments out of core test/review paths by default.
 - Prefer separate branch for prototypes when feasible.
 
-### Testing Minimalism (Strict)
+### Testing Guidance (Targeted by Default)
 
-- Treat all testing as **emergency-only**: rarely run tests, and only when failure risk is critical and cannot be mitigated another way.
-- Default to **no test execution** during normal implementation work.
-- Keep tests out of the codebase by default: do **not** add test files, test harnesses, or ad-hoc test scripts unless the user explicitly requests them.
-- Do **not** modify existing tests unless the user explicitly requests test changes.
-- If an emergency test is unavoidable, run the smallest possible scope once (single test file/case or targeted command), never broad/full-suite runs.
-- In final reports, state exactly what test command was run and why it qualified as an emergency. If none were run, state that explicitly.
+- This repo already has an existing server-side Node test suite under `server/test/**/*.test.js`.
+- Default to **small, targeted verification** instead of broad test runs during normal implementation work.
+- Do **not** run the full suite by default. Prefer the smallest relevant command once when a change touches behavior that is already covered or risky enough to justify a check.
+- The image parser area has dedicated coverage in `server/test/image-parser*.test.js`. When working on image parsing behavior, prefer those focused tests before considering anything broader.
+- Use the repo's existing targeted commands when they fit:
+  - `npm run test:image-parser` for the image parser suite
+  - `npm --prefix server test` only when a broader server change truly warrants it
+- Avoid adding throwaway test harnesses or ad-hoc test scripts. Add or update tests when the user asks, when fixing a regression, or when the changed behavior is difficult to verify safely by inspection alone.
+- In final reports, state exactly what test command was run and why it was chosen. If none were run, state that explicitly.
 
 ### Process Control Safety (Strict)
 

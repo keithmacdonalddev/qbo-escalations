@@ -10,8 +10,14 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:4000',
         changeOrigin: true,
+        timeout: 120_000,      // 2 min — covers long-running AI provider calls
+        proxyTimeout: 120_000, // http-proxy upstream timeout
       },
       '/uploads': {
+        target: 'http://localhost:4000',
+        changeOrigin: true,
+      },
+      '/prototypes': {
         target: 'http://localhost:4000',
         changeOrigin: true,
       },

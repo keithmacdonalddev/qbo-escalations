@@ -39,6 +39,64 @@ function localDateStr(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+const WORK_EVENT_INCLUDE_RE = /\b(work|shift)\b/i;
+const WORK_EVENT_EXCLUDE_RE = /\b(break|lunch|walk|rest|pause|coffee|snack|stretch|nap|downtime|wellness)\b/i;
+
+function getEventStartDate(event) {
+  const raw = event?.start?.dateTime || event?.start?.date || '';
+  const parsed = raw ? new Date(raw) : null;
+  return parsed && Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function isWorkShiftEvent(event) {
+  const title = String(event?.summary || '').trim();
+  if (!title) return false;
+  if (WORK_EVENT_EXCLUDE_RE.test(title)) return false;
+  return WORK_EVENT_INCLUDE_RE.test(title);
+}
+
+function formatClockTime(date) {
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function buildRecentWorkStartBaseline(events) {
+  const workStarts = (Array.isArray(events) ? events : [])
+    .filter(isWorkShiftEvent)
+    .map((event) => ({ event, start: getEventStartDate(event) }))
+    .filter((entry) => entry.start);
+
+  if (workStarts.length === 0) return null;
+
+  const counts = new Map();
+  for (const entry of workStarts) {
+    const label = formatClockTime(entry.start);
+    const current = counts.get(label) || { label, count: 0 };
+    current.count += 1;
+    counts.set(label, current);
+  }
+
+  const distribution = [...counts.values()].sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return a.label.localeCompare(b.label);
+  });
+  const dominant = distribution[0];
+  const sampleCount = workStarts.length;
+  const dominantShare = sampleCount > 0 ? dominant.count / sampleCount : 0;
+  const hasStrongBaseline = sampleCount >= 5 && dominantShare >= 0.7;
+
+  return {
+    sampleCount,
+    dominantTimeLabel: dominant.label,
+    dominantCount: dominant.count,
+    dominantShare,
+    hasStrongBaseline,
+    distribution,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Context pipeline — mirrors workspace.js auto-context
 // ---------------------------------------------------------------------------
@@ -74,6 +132,46 @@ async function gatherBriefingContext() {
         const calendarLink = evt.htmlLink ? ` | Calendar URL: ${evt.htmlLink}` : '';
         parts.push(`  - [${evt.id}] ${start}${end ? ' to ' + end : ''}: ${summary}${location}${desc}${joinLink}${calendarLink}`);
       }
+    }
+  } catch { /* best effort */ }
+
+  // 1b. Recent work schedule baseline (past 30 days)
+  try {
+    const lookbackStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const historyRes = await calendar.listEvents({
+      calendarId: 'primary',
+      timeMin: lookbackStart,
+      timeMax: nowIso,
+      maxResults: 250,
+    });
+    const baseline = buildRecentWorkStartBaseline(historyRes?.ok ? (historyRes.events || []) : []);
+    if (baseline) {
+      parts.push('');
+      parts.push('RECENT WORK SCHEDULE BASELINE (past 30 days):');
+      parts.push(`  - Observed work shifts: ${baseline.sampleCount}`);
+      parts.push(`  - Start time distribution: ${baseline.distribution.map((entry) => `${entry.label} (${entry.count})`).join(', ')}`);
+      if (baseline.hasStrongBaseline) {
+        parts.push(`  - Dominant start time: ${baseline.dominantTimeLabel} (${Math.round(baseline.dominantShare * 100)}%, ${baseline.dominantCount}/${baseline.sampleCount} shifts)`);
+      } else {
+        parts.push('  - No strong dominant start time detected. Do NOT describe any start time as "usual" or "normal".');
+      }
+
+      const todayFirstWork = todayEvents
+        .filter(isWorkShiftEvent)
+        .map((event) => ({ event, start: getEventStartDate(event) }))
+        .filter((entry) => entry.start)
+        .sort((a, b) => a.start - b.start)[0];
+
+      if (todayFirstWork && baseline.hasStrongBaseline) {
+        const todayStartLabel = formatClockTime(todayFirstWork.start);
+        if (todayStartLabel === baseline.dominantTimeLabel) {
+          parts.push(`  - Today's first work shift starts at ${todayStartLabel}, which matches the dominant recent start time.`);
+        } else {
+          parts.push(`  - Today's first work shift starts at ${todayStartLabel}. The dominant recent start time is ${baseline.dominantTimeLabel}.`);
+        }
+      }
+
+      parts.push('  - Only use routine language like "usually", "normally", "earlier than usual", or "later than usual" when the baseline above is strong and supports the claim.');
     }
   } catch { /* best effort */ }
 
@@ -288,6 +386,8 @@ async function generateBriefing() {
     'Keith MacDonald is a QBO escalation specialist based in Atlantic Canada (AST timezone).',
     'This briefing runs automatically — the user did not ask for it.',
     'Be concise but information-dense. Focus on actionable items.',
+    'Never invent routines, norms, or baselines. Do not say "usually", "normally", "earlier than usual", or "later than usual" unless the provided context includes repeated evidence that supports it.',
+    'If the context does not show a strong pattern, omit the comparison instead of guessing.',
     'The markdown portion is read-only. The JSON portion may include supported UI actions.',
     'Do NOT suggest special features, app improvements, or development ideas. This is a personal briefing, not a product roadmap.',
     'Use markdown formatting for readability.',

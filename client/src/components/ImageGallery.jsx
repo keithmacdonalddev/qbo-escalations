@@ -1,11 +1,88 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getArchiveStats, getAllArchivedImages, getImageFileUrl } from '../api/imageArchiveApi.js';
+import ParserGallery from './ParserGallery.jsx';
 
 const GRADES = ['A', 'B', 'C', 'D', 'F'];
 const GRADE_COLORS = { A: '#22c55e', B: '#3b82f6', C: '#eab308', D: '#f97316', F: '#ef4444' };
 const PAGE_SIZE = 60;
 
+const TAB_STYLE_BASE = {
+  padding: '8px 20px',
+  fontSize: 'var(--text-sm)',
+  fontWeight: 600,
+  border: 'none',
+  borderBottom: '2px solid transparent',
+  background: 'none',
+  color: 'var(--ink-secondary)',
+  cursor: 'pointer',
+  transition: 'color 150ms ease, border-color 150ms ease',
+};
+
+const TAB_STYLE_ACTIVE = {
+  ...TAB_STYLE_BASE,
+  color: 'var(--accent)',
+  borderBottomColor: 'var(--accent)',
+};
+
 export default function ImageGallery() {
+  const [activeTab, setActiveTab] = useState(() => {
+    // Restore last-used tab from sessionStorage so navigating away and back
+    // doesn't lose the user's place.
+    try { return sessionStorage.getItem('gallery-tab') || 'parser'; } catch { return 'parser'; }
+  });
+
+  const switchTab = useCallback((tab) => {
+    setActiveTab(tab);
+    try { sessionStorage.setItem('gallery-tab', tab); } catch {}
+  }, []);
+
+  return (
+    <div className="app-content-constrained">
+      <div className="page-header">
+        <h1 className="page-title">Image Gallery</h1>
+        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+          Browse archived images and image parser results.
+        </span>
+      </div>
+
+      {/* Tab switcher */}
+      <div style={{
+        display: 'flex',
+        gap: 0,
+        borderBottom: '1px solid var(--line)',
+        marginBottom: 'var(--sp-6)',
+      }}>
+        <button
+          type="button"
+          style={activeTab === 'parser' ? TAB_STYLE_ACTIVE : TAB_STYLE_BASE}
+          onClick={() => switchTab('parser')}
+        >
+          Parser Results
+        </button>
+        <button
+          type="button"
+          style={activeTab === 'chat' ? TAB_STYLE_ACTIVE : TAB_STYLE_BASE}
+          onClick={() => switchTab('chat')}
+        >
+          Chat Images
+        </button>
+      </div>
+
+      {activeTab === 'parser' ? (
+        <ParserGallery />
+      ) : (
+        <ChatImageGallery />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChatImageGallery — the original gallery content, extracted into its own
+// component so ImageGallery can switch between tabs.
+// ---------------------------------------------------------------------------
+
+function ChatImageGallery() {
   const [stats, setStats] = useState(null);
   const [images, setImages] = useState([]);
   const [total, setTotal] = useState(0);
@@ -19,8 +96,13 @@ export default function ImageGallery() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
 
-  const fetchedRef = useRef(false);
+  const mountedRef = useRef(true);
   const offsetRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchImages = useCallback(async (reset = false) => {
     if (reset) {
@@ -38,6 +120,7 @@ export default function ImageGallery() {
         limit: PAGE_SIZE,
         offset: offsetRef.current,
       });
+      if (!mountedRef.current) return;
       if (reset) {
         setImages(result.images);
       } else {
@@ -46,20 +129,22 @@ export default function ImageGallery() {
       setTotal(result.total);
       offsetRef.current += result.images.length;
     } catch (err) {
-      setError(err.message || 'Failed to load images');
+      if (mountedRef.current) setError(err.message || 'Failed to load images');
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   }, [gradeFilter, dateFrom, dateTo]);
 
   // Initial load + stats
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    getArchiveStats().then(setStats).catch(() => {});
+    getArchiveStats()
+      .then((data) => { if (mountedRef.current) setStats(data); })
+      .catch(() => {});
     fetchImages(true);
-  }, [fetchImages]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-fetch when filters change (skip initial)
   const filterChangeRef = useRef(false);
@@ -100,25 +185,21 @@ export default function ImageGallery() {
 
   if (loading) {
     return (
-      <div className="app-content-constrained" style={{ textAlign: 'center', padding: 'var(--sp-10)' }}>
+      <div style={{ textAlign: 'center', padding: 'var(--sp-10)' }}>
         <span className="spinner" />
+        <div style={{ marginTop: 'var(--sp-3)', fontSize: 'var(--text-sm)', color: 'var(--ink-tertiary)' }}>
+          Loading chat image archive...
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="app-content-constrained">
-      <div className="page-header">
-        <h1 className="page-title">Image Gallery</h1>
-        <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
-          Browse all archived images from conversations.
-        </span>
-      </div>
-
+    <div>
       {error && (
         <div className="error-banner">
           <span>{error}</span>
-          <button onClick={() => fetchImages(true)} type="button">Retry</button>
+          <button onClick={() => { setError(null); fetchImages(true); }} type="button">Retry</button>
         </div>
       )}
 
@@ -213,7 +294,18 @@ export default function ImageGallery() {
       {/* Image grid */}
       {images.length === 0 && !loading ? (
         <div style={{ textAlign: 'center', padding: 'var(--sp-10)', color: 'var(--ink-tertiary)' }}>
-          {hasFilters ? 'No images match your filters.' : 'No archived images yet.'}
+          {hasFilters ? (
+            'No images match your filters.'
+          ) : (
+            <div>
+              <div style={{ fontSize: 'var(--text-base)', marginBottom: 'var(--sp-3)' }}>No archived images yet.</div>
+              <div style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
+                Images sent through the chat with screenshots will be archived here automatically.
+                <br />
+                Send a message with an image attachment in the Chat view to get started.
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="gallery-grid">

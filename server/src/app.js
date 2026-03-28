@@ -3,21 +3,15 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { listProviderHealth } = require('./services/provider-health');
-const { registerRequestRuntime } = require('./services/request-runtime');
+const { registerRequestRuntime, getRequestRuntimeHealth } = require('./services/request-runtime');
+const { getAiRuntimeHealth } = require('./services/ai-runtime');
 const { registerDomainRequestObserver } = require('./services/domain-health');
 const requestId = require('./middleware/request-id');
 const responseTimeout = require('./middleware/response-timeout');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
+const PROTOTYPES_DIR = path.join(__dirname, '..', '..', 'prototypes');
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-
-function parseBool(value, fallback) {
-  if (value === undefined || value === null || value === '') return fallback;
-  const normalized = String(value).trim().toLowerCase();
-  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') return true;
-  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') return false;
-  return fallback;
-}
 
 function getAllowedCorsOrigins() {
   const raw = (process.env.CORS_ALLOWED_ORIGINS || '').trim();
@@ -54,20 +48,6 @@ function buildCorsOptions() {
   };
 }
 
-function isDevModeEnabled() {
-  // Default on for local-only usage; set ENABLE_DEV_MODE=false to disable.
-  return parseBool(process.env.ENABLE_DEV_MODE, true);
-}
-
-function requireDevModeEnabled(req, res, next) {
-  if (isDevModeEnabled()) return next();
-  res.status(403).json({
-    ok: false,
-    code: 'DEV_MODE_DISABLED',
-    error: 'Developer mode is disabled',
-  });
-}
-
 function createApp() {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -81,9 +61,24 @@ function createApp() {
   app.use(responseTimeout(30_000));
   app.use(express.json({ limit: '12mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
+  app.use('/prototypes', express.static(PROTOTYPES_DIR));
 
   app.get('/api/health', (req, res) => {
     res.json({ ok: true, uptime: process.uptime() });
+  });
+
+  app.get('/api/runtime/health', (req, res) => {
+    res.json({
+      ok: true,
+      requests: getRequestRuntimeHealth(),
+      ai: getAiRuntimeHealth(),
+      checkedAt: new Date().toISOString(),
+      server: {
+        uptime: Math.floor(process.uptime()),
+        pid: process.pid,
+        nodeVersion: process.version,
+      },
+    });
   });
 
   app.get('/api/health/providers', (req, res) => {
@@ -94,7 +89,7 @@ function createApp() {
     });
   });
 
-  const { chatRouter, conversationsRouter } = require('./routes/chat');
+  const { chatRouter, conversationsRouter } = require('./routes/chat/index');
   app.use('/api/chat', chatRouter);
   app.use('/api/conversations', conversationsRouter);
   app.use('/api/escalations', require('./routes/escalations'));
@@ -102,16 +97,15 @@ function createApp() {
   app.use('/api/templates', require('./routes/templates'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/copilot', require('./routes/copilot'));
-  app.use('/api/dev', requireDevModeEnabled, require('./routes/dev'));
   app.use('/api/usage', require('./routes/usage'));
   app.use('/api/traces', require('./routes/traces'));
-  app.use('/api/model-lab', require('./routes/model-lab'));
   app.use('/api/agents', require('./routes/agents'));
   app.use('/api/gmail', require('./routes/gmail'));
   app.use('/api/calendar', require('./routes/calendar'));
-  app.use('/api/workspace', require('./routes/workspace'));
+  app.use('/api/workspace', require('./routes/workspace/index'));
   app.use('/api/investigations', require('./routes/investigations'));
   app.use('/api/preferences', require('./routes/preferences'));
+  app.use('/api/image-parser', require('./routes/image-parser'));
 
   app.use((err, req, res, next) => {
     console.error(`[${req.method} ${req.path}]`, err.message || err);

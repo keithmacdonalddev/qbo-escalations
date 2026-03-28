@@ -52,6 +52,22 @@ test('parseEscalationText defaults missing optional fields safely', () => {
   assert.ok(['yes', 'no', 'unknown'].includes(parsed.triedTestAccount));
 });
 
+test('parseEscalationText does not let MID spill into the next field when slash is missing', () => {
+  const input = [
+    'COID/MID: 123456789',
+    'CASE: 55555',
+    'CLIENT/CONTACT: Doug Mckensie',
+    'ACTUAL OUTCOME: Missing T4 summary',
+    'TS STEPS: Retried download',
+  ].join('\n');
+
+  const parsed = parseEscalationText(input);
+
+  assert.equal(parsed.coid, '123456789');
+  assert.equal(parsed.mid, '');
+  assert.equal(parsed.clientContact, 'Doug Mckensie');
+});
+
 test('looksLikeEscalation returns false for plain short text', () => {
   const looksStructured = looksLikeEscalation('Need help, nothing else here');
   assert.equal(looksStructured, false);

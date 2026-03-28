@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LLM Gateway Admin Dashboard Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <div class="mesh"></div>
+
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-block">
+          <div class="brand-mark">LG</div>
+          <div>
+            <p class="eyebrow">Control Room</p>
+            <h1>LLM Gateway</h1>
+          </div>
+        </div>
+
+        <nav class="nav-cluster" aria-label="Dashboard navigation">
+          <button class="nav-item is-active" data-view="overview">
+            <span class="nav-kicker">01</span>
+            <span>Overview</span>
+          </button>
+          <button class="nav-item" data-view="traffic">
+            <span class="nav-kicker">02</span>
+            <span>Traffic</span>
+          </button>
+          <button class="nav-item" data-view="keys">
+            <span class="nav-kicker">03</span>
+            <span>Keys</span>
+          </button>
+          <button class="nav-item" data-view="logs">
+            <span class="nav-kicker">04</span>
+            <span>Logs</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span class="nav-kicker">05</span>
+            <span>Settings</span>
+          </button>
+        </nav>
+
+        <section class="side-card side-card-live">
+          <div class="live-line">
+            <span class="live-dot"></span>
+            <span>Gateway live simulation</span>
+          </div>
+          <p class="side-note">
+            Prototype only. All numbers, incidents, and keys on this screen are simulated.
+          </p>
+        </section>
+
+        <section class="side-card">
+          <p class="side-label">Launch Stack</p>
+          <div class="stack-flow">
+            <div class="stack-node">
+              <span>Apps</span>
+              <strong>QBO + Mobile + Scripts</strong>
+            </div>
+            <div class="stack-arrow"></div>
+            <div class="stack-node accent-node">
+              <span>Gateway</span>
+              <strong>127.0.0.1:4100</strong>
+            </div>
+            <div class="stack-arrow"></div>
+            <div class="stack-node">
+              <span>Upstream</span>
+              <strong>LM Studio</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="side-card">
+          <p class="side-label">Shift Notes</p>
+          <ul class="note-list">
+            <li>Vision traffic is peaking after 2:00 PM.</li>
+            <li>Cloudflare tunnel failover stayed below 40 ms.</li>
+            <li>One dev key is close to its daily cap.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="dashboard">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Local Admin Dashboard Prototype</p>
+            <h2 id="focus-title">Gateway Overview</h2>
+            <p id="focus-description" class="lead">
+              Watch live health, queue pressure, tunnel stability, and request behavior from one
+              calm command deck.
+            </p>
+          </div>
+
+          <div class="status-cluster">
+            <div class="status-chip">
+              <span class="dot dot-live"></span>
+              <span>Stable</span>
+            </div>
+            <div class="status-chip mono" id="clock-chip">--:--:--</div>
+            <button class="action-pill" data-toast="Dry run queued for qbo-prod.">
+              Dry Run
+            </button>
+          </div>
+        </header>
+
+        <section class="hero-grid">
+          <article class="panel hero-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Gateway Pulse</p>
+                <h3>Command Deck</h3>
+              </div>
+              <div class="hero-actions">
+                <button class="ghost-button" data-toast="Key rotation staged in prototype mode.">
+                  Rotate Key
+                </button>
+                <button class="ghost-button" data-toast="Quiet mode enabled for the next 30 min.">
+                  Quiet Mode
+                </button>
+              </div>
+            </div>
+
+            <div class="hero-body">
+              <div class="gauge-wrap">
+                <div class="gauge-ring" id="load-ring">
+                  <div class="gauge-core">
+                    <span class="gauge-label">Load</span>
+                    <strong id="load-value">0%</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="hero-copy">
+                <div class="hero-badge">
+                  <span>Primary model</span>
+                  <strong id="primary-model">qwen/qwen3.5-9b</strong>
+                </div>
+                <p>
+                  The dashboard leans into a mission-control feel: strong status contrast, soft
+                  motion, and enough data density to feel powerful without becoming noise.
+                </p>
+
+                <div class="mix-list" id="request-mix"></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel compact-panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Traffic Shape</p>
+                <h3>Live Stream</h3>
+              </div>
+              <div class="range-switch">
+                <button class="range-button is-active" data-range="1h">1h</button>
+                <button class="range-button" data-range="24h">24h</button>
+                <button class="range-button" data-range="7d">7d</button>
+              </div>
+            </div>
+            <div class="river-chart" id="river-chart"></div>
+          </article>
+        </section>
+
+        <section class="metric-grid" id="metric-grid"></section>
+
+        <section class="detail-shell">
+          <div class="view-stage">
+            <section class="view is-active" data-view="overview">
+              <div class="content-grid">
+                <article class="panel span-2">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Regional Edge Health</p>
+                      <h3>Tunnel Surface</h3>
+                    </div>
+                    <span class="mono minor">Cloudflare mesh</span>
+                  </div>
+                  <div class="edge-grid" id="edge-grid"></div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Active Queue</p>
+                      <h3>Next Up</h3>
+                    </div>
+                  </div>
+                  <div class="queue-list" id="queue-list"></div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Incident Feed</p>
+                      <h3>Watchtower</h3>
+                    </div>
+                  </div>
+                  <div class="incident-list" id="incident-list"></div>
+                </article>
+
+                <article class="panel span-2">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Model Pressure</p>
+                      <h3>Memory + Throughput Bands</h3>
+                    </div>
+                  </div>
+                  <div class="band-grid" id="band-grid"></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="view" data-view="traffic">
+              <div class="content-grid">
+                <article class="panel span-2">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Lane Activity</p>
+                      <h3>Request Conveyor</h3>
+                    </div>
+                    <span class="mono minor">P95 + queue overlap</span>
+                  </div>
+                  <div class="traffic-chart large-chart" id="traffic-chart"></div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Traffic Mix</p>
+                      <h3>Hot Paths</h3>
+                    </div>
+                  </div>
+                  <div class="lane-list" id="lane-list"></div>
+                </article>
+
+                <article class="panel span-3">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Latency Heat</p>
+                      <h3>Response Tempo</h3>
+                    </div>
+                  </div>
+                  <div class="heat-grid" id="heat-grid"></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="view" data-view="keys">
+              <div class="content-grid">
+                <article class="panel span-3">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Key Fleet</p>
+                      <h3>Access Overview</h3>
+                    </div>
+                    <span class="mono minor">One key per app</span>
+                  </div>
+                  <div class="key-grid" id="key-grid"></div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Policy Notes</p>
+                      <h3>Guardrails</h3>
+                    </div>
+                  </div>
+                  <div class="policy-list">
+                    <div class="policy-item">Localhost-only binding remains enforced.</div>
+                    <div class="policy-item">Admin UI should get its own auth later.</div>
+                    <div class="policy-item">Public browser code should never hold these keys.</div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="view" data-view="logs">
+              <div class="content-grid">
+                <article class="panel span-3">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Request History</p>
+                      <h3>Log Explorer</h3>
+                    </div>
+                    <div class="filter-row">
+                      <button class="filter-chip is-active" data-filter="all">All</button>
+                      <button class="filter-chip" data-filter="vision">Vision</button>
+                      <button class="filter-chip" data-filter="error">Errors</button>
+                      <button class="filter-chip" data-filter="stream">Streaming</button>
+                    </div>
+                  </div>
+                  <div class="table-wrap">
+                    <table class="log-table">
+                      <thead>
+                        <tr>
+                          <th>Time</th>
+                          <th>Key</th>
+                          <th>Mode</th>
+                          <th>Model</th>
+                          <th>Status</th>
+                          <th>Latency</th>
+                          <th>Tokens</th>
+                        </tr>
+                      </thead>
+                      <tbody id="log-table-body"></tbody>
+                    </table>
+                  </div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Audit Trail</p>
+                      <h3>Recent Actions</h3>
+                    </div>
+                  </div>
+                  <div class="audit-list" id="audit-list"></div>
+                </article>
+              </div>
+            </section>
+
+            <section class="view" data-view="settings">
+              <div class="content-grid">
+                <article class="panel span-2">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Runtime Settings</p>
+                      <h3>Service Configuration</h3>
+                    </div>
+                  </div>
+                  <div class="settings-grid">
+                    <div class="setting-card">
+                      <span>Host Bind</span>
+                      <strong>127.0.0.1</strong>
+                      <p>Only Cloudflare Tunnel should face the outside world.</p>
+                    </div>
+                    <div class="setting-card">
+                      <span>Timeout</span>
+                      <strong>180s</strong>
+                      <p>Long enough for heavy vision calls, still finite.</p>
+                    </div>
+                    <div class="setting-card">
+                      <span>Concurrency</span>
+                      <strong>2 active</strong>
+                      <p>Protects VRAM from noisy overlap.</p>
+                    </div>
+                    <div class="setting-card">
+                      <span>Body Limit</span>
+                      <strong>25 MB</strong>
+                      <p>Large enough for screenshots, small enough to stay sane.</p>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Toggles</p>
+                      <h3>Operator Controls</h3>
+                    </div>
+                  </div>
+                  <div class="toggle-stack">
+                    <label class="toggle-row">
+                      <span>Auto-retry upstream timeout</span>
+                      <span class="toggle is-on"></span>
+                    </label>
+                    <label class="toggle-row">
+                      <span>Quiet overnight alerts</span>
+                      <span class="toggle is-on"></span>
+                    </label>
+                    <label class="toggle-row">
+                      <span>Record prompt bodies</span>
+                      <span class="toggle"></span>
+                    </label>
+                    <label class="toggle-row">
+                      <span>Allow local admin unlock</span>
+                      <span class="toggle is-on"></span>
+                    </label>
+                  </div>
+                </article>
+
+                <article class="panel span-3 danger-panel">
+                  <div class="panel-head">
+                    <div>
+                      <p class="eyebrow">Danger Zone</p>
+                      <h3>Manual Operations</h3>
+                    </div>
+                  </div>
+                  <div class="danger-actions">
+                    <button class="danger-button" data-toast="Emergency queue drain simulated.">
+                      Drain Queue
+                    </button>
+                    <button class="danger-button" data-toast="Read-only mode simulated for 10 min.">
+                      Freeze Writes
+                    </button>
+                    <button class="danger-button" data-toast="Tunnel reroute simulation opened.">
+                      Reassign Tunnel
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

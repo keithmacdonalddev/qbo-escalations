@@ -2628,3 +2628,124 @@ Special Feature: Walk-Away Lock — Webcam detects when you leave your desk (fac
 Is duplicate?: No
 Complexity: medium
 Special Feature: AI Déjà Vu — When you start typing a message in chat, the AI scans your entire conversation history and silently detects if you've asked something similar before. Instead of re-answering from scratch, it surfaces a ghost card: "You asked this on March 3rd — here's what worked last time" with the previous answer, what resolution you chose, and whether it was successful. Saves you from re-researching the same tricky edge cases you've already solved but forgot about.
+
+### Special Feature #173 — Sensitive Data Shield Mode (2026-03-22 10:14 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Sensitive Data Shield Mode — One-click "Shield" toggle in the header that forces ALL AI requests through your local LM Studio model only, blocking cloud providers entirely. A red lock icon appears and the app refuses to route to Claude/GPT until you deactivate it. Perfect for handling escalations with sensitive customer data (SSNs, bank accounts, tax info) — zero data leaves your machine. Combines the new local model capability with a genuine privacy need in back-office work.
+
+### Special Feature #174 — Ghost Typing Preview (2026-03-22 10:30 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Ghost Typing Preview — When you're composing a response to a phone agent, the app shows a faint AI-generated "ghost completion" ahead of your cursor (like GitHub Copilot but for escalation replies). It draws from your playbook, past resolutions, and the current escalation context. Press Tab to accept, keep typing to ignore. Turns you into a speed demon without taking away control — your words, AI-assisted pacing.
+
+---
+
+### Special Feature #175 — Déjà Vu Escalation Pattern Detector (2026-03-22 10:41 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Déjà Vu Escalation Pattern Detector — When composing a chat message about a new escalation, the AI silently scans your last ~50 resolved cases and surfaces a floating toast if it detects a repeating pattern — like "3rd bank-feed disconnect from RBC this week" or "payroll tax filing failures spiking since Tuesday." It's not about matching a single similar case (that exists already) — it's about detecting emerging trends across multiple cases that you'd only notice by gut feel after days. One tap expands into a mini-timeline of the cluster so you can flag it to your team lead before it becomes a known issue.
+
+### Special Feature #176 — Session Ghost Recovery (2026-03-23 12:17 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Session Ghost Recovery — When a workspace agent session dies mid-stream (network drop, browser tab freeze, server restart), the app auto-detects orphaned sessions on next load, recovers any partial response text from localStorage, and presents a "pick up where you left off" card showing what was being processed when it died. Prevents lost AI work during long agent runs — no more "what was it saying before it crashed?"
+
+### Special Feature #177 — Pomodoro Flow Timer (2026-03-23 12:17 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Pomodoro Flow Timer — A built-in focus timer that integrates with your escalation workflow. Start a 25-minute session and the app auto-silences non-critical workspace alerts, dims notification badges, and tracks escalations closed per session. After the timer, a micro-break card appears with your sprint stats and a stretch reminder. Over time, Analytics shows your escalation-per-pomodoro rate — revealing your peak productivity windows and turning "just grinding" into measurable flow states.
+
+### Special Feature #178 — Ambient Soundscape Engine (2026-03-23 12:20 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Ambient Soundscape Engine — A built-in ambient sound mixer in the header — rain on a window, coffee shop murmur, lo-fi hum, white noise. It auto-reads your work tempo: when you're blazing through escalations it stays mellow, but when you've been stuck on one case for 10+ minutes it subtly shifts to a deeper focus frequency. Tiny headphone icon, drag-and-mix layers, save your own presets. Turns your escalation grind into a vibe.
+
+### Special Feature #179 — AI Shadow Agent (2026-03-23 12:47 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Shadow Agent — A second invisible AI runs on every image you paste into chat, using a different provider than your primary one, and silently compares both transcriptions character-by-character. If they disagree on a COID, case number, or INV number, a subtle warning badge appears on the parsed output highlighting the discrepancy — like having a second pair of eyes proofread every image parse without you doing anything. Catches the one wrong digit that could send you chasing the wrong case.
+
+### Special Feature #180 — Ritual Lock Screen (2026-03-23 2:40 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Ritual Lock Screen — When your shift starts, the app presents a full-screen question: "What's the one thing you want to accomplish today?" Your answer gets pinned as a persistent micro-banner across every view. At end-of-day, it replays your intention alongside actual metrics (escalations closed, emails handled, INVs resolved) and asks "Did you do it?" — stored in a micro-journal. Over weeks, the AI spots patterns in which goals you hit vs. abandon and starts suggesting more realistic daily intentions.
+
+### Special Feature #181 — Escalation Voice Memo (2026-03-23 4:12 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Escalation Voice Memo — Tap a mic icon in the compose area to record a quick voice note, and the app transcribes it instantly into a draft escalation response using Whisper-style speech-to-text. Perfect for when you're juggling multiple cases and typing is slower than talking — speak your resolution, the AI cleans up grammar and QBO terminology, and you review before sending. Keeps your hands free while your brain works.
+
+### Special Feature #182 — AI Time Capsule (2026-03-23 10:19 AM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: AI Time Capsule — Once a month, the AI writes a sealed "letter to future you" summarizing your work patterns, wins, struggles, and growth — then locks it for 90 days. When it unlocks, you get a notification to read how past-you was doing, what you were wrestling with, and how far you've come. A personal retrospective no one else sees — surprisingly motivating when you realize problems that felt huge 3 months ago are now routine.
+
+### Special Feature #183 — Provider Health Dashboard (2026-03-25 7:29 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Provider Health Dashboard — A live tile on the image parser panel that pings all configured vision providers every 30 seconds and shows real-time latency, uptime streaks, and cost-per-parse estimates side by side. When you're about to parse a batch of screenshots, glance at it to pick the fastest/cheapest provider right now — no more trial and error guessing which one is lagging today.
+
+### 🔊 Read Aloud Mode
+**Suggested:** Wed, Mar 25, 2026  7:33:29 PM
+Click a button on any escalation, chat response, or email to have it narrated via browser text-to-speech. Hands-free processing while you multitask — highlight any text and hit a hotkey to hear it read aloud with adjustable speed and voice.
+
+### Special Feature #184 — Phantom Clipboard (2026-03-25 7:37 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Phantom Clipboard — A persistent invisible clipboard that lives across all app views. Triple-tap any text (COID, case number, INV, email address) and it silently stacks onto a floating chip tray at the bottom edge. When you're composing a response or filling a form, tap any chip to paste it inline — like a clipboard with memory that never forgets what you copied 20 minutes ago, even across tab switches and panel changes.
+
+### 🐾 Desk Pet
+**Suggested:** Wed, Mar 25, 2026  7:44:52 PM
+A tiny animated creature that lives in the corner of your app. It reacts to what you're doing — perks up when you resolve an escalation, naps during idle time, gets excited when emails arrive, and occasionally does random silly things. Feed it by completing tasks. Pure dopamine for long shifts.
+
+### 🥠 Fortune Cookie Break
+**Suggested:** Wed, Mar 25, 2026  8:02:06 PM
+A hidden hotkey (Ctrl+Shift+F) that dims the screen and shows a beautifully animated fortune cookie that cracks open with a random piece of wisdom, funny quote, or motivational one-liner. A 5-second mental reset during a tough shift.
+
+### Special Feature #185 — Déjà Vu Radar (2026-03-25 8:22 PM)
+Is duplicate?: No
+Complexity: medium
+Special Feature: Déjà Vu Radar — When you paste or parse a new escalation, the AI silently fingerprints the issue description and scans your last 90 days of resolved cases for eerily similar ones. If it finds a match, a subtle "You've seen this before" toast appears with a link to your past resolution — so you can copy-paste your own winning answer instead of solving the same puzzle twice.
+
+### Special Feature #186 — "Panic Button" Quick-Mute Mode (2026-03-26 2:25 PM)
+Is duplicate?: No (existing #Panic Button at line 2257 is screen-blanking for privacy — this is activity/notification muting)
+Complexity: medium
+**Suggested:** Thu, Mar 26, 2026  2:25:16 PM
+Special Feature: "Panic Button" Quick-Mute Mode — A single keyboard shortcut (like F9) that instantly mutes all workspace agent activity, notification sounds, and auto-scheduled tasks for a configurable cooldown period. Perfect for when you're deep in a live escalation call-assist and need zero distractions from background agent runs, calendar pings, or email alerts — then everything resumes automatically.
+
+### Special Feature #187 — Mood Ring Status Bar (2026-03-26 3:26 PM)
+Is duplicate?: No
+Complexity: medium
+**Suggested:** Thu, Mar 26, 2026  3:26:40 PM
+Special Feature: Mood Ring Status Bar — A thin gradient bar across the top of the app that shifts color based on your work tempo in real-time: cool blue when you're cruising through escalations, warm amber when you've been stuck on one case, pulsing red when your queue is piling up. It also picks up signals from your calendar (meetings coming up) and email volume. At a glance, you know your own "vibe" without checking stats — and it subtly nudges you to take a breath when things are heating up.
+
+### Special Feature #188 — Handwriting Scanner (2026-03-26 3:39 PM)
+Is duplicate?: No
+Complexity: medium
+**Suggested:** Thu, Mar 26, 2026  3:39:42 PM
+Special Feature: Handwriting Scanner — Point your webcam at a handwritten sticky note or whiteboard scrawl and the app uses vision AI to transcribe it into typed text, then auto-routes it: if it looks like a case number or COID it opens that escalation, if it's a to-do it adds it to your task flow, if it's a name it searches your Gmail. Your desk clutter becomes instant digital actions with zero typing.
+
+### Special Feature #189 — Screenshot Queue Parser (2026-03-26 4:45 PM)
+Is duplicate?: No
+Complexity: medium
+**Suggested:** Thu, Mar 26, 2026  4:45:39 PM
+Special Feature: Screenshot Queue Parser — Drop 3-5 escalation screenshots into the image parser popup at once and it runs them sequentially, stitching the extracted text together with clear dividers before inserting the combined result into the compose box. Perfect for when a phone agent sends a thread of screenshots spanning multiple screens — parse the whole batch in one shot instead of one-at-a-time.
+
+### Special Feature #190 — Smart Model Router Dashboard (2026-03-28 12:49 PM)
+Is duplicate?: No
+Complexity: medium
+**Suggested:** Sat, Mar 28, 2026  12:49:54 PM
+Special Feature: Smart Model Router Dashboard — A live panel showing which AI model handles each request as it happens, with a real-time token cost-per-second ticker. The clever part: it auto-detects when you're overspending on a task (e.g., "This image parse used Opus at $0.12 — Qwen could've done it for free") and lets you one-click reassign surfaces to cheaper models with an undo button. A money-saving copilot that watches your AI spending and actively negotiates it down.
+
+### Special Feature #191 — Mood Lighting (2026-03-28 12:57 PM)
+Is duplicate?: No
+Complexity: low
+**Suggested:** Sat, Mar 28, 2026  12:57:41 PM
+Special Feature: Mood Lighting — Your app subtly shifts its color temperature throughout the day like f.lux but for the entire UI. Cool blue-whites in the morning for focus, warm ambers in the evening for wind-down — automatic, zero-config, and based on your local time. A small ambient touch that makes the app feel alive and easier on your eyes during late sessions.
+
+### Special Feature #192 — Ambient Soundscapes (2026-03-28 12:59 PM)
+Is duplicate?: No
+Complexity: low
+**Suggested:** Sat, Mar 28, 2026  12:59:21 PM
+Special Feature: Ambient Soundscapes — A built-in background sound player (rain, coffee shop, lo-fi beats, white noise) that auto-pauses when you join a calendar meeting and resumes after. Helps you focus during long escalation shifts without needing a separate app or browser tab.

@@ -1,13 +1,10 @@
 'use strict';
 
-const DevAgentLog = require('../models/DevAgentLog');
-
 // ---------------------------------------------------------------------------
 // Server Error Pipeline
 //
 // Central collector and broadcaster for server-side errors.
-// Errors are stored in a ring buffer, broadcast to SSE subscribers,
-// and logged to DevAgentLog (with circuit breaker to prevent flood).
+// Errors are stored in a ring buffer and broadcast to subscribers.
 // ---------------------------------------------------------------------------
 
 /** @type {Set<function>} */
@@ -16,13 +13,6 @@ const _subscribers = new Set();
 /** @type {Array<Object>} Ring buffer — last MAX_RECENT errors */
 const _recentErrors = [];
 const MAX_RECENT = 50;
-
-// Circuit breaker: max LOG_LIMIT logged errors per LOG_WINDOW to prevent
-// cascading-failure storms from filling MongoDB.
-let _logCount = 0;
-let _logWindowStart = Date.now();
-const LOG_LIMIT = 10;
-const LOG_WINDOW = 60_000; // 1 minute
 
 // Dedup window: suppress identical messages within DEDUP_WINDOW_MS
 const _recentHashes = new Map(); // hash -> timestamp
@@ -48,15 +38,6 @@ function _isDuplicate(message, source) {
   return false;
 }
 
-function _canLog() {
-  const now = Date.now();
-  if (now - _logWindowStart > LOG_WINDOW) {
-    _logCount = 0;
-    _logWindowStart = now;
-  }
-  return _logCount < LOG_LIMIT;
-}
-
 /**
  * Report a server-side error to the pipeline.
  *
@@ -66,10 +47,10 @@ function _canLog() {
  * @param {string} [opts.detail] - Longer context
  * @param {string} [opts.stack] - Stack trace
  * @param {string} [opts.source] - Origin (e.g. 'process', 'mongodb', 'claude.js')
- * @param {string} [opts.category] - DevAgentLog category
+ * @param {string} [opts.category] - Error category
  * @param {string} [opts.severity] - 'error' | 'warning' | 'info'
  */
-async function reportServerError({ type, message, detail, stack, source, category, severity }) {
+function reportServerError({ type, message, detail, stack, source, category, severity }) {
   // Dedup rapid-fire identical errors
   if (_isDuplicate(message, source)) return;
 
@@ -91,23 +72,6 @@ async function reportServerError({ type, message, detail, stack, source, categor
   // Broadcast to SSE subscribers
   for (const cb of _subscribers) {
     try { cb(entry); } catch { /* subscriber error — silently drop */ }
-  }
-
-  // Log to DevAgentLog (with circuit breaker)
-  if (_canLog()) {
-    _logCount++;
-    try {
-      await DevAgentLog.create({
-        type: 'error-fix',
-        summary: `[SERVER] ${message}`,
-        detail: `${detail || ''}\n${stack || ''}`.trim().slice(0, 5000),
-        category: category || 'other',
-        filesAffected: source ? [source] : [],
-      });
-    } catch (err) {
-      // Cannot log the logging failure — just print to stderr
-      console.error('[server-error-pipeline] Failed to log to DevAgentLog:', err.message);
-    }
   }
 }
 
@@ -136,9 +100,6 @@ function getStats() {
   return {
     subscribers: _subscribers.size,
     recentCount: _recentErrors.length,
-    logCount: _logCount,
-    logLimit: LOG_LIMIT,
-    windowRemainingMs: Math.max(0, LOG_WINDOW - (Date.now() - _logWindowStart)),
   };
 }
 

@@ -194,18 +194,17 @@ test('chat-fallback-integration suite', async (t) => {
     assert.equal(codexCalled, false);
   });
 
-  await t.test('chat image guardrails reject requests exceeding max image count', async () => {
-    process.env.CHAT_MAX_IMAGES_PER_REQUEST = '1';
+  await t.test('chat rejects image payloads and preserves conversation count', async () => {
     const beforeCount = await Conversation.countDocuments({});
 
     const res = await agent
       .post('/api/chat')
       .send({
-        images: [SAMPLE_IMAGE, SAMPLE_IMAGE],
+        images: [SAMPLE_IMAGE],
       });
 
     assert.equal(res.status, 400);
-    assert.equal(res.body.code, 'TOO_MANY_IMAGES');
+    assert.equal(res.body.code, 'CHAT_IMAGES_DISABLED');
 
     const afterCount = await Conversation.countDocuments({});
     assert.equal(afterCount, beforeCount);

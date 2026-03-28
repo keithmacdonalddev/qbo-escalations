@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { dispatchGmailMutations, gmailMutationsFromMonitorPayload } from '../lib/gmailUiEvents.js';
 
 const DEFAULT_CTX = Object.freeze({
   connected: false,
@@ -88,7 +89,12 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       });
     };
 
-    const onLabelsChanged = () => {
+    const onLabelsChanged = (event) => {
+      const data = safeParseEvent(event);
+      const mutations = gmailMutationsFromMonitorPayload(data);
+      if (mutations.length > 0) {
+        dispatchGmailMutations(mutations, { source: 'workspace-monitor' });
+      }
       setInboxRefreshToken((value) => value + 1);
     };
 

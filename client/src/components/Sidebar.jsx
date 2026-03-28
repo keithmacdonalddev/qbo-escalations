@@ -21,11 +21,9 @@ const NAV_ITEMS = [
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
   { hash: '#/templates', label: 'Templates', short: 'Tmpl', icon: IconTemplate },
   { hash: '#/analytics', label: 'Analytics', short: 'Stats', icon: IconChart },
-  { hash: '#/model-lab', label: 'Model Lab', short: 'Lab', icon: IconLab },
   { hash: '#/gallery', label: 'Gallery', short: 'Gal', icon: IconImage },
   { hash: '#/usage', label: 'Usage', short: 'Usage', icon: IconDollar },
   { hash: '#/workspace', label: 'Workspace', short: 'Work', icon: IconWorkspace },
-  { hash: '#/dev', label: 'Dev Mode', short: 'Dev', icon: IconTerminal },
 ];
 
 export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {

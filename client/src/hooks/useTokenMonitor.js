@@ -28,7 +28,7 @@ export function formatCost(cost) {
 }
 
 /**
- * Computes running token usage stats from dev chat messages and
+ * Computes running token usage stats from conversation messages and
  * cumulative background channel results.
  *
  * Background usage is tracked cumulatively via a ref because
@@ -37,7 +37,7 @@ export function formatCost(cost) {
  * a channel, its usage is added to the accumulator.
  *
  * @param {object} options
- * @param {Array} options.messages - Dev chat messages array
+ * @param {Array} options.messages - Conversation messages array
  * @param {object} options.bgLastResults - { channel: { usage, ... } }
  * @returns {{ foreground, background, combined }}
  */
@@ -67,7 +67,7 @@ export function useTokenMonitor({ messages, bgLastResults, sessionBudget }) {
   }
 
   return useMemo(() => {
-    // --- Foreground usage from dev chat messages ---
+    // --- Foreground usage from conversation messages ---
     let fgInput = 0;
     let fgOutput = 0;
     let fgTotal = 0;

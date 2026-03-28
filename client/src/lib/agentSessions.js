@@ -57,6 +57,21 @@ export function updateAgentSession(key, initialState = {}, patch) {
   return next;
 }
 
+export function patchAgentSessionsByPrefix(prefix, patch) {
+  if (!prefix) return [];
+  const updatedKeys = [];
+  for (const [key, current] of sessions.entries()) {
+    if (!String(key).startsWith(prefix)) continue;
+    const next = typeof patch === 'function'
+      ? patch(current, key)
+      : { ...current, ...(patch || {}) };
+    sessions.set(key, next);
+    emit(key);
+    updatedKeys.push(key);
+  }
+  return updatedKeys;
+}
+
 export function resetAgentSession(key, initialState = {}, options = {}) {
   if (!key) return cloneInitialState(initialState);
   const current = getAgentSessionSnapshot(key, initialState);

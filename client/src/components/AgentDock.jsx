@@ -2,16 +2,19 @@ import './AgentDock.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import { getProviderShortLabel } from '../lib/providerCatalog.js';
-import { useDevAgent } from '../context/DevAgentContext.jsx';
 import WorkspaceAgentPanel from './WorkspaceAgentPanel.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 
 const TAB_OPTIONS = [
   { id: 'workspace', label: 'Workspace' },
   { id: 'chat', label: 'Chat' },
-  { id: 'dev', label: 'Dev Agent' },
   { id: 'copilot', label: 'Co-pilot' },
 ];
+const TAB_IDS = TAB_OPTIONS.map((tab) => tab.id);
+
+function normalizeTabId(tabId, fallback = 'workspace') {
+  return TAB_IDS.includes(tabId) ? tabId : fallback;
+}
 
 /* SVG icons for empty states and buttons */
 const TerminalIcon = () => (
@@ -41,11 +44,6 @@ const StopSquareIcon = () => (
 );
 
 const SUGGESTION_CHIPS = {
-  'Dev Agent': [
-    'Explain the codebase structure',
-    'Find recent bugs or TODOs',
-    'Review latest changes',
-  ],
   'Main Chat': [
     'Summarize this escalation',
     'Draft a customer response',
@@ -54,11 +52,6 @@ const SUGGESTION_CHIPS = {
 };
 
 const EMPTY_STATE_MAP = {
-  'Dev Agent': {
-    icon: <TerminalIcon />,
-    title: 'Dev Agent',
-    desc: 'Code, debug, and build with AI assistance.',
-  },
   'Main Chat': {
     icon: <ChatBubbleIcon />,
     title: 'Main Chat',
@@ -177,7 +170,7 @@ function CompactConversationPane({
                   >
                     {!isUser && (
                       <div className="compact-pane-msg-label">
-                        {title === 'Dev Agent' ? 'Dev Agent' : 'Claude'}
+                        {title === 'Main Chat' ? 'Claude' : 'Assistant'}
                       </div>
                     )}
                     <div className={`compact-pane-msg-body${isUser ? ' compact-pane-msg-bubble' : ''}`}>
@@ -242,7 +235,7 @@ function CompactConversationPane({
           {!liveMonitorMode && streamingText ? (
             <div className="compact-pane-msg compact-pane-msg--assistant">
               <div className="compact-pane-msg-label">
-                {title === 'Dev Agent' ? 'Dev Agent' : 'Claude'}
+                {title === 'Main Chat' ? 'Claude' : 'Assistant'}
               </div>
               <div className="compact-pane-msg-body compact-pane-msg--streaming">
                 {renderMarkdown(streamingText || '')}
@@ -334,19 +327,19 @@ export default function AgentDock({
   hideTabs = false,
   onClose,
 }) {
-  const dev = useDevAgent();
-  const [internalActiveTab, setInternalActiveTab] = useState(defaultTab);
-  const activeTab = controlledActiveTab || internalActiveTab;
+  const [internalActiveTab, setInternalActiveTab] = useState(() => normalizeTabId(defaultTab));
+  const activeTab = normalizeTabId(controlledActiveTab || internalActiveTab, normalizeTabId(defaultTab));
   const setActiveTab = useCallback((nextTab) => {
+    const normalizedTab = normalizeTabId(nextTab, normalizeTabId(defaultTab));
     if (controlledActiveTab === undefined) {
-      setInternalActiveTab(nextTab);
+      setInternalActiveTab(normalizedTab);
     }
-    onActiveTabChange?.(nextTab);
-  }, [controlledActiveTab, onActiveTabChange]);
+    onActiveTabChange?.(normalizedTab);
+  }, [controlledActiveTab, defaultTab, onActiveTabChange]);
 
   useEffect(() => {
     if (controlledActiveTab === undefined) {
-      setInternalActiveTab(defaultTab);
+      setInternalActiveTab(normalizeTabId(defaultTab));
     }
   }, [controlledActiveTab, defaultTab]);
 
@@ -416,11 +409,6 @@ export default function AgentDock({
   }, [chat]);
   const chatTabUsesLiveMonitor = viewContext?.view === 'chat';
 
-  const devBadge = useMemo(() => {
-    const label = getProviderShortLabel(dev.streamProvider || dev.provider);
-    return dev.isStreaming ? `${label} · live` : label;
-  }, [dev.streamProvider, dev.provider, dev.isStreaming]);
-
   return (
     <div className="agent-dock" ref={dockRef}>
       <div
@@ -482,20 +470,6 @@ export default function AgentDock({
             emptyText="Continue your current main chat from here."
             liveMonitorMode={chatTabUsesLiveMonitor}
             showCompose={!chatTabUsesLiveMonitor}
-          />
-        ) : null}
-
-        {activeTab === 'dev' ? (
-          <CompactConversationPane
-            title="Dev Agent"
-            badge={devBadge}
-            messages={dev.messages || []}
-            streamingText={dev.streamingText || ''}
-            thinkingText={dev.thinkingText || ''}
-            isStreaming={dev.isStreaming === true}
-            onSend={(text) => dev.sendMessage(text)}
-            onAbort={dev.abortStream}
-            emptyText="Continue your dev-agent conversation from here."
           />
         ) : null}
 

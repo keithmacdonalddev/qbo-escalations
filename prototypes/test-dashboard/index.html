@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Test Runner — QBO Escalations</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- ======== Top Bar ======== -->
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <div class="logo">
+          <svg class="logo-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+          </svg>
+          <span class="logo-text">Test Runner</span>
+        </div>
+        <span class="tagline">QBO Escalation Suite</span>
+      </div>
+      <div class="top-bar-right">
+        <div class="run-stats" id="runStats">
+          <span class="stat-chip idle" id="statusChip">
+            <span class="stat-dot"></span>
+            Idle
+          </span>
+        </div>
+        <button class="btn-run" id="btnRun" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Run Tests
+        </button>
+      </div>
+    </header>
+
+    <!-- ======== Group Selector ======== -->
+    <nav class="group-bar" id="groupBar">
+      <div class="group-bar-inner">
+        <button class="group-chip active" data-group="all" type="button">
+          <span class="group-chip-icon">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </span>
+          <span class="group-chip-label">All Tests</span>
+          <span class="group-chip-count" id="groupCountAll">--</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- ======== Test Preview Panel (shown on chip click) ======== -->
+    <div class="test-preview" id="testPreview"></div>
+
+    <!-- ======== Main Layout ======== -->
+    <main class="main-content">
+      <!-- Left: Progress & Summary -->
+      <aside class="sidebar">
+        <!-- Progress Card -->
+        <div class="sidebar-card progress-card" id="progressCard">
+          <div class="card-title">Progress</div>
+          <div class="progress-ring-wrap">
+            <svg class="progress-ring" viewBox="0 0 120 120">
+              <circle class="ring-bg" cx="60" cy="60" r="52" />
+              <circle class="ring-fill" id="ringFill" cx="60" cy="60" r="52" />
+            </svg>
+            <div class="progress-center">
+              <span class="progress-pct" id="progressPct">0%</span>
+              <span class="progress-label" id="progressLabel">Not started</span>
+            </div>
+          </div>
+          <div class="progress-detail" id="progressDetail">--</div>
+        </div>
+
+        <!-- Summary Card -->
+        <div class="sidebar-card summary-card">
+          <div class="card-title">Summary</div>
+          <div class="summary-grid">
+            <div class="summary-item passed">
+              <span class="summary-count" id="countPassed">0</span>
+              <span class="summary-label">Passed</span>
+            </div>
+            <div class="summary-item failed">
+              <span class="summary-count" id="countFailed">0</span>
+              <span class="summary-label">Failed</span>
+            </div>
+            <div class="summary-item skipped">
+              <span class="summary-count" id="countSkipped">0</span>
+              <span class="summary-label">Skipped</span>
+            </div>
+            <div class="summary-item total-time">
+              <span class="summary-count" id="totalTime">0s</span>
+              <span class="summary-label">Duration</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- History Card -->
+        <div class="sidebar-card history-card">
+          <div class="card-title">
+            History
+            <button class="btn-clear-history" id="btnClearHistory" type="button" title="Clear history">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+            </button>
+          </div>
+          <div class="history-list" id="historyList">
+            <div class="history-empty">No previous runs</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Right: Test Results Stream -->
+      <section class="results-area">
+        <div class="results-header">
+          <span class="results-title">Test Results</span>
+          <div class="results-filters">
+            <button class="filter-btn active" data-filter="all">All</button>
+            <button class="filter-btn" data-filter="passed">Passed</button>
+            <button class="filter-btn" data-filter="failed">Failed</button>
+            <button class="filter-btn" data-filter="skipped">Skipped</button>
+          </div>
+        </div>
+        <div class="results-stream" id="resultsStream">
+          <div class="results-empty" id="resultsEmpty">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+              <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+            <p>Click <strong>Run Tests</strong> to start</p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ======== History Detail Overlay ======== -->
+    <div class="overlay" id="historyOverlay">
+      <div class="overlay-panel">
+        <div class="overlay-header">
+          <span class="overlay-title" id="overlayTitle">Run Details</span>
+          <button class="btn-close-overlay" id="btnCloseOverlay" type="button">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="overlay-body" id="overlayBody"></div>
+      </div>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

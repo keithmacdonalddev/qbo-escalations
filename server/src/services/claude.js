@@ -86,8 +86,10 @@ function combineUsage(usageA, usageB) {
   };
 }
 
-function formatCliFailure(code, stderr) {
-  const preview = (stderr || '').slice(0, 500);
+function formatCliFailure(code, stderr, stdout) {
+  const stderrPreview = (stderr || '').trim().slice(0, 500);
+  const stdoutPreview = (stdout || '').trim().slice(0, 500);
+  const preview = stderrPreview || stdoutPreview;
   const lower = preview.toLowerCase();
   const missingBinary =
     lower.includes('not recognized as an internal or external command') ||
@@ -97,7 +99,10 @@ function formatCliFailure(code, stderr) {
   if (missingBinary) {
     return 'Claude CLI command not found. Ensure `claude` is installed and available on PATH.';
   }
-  return 'Claude CLI exited with code ' + code + ': ' + preview;
+  if (preview) {
+    return 'Claude CLI exited with code ' + code + ': ' + preview;
+  }
+  return 'Claude CLI exited with code ' + code;
 }
 
 
@@ -266,7 +271,6 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
         env: {
           ...process.env,
           CLAUDECODE: undefined,
-          CLAUDE_CODE_SIMPLE: '1',
           CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         },
       });
@@ -402,7 +406,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       }
 
       if (!didCliExitSuccessfully(code)) {
-        finishWithError(new Error(formatCliFailure(code, stderrOutput)));
+        finishWithError(new Error(formatCliFailure(code, stderrOutput, fullResponse)));
       } else {
         if (!fullResponse && receivedThinking) {
           console.warn('[claude] Process exited OK but fullResponse is empty despite receiving thinking chunks — possible extraction gap');
@@ -683,7 +687,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         settled = true;
 
         if (code !== 0 && !stdout) {
-          const cliErr = new Error(formatCliFailure(code, stderr));
+          const cliErr = new Error(formatCliFailure(code, stderr, stdout));
           cliErr._usage = combineUsage(stepAUsage, capturedUsage);
           reportServerError({
             message: `CLI parse (step B) failed: exit code ${code}`,
@@ -819,7 +823,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       settled = true;
 
       if (code !== 0 && !stdout) {
-        const cliErr = new Error(formatCliFailure(code, stderr));
+        const cliErr = new Error(formatCliFailure(code, stderr, stdout));
         cliErr._usage = capturedUsage || null;
         reportServerError({
           message: `CLI parse failed: exit code ${code}`,
@@ -897,7 +901,6 @@ async function warmUp() {
       env: {
         ...process.env,
         CLAUDECODE: undefined,
-        CLAUDE_CODE_SIMPLE: '1',
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
       },
     });
@@ -1024,7 +1027,6 @@ async function prompt(promptText, options = {}) {
         env: {
           ...process.env,
           CLAUDECODE: undefined,
-          CLAUDE_CODE_SIMPLE: '1',
           CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
         },
       });
@@ -1062,7 +1064,7 @@ async function prompt(promptText, options = {}) {
       settled = true;
 
       if (!didCliExitSuccessfully(code) && !stdout) {
-        const err = new Error(formatCliFailure(code, stderr));
+        const err = new Error(formatCliFailure(code, stderr, stdout));
         reportServerError({
           message: `CLI prompt failed: exit code ${code}`,
           detail: `stderr: ${(stderr || '').slice(0, 500)}`,
@@ -1182,7 +1184,6 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
           env: {
             ...process.env,
             CLAUDECODE: undefined,
-            CLAUDE_CODE_SIMPLE: '1',
             CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
           },
         });
@@ -1221,7 +1222,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         settled = true;
 
         if (!didCliExitSuccessfully(code) && !stdout) {
-          const err = new Error(formatCliFailure(code, stderr));
+          const err = new Error(formatCliFailure(code, stderr, stdout));
           reportServerError({
             message: `CLI transcribeImage failed: exit code ${code}`,
             detail: `stderr: ${(stderr || '').slice(0, 500)}`,

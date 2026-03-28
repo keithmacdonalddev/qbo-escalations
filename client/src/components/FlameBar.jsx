@@ -1,7 +1,7 @@
 import { memo, useState, useEffect } from 'react';
 
 /**
- * Dev-only render flame bar. Deliberately avoids Framer Motion —
+ * Development-only render flame bar. Deliberately avoids Framer Motion —
  * AnimatePresence + rapid segment churn was a major memory source.
  * Pure CSS transitions are sufficient and zero-overhead.
  */

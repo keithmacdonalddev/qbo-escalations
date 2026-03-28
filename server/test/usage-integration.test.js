@@ -7,7 +7,6 @@ const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Escalation = require('../src/models/Escalation');
 const Conversation = require('../src/models/Conversation');
-const DevConversation = require('../src/models/DevConversation');
 const UsageLog = require('../src/models/UsageLog');
 const ParallelCandidateTurn = require('../src/models/ParallelCandidateTurn');
 const Template = require('../src/models/Template');
@@ -162,7 +161,6 @@ t.beforeEach(async () => {
   await Promise.all([
     UsageLog.deleteMany({}),
     Conversation.deleteMany({}),
-    DevConversation.deleteMany({}),
     Escalation.deleteMany({}),
     ParallelCandidateTurn.deleteMany({}),
     Template.deleteMany({}),
@@ -613,14 +611,6 @@ await t.test('POST /api/chat/parse-escalation (ok) → UsageLog service=parse', 
   assert.equal(docs[0].status, 'ok');
   assert.ok(docs[0].requestId);
 });
-
-// ================================================================
-//  /api/dev/chat — skipped in this suite.
-//  The dev route spawns real CLI processes (child_process.spawn)
-//  which cannot be stubbed without module-level mocking. Testing
-//  the dev→UsageLog pipeline requires either spawn mocking or a
-//  dedicated test harness with a fake CLI binary.
-// ================================================================
 
 // ================================================================
 //  400 validation errors do NOT create UsageLog entries

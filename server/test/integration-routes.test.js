@@ -13,15 +13,6 @@ const codex = require('../src/services/codex');
 
 const SAMPLE_PNG_DATA_URL = 'data:image/png;base64,' +
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z8UkAAAAASUVORK5CYII=';
-const REQUIRED_QUICK_PARSE_SECTIONS = [
-  'What the Agent Is Attempting',
-  'Expected vs Actual Outcome',
-  'Troubleshooting Steps Taken',
-  'Diagnosis',
-  'Steps for Agent',
-  'Customer-Facing Explanation',
-];
-
 function parseSseEvents(payload) {
   const blocks = String(payload || '').split('\n\n');
   const events = [];
@@ -265,35 +256,17 @@ await t.test('chat and retry endpoints stream SSE and persist conversation updat
   assert.equal(updatedConversation.messages[1].content, 'mock assistant response');
 });
 
-await t.test('image-only chat emits triage card before chunks and repairs quick-parse format', async () => {
+await t.test('image chat is rejected and does not create a conversation', async () => {
+  const beforeCount = await Conversation.countDocuments({});
   const chatRes = await agent
     .post('/api/chat')
     .send({ message: '', images: [SAMPLE_PNG_DATA_URL], provider: 'claude' });
 
-  assert.equal(chatRes.status, 200);
+  assert.equal(chatRes.status, 400);
+  assert.equal(chatRes.body.code, 'CHAT_IMAGES_DISABLED');
 
-  const events = parseSseEvents(chatRes.text);
-  const triageIdx = events.findIndex((e) => e.event === 'triage_card');
-  const chunkIdx = events.findIndex((e) => e.event === 'chunk');
-  assert.ok(triageIdx >= 0, 'triage_card event must be present');
-  assert.ok(chunkIdx === -1 || triageIdx < chunkIdx, 'triage card must arrive before chunks');
-
-  const triageEvent = events.find((e) => e.event === 'triage_card');
-  const triageData = JSON.parse(triageEvent.data);
-  assert.ok(triageData.agent);
-  assert.ok(triageData.client);
-  assert.ok(triageData.read);
-  assert.ok(triageData.action);
-  assert.match(triageData.category, /^(payroll|bank-feeds|reconciliation|permissions|billing|tax|reports|technical|invoicing)$/);
-  assert.match(triageData.severity, /^P[1-4]$/);
-
-  const doneEvent = events.find((e) => e.event === 'done');
-  assert.ok(doneEvent, 'done event must be present');
-  const doneData = JSON.parse(doneEvent.data);
-  for (const section of REQUIRED_QUICK_PARSE_SECTIONS) {
-    assert.match(doneData.fullResponse, new RegExp(section, 'i'));
-  }
-  assert.equal(doneData.responseRepaired, true);
+  const afterCount = await Conversation.countDocuments({});
+  assert.equal(afterCount, beforeCount);
 });
 
 await t.test('parallel chat mode persists both provider responses and retry replaces both', async () => {

@@ -105,6 +105,16 @@ export default function WorkspaceBriefingCards({ briefing, onAction }) {
   };
 
   if (cards.length === 0) {
+    if (briefing?.structured) {
+      return briefing?.structured?.summary ? (
+        <div className="workspace-briefing-content workspace-briefing-content--cards">
+          <div className="workspace-briefing-summary">
+            {renderMarkdown(briefing.structured.summary)}
+          </div>
+        </div>
+      ) : null;
+    }
+
     return (
       <div className="workspace-briefing-content">
         {renderMarkdown(briefing?.content || '')}

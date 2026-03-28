@@ -103,5 +103,7 @@
         ]
       }
     ]
-  }
+  },
+  "outputStyle": "Explanatory",
+  "spinnerTipsEnabled": false
 }
