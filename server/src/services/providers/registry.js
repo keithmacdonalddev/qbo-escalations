@@ -1,6 +1,7 @@
 const claude = require('../claude');
 const codex = require('../codex');
 const lmStudio = require('../lm-studio');
+const remoteApiProviders = require('../remote-api-providers');
 const { createChatAdapter } = require('./chat-provider');
 const {
   PROVIDER_IDS,
@@ -36,84 +37,127 @@ function toBool(value, fallback) {
   return fallback;
 }
 
+function getServiceForTransport(transport) {
+  switch (transport) {
+    case 'lm-studio':
+      return lmStudio;
+    case 'codex':
+      return codex;
+    case 'anthropic':
+      return remoteApiProviders.anthropic;
+    case 'llm-gateway':
+      return remoteApiProviders.llmGateway;
+    case 'openai':
+      return remoteApiProviders.openai;
+    case 'gemini':
+      return remoteApiProviders.gemini;
+    case 'kimi':
+      return remoteApiProviders.kimi;
+    case 'claude':
+    default:
+      return claude;
+  }
+}
+
+function getTimeoutEnvValue(transport, kind) {
+  switch (transport) {
+    case 'lm-studio':
+      return process.env.LM_STUDIO_CHAT_TIMEOUT_MS;
+    case 'codex':
+      return kind === 'transcribe'
+        ? process.env.CODEX_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.CODEX_PARSE_TIMEOUT_MS
+          : process.env.CODEX_CHAT_TIMEOUT_MS;
+    case 'anthropic':
+      return kind === 'transcribe'
+        ? process.env.ANTHROPIC_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.ANTHROPIC_PARSE_TIMEOUT_MS
+          : process.env.ANTHROPIC_CHAT_TIMEOUT_MS;
+    case 'llm-gateway':
+      return kind === 'transcribe'
+        ? process.env.LLM_GATEWAY_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.LLM_GATEWAY_PARSE_TIMEOUT_MS
+          : process.env.LLM_GATEWAY_CHAT_TIMEOUT_MS;
+    case 'openai':
+      return kind === 'transcribe'
+        ? process.env.OPENAI_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.OPENAI_PARSE_TIMEOUT_MS
+          : process.env.OPENAI_CHAT_TIMEOUT_MS;
+    case 'gemini':
+      return kind === 'transcribe'
+        ? process.env.GEMINI_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.GEMINI_PARSE_TIMEOUT_MS
+          : process.env.GEMINI_CHAT_TIMEOUT_MS;
+    case 'kimi':
+      return kind === 'transcribe'
+        ? process.env.KIMI_TRANSCRIBE_TIMEOUT_MS || process.env.MOONSHOT_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.KIMI_PARSE_TIMEOUT_MS || process.env.MOONSHOT_PARSE_TIMEOUT_MS
+          : process.env.KIMI_CHAT_TIMEOUT_MS || process.env.MOONSHOT_CHAT_TIMEOUT_MS;
+    case 'claude':
+    default:
+      return kind === 'transcribe'
+        ? process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS
+        : kind === 'parse'
+          ? process.env.CLAUDE_PARSE_TIMEOUT_MS
+          : process.env.CLAUDE_CHAT_TIMEOUT_MS;
+  }
+}
+
 const PROVIDER_DEFS = Object.freeze(
   PROVIDER_IDS.reduce((acc, id) => {
     const meta = getProviderMeta(id);
     const transport = meta?.transport || 'claude';
     const model = getProviderModelId(id);
-    const isCodex = transport === 'codex';
-    const isLmStudio = transport === 'lm-studio';
+    const service = getServiceForTransport(transport);
+    const supportsImageInput = typeof service?.transcribeImage === 'function'
+      ? transport === 'lm-studio'
+        ? toBool(process.env.LM_STUDIO_SUPPORTS_IMAGE_INPUT, true)
+        : transport === 'codex'
+          ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
+          : transport === 'claude'
+            ? toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false)
+            : false
+      : false;
+
+    function withDefaultModel(fn) {
+      if (typeof fn !== 'function') return null;
+      if (!model) return fn;
+      return (...args) => {
+        const lastArg = args[args.length - 1];
+        if (lastArg && typeof lastArg === 'object' && !Array.isArray(lastArg)) {
+          const nextArgs = [...args];
+          nextArgs[nextArgs.length - 1] = { ...lastArg, model: lastArg.model || model };
+          return fn(...nextArgs);
+        }
+        if (args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) {
+          return fn({ ...args[0], model: args[0].model || model });
+        }
+        return fn(...args);
+      };
+    }
+
     acc[id] = {
       id,
       label: getCatalogProviderLabel(id),
       family: getCatalogProviderFamily(id),
-      supportsImageInput: isLmStudio
-        ? toBool(process.env.LM_STUDIO_SUPPORTS_IMAGE_INPUT, true)
-        : isCodex
-          ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
-          : toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false),
-      getChat: () => {
-        if (isLmStudio) {
-          return model
-            ? (opts) => lmStudio.chat({ ...opts, model })
-            : lmStudio.chat;
-        }
-        if (isCodex) {
-          return model
-            ? (opts) => codex.chat({ ...opts, model })
-            : codex.chat;
-        }
-        return model
-          ? (opts) => claude.chat({ ...opts, model })
-          : claude.chat;
-      },
-      getDefaultTimeoutMs: () => toInt(
-        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
-          : isCodex ? process.env.CODEX_CHAT_TIMEOUT_MS
-          : process.env.CLAUDE_CHAT_TIMEOUT_MS,
-        120_000
-      ),
-      getParse: () => {
-        if (isLmStudio) {
-          return model
-            ? (input, options) => lmStudio.parseEscalation(input, { ...options, model })
-            : lmStudio.parseEscalation;
-        }
-        if (isCodex) {
-          return model
-            ? (input, options) => codex.parseEscalation(input, { ...options, model })
-            : codex.parseEscalation;
-        }
-        return model
-          ? (input, options) => claude.parseEscalation(input, { ...options, model })
-          : claude.parseEscalation;
-      },
-      getTranscribe: () => {
-        if (isLmStudio) {
-          return model
-            ? (input, options) => lmStudio.transcribeImage(input, { ...options, model })
-            : lmStudio.transcribeImage;
-        }
-        if (isCodex) {
-          return model
-            ? (input, options) => codex.transcribeImage(input, { ...options, model })
-            : codex.transcribeImage;
-        }
-        return model
-          ? (input, options) => claude.transcribeImage(input, { ...options, model })
-          : claude.transcribeImage;
-      },
+      supportsImageInput,
+      getChat: () => withDefaultModel(service?.chat),
+      getDefaultTimeoutMs: () => toInt(getTimeoutEnvValue(transport, 'chat'), 120_000),
+      getParse: () => withDefaultModel(service?.parseEscalation),
+      getTranscribe: () => withDefaultModel(service?.transcribeImage),
       getDefaultParseTimeoutMs: () => toInt(
-        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
-          : isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS
-          : process.env.CLAUDE_PARSE_TIMEOUT_MS,
-        120_000
+        getTimeoutEnvValue(transport, 'parse'),
+        toInt(getTimeoutEnvValue(transport, 'chat'), 120_000)
       ),
       getDefaultTranscribeTimeoutMs: () => toInt(
-        isLmStudio ? process.env.LM_STUDIO_CHAT_TIMEOUT_MS
-          : isCodex ? process.env.CODEX_TRANSCRIBE_TIMEOUT_MS
-          : process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS,
-        toInt(isCodex ? process.env.CODEX_PARSE_TIMEOUT_MS : process.env.CLAUDE_PARSE_TIMEOUT_MS, 60_000)
+        getTimeoutEnvValue(transport, 'transcribe'),
+        toInt(getTimeoutEnvValue(transport, 'parse'), 60_000)
       ),
     };
     return acc;

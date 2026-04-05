@@ -660,8 +660,26 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
               </div>
             </div>
 
-            {/* Diagnostics */}
+            {/* Developer Tools master toggle */}
             <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)' }}>
+              <h3 className="settings-ai-title">Developer Tools</h3>
+              <div className="settings-ai-fields">
+                <label className="settings-ai-toggle">
+                  <input
+                    type="checkbox"
+                    checked={layoutProps.devToolsEnabled}
+                    onChange={(e) => layoutProps.setDevToolsEnabled(e.target.checked)}
+                  />
+                  <span style={{ fontWeight: 600 }}>Enable developer tools</span>
+                </label>
+                <p className="settings-section-desc" style={{ margin: 0 }}>
+                  Master switch for all developer tooling — performance bar, network waterfall, and flame stats. When off, none of these tools will render regardless of individual settings below.
+                </p>
+              </div>
+            </div>
+
+            {/* Diagnostics */}
+            <div className="settings-ai-card" style={{ marginTop: 'var(--sp-4)', opacity: layoutProps.devToolsEnabled ? 1 : 0.5 }}>
               <h3 className="settings-ai-title">
                 Diagnostics
                 <span style={{ marginLeft: 8, fontSize: '0.75rem', opacity: 0.6, fontWeight: 400 }}>
@@ -673,6 +691,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   <input
                     type="checkbox"
                     checked={layoutProps.flameBarEnabled && layoutProps.networkTabEnabled}
+                    disabled={!layoutProps.devToolsEnabled}
                     ref={(el) => {
                       if (el) {
                         const count = [layoutProps.flameBarEnabled, layoutProps.networkTabEnabled].filter(Boolean).length;
@@ -692,6 +711,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   <input
                     type="checkbox"
                     checked={layoutProps.flameBarEnabled}
+                    disabled={!layoutProps.devToolsEnabled}
                     onChange={(e) => layoutProps.setFlameBarEnabled(e.target.checked)}
                   />
                   <span>Show render flame bar</span>
@@ -704,6 +724,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   <input
                     type="checkbox"
                     checked={layoutProps.networkTabEnabled}
+                    disabled={!layoutProps.devToolsEnabled}
                     onChange={(e) => layoutProps.setNetworkTabEnabled(e.target.checked)}
                   />
                   <span>Show network waterfall tab</span>
@@ -1022,6 +1043,7 @@ function IconTextBrightness({ size = 16 }) {
 // --- Image Parser API Keys Section ---
 
 const IMAGE_PARSER_KEY_PROVIDERS = [
+  { id: 'llm-gateway', label: 'LLM Gateway API Key', placeholder: 'lgwk_...' },
   { id: 'anthropic', label: 'Anthropic API Key', placeholder: 'sk-ant-...' },
   { id: 'openai', label: 'OpenAI API Key', placeholder: 'sk-...' },
   { id: 'kimi', label: 'Moonshot API Key', placeholder: 'sk-...' },

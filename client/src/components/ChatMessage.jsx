@@ -6,11 +6,78 @@ import { renderMarkdown, CopyButton, formatResponseTime, getProviderLabel } from
 import Tooltip from './Tooltip.jsx';
 import { transitions } from '../utils/motion.js';
 
+const ESCALATION_TEMPLATE_LABELS = Object.freeze({
+  'COID/MID': 'coidMid',
+  CASE: 'caseNumber',
+  'CLIENT/CONTACT': 'clientContact',
+  AGENT: 'agentName',
+  'CX IS ATTEMPTING TO': 'attemptingTo',
+  'EXPECTED OUTCOME': 'expectedOutcome',
+  'ACTUAL OUTCOME': 'actualOutcome',
+  'KB/TOOLS USED': 'kbToolsUsed',
+  'TRIED TEST ACCOUNT': 'triedTestAccount',
+  'TS STEPS': 'tsSteps',
+  CATEGORY: 'category',
+  SEVERITY: 'severity',
+  'OPERATOR NOTE': 'operatorNote',
+});
+
+const ESCALATION_TEMPLATE_FIELDS = Object.freeze([
+  { key: 'attemptingTo', label: 'CX Is Attempting To' },
+  { key: 'expectedOutcome', label: 'Expected Outcome' },
+  { key: 'actualOutcome', label: 'Actual Outcome' },
+  { key: 'kbToolsUsed', label: 'KB / Tools Used' },
+  { key: 'triedTestAccount', label: 'Tried Test Account' },
+  { key: 'tsSteps', label: 'TS Steps' },
+  { key: 'operatorNote', label: 'Operator Note' },
+]);
+
 function formatTokenCount(n) {
   if (n == null) return '';
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
   if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
   return String(n);
+}
+
+function safeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseEscalationTemplateContent(content) {
+  const text = safeText(content);
+  if (!text) return null;
+
+  const fields = {};
+  let currentKey = null;
+  let matchedLabels = 0;
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const match = line.match(/^([A-Z][A-Z0-9/ ]+):\s*(.*)$/);
+    const label = match ? safeText(match[1]).replace(/\s+/g, ' ').toUpperCase() : '';
+    const mappedKey = ESCALATION_TEMPLATE_LABELS[label] || null;
+    if (mappedKey) {
+      matchedLabels += 1;
+      currentKey = mappedKey;
+      fields[currentKey] = safeText(match[2]);
+      continue;
+    }
+    if (currentKey) {
+      fields[currentKey] = [fields[currentKey], line].filter(Boolean).join(' ');
+    }
+  }
+
+  if (matchedLabels < 4) return null;
+
+  const coidMid = safeText(fields.coidMid);
+  if (coidMid && (!fields.coid || !fields.mid)) {
+    const [coid, mid] = coidMid.split('/').map((value) => safeText(value));
+    if (!fields.coid && coid) fields.coid = coid;
+    if (!fields.mid && mid) fields.mid = mid;
+  }
+
+  return fields;
 }
 
 function ChatMessage({
@@ -47,6 +114,16 @@ function ChatMessage({
     if (role !== 'assistant' || !content || isStreaming) return null;
     return renderMarkdown(content);
   }, [role, content, isStreaming]);
+  const parsedUserTemplate = useMemo(() => (
+    role === 'user' ? parseEscalationTemplateContent(content) : null
+  ), [content, role]);
+  const parsedTemplateFields = useMemo(() => (
+    parsedUserTemplate
+      ? ESCALATION_TEMPLATE_FIELDS
+        .map((field) => ({ ...field, value: safeText(parsedUserTemplate[field.key]) }))
+        .filter((field) => field.value)
+      : []
+  ), [parsedUserTemplate]);
 
   // Separate bash events (for terminal preview) from other tool events
   const { bashEvents, otherEvents } = useMemo(() => {
@@ -158,15 +235,42 @@ function ChatMessage({
               style={{
                 maxWidth: 200,
                 maxHeight: 160,
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--line)',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
               }}
             />
           ))}
         </div>
       )}
 
-      {role === 'assistant' && renderedContent ? (
+      {role === 'user' && parsedUserTemplate ? (
+        <div className="chat-template-card">
+          <div className="chat-template-card-head">
+            <span className="chat-template-card-kicker">Parsed Escalation Template</span>
+            {(parsedUserTemplate.severity || parsedUserTemplate.category) && (
+              <span className="chat-template-card-pill">
+                {[parsedUserTemplate.severity, parsedUserTemplate.category].filter(Boolean).join(' ')}
+              </span>
+            )}
+          </div>
+
+          <div className="chat-template-card-meta">
+            {parsedUserTemplate.coid ? <span>COID/MID {parsedUserTemplate.coid}{parsedUserTemplate.mid ? ` / ${parsedUserTemplate.mid}` : ''}</span> : null}
+            {parsedUserTemplate.caseNumber ? <span>Case {parsedUserTemplate.caseNumber}</span> : null}
+            {parsedUserTemplate.clientContact ? <span>Client {parsedUserTemplate.clientContact}</span> : null}
+            {parsedUserTemplate.agentName ? <span>Agent {parsedUserTemplate.agentName}</span> : null}
+          </div>
+
+          <div className="chat-template-card-fields">
+            {parsedTemplateFields.map((field) => (
+              <div key={field.key} className="chat-template-card-field">
+                <div className="chat-template-card-label">{field.label}</div>
+                <div className="chat-template-card-value">{field.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : role === 'assistant' && renderedContent ? (
         <div className="chat-bubble-content playbook-content" style={{ wordBreak: 'break-word' }}>
           {renderedContent}
           {isStreaming && <span className="streaming-cursor" />}

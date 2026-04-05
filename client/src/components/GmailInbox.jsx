@@ -4,9 +4,10 @@ import AgentDock from './AgentDock.jsx';
 import { apiFetch as trackedFetch } from '../api/http.js';
 import { useWorkspaceMonitorStream } from '../context/WorkspaceMonitorContext.jsx';
 import { dispatchGmailMutations, GMAIL_MESSAGES_MUTATED_EVENT } from '../lib/gmailUiEvents.js';
-import { apiFetch, sendGmailAI } from '../lib/gmail/gmailApi.js';
+import { apiFetch } from '../lib/gmail/gmailApi.js';
 import { CATEGORY_LABEL_BY_TAB } from '../lib/gmail/gmailInboxHelpers.jsx';
 import { buildFolderSuggestions } from '../lib/gmail/folderSuggestions.js';
+import { dispatchWorkspaceAgentRequest } from '../lib/workspaceAgentEvents.js';
 import useGmailAccounts from '../hooks/useGmailAccounts.js';
 import GmailHeaderChrome from './gmail/GmailHeaderChrome.jsx';
 import GmailLabelSidebar from './gmail/GmailLabelSidebar.jsx';
@@ -196,284 +197,6 @@ function GmailError({ message, onRetry }) {
 }
 
 // ---------------------------------------------------------------------------
-// AI Chat Panel — floating assistant panel
-// ---------------------------------------------------------------------------
-
-function AiChatPanel({ emailContext, onDraftReply, onClose }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [streaming, setStreaming] = useState(false);
-  const [streamText, setStreamText] = useState('');
-  const abortRef = useRef(null);
-  const messagesEndRef = useRef(null);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, streamText]);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  // Abort any in-flight AI stream on unmount to prevent state updates on unmounted component
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) {
-        abortRef.current();
-        abortRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleSend = useCallback((e) => {
-    e?.preventDefault();
-    const text = input.trim();
-    if (!text || streaming) return;
-
-    const userMsg = { role: 'user', content: text };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput('');
-    setStreaming(true);
-    setStreamText('');
-
-    const history = messages.map((m) => ({ role: m.role, content: m.content }));
-
-    const { abort } = sendGmailAI({
-      prompt: text,
-      emailContext: emailContext || undefined,
-      conversationHistory: history,
-      onChunk: (chunk) => setStreamText((prev) => prev + chunk),
-      onDone: (data) => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '', usage: data.usage || null }]);
-        setStreamText('');
-        setStreaming(false);
-      },
-      onError: (err) => {
-        setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${err}`, isError: true }]);
-        setStreamText('');
-        setStreaming(false);
-      },
-    });
-
-    abortRef.current = abort;
-  }, [input, streaming, messages, emailContext]);
-
-  const handleStop = useCallback(() => {
-    if (abortRef.current) {
-      abortRef.current();
-      abortRef.current = null;
-    }
-    if (streamText) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: streamText }]);
-    }
-    setStreamText('');
-    setStreaming(false);
-  }, [streamText]);
-
-  const quickActions = useMemo(() => {
-    const actions = [];
-    if (emailContext) {
-      actions.push({ label: 'Summarize this email', prompt: 'Summarize this email concisely. Highlight key points, action items, and sender intent.' });
-      actions.push({ label: 'Draft a reply', prompt: 'Draft a professional reply to this email. Output only the reply body text.' });
-      actions.push({ label: 'Extract action items', prompt: 'Extract all action items and deadlines from this email as a bullet list.' });
-    } else {
-      actions.push({ label: 'Unread emails', prompt: 'What are my most recent unread emails? Give me a brief summary.' });
-      actions.push({ label: 'Important emails today', prompt: 'What important emails have I received today?' });
-    }
-    return actions;
-  }, [emailContext]);
-
-  const handleQuickAction = useCallback((promptText) => {
-    setInput(promptText);
-    // Trigger send after state update
-    setTimeout(() => {
-      const userMsg = { role: 'user', content: promptText };
-      setMessages((prev) => [...prev, userMsg]);
-      setStreaming(true);
-      setStreamText('');
-
-      const history = messages.map((m) => ({ role: m.role, content: m.content }));
-
-      const { abort } = sendGmailAI({
-        prompt: promptText,
-        emailContext: emailContext || undefined,
-        conversationHistory: history,
-        onChunk: (chunk) => setStreamText((prev) => prev + chunk),
-        onDone: (data) => {
-          setMessages((prev) => [...prev, { role: 'assistant', content: data.fullResponse || '', usage: data.usage || null }]);
-          setStreamText('');
-          setStreaming(false);
-        },
-        onError: (err) => {
-          setMessages((prev) => [...prev, { role: 'assistant', content: `Error: ${err}`, isError: true }]);
-          setStreamText('');
-          setStreaming(false);
-        },
-      });
-      abortRef.current = abort;
-      setInput('');
-    }, 0);
-  }, [messages, emailContext]);
-
-  return (
-    <motion.div
-      className="gmail-ai-panel"
-      initial={{ opacity: 0, y: 20, scale: 0.95 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 20, scale: 0.95 }}
-      transition={{ duration: 0.2 }}
-    >
-      <div className="gmail-ai-panel-header">
-        <div className="gmail-ai-panel-title">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-          Email AI Assistant
-        </div>
-        <div className="gmail-ai-panel-actions">
-          {messages.length > 0 && (
-            <button
-              className="gmail-btn-icon"
-              onClick={() => { setMessages([]); setStreamText(''); }}
-              type="button"
-              title="Clear chat"
-              aria-label="Clear chat"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-              </svg>
-            </button>
-          )}
-          <button className="gmail-btn-icon" onClick={onClose} type="button" aria-label="Close AI panel">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <div className="gmail-ai-panel-messages">
-        {messages.length === 0 && !streaming && (
-          <div className="gmail-ai-panel-welcome">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--ink-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-            </svg>
-            <p>Ask me about your emails. I can summarize, draft replies, search, and more.</p>
-            <div className="gmail-ai-quick-actions">
-              {quickActions.map((action, i) => (
-                <button
-                  key={i}
-                  className="gmail-ai-quick-btn"
-                  onClick={() => handleQuickAction(action.prompt)}
-                  type="button"
-                >
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`gmail-ai-msg ${msg.role === 'user' ? 'gmail-ai-msg-user' : 'gmail-ai-msg-assistant'}${msg.isError ? ' gmail-ai-msg-error' : ''}`}
-          >
-            {msg.role === 'assistant' && (
-              <div className="gmail-ai-msg-avatar">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                </svg>
-              </div>
-            )}
-            <div className="gmail-ai-msg-content">
-              {msg.content.split('\n').map((line, j) => (
-                <span key={j}>{line}{j < msg.content.split('\n').length - 1 && <br />}</span>
-              ))}
-              {msg.role === 'assistant' && msg.usage && msg.usage.totalTokens > 0 && (
-                <span style={{
-                  fontSize: '11px',
-                  color: 'var(--text-tertiary, #666)',
-                  marginTop: '4px',
-                  display: 'inline-flex',
-                  gap: '6px',
-                  opacity: 0.7,
-                }}>
-                  {msg.usage.totalTokens.toLocaleString()} tokens
-                  {msg.usage.totalCostMicros > 0 && (
-                    <span>· ${(msg.usage.totalCostMicros / 1_000_000).toFixed(4)}</span>
-                  )}
-                  {msg.usage.model && (
-                    <span>· {msg.usage.model}</span>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {streaming && streamText && (
-          <div className="gmail-ai-msg gmail-ai-msg-assistant">
-            <div className="gmail-ai-msg-avatar">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            </div>
-            <div className="gmail-ai-msg-content gmail-ai-streaming">
-              {streamText.split('\n').map((line, j) => (
-                <span key={j}>{line}{j < streamText.split('\n').length - 1 && <br />}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {streaming && !streamText && (
-          <div className="gmail-ai-msg gmail-ai-msg-assistant">
-            <div className="gmail-ai-msg-avatar">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-              </svg>
-            </div>
-            <div className="gmail-ai-msg-content">
-              <div className="gmail-ai-typing-indicator">
-                <span /><span /><span />
-              </div>
-            </div>
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      <form className="gmail-ai-panel-input" onSubmit={handleSend}>
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder={emailContext ? 'Ask about this email...' : 'Ask about your emails...'}
-          disabled={streaming}
-        />
-        {streaming ? (
-          <button className="gmail-ai-send-btn gmail-ai-stop-btn" onClick={handleStop} type="button" aria-label="Stop">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <rect x="6" y="6" width="12" height="12" rx="1" />
-            </svg>
-          </button>
-        ) : (
-          <button className="gmail-ai-send-btn" type="submit" disabled={!input.trim()} aria-label="Send">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        )}
-      </form>
-    </motion.div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Disconnect Confirmation Modal
 // ---------------------------------------------------------------------------
 
@@ -626,6 +349,33 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
     }
     setLocalShowAiPanel(true);
   }, [agentDock]);
+
+  const buildWorkspaceEmailContext = useCallback((emailContext = null) => ({
+    view: 'gmail',
+    ...(selectedMessageId ? { emailId: selectedMessageId } : {}),
+    ...(emailContext ? {
+      emailSubject: emailContext.subject,
+      emailFrom: `${emailContext.from || ''} <${emailContext.fromEmail || ''}>`,
+      emailBody: emailContext.body,
+    } : {}),
+  }), [selectedMessageId]);
+
+  const openWorkspaceAgent = useCallback(({ emailContext = null, prompt = '', source = 'gmail-inbox' } = {}) => {
+    const nextContext = buildWorkspaceEmailContext(emailContext);
+    if (emailContext) {
+      setAiPanelEmailContext(emailContext);
+    }
+    agentDock?.onContextChange?.(nextContext);
+    openAiPanel();
+    if (!prompt || !prompt.trim()) return;
+    window.setTimeout(() => {
+      dispatchWorkspaceAgentRequest({
+        prompt,
+        viewContext: nextContext,
+        source,
+      });
+    }, 30);
+  }, [agentDock, buildWorkspaceEmailContext, openAiPanel]);
 
   // Selection helpers
   const handleSelectMessage = useCallback((id, checked) => {
@@ -1264,15 +1014,10 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
     fetchMessages(activeSearch, activeLabel);
   }, [activeSearch, activeLabel, fetchMessages]);
 
-  const workspaceDockContext = useMemo(() => ({
-    view: 'gmail',
-    ...(selectedMessageId ? { emailId: selectedMessageId } : {}),
-    ...(aiPanelEmailContext ? {
-      emailSubject: aiPanelEmailContext.subject,
-      emailFrom: `${aiPanelEmailContext.from || ''} <${aiPanelEmailContext.fromEmail || ''}>`,
-      emailBody: aiPanelEmailContext.body,
-    } : {}),
-  }), [selectedMessageId, aiPanelEmailContext]);
+  const workspaceDockContext = useMemo(
+    () => buildWorkspaceEmailContext(aiPanelEmailContext),
+    [aiPanelEmailContext, buildWorkspaceEmailContext],
+  );
 
   useEffect(() => {
     if (!isActive) return;
@@ -1370,9 +1115,11 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
                   setComposeDefaults(defaults);
                   setShowCompose(true);
                 }}
-                onOpenAiPanel={(emailCtx) => {
-                  setAiPanelEmailContext(emailCtx);
-                  openAiPanel();
+                onOpenAiPanel={(request) => {
+                  const normalizedRequest = request && typeof request === 'object' && !Array.isArray(request)
+                    ? request
+                    : { emailContext: request };
+                  openWorkspaceAgent(normalizedRequest);
                 }}
                 onReply={handleReply}
                 onForward={handleForward}

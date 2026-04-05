@@ -477,8 +477,8 @@ test('POST /parse — input validation', async (t) => {
     assert.equal(res.body.code, 'INVALID_PROVIDER');
   });
 
-  await t.test('accepts valid providers: lm-studio, anthropic, openai, kimi', async () => {
-    for (const provider of ['lm-studio', 'anthropic', 'openai', 'kimi']) {
+  await t.test('accepts valid providers: lm-studio, anthropic, openai, kimi, gemini', async () => {
+    for (const provider of ['lm-studio', 'anthropic', 'openai', 'kimi', 'gemini']) {
       // These will fail at the provider call level (no API key / no LM Studio)
       // but should NOT fail at validation. Check that we don't get MISSING_IMAGE
       // or INVALID_PROVIDER.
@@ -526,8 +526,15 @@ test('parseImage — provider dispatch', async (t) => {
   });
 
   await t.test('throws INVALID_PROVIDER for unknown provider', async () => {
-    await assert.rejects(() => parseImage(VALID_PNG_BASE64, { provider: 'gemini' }), (err) => {
+    await assert.rejects(() => parseImage(VALID_PNG_BASE64, { provider: 'not-a-provider' }), (err) => {
       assert.equal(err.code, 'INVALID_PROVIDER');
+      return true;
+    });
+  });
+
+  await t.test('throws PROVIDER_UNAVAILABLE for gemini without API key', async () => {
+    await assert.rejects(() => parseImage(VALID_PNG_BASE64, { provider: 'gemini' }), (err) => {
+      assert.equal(err.code, 'PROVIDER_UNAVAILABLE');
       return true;
     });
   });
@@ -1178,13 +1185,13 @@ test('PUT /keys', async (t) => {
     assert.equal(stored.openai, undefined);
   });
 
-  await t.test('rejects invalid provider for PUT', async () => {
+  await t.test('accepts gemini provider for PUT', async () => {
     const res = await makeRequest(app, 'PUT', '/api/image-parser/keys', {
       provider: 'gemini',
       key: 'test',
     });
-    assert.equal(res.status, 400);
-    assert.equal(res.body.code, 'INVALID_PROVIDER');
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
   });
 
   await t.test('rejects lm-studio as provider for keys (no API key needed)', async () => {
@@ -1295,16 +1302,39 @@ test('GET /status', async (t) => {
     assert.equal(res.body.providers.kimi.available, false);
   });
 
-  await t.test('reports anthropic available when key is configured', async () => {
+  await t.test('reports anthropic available when key is valid', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-test';
     interceptHost(LM_STUDIO_TEST_HOST, {
       errorCode: 'ECONNREFUSED',
       errorMessage: 'connect ECONNREFUSED',
     });
+    interceptHost('api.anthropic.com', {
+      statusCode: 200,
+      body: JSON.stringify({ content: [{ text: 'ok' }] }),
+    });
 
     const res = await makeRequest(app, 'GET', '/api/image-parser/status');
     assert.equal(res.body.providers.anthropic.available, true);
-    assert.ok(res.body.providers.anthropic.reason.includes('configured'));
+    assert.equal(res.body.providers.anthropic.configured, true);
+    assert.ok(res.body.providers.anthropic.reason.includes('Authenticated'));
+  });
+
+  await t.test('reports anthropic unavailable when key is invalid', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-bad';
+    interceptHost(LM_STUDIO_TEST_HOST, {
+      errorCode: 'ECONNREFUSED',
+      errorMessage: 'connect ECONNREFUSED',
+    });
+    interceptHost('api.anthropic.com', {
+      statusCode: 401,
+      body: JSON.stringify({ error: { message: 'invalid x-api-key' } }),
+    });
+
+    const res = await makeRequest(app, 'GET', '/api/image-parser/status');
+    assert.equal(res.body.providers.anthropic.available, false);
+    assert.equal(res.body.providers.anthropic.configured, true);
+    assert.equal(res.body.providers.anthropic.code, 'INVALID_KEY');
+    assert.equal(res.body.providers.anthropic.reason, 'API key rejected');
   });
 
   await t.test('reports lm-studio available when it returns a model', async () => {
@@ -1543,13 +1573,13 @@ test('POST /keys/test', async (t) => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
-  await t.test('rejects invalid provider', async () => {
+  await t.test('accepts gemini provider', async () => {
     const res = await makeRequest(app, 'POST', '/api/image-parser/keys/test', {
       provider: 'gemini',
       key: 'test',
     });
-    assert.equal(res.status, 400);
-    assert.equal(res.body.code, 'INVALID_PROVIDER');
+    assert.notEqual(res.status, 400);
+    assert.notEqual(res.body.code, 'INVALID_PROVIDER');
   });
 
   await t.test('returns NO_KEY when no key provided and none stored', async () => {
@@ -1584,7 +1614,8 @@ test('POST /keys/test', async (t) => {
       key: 'sk-bad-key',
     });
     assert.equal(res.body.ok, false);
-    assert.ok(res.body.error.includes('Invalid'));
+    assert.equal(res.body.error, 'API key rejected');
+    assert.ok(res.body.detail.includes('Invalid'));
   });
 
   await t.test('reports timeout on connection timeout', async () => {

@@ -4,7 +4,12 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { getLoadedModel } = require('./lm-studio');
+const { getLoadedModel, getModelSnapshot } = require('./lm-studio');
+const ImageParserApiKey = require('../models/ImageParserApiKey');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
+const { buildServerTriageCard } = require('../lib/chat-triage');
+const { parseEscalationText } = require('../lib/escalation-parser');
+const { validateParsedEscalation } = require('../lib/parse-validation');
 
 // sharp is used to convert unsupported image formats (WebP) to PNG for
 // providers that only accept PNG/JPEG (e.g. LM Studio / llama.cpp).
@@ -20,8 +25,12 @@ try {
 // Configuration
 // ---------------------------------------------------------------------------
 const LM_STUDIO_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
+const LM_STUDIO_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_STUDIO_API_KEY || null;
+const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
+const LLM_GATEWAY_DEFAULT_MODEL = process.env.LLM_GATEWAY_DEFAULT_MODEL || 'auto';
 const DEFAULT_TIMEOUT_MS = 60000;
 const KEYS_FILE = path.join(__dirname, '..', '..', 'data', 'image-parser-keys.json');
+const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
 const PROVIDER_AVAILABILITY_CACHE_TTL_MS = (() => {
   const raw = Number.parseInt(process.env.IMAGE_PARSER_STATUS_CACHE_TTL_MS, 10);
   return Number.isFinite(raw) && raw >= 0 ? raw : 60_000;
@@ -32,31 +41,192 @@ let _providerAvailabilityCachedAt = 0;
 let _providerAvailabilityInFlight = null;
 let _providerAvailabilityVersion = 0;
 
+function verboseLog(...args) {
+  if (IMAGE_PARSER_VERBOSE_LOGS) {
+    console.log(...args);
+  }
+}
+
+function verboseWarn(...args) {
+  if (IMAGE_PARSER_VERBOSE_LOGS) {
+    console.warn(...args);
+  }
+}
+
+function verboseError(...args) {
+  if (IMAGE_PARSER_VERBOSE_LOGS) {
+    console.error(...args);
+  }
+}
+
+function isMongoKeyStoreReady() {
+  return !!(ImageParserApiKey && ImageParserApiKey.db && ImageParserApiKey.db.readyState === 1);
+}
+
+function readStoredKeysFile() {
+  try {
+    const raw = fs.readFileSync(KEYS_FILE, 'utf8');
+    if (!raw || !raw.trim()) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredKeysFile(keys) {
+  fs.mkdirSync(path.dirname(KEYS_FILE), { recursive: true });
+  fs.writeFileSync(KEYS_FILE, JSON.stringify(keys, null, 2), 'utf8');
+}
+
 // ---------------------------------------------------------------------------
 // API Key helpers — stored file first, env var fallback
 // ---------------------------------------------------------------------------
 const ENV_KEY_MAP = {
+  'llm-gateway': 'LLM_GATEWAY_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
   openai: 'OPENAI_API_KEY',
   kimi: 'MOONSHOT_API_KEY',
   gemini: 'GEMINI_API_KEY',
 };
 
+const REMOTE_PROVIDER_TEST_CONFIGS = {
+  'llm-gateway': {
+    baseUrl: LLM_GATEWAY_API_URL,
+    path: '/v1/provider-status',
+    method: 'GET',
+    model: null,
+    buildBody: () => null,
+    buildHeaders: (key) => ({
+      'Authorization': `Bearer ${key}`,
+      'Accept': 'application/json',
+    }),
+  },
+  anthropic: {
+    hostname: 'api.anthropic.com',
+    path: '/v1/messages',
+    model: 'claude-sonnet-4-20250514',
+    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    buildHeaders: (key) => ({
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'Content-Type': 'application/json',
+    }),
+  },
+  openai: {
+    hostname: 'api.openai.com',
+    path: '/v1/chat/completions',
+    model: 'gpt-4o-mini',
+    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    buildHeaders: (key) => ({
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    }),
+  },
+  kimi: {
+    hostname: 'api.moonshot.ai',
+    path: '/v1/chat/completions',
+    model: 'kimi-k2.5',
+    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    buildHeaders: (key) => ({
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    }),
+  },
+  gemini: {
+    hostname: 'generativelanguage.googleapis.com',
+    path: '/v1beta/models/gemini-3-flash-preview:generateContent',
+    model: 'gemini-3-flash-preview',
+    buildBody: () => JSON.stringify({
+      contents: [{ parts: [{ text: 'hi' }] }],
+      generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' },
+    }),
+    buildHeaders: (key) => ({
+      'x-goog-api-key': key,
+      'Content-Type': 'application/json',
+    }),
+  },
+};
+
 function getStoredApiKey(provider) {
-  try {
-    const raw = fs.readFileSync(KEYS_FILE, 'utf8');
-    const keys = JSON.parse(raw);
-    return keys[provider] || null;
-  } catch {
-    return null;
-  }
+  const keys = readStoredKeysFile();
+  return keys && typeof keys[provider] === 'string' ? keys[provider] : null;
 }
 
 function getApiKey(provider) {
   const stored = getStoredApiKey(provider);
-  if (stored) return stored;
+  if (typeof stored === 'string' && stored.trim()) {
+    return stored.trim();
+  }
+
   const envVar = ENV_KEY_MAP[provider];
-  return envVar ? process.env[envVar] || null : null;
+  const envKey = envVar ? process.env[envVar] || null : null;
+  return typeof envKey === 'string' && envKey.trim() ? envKey.trim() : null;
+}
+
+async function resolveApiKey(provider) {
+  const resolved = getApiKey(provider);
+  if (resolved) return resolved;
+
+  if (isMongoKeyStoreReady()) {
+    try {
+      const doc = await ImageParserApiKey.findOne({ provider }).lean();
+      if (doc && typeof doc.key === 'string' && doc.key.trim()) {
+        return doc.key.trim();
+      }
+    } catch {
+      // Fall through to env var lookup.
+    }
+  }
+
+  return null;
+}
+
+async function getAllStoredKeys() {
+  const fileKeys = readStoredKeysFile();
+  const result = { ...fileKeys };
+
+  if (isMongoKeyStoreReady()) {
+    try {
+      const docs = await ImageParserApiKey.find({}).lean();
+      for (const doc of docs) {
+        const hasFileKey = typeof result[doc.provider] === 'string' && result[doc.provider].trim();
+        if (!hasFileKey && typeof doc.key === 'string' && doc.key.trim()) {
+          result[doc.provider] = doc.key.trim();
+        }
+      }
+    } catch {
+      // Fall back to file-backed keys only.
+    }
+  }
+
+  return result;
+}
+
+async function setStoredApiKey(provider, key) {
+  const keys = readStoredKeysFile();
+  if (key && typeof key === 'string' && key.trim()) {
+    keys[provider] = key.trim();
+  } else {
+    delete keys[provider];
+  }
+  writeStoredKeysFile(keys);
+
+  if (!isMongoKeyStoreReady()) return;
+
+  try {
+    if (key && typeof key === 'string' && key.trim()) {
+      await ImageParserApiKey.findOneAndUpdate(
+        { provider },
+        { provider, key: key.trim() },
+        { upsert: true, returnDocument: 'after' }
+      );
+    } else {
+      await ImageParserApiKey.deleteOne({ provider });
+    }
+  } catch {
+    // File-backed storage remains the source of truth when Mongo is unavailable.
+  }
 }
 
 function cloneProviderAvailability(providers) {
@@ -67,6 +237,251 @@ function cloneProviderAvailability(providers) {
       info && typeof info === 'object' ? { ...info } : info,
     ])
   );
+}
+
+function getRemoteProviderLabel(provider) {
+  switch (provider) {
+    case 'llm-gateway':
+      return 'LLM Gateway';
+    case 'anthropic':
+      return 'Anthropic';
+    case 'openai':
+      return 'OpenAI';
+    case 'kimi':
+      return 'Moonshot';
+    case 'gemini':
+      return 'Gemini';
+    default:
+      return provider;
+  }
+}
+
+function extractProviderErrorMessage(body, fallback) {
+  try {
+    const parsed = JSON.parse(body);
+    return parsed.error?.message
+      || parsed.error?.status
+      || parsed.message
+      || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseProviderJson(body) {
+  try {
+    const parsed = JSON.parse(body);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function getGatewayProviderStatusModel(parsed) {
+  return parsed?.upstream?.availableModel
+    || parsed?.upstream?.loadedModel
+    || null;
+}
+
+function getGatewayUnavailableReason(errorCode, detail) {
+  if (errorCode === 'UPSTREAM_NOT_READY') {
+    return 'Gateway reachable, model unavailable';
+  }
+  if (errorCode === 'UPSTREAM_UNAVAILABLE') {
+    return 'Gateway authenticated, upstream unavailable';
+  }
+  if (errorCode === 'PROVIDER_UNAVAILABLE') {
+    return 'Gateway authenticated, unavailable';
+  }
+  if (/model is ready|model unavailable|no upstream model/i.test(detail || '')) {
+    return 'Gateway reachable, model unavailable';
+  }
+  return 'Gateway authenticated, upstream unavailable';
+}
+
+function testRemoteProviderKey(provider, apiKey) {
+  const cfg = REMOTE_PROVIDER_TEST_CONFIGS[provider];
+  if (!cfg) {
+    const err = new Error(`Unsupported provider: ${provider}`);
+    err.code = 'INVALID_PROVIDER';
+    throw err;
+  }
+
+  const payload = cfg.buildBody(cfg.model);
+  const headers = cfg.buildHeaders(apiKey);
+  if (payload) headers['Content-Length'] = Buffer.byteLength(payload);
+  const targetUrl = cfg.baseUrl ? new URL(cfg.path, cfg.baseUrl) : null;
+  const isHttps = targetUrl ? targetUrl.protocol === 'https:' : true;
+  const requestLib = isHttps ? https : http;
+  const hostname = targetUrl ? targetUrl.hostname : cfg.hostname;
+  const port = targetUrl
+    ? (targetUrl.port || (isHttps ? 443 : 80))
+    : 443;
+  const pathName = targetUrl ? `${targetUrl.pathname}${targetUrl.search}` : cfg.path;
+  const method = cfg.method || 'POST';
+
+  return new Promise((resolve, reject) => {
+    const req = requestLib.request({
+      hostname,
+      port,
+      path: pathName,
+      method,
+      headers,
+      timeout: 10_000,
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: data, model: cfg.model }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      const err = new Error('Request timed out');
+      err.code = 'TIMEOUT';
+      reject(err);
+    });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+async function validateRemoteProvider(provider, apiKey) {
+  const label = getRemoteProviderLabel(provider);
+  const trimmedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
+  if (!trimmedKey) {
+    return {
+      ok: false,
+      configured: false,
+      available: false,
+      code: 'NO_KEY',
+      reason: `${label} API key not configured`,
+      detail: '',
+      model: null,
+      };
+    }
+
+    try {
+      const result = await testRemoteProviderKey(provider, trimmedKey);
+      const parsedBody = parseProviderJson(result.body);
+      if (provider === 'llm-gateway') {
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          return {
+            ok: true,
+            configured: true,
+            available: true,
+            code: 'OK',
+            reason: 'Authenticated',
+            detail: '',
+            model: getGatewayProviderStatusModel(parsedBody),
+          };
+        }
+
+        const detail = extractProviderErrorMessage(
+          result.body,
+          result.statusCode === 504
+            ? 'Gateway validation timed out'
+            : `LLM Gateway returned HTTP ${result.statusCode}`
+        );
+        const gatewayCode = String(parsedBody?.error?.code || '').trim().toUpperCase();
+
+        if (result.statusCode === 401 || result.statusCode === 403) {
+          return {
+            ok: false,
+            configured: true,
+            available: false,
+            code: 'INVALID_KEY',
+            reason: 'API key rejected',
+            detail,
+            model: null,
+          };
+        }
+
+        if (result.statusCode === 504) {
+          return {
+            ok: false,
+            configured: true,
+            available: false,
+            code: 'TIMEOUT',
+            reason: 'Gateway validation timed out',
+            detail,
+            model: null,
+          };
+        }
+
+        if (result.statusCode === 503) {
+          return {
+            ok: false,
+            configured: true,
+            available: false,
+            code: 'PROVIDER_UNAVAILABLE',
+            reason: getGatewayUnavailableReason(gatewayCode, detail),
+            detail,
+            model: null,
+          };
+        }
+
+        return {
+          ok: false,
+          configured: true,
+          available: false,
+          code: 'PROVIDER_TEST_FAILED',
+          reason: detail,
+          detail,
+          model: null,
+        };
+      }
+
+      if (result.statusCode >= 200 && result.statusCode < 300) {
+        return {
+          ok: true,
+          configured: true,
+          available: true,
+        code: 'OK',
+        reason: result.model ? `Authenticated (${result.model})` : 'Authenticated',
+        detail: '',
+        model: result.model || null,
+      };
+    }
+
+    const isAuthError = result.statusCode === 401 || result.statusCode === 403;
+    const fallback = isAuthError
+      ? 'Invalid API key'
+      : `Provider returned HTTP ${result.statusCode}`;
+    const detail = extractProviderErrorMessage(result.body, fallback);
+    return {
+      ok: false,
+      configured: true,
+      available: false,
+      code: isAuthError ? 'INVALID_KEY' : 'PROVIDER_TEST_FAILED',
+      reason: isAuthError ? 'API key rejected' : detail,
+      detail,
+      model: null,
+    };
+    } catch (err) {
+      if (err.code === 'TIMEOUT') {
+        return {
+          ok: false,
+          configured: true,
+          available: false,
+          code: 'TIMEOUT',
+          reason: provider === 'llm-gateway'
+            ? 'Gateway validation timed out'
+            : 'Connection to provider timed out',
+          detail: '',
+          model: null,
+        };
+      }
+
+    return {
+      ok: false,
+      configured: true,
+      available: false,
+      code: 'PROVIDER_TEST_FAILED',
+      reason: err.message || 'Connection failed',
+      detail: '',
+      model: null,
+    };
+  }
 }
 
 function clearProviderAvailabilityCache() {
@@ -222,8 +637,7 @@ function normalizeBase64(base64Input) {
 
   const dataUrl = `data:${mediaType};base64,${rawBase64}`;
 
-  // --- DEBUG LOGGING (temporary) ---
-  console.log('[image-parser-debug] normalizeBase64:', {
+  verboseLog('[image-parser-debug] normalizeBase64:', {
     inputLength: (base64Input || '').length,
     startsWithData: trimmed.startsWith('data:'),
     mediaType,
@@ -232,7 +646,6 @@ function normalizeBase64(base64Input) {
     dataUrlLength: dataUrl.length,
     dataUrlPrefix: dataUrl.slice(0, 100),
   });
-  // --- END DEBUG ---
 
   return { rawBase64, mediaType, dataUrl };
 }
@@ -275,7 +688,7 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
   }
 
   if (!sharp) {
-    console.warn('[image-parser] WebP/GIF image detected but sharp is not available — sending as-is (may fail)');
+    verboseWarn('[image-parser] WebP/GIF image detected but sharp is not available — sending as-is (may fail)');
     return { rawBase64, mediaType, wasConverted: false, originalSizeBytes, convertedSizeBytes: originalSizeBytes, conversionTimeMs: 0 };
   }
 
@@ -284,7 +697,7 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
     const inputBuffer = Buffer.from(rawBase64, 'base64');
     const pngBuffer = await sharp(inputBuffer).png().toBuffer();
     const conversionTimeMs = Date.now() - conversionStart;
-    console.log(`[image-parser] Converted ${mediaType} to PNG (${inputBuffer.length} -> ${pngBuffer.length} bytes) in ${conversionTimeMs}ms`);
+    verboseLog(`[image-parser] Converted ${mediaType} to PNG (${inputBuffer.length} -> ${pngBuffer.length} bytes) in ${conversionTimeMs}ms`);
     const convertedBase64 = pngBuffer.toString('base64');
     return {
       rawBase64: convertedBase64,
@@ -295,7 +708,7 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
       conversionTimeMs,
     };
   } catch (err) {
-    console.error('[image-parser] Failed to convert image to PNG:', err.message);
+    verboseError('[image-parser] Failed to convert image to PNG:', err.message);
     // Fall through with original data — the provider will give a clearer error
     return { rawBase64, mediaType, wasConverted: false, originalSizeBytes, convertedSizeBytes: originalSizeBytes, conversionTimeMs: 0 };
   }
@@ -327,11 +740,9 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     ? imageBase64
     : `data:${mediaType};base64,${imageBase64}`;
 
-  // --- DEBUG LOGGING (temporary) ---
-  console.log('[lm-debug] url prefix:', dataUrl.substring(0, 100), 'mediaType:', mediaType, 'model:', effectiveModel);
-  console.log('[lm-debug] rawBase64 length:', imageBase64.length, 'dataUrl length:', dataUrl.length);
-  console.log('[lm-debug] imageBase64 starts with data:', imageBase64.startsWith('data:'), 'first 80 chars:', imageBase64.substring(0, 80));
-  // --- END DEBUG ---
+  verboseLog('[lm-debug] url prefix:', dataUrl.substring(0, 100), 'mediaType:', mediaType, 'model:', effectiveModel);
+  verboseLog('[lm-debug] rawBase64 length:', imageBase64.length, 'dataUrl length:', dataUrl.length);
+  verboseLog('[lm-debug] imageBase64 starts with data:', imageBase64.startsWith('data:'), 'first 80 chars:', imageBase64.substring(0, 80));
 
   const messages = [
     { role: 'system', content: systemPrompt },
@@ -351,7 +762,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     temperature: 0.1,
     max_tokens: 4096,
     chat_template_kwargs: { enable_thinking: false },
-  }, {}, timeoutMs);
+  }, LM_STUDIO_API_TOKEN ? { Authorization: `Bearer ${LM_STUDIO_API_TOKEN}` } : {}, timeoutMs);
 
   if (res.statusCode !== 200) {
     const err = new Error(`LM Studio error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -382,7 +793,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
 async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  const apiKey = getApiKey('anthropic');
+  const apiKey = await resolveApiKey('anthropic');
   if (!apiKey) {
     const err = new Error('Anthropic API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
@@ -435,7 +846,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
 async function callOpenAI(systemPrompt, imageDataUrl, model, timeoutMs) {
-  const apiKey = getApiKey('openai');
+  const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
     const err = new Error('OpenAI API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
@@ -487,10 +898,67 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, timeoutMs) {
 }
 
 /**
+ * LLM Gateway API — OpenAI-compatible POST to your local/custom gateway.
+ */
+async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
+  const apiKey = await resolveApiKey('llm-gateway');
+
+  const effectiveModel = model || LLM_GATEWAY_DEFAULT_MODEL;
+
+  const body = {
+    model: effectiveModel,
+    max_tokens: 4096,
+    temperature: 0.1,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Parse this image.' },
+          { type: 'image_url', image_url: { url: imageDataUrl } },
+        ],
+      },
+    ],
+    chat_template_kwargs: { enable_thinking: false },
+  };
+
+  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+  const res = await jsonRequest('POST', LLM_GATEWAY_API_URL, '/v1/chat/completions', body, headers, timeoutMs);
+
+  if (res.statusCode !== 200) {
+    if ((res.statusCode === 401 || res.statusCode === 403) && !apiKey) {
+      const err = new Error('LLM Gateway requires an API key');
+      err.code = 'PROVIDER_UNAVAILABLE';
+      throw err;
+    }
+    const err = new Error(`LLM Gateway API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
+    err.code = 'PROVIDER_ERROR';
+    throw err;
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(res.body);
+  } catch {
+    const err = new Error(`LLM Gateway returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
+    err.code = 'PROVIDER_ERROR';
+    throw err;
+  }
+
+  const msg = parsed.choices?.[0]?.message || {};
+  const text = msg.content || msg.reasoning_content || '';
+  const usage = parsed.usage
+    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
+    : null;
+
+  return { text: text.trim(), usage };
+}
+
+/**
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
 async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  const apiKey = getApiKey('gemini');
+  const apiKey = await resolveApiKey('gemini');
   if (!apiKey) {
     const err = new Error('Gemini API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
@@ -566,7 +1034,7 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
 async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
-  const apiKey = getApiKey('kimi');
+  const apiKey = await resolveApiKey('kimi');
   if (!apiKey) {
     const err = new Error('Moonshot API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
@@ -591,8 +1059,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     ],
   };
 
-  // --- DEBUG LOGGING (temporary) ---
-  console.log('[image-parser-debug] callKimi request:', {
+  verboseLog('[image-parser-debug] callKimi request:', {
     url: 'https://api.moonshot.ai/v1/chat/completions',
     model: effectiveModel,
     max_tokens: body.max_tokens,
@@ -609,23 +1076,20 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     timeoutMs,
   });
   const payloadSize = JSON.stringify(body).length;
-  console.log('[image-parser-debug] callKimi payload size:', payloadSize, 'bytes');
-  // --- END DEBUG ---
+  verboseLog('[image-parser-debug] callKimi payload size:', payloadSize, 'bytes');
 
   const res = await jsonRequest('POST', 'https://api.moonshot.ai', '/v1/chat/completions', body, {
     'Authorization': `Bearer ${apiKey}`,
   }, timeoutMs);
 
-  // --- DEBUG LOGGING (temporary) ---
-  console.log('[image-parser-debug] callKimi response:', {
+  verboseLog('[image-parser-debug] callKimi response:', {
     statusCode: res.statusCode,
     bodyLength: (res.body || '').length,
     bodyPreview: (res.body || '').slice(0, 1000),
   });
-  // --- END DEBUG ---
 
   if (res.statusCode !== 200) {
-    console.error('[image-parser] Kimi API error:', res.statusCode, res.body?.slice(0, 1000));
+    verboseError('[image-parser] Kimi API error:', res.statusCode, res.body?.slice(0, 1000));
     const err = new Error(`Kimi API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
     err.code = 'PROVIDER_ERROR';
     throw err;
@@ -640,8 +1104,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     throw err;
   }
 
-  // --- DEBUG LOGGING (temporary) ---
-  console.log('[image-parser-debug] callKimi parsed response:', {
+  verboseLog('[image-parser-debug] callKimi parsed response:', {
     id: parsed.id,
     model: parsed.model,
     choicesCount: parsed.choices?.length,
@@ -651,7 +1114,6 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     reasoningContent: parsed.choices?.[0]?.message?.reasoning_content ? 'PRESENT (length: ' + parsed.choices[0].message.reasoning_content.length + ')' : 'absent',
     usage: parsed.usage,
   });
-  // --- END DEBUG ---
 
   const text = parsed.choices?.[0]?.message?.content || '';
   const usage = parsed.usage
@@ -670,6 +1132,55 @@ function detectRole(responseText) {
   return 'unknown';
 }
 
+function hasStructuredParseValue(field, value) {
+  if (value === undefined || value === null) return false;
+  if (typeof value !== 'string') return true;
+
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if ((field === 'category' || field === 'triedTestAccount') && trimmed.toLowerCase() === 'unknown') {
+    return false;
+  }
+  return true;
+}
+
+function buildStructuredParseResult(text, role) {
+  if (role !== 'escalation') {
+    return {
+      parseFields: {},
+      parseMeta: null,
+    };
+  }
+
+  const parsed = parseEscalationText(text);
+  const validation = validateParsedEscalation(parsed, { sourceText: text });
+  const parseFields = {};
+
+  for (const [field, value] of Object.entries(validation.normalizedFields || {})) {
+    if (hasStructuredParseValue(field, value)) {
+      parseFields[field] = value;
+    }
+  }
+
+  if (Object.keys(parseFields).length > 0) {
+    const triageCard = buildServerTriageCard(validation.normalizedFields);
+    if (triageCard?.severity) {
+      parseFields.severity = triageCard.severity;
+    }
+  }
+
+  return {
+    parseFields,
+    parseMeta: {
+      passed: validation.passed,
+      score: validation.score,
+      confidence: validation.confidence,
+      issues: validation.issues,
+      fieldsFound: validation.fieldsFound,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main entry — parseImage()
 // ---------------------------------------------------------------------------
@@ -677,13 +1188,21 @@ function detectRole(responseText) {
 /**
  * @param {string} imageBase64 - Raw base64 or data-URI string
  * @param {Object} options
- * @param {string} options.provider - 'lm-studio' | 'anthropic' | 'openai' | 'kimi' | 'gemini'
+ * @param {string} options.provider - 'llm-gateway' | 'lm-studio' | 'anthropic' | 'openai' | 'kimi' | 'gemini'
  * @param {string} [options.model] - Model ID override
  * @param {number} [options.timeoutMs=60000] - Request timeout
- * @returns {Promise<{ text: string, role: 'escalation'|'inv-list'|'unknown', usage: Object|null }>}
+ * @returns {Promise<{
+ *   text: string,
+ *   role: 'escalation'|'inv-list'|'unknown',
+ *   usage: Object|null,
+ *   parseFields: Object,
+ *   parseMeta: Object|null,
+ *   stats: Object,
+ * }>}
  */
 async function parseImage(imageBase64, options = {}) {
   const { provider, model, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const systemPrompt = getRenderedAgentPrompt('image-parser');
 
   if (!imageBase64 || typeof imageBase64 !== 'string' || !imageBase64.trim()) {
     const err = new Error('Image data is required');
@@ -704,23 +1223,26 @@ async function parseImage(imageBase64, options = {}) {
   let result;
   const providerStartTime = Date.now();
   switch (provider) {
+    case 'llm-gateway':
+      result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
+      break;
     case 'lm-studio':
-      result = await callLmStudio(SYSTEM_PROMPT, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+      result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
       break;
     case 'anthropic':
-      result = await callAnthropic(SYSTEM_PROMPT, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+      result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
       break;
     case 'openai':
-      result = await callOpenAI(SYSTEM_PROMPT, normalized.dataUrl, model, timeoutMs);
+      result = await callOpenAI(systemPrompt, normalized.dataUrl, model, timeoutMs);
       break;
     case 'gemini':
-      result = await callGemini(SYSTEM_PROMPT, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+      result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
       break;
     case 'kimi':
-      result = await callKimi(SYSTEM_PROMPT, normalized.dataUrl, model, timeoutMs);
+      result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
       break;
     default: {
-      const err = new Error(`Invalid provider: ${provider}. Must be one of: lm-studio, anthropic, openai, kimi, gemini`);
+      const err = new Error(`Invalid provider: ${provider}. Must be one of: llm-gateway, lm-studio, anthropic, openai, kimi, gemini`);
       err.code = 'INVALID_PROVIDER';
       throw err;
     }
@@ -739,10 +1261,14 @@ async function parseImage(imageBase64, options = {}) {
   };
 
   const role = detectRole(result.text);
+  const { parseFields, parseMeta } = buildStructuredParseResult(result.text, role);
+
   return {
     text: result.text,
     role,
     usage: result.usage,
+    parseFields,
+    parseMeta,
     stats: {
       providerLatencyMs,
       image: imageStats,
@@ -756,64 +1282,40 @@ async function parseImage(imageBase64, options = {}) {
 
 /**
  * Returns availability of each provider for the image parser.
- * @returns {Promise<Object>} { 'lm-studio': { available, reason }, anthropic: { ... }, openai: { ... } }
+ * @returns {Promise<Object>} { 'llm-gateway': { available, reason }, 'lm-studio': { ... }, anthropic: { ... }, openai: { ... } }
  */
 async function resolveProviderAvailability() {
   const providers = {};
 
-  // LM Studio — try to reach /v1/models with a 3s timeout
-  providers['lm-studio'] = await new Promise((resolve) => {
-    const url = new URL('/v1/models', LM_STUDIO_API_URL);
-    const t = url.protocol === 'https:' ? https : http;
+  const gatewayKey = await resolveApiKey('llm-gateway');
+  providers['llm-gateway'] = await validateRemoteProvider('llm-gateway', gatewayKey);
 
-    const req = t.get(url, { timeout: 3000 }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(body);
-          const modelId = json?.data?.[0]?.id;
-          resolve({
-            available: !!modelId,
-            model: modelId || null,
-            reason: modelId ? `Model loaded: ${modelId}` : 'No model loaded',
-          });
-        } catch {
-          resolve({ available: false, model: null, reason: 'Invalid response from LM Studio' });
-        }
-      });
-    });
-    req.on('error', () => resolve({ available: false, model: null, reason: `Cannot reach LM Studio at ${LM_STUDIO_API_URL}` }));
-    req.on('timeout', () => { req.destroy(); resolve({ available: false, model: null, reason: 'LM Studio connection timed out' }); });
-  });
-
-  // Anthropic — check stored key or env var
-  const anthropicKey = getApiKey('anthropic');
-  providers['anthropic'] = {
-    available: !!(anthropicKey && anthropicKey.trim()),
-    reason: anthropicKey && anthropicKey.trim() ? 'API key configured' : 'Anthropic API key not configured',
+  const lmStudioSnapshot = await getModelSnapshot(LM_STUDIO_API_URL, { timeoutMs: 3000 });
+  const lmStudioModel = lmStudioSnapshot.loadedModel || lmStudioSnapshot.availableModel || null;
+  const lmStudioReason = lmStudioSnapshot.loadedModel
+    ? `Model loaded: ${lmStudioSnapshot.loadedModel}`
+    : lmStudioSnapshot.availableModel
+      ? `Model available: ${lmStudioSnapshot.availableModel}`
+      : (lmStudioSnapshot.status === 'no_model_loaded' || lmStudioSnapshot.status === 'no_models_available')
+        ? 'No model loaded in LM Studio'
+        : lmStudioSnapshot.reason || 'LM Studio unavailable';
+  providers['lm-studio'] = {
+    available: !!lmStudioModel,
+    model: lmStudioModel,
+    reason: lmStudioReason,
   };
 
-  // OpenAI — check stored key or env var
-  const openaiKey = getApiKey('openai');
-  providers['openai'] = {
-    available: !!(openaiKey && openaiKey.trim()),
-    reason: openaiKey && openaiKey.trim() ? 'API key configured' : 'OpenAI API key not configured',
-  };
+  const anthropicKey = await resolveApiKey('anthropic');
+  providers['anthropic'] = await validateRemoteProvider('anthropic', anthropicKey);
 
-  // Kimi/Moonshot — check stored key or env var
-  const kimiKey = getApiKey('kimi');
-  providers['kimi'] = {
-    available: !!(kimiKey && kimiKey.trim()),
-    reason: kimiKey && kimiKey.trim() ? 'API key configured' : 'Moonshot API key not configured',
-  };
+  const openaiKey = await resolveApiKey('openai');
+  providers['openai'] = await validateRemoteProvider('openai', openaiKey);
 
-  // Gemini — check stored key or env var
-  const geminiKey = getApiKey('gemini');
-  providers['gemini'] = {
-    available: !!(geminiKey && geminiKey.trim()),
-    reason: geminiKey && geminiKey.trim() ? 'API key configured' : 'Gemini API key not configured',
-  };
+  const kimiKey = await resolveApiKey('kimi');
+  providers['kimi'] = await validateRemoteProvider('kimi', kimiKey);
+
+  const geminiKey = await resolveApiKey('gemini');
+  providers['gemini'] = await validateRemoteProvider('gemini', geminiKey);
 
   return providers;
 }
@@ -867,6 +1369,12 @@ module.exports = {
   convertToPngIfNeeded,
   getStoredApiKey,
   getApiKey,
+  resolveApiKey,
+  getAllStoredKeys,
+  setStoredApiKey,
+  extractProviderErrorMessage,
+  testRemoteProviderKey,
+  validateRemoteProvider,
   KEYS_FILE,
   SYSTEM_PROMPT,
 };

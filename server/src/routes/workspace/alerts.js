@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -10,7 +11,10 @@ router.get('/alerts', async (req, res) => {
     const detected = await workspaceAlerts.detectAlerts();
     res.json({ ok: true, alerts: detected });
   } catch (err) {
-    res.json({ ok: true, alerts: [], error: err.message });
+    return sendApiError(
+      res,
+      createApiError('ALERT_FETCH_ERROR', err.message || 'Failed to detect alerts', 503)
+    );
   }
 });
 
@@ -20,7 +24,10 @@ router.get('/alerts/detect', async (req, res) => {
     const detected = await workspaceAlerts.detectAlerts();
     res.json({ ok: true, alerts: detected });
   } catch (err) {
-    res.json({ ok: true, alerts: [], error: err.message });
+    return sendApiError(
+      res,
+      createApiError('ALERT_FETCH_ERROR', err.message || 'Failed to detect alerts', 503)
+    );
   }
 });
 
@@ -29,12 +36,15 @@ router.post('/alerts/interaction', async (req, res) => {
   const { alertType, alertTitle, action, sourceId } = req.body;
 
   if (!alertType || !action) {
-    return res.json({ ok: false, code: 'MISSING_FIELD', error: 'alertType and action are required' });
+    return sendApiError(res, createApiError('MISSING_FIELD', 'alertType and action are required', 400));
   }
 
   const validActions = ['clicked', 'dismissed', 'expired'];
   if (!validActions.includes(action)) {
-    return res.json({ ok: false, code: 'INVALID_ACTION', error: `action must be one of: ${validActions.join(', ')}` });
+    return sendApiError(
+      res,
+      createApiError('INVALID_ACTION', `action must be one of: ${validActions.join(', ')}`, 400)
+    );
   }
 
   try {
@@ -45,7 +55,7 @@ router.post('/alerts/interaction', async (req, res) => {
     });
     res.json({ ok: true });
   } catch (err) {
-    res.json({ ok: false, code: 'INTERACTION_LOG_ERROR', error: err.message });
+    return sendApiError(res, createApiError('INTERACTION_LOG_ERROR', err.message || 'Failed to record alert interaction', 500));
   }
 });
 

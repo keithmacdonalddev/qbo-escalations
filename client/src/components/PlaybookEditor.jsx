@@ -69,7 +69,7 @@ export default function PlaybookEditor() {
       <div className="page-header">
         <h1 className="page-title">Playbook</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
-          AI knowledge base — edits here shape how Claude answers.
+          AI knowledge base and system guidance. Agent profiles and prompts now live in the dedicated Agents section.
         </span>
       </div>
 
@@ -97,6 +97,16 @@ export default function PlaybookEditor() {
                 Full Prompt (Read-only)
               </button>
             </Tooltip>
+
+            <div style={{ borderTop: '1px solid var(--line-subtle)', margin: 'var(--sp-2) 0' }} />
+
+            <div className="card card-compact" style={{ display: 'grid', gap: 'var(--sp-2)' }}>
+              <span className="eyebrow">Agents</span>
+              <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                Profiles, prompts, learning, and history moved out of Playbook.
+              </span>
+              <a className="btn btn-secondary btn-sm" href="#/agents">Open Agents</a>
+            </div>
 
             <div style={{ borderTop: '1px solid var(--line-subtle)', margin: 'var(--sp-2) 0' }} />
 

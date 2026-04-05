@@ -18,12 +18,14 @@ const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
+  { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
   { hash: '#/templates', label: 'Templates', short: 'Tmpl', icon: IconTemplate },
   { hash: '#/analytics', label: 'Analytics', short: 'Stats', icon: IconChart },
   { hash: '#/gallery', label: 'Gallery', short: 'Gal', icon: IconImage },
   { hash: '#/usage', label: 'Usage', short: 'Usage', icon: IconDollar },
   { hash: '#/workspace', label: 'Workspace', short: 'Work', icon: IconWorkspace },
+  { hash: '#/rooms', label: 'Rooms', short: 'Rm', icon: IconRooms },
 ];
 
 export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {
@@ -45,6 +47,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   const loadingRef = useRef(false);
   const fetchGenRef = useRef(0);
   const lastMutationRef = useRef(0);  // Start idle — no reason to fast-poll on fresh load
+  const collapsibleRef = useRef(null);
   const [circuitState, setCircuitState] = useState({ status: 'closed', failures: 0 });
   const navItems = [...NAV_ITEMS, ...extraNavItems.map((item) => ({ ...item, icon: item.icon || IconTerminal }))];
 
@@ -112,6 +115,20 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   }, [collapsed, hoverExpand]);
 
   useEffect(() => onCircuitChange(setCircuitState), []);
+
+  // Finding 4: Remove collapsed sidebar from tab order using inert attribute.
+  // React doesn't support inert as a JSX prop, so we use a ref-based approach.
+  useEffect(() => {
+    if (collapsibleRef.current) {
+      if (collapsed && !hoverExpanded) {
+        collapsibleRef.current.setAttribute('inert', '');
+        collapsibleRef.current.setAttribute('aria-hidden', 'true');
+      } else {
+        collapsibleRef.current.removeAttribute('inert');
+        collapsibleRef.current.removeAttribute('aria-hidden');
+      }
+    }
+  }, [collapsed, hoverExpanded]);
 
   const getPollInterval = useCallback(() => {
     return (Date.now() - lastMutationRef.current) < POLL_ACTIVE_WINDOW_MS
@@ -254,12 +271,12 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
       onMouseLeave={handleMouseLeave}
     >
       <div className="sidebar-header">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
           <path d="M2 17l10 5 10-5" />
           <path d="M2 12l10 5 10-5" />
         </svg>
-        <span>QBO Assist</span>
+        <h1 className="sidebar-brand-title">QBO Assist</h1>
         <button
           className="sidebar-collapse-btn"
           onClick={() => {
@@ -270,7 +287,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
           title={collapsed && !hoverExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
           type="button"
         >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
             {/* Outer frame */}
             <rect x="3" y="3" width="18" height="18" rx="2" />
             {/* Sidebar divider */}
@@ -295,7 +312,9 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
           const Icon = item.icon;
           const isActive = currentRoute === item.hash ||
             (item.hash === '#/chat' && currentRoute.startsWith('#/chat')) ||
-            (item.hash === '#/workspace' && currentRoute.startsWith('#/workspace'));
+            (item.hash === '#/workspace' && currentRoute.startsWith('#/workspace')) ||
+            (item.hash === '#/rooms' && currentRoute.startsWith('#/rooms')) ||
+            (item.hash === '#/agents' && currentRoute.startsWith('#/agents'));
           return (
             <a
               key={item.hash}
@@ -321,11 +340,12 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         })}
       </nav>
 
-      <div className="sidebar-collapsible">
+      <div className="sidebar-collapsible" ref={collapsibleRef}>
       {/* Search */}
       <div style={{ padding: '0 var(--sp-3)', marginTop: 'var(--sp-3)' }}>
         <div style={{ position: 'relative' }}>
           <svg
+            aria-hidden="true" focusable="false"
             width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ink-tertiary)"
             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
             style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
@@ -335,9 +355,10 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
           </svg>
           <input
             type="search"
-            placeholder="Search conversations..."
+            placeholder="Search titles and content..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            aria-label="Search conversations by title and content"
             style={{
               fontSize: 'var(--text-xs)',
               padding: '5px 8px 5px 26px',
@@ -351,9 +372,9 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         </div>
       </div>
 
-      <div className="sidebar-section-title">
+      <h2 className="sidebar-section-title">
         {search ? `Results for "${search}"` : 'Recent Conversations'}
-      </div>
+      </h2>
 
       <div className="sidebar-conversations" key={search}>
         {!search && (
@@ -364,7 +385,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
               style={{ fontWeight: 600, color: 'var(--accent)', gap: 'var(--sp-2)' }}
               onClick={onClose}
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <line x1="12" y1="5" x2="12" y2="19" />
                 <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
@@ -601,11 +622,11 @@ function ConvItem({
             disabled={isCopyDisabled}
           >
             {isCopied ? (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
             ) : (
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                 <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
               </svg>
@@ -620,7 +641,7 @@ function ConvItem({
             aria-label="Rename conversation"
             type="button"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
@@ -634,7 +655,7 @@ function ConvItem({
             aria-label={forkExpanded ? 'Collapse forks' : 'Expand forks'}
             type="button"
           >
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
               style={{ transform: forkExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }}
             >
               <polyline points="6 9 12 15 18 9" />
@@ -648,7 +669,7 @@ function ConvItem({
           aria-label="Delete conversation"
           type="button"
         >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+          <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -662,7 +683,7 @@ function ConvItem({
 
 function IconChat({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
     </svg>
   );
@@ -670,7 +691,7 @@ function IconChat({ size = 16 }) {
 
 function IconDashboard({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="7" height="7" />
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
@@ -681,7 +702,7 @@ function IconDashboard({ size = 16 }) {
 
 function IconBook({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
     </svg>
@@ -690,7 +711,7 @@ function IconBook({ size = 16 }) {
 
 function IconTemplate({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
       <polyline points="14 2 14 8 20 8" />
       <line x1="16" y1="13" x2="8" y2="13" />
@@ -702,7 +723,7 @@ function IconTemplate({ size = 16 }) {
 
 function IconChart({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="18" y1="20" x2="18" y2="10" />
       <line x1="12" y1="20" x2="12" y2="4" />
       <line x1="6" y1="20" x2="6" y2="14" />
@@ -712,7 +733,7 @@ function IconChart({ size = 16 }) {
 
 function IconDollar({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="12" y1="2" x2="12" y2="22" />
       <path d="M17 6.5c0-1.93-2.24-3.5-5-3.5S7 4.57 7 6.5 9.24 10 12 10s5 1.57 5 3.5S14.76 17 12 17s-5-1.57-5-3.5" />
     </svg>
@@ -721,7 +742,7 @@ function IconDollar({ size = 16 }) {
 
 function IconTerminal({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
@@ -730,7 +751,7 @@ function IconTerminal({ size = 16 }) {
 
 function IconWorkspace({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <line x1="3" y1="10" x2="21" y2="10" />
       <line x1="8" y1="10" x2="8" y2="20" />
@@ -740,7 +761,7 @@ function IconWorkspace({ size = 16 }) {
 
 function IconMail({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
       <polyline points="22,6 12,13 2,6" />
     </svg>
@@ -749,7 +770,7 @@ function IconMail({ size = 16 }) {
 
 function IconCalendar({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
       <line x1="16" y1="2" x2="16" y2="6" />
       <line x1="8" y1="2" x2="8" y2="6" />
@@ -760,7 +781,7 @@ function IconCalendar({ size = 16 }) {
 
 function IconInvestigation({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
       <line x1="11" y1="8" x2="11" y2="14" />
@@ -771,7 +792,7 @@ function IconInvestigation({ size = 16 }) {
 
 function IconImage({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
       <circle cx="8.5" cy="8.5" r="1.5" />
       <polyline points="21 15 16 10 5 21" />
@@ -779,9 +800,31 @@ function IconImage({ size = 16 }) {
   );
 }
 
+function IconRooms({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M17 20h5v-2a3 3 0 0 0-5.356-1.857" />
+      <path d="M7 20H2v-2a3 3 0 0 1 5.356-1.857" />
+      <circle cx="12" cy="7" r="4" />
+      <path d="M5.5 21a6.5 6.5 0 0 1 13 0" />
+    </svg>
+  );
+}
+
+function IconUsers({ size = 16 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
+  );
+}
+
 function IconLab({ size = 16 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M10 2v7.31" />
       <path d="M14 2v7.31" />
       <path d="M8.5 2h7" />

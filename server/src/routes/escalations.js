@@ -25,6 +25,7 @@ const {
   deleteAiOperation,
 } = require('../services/ai-runtime');
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const {
   createTrace,
   patchTrace,
@@ -314,7 +315,7 @@ async function enrichKnowledgeDraft(escalation, draftData) {
   const promptText = buildEnrichmentPrompt(escalationContext, conversationTranscript);
 
   const result = await claudePrompt(promptText, {
-    systemPrompt: ENRICHMENT_SYSTEM_PROMPT,
+    systemPrompt: getRenderedAgentPrompt('escalation-enrichment'),
     reasoningEffort: 'low',
     timeoutMs: 60000,
   });

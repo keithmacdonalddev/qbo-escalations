@@ -4,7 +4,7 @@ const express = require('express');
 const { randomUUID } = require('node:crypto');
 const Escalation = require('../../models/Escalation');
 const { createRateLimiter } = require('../../middleware/rate-limit');
-const { isValidProvider } = require('../../services/providers/registry');
+const { isValidProvider, getProvider } = require('../../services/providers/registry');
 const { parseWithPolicy } = require('../../services/parse-orchestrator');
 const {
   createAiOperation,
@@ -29,6 +29,7 @@ const {
   resolveParseMode,
   toParseResponseMeta,
 } = require('../../services/chat-request-service');
+const { buildServerTriageCard } = require('../../lib/chat-triage');
 const { logAttemptsUsage } = require('../../lib/chat-route-helpers');
 
 const router = express.Router();
@@ -69,6 +70,18 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
   const resolvedMode = resolveParseMode(mode);
   const traceStartedAt = new Date();
   const selectedProvider = primaryProvider || provider || DEFAULT_PROVIDER;
+  const selectedProviderMeta = getProvider(selectedProvider);
+  const fallbackProviderMeta = fallbackProvider ? getProvider(fallbackProvider) : null;
+  const requestedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : Math.max(
+      selectedProviderMeta?.defaultParseTimeoutMs || 0,
+      fallbackProviderMeta?.defaultParseTimeoutMs || 0,
+      60_000
+    );
+  if (typeof req.setResponseTimeout === 'function') {
+    req.setResponseTimeout(Math.min(requestedTimeoutMs + 30_000, 10 * 60 * 1000));
+  }
   const normalizedClientImageMeta = Array.isArray(imageMeta) ? imageMeta : [];
   const parseRuntimeOperation = createAiOperation({
     kind: 'parse',
@@ -179,6 +192,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
       allowRegexFallback: true,
     });
     const responseMeta = toParseResponseMeta(parseResult.meta);
+    const triageCard = buildServerTriageCard(parseResult.fields);
     await setTraceAttempts(trace?._id, parseResult.meta?.attempts || []).catch(() => null);
     await setTraceUsage(
       trace?._id,
@@ -267,6 +281,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
       return res.status(201).json({
         ok: true,
         escalation: escalation.toObject(),
+        triageCard,
         _meta: responseMeta,
         traceId: trace ? trace._id.toString() : null,
       });
@@ -274,6 +289,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
     return res.json({
       ok: true,
       escalation: parseResult.fields,
+      triageCard,
       _meta: responseMeta,
       traceId: trace ? trace._id.toString() : null,
     });

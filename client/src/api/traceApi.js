@@ -1,4 +1,4 @@
-import { apiFetch } from './http.js';
+import { apiFetchJson } from './http.js';
 
 const BASE = '/api/traces';
 
@@ -15,51 +15,35 @@ function buildParams(dateFrom, dateTo, filters = {}) {
 }
 
 export async function getTraceSummary(dateFrom, dateTo, filters = {}) {
-  const res = await apiFetch(`${BASE}/summary${buildParams(dateFrom, dateTo, filters)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch trace summary');
-  return data;
+  return apiFetchJson(`${BASE}/summary${buildParams(dateFrom, dateTo, filters)}`, {}, 'Failed to fetch trace summary');
 }
 
 export async function getTraceModels(dateFrom, dateTo, filters = {}) {
-  const res = await apiFetch(`${BASE}/models${buildParams(dateFrom, dateTo, filters)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch trace model summary');
-  return data;
+  return apiFetchJson(`${BASE}/models${buildParams(dateFrom, dateTo, filters)}`, {}, 'Failed to fetch trace model summary');
 }
 
 export async function getTraceModelTrends(dateFrom, dateTo, filters = {}, interval = 'daily', seriesLimit = 6) {
-  const res = await apiFetch(`${BASE}/model-trends${buildParams(dateFrom, dateTo, {
+  return apiFetchJson(`${BASE}/model-trends${buildParams(dateFrom, dateTo, {
     ...filters,
     interval,
     seriesLimit,
-  })}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch trace model trends');
-  return data;
+  })}`, {}, 'Failed to fetch trace model trends');
 }
 
 export async function getTraceRecent(dateFrom, dateTo, filters = {}, page = 1, limit = 50) {
-  const res = await apiFetch(`${BASE}/recent${buildParams(dateFrom, dateTo, {
+  return apiFetchJson(`${BASE}/recent${buildParams(dateFrom, dateTo, {
     ...filters,
     page,
     limit,
-  })}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch recent traces');
-  return data;
+  })}`, {}, 'Failed to fetch recent traces');
 }
 
 export async function getTraceDetail(traceId) {
-  const res = await apiFetch(`${BASE}/${encodeURIComponent(traceId)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch trace detail');
+  const data = await apiFetchJson(`${BASE}/${encodeURIComponent(traceId)}`, {}, 'Failed to fetch trace detail');
   return data.trace;
 }
 
 export async function getConversationTraces(conversationId) {
-  const res = await apiFetch(`${BASE}/conversation/${encodeURIComponent(conversationId)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch conversation traces');
+  const data = await apiFetchJson(`${BASE}/conversation/${encodeURIComponent(conversationId)}`, {}, 'Failed to fetch conversation traces');
   return data.traces || [];
 }

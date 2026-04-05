@@ -2,6 +2,7 @@
 
 const express = require('express');
 const patternLearner = require('../../services/workspace-pattern-learner');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -11,7 +12,7 @@ router.get('/patterns', async (req, res) => {
     const patterns = await patternLearner.detectPatterns();
     res.json({ ok: true, ...status, patterns });
   } catch (err) {
-    res.json({ ok: false, code: 'PATTERN_ERROR', error: err.message });
+    return sendApiError(res, createApiError('PATTERN_ERROR', err.message || 'Failed to load patterns', 500));
   }
 });
 
@@ -48,7 +49,7 @@ router.get('/behavior-stats', async (req, res) => {
       topDomains,
     });
   } catch (err) {
-    res.json({ ok: false, code: 'STATS_ERROR', error: err.message });
+    return sendApiError(res, createApiError('STATS_ERROR', err.message || 'Failed to load behavior stats', 500));
   }
 });
 
@@ -68,7 +69,7 @@ router.post('/patterns/mine', async (req, res) => {
       })),
     });
   } catch (err) {
-    res.json({ ok: false, code: 'MINING_ERROR', error: err.message });
+    return sendApiError(res, createApiError('MINING_ERROR', err.message || 'Failed to mine new patterns', 500));
   }
 });
 

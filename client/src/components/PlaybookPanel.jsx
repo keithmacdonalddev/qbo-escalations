@@ -173,6 +173,7 @@ export default function PlaybookPanel({
 
 function PlaybookEmptyState() {
   const items = [
+    { label: 'Agent Defaults', desc: 'Open the editable top-level prompts for Main Chat, Workspace, Image Parser, and Copilot. Internal helper prompts stay hidden.' },
     { label: 'Categories', desc: 'Topic guides like payroll, billing, and bank feeds. Pick one from the sidebar to view or edit.' },
     { label: 'Edge Cases', desc: 'Tricky scenarios that don\'t fit a category. Click "Edge Cases" above.' },
     { label: 'Full Prompt', desc: 'Read-only view of the complete system prompt Claude receives.' },
@@ -185,7 +186,7 @@ function PlaybookEmptyState() {
           Get Started with the Playbook
         </h2>
         <p style={{ fontSize: 'var(--text-sm)', color: 'var(--ink-secondary)', lineHeight: 1.6, marginBottom: 'var(--sp-6)', marginTop: 0 }}>
-          The Playbook is what the AI reads before every chat. Edit it to change how Claude answers escalation questions — no restart needed.
+          The Playbook and agent defaults are what the AI reads before it answers. Edit them here to change behavior without restarting the app.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           {items.map((item) => (

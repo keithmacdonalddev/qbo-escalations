@@ -196,11 +196,24 @@ function parseWorkspaceActions(text) {
   return actions;
 }
 
-async function executeWorkspaceActions(actions, executionState) {
+function createWorkspaceAbortError(message = 'Workspace action loop aborted') {
+  const err = new Error(message);
+  err.code = 'ABORTED';
+  return err;
+}
+
+async function executeWorkspaceActions(actions, executionState, opts = {}) {
   const ordered = orderWorkspaceActionsByDependency(actions);
   const results = [];
+  const shouldAbort = typeof opts.shouldAbort === 'function' ? opts.shouldAbort : () => false;
+  const abortMessage = typeof opts.abortMessage === 'string' && opts.abortMessage.trim()
+    ? opts.abortMessage
+    : 'Workspace action loop aborted';
 
   for (const action of ordered) {
+    if (shouldAbort()) {
+      throw createWorkspaceAbortError(abortMessage);
+    }
     const handler = TOOL_HANDLERS[action.tool];
     if (!handler) {
       actionLog.logAction({
@@ -252,6 +265,9 @@ async function executeWorkspaceActions(actions, executionState) {
     let result;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (shouldAbort()) {
+        throw createWorkspaceAbortError(abortMessage);
+      }
       try {
         result = await handler(preparedAction.params);
         succeeded = true;
@@ -371,7 +387,9 @@ function startWorkspaceCollectedChat({
   timeoutMs = WORKSPACE_CHAT_TIMEOUT_MS,
   mode = 'fallback',
   primaryProvider = WORKSPACE_PRIMARY_PROVIDER,
+  primaryModel = '',
   fallbackProvider = WORKSPACE_FALLBACK_PROVIDER,
+  fallbackModel = '',
   reasoningEffort = 'high',
   onChunk,
   onThinkingChunk,
@@ -398,7 +416,9 @@ function startWorkspaceCollectedChat({
     const cleanup = startChatOrchestration({
       mode,
       primaryProvider,
+      primaryModel,
       fallbackProvider,
+      fallbackModel,
       messages,
       systemPrompt,
       timeoutMs,
@@ -416,13 +436,16 @@ function startWorkspaceCollectedChat({
       onFallback: (detail) => {
         try { onStatus?.({ type: 'fallback', ...detail }); } catch { /* ignore */ }
       },
-      onDone: ({ fullResponse, providerUsed, attempts, usage }) => {
+      onDone: ({ fullResponse, providerUsed, modelUsed, fallbackUsed, fallbackFrom, attempts, usage }) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
           resolve({
             fullResponse: typeof fullResponse === 'string' && fullResponse ? fullResponse : fullText,
             providerUsed: providerUsed || null,
+            modelUsed: modelUsed || usage?.model || null,
+            fallbackUsed: Boolean(fallbackUsed),
+            fallbackFrom: fallbackFrom || null,
             attempts: Array.isArray(attempts) ? attempts : [],
             usage: usage || null,
           });

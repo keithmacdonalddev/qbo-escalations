@@ -47,6 +47,27 @@ export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'xhigh', label: 'Extra High' },
 ]);
 
+const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
+  'llm-gateway': Object.freeze([
+    { value: 'auto', label: 'Auto-detect' },
+  ]),
+  anthropic: Object.freeze([
+    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+    { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+  ]),
+  openai: Object.freeze([
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'o3', label: 'o3' },
+  ]),
+  gemini: Object.freeze([
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+  ]),
+  kimi: Object.freeze([
+    { value: 'kimi-k2.5', label: 'Kimi K2.5' },
+  ]),
+});
+
 function getDefaultProviderMeta() {
   return PROVIDER_MAP[DEFAULT_PROVIDER] || PROVIDER_CATALOG[0] || null;
 }
@@ -92,6 +113,57 @@ export function getProviderCapabilities(providerOrFamily) {
 
 export function getProviderModelId(provider) {
   return getProviderMeta(provider)?.model || null;
+}
+
+export function normalizeModelOverride(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export function getProviderDefaultModel(provider) {
+  return getProviderModelId(provider) || '';
+}
+
+export function getProviderModelPlaceholder(provider) {
+  const normalizedProvider = normalizeProvider(provider);
+  const defaultModel = getProviderDefaultModel(normalizedProvider);
+  if (PROVIDER_FAMILY[normalizedProvider] === 'lm-studio') {
+    return 'Optional override. Default: loaded local model';
+  }
+  if (PROVIDER_FAMILY[normalizedProvider] === 'llm-gateway') {
+    return 'Optional override. Default: gateway auto-detect';
+  }
+  return defaultModel
+    ? `Optional override. Default: ${defaultModel}`
+    : 'Optional model override';
+}
+
+export function getProviderModelSuggestions(provider) {
+  const normalizedProvider = normalizeProvider(provider);
+  const family = getProviderFamily(normalizedProvider);
+  const options = PROVIDER_CATALOG
+    .filter((entry) => entry.model && (entry.id === normalizedProvider || entry.family === family))
+    .map((entry) => ({
+      value: entry.model,
+      label: entry.label,
+      provider: entry.id,
+    }));
+  const extraOptions = (EXTRA_MODEL_SUGGESTIONS[normalizedProvider] || []).map((entry) => ({
+    ...entry,
+    provider: normalizedProvider,
+  }));
+
+  const seen = new Set();
+  return [...options, ...extraOptions].filter((option) => {
+    if (!option.value || seen.has(option.value)) return false;
+    seen.add(option.value);
+    return true;
+  });
+}
+
+export function hasCustomModelOverride(provider, model) {
+  const normalizedModel = normalizeModelOverride(model);
+  if (!normalizedModel) return false;
+  return normalizedModel !== getProviderDefaultModel(provider);
 }
 
 export function getProviderTransport(provider) {

@@ -6,6 +6,10 @@ import {
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
 } from '../lib/imageParserCatalog.js';
+import {
+  getImageParserStatusBadgeText,
+  getImageParserStatusLabel,
+} from '../lib/imageParserStatus.js';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
 import './ImageParserPanel.css';
 
@@ -146,10 +150,16 @@ export default function ImageParserPanel() {
   // Check provider availability on mount
   useEffect(() => {
     let cancelled = false;
-    checkAvailability().then((data) => {
+    const refreshAvailability = async () => {
+      const data = await checkAvailability({ forceRefresh: true });
       if (!cancelled) setAvailability(data);
-    });
-    return () => { cancelled = true; };
+    };
+    refreshAvailability();
+    const interval = window.setInterval(refreshAvailability, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [checkAvailability]);
 
   // Persist provider/model to localStorage
@@ -283,6 +293,13 @@ export default function ImageParserPanel() {
 
   const providerStatus = provider && availability?.providers?.[provider];
   const isProviderOnline = providerStatus?.available;
+  const providerLabel = IMAGE_PARSER_PROVIDERS.find((opt) => opt.value === provider)?.label || provider;
+  const providerStatusLabel = provider
+    ? getImageParserStatusLabel(provider, providerStatus, providerLabel)
+    : 'No provider selected';
+  const providerStatusBadgeText = provider
+    ? getImageParserStatusBadgeText(provider, providerStatus)
+    : 'Unknown';
   const canParse = imageBase64 && provider && !parsing;
 
   const renderedOutput = result?.text ? renderMarkdown(result.text) : null;
@@ -297,8 +314,11 @@ export default function ImageParserPanel() {
             <h2 className="image-parser-title">Image Parser</h2>
           </div>
           {provider && (
-            <span className={`image-parser-status-dot${isProviderOnline ? ' is-online' : providerStatus ? ' is-offline' : ''}`}>
-              {isProviderOnline ? 'Online' : providerStatus ? 'Offline' : 'Unknown'}
+            <span
+              className={`image-parser-status-dot${isProviderOnline ? ' is-online' : providerStatus ? ' is-offline' : ''}`}
+              title={providerStatusLabel}
+            >
+              {providerStatusBadgeText}
             </span>
           )}
         </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { apiFetch, sendGmailAI } from '../../lib/gmail/gmailApi.js';
+import { apiFetch } from '../../lib/gmail/gmailApi.js';
 import { SYSTEM_LABEL_DISPLAY, getInitials, avatarColor } from '../../lib/gmail/gmailInboxHelpers.jsx';
 import GmailReaderHeader from './GmailReaderHeader.jsx';
 import { SnoozeDropdown } from './GmailInboxOverlays.jsx';
@@ -108,44 +108,6 @@ function stripHtml(html) {
   if (!html) return '';
   const doc = new DOMParser().parseFromString(html, 'text/html');
   return doc.body.textContent || '';
-}
-
-function AiSummaryPopover({ text, loading, error, onClose }) {
-  return (
-    <motion.div
-      className="gmail-ai-summary-popover"
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.15 }}
-    >
-      <div className="gmail-ai-summary-header">
-        <span className="gmail-ai-summary-label">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-          AI Summary
-        </span>
-        <button className="gmail-btn-icon gmail-ai-summary-close" onClick={onClose} type="button" aria-label="Close summary">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-      <div className="gmail-ai-summary-body">
-        {loading && (
-          <div className="gmail-ai-summary-loading">
-            <div className="gmail-ai-typing-indicator">
-              <span /><span /><span />
-            </div>
-            <span>Analyzing email...</span>
-          </div>
-        )}
-        {error && <div className="gmail-ai-summary-error">{error}</div>}
-        {text && <div className="gmail-ai-summary-text">{text}</div>}
-      </div>
-    </motion.div>
-  );
 }
 
 function findUnsubscribeLinkInBody(html) {
@@ -270,7 +232,6 @@ function TrackerShield({ msg }) {
 export default function GmailMessageReader({
   messageId,
   onBack,
-  onOpenCompose,
   onOpenAiPanel,
   onReply,
   onForward,
@@ -288,14 +249,10 @@ export default function GmailMessageReader({
   const [error, setError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
   const iframeRef = useRef(null);
-  const [summaryState, setSummaryState] = useState({ show: false, text: '', loading: false, error: null });
   const [showLabelDropdown, setShowLabelDropdown] = useState(false);
   const [actionBusy, setActionBusy] = useState(null);
   const [confirmTrash, setConfirmTrash] = useState(false);
-  const [draftingReply, setDraftingReply] = useState(false);
   const [showSnooze, setShowSnooze] = useState(false);
-  const summaryAbortRef = useRef(null);
-  const draftAbortRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -356,54 +313,26 @@ export default function GmailMessageReader({
   }, [msg]);
 
   const handleSummarize = useCallback(() => {
-    if (summaryState.loading) return;
-    if (summaryAbortRef.current) summaryAbortRef.current();
-    setSummaryState({ show: true, text: '', loading: true, error: null });
-
-    const { abort } = sendGmailAI({
-      prompt: 'Summarize this email concisely. Highlight: key points, action items, sender intent, and any deadlines.',
-      emailContext: getEmailContext(),
-      onChunk: (text) => setSummaryState((prev) => ({ ...prev, text: prev.text + text })),
-      onDone: (data) => setSummaryState((prev) => ({ ...prev, loading: false, text: data.fullResponse || prev.text })),
-      onError: (err) => setSummaryState((prev) => ({ ...prev, loading: false, error: err })),
+    const emailContext = getEmailContext();
+    if (!emailContext) return;
+    onOpenAiPanel?.({
+      emailContext,
+      prompt: 'Summarize this email concisely. Highlight key points, action items, sender intent, and any deadlines.',
+      source: 'gmail-reader-summarize',
     });
-    summaryAbortRef.current = abort;
-  }, [summaryState.loading, getEmailContext]);
+    showToast?.('Workspace Agent is summarizing this email.');
+  }, [getEmailContext, onOpenAiPanel, showToast]);
 
   const handleDraftReply = useCallback(() => {
-    if (draftingReply) return;
-    if (draftAbortRef.current) draftAbortRef.current();
-    setDraftingReply(true);
-
-    let draftBody = '';
-    const { abort } = sendGmailAI({
-      prompt: 'Draft a professional reply to this email. Output ONLY the reply body text, no subject line. Be concise and professional.',
-      emailContext: getEmailContext(),
-      onChunk: (text) => { draftBody += text; },
-      onDone: (data) => {
-        setDraftingReply(false);
-        const replyTo = msg.fromEmail || msg.from || '';
-        const replySubject = msg.subject?.startsWith('Re:') ? msg.subject : `Re: ${msg.subject || ''}`;
-        onOpenCompose?.({
-          to: replyTo,
-          subject: replySubject,
-          body: data.fullResponse || draftBody,
-        });
-      },
-      onError: (err) => {
-        setDraftingReply(false);
-        setError(err?.message || 'Failed to draft AI reply');
-      },
+    const emailContext = getEmailContext();
+    if (!emailContext) return;
+    onOpenAiPanel?.({
+      emailContext,
+      prompt: 'Draft a professional reply to this email. Output only the reply body text, with no subject line.',
+      source: 'gmail-reader-draft-reply',
     });
-    draftAbortRef.current = abort;
-  }, [draftingReply, msg, getEmailContext, onOpenCompose]);
-
-  useEffect(() => {
-    return () => {
-      if (summaryAbortRef.current) summaryAbortRef.current();
-      if (draftAbortRef.current) draftAbortRef.current();
-    };
-  }, []);
+    showToast?.('Workspace Agent is drafting a reply.');
+  }, [getEmailContext, onOpenAiPanel, showToast]);
 
   if (loading) return <GmailLoadingSpinner text="Loading message..." />;
   if (error) return <GmailError message={error} onRetry={() => setRetryCount(c => c + 1)} />;
@@ -515,52 +444,43 @@ export default function GmailMessageReader({
           <button
             className="gmail-btn gmail-ai-action-btn"
             onClick={handleSummarize}
-            disabled={summaryState.loading}
             type="button"
-            title="Summarize this email with AI"
+            title="Summarize this email with the Workspace Agent"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
-            {summaryState.loading ? 'Summarizing...' : 'Summarize'}
+            Summarize
           </button>
           <button
             className="gmail-btn gmail-ai-action-btn"
             onClick={handleDraftReply}
-            disabled={draftingReply}
             type="button"
-            title="Draft a reply with AI"
+            title="Draft a reply with the Workspace Agent"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
               <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
             </svg>
-            {draftingReply ? 'Drafting...' : 'Draft Reply'}
+            Draft Reply
           </button>
           <button
             className="gmail-btn gmail-ai-action-btn"
-            onClick={() => onOpenAiPanel?.(getEmailContext())}
+            onClick={() => onOpenAiPanel?.({
+              emailContext: getEmailContext(),
+              source: 'gmail-reader-open-agent',
+            })}
             type="button"
-            title="Open AI assistant with this email"
+            title="Open Workspace Agent with this email"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
             </svg>
-            Ask AI
+            Ask Agent
           </button>
         </div>
       </div>
       <div className="gmail-reader-content">
-        <AnimatePresence>
-          {summaryState.show && (
-            <AiSummaryPopover
-              text={summaryState.text}
-              loading={summaryState.loading}
-              error={summaryState.error}
-              onClose={() => { setSummaryState({ show: false, text: '', loading: false, error: null }); if (summaryAbortRef.current) summaryAbortRef.current(); }}
-            />
-          )}
-        </AnimatePresence>
         <GmailReaderHeader msg={msg} />
         <UnsubscribeChip msg={msg} />
         <TrackerShield msg={msg} />

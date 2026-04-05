@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetchJson } from '../api/http.js';
 import { dispatchGmailMutations } from '../lib/gmailUiEvents.js';
 
 export default function useWorkspaceAgentFeedState({ open, workspaceMonitor } = {}) {
@@ -77,10 +78,8 @@ export default function useWorkspaceAgentFeedState({ open, workspaceMonitor } = 
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/workspace/activity');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled && data.ok && Array.isArray(data.activities)) {
+        const data = await apiFetchJson('/api/workspace/activity', {}, 'Failed to load workspace activity');
+        if (!cancelled && Array.isArray(data?.activities)) {
           setRecentActivity(data.activities);
         }
       } catch {
@@ -124,17 +123,14 @@ export default function useWorkspaceAgentFeedState({ open, workspaceMonitor } = 
     if (!nudge?.ruleId) return;
     beginPatternAction(nudge.id);
     try {
-      const res = await fetch(`/api/workspace/auto-actions/rules/${encodeURIComponent(nudge.ruleId)}/approve`, {
+      await apiFetchJson(`/api/workspace/auto-actions/rules/${encodeURIComponent(nudge.ruleId)}/approve`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
-        setDismissedNudges((prev) => new Set([...prev, nudge.id]));
-      }
-    } catch {
-      // Best effort — dismiss the nudge anyway
+      }, 'Failed to approve auto-action rule');
+      setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
       setDismissedNudges((prev) => new Set([...prev, nudge.id]));
+    } catch (err) {
+      console.error('[workspace] approve rule failed:', err.message);
     } finally {
       finishPatternAction(nudge.id);
     }
@@ -144,16 +140,14 @@ export default function useWorkspaceAgentFeedState({ open, workspaceMonitor } = 
     if (!nudge?.ruleId) return;
     beginPatternAction(nudge.id);
     try {
-      const res = await fetch(`/api/workspace/auto-actions/rules/${encodeURIComponent(nudge.ruleId)}/reject`, {
+      await apiFetchJson(`/api/workspace/auto-actions/rules/${encodeURIComponent(nudge.ruleId)}/reject`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-      });
-      if (res.ok) {
-        setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
-        setDismissedNudges((prev) => new Set([...prev, nudge.id]));
-      }
-    } catch {
+      }, 'Failed to reject auto-action rule');
+      setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
       setDismissedNudges((prev) => new Set([...prev, nudge.id]));
+    } catch (err) {
+      console.error('[workspace] reject rule failed:', err.message);
     } finally {
       finishPatternAction(nudge.id);
     }
@@ -163,35 +157,28 @@ export default function useWorkspaceAgentFeedState({ open, workspaceMonitor } = 
     if (!nudge?.label || !nudge?.messageIds?.length) return;
     beginPatternAction(nudge.id);
     try {
-      const res = await fetch('/api/workspace/apply-categorization', {
+      const data = await apiFetchJson('/api/workspace/apply-categorization', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: nudge.label, messageIds: nudge.messageIds }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        dispatchGmailMutations({
-          messageIds: nudge.messageIds,
-          addLabelIds: data.labelId ? [data.labelId] : [],
-        }, { source: 'workspace-categorization' });
-        setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
-        setDismissedNudges((prev) => new Set([...prev, nudge.id]));
-        const labelNote = data.labelCreated ? ` (created new label "${nudge.label}")` : '';
-        setProactiveQueue((prev) => [...prev, {
-          role: 'assistant',
-          content: `Applied label "${nudge.label}" to ${nudge.count || nudge.messageIds.length} email${(nudge.count || nudge.messageIds.length) > 1 ? 's' : ''} from ${nudge.domain}${labelNote}.`,
-          isProactive: true,
-          suggestedActions: [],
-          timestamp: new Date().toISOString(),
-          trigger: { type: 'categorization-applied' },
-        }]);
-      } else {
-        console.error('[workspace] categorization failed:', data.error);
-        setDismissedNudges((prev) => new Set([...prev, nudge.id]));
-      }
+      }, 'Failed to apply categorization');
+      dispatchGmailMutations({
+        messageIds: nudge.messageIds,
+        addLabelIds: data.labelId ? [data.labelId] : [],
+      }, { source: 'workspace-categorization' });
+      setNudges((prev) => prev.filter((n) => n.id !== nudge.id));
+      setDismissedNudges((prev) => new Set([...prev, nudge.id]));
+      const labelNote = data.labelCreated ? ` (created new label "${nudge.label}")` : '';
+      setProactiveQueue((prev) => [...prev, {
+        role: 'assistant',
+        content: `Applied label "${nudge.label}" to ${nudge.count || nudge.messageIds.length} email${(nudge.count || nudge.messageIds.length) > 1 ? 's' : ''} from ${nudge.domain}${labelNote}.`,
+        isProactive: true,
+        suggestedActions: [],
+        timestamp: new Date().toISOString(),
+        trigger: { type: 'categorization-applied' },
+      }]);
     } catch (err) {
       console.error('[workspace] categorization request failed:', err.message);
-      setDismissedNudges((prev) => new Set([...prev, nudge.id]));
     } finally {
       finishPatternAction(nudge.id);
     }

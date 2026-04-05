@@ -68,6 +68,7 @@ const {
   getStoredApiKey,
   getApiKey,
   KEYS_FILE,
+  validateRemoteProvider,
 } = require('../src/services/image-parser');
 
 test.beforeEach(() => {
@@ -299,6 +300,46 @@ test('parseImage routes to lm-studio and returns parsed result', async () => {
     assert.ok(result.usage);
     assert.equal(result.usage.inputTokens, 100);
     assert.equal(result.usage.outputTokens, 50);
+    assert.equal(result.parseFields.coid, '123');
+    assert.equal(result.parseFields.caseNumber, 'CS-001');
+    assert.equal(result.parseMeta?.fieldsFound, 2);
+  } finally {
+    clearHttpMock();
+  }
+});
+
+test('parseImage derives structured escalation fields and parse confidence', async () => {
+  mockHttpRequest(200, {
+    choices: [{
+      message: {
+        content: [
+          'COID/MID: 12345 / 67890',
+          'CASE: CS-2026-001',
+          'CLIENT/CONTACT: Jane Smith',
+          'AGENT: John Doe',
+          'CX IS ATTEMPTING TO: submit payroll',
+          'EXPECTED OUTCOME: payroll should submit successfully',
+          'ACTUAL OUTCOME: QBO shows a payroll tax calculation error',
+          'TRIED TEST ACCOUNT: yes',
+          'TS STEPS: cleared cache and retried in incognito',
+        ].join('\n'),
+      },
+    }],
+    model: 'test-vision-model',
+    usage: { prompt_tokens: 120, completion_tokens: 80 },
+  });
+
+  try {
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+    assert.equal(result.role, 'escalation');
+    assert.equal(result.parseFields.coid, '12345');
+    assert.equal(result.parseFields.mid, '67890');
+    assert.equal(result.parseFields.caseNumber, 'CS-2026-001');
+    assert.equal(result.parseFields.clientContact, 'Jane Smith');
+    assert.equal(result.parseFields.category, 'payroll');
+    assert.equal(result.parseMeta?.passed, true);
+    assert.equal(result.parseMeta?.confidence, 'high');
+    assert.ok(Array.isArray(result.parseMeta?.issues));
   } finally {
     clearHttpMock();
   }
@@ -313,6 +354,8 @@ test('parseImage auto-detects inv-list role from INV pattern', async () => {
   try {
     const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
     assert.equal(result.role, 'inv-list');
+    assert.deepEqual(result.parseFields, {});
+    assert.equal(result.parseMeta, null);
   } finally {
     clearHttpMock();
   }
@@ -432,6 +475,29 @@ test('parseImage accepts kimi provider (throws PROVIDER_UNAVAILABLE not INVALID_
   } finally {
     fs.readFileSync = origRead;
     if (origKey !== undefined) process.env.MOONSHOT_API_KEY = origKey;
+  }
+});
+
+test('parseImage accepts gemini provider (throws PROVIDER_UNAVAILABLE not INVALID_PROVIDER)', async () => {
+  const origKey = process.env.GEMINI_API_KEY;
+  const origRead = fs.readFileSync;
+  try {
+    delete process.env.GEMINI_API_KEY;
+    fs.readFileSync = function mockRead(filePath) {
+      if (filePath === KEYS_FILE) throw new Error('ENOENT');
+      return origRead.apply(this, arguments);
+    };
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, { provider: 'gemini' }),
+      (err) => {
+        assert.equal(err.code, 'PROVIDER_UNAVAILABLE');
+        assert.match(err.message, /Gemini.*not configured/i);
+        return true;
+      }
+    );
+  } finally {
+    fs.readFileSync = origRead;
+    if (origKey !== undefined) process.env.GEMINI_API_KEY = origKey;
   }
 });
 
@@ -1055,18 +1121,88 @@ test('checkProviderAvailability reports lm-studio unavailable when no model load
   }
 });
 
+test('checkProviderAvailability reports llm-gateway authenticated only when provider-status succeeds', async () => {
+  const origGatewayKey = process.env.LLM_GATEWAY_API_KEY;
+  try {
+    process.env.LLM_GATEWAY_API_KEY = 'lgwk_test_key';
+    mockHttpRequest(200, {
+      ok: true,
+      provider: 'llm-gateway',
+      authenticated: true,
+      upstream: {
+        loadedModel: null,
+        availableModel: 'google/gemma-4-26b-a4b',
+      },
+    });
+    const result = await checkProviderAvailability({ forceRefresh: true });
+    assert.equal(result['llm-gateway'].available, true);
+    assert.equal(result['llm-gateway'].model, 'google/gemma-4-26b-a4b');
+    assert.equal(result['llm-gateway'].code, 'OK');
+    assert.equal(result['llm-gateway'].reason, 'Authenticated');
+  } finally {
+    if (origGatewayKey !== undefined) process.env.LLM_GATEWAY_API_KEY = origGatewayKey;
+    else delete process.env.LLM_GATEWAY_API_KEY;
+    clearHttpMock();
+  }
+});
+
+test('validateRemoteProvider maps llm-gateway invalid API keys to INVALID_KEY', async () => {
+  mockHttpRequest(401, {
+    error: {
+      message: 'Invalid API key.',
+      code: 'INVALID_API_KEY',
+    },
+  });
+
+  try {
+    const result = await validateRemoteProvider('llm-gateway', 'lgwk_bad_key');
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.available, false);
+    assert.equal(result.code, 'INVALID_KEY');
+    assert.equal(result.reason, 'API key rejected');
+    assert.match(result.detail, /invalid api key/i);
+  } finally {
+    clearHttpMock();
+  }
+});
+
+test('validateRemoteProvider maps llm-gateway upstream-not-ready responses to PROVIDER_UNAVAILABLE', async () => {
+  mockHttpRequest(503, {
+    error: {
+      message: 'Gateway authenticated, but no upstream model is ready.',
+      code: 'UPSTREAM_NOT_READY',
+    },
+  });
+
+  try {
+    const result = await validateRemoteProvider('llm-gateway', 'lgwk_test_key');
+    assert.equal(result.ok, false);
+    assert.equal(result.configured, true);
+    assert.equal(result.available, false);
+    assert.equal(result.code, 'PROVIDER_UNAVAILABLE');
+    assert.equal(result.reason, 'Gateway reachable, model unavailable');
+    assert.match(result.detail, /no upstream model is ready/i);
+  } finally {
+    clearHttpMock();
+  }
+});
+
 test('checkProviderAvailability reports openai available when key is set', async () => {
   const origKey = process.env.OPENAI_API_KEY;
+  const httpsMock = mockHttpsRequest(200, { choices: [{ message: { content: 'ok' } }] });
   try {
     process.env.OPENAI_API_KEY = 'sk-openai-avail-test';
     mockHttpRequest(200, JSON.stringify({ data: [{ id: 'test-model' }] }));
     const result = await checkProviderAvailability();
     assert.equal(result.openai.available, true);
-    assert.match(result.openai.reason, /configured/);
+    assert.equal(result.openai.configured, true);
+    assert.match(result.openai.reason, /Authenticated/);
   } finally {
     if (origKey !== undefined) process.env.OPENAI_API_KEY = origKey;
     else delete process.env.OPENAI_API_KEY;
     clearHttpMock();
+    httpsMock.restore();
   }
 });
 
@@ -1200,16 +1336,19 @@ test('checkProviderAvailability', async (t) => {
 
   await t.test('reports anthropic available when key is set', async () => {
     const origKey = process.env.ANTHROPIC_API_KEY;
+    const httpsMock = mockHttpsRequest(200, { content: [{ text: 'ok' }] });
     try {
       process.env.ANTHROPIC_API_KEY = 'sk-test-key';
       mockHttpRequest(200, JSON.stringify({ data: [{ id: 'test-model' }] }));
       const result = await checkProviderAvailability();
       assert.equal(result.anthropic.available, true);
-      assert.match(result.anthropic.reason, /configured/);
+      assert.equal(result.anthropic.configured, true);
+      assert.match(result.anthropic.reason, /Authenticated/);
     } finally {
       if (origKey !== undefined) process.env.ANTHROPIC_API_KEY = origKey;
       else delete process.env.ANTHROPIC_API_KEY;
       clearHttpMock();
+      httpsMock.restore();
     }
   });
 
@@ -1256,16 +1395,19 @@ test('checkProviderAvailability', async (t) => {
 
   await t.test('reports kimi available when key is set', async () => {
     const origKey = process.env.MOONSHOT_API_KEY;
+    const httpsMock = mockHttpsRequest(200, { choices: [{ message: { content: 'ok' } }] });
     try {
       process.env.MOONSHOT_API_KEY = 'mk-test-key';
       mockHttpRequest(200, JSON.stringify({ data: [{ id: 'test-model' }] }));
       const result = await checkProviderAvailability();
       assert.equal(result.kimi.available, true);
-      assert.match(result.kimi.reason, /configured/);
+      assert.equal(result.kimi.configured, true);
+      assert.match(result.kimi.reason, /Authenticated/);
     } finally {
       if (origKey !== undefined) process.env.MOONSHOT_API_KEY = origKey;
       else delete process.env.MOONSHOT_API_KEY;
       clearHttpMock();
+      httpsMock.restore();
     }
   });
 

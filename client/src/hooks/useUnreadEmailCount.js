@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getDefaultGmailAccount } from '../lib/accountDefaults.js';
+import { apiFetchJson } from '../api/http.js';
 
 export default function useUnreadEmailCount() {
   const [unreadCount, setUnreadCount] = useState(0);
@@ -9,8 +10,7 @@ export default function useUnreadEmailCount() {
 
     const fetchUnread = () => {
       const defaultEmail = getDefaultGmailAccount();
-      fetch('/api/gmail/unified/unread-counts')
-        .then((r) => (r.ok ? r.json() : null))
+      apiFetchJson('/api/gmail/unified/unread-counts', {}, 'Failed to load unread counts')
         .then((data) => {
           if (!active || !data?.ok) return;
           const counts = data.counts || {};

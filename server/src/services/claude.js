@@ -5,7 +5,7 @@ const os = require('os');
 const { extractClaudeUsage } = require('../lib/usage-extractor');
 const { reportServerError } = require('../lib/server-error-pipeline');
 const { parseImageWithSDK } = require('./sdk-image-parse');
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
 
 // Concurrency limiter for SDK image parsing — only 1 at a time to prevent
 // memory pressure from parallel Claude Code subprocess spawns.
@@ -55,6 +55,28 @@ function cleanupTempFiles(paths) {
   for (const f of paths) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
   }
+}
+
+function ensureIsolatedClaudeRoot() {
+  try {
+    fs.mkdirSync(CLAUDE_ISOLATED_ROOT, { recursive: true });
+  } catch {
+    // If this fails, the spawn will still attempt to use the path and surface
+    // the real error. Do not hide it here.
+  }
+  return CLAUDE_ISOLATED_ROOT;
+}
+
+function buildClaudeSpawnOptions() {
+  return {
+    cwd: ensureIsolatedClaudeRoot(),
+    env: {
+      ...process.env,
+      CLAUDECODE: undefined,
+      CLAUDE_PROJECT_DIR: '',
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+    },
+  };
 }
 
 /**
@@ -267,12 +289,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-        cwd: PROJECT_ROOT,
-        env: {
-          ...process.env,
-          CLAUDECODE: undefined,
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-        },
+        ...buildClaudeSpawnOptions(),
       });
     } catch (err) {
       cleanupTempFiles(tempFiles);
@@ -542,12 +559,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           child = spawn('claude', tArgs, {
             stdio: ['pipe', 'pipe', 'pipe'],
             shell: true,
-            cwd: PROJECT_ROOT,
-            env: {
-              ...process.env,
-              CLAUDECODE: undefined,
-              CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-            },
+            ...buildClaudeSpawnOptions(),
           });
         } catch (err) {
           reportServerError({
@@ -645,12 +657,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         child = spawn('claude', parseArgs, {
           stdio: ['pipe', 'pipe', 'pipe'],
           shell: true,
-          cwd: PROJECT_ROOT,
-          env: {
-            ...process.env,
-            CLAUDECODE: undefined,
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-          },
+          ...buildClaudeSpawnOptions(),
         });
       } catch (err) {
         reportServerError({
@@ -773,12 +780,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-        cwd: PROJECT_ROOT,
-        env: {
-          ...process.env,
-          CLAUDECODE: undefined,
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-        },
+        ...buildClaudeSpawnOptions(),
       });
     } catch (err) {
       reportServerError({
@@ -897,12 +899,7 @@ async function warmUp() {
     const child = spawn('claude', ['-p', '--output-format', 'text', '--max-turns', '1'], {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: true,               // required on Windows where claude may be a .cmd shim
-      cwd: PROJECT_ROOT,
-      env: {
-        ...process.env,
-        CLAUDECODE: undefined,
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-      },
+      ...buildClaudeSpawnOptions(),
     });
     // Pipe the prompt via stdin to avoid passing content as a CLI argument
     try { child.stdin.end('hello'); } catch { /* ignore */ }
@@ -1023,12 +1020,7 @@ async function prompt(promptText, options = {}) {
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-        cwd: PROJECT_ROOT,
-        env: {
-          ...process.env,
-          CLAUDECODE: undefined,
-          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-        },
+        ...buildClaudeSpawnOptions(),
       });
     } catch (err) {
       reportServerError({
@@ -1180,12 +1172,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         child = spawn('claude', args, {
           stdio: ['pipe', 'pipe', 'pipe'],
           shell: true,
-          cwd: PROJECT_ROOT,
-          env: {
-            ...process.env,
-            CLAUDECODE: undefined,
-            CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
-          },
+          ...buildClaudeSpawnOptions(),
         });
       } catch (err) {
         reportServerError({

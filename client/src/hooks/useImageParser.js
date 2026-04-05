@@ -63,9 +63,13 @@ export default function useImageParser() {
     }
   }, []);
 
-  const checkAvailability = useCallback(async () => {
+  const checkAvailability = useCallback(async (options = {}) => {
     try {
-      const res = await apiFetch('/api/image-parser/status');
+      const forceRefresh = options.forceRefresh === true;
+      const url = forceRefresh
+        ? '/api/image-parser/status?refresh=1'
+        : '/api/image-parser/status';
+      const res = await apiFetch(url);
       const data = await res.json().catch(() => ({ ok: false, providers: {} }));
       return data;
     } catch {

@@ -20,6 +20,8 @@ const ROUTE_PATH = require.resolve('../src/routes/image-parser');
 // ---------------------------------------------------------------------------
 let _mockParseImage = null;
 let _mockCheckProviderAvailability = null;
+let _mockResolveApiKey = null;
+let _mockValidateRemoteProvider = null;
 
 // Save originals for fs mocking
 const _origReadFileSync = fs.readFileSync;
@@ -54,6 +56,14 @@ function loadRouteWithMockedService() {
         if (_mockCheckProviderAvailability) return _mockCheckProviderAvailability(...args);
         return realService.checkProviderAvailability(...args);
       },
+      resolveApiKey: (...args) => {
+        if (_mockResolveApiKey) return _mockResolveApiKey(...args);
+        return realService.resolveApiKey(...args);
+      },
+      validateRemoteProvider: (...args) => {
+        if (_mockValidateRemoteProvider) return _mockValidateRemoteProvider(...args);
+        return realService.validateRemoteProvider(...args);
+      },
     },
   };
 
@@ -76,12 +86,14 @@ function findHandler(method, routePath) {
   return handlers[handlers.length - 1]; // last handler (after middleware)
 }
 
-function makeReq(body = {}) {
+function makeReq(body = {}, extras = {}) {
   return {
     body,
+    query: extras.query || {},
     ip: '127.0.0.1',
     socket: { remoteAddress: '127.0.0.1' },
     setResponseTimeout: () => {},
+    ...extras,
   };
 }
 
@@ -273,12 +285,25 @@ test('POST /parse error handling', async (t) => {
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /parse — success response shape
 // ═══════════════════════════════════════════════════════════════════════════
-test('POST /parse success response includes ok, text, role, usage, elapsedMs', async () => {
+test('POST /parse success response includes image metadata and structured fields', async () => {
   const handler = findHandler('post', '/parse');
   _mockParseImage = async () => ({
     text: 'COID/MID: 123',
     role: 'escalation',
     usage: { model: 'test', inputTokens: 10, outputTokens: 5 },
+    parseFields: { coid: '123', caseNumber: 'CS-001', category: 'technical' },
+    parseMeta: { passed: true, confidence: 'high', fieldsFound: 3, issues: [] },
+    stats: {
+      providerLatencyMs: 42,
+      image: {
+        originalFormat: 'image/png',
+        finalFormat: 'image/png',
+        originalSizeBytes: 100,
+        finalSizeBytes: 100,
+        wasConverted: false,
+        conversionTimeMs: 0,
+      },
+    },
   });
   const res = makeRes();
   try {
@@ -287,6 +312,9 @@ test('POST /parse success response includes ok, text, role, usage, elapsedMs', a
     assert.equal(res.payload.text, 'COID/MID: 123');
     assert.equal(res.payload.role, 'escalation');
     assert.ok(res.payload.usage);
+    assert.deepEqual(res.payload.parseFields, { coid: '123', caseNumber: 'CS-001', category: 'technical' });
+    assert.equal(res.payload.parseMeta.confidence, 'high');
+    assert.equal(res.payload.meta.originalFormat, 'image/png');
     assert.equal(typeof res.payload.elapsedMs, 'number');
   } finally {
     _mockParseImage = null;
@@ -314,6 +342,24 @@ test('GET /status', async (t) => {
       assert.ok('anthropic' in res.payload.providers);
       assert.ok('openai' in res.payload.providers);
       assert.ok('kimi' in res.payload.providers);
+    } finally {
+      _mockCheckProviderAvailability = null;
+    }
+  });
+
+  await t.test('passes forceRefresh=true when refresh query is present', async () => {
+    let receivedOptions = null;
+    _mockCheckProviderAvailability = async (options) => {
+      receivedOptions = options;
+      return {
+        'llm-gateway': { available: true, model: null, reason: 'reachable' },
+      };
+    };
+    const res = makeRes();
+    try {
+      await handler(makeReq({}, { query: { refresh: '1' } }), res);
+      assert.equal(res.payload.ok, true);
+      assert.deepEqual(receivedOptions, { forceRefresh: true });
     } finally {
       _mockCheckProviderAvailability = null;
     }
@@ -554,28 +600,110 @@ test('POST /keys/test', async (t) => {
       if (origEnv !== undefined) process.env.MOONSHOT_API_KEY = origEnv;
     }
   });
+
+  await t.test('accepts gemini as valid provider', async () => {
+    const res = makeRes();
+    const origRead = fs.readFileSync;
+    fs.readFileSync = function mockRead(filePath) {
+      if (String(filePath).includes('image-parser-keys')) throw new Error('ENOENT');
+      return origRead.apply(this, arguments);
+    };
+    const origEnv = process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    try {
+      await handler(makeReq({ provider: 'gemini' }), res);
+      assert.equal(res.payload.code, 'NO_KEY');
+    } finally {
+      fs.readFileSync = origRead;
+      if (origEnv !== undefined) process.env.GEMINI_API_KEY = origEnv;
+    }
+  });
+
+  await t.test('returns 401 for INVALID_KEY from shared provider validation', async () => {
+    _mockResolveApiKey = async () => 'stored-key';
+    _mockValidateRemoteProvider = async () => ({
+      ok: false,
+      code: 'INVALID_KEY',
+      reason: 'API key rejected',
+      detail: 'Invalid API key',
+      model: null,
+    });
+    const res = makeRes();
+    try {
+      await handler(makeReq({ provider: 'llm-gateway' }), res);
+      assert.equal(res.statusCode, 401);
+      assert.equal(res.payload.ok, false);
+      assert.equal(res.payload.code, 'INVALID_KEY');
+      assert.equal(res.payload.error, 'API key rejected');
+    } finally {
+      _mockResolveApiKey = null;
+      _mockValidateRemoteProvider = null;
+    }
+  });
+
+  await t.test('returns 503 for PROVIDER_UNAVAILABLE from shared provider validation', async () => {
+    _mockResolveApiKey = async () => 'stored-key';
+    _mockValidateRemoteProvider = async () => ({
+      ok: false,
+      code: 'PROVIDER_UNAVAILABLE',
+      reason: 'Gateway reachable, model unavailable',
+      detail: 'Gateway authenticated, but no upstream model is ready.',
+      model: null,
+    });
+    const res = makeRes();
+    try {
+      await handler(makeReq({ provider: 'llm-gateway' }), res);
+      assert.equal(res.statusCode, 503);
+      assert.equal(res.payload.ok, false);
+      assert.equal(res.payload.code, 'PROVIDER_UNAVAILABLE');
+      assert.equal(res.payload.error, 'Gateway reachable, model unavailable');
+    } finally {
+      _mockResolveApiKey = null;
+      _mockValidateRemoteProvider = null;
+    }
+  });
+
+  await t.test('returns 504 for TIMEOUT from shared provider validation', async () => {
+    _mockResolveApiKey = async () => 'stored-key';
+    _mockValidateRemoteProvider = async () => ({
+      ok: false,
+      code: 'TIMEOUT',
+      reason: 'Gateway validation timed out',
+      detail: '',
+      model: null,
+    });
+    const res = makeRes();
+    try {
+      await handler(makeReq({ provider: 'llm-gateway' }), res);
+      assert.equal(res.statusCode, 504);
+      assert.equal(res.payload.ok, false);
+      assert.equal(res.payload.code, 'TIMEOUT');
+      assert.equal(res.payload.error, 'Gateway validation timed out');
+    } finally {
+      _mockResolveApiKey = null;
+      _mockValidateRemoteProvider = null;
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Kimi test config — verify temperature: 1 in the test body
 // ═══════════════════════════════════════════════════════════════════════════
 test('Kimi test config includes temperature: 1', () => {
-  const routeSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'routes', 'image-parser.js'),
+  const serviceSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'services', 'image-parser.js'),
     'utf8'
   );
 
-  // Verify the Kimi buildBody includes temperature: 1
-  const kimiSection = routeSource.match(/kimi:\s*\{[\s\S]*?buildBody:[^}]+\}/);
-  assert.ok(kimiSection, 'Kimi section exists in TEST_CONFIGS');
+  const kimiSection = serviceSource.match(/kimi:\s*\{[\s\S]*?buildBody:[^}]+\}/);
+  assert.ok(kimiSection, 'Kimi section exists in REMOTE_PROVIDER_TEST_CONFIGS');
   assert.ok(
     kimiSection[0].includes('temperature: 1'),
     'Kimi test config buildBody includes temperature: 1'
   );
 
-  // Also verify OpenAI and Anthropic do NOT include temperature
-  const anthropicSection = routeSource.match(/anthropic:\s*\{[\s\S]*?buildBody:[^}]+\}/);
-  assert.ok(anthropicSection, 'Anthropic section exists in TEST_CONFIGS');
+  const anthropicSection = serviceSource.match(/anthropic:\s*\{[\s\S]*?buildBody:[^}]+\}/);
+  assert.ok(anthropicSection, 'Anthropic section exists in REMOTE_PROVIDER_TEST_CONFIGS');
   assert.ok(
     !anthropicSection[0].includes('temperature'),
     'Anthropic test config does not include temperature'
@@ -653,4 +781,6 @@ test.after(() => {
   fs.mkdirSync = _origMkdirSync;
   _mockParseImage = null;
   _mockCheckProviderAvailability = null;
+  _mockResolveApiKey = null;
+  _mockValidateRemoteProvider = null;
 });

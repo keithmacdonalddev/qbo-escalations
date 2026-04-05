@@ -8,6 +8,7 @@ const { parseEscalationText } = require('../lib/escalation-parser');
 const { validateParsedEscalation } = require('../lib/parse-validation');
 const {
   VALID_MODES,
+  normalizeModelOverride,
   resolvePolicy,
 } = require('./chat-orchestrator');
 const {
@@ -22,6 +23,7 @@ const {
 
 const DEFAULT_PARALLEL_OPEN_TURN_LIMIT = 8;
 const DEFAULT_PROVIDER = getDefaultProvider();
+const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -201,7 +203,9 @@ async function prepareChatRequest({
   conversationProvider,
   requestedProvider,
   requestedPrimaryProvider,
+  requestedPrimaryModel,
   requestedFallbackProvider,
+  requestedFallbackModel,
   requestedParallelProviders,
   requestedMode,
   timeoutMs,
@@ -223,11 +227,18 @@ async function prepareChatRequest({
     runtimeSettings.providerStrategy.reasoningEffort || 'high'
   );
   const normalizedRequestedPrimaryProvider = normalizeProvider(requestedPrimary);
+  const normalizedRequestedFallbackProvider = normalizeProvider(
+    resolvedRequestedFallback || getAlternateProvider(normalizedRequestedPrimaryProvider)
+  );
+  const normalizedRequestedPrimaryModel = normalizeModelOverride(requestedPrimaryModel);
+  const normalizedRequestedFallbackModel = normalizeModelOverride(requestedFallbackModel);
 
   let policy = applyChatFeatureFlags(resolvePolicy({
     mode: resolvedRequestedMode,
     primaryProvider: requestedPrimary,
+    primaryModel: normalizedRequestedPrimaryModel,
     fallbackProvider: resolvedRequestedFallback,
+    fallbackModel: normalizedRequestedFallbackModel,
     parallelProviders: requestedParallelProviders || undefined,
   }));
 
@@ -245,10 +256,19 @@ async function prepareChatRequest({
     policy = applyChatFeatureFlags(resolvePolicy({
       mode: guardrail.policyOverride.mode,
       primaryProvider: guardrail.policyOverride.primaryProvider,
+      primaryModel: normalizedRequestedPrimaryModel,
       fallbackProvider: guardrail.policyOverride.fallbackProvider,
+      fallbackModel: normalizedRequestedFallbackModel,
       parallelProviders: guardrail.policyOverride.parallelProviders || policy.parallelProviders,
     }));
   }
+
+  policy.primaryModel = policy.primaryProvider === normalizedRequestedPrimaryProvider
+    ? normalizedRequestedPrimaryModel
+    : '';
+  policy.fallbackModel = policy.fallbackProvider === normalizedRequestedFallbackProvider
+    ? normalizedRequestedFallbackModel
+    : '';
 
   const policyError = !policy.parallelProviders
     && (policy.mode === 'fallback' || policy.mode === 'parallel')
@@ -271,7 +291,9 @@ async function prepareChatRequest({
     policy,
     policyError,
     requestedFallback: resolvedRequestedFallback,
+    requestedFallbackModel: normalizedRequestedFallbackModel,
     requestedMode: resolvedRequestedMode,
+    requestedPrimaryModel: normalizedRequestedPrimaryModel,
     requestedPrimaryProvider: normalizedRequestedPrimaryProvider,
   };
 }
@@ -470,6 +492,28 @@ async function callOptional(callback, payload) {
   await callback(payload);
 }
 
+async function runChatImageTranscriptionFallback({
+  normalizedImages,
+  transcriptionModel,
+  effectiveReasoningEffort,
+  effectiveTimeoutMs,
+  sendStatus,
+}) {
+  await sendStatus('Using standard image transcription...');
+  const transcription = await chatImageModule.transcribeImageForChat(normalizedImages, {
+    model: transcriptionModel || undefined,
+    reasoningEffort: effectiveReasoningEffort || 'high',
+    timeoutMs: effectiveTimeoutMs || undefined,
+  });
+
+  if (!transcription) return null;
+  return {
+    ...transcription,
+    source: 'chat-image-transcription',
+    role: 'unknown',
+  };
+}
+
 async function buildChatImageAugmentation({
   normalizedImages,
   messageText,
@@ -479,15 +523,40 @@ async function buildChatImageAugmentation({
   onTranscriptionComplete,
   onTriageStart,
   imageParserConfig,
+  parsedEscalationText,
+  parsedEscalationProvider,
+  parsedEscalationModel,
+  transcriptionModel,
+  effectiveReasoningEffort,
+  effectiveTimeoutMs,
 }) {
   let nonEscalationIntent = chatTriageModule.isNonEscalationIntent(messageText);
   const sendStatus = typeof emitStatus === 'function' ? emitStatus : async () => {};
 
   let imageTranscription = null;
   let parserError = null;
+  const providedParsedText = safeString(parsedEscalationText, '').trim();
+  if (providedParsedText && normalizedImages.length === 0) {
+    imageTranscription = {
+      text: providedParsedText,
+      usage: null,
+      source: 'parsed-escalation-text',
+      role: 'escalation',
+      providerUsed: normalizeProvider(parsedEscalationProvider || DEFAULT_PROVIDER),
+      model: safeString(parsedEscalationModel, ''),
+      elapsedMs: 0,
+    };
+  }
   if (normalizedImages.length > 0) {
     if (!imageParserConfig?.provider) {
-      await sendStatus('No image parser configured. Chat will continue without screenshot parsing.');
+      imageTranscription = await runChatImageTranscriptionFallback({
+        normalizedImages,
+        transcriptionModel,
+        effectiveReasoningEffort,
+        effectiveTimeoutMs,
+        sendStatus,
+      });
+      await callOptional(onTranscriptionComplete, imageTranscription);
     } else {
       const parserStartedAt = Date.now();
       await callOptional(onTranscriptionStart, {
@@ -518,17 +587,35 @@ async function buildChatImageAugmentation({
         if (imageTranscription.role === 'inv-list') {
           nonEscalationIntent = true;
         }
+        if (!safeString(imageTranscription.text, '').trim()) {
+          imageTranscription = await runChatImageTranscriptionFallback({
+            normalizedImages,
+            transcriptionModel,
+            effectiveReasoningEffort,
+            effectiveTimeoutMs,
+            sendStatus,
+          });
+        }
       } catch (err) {
         parserError = err || null;
-        console.warn('[chat] Dedicated image parser failed; continuing without image context:', err.message);
-        await sendStatus('Image parser failed. Continuing without screenshot parsing.');
+        if (IMAGE_PARSER_VERBOSE_LOGS) {
+          console.warn('[chat] Dedicated image parser failed; falling back to standard image transcription:', err.message);
+        }
+        await sendStatus('Image parser failed. Falling back to standard image transcription.');
+        imageTranscription = await runChatImageTranscriptionFallback({
+          normalizedImages,
+          transcriptionModel,
+          effectiveReasoningEffort,
+          effectiveTimeoutMs,
+          sendStatus,
+        });
       }
       await callOptional(onTranscriptionComplete, imageTranscription);
     }
   }
 
   const shouldRunTriage = (
-    normalizedImages.length > 0
+    (normalizedImages.length > 0 || Boolean(providedParsedText))
     && !nonEscalationIntent
     && imageTranscription
     && safeString(imageTranscription.text, '').trim()
@@ -536,18 +623,22 @@ async function buildChatImageAugmentation({
 
   if (shouldRunTriage) {
     await callOptional(onTriageStart, {
-      provider: imageTranscription.providerUsed || imageParserConfig.provider,
-      model: imageTranscription.model || imageParserConfig.model || '',
+      provider: imageTranscription.providerUsed || imageParserConfig?.provider || DEFAULT_PROVIDER,
+      model: imageTranscription.model || imageParserConfig?.model || '',
     });
-    await sendStatus('Deriving escalation fields from image parser output...');
+    await sendStatus(
+      normalizedImages.length > 0
+        ? 'Deriving escalation fields from image parser output...'
+        : 'Deriving escalation fields from parsed screenshot text...'
+    );
   }
 
   const imageTriageContext = shouldRunTriage
     ? buildParserDerivedTriageContext({
         parserText: imageTranscription.text,
-        parserProvider: imageTranscription.providerUsed || imageParserConfig.provider,
+        parserProvider: imageTranscription.providerUsed || imageParserConfig?.provider || DEFAULT_PROVIDER,
         parserUsage: imageTranscription.usage || null,
-        parserModel: imageTranscription.model || imageParserConfig.model || '',
+        parserModel: imageTranscription.model || imageParserConfig?.model || '',
         elapsedMs: imageTranscription.elapsedMs || 0,
       })
     : null;
@@ -574,7 +665,7 @@ async function buildChatImageAugmentation({
 
   const triageCategory = imageTriageContext?.triageCard?.category || null;
   const invMatchResult = await runInvMatching({
-    message: safeString(messageText, '') || (imageTranscription && imageTranscription.text) || '',
+    message: (imageTranscription && imageTranscription.text) || safeString(messageText, ''),
     parseFields: imageTriageContext?.parseFields || null,
     category: triageCategory,
   });

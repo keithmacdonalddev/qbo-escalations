@@ -256,6 +256,57 @@ await t.test('chat and retry endpoints stream SSE and persist conversation updat
   assert.equal(updatedConversation.messages[1].content, 'mock assistant response');
 });
 
+await t.test('chat and retry SSE expose per-request model overrides', async () => {
+  const previousClaudeChat = claude.chat;
+  const receivedModels = [];
+  claude.chat = ({ model, onChunk, onDone }) => {
+    receivedModels.push(model || null);
+    onChunk('override response');
+    onDone('override response');
+    return () => {};
+  };
+
+  try {
+    const chatRes = await agent
+      .post('/api/chat')
+      .send({
+        message: 'Model override message',
+        provider: 'claude',
+        primaryModel: 'claude-chat-override',
+      });
+    assert.equal(chatRes.status, 200);
+
+    const chatEvents = parseSseEvents(chatRes.text);
+    const chatStart = JSON.parse(chatEvents.find((event) => event.event === 'start').data);
+    const chatDone = JSON.parse(chatEvents.find((event) => event.event === 'done').data);
+
+    assert.equal(chatStart.primaryModel, 'claude-chat-override');
+    assert.equal(chatStart.fallbackModel, null);
+    assert.equal(chatDone.modelUsed, 'claude-chat-override');
+    assert.equal(receivedModels[0], 'claude-chat-override');
+
+    const retryRes = await agent
+      .post('/api/chat/retry')
+      .send({
+        conversationId: chatStart.conversationId,
+        provider: 'claude',
+        primaryModel: 'claude-retry-override',
+      });
+    assert.equal(retryRes.status, 200);
+
+    const retryEvents = parseSseEvents(retryRes.text);
+    const retryStart = JSON.parse(retryEvents.find((event) => event.event === 'start').data);
+    const retryDone = JSON.parse(retryEvents.find((event) => event.event === 'done').data);
+
+    assert.equal(retryStart.primaryModel, 'claude-retry-override');
+    assert.equal(retryStart.fallbackModel, null);
+    assert.equal(retryDone.modelUsed, 'claude-retry-override');
+    assert.equal(receivedModels[1], 'claude-retry-override');
+  } finally {
+    claude.chat = previousClaudeChat;
+  }
+});
+
 await t.test('image chat is rejected and does not create a conversation', async () => {
   const beforeCount = await Conversation.countDocuments({});
   const chatRes = await agent
@@ -617,6 +668,77 @@ await t.test('P5: chat parse-escalation accepts new provider IDs', async () => {
 
   assert.ok([200, 201].includes(res.status));
   assert.equal(res.body.ok, true);
+});
+
+await t.test('POST /api/chat/parse-escalation returns triageCard payload', async () => {
+  const res = await agent
+    .post('/api/chat/parse-escalation')
+    .send({
+      text: [
+        'COID/MID: 12345 / 67890',
+        'CASE: CS-2026-002001',
+        'CLIENT/CONTACT: Example Client',
+        'AGENT: Jamie Agent',
+        'CX IS ATTEMPTING TO: sign in to QuickBooks Online',
+        'EXPECTED OUTCOME: customer signs in successfully',
+        'ACTUAL OUTCOME: login error shown after MFA',
+        'TS STEPS: cleared cache and retried in incognito',
+        'TRIED TEST ACCOUNT: yes',
+      ].join('\n'),
+      provider: 'claude',
+    });
+
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.ok(res.body.triageCard);
+  assert.equal(res.body.triageCard.agent, 'Jamie Agent');
+  assert.equal(res.body.triageCard.client, 'Example Client');
+  assert.equal(res.body.triageCard.category, 'technical');
+  assert.ok(['P2', 'P3'].includes(res.body.triageCard.severity));
+  assert.ok(typeof res.body.triageCard.read === 'string' && res.body.triageCard.read.length > 0);
+  assert.ok(typeof res.body.triageCard.action === 'string' && res.body.triageCard.action.length > 0);
+  assert.ok(res.body._meta);
+});
+
+await t.test('POST /api/chat emits triage_card for parsedEscalationText handoff', async () => {
+  const extractedText = [
+    'COID/MID: 12345 / 67890',
+    'CASE: CS-2026-002001',
+    'CLIENT/CONTACT: Example Client',
+    'AGENT: Jamie Agent',
+    'CX IS ATTEMPTING TO: sign in to QuickBooks Online',
+    'EXPECTED OUTCOME: customer signs in successfully',
+    'ACTUAL OUTCOME: login error shown after MFA',
+    'TS STEPS: cleared cache and retried in incognito',
+    'TRIED TEST ACCOUNT: yes',
+  ].join('\n');
+
+  const res = await agent
+    .post('/api/chat')
+    .send({
+      message: [
+        'Parsed escalation preview',
+        'Case CS-2026-002001',
+        'Client: Example Client',
+        'Issue: login error shown after MFA',
+      ].join('\n'),
+      parsedEscalationText: extractedText,
+      parsedEscalationSource: 'image-parser',
+      parsedEscalationProvider: 'claude',
+      provider: 'claude',
+    })
+    .expect(200);
+
+  const events = parseSseEvents(res.text);
+  const triageEvent = events.find((event) => event.event === 'triage_card');
+  assert.ok(triageEvent, 'triage_card event should be present');
+  const triageData = JSON.parse(triageEvent.data);
+  assert.equal(triageData.agent, 'Jamie Agent');
+  assert.equal(triageData.client, 'Example Client');
+  assert.equal(triageData.category, 'technical');
+  assert.ok(['P2', 'P3'].includes(triageData.severity));
+  assert.ok(typeof triageData.read === 'string' && triageData.read.length > 0);
+  assert.ok(typeof triageData.action === 'string' && triageData.action.length > 0);
 });
 
 // ---------- Phase 6: N-way parallelProviders route tests ----------

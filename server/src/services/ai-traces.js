@@ -188,7 +188,9 @@ function buildRequestConfig({
   reasoningEffort,
   timeoutMs,
   primaryProvider,
+  primaryModel,
   fallbackProvider,
+  fallbackModel,
   parallelProviders,
 }) {
   const normalizedPrimary = primaryProvider ? normalizeProvider(primaryProvider) : '';
@@ -202,9 +204,9 @@ function buildRequestConfig({
     reasoningEffort: safeString(reasoningEffort || 'high', 24) || 'high',
     timeoutMs: clampInt(timeoutMs, 10 * 60 * 1000),
     primaryProvider: normalizedPrimary,
-    primaryModel: normalizedPrimary ? safeString(getProviderModelId(normalizedPrimary), 120) : '',
+    primaryModel: normalizedPrimary ? safeString(primaryModel || getProviderModelId(normalizedPrimary), 120) : '',
     fallbackProvider: normalizedFallback,
-    fallbackModel: normalizedFallback ? safeString(getProviderModelId(normalizedFallback), 120) : '',
+    fallbackModel: normalizedFallback ? safeString(fallbackModel || getProviderModelId(normalizedFallback), 120) : '',
     parallelProviders: normalizedParallel,
     parallelModels: normalizedParallel.map((provider) => safeString(getProviderModelId(provider), 120)).filter(Boolean),
   };

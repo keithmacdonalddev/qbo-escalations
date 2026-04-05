@@ -39,6 +39,8 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   }
   if (path === '/dashboard' || path === '/escalations') return { view: 'dashboard' };
   if (path === '/playbook') return { view: 'playbook' };
+  if (path === '/agents') return { view: 'agents', agentId: null };
+  if (path.startsWith('/agents/')) return { view: 'agents', agentId: path.slice('/agents/'.length) };
   if (path === '/templates') return { view: 'templates' };
   if (path === '/analytics') return { view: 'analytics' };
   if (path === '/gallery') return { view: 'gallery' };
@@ -63,6 +65,8 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   if (path === '/calendar') return { view: 'workspace', workspaceView: 'calendar' };
   if (path === '/investigations') return { view: 'investigations' };
   if (path === '/settings') return { view: 'settings' };
+  if (path === '/rooms') return { view: 'rooms', roomId: null };
+  if (path.startsWith('/rooms/')) return { view: 'rooms', roomId: path.slice(7) };
   return { view: 'chat', conversationId: null };
 }
 
@@ -79,6 +83,14 @@ function getSidebarCurrentRoute(route) {
     return route.workspaceView && route.workspaceView !== 'overview'
       ? `#/workspace/${route.workspaceView}`
       : '#/workspace';
+  }
+
+  if (route.view === 'rooms') {
+    return route.roomId ? `#/rooms/${route.roomId}` : '#/rooms';
+  }
+
+  if (route.view === 'agents') {
+    return route.agentId ? `#/agents/${route.agentId}` : '#/agents';
   }
 
   return `#/${route.view || 'chat'}`;

@@ -1,8 +1,21 @@
 'use strict';
 
 const express = require('express');
+const { sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
+
+function sendWorkspaceConversationError(res, err, fallbackCode, fallbackMessage) {
+  const status = Number.isInteger(err?.status) ? err.status : 500;
+  const safeMessage = status >= 500
+    ? fallbackMessage
+    : (err?.message || fallbackMessage);
+  return sendApiError(res, {
+    status,
+    code: err?.code || fallbackCode,
+    message: safeMessage,
+  });
+}
 
 router.get('/conversations', async (req, res) => {
   try {
@@ -11,7 +24,12 @@ router.get('/conversations', async (req, res) => {
     const conversations = await WorkspaceConversation.listRecent('default', limit);
     res.json({ ok: true, conversations });
   } catch (err) {
-    res.status(500).json({ ok: false, code: 'CONVERSATIONS_LIST_ERROR', error: err.message });
+    return sendWorkspaceConversationError(
+      res,
+      err,
+      'CONVERSATIONS_LIST_ERROR',
+      'Failed to load workspace conversations'
+    );
   }
 });
 
@@ -25,7 +43,12 @@ router.get('/conversation/:sessionId', async (req, res) => {
     const messages = await WorkspaceConversation.getHistory(sessionId);
     res.json({ ok: true, sessionId, messages });
   } catch (err) {
-    res.status(500).json({ ok: false, code: 'CONVERSATION_ERROR', error: err.message });
+    return sendWorkspaceConversationError(
+      res,
+      err,
+      'CONVERSATION_ERROR',
+      'Failed to load workspace conversation'
+    );
   }
 });
 

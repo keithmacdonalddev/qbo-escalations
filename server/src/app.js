@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { buildCorsOptions } = require('./lib/origin-policy');
+const { normalizeApiError } = require('./lib/api-errors');
 const { listProviderHealth } = require('./services/provider-health');
 const { registerRequestRuntime, getRequestRuntimeHealth } = require('./services/request-runtime');
 const { getAiRuntimeHealth } = require('./services/ai-runtime');
@@ -11,42 +13,6 @@ const responseTimeout = require('./middleware/response-timeout');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 const PROTOTYPES_DIR = path.join(__dirname, '..', '..', 'prototypes');
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
-
-function getAllowedCorsOrigins() {
-  const raw = (process.env.CORS_ALLOWED_ORIGINS || '').trim();
-  if (!raw) return null;
-  return new Set(
-    raw.split(',')
-      .map((value) => value.trim())
-      .filter(Boolean)
-  );
-}
-
-function isLoopbackOrigin(origin) {
-  try {
-    const parsed = new URL(origin);
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
-      && LOOPBACK_HOSTS.has(parsed.hostname);
-  } catch {
-    return false;
-  }
-}
-
-function isAllowedOrigin(origin, allowedOrigins) {
-  if (!origin) return true;
-  if (allowedOrigins && allowedOrigins.size > 0) return allowedOrigins.has(origin);
-  return isLoopbackOrigin(origin);
-}
-
-function buildCorsOptions() {
-  const allowedOrigins = getAllowedCorsOrigins();
-  return {
-    origin(origin, callback) {
-      callback(null, isAllowedOrigin(origin, allowedOrigins));
-    },
-  };
-}
 
 function createApp() {
   if (!fs.existsSync(UPLOADS_DIR)) {
@@ -94,6 +60,8 @@ function createApp() {
   app.use('/api/conversations', conversationsRouter);
   app.use('/api/escalations', require('./routes/escalations'));
   app.use('/api/playbook', require('./routes/playbook'));
+  app.use('/api/agent-prompts', require('./routes/agent-prompts'));
+  app.use('/api/agent-identities', require('./routes/agent-identities'));
   app.use('/api/templates', require('./routes/templates'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/copilot', require('./routes/copilot'));
@@ -106,24 +74,41 @@ function createApp() {
   app.use('/api/investigations', require('./routes/investigations'));
   app.use('/api/preferences', require('./routes/preferences'));
   app.use('/api/image-parser', require('./routes/image-parser'));
+  app.use('/api/test-runner', require('./routes/test-runner'));
+  app.use('/api/rooms', require('./routes/room'));
 
   app.use((err, req, res, next) => {
     console.error(`[${req.method} ${req.path}]`, err.message || err);
+    if (err?.stack) {
+      console.error(err.stack);
+    }
 
     // Report to server error pipeline for dev agent visibility
     const { reportServerError } = require('./lib/server-error-pipeline');
-    const status = err.status || 500;
+    const normalized = normalizeApiError(err, 'INTERNAL', 'Internal server error');
+    const status = normalized.status || 500;
     reportServerError({
-      message: `Express error: ${err.message || 'Unknown'}`,
-      detail: `${req.method} ${req.path} - ${err.message || 'Unknown error'}`,
-      stack: err.stack || '',
+      message: `Express error: ${normalized.message || 'Unknown'}`,
+      detail: `${req.method} ${req.path} - ${normalized.message || 'Unknown error'}`,
+      stack: err?.stack || '',
       source: `routes${req.path}`,
       category: status >= 500 ? 'runtime-error' : 'other',
       severity: status >= 500 ? 'error' : 'warning',
     });
 
     if (res.headersSent) return next(err);
-    res.status(status).json({ ok: false, code: 'INTERNAL', error: 'Internal server error' });
+    const isServerError = status >= 500;
+    const payload = {
+      ok: false,
+      code: normalized.code || 'INTERNAL',
+      error: isServerError ? 'Internal server error' : normalized.message,
+    };
+    if (normalized.detail) {
+      payload.detail = normalized.detail;
+    } else if (!isServerError && normalized.message && normalized.message !== payload.error) {
+      payload.detail = normalized.message;
+    }
+    res.status(status).json(payload);
   });
 
   return app;

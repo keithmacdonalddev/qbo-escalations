@@ -37,6 +37,30 @@
     "supportsThinking": true
   },
   {
+    "id": "anthropic",
+    "label": "Anthropic API",
+    "shortLabel": "Anthropic",
+    "family": "anthropic",
+    "transport": "anthropic",
+    "model": "claude-sonnet-4-20250514",
+    "selectable": true,
+    "order": 27,
+    "allowedEfforts": ["low", "medium", "high"],
+    "supportsThinking": false
+  },
+  {
+    "id": "llm-gateway",
+    "label": "LLM Gateway API",
+    "shortLabel": "Gateway",
+    "family": "llm-gateway",
+    "transport": "llm-gateway",
+    "model": "auto",
+    "selectable": true,
+    "order": 28,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
+  },
+  {
     "id": "chatgpt-5.3-codex-high",
     "label": "GPT-5.3-Codex",
     "shortLabel": "5.3 Codex",
@@ -45,6 +69,18 @@
     "model": "gpt-5.3-codex",
     "selectable": true,
     "order": 30,
+    "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
+  },
+  {
+    "id": "openai",
+    "label": "OpenAI API",
+    "shortLabel": "OpenAI",
+    "family": "openai",
+    "transport": "openai",
+    "model": "gpt-4o",
+    "selectable": true,
+    "order": 35,
     "allowedEfforts": ["low", "medium", "high", "xhigh"],
     "supportsThinking": false
   },
@@ -70,6 +106,30 @@
     "selectable": true,
     "order": 45,
     "allowedEfforts": ["low", "medium", "high", "xhigh"],
+    "supportsThinking": false
+  },
+  {
+    "id": "gemini",
+    "label": "Google Gemini API",
+    "shortLabel": "Gemini",
+    "family": "gemini",
+    "transport": "gemini",
+    "model": "gemini-3-flash-preview",
+    "selectable": true,
+    "order": 46,
+    "allowedEfforts": ["low", "medium", "high"],
+    "supportsThinking": false
+  },
+  {
+    "id": "kimi",
+    "label": "Kimi API",
+    "shortLabel": "Kimi",
+    "family": "kimi",
+    "transport": "kimi",
+    "model": "kimi-k2.5",
+    "selectable": true,
+    "order": 47,
+    "allowedEfforts": ["low", "medium", "high"],
     "supportsThinking": false
   },
   {
@@ -119,7 +179,7 @@
     "transport": "lm-studio",
     "model": "local",
     "selectable": true,
-    "order": 50,
+    "order": 90,
     "supportsThinking": false,
     "supportsImageInput": true,
     "allowedEfforts": ["low", "medium", "high"]

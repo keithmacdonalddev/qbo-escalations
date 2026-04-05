@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { apiFetchJson } from '../api/http.js';
 import './ShipmentTracker.css';
 
 // ---------------------------------------------------------------------------
@@ -106,8 +107,7 @@ export default function ShipmentTracker() {
 
   const fetchShipments = useCallback(async () => {
     try {
-      const res = await fetch('/api/workspace/shipments?active=true');
-      const data = await res.json();
+      const data = await apiFetchJson('/api/workspace/shipments?active=true', {}, 'Failed to load shipments');
       if (data.ok) {
         setShipments(data.shipments || []);
       }

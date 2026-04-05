@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -9,10 +10,13 @@ router.post('/feedback', async (req, res) => {
   const { sessionId, messageIndex, rating, comment } = req.body;
 
   if (!sessionId || messageIndex == null || !rating) {
-    return res.json({ ok: false, code: 'MISSING_FIELD', error: 'sessionId, messageIndex, and rating are required' });
+    return sendApiError(
+      res,
+      createApiError('MISSING_FIELD', 'sessionId, messageIndex, and rating are required', 400)
+    );
   }
   if (rating !== 'up' && rating !== 'down') {
-    return res.json({ ok: false, code: 'INVALID_RATING', error: 'rating must be "up" or "down"' });
+    return sendApiError(res, createApiError('INVALID_RATING', 'rating must be "up" or "down"', 400));
   }
 
   const prompt = typeof req.body.prompt === 'string' ? req.body.prompt.slice(0, 200) : '';
@@ -25,7 +29,7 @@ router.post('/feedback', async (req, res) => {
     );
     res.json({ ok: true, id: feedback._id });
   } catch (err) {
-    res.json({ ok: false, code: 'FEEDBACK_ERROR', error: err.message });
+    return sendApiError(res, createApiError('FEEDBACK_ERROR', err.message || 'Failed to save feedback', 500));
   }
 });
 
@@ -58,7 +62,7 @@ router.get('/feedback/stats', async (req, res) => {
       })),
     });
   } catch (err) {
-    res.json({ ok: false, code: 'FEEDBACK_ERROR', error: err.message });
+    return sendApiError(res, createApiError('FEEDBACK_ERROR', err.message || 'Failed to load feedback stats', 500));
   }
 });
 

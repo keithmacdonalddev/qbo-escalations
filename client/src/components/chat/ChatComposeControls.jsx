@@ -1,13 +1,22 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { popover, transitions } from '../../utils/motion.js';
 import { getProviderLabel } from '../../utils/markdown.jsx';
-import { PROVIDER_FAMILY, PROVIDER_OPTIONS, getReasoningEffortOptions } from '../../lib/providerCatalog.js';
+import ModelOverrideControl from '../ModelOverrideControl.jsx';
+import {
+  getProviderModelSuggestions,
+  PROVIDER_FAMILY,
+  PROVIDER_OPTIONS,
+  getReasoningEffortOptions,
+} from '../../lib/providerCatalog.js';
 
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
   { value: 'fallback', label: 'Fallback' },
   { value: 'parallel', label: 'Parallel' },
 ];
+
+const CHAT_PRIMARY_MODEL_LIST_ID = 'chat-primary-model-options';
+const CHAT_FALLBACK_MODEL_LIST_ID = 'chat-fallback-model-options';
 
 function getReasoningEffortLabel(value) {
   return getReasoningEffortOptions('claude').find((option) => option.value === value)?.label || 'High';
@@ -19,6 +28,8 @@ export default function ChatComposeControls({
   provider,
   mode,
   fallbackProvider,
+  model,
+  fallbackModel,
   reasoningEffort,
   parallelProviders,
   showProviderPopover,
@@ -28,6 +39,8 @@ export default function ChatComposeControls({
   setProvider,
   setMode,
   setFallbackProvider,
+  setModel,
+  setFallbackModel,
   setReasoningEffort,
   setParallelProviders,
   smartComposeEnabled,
@@ -37,6 +50,8 @@ export default function ChatComposeControls({
 }) {
   const modeLabel = MODE_OPTIONS.find((entry) => entry.value === mode)?.label || 'Single';
   const effortLabel = getReasoningEffortLabel(reasoningEffort);
+  const primaryModelSuggestions = getProviderModelSuggestions(provider);
+  const fallbackModelSuggestions = getProviderModelSuggestions(fallbackProvider);
 
   return (
     <div className="compose-top-strip">
@@ -84,6 +99,15 @@ export default function ChatComposeControls({
                   {option.label}
                 </button>
               ))}
+              <ModelOverrideControl
+                label="Primary Model"
+                provider={provider}
+                model={model}
+                onChange={setModel}
+                listId={CHAT_PRIMARY_MODEL_LIST_ID}
+                suggestions={primaryModelSuggestions}
+                className="provider-popover-field"
+              />
               <div className="provider-popover-divider" />
               <div className="provider-popover-label">Mode</div>
               {MODE_OPTIONS.map((option) => (
@@ -112,6 +136,15 @@ export default function ChatComposeControls({
                       {option.label}
                     </button>
                   ))}
+                  <ModelOverrideControl
+                    label="Fallback Model"
+                    provider={fallbackProvider}
+                    model={fallbackModel}
+                    onChange={setFallbackModel}
+                    listId={CHAT_FALLBACK_MODEL_LIST_ID}
+                    suggestions={fallbackModelSuggestions}
+                    className="provider-popover-field"
+                  />
                 </>
               )}
               {mode === 'parallel' && (
@@ -197,7 +230,7 @@ export default function ChatComposeControls({
             aria-label="Compose settings"
             aria-expanded={showSettingsPopover}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
             </svg>

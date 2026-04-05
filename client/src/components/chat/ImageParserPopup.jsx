@@ -64,10 +64,16 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    checkAvailability().then((data) => {
+    const refreshAvailability = async () => {
+      const data = await checkAvailability({ forceRefresh: true });
       if (!cancelled) setAvailability(data);
-    });
-    return () => { cancelled = true; };
+    };
+    refreshAvailability();
+    const interval = window.setInterval(refreshAvailability, 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [open, checkAvailability]);
 
   // Persist provider/model
@@ -226,7 +232,10 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
               <span className="ip-popup-header-icon"><ScanIcon /></span>
               <span className="ip-popup-title">Parse Screenshot</span>
               {provider && (
-                <span className={`ip-popup-status${isProviderOnline ? ' is-online' : providerStatus ? ' is-offline' : ''}`}>
+                <span
+                  className={`ip-popup-status${isProviderOnline ? ' is-online' : providerStatus ? ' is-offline' : ''}`}
+                  title={providerStatus?.reason || ''}
+                >
                   {isProviderOnline ? 'Online' : providerStatus ? 'Offline' : ''}
                 </span>
               )}

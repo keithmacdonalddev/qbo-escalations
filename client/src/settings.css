@@ -1452,8 +1452,7 @@
   padding: var(--sp-4) var(--sp-5);
   border-radius: 20px;
   border: 1px solid color-mix(in srgb, var(--line) 82%, white);
-  background: color-mix(in srgb, var(--bg-raised) 82%, white);
-  backdrop-filter: blur(18px) saturate(140%);
+  background: var(--bg-floating);
   box-shadow:
     0 18px 32px rgba(18, 24, 40, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);

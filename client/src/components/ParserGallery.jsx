@@ -13,6 +13,7 @@ const STATUS_COLORS = {
 };
 
 const PROVIDER_LABELS = {
+  'llm-gateway': 'LLM Gateway',
   'lm-studio': 'LM Studio',
   anthropic:   'Anthropic',
   openai:      'OpenAI',
@@ -174,6 +175,41 @@ function ResultCard({ result, onExpand }) {
       onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-3px)'; e.currentTarget.style.boxShadow = 'var(--shadow-lg)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
     >
+      {result.sourceImageUrl ? (
+        <div style={{
+          width: '100%',
+          aspectRatio: '16 / 10',
+          borderRadius: 'var(--radius-md)',
+          overflow: 'hidden',
+          background: 'var(--bg-sunken)',
+          border: '1px solid var(--line-subtle)',
+        }}>
+          <img
+            src={result.sourceImageUrl}
+            alt="Parsed screenshot"
+            loading="lazy"
+            style={{ width: '100%', height: '100%', display: 'block', objectFit: 'cover' }}
+          />
+        </div>
+      ) : (
+        <div style={{
+          width: '100%',
+          aspectRatio: '16 / 10',
+          borderRadius: 'var(--radius-md)',
+          border: '1px dashed var(--line)',
+          background: 'var(--bg-sunken)',
+          color: 'var(--ink-tertiary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+          padding: 'var(--sp-3)',
+          fontSize: 'var(--text-xs)',
+        }}>
+          Source image unavailable
+        </div>
+      )}
+
       {/* Top row: provider + status */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--ink)' }}>
@@ -278,6 +314,36 @@ function DetailModal({ detail, detailLoading, onClose }) {
 
             {/* Body */}
             <div style={{ padding: 'var(--sp-6)', overflow: 'auto', flex: 1 }}>
+              <div style={{ marginBottom: 'var(--sp-6)' }}>
+                <SectionLabel>Source Image</SectionLabel>
+                {detail.sourceImageUrl ? (
+                  <div style={{
+                    borderRadius: 'var(--radius-lg)',
+                    overflow: 'hidden',
+                    border: '1px solid var(--line-subtle)',
+                    background: 'var(--bg-sunken)',
+                  }}>
+                    <img
+                      src={detail.sourceImageUrl}
+                      alt="Parsed screenshot"
+                      style={{ width: '100%', display: 'block', maxHeight: 360, objectFit: 'contain', background: 'var(--bg-sunken)' }}
+                    />
+                  </div>
+                ) : (
+                  <div style={{
+                    fontSize: 'var(--text-sm)',
+                    color: 'var(--ink-secondary)',
+                    background: 'var(--bg-sunken)',
+                    padding: 'var(--sp-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--line-subtle)',
+                    lineHeight: 1.6,
+                  }}>
+                    This parser entry was saved before source screenshots were archived.
+                  </div>
+                )}
+              </div>
+
               {/* Meta grid */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 'var(--sp-4)', marginBottom: 'var(--sp-6)' }}>
                 {detail.model && <MetaBlock label="Model" value={detail.model} />}

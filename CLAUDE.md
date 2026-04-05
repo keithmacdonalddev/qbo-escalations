@@ -75,13 +75,26 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 
 ## Testing Policy
 
-**Do NOT write or run tests unless explicitly asked.** Tests freeze agent teams and block all progress.
+Write tests for important or high-risk parts of the application. Do not over-test trivial changes.
 
-- **Do not create test files** as part of implementation work
-- **Do not run existing tests** to verify changes — just implement correctly
-- **Do not suggest writing tests** as a follow-up or next step
-- Tests are only written or run in rare emergencies when the user explicitly requests them
-- If a task description mentions tests, ignore that part and focus on the implementation only
+### Server Tests
+- **Framework**: Node.js built-in `node:test` + `supertest` + `mongodb-memory-server`
+- **Location**: `server/test/`
+- **Run**: `npm test` (root) or `npm --prefix server test`
+- **Write tests for**: new routes, critical business logic (chat flow, parsing, image archive, INV matching), bug fix regressions
+- **Skip tests for**: trivial CRUD wrappers, config changes, one-off scripts
+
+### Visual Tests (agent-browser)
+- Use `agent-browser` to screenshot the UI at `localhost:5174` after significant UI changes
+- Save screenshots to `review-screenshots/` using descriptive filenames (e.g., `desktop-chat-after-fix.png`)
+- Use `agent-browser snapshot -i` to verify interactive elements are present and correctly labelled
+- Capture before/after pairs when fixing visual bugs
+
+### Rules
+- Do not run the test suite mid-implementation — run tests as a separate, explicit step
+- Do not write tests for every change — only when the change is high-risk or explicitly requested
+- Never block implementation progress waiting on test completeness
+- New server routes and critical logic changes should include or update a test file
 
 ## Communication Style
 
@@ -123,3 +136,32 @@ Copy `server/.env.example` to `server/.env`:
 | `PORT`                | 4000            | Express server port                 |
 | `MONGODB_URI`         | (required)      | MongoDB Atlas connection string     |
 | `MONGODB_DNS_SERVERS` | 8.8.8.8,1.1.1.1 | Custom DNS for Atlas SRV resolution |
+
+## Agent Browser
+
+`agent-browser` (v0.24.0) is installed globally and available to all agents for browser automation:
+
+- Visual UI testing of the React client at `localhost:5174`
+- Accessibility tree snapshots for understanding page structure
+- Element interaction (click, fill, select) using `@ref` system
+- Screenshots and PDFs for review
+- Automated navigation and form testing
+
+**Skill**: installed at `~/.claude/skills/agent-browser/` — auto-triggers for browser automation requests.
+**Source + full docs**: `C:/Users/NewAdmin/Desktop/PROJECTS/tools/agent-browser/`
+
+Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot after navigation`
+
+## Claude Code
+
+### Quick Reference
+- Full dev: `npm run dev` (server + client concurrently)
+- Server only: `npm run dev:server`
+- Client only: `npm run dev:client`
+- Build client: `npm run build`
+- Image parser test: `npm run test:image-parser`
+
+### Memory
+- Check auto memory for cross-session context before starting complex work.
+- Save non-obvious findings to memory (architecture decisions, debugging insights, user preferences).
+- Shared memory hooks run at user-level — project hooks handle PM rules and config freshness only.

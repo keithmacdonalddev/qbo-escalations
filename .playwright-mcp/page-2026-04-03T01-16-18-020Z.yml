@@ -1,0 +1,304 @@
+- generic [ref=e3]:
+  - generic:
+    - generic "0.5ms (update)"
+    - generic "13.8ms (update)"
+    - generic "2.3ms (update)"
+    - generic "54.7ms (update)"
+    - generic "1.7ms (update)"
+    - generic "51.5ms (update)"
+    - generic "0.6ms (update)"
+    - generic "42.4ms (update)"
+    - generic "0.2ms (update)"
+    - generic "11.9ms (update)"
+    - generic "0.3ms (update)"
+    - generic "9.8ms (update)"
+    - generic "1.8ms (update)"
+    - generic "56.2ms (update)"
+    - generic "1.7ms (update)"
+    - generic "51.4ms (update)"
+    - generic "0.1ms (update)"
+    - generic "39.7ms (update)"
+    - generic "0.2ms (update)"
+    - generic "11.3ms (update)"
+    - generic "0.9ms (update)"
+    - generic "0.0ms (update)"
+    - generic "1.9ms (update)"
+    - generic "70.2ms (update)"
+    - generic "1.6ms (update)"
+    - generic "51.8ms (update)"
+    - generic "0.3ms (update)"
+    - generic "43.7ms (update)"
+    - generic "0.4ms (update)"
+    - generic "12.0ms (update)"
+    - generic "0.3ms (update)"
+    - generic "11.1ms (update)"
+    - generic "1.7ms (update)"
+    - generic "51.9ms (update)"
+    - generic "1.7ms (update)"
+    - generic "54.5ms (update)"
+    - generic "0.3ms (update)"
+    - generic "41.3ms (update)"
+  - generic:
+    - generic: "273"
+    - generic: "92"
+    - generic: "147"
+    - generic:
+      - text: avg
+      - generic: 12.1ms
+    - generic [ref=e4]:
+      - button "❙❙" [ref=e5] [cursor=pointer]
+      - button "Clear all segments and reset stats" [ref=e6] [cursor=pointer]:
+        - img [ref=e7]
+      - button "▸" [ref=e9] [cursor=pointer]
+  - complementary [ref=e10]:
+    - button "Expand sidebar" [ref=e338] [cursor=pointer]:
+      - img [ref=e13]
+    - navigation [ref=e16]:
+      - link [ref=e340] [cursor=pointer]:
+        - /url: "#/chat"
+        - img [ref=e19]
+      - link [ref=e341] [cursor=pointer]:
+        - /url: "#/dashboard"
+        - img [ref=e22]
+      - link [ref=e342] [cursor=pointer]:
+        - /url: "#/investigations"
+        - img [ref=e28]
+      - link [ref=e343] [cursor=pointer]:
+        - /url: "#/playbook"
+        - img [ref=e32]
+      - link [ref=e344] [cursor=pointer]:
+        - /url: "#/templates"
+        - img [ref=e36]
+      - link [ref=e345] [cursor=pointer]:
+        - /url: "#/analytics"
+        - img [ref=e40]
+      - link [ref=e346] [cursor=pointer]:
+        - /url: "#/gallery"
+        - img [ref=e42]
+      - link [ref=e347] [cursor=pointer]:
+        - /url: "#/usage"
+        - img [ref=e47]
+      - link [ref=e348] [cursor=pointer]:
+        - /url: "#/workspace"
+        - img [ref=e50]
+  - generic [ref=e52]:
+    - banner [ref=e53]:
+      - generic [ref=e54]:
+        - button "Inbox" [ref=e55] [cursor=pointer]:
+          - img [ref=e56]
+        - button "Test suite" [ref=e59] [cursor=pointer]:
+          - img [ref=e60]
+        - button "Open settings" [ref=e63] [cursor=pointer]:
+          - img [ref=e64]
+    - main [ref=e67]:
+      - generic [ref=e68]:
+        - generic [ref=e211]:
+          - generic [ref=e212]:
+            - link "Overview" [ref=e213] [cursor=pointer]:
+              - /url: "#/workspace"
+            - link "Inbox" [ref=e214] [cursor=pointer]:
+              - /url: "#/workspace/inbox"
+            - link "Calendar" [ref=e215] [cursor=pointer]:
+              - /url: "#/workspace/calendar"
+            - link "Tasks" [ref=e216] [cursor=pointer]:
+              - /url: "#/workspace/tasks"
+            - link "Projects" [ref=e217] [cursor=pointer]:
+              - /url: "#/workspace/projects"
+          - generic [ref=e220]:
+            - generic [ref=e221]:
+              - generic [ref=e222]: Workspace
+              - heading "One place for inbox, calendar, tasks, and projects." [level=1] [ref=e223]
+              - paragraph [ref=e224]: Use this area as the shared control center. The workspace agent, shared monitor stream, and future surfaces all hang off this shell instead of each feature opening its own duplicate background connections.
+            - generic [ref=e225]:
+              - link "Inbox Review email, triage work, and open the workspace agent with email context. Open Inbox" [ref=e226] [cursor=pointer]:
+                - /url: "#/workspace/inbox"
+                - generic [ref=e227]: Inbox
+                - generic [ref=e228]: Review email, triage work, and open the workspace agent with email context.
+                - generic [ref=e229]: Open Inbox
+              - link "Calendar Review the schedule, edit events, and hand calendar context to the workspace agent. Open Calendar" [ref=e230] [cursor=pointer]:
+                - /url: "#/workspace/calendar"
+                - generic [ref=e231]: Calendar
+                - generic [ref=e232]: Review the schedule, edit events, and hand calendar context to the workspace agent.
+                - generic [ref=e233]: Open Calendar
+              - link "Tasks Reserved for cross-workspace task orchestration once task data is integrated. Open Tasks" [ref=e234] [cursor=pointer]:
+                - /url: "#/workspace/tasks"
+                - generic [ref=e235]: Tasks
+                - generic [ref=e236]: Reserved for cross-workspace task orchestration once task data is integrated.
+                - generic [ref=e237]: Open Tasks
+              - link "Projects Reserved for project-level planning and rollups as the workspace expands. Open Projects" [ref=e238] [cursor=pointer]:
+                - /url: "#/workspace/projects"
+                - generic [ref=e239]: Projects
+                - generic [ref=e240]: Reserved for project-level planning and rollups as the workspace expands.
+                - generic [ref=e241]: Open Projects
+        - generic [ref=e129]:
+          - generic [ref=e131]:
+            - button "Workspace" [ref=e132] [cursor=pointer]
+            - button "Chat" [ref=e133] [cursor=pointer]
+            - button "Co-pilot" [ref=e134] [cursor=pointer]
+            - button "Close agent dock" [ref=e243] [cursor=pointer]:
+              - img [ref=e244]
+          - generic [ref=e247]:
+            - generic [ref=e248]:
+              - button "Change workspace model and provider" [active] [ref=e249] [cursor=pointer]:
+                - generic [ref=e250]:
+                  - generic [ref=e251]: Model
+                  - generic [ref=e252]: Opus 4.6 + 5.3 Codex
+                - img [ref=e253]
+              - generic [ref=e255]:
+                - button "Conversation history" [ref=e256] [cursor=pointer]:
+                  - img [ref=e257]
+                - button "New conversation" [ref=e260] [cursor=pointer]:
+                  - img [ref=e261]
+                - button "Copy entire conversation" [ref=e262] [cursor=pointer]:
+                  - img [ref=e263]
+            - generic [ref=e349]:
+              - generic [ref=e350]: Provider
+              - button "Claude Opus 4.6 (Default) ✓" [ref=e351] [cursor=pointer]:
+                - generic [ref=e352]: Claude Opus 4.6 (Default)
+                - generic [ref=e353]: ✓
+              - button "Claude Sonnet 4.6" [ref=e354] [cursor=pointer]:
+                - generic [ref=e355]: Claude Sonnet 4.6
+              - button "Claude Opus 4.6" [ref=e356] [cursor=pointer]:
+                - generic [ref=e357]: Claude Opus 4.6
+              - button "GPT-5.3-Codex" [ref=e358] [cursor=pointer]:
+                - generic [ref=e359]: GPT-5.3-Codex
+              - button "GPT-5.4" [ref=e360] [cursor=pointer]:
+                - generic [ref=e361]: GPT-5.4
+              - button "GPT-5.4 Mini" [ref=e362] [cursor=pointer]:
+                - generic [ref=e363]: GPT-5.4 Mini
+              - button "LM Studio (Local)" [ref=e364] [cursor=pointer]:
+                - generic [ref=e365]: LM Studio (Local)
+              - generic [ref=e366]:
+                - generic [ref=e367]:
+                  - generic [ref=e368]: Primary Model
+                  - button "Use default" [disabled]
+                - generic [ref=e369]:
+                  - generic [ref=e370]: Provider default
+                  - generic "claude-opus-4-6" [ref=e371]
+                - button "Claude Sonnet 4.6" [ref=e373] [cursor=pointer]
+                - generic [ref=e374]:
+                  - generic [ref=e375]: Custom model ID
+                  - combobox "Custom model ID" [ref=e376]
+                - generic [ref=e377]: Pick a suggested model or paste the exact model ID. Leave this blank to stay on the provider default.
+              - generic [ref=e379]: Mode
+              - button "Single" [ref=e380] [cursor=pointer]:
+                - generic [ref=e381]: Single
+              - button "Fallback ✓" [ref=e382] [cursor=pointer]:
+                - generic [ref=e383]: Fallback
+                - generic [ref=e384]: ✓
+              - generic [ref=e386]: Fallback Provider
+              - button "Claude Sonnet 4.6" [ref=e387] [cursor=pointer]:
+                - generic [ref=e388]: Claude Sonnet 4.6
+              - button "Claude Opus 4.6" [ref=e389] [cursor=pointer]:
+                - generic [ref=e390]: Claude Opus 4.6
+              - button "GPT-5.3-Codex ✓" [ref=e391] [cursor=pointer]:
+                - generic [ref=e392]: GPT-5.3-Codex
+                - generic [ref=e393]: ✓
+              - button "GPT-5.4" [ref=e394] [cursor=pointer]:
+                - generic [ref=e395]: GPT-5.4
+              - button "GPT-5.4 Mini" [ref=e396] [cursor=pointer]:
+                - generic [ref=e397]: GPT-5.4 Mini
+              - button "LM Studio (Local)" [ref=e398] [cursor=pointer]:
+                - generic [ref=e399]: LM Studio (Local)
+              - generic [ref=e400]:
+                - generic [ref=e401]:
+                  - generic [ref=e402]: Fallback Model
+                  - button "Use default" [disabled]
+                - generic [ref=e403]:
+                  - generic [ref=e404]: Provider default
+                  - generic "gpt-5.3-codex" [ref=e405]
+                - generic [ref=e406]:
+                  - button "GPT-5.4" [ref=e407] [cursor=pointer]
+                  - button "GPT-5.4 Mini" [ref=e408] [cursor=pointer]
+                  - button "GPT-5.4 Pro" [ref=e409] [cursor=pointer]
+                  - button "GPT-5 Mini" [ref=e410] [cursor=pointer]
+                - generic [ref=e411]:
+                  - generic [ref=e412]: Custom model ID
+                  - combobox "Custom model ID" [ref=e413]
+                - generic [ref=e414]: Pick a suggested model or paste the exact model ID. Leave this blank to stay on the provider default.
+              - generic [ref=e416]: Reasoning Effort
+              - button "Low" [ref=e417] [cursor=pointer]:
+                - generic [ref=e418]: Low
+              - button "Medium" [ref=e419] [cursor=pointer]:
+                - generic [ref=e420]: Medium
+              - button "High ✓" [ref=e421] [cursor=pointer]:
+                - generic [ref=e422]: High
+                - generic [ref=e423]: ✓
+            - generic [ref=e266]:
+              - generic [ref=e267]:
+                - generic [ref=e268] [cursor=pointer]:
+                  - img [ref=e269]
+                  - generic [ref=e271]: Recent EA Activity (11)
+                  - img [ref=e272]
+                - generic [ref=e274]:
+                  - generic [ref=e275]: 1h ago
+                  - generic [ref=e276]: 🏷️
+                  - generic [ref=e277]: Labeled 1 email and moved to folders
+                - generic [ref=e278]:
+                  - generic [ref=e279]: 4h ago
+                  - generic [ref=e280]: 🏷️
+                  - generic [ref=e281]: Labeled 1 email and moved to folders
+                - generic [ref=e282]:
+                  - generic [ref=e283]: 5h ago
+                  - generic [ref=e284]: 🏷️
+                  - generic [ref=e285]: Labeled 1 email and moved to folders
+                - generic [ref=e286]:
+                  - generic [ref=e287]: 5h ago
+                  - generic [ref=e288]: 🏷️
+                  - generic [ref=e289]: Labeled 1 email and moved to folders
+                - generic [ref=e290]:
+                  - generic [ref=e291]: 11h ago
+                  - generic [ref=e292]: 🏷️
+                  - generic [ref=e293]: Labeled 1 email and moved to folders
+                - generic [ref=e294]:
+                  - generic [ref=e295]: 12h ago
+                  - generic [ref=e296]: 🏷️
+                  - generic [ref=e297]: Labeled 1 email and moved to folders
+                - generic [ref=e298]:
+                  - generic [ref=e299]: 12h ago
+                  - generic [ref=e300]: 🏷️
+                  - generic [ref=e301]: Labeled 1 email and moved to folders
+                - generic [ref=e302]:
+                  - generic [ref=e303]: 14h ago
+                  - generic [ref=e304]: 🏷️
+                  - generic [ref=e305]: Labeled 1 email and moved to folders
+                - generic [ref=e306]:
+                  - generic [ref=e307]: 15h ago
+                  - generic [ref=e308]: 🧹
+                  - generic [ref=e309]: "Auto-cleanup: 1 email archived/marked read"
+                - generic [ref=e310]:
+                  - generic [ref=e311]: 20h ago
+                  - generic [ref=e312]: 🏷️
+                  - generic [ref=e313]: Labeled 1 email and moved to folders
+                - generic [ref=e314]:
+                  - generic [ref=e315]: 20h ago
+                  - generic [ref=e316]: 🏷️
+                  - generic [ref=e317]: Labeled 1 email and moved to folders
+              - generic [ref=e319]:
+                - paragraph [ref=e320]: Good evening — brief me on my inbox and calendar.
+                - generic [ref=e321]:
+                  - generic [ref=e322]: 10:15 PM
+                  - button "Copy" [ref=e323] [cursor=pointer]
+              - generic [ref=e324]: Executing actions... (40s)
+              - generic [ref=e424]:
+                - generic [ref=e425]:
+                  - generic [ref=e426]: Live reasoning
+                  - generic [ref=e427]: Executing actions
+                - generic [ref=e428]: "The user wants a briefing. I found their break preferences: - 1x 30-min lunch at 12:30 PM - 2x 15-min breaks at 2:30 PM and 4:45 PM But tomorrow's work shift is 1:00 PM – 9:30 PM ADT (per calendar). So the 12:30 PM lunch is before the shift starts. I need to adjust the break times to fit within the 1:00 PM – 9:30 PM window. Let me think about this: - Work: 1:00 PM – 9:30 PM (8.5 hours) - There's a conflict between the saved memory showing a 12 PM – 8:30 PM shift on April 3 and the calendar event showing 1:00 PM – 9:30 PM. I'll trust the calendar event since that's the actual scheduled time. - For the break schedule, the usual 12:30 PM lunch won't work since the shift now starts at 1:00 PM. I'm adjusting the timing: a 15-minute break around 3:30 PM, lunch at 5:00 PM for 30 minutes, and another 15-minute break at 7:30 PM. This distributes them evenly across the 8.5-hour shift. Now I'm creating the calendar events for these three breaks."
+              - generic [ref=e326]:
+                - img [ref=e328]
+                - paragraph [ref=e331]: "[object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object][object Object]"
+            - generic [ref=e333]:
+              - textbox "Ask your Workspace Agent... (/ for commands)" [disabled]
+              - button "Stop" [ref=e334] [cursor=pointer]:
+                - img [ref=e335]
+  - button "Toggle network waterfall" [ref=e155] [cursor=pointer]:
+    - img [ref=e156]
+    - generic:
+      - generic: Network Waterfall
+      - generic: Monitor API request timing and spot pileups without browser DevTools.
+      - generic: 1 active request
+      - generic:
+        - generic: Glowing = requests in flight
+        - generic: Dim = idle, no active requests
+        - generic: Red = errors detected

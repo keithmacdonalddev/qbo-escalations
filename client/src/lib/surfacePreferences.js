@@ -21,6 +21,10 @@ function toKeyList(keys) {
   return Array.isArray(keys) ? keys.filter(Boolean) : [keys].filter(Boolean);
 }
 
+export function normalizeSurfaceModel(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export function readStoredPreference(keys) {
   const storage = getStorage();
   if (!storage) return null;
@@ -57,6 +61,10 @@ export function writeStoredPreference(key, value) {
   if (!storage || !key) return;
 
   try {
+    if (value === undefined || value === null || value === '') {
+      storage.removeItem(key);
+      return;
+    }
     storage.setItem(key, String(value));
   } catch {
     // Best-effort only.
@@ -107,6 +115,8 @@ export function readSurfacePreferences({
   providerKeys,
   modeKeys,
   fallbackProviderKeys,
+  modelKeys,
+  fallbackModelKeys,
   reasoningEffortKeys,
   defaultMode = 'single',
   supportedModes = ['single', 'fallback'],
@@ -127,6 +137,8 @@ export function readSurfacePreferences({
     provider,
     mode,
     fallbackProvider,
+    model: normalizeSurfaceModel(readStoredPreference(modelKeys)),
+    fallbackModel: normalizeSurfaceModel(readStoredPreference(fallbackModelKeys)),
     reasoningEffort,
   };
 }
@@ -153,6 +165,8 @@ export function readSurfaceSelection(surface, options = {}) {
       surface?.defaultMode,
     ),
     fallbackProvider,
+    model: normalizeSurfaceModel(readStoredPreference(surface?.storage?.model)),
+    fallbackModel: normalizeSurfaceModel(readStoredPreference(surface?.storage?.fallbackModel)),
     reasoningEffort: normalizeReasoningEffort(
       readStoredPreference(surface?.storage?.reasoningEffort) || reasoningEffortFallback || DEFAULT_REASONING_EFFORT
     ),
@@ -164,6 +178,8 @@ export function writeSurfacePreferences(storage, payload) {
   writeStoredPreference(storage.provider, payload.provider);
   writeStoredPreference(storage.mode, payload.mode);
   writeStoredPreference(storage.fallbackProvider, payload.fallbackProvider);
+  writeStoredPreference(storage.model, normalizeSurfaceModel(payload.model));
+  writeStoredPreference(storage.fallbackModel, normalizeSurfaceModel(payload.fallbackModel));
   writeStoredPreference(storage.reasoningEffort, payload.reasoningEffort);
 }
 
@@ -173,6 +189,8 @@ export function applySurfaceDefaults(event, surfaceId, handlers) {
   if (next.provider) handlers?.setProvider?.(next.provider);
   if (next.mode) handlers?.setMode?.(next.mode);
   if (next.fallbackProvider) handlers?.setFallbackProvider?.(next.fallbackProvider);
+  handlers?.setModel?.(next.model || '');
+  handlers?.setFallbackModel?.(next.fallbackModel || '');
   if (next.reasoningEffort) handlers?.setReasoningEffort?.(next.reasoningEffort);
 }
 

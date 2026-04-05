@@ -3,7 +3,7 @@
   position: fixed;
   inset: 0;
   z-index: 900;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, 0.50);
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -15,9 +15,9 @@
   max-width: calc(100vw - 32px);
   max-height: calc(100vh - 180px);
   background: var(--bg-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.25), 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -47,7 +47,7 @@
 .ip-popup-title {
   font-size: var(--text-sm);
   font-weight: 700;
-  color: var(--ink);
+  color: #E2E5EB;
 }
 
 .ip-popup-close {
@@ -59,14 +59,14 @@
   border: none;
   border-radius: var(--radius-full);
   background: transparent;
-  color: var(--ink-muted);
+  color: #5C6370;
   cursor: pointer;
-  transition: all var(--duration-fast) ease;
+  transition: background var(--duration-fast) ease, color var(--duration-fast) ease;
 }
 
 .ip-popup-close:hover {
-  background: var(--bg-sunken);
-  color: var(--ink);
+  background: var(--bg-elevated);
+  color: #E2E5EB;
 }
 
 /* Status badge */
@@ -75,18 +75,18 @@
   font-weight: 600;
   padding: 1px 6px;
   border-radius: var(--radius-pill);
-  background: var(--bg-sunken);
-  color: var(--ink-muted);
+  background: var(--bg-elevated);
+  color: #5C6370;
 }
 
 .ip-popup-status.is-online {
-  background: color-mix(in srgb, #22c55e 15%, var(--bg-sunken));
-  color: #22c55e;
+  background: rgba(74, 222, 128, 0.10);
+  color: #4ADE80;
 }
 
 .ip-popup-status.is-offline {
-  background: color-mix(in srgb, #ef4444 15%, var(--bg-sunken));
-  color: #ef4444;
+  background: rgba(239, 83, 80, 0.10);
+  color: #EF5350;
 }
 
 /* Config row */
@@ -105,7 +105,7 @@
 .ip-popup-field > span {
   font-size: 10px;
   font-weight: 600;
-  color: var(--ink-secondary);
+  color: #5C6370;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -113,10 +113,10 @@
 .ip-popup-field select,
 .ip-popup-field input {
   padding: 5px 8px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  color: var(--ink);
+  background: var(--bg-elevated);
+  color: #E2E5EB;
   font-size: var(--text-xs);
   font-family: var(--font-sans);
 }
@@ -124,8 +124,7 @@
 .ip-popup-field select:focus,
 .ip-popup-field input:focus {
   outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: rgba(91, 156, 245, 0.40);
 }
 
 /* Drop zone */
@@ -136,26 +135,25 @@
   justify-content: center;
   gap: var(--sp-1);
   padding: var(--sp-4) var(--sp-3);
-  border: 2px dashed var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg-sunken);
-  color: var(--ink-muted);
+  border: 1px dashed rgba(255, 255, 255, 0.10);
+  border-radius: 12px;
+  background: var(--bg-sidebar);
+  color: #5C6370;
   cursor: pointer;
-  transition: all var(--duration-fast) ease;
+  transition: border-color var(--duration-fast) ease, background var(--duration-fast) ease;
   min-height: 80px;
 }
 
 .ip-popup-dropzone:hover {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
-  background: color-mix(in srgb, var(--accent) 4%, var(--bg-sunken));
-  color: var(--ink-secondary);
+  border-color: rgba(91, 156, 245, 0.30);
+  background: rgba(91, 156, 245, 0.04);
+  color: #8B919E;
 }
 
 .ip-popup-dropzone.is-dragover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-sunken));
-  color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+  border-color: rgba(91, 156, 245, 0.50);
+  background: rgba(91, 156, 245, 0.08);
+  color: #5B9CF5;
 }
 
 .ip-popup-dropzone-text {
@@ -167,10 +165,10 @@
 /* Preview */
 .ip-popup-preview {
   position: relative;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
   overflow: hidden;
-  background: var(--bg-sunken);
+  background: var(--bg-sidebar);
 }
 
 .ip-popup-preview img {
@@ -178,7 +176,7 @@
   width: 100%;
   max-height: 160px;
   object-fit: contain;
-  background: color-mix(in srgb, var(--bg-sunken) 60%, #000);
+  background: var(--bg);
 }
 
 .ip-popup-preview-clear {
@@ -205,11 +203,11 @@
 /* Error */
 .ip-popup-error {
   font-size: var(--text-xs);
-  color: var(--danger, #ef4444);
+  color: #EF5350;
   padding: var(--sp-1) var(--sp-2);
-  background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--bg-raised));
+  background: rgba(239, 83, 80, 0.06);
   border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 25%, transparent);
+  border: 1px solid rgba(239, 83, 80, 0.20);
 }
 
 .ip-popup-actions {
@@ -235,24 +233,24 @@
 
 .ip-popup-secondary-btn {
   flex: 0 0 auto;
-  background: var(--bg-sunken);
-  color: var(--ink);
-  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: #E2E5EB;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .ip-popup-secondary-btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--line));
-  background: color-mix(in srgb, var(--accent) 5%, var(--bg-sunken));
+  border-color: rgba(255, 255, 255, 0.10);
+  background: var(--bg-floating);
 }
 
 .ip-popup-parse-btn {
   width: 100%;
-  background: var(--accent);
+  background: #5B9CF5;
   color: #fff;
 }
 
 .ip-popup-parse-btn:hover:not(:disabled) {
-  filter: brightness(1.1);
+  background: #7AB3FF;
 }
 
 .ip-popup-secondary-btn:disabled,

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { AnimatePresence } from 'framer-motion';
+import { apiFetchJson } from '../api/http.js';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import { useWorkspaceMonitorStream } from '../context/WorkspaceMonitorContext.jsx';
 import { useToast } from '../hooks/useToast.jsx';
@@ -19,8 +20,8 @@ import ShipmentTracker from './ShipmentTracker.jsx';
 import useWorkspaceAgentPanelControls from '../hooks/useWorkspaceAgentPanelControls.js';
 import {
   getProviderShortLabel,
-  PROVIDER_OPTIONS,
 } from '../lib/providerCatalog.js';
+import { WORKSPACE_AGENT_REQUEST_EVENT } from '../lib/workspaceAgentEvents.js';
 import './WorkspaceAgentPanel.css';
 
 // ---------------------------------------------------------------------------
@@ -42,6 +43,8 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     provider,
     mode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     messages,
     input,
@@ -50,6 +53,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     thinkingText,
     statusState,
     lastActions,
+    providerStatus,
     clearStallWatch,
     resetReasoningState,
     abortActiveAgentSession,
@@ -111,9 +115,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/workspace/memory/count');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await apiFetchJson('/api/workspace/memory/count', {}, 'Failed to load workspace memory count');
         if (!cancelled && data.ok && typeof data.count === 'number') {
           setMemoryCount(data.count);
         }
@@ -164,6 +166,8 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     provider,
     mode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     clearStallWatch,
     resetReasoningState,
@@ -207,6 +211,26 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
   }, [statusState]);
 
   const showThinkingPanel = streaming && Boolean(thinkingText || reasoningNotice);
+  const showProviderModeHint = mode === 'fallback' && Boolean(providerStatus);
+
+  useEffect(() => {
+    const handleExternalRequest = (event) => {
+      const prompt = typeof event?.detail?.prompt === 'string' ? event.detail.prompt.trim() : '';
+      if (!prompt) return;
+      if (streaming) {
+        toast?.warning?.('Wait for the current workspace reply to finish first.');
+        return;
+      }
+      startWorkspaceRequest(prompt, {
+        contextOverride: event?.detail?.viewContext && typeof event.detail.viewContext === 'object'
+          ? event.detail.viewContext
+          : viewContext,
+      });
+    };
+
+    window.addEventListener(WORKSPACE_AGENT_REQUEST_EVENT, handleExternalRequest);
+    return () => window.removeEventListener(WORKSPACE_AGENT_REQUEST_EVENT, handleExternalRequest);
+  }, [startWorkspaceRequest, streaming, toast, viewContext]);
 
   if (!open) return null;
 
@@ -224,6 +248,8 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
         provider={provider}
         mode={mode}
         fallbackProvider={fallbackProvider}
+        model={model}
+        fallbackModel={fallbackModel}
         reasoningEffort={reasoningEffort}
         patchSession={patchSession}
         historyOpen={historyOpen}
@@ -245,6 +271,36 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
         }}
         onClose={embedded ? null : onToggle}
       />
+      {providerStatus && (
+        <div className={`workspace-agent-provider-notice is-${providerStatus.tone || 'info'}`}>
+          <div className="workspace-agent-provider-notice-top">
+            <span className="workspace-agent-provider-notice-pill">Provider status</span>
+            <span className="workspace-agent-provider-notice-title">{providerStatus.title}</span>
+          </div>
+          <div className="workspace-agent-provider-notice-message">{providerStatus.message}</div>
+          {(providerStatus.activeProvider || providerStatus.failedProvider || providerStatus.activeModel) && (
+            <div className="workspace-agent-provider-notice-meta">
+              {providerStatus.activeProvider && (
+                <span>Active: {getProviderShortLabel(providerStatus.activeProvider)}</span>
+              )}
+              {providerStatus.failedProvider && providerStatus.failedProvider !== providerStatus.activeProvider && (
+                <span>Primary attempt: {getProviderShortLabel(providerStatus.failedProvider)}</span>
+              )}
+              {providerStatus.activeModel && (
+                <span>Model: {providerStatus.activeModel}</span>
+              )}
+            </div>
+          )}
+          {providerStatus.detail && (
+            <div className="workspace-agent-provider-notice-detail">{providerStatus.detail}</div>
+          )}
+          {showProviderModeHint && (
+            <div className="workspace-agent-provider-notice-hint">
+              Fallback mode is on. Switch Mode to <strong>Single</strong> in the model menu if you want the API provider to fail loudly instead of auto-switching.
+            </div>
+          )}
+        </div>
+      )}
       <WorkspaceSignalRail
         alerts={alerts}
         nudges={nudges}

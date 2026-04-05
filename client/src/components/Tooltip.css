@@ -11,9 +11,7 @@
   display: none;
   position: absolute;
   z-index: 50;
-  background: color-mix(in srgb, var(--bg-raised) 90%, transparent);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  background: var(--bg-floating);
   border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-xl), var(--shadow-inset-top);

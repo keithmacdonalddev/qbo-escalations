@@ -6,12 +6,85 @@ import ImageParserPopup from './ImageParserPopup.jsx';
 import { transitions } from '../../utils/motion.js';
 import './ImageParserPopup.css';
 
+function ParsedEscalationPreviewCard({ preview, onClear }) {
+  if (!preview) return null;
+
+  const metaChips = [
+    ...(Array.isArray(preview.ids) ? preview.ids : []),
+    preview.client && preview.client !== 'Unknown' ? `Client ${preview.client}` : '',
+    preview.agent && preview.agent !== 'Unknown' ? `Agent ${preview.agent}` : '',
+    preview.category ? `Category ${preview.category}` : '',
+  ].filter(Boolean);
+
+  const detailRows = [
+    preview.attemptingTo ? { label: 'Attempting', value: preview.attemptingTo } : null,
+    preview.expectedOutcome ? { label: 'Expected', value: preview.expectedOutcome } : null,
+    preview.actualOutcome ? { label: 'Actual', value: preview.actualOutcome } : null,
+    preview.tsSteps ? { label: 'TS steps', value: preview.tsSteps } : null,
+  ].filter(Boolean);
+
+  return (
+    <div className={`compose-preview-card${preview.mode === 'fallback' ? ' is-warning' : ''}`}>
+      <div className="compose-preview-head">
+        <div className="compose-preview-title-wrap">
+          <span className="compose-preview-kicker">Parsed Escalation</span>
+          {(preview.severity || preview.category) && (
+            <span className="compose-preview-severity">
+              {[preview.severity, preview.category].filter(Boolean).join(' ')}
+            </span>
+          )}
+        </div>
+        <button
+          type="button"
+          className="compose-preview-clear"
+          onClick={onClear}
+          aria-label="Clear parsed escalation preview"
+          title="Clear parsed escalation preview"
+        >
+          Clear
+        </button>
+      </div>
+
+      {preview.summary && (
+        <div className="compose-preview-summary">{preview.summary}</div>
+      )}
+
+      {metaChips.length > 0 && (
+        <div className="compose-preview-chips">
+          {metaChips.map((chip) => (
+            <span key={chip} className="compose-preview-chip">{chip}</span>
+          ))}
+        </div>
+      )}
+
+      {detailRows.length > 0 && (
+        <div className="compose-preview-grid">
+          {detailRows.map((row) => (
+            <div key={row.label} className="compose-preview-field">
+              <div className="compose-preview-label">{row.label}</div>
+              <div className="compose-preview-value">{row.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {preview.action && (
+        <div className="compose-preview-action">
+          <strong>Immediate next step:</strong> {preview.action}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ChatComposeArea({
   providerPopoverRef,
   settingsPopoverRef,
   provider,
   mode,
   fallbackProvider,
+  model,
+  fallbackModel,
   reasoningEffort,
   parallelProviders,
   showProviderPopover,
@@ -21,6 +94,8 @@ export default function ChatComposeArea({
   setProvider,
   setMode,
   setFallbackProvider,
+  setModel,
+  setFallbackModel,
   setReasoningEffort,
   setParallelProviders,
   smartComposeEnabled,
@@ -62,10 +137,16 @@ export default function ChatComposeArea({
   filteredSlashCommands,
   slashMenuIndex,
   activateSlashCommand,
+  parsedEscalationPreview,
+  onClearParsedEscalationPreview,
+  composeStatusNotice,
   onImageParsed,
 }) {
   const sendDisabled = (!input.trim())
     || (effectiveMode === 'parallel' && (parallelProviders.length < 2 || parallelProviders.length > 4));
+  const composePlaceholder = parsedEscalationPreview
+    ? 'Add a follow-up after the main chat replies, if needed.'
+    : "What's the escalation? Type / for commands.";
 
   return (
     <>
@@ -83,6 +164,8 @@ export default function ChatComposeArea({
             provider={provider}
             mode={mode}
             fallbackProvider={fallbackProvider}
+            model={model}
+            fallbackModel={fallbackModel}
             reasoningEffort={reasoningEffort}
             parallelProviders={parallelProviders}
             showProviderPopover={showProviderPopover}
@@ -92,6 +175,8 @@ export default function ChatComposeArea({
             setProvider={setProvider}
             setMode={setMode}
             setFallbackProvider={setFallbackProvider}
+            setModel={setModel}
+            setFallbackModel={setFallbackModel}
             setReasoningEffort={setReasoningEffort}
             setParallelProviders={setParallelProviders}
             smartComposeEnabled={smartComposeEnabled}
@@ -101,6 +186,17 @@ export default function ChatComposeArea({
           />
 
           <div className="compose-body" style={{ position: 'relative' }}>
+            {parsedEscalationPreview && (
+              <ParsedEscalationPreviewCard
+                preview={parsedEscalationPreview}
+                onClear={onClearParsedEscalationPreview}
+              />
+            )}
+            {composeStatusNotice && (
+              <div className={`compose-status-notice is-${composeStatusNotice.tone || 'info'}`} role="status" aria-live="polite">
+                {composeStatusNotice.text}
+              </div>
+            )}
             <div className="compose-body-inner">
               <textarea
                 ref={textareaRef}
@@ -110,9 +206,10 @@ export default function ChatComposeArea({
                 onPaste={handlePaste}
                 onFocus={handleComposeFocus}
                 onBlur={handleComposeBlur}
-                placeholder="What's the escalation? Type / for commands."
+                placeholder={composePlaceholder}
                 rows={1}
                 disabled={isStreaming}
+                aria-label="Chat message input"
               />
               {smartComposeEnabled && ghostText && (
                 <div className="compose-ghost-overlay" aria-hidden="true">
@@ -165,7 +262,7 @@ export default function ChatComposeArea({
                   aria-label="Parse image from file"
                   disabled={isStreaming}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
                   </svg>
                 </button>
@@ -188,7 +285,7 @@ export default function ChatComposeArea({
                   aria-label="Open webcam for image parser"
                   disabled={isStreaming}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <circle cx="12" cy="13" r="4" />
                     <path d="M9 2L7.17 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-3.17L15 2H9z" />
                   </svg>
@@ -203,7 +300,7 @@ export default function ChatComposeArea({
                   aria-label="Insert template"
                   disabled={isStreaming}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                     <line x1="3" y1="9" x2="21" y2="9" />
                     <line x1="9" y1="21" x2="9" y2="9" />
@@ -219,7 +316,7 @@ export default function ChatComposeArea({
                   aria-label="Parse screenshot"
                   disabled={isStreaming}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M3 7V5a2 2 0 0 1 2-2h2" />
                     <path d="M17 3h2a2 2 0 0 1 2 2v2" />
                     <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
@@ -271,7 +368,9 @@ export default function ChatComposeArea({
             <span className="compose-footer-hint">
               {slashMenuOpen
                 ? 'Enter runs the command. Tab completes it. Type // to send a literal slash.'
-                : 'Drop a screenshot to parse it into text, use webcam, or type / for commands'}
+                : parsedEscalationPreview
+                  ? 'The compact preview above was already sent to the main chat. Use this box only for follow-up messages.'
+                  : 'Drop a screenshot to parse it into text, use webcam, or type / for commands'}
             </span>
 
             <span className="compose-char-count">{input.length} chars</span>
@@ -290,7 +389,7 @@ export default function ChatComposeArea({
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={transitions.springSnappy}
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
                     <rect x="6" y="6" width="12" height="12" rx="2" />
                   </svg>
                 </motion.button>
@@ -308,7 +407,7 @@ export default function ChatComposeArea({
                   exit={{ opacity: 0, scale: 0.8 }}
                   transition={transitions.springSnappy}
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <line x1="12" y1="19" x2="12" y2="5" />
                     <polyline points="5 12 12 5 19 12" />
                   </svg>

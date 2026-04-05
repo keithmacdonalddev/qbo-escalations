@@ -13,7 +13,7 @@ import { transitions } from '../utils/motion.js';
  *  - children   {ReactNode} Panel content
  *  - badge      {ReactNode} Optional element rendered next to the title (counts, status, etc.)
  */
-export default function RightSidebar({ open, onClose, title, width = 320, badge, children }) {
+export default function RightSidebar({ open, onClose, title, width = 320, badge, children, id }) {
   // Close on Escape
   const handleKey = useCallback((e) => {
     if (e.key === 'Escape') onClose();
@@ -42,6 +42,7 @@ export default function RightSidebar({ open, onClose, title, width = 320, badge,
 
           {/* Panel */}
           <motion.aside
+            id={id}
             className="rsb-panel"
             style={{ width }}
             initial={{ x: width }}

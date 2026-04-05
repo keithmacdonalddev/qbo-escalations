@@ -82,10 +82,11 @@ export default function useEscalations() {
       if (escData.escalations.length === 0) {
         tel(TEL.DATA_EMPTY, 'No escalations found', { hasFilters: !!(statusFilter || categoryFilter || debouncedSearch) });
       }
-    } catch {
+    } catch (err) {
       if (signal?.aborted) return;
-      setLoadError('Failed to load escalations');
-      tel(TEL.DATA_ERROR, 'Failed to load escalations', { statusFilter, categoryFilter, search: debouncedSearch });
+      const message = err?.message || 'Failed to load escalations';
+      setLoadError(message);
+      tel(TEL.DATA_ERROR, message, { statusFilter, categoryFilter, search: debouncedSearch, status: err?.status || 0 });
     }
     if (signal?.aborted) return;
     setLoading(false);
@@ -108,8 +109,8 @@ export default function useEscalations() {
       setKqTotal(data.total);
       setKqCounts(data.counts);
       setKqError(null);
-    } catch {
-      setKqError('Failed to load knowledge candidates');
+    } catch (err) {
+      setKqError(err?.message || 'Failed to load knowledge candidates');
     }
     setKqLoading(false);
   }, [kqStatusFilter, kqCategoryFilter]);
@@ -123,8 +124,8 @@ export default function useEscalations() {
     try {
       await updateEscalation(id, { status: newStatus });
       loadEscalations();
-    } catch {
-      toastRef.current.error('Failed to update status');
+    } catch (err) {
+      toastRef.current.error(err?.message || 'Failed to update status');
     }
   }, [loadEscalations]);
 
@@ -141,8 +142,8 @@ export default function useEscalations() {
     try {
       await deleteEscalation(deleteTarget);
       loadEscalations();
-    } catch {
-      toastRef.current.error('Failed to delete escalation');
+    } catch (err) {
+      toastRef.current.error(err?.message || 'Failed to delete escalation');
     }
     setDeleteTarget(null);
   }, [deleteTarget, loadEscalations]);

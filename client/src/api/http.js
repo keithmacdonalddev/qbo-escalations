@@ -1,3 +1,5 @@
+import { toApiError } from '../utils/normalizeError.js';
+
 // ---------------------------------------------------------------------------
 // apiFetch — thin wrapper around fetch with six mechanisms:
 //
@@ -40,6 +42,13 @@ const _inFlight = new Map();
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_GET_RETRIES = 2;
 const MAX_MUTATION_RETRIES = 1;
+const BACKEND_READY_TIMEOUT_MS = 20_000;
+const BACKEND_READY_POLL_MS = 400;
+
+let _backendReadyState = {
+  ready: false,
+  promise: null,
+};
 
 // ---- Circuit breaker --------------------------------------------------------
 // After THRESHOLD consecutive GET failures, the circuit opens for RESET_MS.
@@ -271,6 +280,60 @@ export function getActiveRequestsSnapshot() {
   return _getActiveRequestSnapshot();
 }
 
+async function _readResponsePayload(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    return res.json().catch(() => null);
+  }
+  const text = await res.text().catch(() => '');
+  return text || null;
+}
+
+function _buildResponseErrorPayload(res, payload, fallbackMessage) {
+  const messageFromPayload = typeof payload === 'object' && payload
+    ? payload.message || payload.error
+    : typeof payload === 'string'
+      ? payload
+      : '';
+  const message = messageFromPayload || fallbackMessage || res.statusText || `HTTP ${res.status}`;
+  const status = res.status >= 400 ? res.status : undefined;
+  if (typeof payload === 'object' && payload && !Array.isArray(payload)) {
+    return {
+      ...payload,
+      message,
+      error: message,
+      status: Number.isInteger(payload.status) ? payload.status : status,
+      statusText: res.statusText || payload.statusText || '',
+      url: res.url || payload.url || '',
+    };
+  }
+  return {
+    message,
+    error: message,
+    code: status === 404 ? 'NOT_FOUND' : 'HTTP_ERROR',
+    detail: '',
+    status,
+    statusText: res.statusText || '',
+    url: res.url || '',
+  };
+}
+
+export async function readApiResponse(res, fallbackMessage = 'Request failed') {
+  const payload = await _readResponsePayload(res);
+  if (!res.ok) {
+    throw toApiError(_buildResponseErrorPayload(res, payload, fallbackMessage), fallbackMessage);
+  }
+  if (payload && typeof payload === 'object' && !Array.isArray(payload) && payload.ok === false) {
+    throw toApiError(_buildResponseErrorPayload(res, payload, fallbackMessage), fallbackMessage);
+  }
+  return payload;
+}
+
+export async function apiFetchJson(url, options = {}, fallbackMessage = 'Request failed') {
+  const res = await apiFetch(url, options);
+  return readApiResponse(res, fallbackMessage);
+}
+
 // ---- public -----------------------------------------------------------------
 
 /**
@@ -283,9 +346,21 @@ export function getActiveRequestsSnapshot() {
  */
 export function apiFetch(url, options = {}) {
   const method = (options.method || 'GET').toUpperCase();
+  const hasExternalSignal = !!options.signal;
+  const skipDedupe = !!options.noDedupe;
+  const skipBackendReady = !!options.skipBackendReady;
+
+  if (!skipBackendReady) {
+    if (typeof url === 'string' && method === 'GET' && url.startsWith('/api/') && url !== '/api/health') {
+      return _waitForBackendReady(options).then(() => apiFetch(url, { ...options, skipBackendReady: true }));
+    }
+  }
 
   // --- Single-flight dedupe for GETs ---
-  if (method === 'GET') {
+  // Skip dedupe when the caller provides an AbortSignal. Shared in-flight
+  // requests and per-caller cancellation do not compose safely; in React
+  // Strict Mode, the first mount's cleanup can abort the remount's request.
+  if (method === 'GET' && !hasExternalSignal && !skipDedupe) {
     if (_inFlight.has(url)) {
       _dedupSaves++;
       _notifyBudget();
@@ -302,6 +377,10 @@ export function apiFetch(url, options = {}) {
     return p.then(r => r.clone());
   }
 
+  if (method === 'GET') {
+    return _trackedFetch(url, method, options, _fetchWithRetry(url, options));
+  }
+
   // Non-GET requests (POST, PATCH, DELETE) get a single retry on 5xx.
   // SSE / streaming callers already attach their own AbortController signal.
   // Callers can pass `noRetry: true` to skip mutation retry (e.g. long-running
@@ -313,6 +392,88 @@ export function apiFetch(url, options = {}) {
 }
 
 // ---- internal ---------------------------------------------------------------
+
+async function _waitForBackendReady(options = {}) {
+  if (_backendReadyState.ready) return;
+  if (_backendReadyState.promise) {
+    return _backendReadyState.promise;
+  }
+
+  const externalSignal = options.signal;
+  const startedAt = Date.now();
+
+  _backendReadyState.promise = (async () => {
+    while (Date.now() - startedAt < BACKEND_READY_TIMEOUT_MS) {
+      if (externalSignal?.aborted) {
+        const err = new Error('Backend readiness check aborted');
+        err.name = 'AbortError';
+        throw err;
+      }
+
+      try {
+        const res = await fetch('/api/health', {
+          method: 'GET',
+          cache: 'no-store',
+          signal: externalSignal,
+        });
+        if (res.ok) {
+          _backendReadyState.ready = true;
+          return;
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+      }
+
+      await _delayWithAbort(BACKEND_READY_POLL_MS, externalSignal);
+    }
+
+    throw new Error('Backend did not become ready in time');
+  })();
+
+  try {
+    await _backendReadyState.promise;
+  } finally {
+    if (!_backendReadyState.ready) {
+      _backendReadyState.promise = null;
+    }
+  }
+}
+
+function _delayWithAbort(ms, signal) {
+  return new Promise((resolve, reject) => {
+    let onAbort = null;
+    const cleanup = () => {
+      if (!signal || !onAbort) return;
+      try { signal.removeEventListener('abort', onAbort); } catch {}
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      resolve();
+    }, ms);
+    timer.unref?.();
+
+    if (!signal) return;
+    if (signal.aborted) {
+      clearTimeout(timer);
+      cleanup();
+      const err = new Error('Backend readiness check aborted');
+      err.name = 'AbortError';
+      reject(err);
+      return;
+    }
+
+    onAbort = () => {
+      clearTimeout(timer);
+      cleanup();
+      const err = new Error('Backend readiness check aborted');
+      err.name = 'AbortError';
+      reject(err);
+    };
+
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 /**
  * Bounded retry loop for GET requests with circuit breaker.
@@ -326,6 +487,7 @@ async function _fetchWithRetry(url, options) {
   }
 
   let lastError;
+  let lastResponse;
   let lastStatus = 0;
   let lastStatusText = '';
   for (let attempt = 0; attempt <= MAX_GET_RETRIES; attempt++) {
@@ -348,12 +510,14 @@ async function _fetchWithRetry(url, options) {
         return res;
       }
       // 5xx — retriable server error
+      lastResponse = res;
       lastError = new Error(`HTTP ${res.status}`);
       lastStatus = res.status;
       lastStatusText = res.statusText;
       _recordFailure();
     } catch (err) {
       lastError = err;
+      lastResponse = null;
       _recordFailure();
       if (err.name === 'AbortError') {
         _notifyApiError({
@@ -374,6 +538,7 @@ async function _fetchWithRetry(url, options) {
       });
     }
   }
+  if (lastResponse) return lastResponse;
   throw lastError;
 }
 

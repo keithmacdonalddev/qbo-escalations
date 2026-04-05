@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { getSharedRealtimeClient } from '../api/realtime.js';
 import { dispatchGmailMutations, gmailMutationsFromMonitorPayload } from '../lib/gmailUiEvents.js';
 
 const DEFAULT_CTX = Object.freeze({
@@ -13,14 +14,6 @@ const DEFAULT_CTX = Object.freeze({
 });
 
 const WorkspaceMonitorContext = createContext(DEFAULT_CTX);
-
-function safeParseEvent(event) {
-  try {
-    return JSON.parse(event?.data || '{}');
-  } catch {
-    return null;
-  }
-}
 
 export function WorkspaceMonitorProvider({ enabled = true, children }) {
   const [connected, setConnected] = useState(false);
@@ -40,26 +33,32 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       return undefined;
     }
 
-    let eventSource;
-    try {
-      eventSource = new EventSource('/api/workspace/monitor');
-    } catch {
-      setConnected(false);
-      return undefined;
-    }
+    const realtime = getSharedRealtimeClient();
 
-    const onSnapshot = (event) => {
-      const data = safeParseEvent(event);
-      if (!data) return;
+    const onSnapshot = (data) => {
+      if (!data || typeof data !== 'object') return;
       if (Array.isArray(data.alerts)) setAlerts(data.alerts);
       if (Array.isArray(data.nudges)) setNudges(data.nudges);
+      if (data.lastWorkSummary && typeof data.lastWorkSummary === 'object') {
+        workCompletedIdRef.current += 1;
+        setLastWorkCompleted({
+          id: workCompletedIdRef.current,
+          payload: data.lastWorkSummary,
+        });
+      }
+      if (data.lastProactiveMessage && typeof data.lastProactiveMessage === 'object') {
+        proactiveIdRef.current += 1;
+        setLastProactiveMessage({
+          id: proactiveIdRef.current,
+          payload: data.lastProactiveMessage,
+        });
+      }
       setConnected(true);
       setLastSnapshotAt(Date.now());
     };
 
-    const onAlert = (event) => {
-      const alert = safeParseEvent(event);
-      if (!alert) return;
+    const onAlert = (alert) => {
+      if (!alert || typeof alert !== 'object') return;
       setAlerts((prev) => {
         const key = `${alert.type}:${alert.sourceId || ''}`;
         const filtered = prev.filter((item) => `${item.type}:${item.sourceId || ''}` !== key);
@@ -67,21 +66,18 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       });
     };
 
-    const onAlertResolved = (event) => {
-      const data = safeParseEvent(event);
-      if (!data) return;
+    const onAlertResolved = (data) => {
+      if (!data || typeof data !== 'object') return;
       const key = `${data.type}:${data.sourceId || ''}`;
       setAlerts((prev) => prev.filter((item) => `${item.type}:${item.sourceId || ''}` !== key));
     };
 
-    const onNudges = (event) => {
-      const data = safeParseEvent(event);
+    const onNudges = (data) => {
       if (!data || !Array.isArray(data.nudges)) return;
       setNudges(data.nudges);
     };
 
-    const onNudge = (event) => {
-      const nudge = safeParseEvent(event);
+    const onNudge = (nudge) => {
       if (!nudge?.id) return;
       setNudges((prev) => {
         const filtered = prev.filter((item) => item.id !== nudge.id);
@@ -89,8 +85,7 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       });
     };
 
-    const onLabelsChanged = (event) => {
-      const data = safeParseEvent(event);
+    const onLabelsChanged = (data) => {
       const mutations = gmailMutationsFromMonitorPayload(data);
       if (mutations.length > 0) {
         dispatchGmailMutations(mutations, { source: 'workspace-monitor' });
@@ -98,9 +93,8 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       setInboxRefreshToken((value) => value + 1);
     };
 
-    const onWorkCompleted = (event) => {
-      const data = safeParseEvent(event);
-      if (!data) return;
+    const onWorkCompleted = (data) => {
+      if (!data || typeof data !== 'object') return;
 
       const shouldRefreshInbox = (data.labelsApplied || 0) > 0
         || (data.silentActionsRun || 0) > 0
@@ -116,9 +110,8 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       });
     };
 
-    const onProactiveMessage = (event) => {
-      const data = safeParseEvent(event);
-      if (!data) return;
+    const onProactiveMessage = (data) => {
+      if (!data || typeof data !== 'object') return;
       proactiveIdRef.current += 1;
       setLastProactiveMessage({
         id: proactiveIdRef.current,
@@ -131,24 +124,31 @@ export function WorkspaceMonitorProvider({ enabled = true, children }) {
       setLastHeartbeatAt(Date.now());
     };
 
-    eventSource.addEventListener('snapshot', onSnapshot);
-    eventSource.addEventListener('alert', onAlert);
-    eventSource.addEventListener('alert-resolved', onAlertResolved);
-    eventSource.addEventListener('nudges', onNudges);
-    eventSource.addEventListener('nudge', onNudge);
-    eventSource.addEventListener('labels-changed', onLabelsChanged);
-    eventSource.addEventListener('work-completed', onWorkCompleted);
-    eventSource.addEventListener('proactive-message', onProactiveMessage);
-    eventSource.addEventListener('heartbeat', onHeartbeat);
-    eventSource.onopen = () => setConnected(true);
-    eventSource.onerror = () => setConnected(false);
+    const unsubscribeConnection = realtime.subscribeConnectionState((state) => {
+      setConnected(Boolean(state?.connected));
+    });
+
+    const unsubscribe = realtime.subscribe({
+      channel: 'workspace-monitor',
+      onEvent(eventType, data) {
+        if (eventType === 'snapshot') onSnapshot(data);
+        else if (eventType === 'alert') onAlert(data);
+        else if (eventType === 'alert-resolved') onAlertResolved(data);
+        else if (eventType === 'nudges') onNudges(data);
+        else if (eventType === 'nudge') onNudge(data);
+        else if (eventType === 'labels-changed') onLabelsChanged(data);
+        else if (eventType === 'work-completed') onWorkCompleted(data);
+        else if (eventType === 'proactive-message') onProactiveMessage(data);
+        else if (eventType === 'heartbeat') onHeartbeat();
+      },
+      onError() {
+        setConnected(false);
+      },
+    });
 
     return () => {
-      try {
-        eventSource.close();
-      } catch {
-        // ignore close failures
-      }
+      unsubscribe();
+      unsubscribeConnection();
     };
   }, [enabled]);
 

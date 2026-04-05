@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetchJson } from '../api/http.js';
 
 const HISTORY_LIMIT = 30;
 const AUTO_BRIEFING_KEY = 'qbo-workspace-last-briefing-ts';
@@ -24,9 +25,11 @@ export default function useWorkspaceAgentPanelControls({
   const fetchConversationHistory = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const res = await fetch(`/api/workspace/conversations?limit=${HISTORY_LIMIT}`);
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiFetchJson(
+        `/api/workspace/conversations?limit=${HISTORY_LIMIT}`,
+        {},
+        'Failed to load workspace conversation history'
+      );
       if (data.ok && Array.isArray(data.conversations)) {
         setHistoryItems(data.conversations);
       }

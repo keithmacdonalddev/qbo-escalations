@@ -1,91 +1,39 @@
 /* ============================================================
-   Depth Effects — 3D, Shadows, and Visual Enhancements
-
-   Layered depth system for the QBO Escalation Assistant.
-   Adds subtle 3D perception, advanced shadows, and two
-   special design improvements:
-   1. Glassmorphism (frosted glass) on key surfaces
-   2. Soft inner glow on interactive elements (cards, buttons)
+   Depth Effects — Shadows & Elevation
+   Clean, minimal elevation system for the Slate design system.
+   No glassmorphism, no noise textures, no decorative glows.
    ============================================================ */
 
-/* ----- Enhanced Shadow System (Elevation Layers) ----- */
-
-/* Override the base shadow tokens with richer multi-layer shadows */
+/* ----- Elevation Tokens ----- */
 :root {
   /* Elevation 1 — subtle lift (cards at rest) */
-  --shadow-e1:
-    0 1px 2px rgba(44, 38, 32, 0.04),
-    0 2px 4px rgba(44, 38, 32, 0.03);
+  --shadow-e1: 0 1px 2px rgba(0, 0, 0, 0.2);
 
   /* Elevation 2 — raised (hovered cards, dropdowns) */
-  --shadow-e2:
-    0 2px 4px rgba(44, 38, 32, 0.04),
-    0 4px 12px rgba(44, 38, 32, 0.06),
-    0 1px 2px rgba(44, 38, 32, 0.03);
+  --shadow-e2: 0 4px 12px rgba(0, 0, 0, 0.28);
 
   /* Elevation 3 — floating (modals, popovers) */
-  --shadow-e3:
-    0 4px 8px rgba(44, 38, 32, 0.04),
-    0 8px 24px rgba(44, 38, 32, 0.08),
-    0 16px 48px rgba(44, 38, 32, 0.06);
+  --shadow-e3: 0 8px 24px rgba(0, 0, 0, 0.36);
 
   /* Elevation 4 — dramatic (toasts, notifications) */
   --shadow-e4:
-    0 8px 16px rgba(44, 38, 32, 0.06),
-    0 16px 40px rgba(44, 38, 32, 0.1),
-    0 24px 64px rgba(44, 38, 32, 0.08);
-
-  /* Soft inner glow for interactive elements */
-  --glow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --glow-inner-accent: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    0 8px 24px rgba(0, 0, 0, 0.36),
+    0 16px 40px rgba(0, 0, 0, 0.2);
 
   /* 3D perspective for card tilt effects */
   --perspective: 800px;
-
-  /* Glass blur intensity */
-  --glass-blur: 12px;
-  --glass-bg: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.2);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --shadow-e1:
-      0 1px 2px rgba(0, 0, 0, 0.15),
-      0 2px 4px rgba(0, 0, 0, 0.12);
-
-    --shadow-e2:
-      0 2px 4px rgba(0, 0, 0, 0.18),
-      0 4px 12px rgba(0, 0, 0, 0.2),
-      0 1px 2px rgba(0, 0, 0, 0.15);
-
-    --shadow-e3:
-      0 4px 8px rgba(0, 0, 0, 0.2),
-      0 8px 24px rgba(0, 0, 0, 0.25),
-      0 16px 48px rgba(0, 0, 0, 0.2);
-
-    --shadow-e4:
-      0 8px 16px rgba(0, 0, 0, 0.25),
-      0 16px 40px rgba(0, 0, 0, 0.3),
-      0 24px 64px rgba(0, 0, 0, 0.25);
-
-    --glow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.04);
-    --glow-inner-accent: inset 0 1px 0 rgba(255, 255, 255, 0.08);
-
-    --glass-bg: rgba(30, 27, 23, 0.72);
-    --glass-border: rgba(255, 255, 255, 0.06);
-  }
-}
 
 /* =============================================
-   1. CARD DEPTH — 3D lift on hover
+   1. CARD DEPTH — clean shadow on hover
    ============================================= */
 
 .card {
   box-shadow: var(--shadow-e1);
   transition:
-    box-shadow var(--duration-normal) var(--ease-standard),
-    transform var(--duration-normal) var(--ease-standard);
+    box-shadow var(--duration-normal, 200ms) var(--ease-default, ease),
+    transform var(--duration-normal, 200ms) var(--ease-default, ease);
 }
 
 .card-clickable {
@@ -100,101 +48,73 @@
 .card-clickable:active {
   box-shadow: var(--shadow-e1);
   transform: translateY(0);
-  transition-duration: var(--duration-micro);
+  transition-duration: 50ms;
 }
 
 /* =============================================
-   2. BUTTON DEPTH — layered shadow + inner glow
+   2. BUTTON DEPTH — simple shadow, no inner glow
    ============================================= */
 
 .btn-primary {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 1px 3px rgba(44, 38, 32, 0.12),
-    0 2px 6px rgba(44, 38, 32, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transition:
-    box-shadow var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard);
+    box-shadow 100ms ease,
+    transform 100ms ease,
+    background 100ms ease;
 }
 
 .btn-primary:hover {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 2px 6px rgba(44, 38, 32, 0.15),
-    0 4px 12px rgba(44, 38, 32, 0.08);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
   transform: translateY(-1px);
 }
 
 .btn-primary:active {
-  box-shadow:
-    var(--glow-inner),
-    0 1px 2px rgba(44, 38, 32, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transform: translateY(0);
 }
 
 .btn-secondary {
-  box-shadow: var(--glow-inner);
+  box-shadow: none;
   transition:
-    box-shadow var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    background var(--duration-fast) var(--ease-standard);
+    box-shadow 100ms ease,
+    transform 100ms ease,
+    border-color 100ms ease,
+    background 100ms ease;
 }
 
 .btn-secondary:hover {
-  box-shadow:
-    var(--glow-inner),
-    0 1px 4px rgba(44, 38, 32, 0.06);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   transform: translateY(-1px);
 }
 
 .btn-danger {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 1px 3px rgba(192, 57, 43, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn-danger:hover {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 2px 8px rgba(192, 57, 43, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
   transform: translateY(-1px);
 }
 
 .btn-success {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 1px 3px rgba(58, 138, 92, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 .btn-success:hover {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 2px 8px rgba(58, 138, 92, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
   transform: translateY(-1px);
 }
 
 /* =============================================
-   3. SIDEBAR DEPTH — subtle 3D edge
+   3. SIDEBAR DEPTH — subtle border edge
    ============================================= */
 
 .sidebar {
-  box-shadow:
-    1px 0 0 var(--line-subtle),
-    2px 0 8px rgba(44, 38, 32, 0.03);
-}
-
-@media (prefers-color-scheme: dark) {
-  .sidebar {
-    box-shadow:
-      1px 0 0 var(--line-subtle),
-      2px 0 12px rgba(0, 0, 0, 0.15);
-  }
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.06);
 }
 
 /* =============================================
-   4. MODAL DEPTH — dramatic elevation
+   4. MODAL DEPTH — elevated
    ============================================= */
 
 .modal-content,
@@ -203,7 +123,7 @@
 }
 
 /* =============================================
-   5. INPUT DEPTH — subtle inset shadow
+   5. INPUT DEPTH — minimal
    ============================================= */
 
 input[type="text"],
@@ -214,35 +134,20 @@ input[type="number"],
 input[type="url"],
 textarea,
 select {
-  box-shadow: inset 0 1px 2px rgba(44, 38, 32, 0.04);
+  box-shadow: none;
   transition:
-    box-shadow var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard);
+    box-shadow 100ms ease,
+    border-color 100ms ease;
 }
 
 input:focus,
 textarea:focus,
 select:focus {
-  box-shadow:
-    inset 0 1px 2px rgba(44, 38, 32, 0.02),
-    var(--shadow-focus);
-}
-
-@media (prefers-color-scheme: dark) {
-  input[type="text"],
-  input[type="search"],
-  input[type="email"],
-  input[type="password"],
-  input[type="number"],
-  input[type="url"],
-  textarea,
-  select {
-    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.12);
-  }
+  box-shadow: 0 0 0 2px rgba(91, 156, 245, 0.20);
 }
 
 /* =============================================
-   6. STAT CARDS — gradient depth
+   6. STAT CARDS — flat, accent top bar
    ============================================= */
 
 .stat-card {
@@ -258,29 +163,23 @@ select:focus {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(
-    90deg,
-    var(--accent) 0%,
-    var(--accent-muted) 100%
-  );
-  opacity: 0.6;
+  background: var(--accent, #5B9CF5);
+  opacity: 0.5;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
 /* =============================================
-   7. TABLE ROW DEPTH — hover lift
+   7. TABLE ROW DEPTH — hover highlight
    ============================================= */
 
 .table tbody tr {
   transition:
-    background var(--duration-fast) var(--ease-standard),
-    box-shadow var(--duration-fast) var(--ease-standard);
+    background 100ms ease,
+    box-shadow 100ms ease;
 }
 
 .table tbody tr:hover {
-  box-shadow:
-    0 1px 4px rgba(44, 38, 32, 0.04),
-    0 2px 8px rgba(44, 38, 32, 0.03);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   position: relative;
   z-index: 1;
 }
@@ -294,12 +193,11 @@ select:focus {
 }
 
 .chat-bubble-user {
-  box-shadow:
-    0 1px 3px rgba(44, 38, 32, 0.03);
+  box-shadow: none;
 }
 
 /* =============================================
-   9. TOAST DEPTH — dramatic floating
+   9. TOAST DEPTH — floating
    ============================================= */
 
 .toast {
@@ -307,59 +205,44 @@ select:focus {
 }
 
 /* =============================================
-   SPECIAL DESIGN 1: GLASSMORPHISM
-   Frosted glass effect on sidebar header and
-   compose toolbar for visual depth layering.
+   10. SIDEBAR HEADER — solid background, no glass
    ============================================= */
 
 .sidebar-header {
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
-  background: var(--glass-bg);
-  border-bottom: 1px solid var(--glass-border);
+  background: var(--bg-surface, #161A22);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .compose-settings-bar {
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
-  background: var(--glass-bg);
-  border-top: 1px solid var(--glass-border);
+  background: var(--bg-surface, #161A22);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-/* Settings filter bar gets glass effect with solid fallback */
 .settings-filter-bar {
   position: sticky;
   top: 0;
   z-index: 5;
   padding: var(--sp-3) 0;
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(var(--glass-blur));
-  backdrop-filter: blur(var(--glass-blur));
+  background: var(--bg-surface, #161A22);
 }
 
 /* =============================================
-   SPECIAL DESIGN 2: SOFT INNER GLOW
-   Subtle top-edge highlight on interactive
-   elements creates a "lit from above" effect,
-   adding perceived physicality and tactility.
+   11. INTERACTIVE ELEMENTS — flat
    ============================================= */
 
 .sidebar-nav-item {
-  box-shadow: var(--glow-inner);
+  box-shadow: none;
 }
 
 .sidebar-nav-item.is-active {
-  box-shadow:
-    var(--glow-inner-accent),
-    0 1px 4px rgba(44, 38, 32, 0.04);
+  box-shadow: none;
 }
 
 .badge,
 .status-badge {
-  box-shadow: var(--glow-inner);
+  box-shadow: none;
 }
 
-/* Settings theme cards get enhanced 3D */
 .settings-theme-card {
   box-shadow: var(--shadow-e1);
 }
@@ -379,7 +262,7 @@ select:focus {
 }
 
 /* =============================================
-   REDUCED MOTION — respect user preference
+   REDUCED MOTION
    ============================================= */
 
 @media (prefers-reduced-motion: reduce) {

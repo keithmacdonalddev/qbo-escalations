@@ -121,7 +121,7 @@ const S = {
   // Root — Vercel-inspired radical simplicity
   root: { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--font-sans)' },
   // Header — Glassmorphism + Stripe gradient accents
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 56px 10px 20px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', background: 'color-mix(in srgb, var(--bg-raised) 82%, transparent)', backdropFilter: 'blur(16px) saturate(1.4)', WebkitBackdropFilter: 'blur(16px) saturate(1.4)', gap: 12, flexWrap: 'wrap', flexShrink: 0, zIndex: 10, position: 'relative' },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 56px 10px 20px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', background: '#161A22', gap: 12, flexWrap: 'wrap', flexShrink: 0, zIndex: 10, position: 'relative' },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 8 },
   headerCenter: { display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 auto', justifyContent: 'center', minWidth: 200 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 6 },
@@ -221,7 +221,7 @@ const S = {
   btnDanger: { background: 'linear-gradient(135deg, var(--danger), color-mix(in srgb, var(--danger) 80%, #ff6b6b))', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', padding: '9px 20px', cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 700, transition: 'all 0.2s cubic-bezier(0.4,0,0.2,1)' },
   btnGhost: { background: 'color-mix(in srgb, var(--ink) 4%, transparent)', color: 'var(--ink-secondary)', border: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', borderRadius: 'var(--radius-md)', padding: '9px 20px', cursor: 'pointer', fontSize: 'var(--text-sm)', fontWeight: 600, transition: 'all 0.2s cubic-bezier(0.4,0,0.2,1)' },
   // Popover — Enhanced glassmorphism + refined layout
-  popover: { position: 'fixed', background: 'color-mix(in srgb, var(--bg-raised) 94%, transparent)', backdropFilter: 'blur(24px) saturate(1.6)', WebkitBackdropFilter: 'blur(24px) saturate(1.6)', borderRadius: '16px', boxShadow: '0 20px 70px rgba(0,0,0,0.22), 0 0 0 1px color-mix(in srgb, var(--line-subtle) 40%, transparent)', border: '1px solid color-mix(in srgb, var(--line-subtle) 25%, transparent)', padding: '0 20px 20px', width: 340, zIndex: 50, maxHeight: 440, overflow: 'hidden' },
+  popover: { position: 'fixed', background: '#2E3542', borderRadius: '16px', boxShadow: '0 20px 70px rgba(0,0,0,0.22), 0 0 0 1px color-mix(in srgb, var(--line-subtle) 40%, transparent)', border: '1px solid color-mix(in srgb, var(--line-subtle) 25%, transparent)', padding: '0 20px 20px', width: 340, zIndex: 50, maxHeight: 440, overflow: 'hidden' },
   popoverTitle: { fontSize: '16px', fontWeight: 800, letterSpacing: '-0.025em', lineHeight: 1.3, paddingRight: 28, color: 'var(--ink)' },
   popoverMeta: { fontSize: '13px', color: 'var(--ink-secondary)', display: 'flex', alignItems: 'center', gap: 7 },
   popoverActions: { display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 14, borderTop: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)' },
@@ -391,8 +391,7 @@ function QuickPeekTooltip({ event, anchor, calendarColor }) {
       className="cal-quick-peek"
       style={{
         position: 'fixed', top, left, zIndex: 60, pointerEvents: 'none',
-        background: 'color-mix(in srgb, var(--bg-raised) 94%, transparent)',
-        backdropFilter: 'blur(16px) saturate(1.4)', WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
+        background: '#2E3542',
         borderRadius: 'var(--radius-md)',
         boxShadow: 'var(--shadow-lg), 0 0 0 1px color-mix(in srgb, var(--line-subtle) 40%, transparent)',
         border: '1px solid color-mix(in srgb, var(--line-subtle) 30%, transparent)',

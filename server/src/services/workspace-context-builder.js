@@ -78,6 +78,8 @@ async function buildWorkspaceAutoContextInner({ autoExtractFromEmails } = {}) {
   const allConnectedAccounts = await GmailAuth.getAll().catch(() => []);
   const connectedEmails = (allConnectedAccounts || []).map((account) => account.email);
 
+  const gmailConnected = connectedEmails.length > 0;
+
   const [todayEventsRes, recentInboxRes, draftsRes] = await Promise.all([
     calendar.listEvents({
       calendarId: 'primary',
@@ -85,15 +87,40 @@ async function buildWorkspaceAutoContextInner({ autoExtractFromEmails } = {}) {
       timeMax: in48hIso,
       maxResults: 20,
     }).catch(() => null),
-    connectedEmails.length > 1
-      ? gmail.listUnifiedMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null)
-      : gmail.listMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null),
-    gmail.listDrafts({ maxResults: 10 }).catch(() => null),
+    gmailConnected
+      ? (connectedEmails.length > 1
+        ? gmail.listUnifiedMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null)
+        : gmail.listMessages({ q: 'in:inbox', maxResults: 100 }).catch(() => null))
+      : Promise.resolve(null),
+    gmailConnected
+      ? gmail.listDrafts({ maxResults: 10 }).catch(() => null)
+      : Promise.resolve(null),
   ]);
+
+  // Detect whether Calendar is actually connected by checking the API response.
+  // calendar.listEvents returns { ok: false, code: 'GMAIL_NOT_CONNECTED' } when
+  // no Google account is authenticated, or null if the call threw an error.
+  const calendarConnected = todayEventsRes !== null && todayEventsRes.ok !== false;
 
   const contextParts = [];
 
-  if (connectedEmails.length > 0) {
+  // --- Disconnection warnings (must come first so the LLM sees them immediately) ---
+  if (!gmailConnected) {
+    contextParts.push('--- SERVICE STATUS: GMAIL NOT CONNECTED ---');
+    contextParts.push('The user has NOT signed in with Google. No inbox data, drafts, or email history is available.');
+    contextParts.push('Do NOT fabricate email counts, unread messages, or inbox status. State clearly that Gmail is not connected.');
+    contextParts.push('Guide the user to reconnect: "Head to the **Inbox** tab on the left sidebar to sign in with Google — it takes about 10 seconds."');
+    contextParts.push('--- End Service Status ---');
+  }
+  if (!calendarConnected) {
+    contextParts.push('--- SERVICE STATUS: GOOGLE CALENDAR NOT CONNECTED ---');
+    contextParts.push('The user has NOT signed in with Google. No calendar events, schedule, or availability data is available.');
+    contextParts.push('Do NOT fabricate calendar events, meeting times, or schedule information. State clearly that Google Calendar is not connected.');
+    contextParts.push('Guide the user to reconnect: "Head to the **Inbox** tab on the left sidebar to sign in with Google — it takes about 10 seconds."');
+    contextParts.push('--- End Service Status ---');
+  }
+
+  if (gmailConnected) {
     contextParts.push(`CONNECTED EMAIL ACCOUNTS: ${connectedEmails.join(', ')}${connectedEmails.length > 1 ? ' (use account param to target a specific account)' : ''}`);
   }
 

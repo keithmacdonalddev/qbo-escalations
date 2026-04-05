@@ -1,5 +1,4 @@
-import { apiFetch } from './http.js';
-import { toApiError } from '../utils/normalizeError.js';
+import { apiFetchJson } from './http.js';
 import { serializeJsonRequestBody } from '../lib/jsonRequestBody.js';
 const BASE = '/api/escalations';
 
@@ -10,119 +9,93 @@ export async function listEscalations({ status, category, search, agent, limit =
   if (search) params.set('search', search);
   if (agent) params.set('agent', agent);
 
-  const res = await apiFetch(`${BASE}?${params}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to list escalations');
+  const data = await apiFetchJson(`${BASE}?${params}`, {}, 'Failed to list escalations');
   return { escalations: data.escalations, total: data.total };
 }
 
 export async function getEscalation(id) {
-  const res = await apiFetch(`${BASE}/${id}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Escalation not found');
+  const data = await apiFetchJson(`${BASE}/${id}`, {}, 'Escalation not found');
   return data.escalation;
 }
 
 export async function createEscalation(fields) {
-  const res = await apiFetch(BASE, {
+  const data = await apiFetchJson(BASE, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to create');
+  }, 'Failed to create escalation');
   return data.escalation;
 }
 
 export async function updateEscalation(id, fields) {
-  const res = await apiFetch(`${BASE}/${id}`, {
+  const data = await apiFetchJson(`${BASE}/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to update');
+  }, 'Failed to update escalation');
   return data.escalation;
 }
 
 export async function deleteEscalation(id) {
-  const res = await apiFetch(`${BASE}/${id}`, { method: 'DELETE' });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to delete');
+  await apiFetchJson(`${BASE}/${id}`, { method: 'DELETE' }, 'Failed to delete escalation');
 }
 
 export async function getEscalationKnowledge(id) {
-  const res = await apiFetch(`${BASE}/${id}/knowledge`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to load knowledge draft');
+  const data = await apiFetchJson(`${BASE}/${id}/knowledge`, {}, 'Failed to load knowledge draft');
   return data.knowledge || null;
 }
 
 export async function generateEscalationKnowledge(id, { force = false, enrich = false } = {}) {
-  const res = await apiFetch(`${BASE}/${id}/knowledge/generate`, {
+  const data = await apiFetchJson(`${BASE}/${id}/knowledge/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ force, enrich }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to generate knowledge draft');
+  }, 'Failed to generate knowledge draft');
   return data.knowledge;
 }
 
 export async function updateEscalationKnowledge(id, fields) {
-  const res = await apiFetch(`${BASE}/${id}/knowledge`, {
+  const data = await apiFetchJson(`${BASE}/${id}/knowledge`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to update knowledge draft');
+  }, 'Failed to update knowledge draft');
   return data.knowledge;
 }
 
 export async function publishEscalationKnowledge(id) {
-  const res = await apiFetch(`${BASE}/${id}/knowledge/publish`, {
+  return apiFetchJson(`${BASE}/${id}/knowledge/publish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to publish knowledge draft');
-  return data;
+  }, 'Failed to publish knowledge draft');
 }
 
 export async function unpublishEscalationKnowledge(id) {
-  const res = await apiFetch(`${BASE}/${id}/knowledge/unpublish`, {
+  return apiFetchJson(`${BASE}/${id}/knowledge/unpublish`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to unpublish knowledge');
-  return data;
+  }, 'Failed to unpublish knowledge');
 }
 
 /** Quick status transition — returns { escalation, knowledgeEligible } */
 export async function transitionEscalation(id, status, resolution = '') {
-  const res = await apiFetch(`${BASE}/${id}/transition`, {
+  const data = await apiFetchJson(`${BASE}/${id}/transition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, resolution }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to transition');
+  }, 'Failed to transition escalation');
   return { escalation: data.escalation, knowledgeEligible: Boolean(data.knowledgeEligible) };
 }
 
 /** Link escalation to conversation */
 export async function linkEscalation(id, conversationId) {
-  const res = await apiFetch(`${BASE}/${id}/link`, {
+  const data = await apiFetchJson(`${BASE}/${id}/link`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversationId }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to link');
+  }, 'Failed to link escalation');
   return data.escalation;
 }
 
@@ -151,39 +124,31 @@ export async function parseEscalation({
     reasoningEffort,
     timeoutMs,
   };
-  const res = await apiFetch(`${BASE}/parse`, {
+  return apiFetchJson(`${BASE}/parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: await serializeJsonRequestBody(body, {
       offThread: typeof image === 'string' && image.length > 0,
     }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw toApiError(data, 'Failed to parse escalation');
-  return data;
+  }, 'Failed to parse escalation');
 }
 
 /** Regex-only quick parse (does not persist record) */
 export async function quickParseEscalation(text) {
-  const res = await apiFetch(`${BASE}/quick-parse`, {
+  return apiFetchJson(`${BASE}/quick-parse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to quick-parse escalation');
-  return data;
+  }, 'Failed to quick-parse escalation');
 }
 
 /** Create escalation directly from a chat conversation */
 export async function createEscalationFromConversation(conversationId, fields) {
-  const res = await apiFetch(`${BASE}/from-conversation`, {
+  const data = await apiFetchJson(`${BASE}/from-conversation`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ conversationId, ...fields }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to create escalation from conversation');
+  }, 'Failed to create escalation from conversation');
   return data.escalation;
 }
 
@@ -194,18 +159,13 @@ export async function listKnowledgeCandidates({ reviewStatus, category, reusable
   if (category) params.set('category', category);
   if (reusableOutcome) params.set('reusableOutcome', reusableOutcome);
 
-  const res = await apiFetch(`${BASE}/knowledge-candidates?${params}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to list knowledge candidates');
+  const data = await apiFetchJson(`${BASE}/knowledge-candidates?${params}`, {}, 'Failed to list knowledge candidates');
   return { candidates: data.candidates, total: data.total, counts: data.counts };
 }
 
 /** Fetch knowledge gap analysis for playbook coverage */
 export async function getKnowledgeGaps(days = 30) {
-  const res = await apiFetch(`${BASE}/knowledge-gaps?days=${days}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch knowledge gaps');
-  return data;
+  return apiFetchJson(`${BASE}/knowledge-gaps?days=${days}`, {}, 'Failed to fetch knowledge gaps');
 }
 
 /** Fetch similar escalations by category/symptoms or escalationId */
@@ -216,32 +176,26 @@ export async function listSimilarEscalations({ escalationId, category, symptoms,
   if (symptoms) params.set('symptoms', symptoms);
   params.set('limit', String(limit));
 
-  const res = await apiFetch(`${BASE}/similar?${params}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch similar escalations');
+  const data = await apiFetchJson(`${BASE}/similar?${params}`, {}, 'Failed to fetch similar escalations');
   return data.escalations;
 }
 
 /** Attach screenshots to an escalation (base64 images) */
 export async function uploadEscalationScreenshots(id, images) {
-  const res = await apiFetch(`${BASE}/${id}/screenshots`, {
+  const data = await apiFetchJson(`${BASE}/${id}/screenshots`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: await serializeJsonRequestBody({ images }, {
       offThread: Array.isArray(images) && images.length > 0,
     }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to upload screenshots');
+  }, 'Failed to upload escalation screenshots');
   return data.escalation;
 }
 
 /** Remove one screenshot attachment from an escalation */
 export async function deleteEscalationScreenshot(id, filename) {
-  const res = await apiFetch(`${BASE}/${id}/screenshots/${encodeURIComponent(filename)}`, {
+  const data = await apiFetchJson(`${BASE}/${id}/screenshots/${encodeURIComponent(filename)}`, {
     method: 'DELETE',
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to delete screenshot');
+  }, 'Failed to delete escalation screenshot');
   return data.escalation;
 }

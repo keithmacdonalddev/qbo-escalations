@@ -167,8 +167,11 @@ body { font-family: var(--font-sans); background: var(--bg); color: var(--text);
 .test-badge.pass { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
 .test-badge.fail { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
 .test-badge.skip { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+.test-badge.info { background: var(--blue-bg); color: var(--blue); border: 1px solid rgba(96, 165, 250, 0.2); }
 .test-body { flex: 1; min-width: 0; }
 .test-name { font-family: var(--font-mono); font-size: 13px; color: var(--text); word-break: break-word; line-height: 1.4; }
+.test-card.comment { background: rgba(96, 165, 250, 0.04); border-style: dashed; }
+.comment-name { color: var(--text-muted); }
 .test-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--text-dim); }
 .test-duration { font-family: var(--font-mono); color: var(--text-muted); }
 

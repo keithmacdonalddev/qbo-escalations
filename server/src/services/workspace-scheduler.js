@@ -1,5 +1,6 @@
 'use strict';
 
+const GmailAuth = require('../models/GmailAuth');
 const gmail = require('./gmail');
 const calendar = require('./calendar');
 const { startChatOrchestration, resolvePolicy } = require('./chat-orchestrator');
@@ -105,9 +106,14 @@ async function gatherBriefingContext() {
   const now = new Date();
   const nowIso = now.toISOString();
   const in48hIso = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
-  const meta = { calendarEventCount: 0, inboxMessageCount: 0, memoryCount: 0 };
+  const meta = { calendarEventCount: 0, inboxMessageCount: 0, memoryCount: 0, gmailConnected: true, calendarConnected: true };
 
   const parts = [];
+
+  // 0. Check if Gmail/Calendar are connected
+  const allConnectedAccounts = await GmailAuth.getAll().catch(() => []);
+  const gmailConnected = (allConnectedAccounts || []).length > 0;
+  meta.gmailConnected = gmailConnected;
 
   // 1. Calendar events (next 48h)
   let todayEvents = [];
@@ -118,6 +124,11 @@ async function gatherBriefingContext() {
       timeMax: in48hIso,
       maxResults: 25,
     });
+    const calendarConnected = eventsRes !== null && eventsRes.ok !== false;
+    meta.calendarConnected = calendarConnected;
+    if (!calendarConnected) {
+      parts.push('GOOGLE CALENDAR: NOT CONNECTED — no calendar data available.');
+    }
     todayEvents = eventsRes?.ok ? (eventsRes.events || []) : [];
     meta.calendarEventCount = todayEvents.length;
     if (todayEvents.length > 0) {
@@ -177,8 +188,14 @@ async function gatherBriefingContext() {
 
   // 2. Recent inbox (10 messages with full bodies for top 3 unread)
   let inboxMessages = [];
+  if (!gmailConnected) {
+    parts.push('');
+    parts.push('GMAIL: NOT CONNECTED — no inbox data available.');
+  }
   try {
-    const inboxRes = await gmail.listMessages({ q: 'in:inbox', maxResults: 10 });
+    const inboxRes = gmailConnected
+      ? await gmail.listMessages({ q: 'in:inbox', maxResults: 10 })
+      : { ok: false };
     inboxMessages = inboxRes?.ok ? (inboxRes.messages || []) : [];
     meta.inboxMessageCount = inboxMessages.length;
 
@@ -325,6 +342,51 @@ async function generateBriefing() {
 
   // Gather context
   const { contextText, alertTexts, entityCount, meta } = await gatherBriefingContext();
+
+  // Guard: if both Gmail and Calendar are disconnected, save a minimal briefing
+  // instead of burning LLM tokens on fabricated data.
+  if (!meta.gmailConnected && !meta.calendarConnected) {
+    console.log('[workspace-scheduler] Skipping LLM briefing — Gmail and Calendar are both disconnected');
+    const disconnectedMarkdown = [
+      '## Good morning!',
+      '',
+      'I couldn\'t prepare your full briefing because **Gmail and Google Calendar aren\'t connected** yet.',
+      '',
+      'Head to the **Inbox** tab on the left sidebar to sign in with Google — it takes about 10 seconds. Once connected, I\'ll have your schedule, emails, and a proper briefing ready for you.',
+    ].join('\n');
+
+    const briefing = await WorkspaceBriefing.findOneAndUpdate(
+      { date: dateStr },
+      {
+        content: disconnectedMarkdown,
+        structured: {
+          summary: 'Gmail and Calendar are not connected.',
+          cards: [{
+            title: 'Connect Google to get your briefing',
+            urgency: 'action',
+            icon: 'alert',
+            bodyMarkdown: 'Head to the **Inbox** tab on the left sidebar to sign in with Google. Once connected, your morning briefing will include your schedule, inbox highlights, and action items.',
+            actions: [{ label: 'Open Inbox', type: 'navigate', target: '#/inbox' }],
+          }],
+        },
+        generatedAt: new Date(),
+        alerts: [],
+        entityCount: 0,
+        read: false,
+        readAt: null,
+        meta: {
+          ...meta,
+          generationTimeMs: Date.now() - startMs,
+          skippedReason: 'services-disconnected',
+        },
+      },
+      { upsert: true, returnDocument: 'after', lean: true },
+    );
+
+    const hydrated = hydrateBriefingDocument(briefing);
+    console.log(`[workspace-scheduler] Disconnected-state briefing saved for ${dateStr} (${Date.now() - startMs}ms)`);
+    return hydrated;
+  }
 
   // Build the briefing prompt
   const timeStr = now.toLocaleString('en-US', {

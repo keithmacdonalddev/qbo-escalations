@@ -1,5 +1,15 @@
 'use strict';
 
+const { observeBestEffort } = require('../lib/best-effort');
+
+function saveMemoryBestEffort(workspaceMemory, item, context) {
+  return observeBestEffort(() => workspaceMemory.saveMemory(item), {
+    source: 'workspace-memory-extraction',
+    action: `Persist ${context}`,
+    detail: 'Workspace memory extraction succeeded, but the extracted fact could not be saved. Future recall may be incomplete until storage recovers.',
+  });
+}
+
 function autoExtractAndSave(responseText) {
   if (!responseText || typeof responseText !== 'string' || responseText.length < 20) return 0;
 
@@ -54,7 +64,7 @@ function autoExtractAndSave(responseText) {
   }
 
   for (const item of extractions) {
-    workspaceMemory.saveMemory(item).catch(() => {});
+    saveMemoryBestEffort(workspaceMemory, item, `response memory "${item.key}"`);
   }
 
   return extractions.length;
@@ -71,25 +81,25 @@ function autoExtractFromEmails(inboxMessages) {
 
       const confMatch = text.match(/(?:confirmation|booking|reservation|order|itinerary|reference)[:\s#]*([A-Z0-9]{5,10})/i);
       if (confMatch) {
-        workspaceMemory.saveMemory({
+        saveMemoryBestEffort(workspaceMemory, {
           type: 'fact',
           key: `email-conf:${confMatch[1].toUpperCase()}`,
           content: `${msg.subject} (from ${msg.from || msg.fromEmail || 'unknown'})`,
           source: `email:${msg.id}`,
           metadata: { emailId: msg.id, from: msg.from || msg.fromEmail },
-        }).catch(() => {});
+        }, `email confirmation memory "${msg.id}"`);
       }
 
       if (/receipt|invoice|e-?receipt|order\s+\d|payment\s+confirm|purchase/i.test(text)) {
         const amountMatch = text.match(/\$[\d,]+\.?\d{0,2}/);
-        workspaceMemory.saveMemory({
+        saveMemoryBestEffort(workspaceMemory, {
           type: 'fact',
           key: `receipt:${msg.id}`,
           content: `Receipt/invoice: ${msg.subject} from ${msg.from || msg.fromEmail || 'unknown'}${amountMatch ? ' - ' + amountMatch[0] : ''}`,
           source: `email:${msg.id}`,
           metadata: { emailId: msg.id, amount: amountMatch ? amountMatch[0] : undefined },
           expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-        }).catch(() => {});
+        }, `receipt memory "${msg.id}"`);
       }
     } catch {
       // Best effort per message.
@@ -260,7 +270,7 @@ function autoExtractConversationMemories(userMessage, assistantResponse) {
   }
 
   for (const item of deduped.values()) {
-    workspaceMemory.saveMemory(item).catch(() => {});
+    saveMemoryBestEffort(workspaceMemory, item, `conversation memory "${item.key}"`);
   }
 
   if (deduped.size > 0) {

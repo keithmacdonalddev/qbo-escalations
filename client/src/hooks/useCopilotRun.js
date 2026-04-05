@@ -78,6 +78,8 @@ export default function useCopilotRun({
   provider,
   providerMode,
   fallbackProvider,
+  model,
+  fallbackModel,
   reasoningEffort,
   needsQuery,
   patchSession,
@@ -154,8 +156,10 @@ export default function useCopilotRun({
       },
     }, {
       provider,
+      primaryModel: model || undefined,
       mode: providerMode,
       fallbackProvider: providerMode === 'fallback' ? fallbackProvider : undefined,
+      fallbackModel: providerMode === 'fallback' ? (fallbackModel || undefined) : undefined,
       reasoningEffort,
     });
 
@@ -169,6 +173,8 @@ export default function useCopilotRun({
     provider,
     providerMode,
     fallbackProvider,
+    fallbackModel,
+    model,
     reasoningEffort,
     patchSession,
     setController,

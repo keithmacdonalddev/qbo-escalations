@@ -17,6 +17,14 @@ import {
   getEdgeCaseVersion,
   restoreEdgeCaseVersion,
 } from '../api/playbookApi.js';
+import {
+  listAgentPrompts,
+  getAgentPrompt,
+  updateAgentPrompt,
+  listAgentPromptVersions,
+  getAgentPromptVersion,
+  restoreAgentPromptVersion,
+} from '../api/agentPromptsApi.js';
 
 function computeDiff(oldText, newText) {
   const oldLines = oldText.split('\n');
@@ -71,7 +79,9 @@ function formatTs(ts) {
 export default function usePlaybook() {
   const toast = useToast();
   const [categories, setCategories] = useState([]);
+  const [agentPrompts, setAgentPrompts] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedAgentPromptId, setSelectedAgentPromptId] = useState(null);
   const [viewMode, setViewMode] = useState('category');
   const [content, setContent] = useState('');
   const [draftContent, setDraftContent] = useState('');
@@ -97,6 +107,12 @@ export default function usePlaybook() {
     return cats;
   }, []);
 
+  const loadAgentPromptList = useCallback(async () => {
+    const prompts = await listAgentPrompts();
+    setAgentPrompts(prompts);
+    return prompts;
+  }, []);
+
   const resetPanels = useCallback(() => {
     setShowDiff(false);
     setShowHistory(false);
@@ -108,13 +124,13 @@ export default function usePlaybook() {
     setLoading(true);
     setLoadError(null);
     try {
-      await loadCategories();
-    } catch {
-      setLoadError('Failed to load playbook categories');
+      await Promise.all([loadCategories(), loadAgentPromptList()]);
+    } catch (err) {
+      setLoadError(err?.message || 'Failed to load playbook data');
     } finally {
       setLoading(false);
     }
-  }, [loadCategories]);
+  }, [loadCategories, loadAgentPromptList]);
 
   useEffect(() => {
     loadInitial();
@@ -123,6 +139,7 @@ export default function usePlaybook() {
   const loadCategory = useCallback(async (name) => {
     tel(TEL.USER_ACTION, `Selected playbook: ${name}`, { category: name });
     setSelectedCategory(name);
+    setSelectedAgentPromptId(null);
     setViewMode('category');
     setIsEditing(false);
     setSaveNotice('');
@@ -133,18 +150,52 @@ export default function usePlaybook() {
       setContent(text);
       setDraftContent(text);
       tel(TEL.DATA_LOAD, `Loaded playbook content (${text.length} chars)`, { category: name, size: text.length });
-    } catch {
-      setContent('Failed to load content.');
-      setDraftContent('Failed to load content.');
-      tel(TEL.DATA_ERROR, `Failed to load playbook: ${name}`, { category: name });
+    } catch (err) {
+      const message = err?.message || 'Failed to load content.';
+      setContent(message);
+      setDraftContent(message);
+      tel(TEL.DATA_ERROR, `Failed to load playbook: ${name}`, { category: name, status: err?.status || 0 });
     } finally {
       setContentLoading(false);
     }
   }, [resetPanels]);
 
+  const loadAgentPromptById = useCallback(async (id) => {
+    const normalizedId = String(id || '').trim();
+    if (!normalizedId) return;
+    const knownPrompt = agentPrompts.find((prompt) => prompt.id === normalizedId);
+    tel(TEL.USER_ACTION, `Selected agent prompt: ${normalizedId}`, { agentPromptId: normalizedId });
+    setSelectedCategory(null);
+    setSelectedAgentPromptId(normalizedId);
+    setViewMode('agent-prompt');
+    setIsEditing(false);
+    setSaveNotice('');
+    resetPanels();
+    setContentLoading(true);
+    try {
+      const data = await getAgentPrompt(normalizedId);
+      setContent(data.content || '');
+      setDraftContent(data.content || '');
+      if (data.prompt) {
+        setAgentPrompts((current) => current.map((prompt) => (
+          prompt.id === normalizedId ? { ...prompt, ...data.prompt } : prompt
+        )));
+      } else if (!knownPrompt) {
+        await loadAgentPromptList();
+      }
+    } catch (err) {
+      const message = err?.message || 'Failed to load agent prompt.';
+      setContent(message);
+      setDraftContent(message);
+    } finally {
+      setContentLoading(false);
+    }
+  }, [agentPrompts, loadAgentPromptList, resetPanels]);
+
   const loadEdgeCases = useCallback(async () => {
     setViewMode('edge-cases');
     setSelectedCategory(null);
+    setSelectedAgentPromptId(null);
     setIsEditing(false);
     setSaveNotice('');
     resetPanels();
@@ -153,9 +204,10 @@ export default function usePlaybook() {
       const text = await getEdgeCases();
       setContent(text);
       setDraftContent(text);
-    } catch {
-      setContent('Failed to load edge cases.');
-      setDraftContent('Failed to load edge cases.');
+    } catch (err) {
+      const message = err?.message || 'Failed to load edge cases.';
+      setContent(message);
+      setDraftContent(message);
     } finally {
       setContentLoading(false);
     }
@@ -164,6 +216,7 @@ export default function usePlaybook() {
   const loadFullPrompt = useCallback(async () => {
     setViewMode('full');
     setSelectedCategory(null);
+    setSelectedAgentPromptId(null);
     setIsEditing(false);
     setSaveNotice('');
     resetPanels();
@@ -172,9 +225,10 @@ export default function usePlaybook() {
       const text = await getFullPlaybook();
       setContent(text);
       setDraftContent(text);
-    } catch {
-      setContent('Failed to load full playbook.');
-      setDraftContent('Failed to load full playbook.');
+    } catch (err) {
+      const message = err?.message || 'Failed to load full playbook.';
+      setContent(message);
+      setDraftContent(message);
     } finally {
       setContentLoading(false);
     }
@@ -209,6 +263,10 @@ export default function usePlaybook() {
       const label = saveLabel.trim() || undefined;
       if (viewMode === 'category' && selectedCategory) {
         await updateCategoryContent(selectedCategory, draftContent, label);
+        await loadCategories();
+      } else if (viewMode === 'agent-prompt' && selectedAgentPromptId) {
+        await updateAgentPrompt(selectedAgentPromptId, draftContent, label);
+        await loadAgentPromptList();
       } else if (viewMode === 'edge-cases') {
         await updateEdgeCases(draftContent, label);
       }
@@ -219,12 +277,12 @@ export default function usePlaybook() {
       setSaveNotice('Saved');
       tel(TEL.FORM_SUBMIT, `Saved playbook: ${viewMode === 'category' ? selectedCategory : viewMode}`, { viewMode, category: selectedCategory });
       setTimeout(() => setSaveNotice(''), 2000);
-    } catch {
-      toast.error('Failed to save playbook changes');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to save playbook changes');
     } finally {
       setSaving(false);
     }
-  }, [saving, viewMode, selectedCategory, draftContent, saveLabel, toast]);
+  }, [saving, viewMode, selectedCategory, selectedAgentPromptId, draftContent, saveLabel, toast, loadCategories, loadAgentPromptList]);
 
   const handleBackToEdit = useCallback(() => {
     setShowDiff(false);
@@ -247,33 +305,37 @@ export default function usePlaybook() {
       let vers;
       if (viewMode === 'category' && selectedCategory) {
         vers = await listCategoryVersions(selectedCategory);
+      } else if (viewMode === 'agent-prompt' && selectedAgentPromptId) {
+        vers = await listAgentPromptVersions(selectedAgentPromptId);
       } else if (viewMode === 'edge-cases') {
         vers = await listEdgeCaseVersions();
       } else {
         vers = [];
       }
       setVersions(vers);
-    } catch {
-      toast.error('Failed to load version history');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to load version history');
       setVersions([]);
     } finally {
       setHistoryLoading(false);
     }
-  }, [showHistory, viewMode, selectedCategory, toast]);
+  }, [showHistory, viewMode, selectedCategory, selectedAgentPromptId, toast]);
 
   const handlePreviewVersion = useCallback(async (ts) => {
     try {
       let versionContent;
       if (viewMode === 'category' && selectedCategory) {
         versionContent = await getCategoryVersion(selectedCategory, ts);
+      } else if (viewMode === 'agent-prompt' && selectedAgentPromptId) {
+        versionContent = await getAgentPromptVersion(selectedAgentPromptId, ts);
       } else {
         versionContent = await getEdgeCaseVersion(ts);
       }
       setPreviewVersion({ ts, content: versionContent });
-    } catch {
-      toast.error('Failed to load version preview');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to load version preview');
     }
-  }, [viewMode, selectedCategory, toast]);
+  }, [viewMode, selectedCategory, selectedAgentPromptId, toast]);
 
   const handleRestoreVersion = useCallback(async (ts) => {
     try {
@@ -282,6 +344,14 @@ export default function usePlaybook() {
         const text = await getCategoryContent(selectedCategory);
         setContent(text);
         setDraftContent(text);
+        await loadCategories();
+      } else if (viewMode === 'agent-prompt' && selectedAgentPromptId) {
+        await restoreAgentPromptVersion(selectedAgentPromptId, ts);
+        const data = await getAgentPrompt(selectedAgentPromptId);
+        const text = data.content || '';
+        setContent(text);
+        setDraftContent(text);
+        await loadAgentPromptList();
       } else if (viewMode === 'edge-cases') {
         await restoreEdgeCaseVersion(ts);
         const text = await getEdgeCases();
@@ -291,10 +361,10 @@ export default function usePlaybook() {
       setShowHistory(false);
       setPreviewVersion(null);
       toast.success(`Restored version from ${formatTs(ts)}`);
-    } catch {
-      toast.error('Failed to restore version');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to restore version');
     }
-  }, [viewMode, selectedCategory, toast]);
+  }, [viewMode, selectedCategory, selectedAgentPromptId, toast, loadCategories, loadAgentPromptList]);
 
   const handleCreateCategory = useCallback(async () => {
     const name = newCategoryName.trim();
@@ -305,8 +375,8 @@ export default function usePlaybook() {
       setShowCreateCategory(false);
       await loadCategories();
       await loadCategory(createdName);
-    } catch {
-      toast.error('Failed to create category');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to create category');
     }
   }, [newCategoryName, loadCategories, loadCategory, toast]);
 
@@ -320,11 +390,16 @@ export default function usePlaybook() {
       setViewMode('category');
       resetPanels();
       await loadCategories();
-    } catch {
-      toast.error('Failed to delete category');
+    } catch (err) {
+      toast.error(err?.message || 'Failed to delete category');
     }
     setDeleteConfirmOpen(false);
   }, [selectedCategory, loadCategories, resetPanels, toast]);
+
+  const selectedAgentPrompt = useMemo(
+    () => agentPrompts.find((prompt) => prompt.id === selectedAgentPromptId) || null,
+    [agentPrompts, selectedAgentPromptId],
+  );
 
   const hasUnsavedChanges = isEditing && draftContent !== content;
 
@@ -341,17 +416,22 @@ export default function usePlaybook() {
 
   const heading = viewMode === 'full'
     ? 'Full System Prompt'
+    : viewMode === 'agent-prompt'
+      ? (selectedAgentPrompt?.name || 'Agent Prompt')
     : viewMode === 'edge-cases'
       ? 'Edge Cases'
       : (selectedCategory ? selectedCategory.replace(/-/g, ' ') : 'Select a Category');
 
-  const canHaveHistory = viewMode !== 'full' && (viewMode === 'edge-cases' || selectedCategory);
+  const canHaveHistory = viewMode !== 'full' && (viewMode === 'edge-cases' || selectedCategory || selectedAgentPromptId);
   const diffLines = useMemo(() => (showDiff ? computeDiff(content, draftContent) : []), [showDiff, content, draftContent]);
   const hasDiffChanges = useMemo(() => diffLines.some((line) => line.type !== 'unchanged'), [diffLines]);
 
   return {
     categories,
+    agentPrompts,
     selectedCategory,
+    selectedAgentPromptId,
+    selectedAgentPrompt,
     viewMode,
     content,
     draftContent,
@@ -376,6 +456,7 @@ export default function usePlaybook() {
     previewVersion,
     loadInitial,
     loadCategory,
+    loadAgentPrompt: loadAgentPromptById,
     loadEdgeCases,
     loadFullPrompt,
     handleCreateCategory,

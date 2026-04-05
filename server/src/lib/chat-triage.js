@@ -58,51 +58,183 @@ function normalizeTriageCategory(rawCategory) {
   return 'technical';
 }
 
-function inferTriageSeverity(fields) {
-  const haystack = [
+function normalizeSpacing(value) {
+  return safeString(value, '').replace(/\s+/g, ' ').trim();
+}
+
+function stripTrailingPunctuation(value) {
+  return normalizeSpacing(value).replace(/[.?!,:;\s]+$/g, '').trim();
+}
+
+function ensureSentence(value) {
+  const text = stripTrailingPunctuation(value);
+  if (!text) return '';
+  return /[.?!]$/.test(text) ? text : `${text}.`;
+}
+
+function lowerFirst(value) {
+  const text = normalizeSpacing(value);
+  if (!text) return '';
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+function buildFieldHaystack(fields) {
+  return [
     safeString(fields && fields.attemptingTo, ''),
     safeString(fields && fields.expectedOutcome, ''),
     safeString(fields && fields.actualOutcome, ''),
     safeString(fields && fields.tsSteps, ''),
   ].join(' ').toLowerCase();
+}
+
+function extractFormType(haystack) {
+  if (!haystack) return '';
+  if (/\bt4a\b/.test(haystack)) return 'T4A';
+  if (/\bt4\b/.test(haystack)) return 'T4';
+  if (/\bw-?2\b/.test(haystack)) return 'W-2';
+  if (/\b1099\b/.test(haystack)) return '1099';
+  return '';
+}
+
+function stripLeadIn(value) {
+  const text = normalizeSpacing(value);
+  if (!text) return '';
+  return text
+    .replace(/^(?:customer|client|cx)\s+is\s+(?:calling\s+(?:about|to)\s+)?/i, '')
+    .replace(/^(?:wanted|wants)\s+to\s+/i, '')
+    .replace(/^(?:trying|attempting)\s+to\s+/i, '')
+    .trim();
+}
+
+function toIssuePhrase(value) {
+  return stripTrailingPunctuation(stripLeadIn(value));
+}
+
+function buildGenericExpectedActualRead(fields, category) {
+  const categoryLabel = category.replace(/-/g, ' ');
+  const expected = toIssuePhrase(fields && fields.expectedOutcome);
+  const actual = toIssuePhrase(fields && fields.actualOutcome);
+  const attempting = toIssuePhrase(fields && fields.attemptingTo);
+
+  if (expected && actual) {
+    return `The workflow is missing the expected result: ${expected}. Instead, ${lowerFirst(actual)}. This looks like a ${categoryLabel} workflow failure in QBO.`;
+  }
+  if (actual) {
+    return `The current blocker is ${lowerFirst(actual)}. This looks like a ${categoryLabel} workflow failure in QBO.`;
+  }
+  if (attempting) {
+    return `The customer is trying to ${lowerFirst(attempting)}. The expected result is not occurring, which points to a ${categoryLabel} workflow issue in QBO.`;
+  }
+  return 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the exact failure point.';
+}
+
+function buildTaxFormExportSummaryTriage(formType, haystack) {
+  const archiveMention = /archive|repopulate|delete/.test(haystack);
+  return {
+    category: 'payroll',
+    read: `${formType} export is incomplete because the ${formType} summary is missing from the download package.${archiveMention ? ' Clearing the archive and forcing repopulation did not restore it.' : ''} This looks more like a payroll tax-form generation or packaging defect than a simple browser download problem.`,
+    action: `Confirm the tax year, payroll subscription status, and whether the ${formType} summary exists under Archived Forms, then run one fresh export and capture whether the package omits only the summary or fails more broadly.`,
+  };
+}
+
+function detectSpecializedTriage(fields, category, haystack) {
+  const formType = extractFormType(haystack);
+  const categoryLabel = category.replace(/-/g, ' ');
+
+  if (
+    formType
+    && /(?:xml|download|export|archive)/.test(haystack)
+    && /\bsummary\b/.test(haystack)
+    && /(missing|not download|didn'?t download|not included|not populate|didn'?t work)/.test(haystack)
+  ) {
+    return buildTaxFormExportSummaryTriage(formType, haystack);
+  }
+
+  if (/(sign in|sign-in|login|log in|mfa|2fa|two-factor|verification code)/.test(haystack)) {
+    return {
+      category: 'technical',
+      read: 'The customer is being blocked in the sign-in or verification flow. This usually points to an authentication, MFA, or session-state problem rather than a feature-specific defect.',
+      action: 'Confirm the exact sign-in step that fails, capture the precise login or MFA message, and retry once in an incognito session before escalating.',
+    };
+  }
+
+  if (category === 'permissions' || /(permission|access|role|admin|accountant access)/.test(haystack)) {
+    return {
+      category: 'permissions',
+      read: 'This looks like an access or role-permission block in QBO. The failing step is more consistent with a company-role restriction than a product outage.',
+      action: 'Confirm the affected user role, verify whether a master or company admin can reproduce the same step, and capture the exact permission message.',
+    };
+  }
+
+  if (category === 'bank-feeds') {
+    return {
+      category: 'bank-feeds',
+      read: buildGenericExpectedActualRead(fields, 'bank feeds'),
+      action: 'Capture the exact bank connection error or sync state, confirm whether only one bank account is affected, and retry the connection once in an incognito session.',
+    };
+  }
+
+  if (category === 'reconciliation') {
+    return {
+      category: 'reconciliation',
+      read: buildGenericExpectedActualRead(fields, 'reconciliation'),
+      action: 'Confirm which statement period is affected, identify the first transaction where the reconcile balance diverges, and compare it against the register before escalating.',
+    };
+  }
+
+  if (category === 'reports') {
+    return {
+      category: 'reports',
+      read: buildGenericExpectedActualRead(fields, 'reports'),
+      action: 'Confirm the exact report name, filters, basis, and date range being used, then reproduce the mismatch once before escalating the reporting result.',
+    };
+  }
+
+  if (category === 'invoicing') {
+    return {
+      category: 'invoicing',
+      read: buildGenericExpectedActualRead(fields, 'invoicing'),
+      action: 'Confirm the exact invoice or payment workflow step that fails, capture any visible error text, and retest once with the same customer and form settings.',
+    };
+  }
+
+  if (category === 'payroll') {
+    return {
+      category: 'payroll',
+      read: buildGenericExpectedActualRead(fields, 'payroll'),
+      action: 'Confirm the affected payroll period or tax year, verify whether the issue reproduces for only one employee or form set, and capture the exact payroll result before escalating.',
+    };
+  }
+
+  return {
+    category,
+    read: buildGenericExpectedActualRead(fields, categoryLabel),
+    action: 'Reproduce the exact failing workflow one more time, capture the precise result or error text, and confirm whether the issue is isolated or company-wide before escalating.',
+  };
+}
+
+function inferTriageSeverity(fields) {
+  const haystack = buildFieldHaystack(fields);
+  const formType = extractFormType(haystack);
 
   if (/(outage|down for everyone|all users|system down|security breach|data loss)/.test(haystack)) return 'P1';
+  if (
+    /(deadline|due today|due now|urgent|cannot file|can't file|unable to file|cannot pay|can't pay|unable to pay)/.test(haystack)
+    || (formType && /\bcra\b/.test(haystack) && /(deadline|urgent|today|cannot file|can't file)/.test(haystack))
+  ) {
+    return 'P2';
+  }
   if (/(cannot|can't|unable|blocked|lock(ed)? out|hard stop|failed|error)/.test(haystack)) return 'P2';
   if (/(slow|intermittent|workaround|degraded|delay)/.test(haystack)) return 'P3';
   return 'P3';
 }
 
 function buildTriageRead(fields, category) {
-  const attempting = safeString(fields && fields.attemptingTo, '').trim();
-  const actual = safeString(fields && fields.actualOutcome, '').trim();
-
-  if (attempting && actual) {
-    return `The agent is trying to ${attempting}, but ${actual}. This looks like a ${category} workflow issue in QBO that needs targeted troubleshooting.`;
-  }
-  if (actual) {
-    return `${actual}. This appears to be a ${category} issue and likely needs a focused settings and browser/session check.`;
-  }
-  if (attempting) {
-    return `The agent is trying to ${attempting}, but the expected result is not happening. This appears to be a ${category} workflow issue.`;
-  }
-  return 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the failing step.';
+  return detectSpecializedTriage(fields, category, buildFieldHaystack(fields)).read;
 }
 
 function buildTriageAction(fields, category) {
-  const attempted = safeString(fields && fields.attemptingTo, '').trim();
-  if (category === 'bank-feeds') {
-    return 'Capture the exact bank error text/code and retry the connection once in an incognito window.';
-  }
-  if (category === 'payroll') {
-    return 'Confirm payroll deadline impact and capture the exact payroll error text/code before the next retry.';
-  }
-  if (category === 'permissions') {
-    return 'Verify the user role and company access level, then retest the exact same step.';
-  }
-  if (attempted) {
-    return `Capture the exact error text/code while retrying "${attempted}" once in an incognito window.`;
-  }
-  return 'Capture the exact error text/code and reproduce the issue once in an incognito window before escalating.';
+  return detectSpecializedTriage(fields, category, buildFieldHaystack(fields)).action;
 }
 
 function isNonEscalationIntent(messageText) {
@@ -132,21 +264,23 @@ function buildFallbackTriageCard() {
     category: 'technical',
     severity: 'P3',
     read: 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the exact failure point.',
-    action: 'Capture the exact error text/code and reproduce the issue once in an incognito window before escalating.',
+    action: 'Reproduce the exact failing step once, capture the precise result or error text, and confirm whether the issue is isolated or company-wide before escalating.',
   };
 }
 
 function buildServerTriageCard(fields) {
   const sourceFields = fields && typeof fields === 'object' ? fields : {};
-  const category = normalizeTriageCategory(sourceFields.category);
+  const baseCategory = normalizeTriageCategory(sourceFields.category);
+  const specialized = detectSpecializedTriage(sourceFields, baseCategory, buildFieldHaystack(sourceFields));
+  const category = normalizeTriageCategory(specialized.category || baseCategory);
   const severity = inferTriageSeverity(sourceFields);
   return {
     agent: firstNonEmpty([sourceFields.agentName], 'Unknown'),
     client: firstNonEmpty([sourceFields.clientContact], 'Unknown'),
     category,
     severity,
-    read: buildTriageRead(sourceFields, category),
-    action: buildTriageAction(sourceFields, category),
+    read: specialized.read || buildTriageRead(sourceFields, category),
+    action: specialized.action || buildTriageAction(sourceFields, category),
   };
 }
 
@@ -184,7 +318,7 @@ function buildImageTurnSystemPrompt(baseSystemPrompt) {
     '4. Diagnosis',
     '5. Steps for Agent',
     '6. Customer-Facing Explanation',
-    '- Pre-parsed escalation data is provided in the system prompt. Use it as the canonical source for IDs, names, and field values. You may reference the attached image for additional visual context but rely on the pre-parsed data for accuracy.',
+    '- Pre-parsed escalation data is provided in the system prompt. Use it as the canonical source for IDs, names, and field values. If an image is attached, you may reference it for additional visual context, but rely on the pre-parsed data for accuracy.',
     '- If pre-parsed data is not available for a field, and the image text is unclear, say it is unclear rather than guessing.',
     '- Keep the response concise and actionable.',
   ].join('\n');
@@ -209,7 +343,7 @@ function buildInvMatchRefBlock(matches) {
   return [
     '\n\n--- KNOWN ISSUE MATCHES (active INV investigations) ---',
     'The following known issues were automatically matched to this escalation.',
-    'Reference them in your response when relevant. Tell the agent to give the',
+    'Reference them in your response when relevant. In the Steps for Agent section, give the',
     'customer the INV number and add them to affected users if the issue matches.',
     '',
     ...entries,

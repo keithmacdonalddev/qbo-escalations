@@ -1,4 +1,5 @@
 export const IMAGE_PARSER_PROVIDER_OPTIONS = [
+  { value: 'llm-gateway', label: 'LLM Gateway API' },
   { value: 'lm-studio', label: 'LM Studio (Local)' },
   { value: 'anthropic', label: 'Anthropic API' },
   { value: 'openai', label: 'OpenAI API' },

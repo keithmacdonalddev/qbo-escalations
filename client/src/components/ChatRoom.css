@@ -1,0 +1,1593 @@
+/* ==========================================================================
+   ChatRoom — Structural Layout
+   Visual styling is handled by overhaul.css. This file defines
+   layout, positioning, sizing, and basic transitions only.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   Base container (shared by list and active views)
+   --------------------------------------------------------------------------- */
+
+.chat-room {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.chat-room--loading,
+.chat-room--error {
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------------------------------------------------------------------------
+   Loading indicator
+   --------------------------------------------------------------------------- */
+
+.chat-room-loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  font-size: var(--text-sm, 14px);
+}
+
+/* ---------------------------------------------------------------------------
+   Error card (full-screen error state)
+   --------------------------------------------------------------------------- */
+
+.chat-room-error-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-6, 24px);
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  text-align: center;
+  max-width: 360px;
+}
+
+.chat-room-error-card svg {
+  opacity: 0.5;
+}
+
+.chat-room-error-text {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  line-height: 1.5;
+}
+
+.chat-room-error-retry {
+  appearance: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: var(--bg-raised, rgba(255, 255, 255, 0.04));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 16px;
+  font-size: var(--text-sm, 14px);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-room-error-retry:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.14));
+}
+
+/* ---------------------------------------------------------------------------
+   Error banner (dismissible, inside active room)
+   --------------------------------------------------------------------------- */
+
+.chat-room-error-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  padding: 8px 12px;
+  background: rgba(220, 38, 38, 0.12);
+  border-bottom: 1px solid rgba(220, 38, 38, 0.25);
+  font-size: var(--text-xs, 12px);
+  color: #fca5a5;
+  flex-shrink: 0;
+}
+
+.chat-room-error-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-room-error-dismiss {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-room-error-dismiss:hover {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Room List — Header
+   --------------------------------------------------------------------------- */
+
+.room-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-5, 20px) var(--sp-6, 24px) var(--sp-4, 16px);
+  flex-shrink: 0;
+}
+
+.room-list-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+.room-list-create-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  appearance: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: var(--bg-raised, rgba(255, 255, 255, 0.04));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 14px;
+  font-size: var(--text-sm, 14px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.room-list-create-btn:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.14));
+}
+
+/* ---------------------------------------------------------------------------
+   Room List — Grid
+   --------------------------------------------------------------------------- */
+
+.room-list-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4, 16px);
+  padding: 0 var(--sp-6, 24px) var(--sp-6, 24px);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.room-list-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 120px;
+}
+
+.room-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-4, 16px);
+  flex: 1;
+  min-height: 200px;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  padding: var(--sp-6, 24px);
+  text-align: center;
+}
+
+.room-list-empty svg {
+  opacity: 0.35;
+}
+
+.room-list-empty-text {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  line-height: 1.5;
+  max-width: 320px;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Card
+   --------------------------------------------------------------------------- */
+
+.room-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2, 8px);
+  padding: var(--sp-4, 16px);
+  background: var(--bg-raised, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  min-height: 0;
+}
+
+.room-card:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  border-color: var(--line-strong, rgba(255, 255, 255, 0.14));
+}
+
+.room-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+}
+
+.room-card-title {
+  margin: 0;
+  font-size: var(--text-sm, 14px);
+  font-weight: 600;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.room-card-time {
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.room-card-preview {
+  margin: 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.room-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3, 12px);
+  margin-top: auto;
+}
+
+.room-card-avatars {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.room-card-avatars .agent-avatar + .agent-avatar {
+  margin-left: -4px;
+}
+
+.room-card-avatar-overflow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  margin-left: -4px;
+}
+
+.room-card-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+}
+
+/* ---------------------------------------------------------------------------
+   Room Create Dialog
+   --------------------------------------------------------------------------- */
+
+.room-create-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.room-create-dialog {
+  width: min(440px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-floating, #1e1e1e);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.room-create-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-4, 16px) var(--sp-5, 20px);
+  border-bottom: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+}
+
+.room-create-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+.room-create-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s ease;
+}
+
+.room-create-close:hover {
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+.room-create-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4, 16px);
+  padding: var(--sp-5, 20px);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.room-create-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2, 8px);
+}
+
+.room-create-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2, 8px);
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.room-create-input,
+.room-create-select {
+  appearance: none;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-sunken, rgba(0, 0, 0, 0.15));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  font-size: var(--text-sm, 14px);
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.room-create-input:focus,
+.room-create-select:focus {
+  outline: none;
+  border-color: var(--accent-border, rgba(110, 161, 247, 0.3));
+}
+
+.room-create-input::placeholder {
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.room-create-select option {
+  background: var(--bg-floating, #1e1e1e);
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+/* Agent selection grid */
+
+.room-create-agent-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2, 8px);
+}
+
+.room-create-agent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  padding: 6px 12px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: 20px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  font-size: var(--text-sm, 14px);
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  user-select: none;
+}
+
+.room-create-agent-chip:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+}
+
+.room-create-agent-chip.is-selected {
+  background: var(--accent-muted, rgba(110, 161, 247, 0.1));
+  border-color: var(--accent-border, rgba(110, 161, 247, 0.3));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+.room-create-agent-checkbox {
+  display: none;
+}
+
+.room-create-agent-name {
+  font-weight: 500;
+}
+
+.room-create-no-agents {
+  font-size: var(--text-sm, 14px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.room-create-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-4, 16px) var(--sp-5, 20px);
+  border-top: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+}
+
+.room-create-cancel-btn {
+  appearance: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 16px;
+  font-size: var(--text-sm, 14px);
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.room-create-cancel-btn:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+}
+
+.room-create-submit-btn {
+  appearance: none;
+  border: none;
+  background: var(--accent, #6ea1f7);
+  color: #fff;
+  border-radius: var(--radius-md, 8px);
+  padding: 6px 20px;
+  font-size: var(--text-sm, 14px);
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.room-create-submit-btn:hover {
+  opacity: 0.9;
+}
+
+.room-create-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Header
+   --------------------------------------------------------------------------- */
+
+.chat-room-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3, 12px);
+  padding: var(--sp-3, 12px) var(--sp-4, 16px);
+  border-bottom: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.06));
+  flex-shrink: 0;
+  min-height: 48px;
+}
+
+.chat-room-back-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md, 8px);
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  text-decoration: none;
+  transition: background 0.15s ease, color 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-room-back-btn:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+}
+
+.chat-room-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-room-header-agents {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.chat-room-settings-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-md, 8px);
+  transition: color 0.15s ease, background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.chat-room-settings-btn:hover:not(:disabled) {
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+}
+
+.chat-room-settings-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.chat-room-presence-strip {
+  display: flex;
+  gap: 10px;
+  padding: 10px 16px 0;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.chat-room-presence-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
+}
+
+.chat-room-presence-pill.is-responding,
+.chat-room-presence-pill.is-thinking,
+.chat-room-presence-pill.is-using-tools {
+  border-color: rgba(100, 226, 255, 0.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 0 1px rgba(100, 226, 255, 0.08);
+}
+
+.chat-room-presence-pill.is-social {
+  border-color: rgba(255, 192, 99, 0.26);
+}
+
+.chat-room-presence-pill.is-error {
+  border-color: rgba(239, 68, 68, 0.26);
+}
+
+.chat-room-presence-copy {
+  display: grid;
+  min-width: 0;
+}
+
+.chat-room-presence-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(247, 250, 255, 0.92);
+}
+
+.chat-room-presence-note {
+  font-size: 11px;
+  color: rgba(171, 182, 209, 0.78);
+  white-space: nowrap;
+}
+
+.chat-room-event-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 12px 16px 0;
+  flex-shrink: 0;
+}
+
+.chat-room-event-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
+}
+
+.chat-room-event-card.is-social_nudge,
+.chat-room-event-card.is-room-autonomy,
+.chat-room-event-card.is-autonomous-room-turn {
+  border-color: rgba(255, 192, 99, 0.24);
+}
+
+.chat-room-event-card.is-agent-actions,
+.chat-room-event-card.is-tool_loop,
+.chat-room-event-card.is-tool_ready {
+  border-color: rgba(100, 226, 255, 0.2);
+}
+
+.chat-room-event-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-room-event-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(247,250,255,0.94);
+}
+
+.chat-room-event-time,
+.chat-room-event-detail {
+  font-size: 11px;
+  color: rgba(171,182,209,0.78);
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Thread (container scroll area)
+   --------------------------------------------------------------------------- */
+
+.chat-room-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-5, 20px) var(--sp-5, 20px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4, 16px);
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+}
+
+.chat-room-thread::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-room-thread::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-room-thread::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+.chat-room-thread::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Thread empty state */
+.chat-room-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3, 12px);
+  flex: 1;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  text-align: center;
+  padding: var(--sp-6, 24px);
+}
+
+.chat-room-empty svg {
+  opacity: 0.3;
+}
+
+.chat-room-empty-title {
+  font-size: var(--text-sm, 14px);
+  font-weight: 600;
+}
+
+.chat-room-empty-desc {
+  font-size: var(--text-xs, 12px);
+  opacity: 0.7;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Message Groups
+   --------------------------------------------------------------------------- */
+
+.chat-room-message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1, 4px);
+  position: relative;
+  width: min(960px, calc(100% - 56px));
+  padding: 14px 16px 15px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.018));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 16px 32px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.chat-room-message-group.is-user {
+  align-items: flex-end;
+  margin-left: auto;
+  width: min(760px, calc(100% - 84px));
+  background:
+    linear-gradient(180deg, rgba(84, 145, 255, 0.16), rgba(50, 90, 175, 0.08));
+  border-color: rgba(96, 164, 255, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 34px rgba(8, 15, 36, 0.3);
+}
+
+.chat-room-message-group.is-agent::before,
+.chat-room-message-group.is-user::before {
+  content: "";
+  position: absolute;
+  inset: 10px auto 10px 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(140, 150, 255, 0.88), rgba(72, 232, 255, 0.3));
+  opacity: 0.9;
+}
+
+.chat-room-message-group.is-user::before {
+  inset: 10px 10px 10px auto;
+  background: linear-gradient(180deg, rgba(122, 202, 255, 0.95), rgba(83, 116, 255, 0.42));
+}
+
+.chat-room-message-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  min-height: 28px;
+}
+
+.chat-room-message-group.is-user .chat-room-message-header {
+  flex-direction: row-reverse;
+}
+
+.chat-room-sender-label {
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+}
+
+.chat-room-provider-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.chat-room-timestamp {
+  font-size: 11px;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  margin-left: auto;
+}
+
+.chat-room-message-group.is-user .chat-room-timestamp {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Message Body
+   --------------------------------------------------------------------------- */
+
+.chat-room-message-body {
+  max-width: none;
+  padding-left: 2px;
+}
+
+.chat-room-message-group.is-user .chat-room-message-body {
+  text-align: right;
+  padding-right: 2px;
+}
+
+.chat-room-message-content {
+  font-size: var(--text-sm, 14px);
+  line-height: 1.68;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-room-message-group.is-agent[data-agent-id="chat"] {
+  background:
+    linear-gradient(180deg, rgba(144, 158, 255, 0.085), rgba(255, 255, 255, 0.018));
+}
+
+.chat-room-message-group.is-agent[data-agent-id="copilot"] {
+  background:
+    linear-gradient(180deg, rgba(118, 226, 255, 0.09), rgba(255, 255, 255, 0.018));
+}
+
+.chat-room-message-group.is-agent[data-agent-id="workspace"] {
+  background:
+    linear-gradient(180deg, rgba(255, 199, 95, 0.085), rgba(255, 255, 255, 0.018));
+}
+
+.chat-room-message-group.is-agent[data-agent-id="image-analyst"] {
+  background:
+    linear-gradient(180deg, rgba(114, 255, 179, 0.08), rgba(255, 255, 255, 0.018));
+}
+
+/* Thinking block */
+.chat-room-thinking {
+  margin-bottom: var(--sp-1, 4px);
+}
+
+.chat-room-thinking-toggle {
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  cursor: pointer;
+  user-select: none;
+}
+
+.chat-room-thinking-content {
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  line-height: 1.5;
+  padding: var(--sp-2, 8px) 0;
+  white-space: pre-wrap;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Agent Error Indicators
+   --------------------------------------------------------------------------- */
+
+.agent-error-group {
+  opacity: 0.85;
+}
+
+.agent-error-content {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  color: var(--color-error, #ef4444);
+  font-size: var(--text-sm, 14px);
+}
+
+.agent-error-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Streaming Indicators
+   --------------------------------------------------------------------------- */
+
+.chat-room-streaming-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 0;
+}
+
+.chat-room-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  animation: chatRoomPulse 1.4s ease-in-out infinite;
+}
+
+.chat-room-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.chat-room-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes chatRoomPulse {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(1); }
+  40% { opacity: 1; transform: scale(1.15); }
+}
+
+.chat-room-streaming-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  padding: 4px 0 0;
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.chat-room-abort-btn {
+  appearance: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  background: transparent;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  margin-left: auto;
+  transition: background 0.15s ease;
+}
+
+.chat-room-abort-btn:hover {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+}
+
+/* ---------------------------------------------------------------------------
+   Room Chat — Composer
+   --------------------------------------------------------------------------- */
+
+.chat-room-composer {
+  flex-shrink: 0;
+  padding: var(--sp-3, 12px) var(--sp-4, 16px) var(--sp-4, 16px);
+  border-top: 1px solid var(--line-subtle, rgba(255, 255, 255, 0.06));
+  position: relative;
+}
+
+.chat-room-composer-inner {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-2, 8px);
+  position: relative;
+}
+
+.chat-room-textarea {
+  flex: 1;
+  min-height: 38px;
+  max-height: min(30vh, 200px);
+  resize: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-sunken, rgba(0, 0, 0, 0.15));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  font-family: inherit;
+  font-size: var(--text-sm, 14px);
+  padding: 8px 12px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease;
+}
+
+.chat-room-textarea:focus {
+  outline: none;
+  border-color: var(--accent-border, rgba(110, 161, 247, 0.3));
+}
+
+.chat-room-textarea::placeholder {
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.chat-room-textarea:disabled {
+  opacity: 0.5;
+}
+
+.chat-room-send-btn {
+  appearance: none;
+  border: none;
+  background: var(--accent, #6ea1f7);
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md, 8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.chat-room-send-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.chat-room-send-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.chat-room-send-btn.is-supersede {
+  background: linear-gradient(180deg, rgba(255, 170, 84, 0.95), rgba(255, 104, 56, 0.92));
+  box-shadow: 0 12px 24px rgba(255, 104, 56, 0.22);
+}
+
+/* ---------------------------------------------------------------------------
+   Agent Avatar (structural — consumed by AgentAvatar.jsx)
+   --------------------------------------------------------------------------- */
+
+.agent-avatar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.agent-avatar-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-weight: 600;
+  line-height: 1;
+  overflow: hidden;
+  flex-shrink: 0;
+  background:
+    radial-gradient(circle at 28% 22%, rgba(255, 255, 255, 0.3), transparent 46%),
+    linear-gradient(145deg, rgba(120, 132, 255, 0.28), rgba(14, 17, 33, 0.9));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+.agent-avatar-initials {
+  font-size: 0.42em;
+}
+
+.agent-avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.agent-avatar-emoji {
+  font-size: 0.62em;
+  line-height: 1;
+}
+
+.agent-avatar--compact .agent-avatar-initials {
+  font-size: 9px;
+}
+
+.agent-avatar--large .agent-avatar-initials {
+  font-size: 14px;
+}
+
+.agent-avatar-icon {
+  font-size: 0.55em;
+}
+
+.agent-avatar-name {
+  font-size: var(--text-xs, 12px);
+  font-weight: 500;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+}
+
+.agent-avatar-hovercard {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  transform: translateX(-50%) translateY(8px) scale(0.96);
+  min-width: max-content;
+  max-width: min(240px, calc(100vw - 24px));
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(116, 232, 255, 0.16);
+  background:
+    radial-gradient(circle at top, rgba(129, 231, 255, 0.14), transparent 56%),
+    linear-gradient(180deg, rgba(21, 26, 43, 0.98), rgba(8, 10, 20, 0.98));
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(18px);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.16s ease,
+    transform 0.18s cubic-bezier(0.2, 0.9, 0.24, 1),
+    visibility 0.16s ease;
+  z-index: 24;
+}
+
+.agent-avatar-hovercard::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 14px;
+  height: 14px;
+  transform: translateX(-50%) rotate(45deg);
+  border-right: 1px solid rgba(116, 232, 255, 0.12);
+  border-bottom: 1px solid rgba(116, 232, 255, 0.12);
+  background: linear-gradient(135deg, rgba(15, 19, 34, 0.98), rgba(8, 10, 20, 0.98));
+}
+
+.agent-avatar-hovercard-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(247, 250, 255, 0.96);
+  white-space: nowrap;
+}
+
+.agent-avatar-hovercard-role {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(156, 172, 210, 0.82);
+  white-space: nowrap;
+}
+
+.agent-avatar:hover .agent-avatar-hovercard,
+.agent-avatar:focus-within .agent-avatar-hovercard {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0) scale(1);
+}
+
+.agent-avatar--interactive {
+  z-index: 2;
+}
+
+.agent-avatar-trigger {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: inherit;
+  cursor: pointer;
+}
+
+.agent-avatar-trigger:focus-visible {
+  outline: none;
+}
+
+.agent-avatar--interactive .agent-avatar-circle {
+  transition:
+    transform 0.16s ease,
+    border-color 0.16s ease,
+    box-shadow 0.16s ease,
+    filter 0.16s ease;
+}
+
+.agent-avatar--interactive .agent-avatar-trigger:hover .agent-avatar-circle,
+.agent-avatar--interactive .agent-avatar-trigger[aria-expanded="true"] .agent-avatar-circle {
+  transform: translateY(-1px) scale(1.03);
+  border-color: rgba(99, 233, 255, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 0 0 1px rgba(99, 233, 255, 0.14),
+    0 16px 34px rgba(3, 9, 27, 0.44);
+  filter: saturate(1.08);
+}
+
+.agent-avatar-menu {
+  position: fixed;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 24px));
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 214, 255, 0.16);
+  background:
+    linear-gradient(180deg, rgba(18, 22, 39, 0.98), rgba(11, 14, 27, 0.98));
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  z-index: 240;
+}
+
+.agent-avatar-menu-header {
+  display: grid;
+  gap: 3px;
+  padding: 2px 2px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 2px;
+}
+
+.agent-avatar-menu-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(246, 248, 255, 0.96);
+}
+
+.agent-avatar-menu-subtitle {
+  font-size: 11px;
+  color: rgba(162, 174, 214, 0.76);
+}
+
+.agent-avatar-menu-item {
+  appearance: none;
+  width: 100%;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015));
+  color: rgba(240, 243, 255, 0.94);
+  text-decoration: none;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition:
+    transform 0.14s ease,
+    border-color 0.14s ease,
+    background 0.14s ease,
+    opacity 0.14s ease;
+}
+
+.agent-avatar-menu-item:hover:not(:disabled),
+.agent-avatar-menu-item:focus-visible:not(:disabled) {
+  outline: none;
+  transform: translateX(1px);
+  border-color: rgba(99, 233, 255, 0.22);
+  background:
+    linear-gradient(180deg, rgba(99, 233, 255, 0.12), rgba(99, 233, 255, 0.04));
+}
+
+.agent-avatar-menu-item:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+   Mention Autocomplete (structural — consumed by MentionAutocomplete.jsx)
+   --------------------------------------------------------------------------- */
+
+.mention-autocomplete {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 320px;
+  background: var(--bg-floating, #1e1e1e);
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.mention-autocomplete-list {
+  overflow-y: auto;
+}
+
+.mention-autocomplete-empty {
+  padding: 10px 14px;
+  font-size: var(--text-sm, 14px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.mention-autocomplete-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  font-size: var(--text-sm, 14px);
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.mention-autocomplete-item:hover,
+.mention-autocomplete-item.is-highlighted {
+  background: var(--bg-sunken, rgba(255, 255, 255, 0.04));
+}
+
+.mention-autocomplete-name {
+  font-weight: 500;
+}
+
+.mention-autocomplete-desc {
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------------------------
+   ChatRoomComposer — extra structural rules
+   (Classes consumed by ChatRoomComposer.jsx that extend the base composer)
+   --------------------------------------------------------------------------- */
+
+.chat-room-composer-input {
+  flex: 1;
+  min-height: 38px;
+  max-height: min(30vh, 200px);
+  resize: none;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-md, 8px);
+  background: var(--bg-sunken, rgba(0, 0, 0, 0.15));
+  color: var(--ink, rgba(255, 255, 255, 0.9));
+  font-family: inherit;
+  font-size: var(--text-sm, 14px);
+  padding: 8px 12px;
+  line-height: 1.5;
+  transition: border-color 0.15s ease;
+}
+
+.chat-room-composer-input:focus {
+  outline: none;
+  border-color: var(--accent-border, rgba(110, 161, 247, 0.3));
+}
+
+.chat-room-composer-input::placeholder {
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.chat-room-composer-input:disabled {
+  opacity: 0.5;
+}
+
+.chat-room-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-3, 12px);
+  padding: 4px 0 0;
+  min-height: 0;
+}
+
+.chat-room-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2, 8px);
+}
+
+.chat-room-char-count {
+  font-size: var(--text-xs, 12px);
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+  margin-right: auto;
+}
+
+.chat-room-char-count.is-danger {
+  color: #fca5a5;
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 600px) {
+  .room-list-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .room-list-header {
+    padding: var(--sp-4, 16px) var(--sp-4, 16px) var(--sp-3, 12px);
+  }
+
+  .room-list-grid {
+    padding: 0 var(--sp-4, 16px) var(--sp-4, 16px);
+  }
+
+  .chat-room-message-body {
+    max-width: none;
+  }
+
+  .chat-room-message-group {
+    width: calc(100% - 16px);
+    padding: 12px 14px 13px;
+    border-radius: 18px;
+  }
+
+  .chat-room-message-group.is-user {
+    width: calc(100% - 24px);
+  }
+
+  .room-create-dialog {
+    width: calc(100vw - 32px);
+  }
+
+  .chat-room-event-rail {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Room Pending Image Preview (paste/drop image support)
+   --------------------------------------------------------------------------- */
+
+.room-pending-image {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-color, #333);
+  background: var(--surface-secondary, rgba(255, 255, 255, 0.03));
+}
+
+.room-pending-image--parsing {
+  opacity: 0.7;
+}
+
+.room-pending-image--error {
+  background: var(--surface-error, rgba(239, 68, 68, 0.08));
+}
+
+.room-pending-image-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #333);
+  flex-shrink: 0;
+}
+
+.room-pending-image-details {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.room-pending-image-label {
+  font-size: 12px;
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-pending-image-summary {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-secondary, rgba(255, 255, 255, 0.65));
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.room-pending-image-remove {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+  opacity: 0.5;
+  padding: 4px 8px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: opacity 0.15s ease;
+}
+
+.room-pending-image-remove:hover {
+  opacity: 1;
+}
+
+/* ---------------------------------------------------------------------------
+   Action results & status indicators (workspace agent actions)
+   --------------------------------------------------------------------------- */
+
+.room-message-actions {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.room-message-actions summary {
+  cursor: pointer;
+  opacity: 0.7;
+  user-select: none;
+}
+
+.room-message-actions summary:hover {
+  opacity: 1;
+}
+
+.room-message-actions-list {
+  padding: 8px 0 0 12px;
+}
+
+.room-action-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.action-status.success {
+  color: #22c55e;
+}
+
+.action-status.error {
+  color: #ef4444;
+}
+
+.action-status.unknown {
+  color: var(--ink-tertiary, rgba(255, 255, 255, 0.45));
+}
+
+.action-tool {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.action-error {
+  color: #ef4444;
+  font-size: 12px;
+}
+
+.room-message-status {
+  font-size: 12px;
+  opacity: 0.6;
+  font-style: italic;
+  padding: 4px 0;
+}

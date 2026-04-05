@@ -2,6 +2,7 @@
 
 const gmail = require('../gmail');
 const calendar = require('../calendar');
+const { SHARED_AGENT_TOOL_HANDLERS } = require('../shared-agent-tools');
 
 const WORKSPACE_TOOL_HANDLERS = {
   'gmail.search': async (params) => {
@@ -222,6 +223,42 @@ const WORKSPACE_TOOL_HANDLERS = {
     const workspaceMemory = require('../workspace-memory');
     return workspaceMemory.deleteMemory(params.key);
   },
+  'agentProfiles.list': async (_params) => {
+    const { listAgentIdentities } = require('../agent-identity-service');
+    const agents = await listAgentIdentities();
+    return {
+      ok: true,
+      agents: agents.map((agent) => ({
+        agentId: agent.agentId,
+        promptId: agent.promptId || null,
+        profilePage: `#/agents/${agent.agentId}`,
+        profile: agent.profile,
+        updatedAt: agent.updatedAt || null,
+      })),
+      count: agents.length,
+    };
+  },
+  'agentProfiles.get': async (params) => {
+    const { getAgentIdentity, buildAgentReferenceLinks } = require('../agent-identity-service');
+    const agent = await getAgentIdentity(params.agentId);
+    if (!agent) return { ok: false, error: 'Agent profile not found' };
+    return {
+      ok: true,
+      agent,
+      links: buildAgentReferenceLinks(agent),
+    };
+  },
+  'agentProfiles.history': async (params) => {
+    const { getAgentIdentity } = require('../agent-identity-service');
+    const agent = await getAgentIdentity(params.agentId);
+    if (!agent) return { ok: false, error: 'Agent profile not found' };
+    return {
+      ok: true,
+      agentId: agent.agentId,
+      history: Array.isArray(agent.history?.entries) ? agent.history.entries : [],
+      count: Array.isArray(agent.history?.entries) ? agent.history.entries.length : 0,
+    };
+  },
   'autoAction.createRule': async (params) => {
     const WorkspaceAutoRule = require('../../models/WorkspaceAutoRule');
     const autoActions = require('../workspace-auto-actions');
@@ -287,6 +324,7 @@ const WORKSPACE_TOOL_HANDLERS = {
     const trackingUrl = shipmentTracker.getTrackingUrl(shipment.carrier, shipment.trackingNumber);
     return { ok: true, ...shipment, trackingUrl };
   },
+  ...SHARED_AGENT_TOOL_HANDLERS,
 };
 
 module.exports = { WORKSPACE_TOOL_HANDLERS };

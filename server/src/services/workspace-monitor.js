@@ -12,6 +12,7 @@ const { isChatAgentActive, isMessageRecentlyProcessed } = require('./workspace-r
 const GmailAuth = require('../models/GmailAuth');
 const labelCache = require('../lib/label-cache');
 const WorkspaceActivity = require('../models/WorkspaceActivity');
+const { observeBestEffort } = require('../lib/best-effort');
 
 // ---------------------------------------------------------------------------
 // Workspace Background Monitor
@@ -40,11 +41,13 @@ const MAX_LAST_NUDGES = 50;
 let _intervalId = null;
 let _heartbeatId = null;
 let _subscriberCleanupId = null;
-const _subscribers = new Set();   // SSE response objects
+const _subscribers = new Set();   // generic listener callbacks
+const _sseSubscribers = new Map(); // SSE response -> listener callback
 const _lastAlerts = new Map();    // fingerprint -> alert
 let _lastEmailCheckAt = 0;        // timestamp of last email categorization scan
 let _lastNudges = [];             // last emitted nudges (for snapshot on connect)
 let _lastWorkSummary = null;      // last work-completed summary (for snapshot on connect)
+let _lastProactiveMessage = null; // last proactive AI message (for snapshot on connect)
 let _running = false;
 let _tickInProgress = false;
 
@@ -52,6 +55,14 @@ let _tickInProgress = false;
 let _monitorAccountEmail = null;
 let _monitorAccountCheckedAt = 0;
 const ACCOUNT_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function persistActivity(entry, context) {
+  return observeBestEffort(() => WorkspaceActivity.create(entry), {
+    source: 'workspace-monitor',
+    action: `Persist workspace activity for ${context}`,
+    detail: 'Background monitor work completed, but the activity history record could not be saved. Live behavior may still succeed while offline history becomes incomplete.',
+  });
+}
 
 /**
  * Resolve the primary Gmail account email for background monitor work.
@@ -140,11 +151,11 @@ async function tick() {
     // 5. Broadcast changes + persist new alerts for offline clients
     for (const alert of newAlerts) {
       broadcast('alert', alert);
-      WorkspaceActivity.create({
+      persistActivity({
         type: 'alert-detected',
         summary: `Alert: [${(alert.severity || 'info').toUpperCase()}] ${alert.title || 'Untitled'}`,
         details: { type: alert.type, severity: alert.severity, sourceId: alert.sourceId, detail: alert.detail },
-      }).catch(() => {}); // fire-and-forget
+      }, `alert "${alert.title || alert.type || 'unknown'}"`);
     }
     for (const resolved of resolvedFingerprints) {
       broadcast('alert-resolved', resolved);
@@ -160,12 +171,14 @@ async function tick() {
             context: `Alert: [${(alert.severity || 'info').toUpperCase()}] ${alert.title || 'Untitled'}\nDetail: ${alert.detail || 'No detail provided'}\nType: ${alert.type || 'unknown'}\nSource: ${alert.sourceId || 'unknown'}`,
           });
           if (reasoning.shouldAct) {
-            broadcast('proactive-message', {
+            const proactiveMessage = {
               trigger: { type: alert.type, severity: alert.severity, title: alert.title },
               message: reasoning.message,
               suggestedActions: reasoning.suggestedActions,
               timestamp: new Date().toISOString(),
-            });
+            };
+            _lastProactiveMessage = proactiveMessage;
+            broadcast('proactive-message', proactiveMessage);
           }
         } catch (err) {
           console.error('[workspace-monitor] proactive AI error:', err.message);
@@ -285,11 +298,11 @@ async function executeBackgroundWork() {
           workSummary._labeledActions = catResult.actions || [];
           console.log(`[workspace-monitor] auto-labeled ${catResult.executed} emails`);
           // Persist for offline clients
-          WorkspaceActivity.create({
+          persistActivity({
             type: 'labels-applied',
             summary: `Labeled ${catResult.executed} email${catResult.executed > 1 ? 's' : ''} and moved to folders`,
             details: { actions: catResult.actions },
-          }).catch(() => {}); // fire-and-forget
+          }, 'auto-categorization');
           // Tell clients to refresh their inbox — labels changed
           broadcast('labels-changed', {
             labelsApplied: catResult.executed,
@@ -314,11 +327,11 @@ async function executeBackgroundWork() {
           workSummary.silentActionsRun = silentResult.executed;
           console.log(`[workspace-monitor] executed ${silentResult.executed} silent auto-actions`);
           // Persist for offline clients
-          WorkspaceActivity.create({
+          persistActivity({
             type: 'silent-action',
             summary: `Auto-cleanup: ${silentResult.executed} email${silentResult.executed > 1 ? 's' : ''} archived/marked read`,
             details: { actions: silentResult.actions },
-          }).catch(() => {}); // fire-and-forget
+          }, 'silent auto-actions');
           // Silent actions may modify labels (archive, mark-read) — notify clients
           broadcast('labels-changed', {
             labelsApplied: silentResult.executed,
@@ -337,11 +350,11 @@ async function executeBackgroundWork() {
           workSummary.notifyActionsRun = notifyResult.executed;
           console.log(`[workspace-monitor] executed ${notifyResult.executed} notify auto-actions`);
           // Persist for offline clients
-          WorkspaceActivity.create({
+          persistActivity({
             type: 'notify-action',
             summary: `Executed ${notifyResult.executed} auto-action${notifyResult.executed > 1 ? 's' : ''} (notify tier)`,
             details: { actions: notifyResult.actions },
-          }).catch(() => {}); // fire-and-forget
+          }, 'notify auto-actions');
 
           // Build human-readable descriptions for each action
           const actionDescriptions = [];
@@ -421,11 +434,11 @@ async function executeBackgroundWork() {
           workSummary.entitiesSaved = entitySaveResult.saved;
           console.log(`[workspace-monitor] saved ${entitySaveResult.saved} entity facts`);
           // Persist for offline clients
-          WorkspaceActivity.create({
+          persistActivity({
             type: 'entity-saved',
             summary: `Saved ${entitySaveResult.saved} entity fact${entitySaveResult.saved > 1 ? 's' : ''} to workspace memory`,
             details: { saved: entitySaveResult.saved },
-          }).catch(() => {}); // fire-and-forget
+          }, 'entity fact saves');
         }
       } catch (err) {
         console.error('[workspace-monitor] entity fact save error:', err.message);
@@ -514,12 +527,11 @@ async function checkForNudges(preloadedMessages, labeledDomains = new Set()) {
 
 function broadcast(eventName, data) {
   if (_subscribers.size === 0) return;
-  const payload = `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
-  for (const res of _subscribers) {
+  for (const listener of _subscribers) {
     try {
-      res.write(payload);
+      listener(eventName, data);
     } catch {
-      _subscribers.delete(res);
+      _subscribers.delete(listener);
     }
   }
 }
@@ -532,22 +544,46 @@ function sendEvent(res, eventName, data) {
   }
 }
 
-function addSubscriber(res) {
-  _subscribers.add(res);
-
-  // Immediately send current state snapshot so the client doesn't start blank
-  const alertSnapshot = Array.from(_lastAlerts.values());
-  sendEvent(res, 'snapshot', {
-    alerts: alertSnapshot,
+function getSnapshot() {
+  return {
+    alerts: Array.from(_lastAlerts.values()),
     nudges: _lastNudges,
     lastWorkSummary: _lastWorkSummary,
+    lastProactiveMessage: _lastProactiveMessage,
     subscriberCount: _subscribers.size,
     lastTickAt: _lastEmailCheckAt > 0 ? new Date(_lastEmailCheckAt).toISOString() : null,
-  });
+  };
+}
+
+function subscribe(listener) {
+  if (typeof listener !== 'function') return () => {};
+  _subscribers.add(listener);
+  try {
+    listener('snapshot', getSnapshot());
+  } catch {
+    _subscribers.delete(listener);
+    return () => {};
+  }
+  return () => {
+    _subscribers.delete(listener);
+  };
+}
+
+function addSubscriber(res) {
+  if (!res) return;
+  const listener = (eventName, data) => {
+    sendEvent(res, eventName, data);
+  };
+  _sseSubscribers.set(res, listener);
+  subscribe(listener);
 }
 
 function removeSubscriber(res) {
-  _subscribers.delete(res);
+  const listener = _sseSubscribers.get(res);
+  if (listener) {
+    _subscribers.delete(listener);
+    _sseSubscribers.delete(res);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -577,13 +613,15 @@ function startMonitor() {
 
   // Periodic dead-connection sweep — removes SSE subscribers whose sockets are destroyed
   _subscriberCleanupId = setInterval(() => {
-    for (const res of _subscribers) {
+    for (const [res, listener] of _sseSubscribers.entries()) {
       try {
         if (res.destroyed || res.writableEnded || res.socket?.destroyed) {
-          _subscribers.delete(res);
+          _subscribers.delete(listener);
+          _sseSubscribers.delete(res);
         }
       } catch {
-        _subscribers.delete(res);
+        _subscribers.delete(listener);
+        _sseSubscribers.delete(res);
       }
     }
   }, SUBSCRIBER_CLEANUP_MS);
@@ -607,13 +645,15 @@ function stopMonitor() {
   }
 
   // Gracefully close all subscriber connections
-  for (const res of _subscribers) {
+  for (const res of _sseSubscribers.keys()) {
     try { res.end(); } catch { /* already closed */ }
   }
   _subscribers.clear();
+  _sseSubscribers.clear();
   _lastAlerts.clear();
   _lastNudges = [];
   _lastWorkSummary = null;
+  _lastProactiveMessage = null;
   _tickInProgress = false;
   _monitorAccountEmail = null;
   _monitorAccountCheckedAt = 0;
@@ -637,16 +677,19 @@ function getStatus() {
     nudgeCount: _lastNudges.length,
     lastEmailCheckAt: _lastEmailCheckAt > 0 ? new Date(_lastEmailCheckAt).toISOString() : null,
     lastWorkSummary: _lastWorkSummary,
+    lastProactiveMessage: _lastProactiveMessage,
   };
 }
 
 module.exports = {
   startMonitor,
   stopMonitor,
+  subscribe,
   addSubscriber,
   removeSubscriber,
   getLatestAlerts,
   getLatestNudges,
   getStatus,
+  getSnapshot,
   broadcast,
 };

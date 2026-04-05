@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { getConversation } from '../api/chatApi.js';
 import { normalizeError } from '../utils/normalizeError.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 import {
@@ -16,6 +17,39 @@ const MODES = new Set(['single', 'fallback', 'parallel']);
 
 function normalizeMode(mode) {
   return MODES.has(mode) ? mode : DEFAULT_MODE;
+}
+
+function normalizeConversationMessages(conversation) {
+  const conversationProvider = normalizeProvider(conversation?.provider);
+  const normalizedMessages = Array.isArray(conversation?.messages)
+    ? conversation.messages.map((msg) => {
+      if (msg?.role !== 'assistant') return msg;
+      const quickActions = msg.attemptMeta?.quickActions;
+      return {
+        ...msg,
+        provider: normalizeProvider(msg.provider || conversationProvider),
+        ...(Array.isArray(quickActions) && quickActions.length > 0 ? { quickActions } : {}),
+      };
+    })
+    : [];
+
+  return {
+    conversationProvider,
+    normalizedMessages,
+  };
+}
+
+function shouldAttemptStreamRecovery(normalized) {
+  const code = String(normalized?.code || '').trim().toUpperCase();
+  const message = String(normalized?.message || '').trim().toLowerCase();
+  if (!code && !message) return false;
+  if (code === 'STREAM_INCOMPLETE' || code === 'REQUEST_FAILED' || code === 'SSE_STREAM_TIMEOUT') return true;
+  return (
+    message.includes('network error')
+    || message.includes('failed to fetch')
+    || message.includes('response stream ended before completion')
+    || message.includes('signal is aborted')
+  );
 }
 
 function resetActiveRequestState({
@@ -65,6 +99,7 @@ function resetActiveRequestState({
 export default function useChatRequestCallbacks({
   clearScheduledStreamFlush,
   chunkStartedProvidersRef,
+  conversationIdRef,
   isStreamingRef,
   isThinkingRef,
   parallelProvidersRef,
@@ -88,6 +123,7 @@ export default function useChatRequestCallbacks({
   setSplitModeActive,
   setStreamProvider,
   setStreamingText,
+  setThinkingText,
   setThinkingStartTime,
   setTriageCard,
   shouldShowContextDebug,
@@ -192,9 +228,13 @@ export default function useChatRequestCallbacks({
     isThinkingRef.current = false;
     setThinkingStartTime(null);
     setConversationId(data.conversationId);
+    if (conversationIdRef) {
+      conversationIdRef.current = data.conversationId || null;
+    }
     return elapsed;
   }, [
     clearScheduledStreamFlush,
+    conversationIdRef,
     isStreamingRef,
     isThinkingRef,
     parallelStreamingRef,
@@ -209,6 +249,7 @@ export default function useChatRequestCallbacks({
     setSplitModeActive,
     setStreamProvider,
     setStreamingText,
+    setThinkingText,
     setThinkingStartTime,
     shouldShowContextDebug,
     startTimeRef,
@@ -229,6 +270,9 @@ export default function useChatRequestCallbacks({
   }) => ({
     onInit: (data) => {
       setConversationId(data.conversationId);
+      if (conversationIdRef) {
+        conversationIdRef.current = data.conversationId || null;
+      }
       setCurrentTraceId(data.traceId || null);
       if (data.primaryProvider) setProvider(data.primaryProvider);
       const activeProvider = normalizeProvider(data.primaryProvider || data.provider || selectedProviderForRequest);
@@ -279,6 +323,16 @@ export default function useChatRequestCallbacks({
           code: 'INV_MATCH',
         });
       }
+    },
+    onStatus: (data) => {
+      const message = typeof data?.message === 'string' ? data.message.trim() : '';
+      if (!message) return;
+      pushProcessEvent({
+        level: 'info',
+        title: 'Server status',
+        message,
+        code: typeof data?.code === 'string' ? data.code : 'SERVER_STATUS',
+      });
     },
     onThinking: (data) => {
       if (!isThinkingRef.current) {
@@ -337,33 +391,75 @@ export default function useChatRequestCallbacks({
       setStreamingText,
       streamingTextRef,
     }),
-    onError: (errPayload) => {
+    onError: async (errPayload) => {
       const normalized = normalizeError(errPayload);
-      setError(normalized);
-      tel(TEL.CHAT_ERROR, `${selectedFailureTelMessage}: ${normalized.message}`, {
-        code: normalized.code,
-        provider: selectedProviderForRequest,
-      });
-      pushProcessEvent({
-        level: 'error',
-        title: selectedFailureTitle,
-        message: normalized.message,
-        code: normalized.code,
-        detail: normalized.detail || '',
-        attempts: normalized.attempts || [],
-      });
-      if (Array.isArray(normalized.attempts)) {
-        for (const attempt of normalized.attempts) {
-          if (attempt.status !== 'error') continue;
-          pushProcessEvent({
-            level: 'error',
-            title: `Attempt failed: ${attempt.provider}`,
-            message: attempt.errorMessage || 'Provider request failed.',
-            code: attempt.errorCode || normalized.code,
-            detail: attempt.errorDetail || '',
-            provider: attempt.provider,
-            latencyMs: attempt.latencyMs || 0,
-          });
+      let recovered = false;
+
+      if (conversationIdRef?.current && shouldAttemptStreamRecovery(normalized)) {
+        try {
+          const conversation = await getConversation(conversationIdRef.current);
+          const { conversationProvider, normalizedMessages } = normalizeConversationMessages(conversation);
+          const latestAssistant = [...normalizedMessages].reverse().find((message) => message?.role === 'assistant');
+
+          if (latestAssistant) {
+            const recoveredProvider = normalizeProvider(latestAssistant.provider || conversationProvider || selectedProviderForRequest);
+            const recoveredThinking = typeof latestAssistant.thinking === 'string' ? latestAssistant.thinking : '';
+            const hadParallel = normalizedMessages.some((message) => (
+              message?.role === 'assistant' && message?.mode === 'parallel' && message?.attemptMeta?.parallel
+            ));
+
+            setConversationId(conversation._id);
+            conversationIdRef.current = conversation._id || conversationIdRef.current;
+            setProvider(conversationProvider);
+            setMessages(normalizedMessages);
+            setSplitModeActive(hadParallel);
+            setStreamProvider(recoveredProvider);
+            if (!String(thinkingTextRef.current || '').trim() && recoveredThinking.trim()) {
+              setThinkingText(recoveredThinking);
+              thinkingTextRef.current = recoveredThinking;
+            }
+            setError(null);
+            pushProcessEvent({
+              level: 'success',
+              title: 'Recovered saved response',
+              message: 'The stream connection dropped, but the saved assistant response and reasoning were recovered from the server.',
+              code: 'STREAM_RECOVERED',
+              provider: recoveredProvider,
+            });
+            recovered = true;
+          }
+        } catch {
+          recovered = false;
+        }
+      }
+
+      if (!recovered) {
+        setError(normalized);
+        tel(TEL.CHAT_ERROR, `${selectedFailureTelMessage}: ${normalized.message}`, {
+          code: normalized.code,
+          provider: selectedProviderForRequest,
+        });
+        pushProcessEvent({
+          level: 'error',
+          title: selectedFailureTitle,
+          message: normalized.message,
+          code: normalized.code,
+          detail: normalized.detail || '',
+          attempts: normalized.attempts || [],
+        });
+        if (Array.isArray(normalized.attempts)) {
+          for (const attempt of normalized.attempts) {
+            if (attempt.status !== 'error') continue;
+            pushProcessEvent({
+              level: 'error',
+              title: `Attempt failed: ${attempt.provider}`,
+              message: attempt.errorMessage || 'Provider request failed.',
+              code: attempt.errorCode || normalized.code,
+              detail: attempt.errorDetail || '',
+              provider: attempt.provider,
+              latencyMs: attempt.latencyMs || 0,
+            });
+          }
         }
       }
       clearScheduledStreamFlush();
@@ -380,6 +476,7 @@ export default function useChatRequestCallbacks({
   }), [
     clearScheduledStreamFlush,
     chunkStartedProvidersRef,
+    conversationIdRef,
     finalizeSuccess,
     isStreamingRef,
     isThinkingRef,
@@ -396,8 +493,10 @@ export default function useChatRequestCallbacks({
     setParallelProviders,
     setParallelStreaming,
     setProvider,
+    setSplitModeActive,
     setStreamProvider,
     setStreamingText,
+    setThinkingText,
     setTriageCard,
     setThinkingStartTime,
     setIsStreaming,

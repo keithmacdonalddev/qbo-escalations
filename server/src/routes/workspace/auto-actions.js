@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -21,6 +22,8 @@ router.get('/auto-actions', async (req, res) => {
   } catch (err) {
     res.json({
       ok: true,
+      degraded: true,
+      warning: err.message || 'Failed to load learned rules. Showing built-in rules only.',
       rules: autoActions.BUILTIN_RULES.map((r) => ({
         id: r.id,
         name: r.name,
@@ -72,7 +75,7 @@ router.get('/auto-actions/rules', async (req, res) => {
 
     res.json({ ok: true, rules });
   } catch (err) {
-    res.json({ ok: false, code: 'RULE_ERROR', error: err.message });
+    return sendApiError(res, createApiError('RULE_ERROR', err.message || 'Failed to load auto-action rules', 500));
   }
 });
 
@@ -83,11 +86,10 @@ router.post('/auto-actions/rules', async (req, res) => {
   const { name, tier, conditionType, conditionValue, actionType, actionValue, createdBy } = req.body;
 
   if (!name || !conditionType || !conditionValue || !actionType) {
-    return res.json({
-      ok: false,
-      code: 'MISSING_FIELD',
-      error: 'name, conditionType, conditionValue, and actionType are required',
-    });
+    return sendApiError(
+      res,
+      createApiError('MISSING_FIELD', 'name, conditionType, conditionValue, and actionType are required', 400)
+    );
   }
 
   const validConditionTypes = ['domain', 'label', 'age', 'keyword'];
@@ -95,13 +97,22 @@ router.post('/auto-actions/rules', async (req, res) => {
   const validTiers = ['silent', 'notify', 'ask'];
 
   if (!validConditionTypes.includes(conditionType)) {
-    return res.json({ ok: false, code: 'INVALID_CONDITION', error: `conditionType must be one of: ${validConditionTypes.join(', ')}` });
+    return sendApiError(
+      res,
+      createApiError('INVALID_CONDITION', `conditionType must be one of: ${validConditionTypes.join(', ')}`, 400)
+    );
   }
   if (!validActionTypes.includes(actionType)) {
-    return res.json({ ok: false, code: 'INVALID_ACTION', error: `actionType must be one of: ${validActionTypes.join(', ')}` });
+    return sendApiError(
+      res,
+      createApiError('INVALID_ACTION', `actionType must be one of: ${validActionTypes.join(', ')}`, 400)
+    );
   }
   if (tier && !validTiers.includes(tier)) {
-    return res.json({ ok: false, code: 'INVALID_TIER', error: `tier must be one of: ${validTiers.join(', ')}` });
+    return sendApiError(
+      res,
+      createApiError('INVALID_TIER', `tier must be one of: ${validTiers.join(', ')}`, 400)
+    );
   }
 
   try {
@@ -125,7 +136,7 @@ router.post('/auto-actions/rules', async (req, res) => {
     autoActions.invalidateCache();
     res.json({ ok: true, rule });
   } catch (err) {
-    res.json({ ok: false, code: 'RULE_ERROR', error: err.message });
+    return sendApiError(res, createApiError('RULE_ERROR', err.message || 'Failed to save auto-action rule', 500));
   }
 });
 
@@ -134,7 +145,7 @@ router.patch('/auto-actions/rules/:ruleId/approve', async (req, res) => {
     const autoActions = require('../../services/workspace-auto-actions');
     const result = await autoActions.recordApproval(req.params.ruleId);
     if (!result) {
-      return res.json({ ok: false, code: 'NOT_FOUND', error: 'Rule not found' });
+      return sendApiError(res, createApiError('NOT_FOUND', 'Rule not found', 404));
     }
     res.json({
       ok: true,
@@ -144,7 +155,7 @@ router.patch('/auto-actions/rules/:ruleId/approve', async (req, res) => {
       rejectionCount: result.rule.rejectionCount,
     });
   } catch (err) {
-    res.json({ ok: false, code: 'RULE_ERROR', error: err.message });
+    return sendApiError(res, createApiError('RULE_ERROR', err.message || 'Failed to approve auto-action rule', 500));
   }
 });
 
@@ -153,7 +164,7 @@ router.patch('/auto-actions/rules/:ruleId/reject', async (req, res) => {
     const autoActions = require('../../services/workspace-auto-actions');
     const result = await autoActions.recordRejection(req.params.ruleId);
     if (!result) {
-      return res.json({ ok: false, code: 'NOT_FOUND', error: 'Rule not found' });
+      return sendApiError(res, createApiError('NOT_FOUND', 'Rule not found', 404));
     }
     res.json({
       ok: true,
@@ -163,7 +174,7 @@ router.patch('/auto-actions/rules/:ruleId/reject', async (req, res) => {
       rejectionCount: result.rule.rejectionCount,
     });
   } catch (err) {
-    res.json({ ok: false, code: 'RULE_ERROR', error: err.message });
+    return sendApiError(res, createApiError('RULE_ERROR', err.message || 'Failed to reject auto-action rule', 500));
   }
 });
 
@@ -174,13 +185,13 @@ router.delete('/auto-actions/rules/:ruleId', async (req, res) => {
 
     const result = await WorkspaceAutoRule.findOneAndDelete({ ruleId: req.params.ruleId });
     if (!result) {
-      return res.json({ ok: false, code: 'NOT_FOUND', error: 'Rule not found' });
+      return sendApiError(res, createApiError('NOT_FOUND', 'Rule not found', 404));
     }
 
     autoActions.invalidateCache();
     res.json({ ok: true, deleted: req.params.ruleId });
   } catch (err) {
-    res.json({ ok: false, code: 'RULE_ERROR', error: err.message });
+    return sendApiError(res, createApiError('RULE_ERROR', err.message || 'Failed to delete auto-action rule', 500));
   }
 });
 

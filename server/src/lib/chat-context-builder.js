@@ -318,5 +318,6 @@ function buildChatModelContext({ normalizedMessages, settings }) {
 module.exports = {
   buildChatModelContext,
   estimateInputTokensFromChars,
+  summarizeMessages,
 };
 

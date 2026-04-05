@@ -10,6 +10,20 @@ import useChatRequestCallbacks from './useChatRequestCallbacks.js';
 
 const DEFAULT_MODE = 'single';
 const SUPPORTED_MODES = new Set(['single', 'fallback', 'parallel']);
+const RESERVED_REQUEST_KEYS = new Set([
+  'message',
+  'conversationId',
+  'images',
+  'imageMeta',
+  'provider',
+  'mode',
+  'fallbackProvider',
+  'primaryModel',
+  'fallbackModel',
+  'parallelProviders',
+  'reasoningEffort',
+  'settings',
+]);
 
 function normalizeMode(mode) {
   return SUPPORTED_MODES.has(mode) ? mode : DEFAULT_MODE;
@@ -28,6 +42,8 @@ export default function useChatRequestFlow({
   parallelStreamingRef,
   pushProcessEvent,
   reasoningEffortRef,
+  modelRef,
+  fallbackModelRef,
   resetProcessEvents,
   scheduleStreamFlush,
   splitModeActiveRef,
@@ -61,6 +77,7 @@ export default function useChatRequestFlow({
   const { createHandlers, buildRequestSeedEvent, resetActiveRequestState } = useChatRequestCallbacks({
     clearScheduledStreamFlush,
     chunkStartedProvidersRef,
+    conversationIdRef,
     isStreamingRef,
     isThinkingRef,
     parallelProvidersRef,
@@ -84,6 +101,7 @@ export default function useChatRequestFlow({
     setSplitModeActive,
     setStreamProvider,
     setStreamingText,
+    setThinkingText,
     setThinkingStartTime,
     setTriageCard,
     shouldShowContextDebug,
@@ -189,19 +207,33 @@ export default function useChatRequestFlow({
     thinkingTextRef,
   ]);
 
-  const sendMessage = useCallback((text, images = [], providerOverride, imageMeta = []) => {
-    const trimmedText = text.trim();
+  const sendMessage = useCallback((text, images = [], providerOverride, imageMeta = [], options = {}) => {
+    const inputText = typeof text === 'string' ? text : '';
+    const trimmedText = inputText.trim();
+    const payloadText = typeof options?.payloadMessage === 'string'
+      ? options.payloadMessage.trim()
+      : trimmedText;
+    const displayContent = typeof options?.displayContent === 'string'
+      ? options.displayContent.trim()
+      : trimmedText;
+    const requestExtras = options?.requestExtras && typeof options.requestExtras === 'object' && !Array.isArray(options.requestExtras)
+      ? Object.fromEntries(
+          Object.entries(options.requestExtras).filter(([key]) => !RESERVED_REQUEST_KEYS.has(key))
+        )
+      : {};
     const normalizedImages = [];
     const normalizedImageMeta = [];
-    if ((!trimmedText && normalizedImages.length === 0) || isStreamingRef.current) return;
+    if ((!payloadText && normalizedImages.length === 0) || isStreamingRef.current) return;
 
     const selectedProvider = normalizeProvider(providerOverride || providerRef.current || DEFAULT_PROVIDER);
     const selectedMode = splitModeActiveRef.current ? 'parallel' : normalizeMode(modeRef.current);
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
+    const selectedModel = modelRef.current || undefined;
+    const selectedFallbackModel = fallbackModelRef.current || undefined;
 
     setMessages((prev) => [...prev, {
       role: 'user',
-      content: trimmedText,
+      content: displayContent,
       images: normalizedImages,
       imageMeta: normalizedImageMeta,
       timestamp: new Date().toISOString(),
@@ -214,18 +246,21 @@ export default function useChatRequestFlow({
       selectedFallback,
       requestFn: sendChatMessage,
       requestPayload: {
-        message: trimmedText,
+        message: payloadText,
         conversationId: conversationIdRef.current,
         images: normalizedImages,
         imageMeta: normalizedImageMeta,
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode !== 'single' ? selectedFallback : undefined,
+        primaryModel: selectedModel,
+        fallbackModel: selectedMode === 'fallback' ? selectedFallbackModel : undefined,
         parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
           ? parallelProvidersRef.current
           : undefined,
         reasoningEffort: reasoningEffortRef.current,
         settings: aiSettingsRef.current || undefined,
+        ...requestExtras,
       },
       imageCount: normalizedImages.length,
       selectedSuccessTitle: 'Request complete',
@@ -253,6 +288,8 @@ export default function useChatRequestFlow({
     const selectedProvider = normalizeProvider(providerOverride || providerRef.current || DEFAULT_PROVIDER);
     const selectedMode = splitModeActiveRef.current ? 'parallel' : normalizeMode(modeRef.current);
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
+    const selectedModel = modelRef.current || undefined;
+    const selectedFallbackModel = fallbackModelRef.current || undefined;
 
     setMessages((prev) => {
       if (prev.length === 0) return prev;
@@ -278,6 +315,8 @@ export default function useChatRequestFlow({
         provider: selectedProvider,
         mode: selectedMode,
         fallbackProvider: selectedMode !== 'single' ? selectedFallback : undefined,
+        primaryModel: selectedModel,
+        fallbackModel: selectedMode === 'fallback' ? selectedFallbackModel : undefined,
         parallelProviders: selectedMode === 'parallel' && parallelProvidersRef.current.length >= 2
           ? parallelProvidersRef.current
           : undefined,
@@ -299,6 +338,8 @@ export default function useChatRequestFlow({
     parallelProvidersRef,
     providerRef,
     reasoningEffortRef,
+    modelRef,
+    fallbackModelRef,
     runRequest,
     setMessages,
     splitModeActiveRef,

@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ router.get('/memory/count', async (req, res) => {
 
     res.json({ ok: true, count });
   } catch (err) {
-    res.json({ ok: false, code: 'MEMORY_ERROR', error: err.message });
+    return sendApiError(res, createApiError('MEMORY_ERROR', err.message || 'Failed to load memory count', 500));
   }
 });
 
@@ -37,7 +38,7 @@ router.get('/memories', async (req, res) => {
 
     res.json({ ok: true, memories });
   } catch (err) {
-    res.json({ ok: false, code: 'MEMORY_ERROR', error: err.message });
+    return sendApiError(res, createApiError('MEMORY_ERROR', err.message || 'Failed to load memories', 500));
   }
 });
 
@@ -47,7 +48,7 @@ router.delete('/memories/:key', async (req, res) => {
     const result = await workspaceMemory.deleteMemory(req.params.key);
     res.json(result);
   } catch (err) {
-    res.json({ ok: false, code: 'MEMORY_ERROR', error: err.message });
+    return sendApiError(res, createApiError('MEMORY_ERROR', err.message || 'Failed to delete memory', 500));
   }
 });
 

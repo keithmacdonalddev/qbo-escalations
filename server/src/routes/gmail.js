@@ -12,6 +12,7 @@ const {
   deleteAiOperation,
 } = require('../services/ai-runtime');
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
 const { randomUUID } = require('node:crypto');
@@ -437,18 +438,12 @@ router.post('/messages/:id/untrash', async (req, res) => {
 // AI email assistant endpoint (SSE streaming)
 // ---------------------------------------------------------------------------
 
-const GMAIL_AI_SYSTEM_PROMPT = [
-  'You are an AI email assistant integrated into a QBO escalation workspace.',
-  'You help the user manage their Gmail: searching emails, summarizing threads,',
-  'drafting replies, and answering questions about their inbox.',
+const WORKSPACE_EMAIL_CHAT_OVERLAY = [
   '',
-  'Guidelines:',
-  '- When asked to summarize an email, provide a concise summary with key points, action items, and sender intent.',
-  '- When asked to draft a reply, write a professional, clear response that addresses the original email.',
-  '- When given email context (subject, sender, body), use it to provide relevant, contextual assistance.',
-  '- Keep responses focused and actionable.',
-  '- Use markdown formatting for readability.',
-  '- For draft replies, output ONLY the reply body text (no subject line, no "Dear..." unless appropriate).',
+  'EMAIL CHAT MODE OVERRIDE:',
+  '- Answer directly. Do not emit ACTION blocks in this endpoint.',
+  '- Focus on email summarization, drafting, inbox Q&A, and thread analysis.',
+  '- When asked to draft a reply, output only the reply body unless the user explicitly asks for more.',
 ].join('\n');
 
 // POST /api/gmail/ai — AI email assistant with SSE streaming
@@ -522,7 +517,7 @@ router.post('/ai', async (req, res) => {
 
   const cleanup = chat({
     messages,
-    systemPrompt: GMAIL_AI_SYSTEM_PROMPT,
+    systemPrompt: `${getRenderedAgentPrompt('workspace-action')}${WORKSPACE_EMAIL_CHAT_OVERLAY}`,
     onChunk: (text) => {
       recordAiChunk(runtimeOperationId, text, { provider: 'claude' });
       try {

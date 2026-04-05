@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -13,7 +14,7 @@ router.get('/entities', async (req, res) => {
       : await WorkspaceEntity.getActive();
     res.json({ ok: true, entities });
   } catch (err) {
-    res.status(500).json({ ok: false, code: 'ENTITY_ERROR', error: err.message });
+    return sendApiError(res, err, 'ENTITY_ERROR', 'Failed to load workspace entities');
   }
 });
 
@@ -43,7 +44,7 @@ router.patch('/entities/:entityId', async (req, res) => {
     }
     res.json({ ok: true, entity });
   } catch (err) {
-    res.status(500).json({ ok: false, code: 'ENTITY_ERROR', error: err.message });
+    return sendApiError(res, err, 'ENTITY_ERROR', 'Failed to update workspace entity');
   }
 });
 

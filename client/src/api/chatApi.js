@@ -1,4 +1,4 @@
-import { apiFetch } from './http.js';
+import { apiFetch, apiFetchJson } from './http.js';
 import { consumeSSEStream } from './sse.js';
 import { normalizeError } from '../utils/normalizeError.js';
 import { serializeJsonRequestBody } from '../lib/jsonRequestBody.js';
@@ -8,10 +8,10 @@ const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
 /**
  * Send a chat message and consume SSE stream.
  * @param {{ message: string, conversationId?: string, images?: string[], provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onLocalStage?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onInvMatches, onLocalStage }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat`;
   const hasImages = Array.isArray(body.images) && body.images.length > 0;
@@ -56,12 +56,14 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(normalizeError(err, err.error || 'Request failed'));
+        onError?.(normalizeError({ ...err, status: res.status, statusText: res.statusText, url: res.url }, err.error || 'Request failed'));
         return;
       }
 
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
+        else if (eventType === 'status') onStatus?.(data);
+        else if (eventType === 'message' && data?.type === 'status') onStatus?.(data);
         else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
@@ -103,10 +105,10 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 /**
  * Retry last assistant response for a conversation and consume SSE stream.
  * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onTriageCard, onInvMatches, onLocalStage }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat/retry`;
 
@@ -130,12 +132,14 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(normalizeError(err, err.error || 'Request failed'));
+        onError?.(normalizeError({ ...err, status: res.status, statusText: res.statusText, url: res.url }, err.error || 'Request failed'));
         return;
       }
 
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'start' || eventType === 'init') onInit?.(data);
+        else if (eventType === 'status') onStatus?.(data);
+        else if (eventType === 'message' && data?.type === 'status') onStatus?.(data);
         else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
@@ -172,69 +176,68 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
   return { abort: () => controller.abort() };
 }
 
+/**
+ * Parse escalation text/image into structured fields and triage metadata.
+ * @param {{ text?: string, image?: string, provider?: string, primaryProvider?: string, fallbackProvider?: string, reasoningEffort?: string, timeoutMs?: number, persist?: boolean }} body
+ */
+export async function parseChatEscalation(body) {
+  return apiFetchJson(`${BASE}/chat/parse-escalation`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    timeout: 120_000,
+    noRetry: true,
+  }, 'Failed to parse escalation');
+}
+
 /** List conversations (with optional search) */
 export async function listConversations(limit = 50, skip = 0, search = '') {
   const params = new URLSearchParams({ limit, skip });
   if (search) params.set('search', search);
-  const res = await apiFetch(`${BASE}/conversations?${params}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to list conversations');
+  const data = await apiFetchJson(`${BASE}/conversations?${params}`, {}, 'Failed to list conversations');
   return data.conversations;
 }
 
 /** Get a single conversation with messages */
 export async function getConversation(id) {
-  const res = await apiFetch(`${BASE}/conversations/${id}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Conversation not found');
+  const data = await apiFetchJson(`${BASE}/conversations/${id}`, {}, 'Conversation not found');
   return data.conversation;
 }
 
 /** Get lightweight conversation metadata without message history */
 export async function getConversationMeta(id) {
-  const res = await apiFetch(`${BASE}/conversations/${id}/meta`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Conversation not found');
+  const data = await apiFetchJson(`${BASE}/conversations/${id}/meta`, {}, 'Conversation not found');
   return data.conversation;
 }
 
 /** Rename or update a conversation */
 export async function updateConversation(id, fields) {
-  const res = await apiFetch(`${BASE}/conversations/${id}`, {
+  const data = await apiFetchJson(`${BASE}/conversations/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to update');
+  }, 'Failed to update conversation');
   return data.conversation;
 }
 
 /** Export conversation as plain text */
 export async function exportConversation(id) {
-  const res = await apiFetch(`${BASE}/conversations/${id}/export`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to export');
+  const data = await apiFetchJson(`${BASE}/conversations/${id}/export`, {}, 'Failed to export conversation');
   return data.text;
 }
 
 /** Delete a conversation */
 export async function deleteConversation(id) {
-  const res = await apiFetch(`${BASE}/conversations/${id}`, { method: 'DELETE' });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to delete');
-  return data;
+  return apiFetchJson(`${BASE}/conversations/${id}`, { method: 'DELETE' }, 'Failed to delete conversation');
 }
 
 /** Fork a conversation from a specific message index */
 export async function forkConversation(id, fromMessageIndex) {
-  const res = await apiFetch(`${BASE}/conversations/${id}/fork`, {
+  const data = await apiFetchJson(`${BASE}/conversations/${id}/fork`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ fromMessageIndex }),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fork conversation');
+  }, 'Failed to fork conversation');
   return data.conversation;
 }
 
@@ -244,14 +247,11 @@ export async function forkConversation(id, fromMessageIndex) {
  * @param {{ conversationId: string, provider: string, editedContent?: string }} body
  */
 export async function acceptParallelTurn(turnId, body) {
-  const res = await apiFetch(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/accept`, {
+  return apiFetchJson(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/accept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to accept parallel response');
-  return data;
+  }, 'Failed to accept parallel response');
 }
 
 /**
@@ -265,23 +265,17 @@ export async function acceptParallelTurn(turnId, body) {
  * @param {{ conversationId: string }} body
  */
 export async function unacceptParallelTurn(turnId, body) {
-  const res = await apiFetch(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/unaccept`, {
+  return apiFetchJson(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/unaccept`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to unaccept parallel response');
-  return data;
+  }, 'Failed to unaccept parallel response');
 }
 
 export async function discardParallelTurn(turnId, body) {
-  const res = await apiFetch(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/discard`, {
+  return apiFetchJson(`${BASE}/chat/parallel/${encodeURIComponent(turnId)}/discard`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to discard parallel response');
-  return data;
+  }, 'Failed to discard parallel response');
 }

@@ -1,5 +1,7 @@
 'use strict';
 
+const { SHARED_AGENT_TOOL_METADATA } = require('../shared-agent-tools');
+
 const WORKSPACE_TOOL_METADATA = {
   'gmail.search': {
     kind: 'read',
@@ -157,6 +159,42 @@ const WORKSPACE_TOOL_METADATA = {
     params: '{ key }',
     statusLabel: 'Removing memory',
   },
+  'agentProfiles.list': {
+    kind: 'read',
+    description: 'List all agent profiles with summary fields and links to their profile pages.',
+    params: '{}',
+    statusLabel: 'Listing agent profiles',
+  },
+  'agentProfiles.get': {
+    kind: 'read',
+    description: 'Open a specific agent profile, including profile data, learned continuity, and links.',
+    params: '{ agentId }',
+    statusLabel: 'Opening agent profile',
+  },
+  'agentProfiles.history': {
+    kind: 'read',
+    description: 'Read the profile and prompt history log for a specific agent.',
+    params: '{ agentId }',
+    statusLabel: 'Reading agent history',
+  },
+  'agentProfiles.updateAvatar': {
+    kind: 'write',
+    description: 'Update an agent avatar using an external image URL, emoji, or prompt metadata.',
+    params: '{ agentId, imageUrl?, emoji?, prompt?, source?, summary? }',
+    statusLabel: 'Updating avatar',
+  },
+  'agentProfiles.generateAvatar': {
+    kind: 'write',
+    description: 'Generate and save a new SVG avatar for an agent from a short prompt.',
+    params: '{ agentId, prompt?, palette?, emoji?, summary? }',
+    statusLabel: 'Generating avatar',
+  },
+  'agentProfiles.nudge': {
+    kind: 'write',
+    description: 'Send another agent a social nudge to encourage them to join the conversation more naturally.',
+    params: '{ fromAgentId, toAgentId, note?, roomId?, surface? }',
+    statusLabel: 'Sending nudge',
+  },
   'autoAction.createRule': {
     kind: 'write',
     description: 'Create an automatic rule for future emails.',
@@ -198,6 +236,66 @@ const WORKSPACE_TOOL_METADATA = {
     description: 'Get carrier tracking URL and latest info for a package.',
     params: '{ trackingNumber }',
     statusLabel: 'Getting tracking info',
+  },
+  'db.searchEscalations': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.searchEscalations'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.searchEscalations'].params,
+    statusLabel: 'Searching escalations',
+  },
+  'db.getEscalation': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.getEscalation'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.getEscalation'].params,
+    statusLabel: 'Opening escalation',
+  },
+  'db.searchInvestigations': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.searchInvestigations'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.searchInvestigations'].params,
+    statusLabel: 'Searching investigations',
+  },
+  'db.getInvestigation': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.getInvestigation'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.getInvestigation'].params,
+    statusLabel: 'Opening investigation',
+  },
+  'db.searchTemplates': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.searchTemplates'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.searchTemplates'].params,
+    statusLabel: 'Searching templates',
+  },
+  'db.searchConversations': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.searchConversations'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.searchConversations'].params,
+    statusLabel: 'Searching conversations',
+  },
+  'db.getConversation': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.getConversation'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.getConversation'].params,
+    statusLabel: 'Opening conversation',
+  },
+  'db.searchRooms': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.searchRooms'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.searchRooms'].params,
+    statusLabel: 'Searching rooms',
+  },
+  'db.getRoom': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['db.getRoom'].description,
+    params: SHARED_AGENT_TOOL_METADATA['db.getRoom'].params,
+    statusLabel: 'Opening room',
+  },
+  'web.search': {
+    kind: 'read',
+    description: SHARED_AGENT_TOOL_METADATA['web.search'].description,
+    params: SHARED_AGENT_TOOL_METADATA['web.search'].params,
+    statusLabel: 'Searching the web',
   },
 };
 

@@ -2,6 +2,7 @@
 
 const express = require('express');
 const gmail = require('../../services/gmail');
+const { createApiError, sendApiError } = require('../../lib/api-errors');
 
 const router = express.Router();
 
@@ -139,7 +140,7 @@ router.get('/briefing/today', async (req, res) => {
     }
     res.json({ ok: true, briefing: await serializeBriefing(briefing) });
   } catch (err) {
-    res.json({ ok: false, code: 'BRIEFING_ERROR', error: err.message });
+    return sendApiError(res, createApiError('BRIEFING_ERROR', err.message || 'Failed to load briefing', 500));
   }
 });
 
@@ -148,11 +149,14 @@ router.post('/briefing/generate', async (req, res) => {
     const { generateBriefing } = require('../../services/workspace-scheduler');
     const briefing = await generateBriefing();
     if (!briefing) {
-      return res.json({ ok: false, code: 'BRIEFING_EMPTY', error: 'Briefing generation returned empty result' });
+      return sendApiError(
+        res,
+        createApiError('BRIEFING_EMPTY', 'Briefing generation returned empty result', 502)
+      );
     }
     res.json({ ok: true, briefing: await serializeBriefing(briefing) });
   } catch (err) {
-    res.json({ ok: false, code: 'BRIEFING_ERROR', error: err.message });
+    return sendApiError(res, createApiError('BRIEFING_ERROR', err.message || 'Failed to generate briefing', 500));
   }
 });
 
@@ -161,7 +165,7 @@ router.patch('/briefing/:date/read', async (req, res) => {
     const WorkspaceBriefing = require('../../models/WorkspaceBriefing');
     const dateStr = req.params.date;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return res.json({ ok: false, code: 'INVALID_DATE', error: 'date must be YYYY-MM-DD format' });
+      return sendApiError(res, createApiError('INVALID_DATE', 'date must be YYYY-MM-DD format', 400));
     }
     const briefing = await WorkspaceBriefing.findOneAndUpdate(
       { date: dateStr },
@@ -169,11 +173,11 @@ router.patch('/briefing/:date/read', async (req, res) => {
       { returnDocument: 'after', lean: true },
     );
     if (!briefing) {
-      return res.json({ ok: false, code: 'NOT_FOUND', error: 'No briefing found for this date' });
+      return sendApiError(res, createApiError('NOT_FOUND', 'No briefing found for this date', 404));
     }
     res.json({ ok: true, briefing: await serializeBriefing(briefing) });
   } catch (err) {
-    res.json({ ok: false, code: 'BRIEFING_ERROR', error: err.message });
+    return sendApiError(res, createApiError('BRIEFING_ERROR', err.message || 'Failed to mark briefing as read', 500));
   }
 });
 
@@ -182,12 +186,12 @@ router.delete('/briefing/:date', async (req, res) => {
     const WorkspaceBriefing = require('../../models/WorkspaceBriefing');
     const dateStr = req.params.date;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return res.json({ ok: false, code: 'INVALID_DATE', error: 'date must be YYYY-MM-DD format' });
+      return sendApiError(res, createApiError('INVALID_DATE', 'date must be YYYY-MM-DD format', 400));
     }
     const result = await WorkspaceBriefing.deleteOne({ date: dateStr });
     res.json({ ok: true, deleted: result.deletedCount > 0 });
   } catch (err) {
-    res.json({ ok: false, code: 'BRIEFING_ERROR', error: err.message });
+    return sendApiError(res, createApiError('BRIEFING_ERROR', err.message || 'Failed to delete briefing', 500));
   }
 });
 

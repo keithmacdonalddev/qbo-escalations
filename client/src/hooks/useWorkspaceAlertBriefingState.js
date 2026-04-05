@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { apiFetchJson } from '../api/http.js';
 import { GMAIL_MESSAGES_MUTATED_EVENT } from '../lib/gmailUiEvents.js';
 import {
   ALERT_EXPIRY_MS,
@@ -34,10 +35,9 @@ export default function useWorkspaceAlertBriefingState({ open, workspaceMonitor 
     if (alertFetchedRef.current) return;
     alertFetchedRef.current = true;
 
-    fetch('/api/workspace/alerts/detect')
-      .then((r) => r.json())
+    apiFetchJson('/api/workspace/alerts/detect', {}, 'Failed to detect workspace alerts')
       .then((data) => {
-        if (data.ok && Array.isArray(data.alerts)) {
+        if (Array.isArray(data?.alerts)) {
           setAlerts(data.alerts);
         }
       })
@@ -54,7 +54,7 @@ export default function useWorkspaceAlertBriefingState({ open, workspaceMonitor 
   }, [open, workspaceMonitor?.alerts]);
 
   const logAlertInteraction = useCallback((alert, action) => {
-    fetch('/api/workspace/alerts/interaction', {
+    apiFetchJson('/api/workspace/alerts/interaction', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -63,7 +63,7 @@ export default function useWorkspaceAlertBriefingState({ open, workspaceMonitor 
         action,
         sourceId: alert?.sourceId || '',
       }),
-    }).catch(() => {
+    }, 'Failed to record alert interaction').catch(() => {
       // fire-and-forget
     });
     setAlertReactions(logAlertReaction(alert, action));
@@ -142,10 +142,8 @@ export default function useWorkspaceAlertBriefingState({ open, workspaceMonitor 
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/workspace/briefing/today');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (!cancelled && data.ok && data.briefing) {
+        const data = await apiFetchJson('/api/workspace/briefing/today', {}, 'Failed to load today briefing');
+        if (!cancelled && data?.briefing) {
           setBriefing(data.briefing);
           setBriefingDismissed(false);
           if (!data.briefing.read) setBriefingExpanded(true);
@@ -173,7 +171,7 @@ export default function useWorkspaceAlertBriefingState({ open, workspaceMonitor 
   const markBriefingRead = useCallback(async () => {
     if (!briefing?.date) return;
     try {
-      await fetch(`/api/workspace/briefing/${briefing.date}/read`, { method: 'PATCH' });
+      await apiFetchJson(`/api/workspace/briefing/${briefing.date}/read`, { method: 'PATCH' }, 'Failed to mark briefing as read');
       setBriefing((prev) => (prev ? { ...prev, read: true } : null));
     } catch {
       // Best effort

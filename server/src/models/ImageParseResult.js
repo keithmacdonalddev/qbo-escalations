@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 
 const imageParseResultSchema = new mongoose.Schema({
   // Request context
-  provider:       { type: String, required: true },           // 'lm-studio', 'anthropic', 'openai', 'kimi', 'gemini'
+  provider:       { type: String, required: true },           // 'llm-gateway', 'lm-studio', 'anthropic', 'openai', 'kimi', 'gemini'
   model:          { type: String, default: '' },              // model ID actually used
   modelRequested: { type: String, default: '' },              // model ID user requested
 
@@ -16,6 +16,10 @@ const imageParseResultSchema = new mongoose.Schema({
     finalSizeBytes:    { type: Number, default: 0 },
     wasConverted:      { type: Boolean, default: false },
     conversionTimeMs:  { type: Number, default: 0 },
+    sourceFileName:    { type: String, default: '' },
+    sourceContentType: { type: String, default: '' },
+    sourceSizeBytes:   { type: Number, default: 0 },
+    sourceStoredAt:    { type: Date, default: null },
   },
 
   // Token usage

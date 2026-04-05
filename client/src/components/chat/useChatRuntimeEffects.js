@@ -4,6 +4,7 @@ import { apiFetch } from '../../api/http.js';
 export default function useChatRuntimeEffects({
   aiSettings = null,
   conversationIdFromRoute = null,
+  routeView = 'chat',
   conversationId = null,
   isStreaming = false,
   streamingText = '',
@@ -82,6 +83,8 @@ export default function useChatRuntimeEffects({
   ]);
 
   useEffect(() => {
+    if (routeView !== 'chat') return;
+
     const prev = previousRouteConversationIdRef.current;
     previousRouteConversationIdRef.current = conversationIdFromRoute;
 
@@ -92,7 +95,7 @@ export default function useChatRuntimeEffects({
     } else if (prev && !conversationIdFromRoute) {
       newConversation();
     }
-  }, [conversationId, conversationIdFromRoute, newConversation, selectConversation]);
+  }, [conversationId, conversationIdFromRoute, newConversation, routeView, selectConversation]);
 
   useEffect(() => {
     if (scrollFrameRef.current) {

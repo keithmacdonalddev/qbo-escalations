@@ -2,6 +2,13 @@
 
 const express = require('express');
 const {
+  getProvider,
+  getProviderLabel,
+  getProviderModelId,
+  isAllowedEffort,
+  normalizeProvider,
+} = require('../services/providers/registry');
+const {
   createAgentSession,
   getAgentSession,
   updateAgentSession,
@@ -16,6 +23,93 @@ const {
 } = require('../services/agent-session-runtime');
 
 const router = express.Router();
+const TEST_TIMEOUT_MS = 20_000;
+
+function normalizeReasoningEffort(value, provider) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized && isAllowedEffort(provider, normalized)) return normalized;
+  return 'medium';
+}
+
+function normalizeModelOverride(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function compact(text, max = 240) {
+  const clean = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+  if (!clean) return '';
+  return clean.length <= max ? clean : `${clean.slice(0, max - 3).trimEnd()}...`;
+}
+
+function runModelProbe({ providerId, model, reasoningEffort }) {
+  const provider = getProvider(providerId);
+  const startedAt = Date.now();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let cleanup = null;
+    let responseText = '';
+    let usageMeta = null;
+
+    function finish(fn, value) {
+      if (settled) return;
+      settled = true;
+      try {
+        fn(value);
+      } finally {
+        if (typeof cleanup === 'function') {
+          cleanup = null;
+        }
+      }
+    }
+
+    try {
+      cleanup = provider.chat({
+        messages: [
+          {
+            role: 'user',
+            content: 'Reply with exactly: MODEL_TEST_OK',
+          },
+        ],
+        systemPrompt: 'You are running a model connectivity test. Reply with exactly MODEL_TEST_OK and nothing else.',
+        images: [],
+        model: model || undefined,
+        reasoningEffort,
+        timeoutMs: TEST_TIMEOUT_MS,
+        onChunk: (text) => {
+          if (typeof text === 'string' && responseText.length < 1200) {
+            responseText += text;
+          }
+        },
+        onThinkingChunk: () => {},
+        onDone: (fullResponse, usage) => {
+          usageMeta = usage || null;
+          finish(resolve, {
+            ok: true,
+            fullResponse: typeof fullResponse === 'string' ? fullResponse : responseText,
+            usage: usageMeta,
+            latencyMs: Date.now() - startedAt,
+          });
+        },
+        onError: (err) => {
+          finish(reject, err || new Error('Model test failed'));
+        },
+      });
+    } catch (err) {
+      finish(reject, err);
+      return;
+    }
+
+    setTimeout(() => {
+      if (settled) return;
+      try {
+        const abortData = typeof cleanup === 'function' ? cleanup() : null;
+        usageMeta = abortData?.usage || usageMeta;
+      } catch {}
+      finish(reject, Object.assign(new Error(`Model test timed out after ${TEST_TIMEOUT_MS}ms`), { code: 'TIMEOUT', usage: usageMeta }));
+    }, TEST_TIMEOUT_MS + 250).unref?.();
+  });
+}
 
 function getBaseUrl(req) {
   const forwardedProto = req.headers['x-forwarded-proto'];
@@ -99,6 +193,13 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
     status: 'running',
     metadata: {
       ...(input?.context?.view ? { view: input.context.view } : {}),
+      provider: input?.provider || null,
+      currentProvider: input?.provider || null,
+      primaryModel: input?.primaryModel || null,
+      currentModel: input?.primaryModel || null,
+      fallbackProvider: input?.mode === 'fallback' ? (input?.fallbackProvider || null) : null,
+      fallbackModel: input?.mode === 'fallback' ? (input?.fallbackModel || null) : null,
+      mode: input?.mode || null,
     },
   });
 
@@ -147,12 +248,22 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
             workspaceRuntimeSessionId: data?.sessionId || null,
             provider: data?.provider || data?.primaryProvider || null,
             currentProvider: data?.provider || data?.primaryProvider || null,
+            primaryModel: data?.primaryModel || null,
+            currentModel: data?.primaryModel || null,
             fallbackProvider: data?.fallbackProvider || null,
+            fallbackModel: data?.fallbackModel || null,
             mode: data?.mode || null,
           },
         });
       } else if (eventType === 'done') {
-        updateAgentSession(sessionId, { status: 'done' });
+        updateAgentSession(sessionId, {
+          status: 'done',
+          metadata: {
+            provider: data?.providerUsed || data?.provider || null,
+            currentProvider: data?.providerUsed || data?.provider || null,
+            currentModel: data?.modelUsed || null,
+          },
+        });
       } else if (eventType === 'error') {
         updateAgentSession(sessionId, {
           status: 'error',
@@ -170,8 +281,14 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
           metadata: {
             provider: data?.to || null,
             currentProvider: data?.to || null,
+            currentModel: data?.toModel || null,
             fallbackFrom: data?.from || null,
+            fallbackFromModel: data?.fromModel || null,
             fallbackTo: data?.to || null,
+            fallbackToModel: data?.toModel || null,
+            fallbackReason: data?.reason || null,
+            fallbackDetail: data?.detail || null,
+            fallbackPreflight: Boolean(data?.preflight),
             fallbackAt: new Date().toISOString(),
           },
         });
@@ -180,6 +297,10 @@ async function runWorkspaceSession(sessionId, baseUrl, input) {
           metadata: {
             lastProviderError: data?.message || data?.error || 'Workspace provider error',
             lastProviderErrorProvider: data?.provider || null,
+            lastProviderErrorModel: data?.model || null,
+            lastProviderErrorCode: data?.code || null,
+            lastProviderErrorDetail: data?.detail || null,
+            lastProviderErrorRetriable: Boolean(data?.retriable),
           },
           lastError: data?.message || data?.error || 'Workspace provider error',
         });
@@ -256,6 +377,28 @@ router.get('/sessions', (req, res) => {
     ok: true,
     sessions: listAgentSessions({ agentType, activeOnly }),
   });
+});
+
+router.post('/test-model', async (req, res, next) => {
+  try {
+    const providerId = normalizeProvider(req.body?.provider);
+    const model = normalizeModelOverride(req.body?.model);
+    const reasoningEffort = normalizeReasoningEffort(req.body?.reasoningEffort, providerId);
+    const result = await runModelProbe({ providerId, model, reasoningEffort });
+    const output = compact(result.fullResponse || '');
+    res.json({
+      ok: true,
+      provider: providerId,
+      providerLabel: getProviderLabel(providerId),
+      model: model || getProviderModelId(providerId) || '',
+      reasoningEffort,
+      latencyMs: result.latencyMs,
+      output,
+      usage: result.usage || null,
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.post('/sessions', (req, res) => {

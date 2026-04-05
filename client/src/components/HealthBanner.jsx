@@ -14,6 +14,7 @@ import './HealthBanner.css';
 
 const ENDPOINT_NAMES = {
   'chat/send': 'Chat',
+  'chat/parse-escalation': 'Triage Preview',
   'chat/conversations': 'Conversations',
   'chat/history': 'Chat History',
   'escalations': 'Escalations',
@@ -25,6 +26,7 @@ const ENDPOINT_NAMES = {
   'dev/health': 'System Health',
   'dev/server-errors': 'Error Monitor',
   'dev/monitor': 'Monitor',
+  'image-parser': 'Image Parser',
   'workspace/status': 'Workspace',
   'workspace/briefing': 'Briefing',
   'traces': 'AI Traces',
@@ -120,8 +122,8 @@ export default function HealthBanner({ requests, slowThreshold = 500 }) {
     const slowFeatures = [...new Set(slow.map(r => featureName(r.url)))];
     if (slowFeatures.length > 0) {
       const msg = slowFeatures.length === 1
-        ? `${slowFeatures[0]} is responding slowly`
-        : `${slowFeatures.slice(0, 3).join(', ')}${slowFeatures.length > 3 ? ` +${slowFeatures.length - 3} more` : ''} responding slowly`;
+        ? `Recent ${slowFeatures[0]} request was slow`
+        : `Recent slow requests: ${slowFeatures.slice(0, 3).join(', ')}${slowFeatures.length > 3 ? ` +${slowFeatures.length - 3} more` : ''}`;
       return { level: 'yellow', message: msg, details: dedupedDetails };
     }
 
@@ -166,6 +168,8 @@ export default function HealthBanner({ requests, slowThreshold = 500 }) {
       className={`health-banner ${levelClass}`}
       onClick={canExpand ? () => setExpanded(e => !e) : undefined}
       style={canExpand ? { cursor: 'pointer' } : undefined}
+      role="status"
+      aria-live="polite"
     >
       <span className="health-banner-dot" />
       <span className="health-banner-text">

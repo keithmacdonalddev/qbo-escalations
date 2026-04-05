@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
+import { apiFetch, apiFetchJson } from '../api/http.js';
 import { getProviderShortLabel, PROVIDER_OPTIONS } from '../lib/providerCatalog.js';
 import { buildAlertActionPrompt } from '../lib/workspaceAlertBriefing.js';
 import {
@@ -24,6 +25,8 @@ export default function useWorkspaceAgentPanelActions({
   provider,
   mode,
   fallbackProvider,
+  model,
+  fallbackModel,
   reasoningEffort,
   clearStallWatch,
   resetReasoningState,
@@ -109,8 +112,7 @@ export default function useWorkspaceAgentPanelActions({
       }
       case '/history': {
         addSystemMessage('Loading action history...');
-        fetch('/api/workspace/action-log?limit=50')
-          .then((r) => r.json())
+        apiFetchJson('/api/workspace/action-log?limit=50', {}, 'Failed to fetch action history')
           .then((data) => {
             if (!data.ok || !data.actions || data.actions.length === 0) {
               addSystemMessage('No agent actions recorded yet.');
@@ -151,13 +153,20 @@ export default function useWorkspaceAgentPanelActions({
             ? `${getProviderShortLabel(provider)} + ${getProviderShortLabel(fallbackProvider)} (fallback)`
             : getProviderShortLabel(provider);
           const available = PROVIDER_OPTIONS.map((o) => `\`${o.value}\``).join(', ');
-          addSystemMessage(`**Current provider:** ${modeLabel}\n**Reasoning effort:** ${reasoningEffort}\n\n**Available providers:** ${available}`);
+          addSystemMessage([
+            `**Current provider:** ${modeLabel}`,
+            `**Model override:** ${model || 'provider default'}`,
+            mode === 'fallback' ? `**Fallback model:** ${fallbackModel || 'provider default'}` : '',
+            `**Reasoning effort:** ${reasoningEffort}`,
+            '',
+            `**Available providers:** ${available}`,
+          ].filter(Boolean).join('\n'));
         } else {
           const match = PROVIDER_OPTIONS.find(
             (o) => o.value.toLowerCase() === arg.toLowerCase() || o.label.toLowerCase() === arg.toLowerCase()
           );
           if (match) {
-            patchSession({ provider: match.value });
+            patchSession({ provider: match.value, model: '' });
             addSystemMessage(`Provider switched to **${match.label}** (\`${match.value}\`).`);
           } else {
             const available = PROVIDER_OPTIONS.map((o) => `\`${o.value}\``).join(', ');
@@ -184,11 +193,13 @@ export default function useWorkspaceAgentPanelActions({
           `| Field | Value |`,
           `|-------|-------|`,
           `| Provider | ${modeLabel} |`,
+          `| Model | ${model || 'provider default'} |`,
+          mode === 'fallback' ? `| Fallback Model | ${fallbackModel || 'provider default'} |` : '',
           `| Mode | ${mode} |`,
           `| Reasoning | ${reasoningEffort} |`,
           `| Messages | ${msgCount} |`,
           `| Session ID | \`${workspaceSessionId || 'none'}\` |`,
-        ];
+        ].filter(Boolean);
         addSystemMessage(lines.join('\n'));
         return true;
       }
@@ -199,8 +210,10 @@ export default function useWorkspaceAgentPanelActions({
   }, [
     addSystemMessage,
     fallbackProvider,
+    fallbackModel,
     handleStartNewConversation,
     messages,
+    model,
     mode,
     patchSession,
     provider,
@@ -307,15 +320,11 @@ export default function useWorkspaceAgentPanelActions({
         if (typeof action?.account === 'string' && action.account.trim()) {
           body.account = action.account.trim();
         }
-        const res = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}`, {
+        const data = await apiFetchJson(`/api/gmail/messages/${encodeURIComponent(messageId)}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.ok === false) {
-          throw new Error(data?.error || 'Email action failed');
-        }
+        }, 'Email action failed');
         dispatchGmailMutations({
           messageId,
           account: body.account,
@@ -334,13 +343,9 @@ export default function useWorkspaceAgentPanelActions({
         const query = typeof action?.account === 'string' && action.account.trim()
           ? `?account=${encodeURIComponent(action.account.trim())}`
           : '';
-        const res = await fetch(`/api/gmail/messages/${encodeURIComponent(messageId)}${query}`, {
+        const data = await apiFetchJson(`/api/gmail/messages/${encodeURIComponent(messageId)}${query}`, {
           method: 'DELETE',
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.ok === false) {
-          throw new Error(data?.error || 'Email action failed');
-        }
+        }, 'Email action failed');
         dispatchGmailMutations({
           messageId,
           account: typeof action?.account === 'string' && action.account.trim() ? action.account.trim() : '',
@@ -369,7 +374,7 @@ export default function useWorkspaceAgentPanelActions({
       }
     }
 
-    fetch('/api/workspace/feedback', {
+    apiFetch('/api/workspace/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

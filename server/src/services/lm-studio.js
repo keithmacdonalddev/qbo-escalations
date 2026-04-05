@@ -9,6 +9,7 @@ const fs = require('fs');
 // Configuration
 // ---------------------------------------------------------------------------
 const DEFAULT_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
+const DEFAULT_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_STUDIO_API_KEY || null;
 const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.LM_STUDIO_CHAT_TIMEOUT_MS, 180000);
 const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.LM_STUDIO_PARSE_TIMEOUT_MS, 120000);
 
@@ -32,9 +33,17 @@ function resolveTransport(baseUrl) {
   };
 }
 
-function jsonRequest(method, urlPath, body, timeoutMs) {
+function buildDefaultHeaders(extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  if (DEFAULT_API_TOKEN && !headers.Authorization && !headers.authorization) {
+    headers.Authorization = `Bearer ${DEFAULT_API_TOKEN}`;
+  }
+  return headers;
+}
+
+function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
-    const { transport, hostname, port } = resolveTransport(DEFAULT_API_URL);
+    const { transport, hostname, port } = resolveTransport(baseUrl);
     const payload = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
 
     const options = {
@@ -42,7 +51,11 @@ function jsonRequest(method, urlPath, body, timeoutMs) {
       port,
       path: urlPath,
       method,
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      headers: buildDefaultHeaders({
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        ...extraHeaders,
+      }),
       timeout: timeoutMs || 30000,
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
@@ -59,33 +72,175 @@ function jsonRequest(method, urlPath, body, timeoutMs) {
   });
 }
 
+function rawGet(baseUrl, urlPath, timeoutMs, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    const { transport, hostname, port } = resolveTransport(baseUrl);
+    const options = {
+      hostname,
+      port,
+      path: urlPath,
+      headers: buildDefaultHeaders({
+        'Accept': 'application/json',
+        ...extraHeaders,
+      }),
+      timeout: timeoutMs || 30000,
+    };
+
+    const req = transport.get(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      const err = new Error('LM Studio request timed out');
+      err.code = 'TIMEOUT';
+      reject(err);
+    });
+  });
+}
+
+function jsonRequest(method, urlPath, body, timeoutMs, extraHeaders) {
+  return rawRequest(DEFAULT_API_URL, method, urlPath, body, timeoutMs, extraHeaders);
+}
+
+function parseNativeModelsSnapshot(json) {
+  if (!json || !Array.isArray(json.models)) return null;
+
+  const llmModels = json.models.filter((model) => model && model.type !== 'embedding');
+  const loadedEntry = llmModels.find((model) =>
+    Array.isArray(model.loaded_instances) && model.loaded_instances.some((instance) => instance?.id)
+  ) || null;
+
+  const loadedModel = loadedEntry?.loaded_instances?.find((instance) => instance?.id)?.id || null;
+  const firstModel = llmModels[0] || null;
+  const availableModel = loadedModel
+    || firstModel?.key
+    || firstModel?.loaded_instances?.find((instance) => instance?.id)?.id
+    || null;
+
+  return {
+    source: 'native',
+    loadedModel,
+    availableModel,
+    downloadedModelCount: llmModels.length,
+    totalModelCount: json.models.length,
+    status: loadedModel ? 'ready' : availableModel ? 'no_model_loaded' : 'no_models_available',
+  };
+}
+
+function parseCompatModelsSnapshot(json) {
+  if (!json || !Array.isArray(json.data)) return null;
+
+  const firstModel = json.data.find((entry) => entry && entry.id) || null;
+  return {
+    source: 'compat',
+    loadedModel: firstModel?.id || null,
+    availableModel: firstModel?.id || null,
+    downloadedModelCount: firstModel ? Math.max(json.data.length, 1) : 0,
+    totalModelCount: Array.isArray(json.data) ? json.data.length : 0,
+    status: firstModel?.id ? 'ready' : 'no_models_available',
+  };
+}
+
+function buildErrorSnapshot(status, reason, source = 'unknown') {
+  return {
+    source,
+    loadedModel: null,
+    availableModel: null,
+    downloadedModelCount: 0,
+    totalModelCount: 0,
+    status,
+    reason,
+  };
+}
+
+function isLegacyModelsFallbackStatus(statusCode) {
+  return statusCode === 404 || statusCode === 405 || statusCode === 501;
+}
+
+function formatModelEndpointError(baseUrl, err) {
+  if (err?.code === 'TIMEOUT') {
+    return buildErrorSnapshot('timeout', 'LM Studio connection timed out');
+  }
+
+  const errorText = `${err?.code || ''} ${err?.message || ''}`;
+  if (/ECONNREFUSED|ECONNRESET|ENOTFOUND/i.test(errorText)) {
+    return buildErrorSnapshot('offline', `Cannot reach LM Studio at ${baseUrl}`);
+  }
+
+  return buildErrorSnapshot('error', err?.message || 'LM Studio model discovery failed');
+}
+
+async function inspectModelsEndpoint(baseUrl, urlPath, source, timeoutMs) {
+  try {
+    const res = await rawGet(baseUrl, urlPath, timeoutMs);
+
+    if (res.statusCode === 401 || res.statusCode === 403) {
+      return {
+        done: true,
+        snapshot: buildErrorSnapshot(
+          DEFAULT_API_TOKEN ? 'auth_rejected' : 'auth_required',
+          DEFAULT_API_TOKEN ? 'LM Studio API token rejected' : 'LM Studio API token required',
+          source
+        ),
+      };
+    }
+
+    if (res.statusCode >= 200 && res.statusCode < 300) {
+      const parsed = safeJsonParse(res.body);
+      const snapshot = parseNativeModelsSnapshot(parsed) || parseCompatModelsSnapshot(parsed);
+      if (snapshot) {
+        return {
+          done: true,
+          snapshot,
+        };
+      }
+
+      return {
+        done: !isLegacyModelsFallbackStatus(res.statusCode),
+        snapshot: buildErrorSnapshot('error', 'Invalid response from LM Studio', source),
+      };
+    }
+
+    if (isLegacyModelsFallbackStatus(res.statusCode)) {
+      return { done: false, snapshot: null };
+    }
+
+    return {
+      done: true,
+      snapshot: buildErrorSnapshot('error', `LM Studio error (HTTP ${res.statusCode})`, source),
+    };
+  } catch (err) {
+    return {
+      done: false,
+      snapshot: formatModelEndpointError(baseUrl, err),
+    };
+  }
+}
+
+async function getModelSnapshot(baseUrl = DEFAULT_API_URL, options = {}) {
+  const timeoutMs = parsePositiveInt(options.timeoutMs, 5000);
+
+  const native = await inspectModelsEndpoint(baseUrl, '/api/v1/models', 'native', timeoutMs);
+  if (native.done && native.snapshot) return native.snapshot;
+
+  const compat = await inspectModelsEndpoint(baseUrl, '/v1/models', 'compat', timeoutMs);
+  if (compat.snapshot) return compat.snapshot;
+
+  return native.snapshot || compat.snapshot || buildErrorSnapshot('offline', `Cannot reach LM Studio at ${baseUrl}`);
+}
+
 // ---------------------------------------------------------------------------
 // Model auto-detection
 // ---------------------------------------------------------------------------
 async function getLoadedModel(baseUrl) {
   if (_cachedModelName) return _cachedModelName;
-  return new Promise((resolve) => {
-    const url = new URL('/v1/models', baseUrl || DEFAULT_API_URL);
-    const t = url.protocol === 'https:' ? https : http;
-
-    const req = t.get(url, { timeout: 5000 }, (res) => {
-      let body = '';
-      res.on('data', (chunk) => { body += chunk; });
-      res.on('end', () => {
-        try {
-          const json = JSON.parse(body);
-          const modelId = json?.data?.[0]?.id;
-          _cachedModelName = modelId || 'local';
-        } catch {
-          _cachedModelName = 'local';
-        }
-        console.log('[lm-studio] Detected model:', _cachedModelName);
-        resolve(_cachedModelName);
-      });
-    });
-    req.on('error', () => { _cachedModelName = 'local'; resolve('local'); });
-    req.on('timeout', () => { req.destroy(); _cachedModelName = 'local'; resolve('local'); });
-  });
+  const snapshot = await getModelSnapshot(baseUrl || DEFAULT_API_URL);
+  _cachedModelName = snapshot.loadedModel || snapshot.availableModel || 'local';
+  console.log('[lm-studio] Detected model:', _cachedModelName, `(${snapshot.source})`);
+  return _cachedModelName;
 }
 
 function clearModelCache() {
@@ -213,6 +368,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(body),
+        ...buildDefaultHeaders(),
       },
       timeout: effectiveTimeoutMs,
     }, (res) => {
@@ -449,8 +605,10 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
 // ---------------------------------------------------------------------------
 async function warmUp() {
   try {
-    const model = await getLoadedModel(DEFAULT_API_URL);
-    console.log('[lm-studio] Warm-up complete — model:', model);
+    const snapshot = await getModelSnapshot(DEFAULT_API_URL);
+    const model = snapshot.loadedModel || snapshot.availableModel || 'local';
+    _cachedModelName = model;
+    console.log('[lm-studio] Warm-up complete — model:', model, `status: ${snapshot.status}`);
   } catch (err) {
     console.warn('[lm-studio] Warm-up failed:', err.message);
   }
@@ -480,4 +638,12 @@ function safeJsonParse(value) {
 // ---------------------------------------------------------------------------
 // Exports — same shape as claude.js / codex.js
 // ---------------------------------------------------------------------------
-module.exports = { chat, parseEscalation, transcribeImage, warmUp, getLoadedModel, clearModelCache };
+module.exports = {
+  chat,
+  parseEscalation,
+  transcribeImage,
+  warmUp,
+  getLoadedModel,
+  getModelSnapshot,
+  clearModelCache,
+};

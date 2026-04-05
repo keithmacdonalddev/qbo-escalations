@@ -1,12 +1,9 @@
-import { apiFetch } from './http.js';
+import { apiFetchJson } from './http.js';
 
 const BASE = '/api/chat/image-archive';
 
 export async function getArchiveStats() {
-  const res = await apiFetch(`${BASE}/stats`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch archive stats');
-  return data;
+  return apiFetchJson(`${BASE}/stats`, { noDedupe: true }, 'Failed to fetch archive stats');
 }
 
 export async function getAllArchivedImages({ grade, dateFrom, dateTo, conversationId, limit = 100, offset = 0 } = {}) {
@@ -17,9 +14,7 @@ export async function getAllArchivedImages({ grade, dateFrom, dateTo, conversati
   if (dateFrom) params.set('dateFrom', dateFrom);
   if (dateTo) params.set('dateTo', dateTo);
   if (conversationId) params.set('conversationId', conversationId);
-  const res = await apiFetch(`${BASE}/all?${params}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch images');
+  const data = await apiFetchJson(`${BASE}/all?${params}`, { noDedupe: true }, 'Failed to fetch archived images');
   return { images: data.images, total: data.total };
 }
 

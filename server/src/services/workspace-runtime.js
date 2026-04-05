@@ -11,28 +11,48 @@ let _pruneInterval = null;
 // --- Cross-request coordination (chat agent <-> background monitor) ---
 let _chatAgentLock = false;
 let _chatAgentLockAt = 0;
+let _chatAgentLockOwner = null;
 const LOCK_TIMEOUT_MS = 3 * 60 * 1000; // 3 min auto-release
 
 const _recentlyProcessed = new Map(); // messageId -> timestamp
 const RECENTLY_PROCESSED_TTL = 10 * 60 * 1000; // 10 min
 const MAX_RECENTLY_PROCESSED = 200;
 
-function acquireChatLock() {
+function acquireChatLock(ownerId = 'unknown') {
+  // Check for stale lock (auto-release after timeout)
+  if (_chatAgentLock && _chatAgentLockAt && (Date.now() - _chatAgentLockAt > LOCK_TIMEOUT_MS)) {
+    console.warn(`[workspace-runtime] Auto-releasing stale chat lock held by ${_chatAgentLockOwner} for ${Date.now() - _chatAgentLockAt}ms`);
+    _chatAgentLock = false;
+    _chatAgentLockAt = 0;
+    _chatAgentLockOwner = null;
+  }
+
+  // Check-and-set: if already locked, return false
+  if (_chatAgentLock) return false;
+
   _chatAgentLock = true;
   _chatAgentLockAt = Date.now();
+  _chatAgentLockOwner = ownerId;
   return true;
 }
 
-function releaseChatLock() {
+function releaseChatLock(ownerId = null) {
+  if (ownerId && _chatAgentLockOwner && ownerId !== _chatAgentLockOwner) {
+    return false;
+  }
   _chatAgentLock = false;
   _chatAgentLockAt = 0;
+  _chatAgentLockOwner = null;
+  return true;
 }
 
 function isChatAgentActive() {
   // Auto-release stale locks
-  if (_chatAgentLock && Date.now() - _chatAgentLockAt > LOCK_TIMEOUT_MS) {
+  if (_chatAgentLock && _chatAgentLockAt && (Date.now() - _chatAgentLockAt > LOCK_TIMEOUT_MS)) {
+    console.warn(`[workspace-runtime] Auto-releasing stale chat lock held by ${_chatAgentLockOwner} for ${Date.now() - _chatAgentLockAt}ms`);
     _chatAgentLock = false;
     _chatAgentLockAt = 0;
+    _chatAgentLockOwner = null;
   }
   return _chatAgentLock;
 }

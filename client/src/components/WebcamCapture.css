@@ -8,11 +8,10 @@
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.72);
+  background: rgba(15, 18, 24, 0.85);
   display: flex;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(6px);
 }
 
 .webcam-modal {

@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import AgentDock from '../AgentDock.jsx';
+import TraceLogsDrawer from './TraceLogsDrawer.jsx';
 
 const AGENT_SURFACE_TABS = [
   { id: 'chat', label: 'Chat' },
@@ -10,15 +12,17 @@ function TabStrip({ surfaceTab, onSurfaceTabChange }) {
   return (
     <div className="compose-card-header-row">
       <div className="compose-card-tab-row">
-        <div className="compose-card-tab-strip" role="tablist" aria-label="Agent tabs">
+        <div className="compose-card-tab-strip" role="tablist" aria-label="Compose mode">
           {AGENT_SURFACE_TABS.map((tab) => (
             <button
               key={tab.id}
+              id={`surface-tab-${tab.id}`}
               className={`compose-card-tab${surfaceTab === tab.id ? ' is-active' : ''}`}
               onClick={() => onSurfaceTabChange(tab.id)}
               type="button"
               role="tab"
               aria-selected={surfaceTab === tab.id}
+              aria-controls={`surface-tabpanel-${tab.id}`}
             >
               {tab.label}
             </button>
@@ -41,13 +45,14 @@ export default function ChatSurfaceShell({
   exportCopied,
   onStartFreshConversation,
   onRetryLastResponse,
-  onOpenTraceLogs,
+  onOpenTraceLogs, // kept for backward compat but unused — drawer replaces navigation
   onCopyConversation,
   threadContent,
   composeArea,
   children,
 }) {
-  const showActionRow = messages.length > 1 && !isStreaming && conversationId;
+  const hasConversation = messages.length > 1 && !isStreaming && conversationId;
+  const [traceDrawerOpen, setTraceDrawerOpen] = useState(false);
 
   // Support both split props (threadContent + composeArea) and legacy children
   const thread = threadContent || null;
@@ -56,43 +61,43 @@ export default function ChatSurfaceShell({
 
   if (surfaceTab === 'chat') {
     return (
-      <>
-        {showActionRow && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--sp-2)', padding: '0 var(--sp-2)' }}>
-            <button
-              className="copy-btn"
-              onClick={onStartFreshConversation}
-              type="button"
-              title="Start a new conversation"
-            >
-              New Chat
-            </button>
-            {canRetryLastResponse && (
-              <button
-                className="copy-btn"
-                onClick={onRetryLastResponse}
-                type="button"
-              >
-                Retry Last Response
-              </button>
-            )}
-            <button
-              className="copy-btn"
-              onClick={onOpenTraceLogs}
-              type="button"
-              title="Open full trace logs and timings for this conversation"
-            >
-              View Trace Logs
-            </button>
-            <button
-              className={`copy-btn${exportCopied ? ' is-copied' : ''}`}
-              onClick={onCopyConversation}
-              type="button"
-            >
-              {exportCopied ? 'Copied to clipboard' : 'Copy full conversation'}
-            </button>
-          </div>
-        )}
+      <div role="tabpanel" id="surface-tabpanel-chat" aria-labelledby="surface-tab-chat" className="chat-input-area">
+        <h2 className="sr-only">Chat</h2>
+        <div className="chat-action-row">
+          <button
+            className="copy-btn"
+            onClick={onStartFreshConversation}
+            type="button"
+            title="Start a new conversation"
+          >
+            New Chat
+          </button>
+          <button
+            className="copy-btn"
+            onClick={onRetryLastResponse}
+            type="button"
+            disabled={!canRetryLastResponse}
+          >
+            Retry Last Response
+          </button>
+          <button
+            className="copy-btn"
+            onClick={() => setTraceDrawerOpen(true)}
+            type="button"
+            title="View trace logs for this conversation"
+            disabled={!hasConversation}
+          >
+            View Trace Logs
+          </button>
+          <button
+            className={`copy-btn${exportCopied ? ' is-copied' : ''}`}
+            onClick={onCopyConversation}
+            type="button"
+            disabled={!hasConversation}
+          >
+            {exportCopied ? 'Copied to clipboard' : 'Copy full conversation'}
+          </button>
+        </div>
 
         {legacyChildren || (
           <>
@@ -101,13 +106,24 @@ export default function ChatSurfaceShell({
             {compose}
           </>
         )}
-      </>
+
+        <TraceLogsDrawer
+          conversationId={conversationId}
+          open={traceDrawerOpen}
+          onClose={() => setTraceDrawerOpen(false)}
+        />
+      </div>
     );
   }
 
   // workspace and copilot delegate to AgentDock
   return (
-    <div className="chat-input-area">
+    <div
+      role="tabpanel"
+      id={`surface-tabpanel-${surfaceTab}`}
+      aria-labelledby={`surface-tab-${surfaceTab}`}
+      className="chat-input-area"
+    >
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
         <AgentDock
           chat={chat}

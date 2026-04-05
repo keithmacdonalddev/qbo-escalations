@@ -46,7 +46,12 @@ async function listConversations({ limit, skip, search, includeTotal }) {
 
   const escapedSearch = escapeRegexLiteral(search);
   const filter = escapedSearch
-    ? { title: { $regex: escapedSearch, $options: 'i' } }
+    ? {
+        $or: [
+          { title: { $regex: escapedSearch, $options: 'i' } },
+          { 'messages.0.content': { $regex: escapedSearch, $options: 'i' } },
+        ],
+      }
     : {};
 
   try {

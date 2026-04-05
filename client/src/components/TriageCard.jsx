@@ -1,10 +1,10 @@
 import { motion } from 'framer-motion';
 
 const SEVERITY_COLORS = {
-  P1: { bg: 'var(--danger-subtle)', border: 'var(--danger)', text: 'var(--danger)' },
-  P2: { bg: 'var(--warning-subtle)', border: 'var(--warning)', text: 'var(--warning)' },
-  P3: { bg: 'color-mix(in srgb, var(--accent) 8%, var(--bg-raised))', border: 'var(--accent)', text: 'var(--accent)' },
-  P4: { bg: 'var(--bg-sunken)', border: 'var(--line)', text: 'var(--ink-secondary)' },
+  P1: { bg: 'rgba(242, 63, 67, 0.06)', border: '#f23f43', borderSubtle: 'rgba(242, 63, 67, 0.18)', text: '#f23f43' },
+  P2: { bg: 'rgba(240, 178, 50, 0.06)', border: '#f0b232', borderSubtle: 'rgba(240, 178, 50, 0.18)', text: '#f0b232' },
+  P3: { bg: 'rgba(88, 101, 242, 0.06)', border: '#5865f2', borderSubtle: 'rgba(88, 101, 242, 0.18)', text: '#5865f2' },
+  P4: { bg: 'rgba(35, 165, 89, 0.06)', border: '#23a559', borderSubtle: 'rgba(35, 165, 89, 0.18)', text: '#23a559' },
 };
 
 export default function TriageCard({ triageCard }) {
@@ -19,11 +19,12 @@ export default function TriageCard({ triageCard }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
       style={{
-        background: colors.bg,
-        border: `2px solid ${colors.border}`,
-        borderRadius: 'var(--radius-lg)',
-        padding: 'var(--sp-4) var(--sp-5)',
-        marginBottom: 'var(--sp-4)',
+        background: '#232428',
+        border: `1px solid rgba(255,255,255,0.06)`,
+        borderLeft: `4px solid ${colors.border}`,
+        borderRadius: '10px',
+        padding: '8px 12px',
+        marginBottom: '6px',
         maxWidth: '88%',
         alignSelf: 'flex-start',
       }}
@@ -32,37 +33,42 @@ export default function TriageCard({ triageCard }) {
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 'var(--sp-3)',
-        marginBottom: 'var(--sp-3)',
+        gap: '6px',
+        marginBottom: '4px',
       }}>
         <span style={{
           background: colors.border,
           color: '#fff',
           fontWeight: 700,
-          fontSize: 'var(--text-xs)',
-          padding: '2px 8px',
-          borderRadius: 'var(--radius-sm)',
+          fontSize: '10px',
+          padding: '1px 6px',
+          borderRadius: '8px',
+          height: '16px',
+          display: 'inline-flex',
+          alignItems: 'center',
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
           fontFamily: 'var(--font-mono)',
+          lineHeight: 1,
         }}>
           {severity}
         </span>
         <span style={{
-          fontSize: 'var(--text-sm)',
+          fontSize: '12px',
           fontWeight: 600,
-          color: 'var(--ink)',
+          color: '#949ba4',
           textTransform: 'capitalize',
         }}>
           {(triageCard.category || 'unknown').replace(/-/g, ' ')}
         </span>
         <span style={{
           marginLeft: 'auto',
-          fontSize: 'var(--text-xs)',
-          color: 'var(--ink-tertiary)',
-          fontFamily: 'var(--font-mono)',
+          fontSize: '9px',
+          fontWeight: 600,
+          color: '#6d6f78',
           textTransform: 'uppercase',
-          letterSpacing: '0.06em',
+          letterSpacing: '0.04em',
+          opacity: 0.5,
         }}>
           Triage
         </span>
@@ -72,10 +78,10 @@ export default function TriageCard({ triageCard }) {
       {(triageCard.agent !== 'Unknown' || triageCard.client !== 'Unknown') && (
         <div style={{
           display: 'flex',
-          gap: 'var(--sp-6)',
-          fontSize: 'var(--text-sm)',
-          color: 'var(--ink-secondary)',
-          marginBottom: 'var(--sp-3)',
+          gap: '12px',
+          fontSize: '12px',
+          color: '#dbdee1',
+          marginBottom: '3px',
         }}>
           {triageCard.agent && triageCard.agent !== 'Unknown' && (
             <span><strong>Agent:</strong> {triageCard.agent}</span>
@@ -89,10 +95,10 @@ export default function TriageCard({ triageCard }) {
       {/* Instant read */}
       {triageCard.read && (
         <div style={{
-          fontSize: 'var(--text-sm)',
-          color: 'var(--ink)',
-          lineHeight: 1.55,
-          marginBottom: triageCard.action ? 'var(--sp-3)' : 0,
+          fontSize: '13px',
+          color: '#949ba4',
+          lineHeight: 1.35,
+          marginBottom: triageCard.action ? '4px' : 0,
         }}>
           {triageCard.read}
         </div>
@@ -101,13 +107,13 @@ export default function TriageCard({ triageCard }) {
       {/* Action line */}
       {triageCard.action && (
         <div style={{
-          fontSize: 'var(--text-sm)',
+          fontSize: '13px',
           fontWeight: 600,
-          color: colors.text,
-          borderTop: `1px solid color-mix(in srgb, ${colors.border} 30%, transparent)`,
-          paddingTop: 'var(--sp-3)',
+          color: '#5865f2',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          paddingTop: '3px',
         }}>
-          Tell the agent: {triageCard.action}
+          Immediate next step: {triageCard.action}
         </div>
       )}
     </motion.div>

@@ -1,4 +1,4 @@
-import { apiFetch } from './http.js';
+import { apiFetchJson } from './http.js';
 const BASE = '/api/usage';
 
 function buildParams(dateFrom, dateTo, extra) {
@@ -11,57 +11,33 @@ function buildParams(dateFrom, dateTo, extra) {
 }
 
 export async function getUsageSummary(dateFrom, dateTo) {
-  const res = await apiFetch(`${BASE}/summary${buildParams(dateFrom, dateTo)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage summary');
-  return data;
+  return apiFetchJson(`${BASE}/summary${buildParams(dateFrom, dateTo)}`, {}, 'Failed to fetch usage summary');
 }
 
 export async function getUsageByProvider(dateFrom, dateTo) {
-  const res = await apiFetch(`${BASE}/by-provider${buildParams(dateFrom, dateTo)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage by provider');
-  return data;
+  return apiFetchJson(`${BASE}/by-provider${buildParams(dateFrom, dateTo)}`, {}, 'Failed to fetch usage by provider');
 }
 
 export async function getUsageByService(dateFrom, dateTo) {
-  const res = await apiFetch(`${BASE}/by-service${buildParams(dateFrom, dateTo)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage by service');
-  return data;
+  return apiFetchJson(`${BASE}/by-service${buildParams(dateFrom, dateTo)}`, {}, 'Failed to fetch usage by service');
 }
 
 export async function getUsageTrends(dateFrom, dateTo, interval = 'daily') {
-  const res = await apiFetch(`${BASE}/trends${buildParams(dateFrom, dateTo, { interval })}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage trends');
-  return data;
+  return apiFetchJson(`${BASE}/trends${buildParams(dateFrom, dateTo, { interval })}`, {}, 'Failed to fetch usage trends');
 }
 
 export async function getUsageByCategory(dateFrom, dateTo, service) {
-  const res = await apiFetch(`${BASE}/by-category${buildParams(dateFrom, dateTo, { service })}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage by category');
-  return data;
+  return apiFetchJson(`${BASE}/by-category${buildParams(dateFrom, dateTo, { service })}`, {}, 'Failed to fetch usage by category');
 }
 
 export async function getUsageRecent(dateFrom, dateTo, page = 1, limit = 50) {
-  const res = await apiFetch(`${BASE}/recent${buildParams(dateFrom, dateTo, { page, limit })}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch recent usage');
-  return data;
+  return apiFetchJson(`${BASE}/recent${buildParams(dateFrom, dateTo, { page, limit })}`, {}, 'Failed to fetch recent usage');
 }
 
 export async function getUsageByConversation(conversationId) {
-  const res = await apiFetch(`${BASE}/conversation/${encodeURIComponent(conversationId)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch conversation usage');
-  return data;
+  return apiFetchJson(`${BASE}/conversation/${encodeURIComponent(conversationId)}`, {}, 'Failed to fetch conversation usage');
 }
 
 export async function getUsageModels(dateFrom, dateTo) {
-  const res = await apiFetch(`${BASE}/models${buildParams(dateFrom, dateTo)}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'Failed to fetch usage by model');
-  return data;
+  return apiFetchJson(`${BASE}/models${buildParams(dateFrom, dateTo)}`, {}, 'Failed to fetch usage by model');
 }

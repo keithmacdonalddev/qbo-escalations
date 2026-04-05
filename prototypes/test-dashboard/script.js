@@ -4,6 +4,8 @@
 
 const STORAGE_KEY = 'test-runner-history';
 const CIRCUMFERENCE = 326.73; // 2 * PI * 52
+const STREAM_IDLE_WARNING_MS = 45_000;
+const STREAM_IDLE_FAIL_MS = 210_000;
 
 // DOM refs
 const btnRun = document.getElementById('btnRun');
@@ -34,6 +36,7 @@ let currentResults = [];
 let activeFilter = 'all';
 let runStartTime = null;
 let durationTimer = null;
+let streamHealthTimer = null;
 let selectedGroup = 'all';
 let featureGroups = [];
 
@@ -466,6 +469,28 @@ function createTestCard(result) {
   return card;
 }
 
+function createCommentCard(note) {
+  const card = document.createElement('div');
+  const metaParts = [];
+  if (note.file) metaParts.push(note.file);
+  if (note.kind) metaParts.push(String(note.kind).replace(/-/g, ' '));
+
+  card.className = 'test-card comment';
+  card.dataset.status = 'comment';
+  card.innerHTML =
+    '<div class="test-badge info">i</div>' +
+    '<div class="test-body">' +
+      '<div class="test-name comment-name">' + escapeHtml(note.message) + '</div>' +
+      (metaParts.length > 0 ? '<div class="test-meta"><span class="test-duration">' + escapeHtml(metaParts.join(' • ')) + '</span></div>' : '') +
+    '</div>';
+
+  if (activeFilter !== 'all') {
+    card.classList.add('filter-hidden');
+  }
+
+  return card;
+}
+
 // Add error detail to a test card
 function attachError(testName, errorData) {
   const cards = resultsStream.querySelectorAll('.test-card');
@@ -527,6 +552,8 @@ function runTests() {
   let runHadError = false;
   let runExitCode = null;
   let runErrorMessage = '';
+  let lastEventAt = Date.now();
+  let idleWarningShown = false;
 
   // Determine which group label to show
   const groupLabel = selectedGroup === 'all'
@@ -561,6 +588,30 @@ function runTests() {
   durationTimer = setInterval(() => {
     totalTime.textContent = formatDuration(Date.now() - runStartTime);
   }, 100);
+
+  streamHealthTimer = setInterval(() => {
+    if (runFinalized) return;
+
+    const idleMs = Date.now() - lastEventAt;
+    if (!idleWarningShown && idleMs >= STREAM_IDLE_WARNING_MS) {
+      idleWarningShown = true;
+      const noteCard = createCommentCard({
+        kind: 'warning',
+        message: 'No test runner activity for 45s. This run may be stalled.',
+      });
+      resultsStream.appendChild(noteCard);
+      noteCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      progressLabel.textContent = 'Waiting for output...';
+      progressDetail.textContent = 'No events from server';
+    }
+
+    if (idleMs >= STREAM_IDLE_FAIL_MS) {
+      runHadError = true;
+      runExitCode = runExitCode || 1;
+      runErrorMessage = 'No test runner activity for 210s. The stream appears stale.';
+      finalizeRun(Date.now() - runStartTime);
+    }
+  }, 1000);
 
   let passed = 0, failed = 0, skipped = 0, total = 0, planTotal = null;
 
@@ -610,6 +661,8 @@ function runTests() {
     let buffer = '';
 
     function processChunk({ done, value }) {
+      if (runFinalized) return;
+
       if (done) {
         const trailingEvent = parseSSEBlock(buffer);
         if (trailingEvent) {
@@ -630,10 +683,19 @@ function runTests() {
         }
       }
 
-      reader.read().then(processChunk);
+      reader.read().then(processChunk).catch(err => {
+        runHadError = true;
+        runExitCode = runExitCode || 1;
+        runErrorMessage = extractEventMessage(err) || 'The test runner stream was interrupted';
+        finalizeRun(Date.now() - runStartTime);
+      });
     }
 
     function handleSSEEvent(event, data) {
+      if (runFinalized) return;
+      lastEventAt = Date.now();
+      idleWarningShown = false;
+
       if (event === 'run-start') {
         progressLabel.textContent = 'Starting...';
         progressDetail.textContent = data.pattern || 'test suite';
@@ -687,11 +749,20 @@ function runTests() {
         }
         finalizeRun(data.durationMs);
       } else if (event === 'comment') {
-        // Could display comments, but skip for cleanliness
+        if (!data || !data.message) return;
+        const noteCard = createCommentCard(data);
+        resultsStream.appendChild(noteCard);
+        noteCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        progressDetail.textContent = data.file || data.message;
       }
     }
 
-    reader.read().then(processChunk);
+    reader.read().then(processChunk).catch(err => {
+      runHadError = true;
+      runExitCode = runExitCode || 1;
+      runErrorMessage = extractEventMessage(err) || 'The test runner stream was interrupted';
+      finalizeRun(Date.now() - runStartTime);
+    });
   }).catch(err => {
     console.error('Test run fetch error:', err);
     runHadError = true;
@@ -703,6 +774,9 @@ function runTests() {
 function finishRun({ passed, failed, skipped, total, durationMs, exitCode, hadError, errorMessage, groupLabel }) {
   running = false;
   clearInterval(durationTimer);
+  durationTimer = null;
+  clearInterval(streamHealthTimer);
+  streamHealthTimer = null;
 
   const dur = durationMs || (Date.now() - runStartTime);
   const success = !hadError && failed === 0 && (exitCode == null || exitCode === 0);

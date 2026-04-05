@@ -2,8 +2,11 @@
 
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 
-const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
+const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
 
 // ---------------------------------------------------------------------------
 // Workspace Proactive AI Reasoning
@@ -21,22 +24,18 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 //   - Low reasoning effort to keep costs down
 // ---------------------------------------------------------------------------
 
-const PROACTIVE_SYSTEM_PROMPT = `You are Keith's executive assistant. A situation has been detected that may need attention.
+function getProactiveSystemPrompt() {
+  return getRenderedAgentPrompt('workspace-proactive');
+}
 
-Analyze the situation and provide a SHORT recommendation (2-3 sentences max).
-- If immediate action is needed, say what and why.
-- If it can wait, say so and suggest when to revisit.
-- Be specific: include times, confirmation codes, amounts, names.
-- Do NOT use ACTION commands. This is advisory only.
-- Do NOT be generic. Use the actual data provided.
-
-After your recommendation, provide 1-3 suggested follow-up prompts the user could send to you for deeper help. Format them on separate lines prefixed with "SUGGEST: ". These should be specific, actionable questions or requests.
-
-Example:
-Your flight AC8839 departs in 2 hours from YHZ at 3:15 PM. You should leave for the airport within the next 30 minutes to allow time for security.
-SUGGEST: Check my flight status for AC8839
-SUGGEST: What's the weather at my destination?
-SUGGEST: Do I have any conflicts if my flight is delayed?`;
+function ensureIsolatedClaudeRoot() {
+  try {
+    fs.mkdirSync(CLAUDE_ISOLATED_ROOT, { recursive: true });
+  } catch {
+    // Surface the real spawn failure later if this directory cannot be used.
+  }
+  return CLAUDE_ISOLATED_ROOT;
+}
 
 const MAX_CALLS_PER_HOUR = 3;
 const PROACTIVE_TIMEOUT_MS = 30_000;
@@ -124,7 +123,7 @@ function parseProactiveResponse(rawText) {
 
 async function evaluateProactiveAction(trigger) {
   // trigger: { type: 'alert'|'pattern'|'entity', data: {...}, context: string }
-  const prompt = `${PROACTIVE_SYSTEM_PROMPT}\n\n---\nSituation:\n${trigger.context || JSON.stringify(trigger.data, null, 2)}`;
+  const prompt = `${getProactiveSystemPrompt()}\n\n---\nSituation:\n${trigger.context || JSON.stringify(trigger.data, null, 2)}`;
 
   // Record the call attempt for rate limiting (cap at 100 entries)
   _callLog.push(Date.now());
@@ -152,8 +151,13 @@ async function evaluateProactiveAction(trigger) {
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: true,
-        cwd: PROJECT_ROOT,
-        env: { ...process.env, CLAUDECODE: undefined },
+        cwd: ensureIsolatedClaudeRoot(),
+        env: {
+          ...process.env,
+          CLAUDECODE: undefined,
+          CLAUDE_PROJECT_DIR: '',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        },
       });
     } catch (err) {
       return reject(new Error(`Proactive CLI spawn error: ${err.message}`));

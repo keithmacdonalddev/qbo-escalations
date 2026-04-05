@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar.jsx';
 import { ChatView } from './components/Chat.jsx';
 import EscalationDashboard from './components/EscalationDashboard.jsx';
 import PlaybookEditor from './components/PlaybookEditor.jsx';
+import AgentsView from './components/AgentsView.jsx';
 import TemplateLibrary from './components/TemplateLibrary.jsx';
 import Analytics from './components/Analytics.jsx';
 import ImageGallery from './components/ImageGallery.jsx';
@@ -15,6 +16,7 @@ import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import EscalationDetail from './components/EscalationDetail.jsx';
 import Settings from './components/Settings.jsx';
 import InvestigationsView from './components/InvestigationsView.jsx';
+import ChatRoom from './components/ChatRoom.jsx';
 import RightSidebar from './components/RightSidebar.jsx';
 import RequestWaterfall from './components/RequestWaterfall.jsx';
 import HealthBanner from './components/HealthBanner.jsx';
@@ -37,7 +39,16 @@ import { tel, TEL } from './lib/devTelemetry.js';
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      const saved = localStorage.getItem('sidebar-collapsed');
+      return saved !== null ? saved === 'true' : true;
+    } catch { return true; }
+  });
+  const [dockOverlayOpen, setDockOverlayOpen] = useState(false);
+  const [devToolsEnabled, setDevToolsEnabled] = useState(() => {
+    try { return localStorage.getItem('dev-tools-enabled') === 'true'; } catch { return false; }
+  });
   const {
     sidebarHoverExpand,
     setSidebarHoverExpand,
@@ -98,10 +109,27 @@ function App() {
     [waterfall.requests],
   );
 
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    try { localStorage.setItem('sidebar-collapsed', String(sidebarCollapsed)); } catch {}
+  }, [sidebarCollapsed]);
+
+  // Persist dev tools flag
+  useEffect(() => {
+    try { localStorage.setItem('dev-tools-enabled', String(devToolsEnabled)); } catch {}
+  }, [devToolsEnabled]);
+
   // App mount telemetry
   useEffect(() => {
     tel(TEL.MOUNT, 'App mounted');
   }, []);
+
+  useEffect(() => {
+    if (!dockOverlayOpen) return;
+    const handler = (e) => { if (e.key === 'Escape') setDockOverlayOpen(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [dockOverlayOpen]);
 
   const motionProps = useMemo(() => shouldReduceMotion
     ? {}
@@ -133,6 +161,14 @@ function App() {
           <Profiler id="Playbook" onRender={flame.onRender}>
           <motion.div key="playbook" {...motionProps}>
             <PlaybookEditor />
+          </motion.div>
+          </Profiler>
+        );
+      case 'agents':
+        return (
+          <Profiler id="Agents" onRender={flame.onRender}>
+          <motion.div key={`agents-${route.agentId || 'index'}`} {...motionProps}>
+            <AgentsView agentIdFromRoute={route.agentId || null} />
           </motion.div>
           </Profiler>
         );
@@ -192,16 +228,24 @@ function App() {
         return (
           <Profiler id="Settings" onRender={flame.onRender}>
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled }} />
+          </motion.div>
+          </Profiler>
+        );
+      case 'rooms':
+        return (
+          <Profiler id="rooms" onRender={flame.onRender}>
+          <motion.div key="rooms" {...motionProps} style={{ height: '100%' }}>
+            <ChatRoom roomId={route.roomId} />
           </motion.div>
           </Profiler>
         );
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, chat, workspaceAgentDock, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, flame.onRender]);
+  }, [route, motionProps, themeProps, aiProps, chat, workspaceAgentDock, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled, flame.onRender]);
 
-  const isFullHeightView = route.view === 'chat' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail';
+  const isFullHeightView = route.view === 'chat' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail' || route.view === 'rooms';
   const usesEdgeToEdgeShell = isFullHeightView;
   const mainStyle = useMemo(() => ({
     display: 'flex',
@@ -217,11 +261,12 @@ function App() {
     <MotionConfig reducedMotion="user">
     <WorkspaceMonitorProvider enabled={workspaceMonitorEnabled}>
     <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
+      <a href="#main-content" className="skip-nav-link">Skip to main content</a>
       {/* Health banner — always visible at the very top */}
       <HealthBanner requests={waterfall.requests} slowThreshold={waterfall.slowThreshold} />
 
       {/* Render flame bar — dev only, toggleable in Settings */}
-      {import.meta.env.DEV && flameBarEnabled && <FlameBar {...flame} />}
+      {devToolsEnabled && import.meta.env.DEV && flameBarEnabled && <FlameBar {...flame} />}
 
       {/* Mobile overlay */}
       <AnimatePresence>
@@ -256,6 +301,7 @@ function App() {
       />
 
       <main
+        id="main-content"
         className="app-content"
         style={mainStyle}
       >
@@ -265,7 +311,7 @@ function App() {
             <Profiler id="Chat" onRender={flame.onRender}>
             <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} />
+                <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} routeView={route.view} />
               </div>
             </div>
             </Profiler>
@@ -286,7 +332,21 @@ function App() {
             )}
           </div>
           {showGlobalDock && (
-            <div className="gmail-agent-dock-wrapper app-global-dock-wrapper">
+            <button
+              className="dock-toggle-btn"
+              onClick={() => setDockOverlayOpen(o => !o)}
+              type="button"
+              aria-label={dockOverlayOpen ? 'Close agent dock' : 'Open agent dock'}
+              aria-expanded={dockOverlayOpen}
+            >
+              <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="15" y1="3" x2="15" y2="21" />
+              </svg>
+            </button>
+          )}
+          {showGlobalDock && (
+            <aside className={`gmail-agent-dock-wrapper app-global-dock-wrapper${dockOverlayOpen ? ' dock-overlay-open' : ''}`} aria-label="Agent dock">
               <AgentDock
                 chat={chat}
                 activeTab={globalDockTab}
@@ -295,7 +355,7 @@ function App() {
                 viewContext={dockViewContext}
                 onClose={dockCloseHandler}
               />
-            </div>
+            </aside>
           )}
         </div>
       </main>
@@ -321,14 +381,17 @@ function App() {
       <HealthToast requests={waterfall.requests} />
 
       {/* Network waterfall — edge tab + right sidebar overlay */}
-      {networkTabEnabled && (
+      {devToolsEnabled && networkTabEnabled && (
         <>
           <button
             className={`network-edge-tab${networkOpen ? ' is-active' : ''}${networkActiveCount > 0 && ledMode === 'icon' ? ' led-icon-glow' : ''}`}
             style={{ '--led-intensity': ledIntensity / 100, '--led-speed': `${ledSpeed}s` }}
             onClick={() => setNetworkOpen(o => !o)}
+            onKeyDown={(e) => { if (e.key === 'Escape') setNetworkOpen(false); }}
             type="button"
             aria-label="Toggle network waterfall"
+            aria-expanded={networkOpen}
+            aria-controls="network-waterfall-panel"
           >
             {networkActiveCount > 0 && ledMode === 'dot' && <span className="network-edge-dot" />}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -354,6 +417,7 @@ function App() {
           </button>
 
           <RightSidebar
+            id="network-waterfall-panel"
             open={networkOpen}
             onClose={() => setNetworkOpen(false)}
             title="Network"

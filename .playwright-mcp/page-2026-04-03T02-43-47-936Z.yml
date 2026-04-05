@@ -1,0 +1,290 @@
+- generic [ref=e367]:
+  - generic:
+    - generic "7.3ms (update)"
+    - generic "69.8ms (update)"
+    - generic "6.3ms (update)"
+    - generic "68.8ms (update)"
+    - generic "0.8ms (update)"
+    - generic "50.4ms (update)"
+    - generic "0.6ms (update)"
+    - generic "11.5ms (update)"
+    - generic "1.0ms (update)"
+    - generic "14.9ms (update)"
+    - generic "9.3ms (update)"
+    - generic "67.2ms (update)"
+    - generic "9.3ms (update)"
+    - generic "77.1ms (update)"
+    - generic "1.1ms (update)"
+    - generic "51.6ms (update)"
+    - generic "1.6ms (update)"
+    - generic "14.7ms (update)"
+    - generic "0.8ms (update)"
+    - generic "10.2ms (update)"
+    - generic "6.5ms (update)"
+    - generic "76.9ms (update)"
+    - generic "7.7ms (update)"
+    - generic "83.6ms (update)"
+    - generic "1.0ms (update)"
+    - generic "53.7ms (update)"
+    - generic "0.7ms (update)"
+    - generic "12.0ms (update)"
+    - generic "6.3ms (update)"
+    - generic "62.0ms (update)"
+    - generic "9.3ms (update)"
+    - generic "67.4ms (update)"
+    - generic "1.2ms (update)"
+    - generic "49.1ms (update)"
+    - generic "1.3ms (update)"
+    - generic "11.9ms (update)"
+  - generic:
+    - generic: "13579"
+    - generic: "5420"
+    - generic: "8691"
+    - generic:
+      - text: avg
+      - generic: 18.9ms
+    - generic [ref=e368]:
+      - button "❙❙" [ref=e369] [cursor=pointer]
+      - button "Clear all segments and reset stats" [ref=e370] [cursor=pointer]:
+        - img [ref=e371]
+      - button "▸" [ref=e373] [cursor=pointer]
+  - complementary [ref=e374]:
+    - button "Expand sidebar" [ref=e376] [cursor=pointer]:
+      - img [ref=e377]
+    - navigation [ref=e380]:
+      - link [ref=e381] [cursor=pointer]:
+        - /url: "#/chat"
+        - img [ref=e382]
+      - link [ref=e384] [cursor=pointer]:
+        - /url: "#/dashboard"
+        - img [ref=e385]
+      - link [ref=e390] [cursor=pointer]:
+        - /url: "#/investigations"
+        - img [ref=e391]
+      - link [ref=e394] [cursor=pointer]:
+        - /url: "#/playbook"
+        - img [ref=e395]
+      - link [ref=e398] [cursor=pointer]:
+        - /url: "#/templates"
+        - img [ref=e399]
+      - link [ref=e402] [cursor=pointer]:
+        - /url: "#/analytics"
+        - img [ref=e403]
+      - link [ref=e404] [cursor=pointer]:
+        - /url: "#/gallery"
+        - img [ref=e405]
+      - link [ref=e409] [cursor=pointer]:
+        - /url: "#/usage"
+        - img [ref=e410]
+      - link [ref=e412] [cursor=pointer]:
+        - /url: "#/workspace"
+        - img [ref=e414]
+  - generic [ref=e416]:
+    - banner [ref=e417]:
+      - generic [ref=e418]:
+        - button "Inbox" [ref=e419] [cursor=pointer]:
+          - img [ref=e420]
+        - button "Test suite" [ref=e423] [cursor=pointer]:
+          - img [ref=e424]
+        - button "Open settings" [ref=e427] [cursor=pointer]:
+          - img [ref=e428]
+    - main [ref=e431]:
+      - generic [ref=e432]:
+        - generic [ref=e437]:
+          - generic [ref=e438]:
+            - link "Overview" [ref=e439] [cursor=pointer]:
+              - /url: "#/workspace"
+            - link "Inbox" [ref=e440] [cursor=pointer]:
+              - /url: "#/workspace/inbox"
+            - link "Calendar" [ref=e441] [cursor=pointer]:
+              - /url: "#/workspace/calendar"
+            - link "Tasks" [ref=e442] [cursor=pointer]:
+              - /url: "#/workspace/tasks"
+            - link "Projects" [ref=e443] [cursor=pointer]:
+              - /url: "#/workspace/projects"
+          - generic [ref=e446]:
+            - generic [ref=e447]:
+              - generic [ref=e448]:
+                - img [ref=e449]
+                - generic [ref=e452]: Gmail
+                - button "Switch Gmail account" [ref=e454] [cursor=pointer]:
+                  - generic [ref=e455]: K
+                  - generic [ref=e456]: keithmacdonald2025@gmail.com
+                  - img [ref=e457]
+              - generic [ref=e459]:
+                - button "Display density" [ref=e461] [cursor=pointer]:
+                  - img [ref=e462]
+                - combobox "Emails per page" [ref=e464] [cursor=pointer]:
+                  - option "25" [selected]
+                  - option "50"
+                  - option "100"
+                - button "Refresh" [ref=e465] [cursor=pointer]:
+                  - img [ref=e466]
+                - button "Manage Subscriptions" [ref=e470] [cursor=pointer]:
+                  - img [ref=e471]
+                - button "Compose" [ref=e473] [cursor=pointer]:
+                  - img [ref=e474]
+                  - text: Compose
+                - button "Agent" [ref=e475] [cursor=pointer]:
+                  - img [ref=e476]
+                  - text: Agent
+                - button "Disconnect Gmail account" [ref=e478] [cursor=pointer]:
+                  - img [ref=e479]
+            - generic [ref=e483]:
+              - generic [ref=e484]:
+                - generic [ref=e486]:
+                  - button "All Mail" [ref=e487] [cursor=pointer]:
+                    - img [ref=e488]
+                    - generic [ref=e491]: All Mail
+                  - button "Inbox" [ref=e492] [cursor=pointer]:
+                    - img [ref=e493]
+                    - generic [ref=e496]: Inbox
+                  - button "Starred" [ref=e497] [cursor=pointer]:
+                    - img [ref=e498]
+                    - generic [ref=e500]: Starred
+                  - button "Sent" [ref=e501] [cursor=pointer]:
+                    - img [ref=e502]
+                    - generic [ref=e505]: Sent
+                  - button "More" [ref=e506] [cursor=pointer]:
+                    - img [ref=e507]
+                    - generic [ref=e509]: More
+                - generic [ref=e510]:
+                  - generic [ref=e512]:
+                    - generic [ref=e513]: Labels
+                    - generic [ref=e514]:
+                      - button "Create new label" [ref=e515] [cursor=pointer]:
+                        - img [ref=e516]
+                      - button "Hide labels" [ref=e517] [cursor=pointer]:
+                        - img [ref=e518]
+                  - generic [ref=e520]:
+                    - button "Entertainment" [ref=e521] [cursor=pointer]:
+                      - generic [ref=e523]: Entertainment
+                    - button "Finance" [ref=e524] [cursor=pointer]:
+                      - generic [ref=e526]: Finance
+                    - button "Food" [ref=e527] [cursor=pointer]:
+                      - generic [ref=e529]: Food
+                    - button "Health" [ref=e530] [cursor=pointer]:
+                      - generic [ref=e532]: Health
+                    - button "Jobs" [ref=e533] [cursor=pointer]:
+                      - generic [ref=e535]: Jobs
+                    - button "8 more" [ref=e536] [cursor=pointer]:
+                      - img [ref=e537]
+                      - generic [ref=e539]: 8 more
+              - generic [ref=e541]:
+                - generic [ref=e542]:
+                  - img
+                  - textbox "Search mail (e.g. from:user subject:invoice)" [ref=e543]
+                - generic [ref=e544]:
+                  - button "All Mail" [ref=e545] [cursor=pointer]
+                  - button "Primary" [ref=e546] [cursor=pointer]
+                  - button "Social" [ref=e547] [cursor=pointer]
+                  - button "Promotions" [ref=e548] [cursor=pointer]
+                  - button "Updates" [ref=e549] [cursor=pointer]
+                - generic [ref=e550]:
+                  - img [ref=e552]
+                  - paragraph [ref=e555]: All caught up!
+                  - paragraph [ref=e556]: Nothing new here. Time to get things done.
+        - generic [ref=e558]:
+          - generic [ref=e560]:
+            - button "Workspace" [ref=e561] [cursor=pointer]
+            - button "Chat" [ref=e562] [cursor=pointer]
+            - button "Co-pilot" [ref=e563] [cursor=pointer]
+            - button "Close agent dock" [ref=e565] [cursor=pointer]:
+              - img [ref=e566]
+          - generic [ref=e570]:
+            - generic [ref=e571]:
+              - button "Change workspace model and provider" [ref=e572] [cursor=pointer]:
+                - generic [ref=e573]:
+                  - generic [ref=e574]: Primary
+                  - generic [ref=e575]: Opus 4.6
+                - img [ref=e576]
+              - generic [ref=e578]:
+                - button "Conversation history" [ref=e579] [cursor=pointer]:
+                  - img [ref=e580]
+                - button "New conversation" [ref=e583] [cursor=pointer]:
+                  - img [ref=e584]
+                - button "Copy entire conversation" [ref=e585] [cursor=pointer]:
+                  - img [ref=e586]
+            - generic [ref=e589]:
+              - generic [ref=e590]:
+                - generic [ref=e591] [cursor=pointer]:
+                  - img [ref=e592]
+                  - generic [ref=e594]: Recent EA Activity (11)
+                  - img [ref=e595]
+                - generic [ref=e597]:
+                  - generic [ref=e598]: 2h ago
+                  - generic [ref=e599]: 🏷️
+                  - generic [ref=e600]: Labeled 1 email and moved to folders
+                - generic [ref=e601]:
+                  - generic [ref=e602]: 6h ago
+                  - generic [ref=e603]: 🏷️
+                  - generic [ref=e604]: Labeled 1 email and moved to folders
+                - generic [ref=e605]:
+                  - generic [ref=e606]: 7h ago
+                  - generic [ref=e607]: 🏷️
+                  - generic [ref=e608]: Labeled 1 email and moved to folders
+                - generic [ref=e609]:
+                  - generic [ref=e610]: 7h ago
+                  - generic [ref=e611]: 🏷️
+                  - generic [ref=e612]: Labeled 1 email and moved to folders
+                - generic [ref=e613]:
+                  - generic [ref=e614]: 12h ago
+                  - generic [ref=e615]: 🏷️
+                  - generic [ref=e616]: Labeled 1 email and moved to folders
+                - generic [ref=e617]:
+                  - generic [ref=e618]: 13h ago
+                  - generic [ref=e619]: 🏷️
+                  - generic [ref=e620]: Labeled 1 email and moved to folders
+                - generic [ref=e621]:
+                  - generic [ref=e622]: 14h ago
+                  - generic [ref=e623]: 🏷️
+                  - generic [ref=e624]: Labeled 1 email and moved to folders
+                - generic [ref=e625]:
+                  - generic [ref=e626]: 16h ago
+                  - generic [ref=e627]: 🏷️
+                  - generic [ref=e628]: Labeled 1 email and moved to folders
+                - generic [ref=e629]:
+                  - generic [ref=e630]: 16h ago
+                  - generic [ref=e631]: 🧹
+                  - generic [ref=e632]: "Auto-cleanup: 1 email archived/marked read"
+                - generic [ref=e633]:
+                  - generic [ref=e634]: 21h ago
+                  - generic [ref=e635]: 🏷️
+                  - generic [ref=e636]: Labeled 1 email and moved to folders
+                - generic [ref=e637]:
+                  - generic [ref=e638]: 22h ago
+                  - generic [ref=e639]: 🏷️
+                  - generic [ref=e640]: Labeled 1 email and moved to folders
+              - generic [ref=e642]:
+                - paragraph [ref=e643]: Good evening — brief me on my inbox and calendar.
+                - generic [ref=e644]:
+                  - generic [ref=e645]: 10:16 PM
+                  - button "Copy" [ref=e646] [cursor=pointer]
+              - generic [ref=e647]:
+                - img [ref=e649]
+                - generic [ref=e651]:
+                  - paragraph [ref=e652]: "3 breaks added to tomorrow's shift: 3:30 PM break, 5:00 PM lunch, 7:30 PM break — all with 5-min reminders. Inbox is clean, nothing needs attention. Have a good evening."
+                  - generic [ref=e653]:
+                    - generic [ref=e654]: 10:16 PM
+                    - generic [ref=e655]: 1.2K tokens
+                    - generic [ref=e656]: $0.0182
+                    - button "Copy" [ref=e657] [cursor=pointer]
+                - generic [ref=e658]:
+                  - button "Good response" [ref=e659] [cursor=pointer]:
+                    - img
+                  - button "Poor response" [ref=e662] [cursor=pointer]:
+                    - img
+            - generic [ref=e666]:
+              - textbox "Ask your Workspace Agent... (/ for commands)" [ref=e667]
+              - button "Send" [disabled]:
+                - img
+  - button "Toggle network waterfall" [ref=e668] [cursor=pointer]:
+    - img [ref=e669]
+    - generic:
+      - generic: Network Waterfall
+      - generic: Monitor API request timing and spot pileups without browser DevTools.
+      - generic: 114 recorded
+      - generic:
+        - generic: Glowing = requests in flight
+        - generic: Dim = idle, no active requests
+        - generic: Red = errors detected

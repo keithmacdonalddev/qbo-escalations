@@ -1,9 +1,10 @@
 'use strict';
 
 const express = require('express');
-const { resolvePolicy } = require('../../services/chat-orchestrator');
+const { normalizeModelOverride, resolvePolicy } = require('../../services/chat-orchestrator');
 const { getDefaultProvider, getAlternateProvider, isValidProvider, normalizeProvider } = require('../../services/providers/registry');
 const { reportServerError } = require('../../lib/server-error-pipeline');
+const { getRenderedAgentPrompt } = require('../../lib/agent-prompt-store');
 const {
   createWorkspaceSession,
   updateWorkspaceSession,
@@ -15,6 +16,7 @@ const {
   getWorkspaceRuntimeHealth,
   acquireChatLock,
   releaseChatLock,
+  isChatAgentActive,
 } = require('../../services/workspace-runtime');
 const { WORKSPACE_AVAILABLE_TOOL_LINES } = require('../../services/workspace-tools/metadata');
 const { buildWorkspacePrompt } = require('../../services/workspace-prompt-builder');
@@ -25,6 +27,14 @@ const {
 const {
   autoExtractFromEmails,
 } = require('../../services/workspace-memory-extraction');
+const {
+  buildCommunityProfilesContext,
+  buildIdentityMemoryContext,
+  buildRelationshipCoordinationContext,
+  getAgentIdentity,
+  listAgentIdentities,
+} = require('../../services/agent-identity-service');
+const { buildAgentIdentityOverlay } = require('../../services/room-agents/agent-profiles');
 const {
   clearWorkspaceFailureFingerprints,
   normalizeWorkspaceReasoningEffort,
@@ -242,6 +252,14 @@ const WORKSPACE_ROLE = [
   'You have up to 15 rounds of action execution. Use them wisely — search first, then act on what you find.',
   'When chaining, briefly explain what you are doing before each ACTION block so the user sees progress.',
   '',
+  'DISCONNECTED SERVICES:',
+  '- When auto-context includes "SERVICE STATUS: GMAIL NOT CONNECTED" or "SERVICE STATUS: GOOGLE CALENDAR NOT CONNECTED", one or both Google services are disconnected.',
+  '- NEVER fabricate email counts, inbox status, calendar events, meeting times, or schedule information when a service is disconnected. Do NOT say "Inbox: Clean — 0 unread emails" or "No events today" — the truth is you simply have no data.',
+  '- Be upfront and helpful about it. Example: "Your Gmail isn\'t connected right now, so I can\'t check your inbox or calendar. Head to the **Inbox** tab on the left sidebar to sign in with Google — it takes about 10 seconds. Once you\'re connected, I\'ll be able to manage your emails, check your schedule, and keep things organized for you."',
+  '- If ONLY Gmail is disconnected but Calendar works (or vice versa), mention only the disconnected service. Don\'t alarm the user about services that are working fine.',
+  '- After mentioning the disconnection, still be helpful with whatever the user asked about. If they asked a general question, answer it. Just don\'t pretend you have email/calendar data when you don\'t.',
+  '- Do NOT repeatedly nag about reconnecting in every single response. Mention it once when relevant, then move on.',
+  '',
   'RULES:',
   '- NEVER fabricate email IDs, event IDs, or other identifiers — always search first.',
   '- When asked to reply to or act on "the email from X" or "my last email", search for it first.',
@@ -416,9 +434,32 @@ const WORKSPACE_CHAT_ONLY_ROLE = [
   'Do NOT emit ACTION commands in this mode. Only answer the user.',
   'Use markdown formatting for readability — especially tables for schedules and lists for action items.',
   '',
+  'DISCONNECTED SERVICES:',
+  '- When auto-context includes "SERVICE STATUS: GMAIL NOT CONNECTED" or "SERVICE STATUS: GOOGLE CALENDAR NOT CONNECTED", those services are disconnected.',
+  '- NEVER fabricate email counts, inbox status, calendar events, or schedule data when a service is disconnected.',
+  '- Be upfront: "Your Gmail isn\'t connected right now. Head to the **Inbox** tab on the left sidebar to sign in with Google — takes about 10 seconds. Once connected, I can check your emails and calendar for you."',
+  '- Mention disconnection once when relevant, then move on. Don\'t nag every response.',
+  '',
   'SELF-VERIFICATION (do this mentally before every response):',
   'Before sending your response, re-read the calendar/email data in context and verify every time, date, amount, and name in your response matches the source data exactly. If you wrote "9:00 AM" but the data says "10:00 AM", fix it. If you wrote a confirmation code, double-check it character by character. This takes 2 seconds and prevents errors that destroy user trust.',
 ].join('\n');
+
+const WORKSPACE_CHAT_ONLY_OVERLAY = [
+  '',
+  'CHAT-ONLY MODE OVERRIDE:',
+  '- Do not emit ACTION blocks in this mode.',
+  '- Answer directly using the available email, calendar, and workspace context.',
+  '- If the user asks for something that normally requires execution, explain the recommended next step instead of emitting actions.',
+  '- Use markdown for readability when it helps.',
+].join('\n');
+
+function getWorkspaceRolePrompt() {
+  return getRenderedAgentPrompt('workspace-action');
+}
+
+function getWorkspaceChatOnlyRolePrompt() {
+  return `${getRenderedAgentPrompt('workspace-action')}${WORKSPACE_CHAT_ONLY_OVERLAY}`;
+}
 
 router.post('/ai', async (req, res) => {
   if (Date.now() - _lastMemoryCleanup > 3600000) {
@@ -433,13 +474,24 @@ router.post('/ai', async (req, res) => {
     conversationSessionId,
     provider,
     primaryProvider,
+    primaryModel,
     fallbackProvider,
+    fallbackModel,
     mode,
     reasoningEffort,
   } = req.body || {};
 
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ ok: false, code: 'MISSING_PROMPT', error: 'prompt is required' });
+  }
+
+  // Reject if another workspace request is already running
+  if (isChatAgentActive()) {
+    return res.status(409).json({
+      ok: false,
+      code: 'WORKSPACE_BUSY',
+      error: 'Workspace agent is currently handling another request',
+    });
   }
   if (provider !== undefined && !isValidProvider(provider)) {
     return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: 'Unsupported provider' });
@@ -449,6 +501,12 @@ router.post('/ai', async (req, res) => {
   }
   if (fallbackProvider !== undefined && !isValidProvider(fallbackProvider)) {
     return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: 'Unsupported fallback provider' });
+  }
+  if (primaryModel !== undefined && typeof primaryModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'primaryModel must be a string' });
+  }
+  if (fallbackModel !== undefined && typeof fallbackModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'fallbackModel must be a string' });
   }
   if (mode !== undefined && mode !== 'single' && mode !== 'fallback') {
     return res.status(400).json({
@@ -464,7 +522,9 @@ router.post('/ai', async (req, res) => {
   const policy = resolvePolicy({
     mode: mode || 'fallback',
     primaryProvider: requestedPrimaryProvider,
+    primaryModel: normalizeModelOverride(primaryModel),
     fallbackProvider: fallbackProvider || getAlternateProvider(requestedPrimaryProvider),
+    fallbackModel: normalizeModelOverride(fallbackModel),
   });
 
   const persistentSessionId = conversationSessionId
@@ -488,7 +548,9 @@ router.post('/ai', async (req, res) => {
     ok: true,
     provider: policy.primaryProvider,
     primaryProvider: policy.primaryProvider,
+    primaryModel: policy.primaryModel || null,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
+    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
     mode: policy.mode,
     reasoningEffort: effectiveReasoningEffort,
     sessionId,
@@ -619,7 +681,6 @@ router.post('/ai', async (req, res) => {
 
   res.on('close', () => {
     clientDisconnected = true;
-    releaseChatLock();
     clearWorkspaceTimers();
     if (spawnGuard) {
       clearTimeout(spawnGuard);
@@ -650,6 +711,16 @@ router.post('/ai', async (req, res) => {
     prompt,
   });
 
+  const workspaceIdentity = await getAgentIdentity('workspace').catch(() => null);
+  const allAgentIdentities = await listAgentIdentities().catch(() => []);
+  const enrichedWorkspaceRole = [
+    getWorkspaceRolePrompt(),
+    buildAgentIdentityOverlay(workspaceIdentity?.profile || 'workspace'),
+    buildIdentityMemoryContext(workspaceIdentity),
+    buildRelationshipCoordinationContext(workspaceIdentity, allAgentIdentities.map((item) => item.agentId).filter((id) => id !== 'workspace')),
+    buildCommunityProfilesContext('workspace', allAgentIdentities),
+  ].filter(Boolean).join('\n\n');
+
   await runWorkspaceRequest({
     res,
     useActionFlow,
@@ -663,8 +734,8 @@ router.post('/ai', async (req, res) => {
     requestState: workspaceRequestState,
     saveConversationTurn,
     connectedAccountsPromise,
-    workspaceRole: WORKSPACE_ROLE,
-    workspaceChatOnlyRole: WORKSPACE_CHAT_ONLY_ROLE,
+    workspaceRole: enrichedWorkspaceRole,
+    workspaceChatOnlyRole: enrichedWorkspaceRole,
     runtime: {
       updateWorkspaceSession,
       recordWorkspaceChunk,

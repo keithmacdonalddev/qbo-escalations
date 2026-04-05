@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createAgentSession, streamAgentSession } from '../api/agentStream.js';
+import { createAgentSession, streamAgentSessionRealtime } from '../api/agentStream.js';
+import { apiFetch, apiFetchJson } from '../api/http.js';
 import { useSharedAgentSession } from '../lib/agentSessions.js';
 import {
   DEFAULT_PROVIDER,
@@ -10,6 +11,7 @@ import {
   normalizeReasoningEffort,
   supportsLiveReasoning,
 } from '../lib/providerCatalog.js';
+import { normalizeSurfaceModel, writeStoredPreference } from '../lib/surfacePreferences.js';
 
 const WORKSPACE_SESSION_KEY = 'workspace:shared';
 const WORKSPACE_SESSION_ID_KEY = 'qbo-workspace-session-id';
@@ -21,6 +23,8 @@ function buildInitialWorkspaceSession() {
   let initialProvider = DEFAULT_PROVIDER;
   let initialMode = 'fallback';
   let initialFallbackProvider = getAlternateProvider(DEFAULT_PROVIDER);
+  let initialModel = '';
+  let initialFallbackModel = '';
   let initialReasoningEffort = DEFAULT_REASONING_EFFORT;
 
   try {
@@ -35,6 +39,14 @@ function buildInitialWorkspaceSession() {
       window.localStorage.getItem('qbo-workspace-fallback-provider')
       || window.localStorage.getItem('qbo-chat-fallback-provider')
       || getAlternateProvider(initialProvider)
+    );
+    initialModel = normalizeSurfaceModel(
+      window.localStorage.getItem('qbo-workspace-model')
+      || window.localStorage.getItem('qbo-chat-model')
+    );
+    initialFallbackModel = normalizeSurfaceModel(
+      window.localStorage.getItem('qbo-workspace-fallback-model')
+      || window.localStorage.getItem('qbo-chat-fallback-model')
     );
     initialReasoningEffort = normalizeReasoningEffort(
       window.localStorage.getItem('qbo-workspace-reasoning-effort')
@@ -51,6 +63,8 @@ function buildInitialWorkspaceSession() {
     fallbackProvider: initialFallbackProvider === initialProvider
       ? getAlternateProvider(initialProvider)
       : initialFallbackProvider,
+    model: initialModel,
+    fallbackModel: initialFallbackModel,
     reasoningEffort: initialReasoningEffort,
     messages: [],
     input: '',
@@ -59,6 +73,9 @@ function buildInitialWorkspaceSession() {
     thinkingText: '',
     statusState: null,
     lastActions: null,
+    currentProvider: initialProvider,
+    currentModel: initialModel || null,
+    providerStatus: null,
   };
 }
 
@@ -68,8 +85,10 @@ async function createWorkspaceAISession({
   conversationHistory,
   conversationSessionId,
   provider,
+  primaryModel,
   mode,
   fallbackProvider,
+  fallbackModel,
   reasoningEffort,
 }) {
   const payload = await createAgentSession('/api/agents/sessions', {
@@ -81,8 +100,10 @@ async function createWorkspaceAISession({
       conversationHistory,
       conversationSessionId,
       provider,
+      primaryModel,
       mode,
       fallbackProvider,
+      fallbackModel,
       reasoningEffort,
     },
   });
@@ -90,7 +111,7 @@ async function createWorkspaceAISession({
 }
 
 function attachWorkspaceAISession(sessionId, handlers = {}) {
-  return streamAgentSession(`/api/agents/sessions/${encodeURIComponent(sessionId)}/stream`, {
+  return streamAgentSessionRealtime(sessionId, {
     onSession: handlers.onSession,
     onStart: handlers.onStart,
     onChunk: handlers.onChunk,
@@ -102,6 +123,138 @@ function attachWorkspaceAISession(sessionId, handlers = {}) {
     onDone: handlers.onDone,
     onError: handlers.onError,
   });
+}
+
+function getProviderDisplayLabel(providerId, fallbackLabel = 'Provider') {
+  return providerId ? getProviderShortLabel(providerId) : fallbackLabel;
+}
+
+function cleanProviderDetail(detail, message = '') {
+  const normalizedDetail = typeof detail === 'string' ? detail.trim() : '';
+  const normalizedMessage = typeof message === 'string' ? message.trim() : '';
+  if (!normalizedDetail || normalizedDetail === normalizedMessage) return '';
+  return normalizedDetail;
+}
+
+function describeProviderFailure(reason, providerLabel) {
+  switch (String(reason || '').toUpperCase()) {
+    case 'TIMEOUT':
+      return `${providerLabel} timed out`;
+    case 'PRIMARY_UNHEALTHY':
+      return `${providerLabel} is temporarily unhealthy`;
+    case 'ABORT':
+      return `${providerLabel} was aborted`;
+    default:
+      return `${providerLabel} failed`;
+  }
+}
+
+function ensureSentence(text) {
+  const normalized = typeof text === 'string' ? text.trim() : '';
+  if (!normalized) return '';
+  return /[.!?]$/.test(normalized) ? normalized : `${normalized}.`;
+}
+
+function joinSentences(...parts) {
+  return parts
+    .map((part) => ensureSentence(part))
+    .filter(Boolean)
+    .join(' ');
+}
+
+function buildWorkspaceProviderErrorStatus(data, configuredFallbackProvider) {
+  const failedProvider = data?.provider || null;
+  const failedLabel = getProviderDisplayLabel(failedProvider);
+  const fallbackLabel = data?.retriable ? getProviderDisplayLabel(configuredFallbackProvider, 'the fallback provider') : '';
+  const baseMessage = data?.message || `${failedLabel} request failed`;
+
+  return {
+    kind: 'provider_error',
+    tone: data?.retriable ? 'warning' : 'error',
+    title: `${failedLabel} failed`,
+    message: joinSentences(
+      baseMessage,
+      data?.retriable && fallbackLabel ? `Trying ${fallbackLabel} instead` : ''
+    ),
+    detail: cleanProviderDetail(data?.detail, data?.message),
+    activeProvider: failedProvider,
+    activeModel: data?.model || null,
+    failedProvider,
+    failedModel: data?.model || null,
+    failedCode: data?.code || null,
+  };
+}
+
+function buildWorkspaceFallbackStatus(data, configuredPrimaryProvider, configuredFallbackProvider) {
+  const fromProvider = data?.from || configuredPrimaryProvider || null;
+  const toProvider = data?.to || configuredFallbackProvider || null;
+  const fromLabel = getProviderDisplayLabel(fromProvider, 'Primary provider');
+  const toLabel = getProviderDisplayLabel(toProvider, 'Fallback provider');
+
+  return {
+    kind: 'fallback',
+    tone: 'warning',
+    title: data?.preflight ? `Using ${toLabel} first` : `Switched to ${toLabel}`,
+    message: data?.preflight
+      ? `${fromLabel} is temporarily unhealthy, so Workspace started with ${toLabel}.`
+      : `${describeProviderFailure(data?.reason, fromLabel)}, so Workspace switched to ${toLabel}.`,
+    detail: cleanProviderDetail(data?.detail),
+    activeProvider: toProvider,
+    activeModel: data?.toModel || null,
+    failedProvider: fromProvider,
+    failedModel: data?.fromModel || null,
+    failedCode: data?.reason || null,
+    preflight: Boolean(data?.preflight),
+  };
+}
+
+function buildWorkspaceCompletionStatus(data, configuredPrimaryProvider, previousStatus) {
+  const providerUsed = data?.providerUsed || data?.provider || null;
+  if (!providerUsed) return previousStatus || null;
+
+  const usedLabel = getProviderDisplayLabel(providerUsed, 'the active provider');
+  const activeModel = data?.modelUsed || data?.usage?.model || previousStatus?.activeModel || null;
+  const fromProvider = data?.fallbackFrom || previousStatus?.failedProvider || configuredPrimaryProvider || null;
+  const switchedAwayFromPrimary = Boolean(data?.fallbackUsed)
+    || providerUsed !== configuredPrimaryProvider
+    || previousStatus?.kind === 'fallback'
+    || previousStatus?.kind === 'provider_error';
+
+  if (!switchedAwayFromPrimary) return null;
+
+  return {
+    kind: 'done',
+    tone: 'warning',
+    title: `Answered with ${usedLabel}`,
+    message: fromProvider && fromProvider !== providerUsed
+      ? `${usedLabel} completed this request after ${getProviderDisplayLabel(fromProvider, 'the primary provider')} did not.`
+      : `${usedLabel} completed this request.`,
+    detail: previousStatus?.detail || '',
+    activeProvider: providerUsed,
+    activeModel,
+    failedProvider: previousStatus?.failedProvider || fromProvider || null,
+    failedModel: previousStatus?.failedModel || null,
+    failedCode: previousStatus?.failedCode || null,
+  };
+}
+
+function buildWorkspaceFatalStatus(err, currentProvider, previousStatus) {
+  const failedProvider = previousStatus?.failedProvider || previousStatus?.activeProvider || currentProvider || null;
+  const failedLabel = getProviderDisplayLabel(failedProvider);
+  const message = err?.message || err?.error || 'Workspace request failed';
+
+  return {
+    kind: 'fatal',
+    tone: 'error',
+    title: `${failedLabel} failed`,
+    message,
+    detail: cleanProviderDetail(err?.detail, message) || previousStatus?.detail || '',
+    activeProvider: failedProvider,
+    activeModel: previousStatus?.activeModel || null,
+    failedProvider,
+    failedModel: previousStatus?.failedModel || null,
+    failedCode: previousStatus?.failedCode || err?.code || null,
+  };
 }
 
 export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, setReasoningNotice } = {}) {
@@ -133,6 +286,8 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     provider,
     mode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     messages,
     input,
@@ -141,6 +296,9 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     thinkingText,
     statusState,
     lastActions,
+    currentProvider,
+    currentModel,
+    providerStatus,
   } = session;
 
   const activeRequestRef = useRef(null);
@@ -290,7 +448,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
   const abortActiveAgentSession = useCallback(async (reason) => {
     if (!activeAgentSessionId) return;
     try {
-      await fetch(`/api/agents/sessions/${encodeURIComponent(activeAgentSessionId)}/abort`, {
+      await apiFetch(`/api/agents/sessions/${encodeURIComponent(activeAgentSessionId)}/abort`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: reason || 'Workspace session aborted from the client' }),
@@ -307,7 +465,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     setWorkspaceSessionId(sessionId);
     setConversationRestored(false);
     clearSession({
-      preserveKeys: ['provider', 'mode', 'fallbackProvider', 'reasoningEffort'],
+      preserveKeys: ['provider', 'mode', 'fallbackProvider', 'model', 'fallbackModel', 'reasoningEffort'],
     });
     clearStallWatch();
     resetReasoningState();
@@ -321,7 +479,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     setWorkspaceSessionId(null);
     setConversationRestored(false);
     clearSession({
-      preserveKeys: ['provider', 'mode', 'fallbackProvider', 'reasoningEffort'],
+      preserveKeys: ['provider', 'mode', 'fallbackProvider', 'model', 'fallbackModel', 'reasoningEffort'],
     });
     clearStallWatch();
     resetReasoningState();
@@ -353,14 +511,25 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
   }, [activeAgentSessionId]);
 
   useEffect(() => {
+    writeStoredPreference('qbo-workspace-provider', provider);
+    writeStoredPreference('qbo-workspace-mode', mode);
+    writeStoredPreference('qbo-workspace-fallback-provider', fallbackProvider);
+    writeStoredPreference('qbo-workspace-model', model);
+    writeStoredPreference('qbo-workspace-fallback-model', fallbackModel);
+    writeStoredPreference('qbo-workspace-reasoning-effort', reasoningEffort);
+  }, [fallbackModel, fallbackProvider, mode, model, provider, reasoningEffort]);
+
+  useEffect(() => {
     if (!workspaceSessionId || conversationRestored) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const res = await fetch(`/api/workspace/conversation/${encodeURIComponent(workspaceSessionId)}`);
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await apiFetchJson(
+          `/api/workspace/conversation/${encodeURIComponent(workspaceSessionId)}`,
+          {},
+          'Failed to restore workspace conversation'
+        );
         if (cancelled || !data.ok || !Array.isArray(data.messages)) return;
         if (data.messages.length > 0) {
           const restored = data.messages.map((m) => ({
@@ -404,6 +573,13 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
             lastStatus: sessionMeta?.status === 'running' ? 'Streaming response...' : sessionMeta?.status || null,
           });
         }
+        patchSession((prev) => ({
+          ...prev,
+          model: sessionMeta?.metadata?.primaryModel || prev.model,
+          fallbackModel: sessionMeta?.metadata?.fallbackModel || prev.fallbackModel,
+          currentProvider: currentProvider || prev.currentProvider,
+          currentModel: sessionMeta?.metadata?.currentModel || sessionMeta?.metadata?.primaryModel || prev.currentModel,
+        }));
       },
       onStart: (data) => {
         resetReasoningState();
@@ -414,6 +590,14 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
         if (currentProvider) {
           syncReasoningProvider(currentProvider);
         }
+        patchSession((prev) => ({
+          ...prev,
+          model: data?.primaryModel || prev.model,
+          fallbackModel: data?.fallbackModel || prev.fallbackModel,
+          currentProvider: currentProvider || prev.currentProvider,
+          currentModel: data?.primaryModel || prev.currentModel,
+          providerStatus: null,
+        }));
         touchStallWatch({
           currentProvider: currentProvider || null,
           lastStatus: 'Thinking...',
@@ -478,14 +662,23 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
         });
       },
       onProviderError: (data) => {
+        const failedProvider = data?.provider || activeRequestRef.current?.currentProvider || reasoningMetaRef.current.provider || null;
+        const nextProviderStatus = buildWorkspaceProviderErrorStatus(data, fallbackProvider);
         touchStallWatch({
           lastStatus: data?.message || 'Workspace provider error',
-          currentProvider: data?.provider || activeRequestRef.current?.currentProvider || reasoningMetaRef.current.provider || null,
+          currentProvider: failedProvider,
         });
+        patchSession((prev) => ({
+          ...prev,
+          currentProvider: failedProvider || prev.currentProvider,
+          currentModel: data?.model || prev.currentModel,
+          providerStatus: nextProviderStatus,
+        }));
       },
       onFallback: (data) => {
         const fromProvider = data?.from || null;
         const toProvider = data?.to || null;
+        const nextProviderStatus = buildWorkspaceFallbackStatus(data, provider, fallbackProvider);
         if (toProvider) {
           syncReasoningProvider(toProvider);
         }
@@ -495,6 +688,9 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
         });
         patchSession((prev) => ({
           ...prev,
+          currentProvider: toProvider || prev.currentProvider,
+          currentModel: data?.toModel || prev.currentModel,
+          providerStatus: nextProviderStatus,
           statusState: {
             ...(prev.statusState || {}),
             type: 'fallback',
@@ -502,7 +698,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
             to: toProvider,
             phase: data?.phase || prev.statusState?.phase || 'pass1',
             sessionId: data?.sessionId || prev.statusState?.sessionId || null,
-            message: `Switching provider from ${getProviderShortLabel(fromProvider || provider)} to ${getProviderShortLabel(toProvider || fallbackProvider)}...`,
+            message: nextProviderStatus.message,
           },
         }));
       },
@@ -532,6 +728,9 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
             thinkingText: '',
             streaming: false,
             statusState: null,
+            currentProvider: data?.providerUsed || data?.provider || prev.currentProvider,
+            currentModel: data?.modelUsed || data?.usage?.model || prev.currentModel,
+            providerStatus: buildWorkspaceCompletionStatus(data, provider, prev.providerStatus),
           };
         });
       },
@@ -556,6 +755,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
           thinkingText: '',
           streaming: false,
           statusState: null,
+          providerStatus: buildWorkspaceFatalStatus(err, prev.currentProvider || provider, prev.providerStatus),
         }));
       },
     });
@@ -582,12 +782,11 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
 
     (async () => {
       try {
-        const res = await fetch(`/api/agents/sessions/${encodeURIComponent(activeAgentSessionId)}`);
-        if (!res.ok) {
-          if (!cancelled) setActiveAgentSessionId(null);
-          return;
-        }
-        const data = await res.json();
+        const data = await apiFetchJson(
+          `/api/agents/sessions/${encodeURIComponent(activeAgentSessionId)}`,
+          {},
+          'Failed to load workspace session'
+        );
         const status = data?.session?.status;
         if (cancelled) return;
         if (!data?.ok || !data?.session || ['done', 'error', 'aborted'].includes(status)) {
@@ -605,9 +804,13 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     };
   }, [activeAgentSessionId, streaming, attachExistingWorkspaceSession]);
 
-  const startWorkspaceRequest = useCallback(async (promptText) => {
+  const startWorkspaceRequest = useCallback(async (promptText, options = {}) => {
     const text = typeof promptText === 'string' ? promptText.trim() : '';
     if (!text) return;
+    const contextOverride = options && typeof options === 'object' && options.contextOverride && typeof options.contextOverride === 'object'
+      ? options.contextOverride
+      : null;
+    const activeViewContext = contextOverride || viewContext || null;
 
     let currentSessionId = workspaceSessionId;
     if (!currentSessionId) {
@@ -626,8 +829,8 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     const requestMeta = {
       requestKey: `workspace-ui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
       prompt: text,
-      view: viewContext?.view || null,
-      context: viewContext || null,
+      view: activeViewContext?.view || null,
+      context: activeViewContext,
       historyLength: history.length,
       startedAt: Date.now(),
       lastStatus: 'Creating workspace session...',
@@ -645,6 +848,9 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
       thinkingText: '',
       statusState: null,
       lastActions: null,
+      currentProvider: provider,
+      currentModel: model || null,
+      providerStatus: null,
     }));
 
     let proactiveHints = {};
@@ -652,14 +858,20 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
       const nowIso = new Date().toISOString();
       const in48hIso = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
       const [inboxRes, calRes, draftsRes] = await Promise.all([
-        fetch('/api/gmail/messages?maxResults=100&q=' + encodeURIComponent('is:unread in:inbox'))
-          .then((r) => r.json()).catch(() => null),
-        fetch('/api/calendar/events?' + new URLSearchParams({
+        apiFetchJson(
+          '/api/gmail/messages?maxResults=100&q=' + encodeURIComponent('is:unread in:inbox'),
+          {},
+          'Failed to load unread inbox messages'
+        ).catch(() => null),
+        apiFetchJson('/api/calendar/events?' + new URLSearchParams({
           timeMin: nowIso,
           timeMax: in48hIso,
-        })).then((r) => r.json()).catch(() => null),
-        fetch('/api/gmail/messages?maxResults=5&q=' + encodeURIComponent('in:drafts'))
-          .then((r) => r.json()).catch(() => null),
+        }), {}, 'Failed to load upcoming calendar events').catch(() => null),
+        apiFetchJson(
+          '/api/gmail/messages?maxResults=5&q=' + encodeURIComponent('in:drafts'),
+          {},
+          'Failed to load drafts'
+        ).catch(() => null),
       ]);
       const unreadMessages = inboxRes?.ok !== false ? (inboxRes?.messages || []) : [];
       const upcomingEvents = calRes?.ok !== false ? (calRes?.events || []) : [];
@@ -707,8 +919,8 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
       // Proactive hints are optional — don't block the request.
     }
 
-    const enrichedContext = viewContext
-      ? { ...viewContext, proactiveHints }
+    const enrichedContext = activeViewContext
+      ? { ...activeViewContext, proactiveHints }
       : { proactiveHints };
 
     try {
@@ -718,8 +930,10 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
         conversationHistory: currentSessionId ? undefined : history,
         conversationSessionId: currentSessionId || undefined,
         provider,
+        primaryModel: model || undefined,
         mode,
         fallbackProvider: mode === 'fallback' ? fallbackProvider : undefined,
+        fallbackModel: mode === 'fallback' ? (fallbackModel || undefined) : undefined,
         reasoningEffort,
       });
       if (!created?.id) {
@@ -743,13 +957,16 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
         thinkingText: '',
         streaming: false,
         statusState: null,
+        providerStatus: buildWorkspaceFatalStatus(err, provider, prev.providerStatus),
       }));
     }
   }, [
     attachExistingWorkspaceSession,
     clearStallWatch,
     fallbackProvider,
+    fallbackModel,
     mode,
+    model,
     patchSession,
     provider,
     reasoningEffort,
@@ -784,6 +1001,8 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     provider,
     mode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     messages,
     input,
@@ -792,6 +1011,9 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     thinkingText,
     statusState,
     lastActions,
+    currentProvider,
+    currentModel,
+    providerStatus,
     clearStallWatch,
     clearReasoningWatch,
     resetReasoningState,

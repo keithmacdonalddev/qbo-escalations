@@ -89,6 +89,50 @@ await t.test('fallback mode switches to alternate provider on primary failure', 
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 1);
 });
 
+await t.test('explicit model overrides propagate through fallback orchestration', async () => {
+  let primaryModel = null;
+  let fallbackModel = null;
+
+  claude.chat = ({ model, onError }) => {
+    primaryModel = model;
+    const err = new Error('primary failed');
+    err.code = 'PROVIDER_EXEC_FAILED';
+    onError(err);
+    return () => {};
+  };
+  codex.chat = ({ model, onChunk, onDone }) => {
+    fallbackModel = model;
+    onChunk('from fallback');
+    onDone('from fallback');
+    return () => {};
+  };
+
+  const out = await runChat({
+    mode: 'fallback',
+    primaryProvider: 'claude',
+    primaryModel: 'claude-custom-model',
+    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackModel: 'codex-custom-model',
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+  });
+
+  assert.equal(primaryModel, 'claude-custom-model');
+  assert.equal(fallbackModel, 'codex-custom-model');
+  assert.equal(out.result, 'done');
+  assert.equal(out.data.providerUsed, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.modelUsed, 'codex-custom-model');
+
+  const providerErrorEvent = out.events.find((event) => event.type === 'provider_error');
+  const fallbackEvent = out.events.find((event) => event.type === 'fallback');
+  assert.ok(providerErrorEvent);
+  assert.ok(fallbackEvent);
+  assert.equal(providerErrorEvent.data.model, 'claude-custom-model');
+  assert.equal(fallbackEvent.data.fromModel, 'claude-custom-model');
+  assert.equal(fallbackEvent.data.toModel, 'codex-custom-model');
+});
+
 await t.test('fallback mode returns terminal error when both providers fail', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('claude failed');

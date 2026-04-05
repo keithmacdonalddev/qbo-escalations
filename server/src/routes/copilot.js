@@ -4,7 +4,7 @@ const Escalation = require('../models/Escalation');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const Template = require('../models/Template');
-const { resolvePolicy, startChatOrchestration } = require('../services/chat-orchestrator');
+const { normalizeModelOverride, resolvePolicy, startChatOrchestration } = require('../services/chat-orchestrator');
 const {
   createAiOperation,
   updateAiOperation,
@@ -20,6 +20,7 @@ const {
   normalizeProvider,
 } = require('../services/providers/registry');
 const { getSystemPrompt, getCategories } = require('../lib/playbook-loader');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { reportServerError } = require('../lib/server-error-pipeline');
 const { logUsage } = require('../lib/usage-writer');
@@ -31,6 +32,14 @@ const { randomUUID } = require('node:crypto');
 router.use(createRateLimiter({ name: 'copilot', limit: 18, windowMs: 60_000 }));
 const COPILOT_DEFAULT_PROVIDER = getDefaultProvider();
 const COPILOT_ALLOWED_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function getCopilotSystemPrompt() {
+  const basePrompt = getSystemPrompt();
+  const copilotPrompt = getRenderedAgentPrompt('copilot-agent');
+  const normalizedCopilotPrompt = typeof copilotPrompt === 'string' ? copilotPrompt.trim() : '';
+  if (!normalizedCopilotPrompt) return basePrompt;
+  return `${basePrompt}\n\n${normalizedCopilotPrompt}`;
+}
 
 // Helper: set up SSE response
 function initSSE(res) {
@@ -56,7 +65,9 @@ function resolveCopilotPolicy(body) {
   const {
     provider,
     primaryProvider,
+    primaryModel,
     fallbackProvider,
+    fallbackModel,
     mode,
     reasoningEffort,
   } = source;
@@ -76,6 +87,16 @@ function resolveCopilotPolicy(body) {
     err.code = 'INVALID_PROVIDER';
     throw err;
   }
+  if (primaryModel !== undefined && typeof primaryModel !== 'string') {
+    const err = new Error('primaryModel must be a string');
+    err.code = 'INVALID_MODEL';
+    throw err;
+  }
+  if (fallbackModel !== undefined && typeof fallbackModel !== 'string') {
+    const err = new Error('fallbackModel must be a string');
+    err.code = 'INVALID_MODEL';
+    throw err;
+  }
   if (mode !== undefined && mode !== 'single' && mode !== 'fallback') {
     const err = new Error('Copilot only supports single or fallback mode');
     err.code = 'INVALID_MODE';
@@ -86,7 +107,9 @@ function resolveCopilotPolicy(body) {
   const policy = resolvePolicy({
     mode: mode || 'fallback',
     primaryProvider: resolvedPrimary,
+    primaryModel: normalizeModelOverride(primaryModel),
     fallbackProvider: fallbackProvider || getAlternateProvider(resolvedPrimary),
+    fallbackModel: normalizeModelOverride(fallbackModel),
   });
 
   return {
@@ -144,9 +167,11 @@ function streamCopilotChat({
   cleanupFn = startChatOrchestration({
     mode: policy.mode,
     primaryProvider: policy.primaryProvider,
+    primaryModel: policy.primaryModel,
     fallbackProvider: policy.fallbackProvider,
+    fallbackModel: policy.fallbackModel,
     messages,
-    systemPrompt: systemPrompt || getSystemPrompt(),
+    systemPrompt: systemPrompt || getCopilotSystemPrompt(),
     images,
     reasoningEffort,
     onChunk: ({ text, provider }) => {
@@ -183,7 +208,7 @@ function streamCopilotChat({
       }
       try { res.write('event: fallback\ndata: ' + JSON.stringify(detail || {}) + '\n\n'); } catch { /* gone */ }
     },
-    onDone: ({ fullResponse, usage, providerUsed, fallbackUsed, fallbackFrom, attempts, mode }) => {
+    onDone: ({ fullResponse, usage, providerUsed, modelUsed, fallbackUsed, fallbackFrom, attempts, mode }) => {
       streamSettled = true;
       clearInterval(heartbeat);
       if (runtimeOperationId) {
@@ -213,6 +238,7 @@ function streamCopilotChat({
           fullResponse,
           provider: providerUsed || policy.primaryProvider,
           providerUsed: providerUsed || policy.primaryProvider,
+          modelUsed: modelUsed || (usage && usage.model) || '',
           fallbackUsed: Boolean(fallbackUsed),
           fallbackFrom: fallbackFrom || null,
           mode: mode || policy.mode,
@@ -354,7 +380,9 @@ router.post('/analyze-escalation', async (req, res) => {
     type: 'analyze-escalation',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -421,7 +449,9 @@ router.post('/find-similar', async (req, res) => {
     candidateCount: similar.length,
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -484,7 +514,9 @@ router.post('/suggest-template', async (req, res) => {
     type: 'suggest-template',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -533,7 +565,9 @@ router.post('/generate-template', async (req, res) => {
     type: 'generate-template',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -589,7 +623,9 @@ router.post('/improve-template', async (req, res) => {
     type: 'improve-template',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -655,7 +691,9 @@ router.post('/explain-trends', async (req, res) => {
     type: 'explain-trends',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -717,7 +755,9 @@ router.post('/playbook-check', async (req, res) => {
     type: 'playbook-check',
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');
@@ -798,7 +838,9 @@ router.post('/search', async (req, res) => {
     candidateCount: candidates.length,
     provider: copilotOptions.policy.primaryProvider,
     primaryProvider: copilotOptions.policy.primaryProvider,
+    primaryModel: copilotOptions.policy.primaryModel || null,
     fallbackProvider: copilotOptions.policy.mode === 'fallback' ? copilotOptions.policy.fallbackProvider : null,
+    fallbackModel: copilotOptions.policy.mode === 'fallback' ? (copilotOptions.policy.fallbackModel || null) : null,
     mode: copilotOptions.policy.mode,
     reasoningEffort: copilotOptions.reasoningEffort,
   }) + '\n\n');

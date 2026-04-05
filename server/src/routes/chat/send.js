@@ -10,7 +10,9 @@ const { normalizeChatImages } = require('../../lib/chat-image');
 const { applyImageResponseCompliance } = require('../../lib/chat-triage');
 const { createRateLimiter } = require('../../middleware/rate-limit');
 const { isValidProvider, normalizeProvider } = require('../../services/providers/registry');
-const { startChatOrchestration } = require('../../services/chat-orchestrator');
+const { normalizeModelOverride, startChatOrchestration } = require('../../services/chat-orchestrator');
+const { runAgentToolLoop } = require('../../services/agent-tool-loop');
+const { SHARED_AGENT_TOOL_LINES } = require('../../services/shared-agent-tools');
 const {
   createAiOperation,
   updateAiOperation,
@@ -33,6 +35,17 @@ const {
 } = require('../../services/ai-traces');
 const { archiveImages } = require('../../lib/image-archive');
 const { extractQuickActions } = require('../../lib/quick-actions');
+const {
+  buildCommunityProfilesContext,
+  buildIdentityMemoryContext,
+  buildRelationshipCoordinationContext,
+  getAgentIdentity,
+  learnFromInteraction,
+  listAgentIdentities,
+  recordAgentActivity,
+  recordAgentToolUsage,
+} = require('../../services/agent-identity-service');
+const { buildAgentIdentityOverlay } = require('../../services/room-agents/agent-profiles');
 const {
   buildChatImageAugmentation,
   getChatGenerationValidationError,
@@ -63,6 +76,116 @@ const {
 const chatRouter = express.Router();
 const chatRateLimit = createRateLimiter({ name: 'chat', limit: 20, windowMs: 60_000 });
 const retryRateLimit = createRateLimiter({ name: 'chat-retry', limit: 12, windowMs: 60_000 });
+const rawSseSafetyTimeoutMs = Number.parseInt(process.env.SSE_SAFETY_TIMEOUT_MS, 10);
+const SSE_SAFETY_TIMEOUT_MS = Number.isFinite(rawSseSafetyTimeoutMs) && rawSseSafetyTimeoutMs > 0
+  ? rawSseSafetyTimeoutMs
+  : 180_000;
+const MAIN_CHAT_TOOL_AGENT_ID = 'main-chat-assistant';
+const CHAT_ACTIVITY_AGENT_ID = 'chat';
+
+async function buildMainChatSystemPrompt(basePrompt, enableTools) {
+  const normalizedBase = safeString(basePrompt, '');
+  const identity = await getAgentIdentity('chat').catch(() => null);
+  const identities = await listAgentIdentities().catch(() => []);
+  return [
+    normalizedBase,
+    buildAgentIdentityOverlay(identity?.profile || 'chat'),
+    buildIdentityMemoryContext(identity),
+    buildRelationshipCoordinationContext(identity, identities.map((item) => item.agentId).filter((id) => id !== 'chat')),
+    buildCommunityProfilesContext('chat', identities),
+    enableTools ? SHARED_AGENT_TOOL_LINES : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+function startMainChatExecution({
+  useAgentTools,
+  policy,
+  messages,
+  systemPrompt,
+  reasoningEffort,
+  timeoutMs,
+  onChunk,
+  onThinkingChunk,
+  onProviderError,
+  onFallback,
+  onDone,
+  onError,
+  onStatus,
+}) {
+  if (!useAgentTools) {
+    return startChatOrchestration({
+      mode: policy.mode,
+      primaryProvider: policy.primaryProvider,
+      primaryModel: policy.primaryModel,
+      fallbackProvider: policy.fallbackProvider,
+      fallbackModel: policy.fallbackModel,
+      parallelProviders: policy.parallelProviders || undefined,
+      messages,
+      systemPrompt,
+      images: [],
+      reasoningEffort,
+      timeoutMs,
+      onChunk,
+      onThinkingChunk,
+      onProviderError,
+      onFallback,
+      onDone,
+      onError,
+    });
+  }
+
+  let cancelled = false;
+  Promise.resolve().then(async () => {
+    onStatus?.({
+      type: 'tool_ready',
+      message: 'Assistant tools enabled. Inspecting before answering when needed.',
+    });
+    const result = await runAgentToolLoop({
+      agent: {
+        id: MAIN_CHAT_TOOL_AGENT_ID,
+        preferredProvider: policy.primaryProvider,
+      },
+      systemPrompt,
+      messagesForModel: messages,
+      onStatus,
+      onActions: ({ results }) => {
+        const count = Array.isArray(results) ? results.length : 0;
+        onStatus?.({
+          type: 'tool_actions',
+          message: `Completed ${count} tool action${count === 1 ? '' : 's'}.`,
+        });
+      },
+      isCancelled: () => cancelled,
+    });
+    if (cancelled) return;
+    await onDone({
+      fullResponse: result.fullResponse,
+      usage: result.usage || null,
+      providerUsed: result.providerUsed || policy.primaryProvider,
+      modelUsed: result.modelUsed || null,
+      mode: policy.mode,
+      fallbackUsed: false,
+      fallbackFrom: null,
+      attempts: [],
+      thinking: '',
+      providerThinking: {},
+      toolActions: result.actions || [],
+      toolIterations: result.iterations || 0,
+    });
+  }).catch((err) => {
+    if (cancelled || err?.code === 'ABORTED') return;
+    onError?.(err);
+  });
+
+  return () => {
+    cancelled = true;
+  };
+}
+
+function resolveRequestedModel(providerId, modelOverride) {
+  return normalizeModelOverride(modelOverride) || getProviderModelId(providerId);
+}
+
 chatRouter.post('/', chatRateLimit, async (req, res) => {
   const {
     conversationId,
@@ -72,8 +195,14 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     provider, // backward-compat alias for primaryProvider
     mode,
     primaryProvider,
+    primaryModel,
     fallbackProvider,
+    fallbackModel,
     parallelProviders,
+    parsedEscalationText,
+    parsedEscalationSource,
+    parsedEscalationProvider,
+    parsedEscalationModel,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -106,6 +235,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       code: 'INVALID_CONVERSATION_ID',
       error: 'conversationId must be a valid ObjectId',
     });
+  }
+  if (primaryModel !== undefined && typeof primaryModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'primaryModel must be a string' });
+  }
+  if (fallbackModel !== undefined && typeof fallbackModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'fallbackModel must be a string' });
   }
   const generationValidationError = getChatGenerationValidationError({
     provider,
@@ -156,13 +291,17 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     policy,
     policyError,
     requestedFallback,
+    requestedFallbackModel,
     requestedMode,
+    requestedPrimaryModel,
     requestedPrimaryProvider,
   } = await prepareChatRequest({
     conversationProvider: conversation.provider,
     requestedProvider: provider,
     requestedPrimaryProvider: primaryProvider,
+    requestedPrimaryModel: primaryModel,
     requestedFallbackProvider: fallbackProvider,
+    requestedFallbackModel: fallbackModel,
     requestedParallelProviders: parallelProviders,
     requestedMode: mode,
     timeoutMs,
@@ -173,6 +312,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   if (policyError) {
     return res.status(policyError.status).json(policyError.body);
   }
+  const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
+  const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
 
   const traceStartedAt = new Date();
   const trace = await createTrace({
@@ -190,7 +331,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       primaryProvider: requestedPrimaryProvider,
+      primaryModel: requestedPrimaryModel,
       fallbackProvider: requestedFallback,
+      fallbackModel: requestedFallbackModel,
       parallelProviders: parallelProviders || [],
     },
     resolved: {
@@ -198,7 +341,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       primaryProvider: policy.primaryProvider,
+      primaryModel: policy.primaryModel,
       fallbackProvider: policy.fallbackProvider,
+      fallbackModel: policy.fallbackModel,
       parallelProviders: policy.parallelProviders || [],
     },
   }).catch(() => null);
@@ -207,7 +352,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     label: 'Request received',
     status: 'info',
     provider: policy.primaryProvider,
-    model: getProviderModelId(policy.primaryProvider),
+    model: primaryTraceModel,
     message: `Chat request queued for ${policy.primaryProvider}.`,
   }, traceStartedAt);
   await appendTraceEvent(trace?._id, {
@@ -234,7 +379,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       status: 'error',
       outcome: buildOutcome({
         providerUsed: policy.primaryProvider,
-        modelUsed: getProviderModelId(policy.primaryProvider),
+        modelUsed: primaryTraceModel,
         totalMs: Date.now() - traceStartedAt.getTime(),
         completedAt: new Date(),
         errorCode: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
@@ -266,7 +411,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         status: 'error',
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - traceStartedAt.getTime(),
           completedAt: new Date(),
           errorCode: 'PARALLEL_MODE_DISABLED',
@@ -296,7 +441,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         status: 'error',
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - traceStartedAt.getTime(),
           completedAt: new Date(),
           errorCode: 'PARALLEL_TURN_LIMIT',
@@ -335,7 +480,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     baseSystemPrompt: contextBundle.systemPrompt,
     emitStatus: async (statusMessage) => {
       try {
-        res.write('data: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
+        res.write('event: status\ndata: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onTranscriptionStart: async (stageMeta) => {
@@ -379,7 +524,14 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     imageParserConfig: req.body.imageParserProvider
       ? { provider: req.body.imageParserProvider, model: req.body.imageParserModel || undefined }
       : null,
+    parsedEscalationText: safeString(parsedEscalationSource, '') === 'image-parser'
+      ? safeString(parsedEscalationText, '')
+      : '',
+    parsedEscalationProvider: parsedEscalationProvider || policy.primaryProvider,
+    parsedEscalationModel: parsedEscalationModel || '',
   });
+  const useSharedAgentTools = policy.mode !== 'parallel';
+  const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
       key: 'inv_match_completed',
@@ -395,6 +547,20 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 
   // Save user message once context/guardrails are resolved.
   conversation.messages.push(userMsg);
+  await learnFromInteraction(userMsg, { surface: 'chat' }).catch(() => {});
+  await recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+    type: 'message',
+    phase: 'user-input',
+    status: 'received',
+    summary: 'Main chat received a new user message.',
+    detail: userMsg.content,
+    metadata: {
+      conversationId: conversation._id.toString(),
+    },
+  }, {
+    surface: 'chat',
+    conversationId: conversation._id.toString(),
+  }).catch(() => {});
   await saveConversationLenient(conversation);
   await appendTraceEvent(trace?._id, {
     key: 'user_message_saved',
@@ -431,7 +597,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     label: 'Request accepted',
     status: 'info',
     provider: policy.primaryProvider,
-    model: getProviderModelId(policy.primaryProvider),
+    model: primaryTraceModel,
     message: 'SSE stream opened and request accepted by the server.',
   }, traceStartedAt);
   res.write('event: start\ndata: ' + JSON.stringify({
@@ -440,7 +606,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     traceId: trace ? trace._id.toString() : null,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
+    primaryModel: policy.primaryModel || null,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
+    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
     parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,
@@ -547,14 +715,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }
   }, SSE_SAFETY_TIMEOUT_MS);
 
-  const cleanupFn = startChatOrchestration({
-    mode: policy.mode,
-    primaryProvider: policy.primaryProvider,
-    fallbackProvider: policy.fallbackProvider,
-    parallelProviders: policy.parallelProviders || undefined,
+  const cleanupFn = startMainChatExecution({
+    useAgentTools: useSharedAgentTools,
+    policy,
     messages: contextBundle.messagesForModel,
-    systemPrompt: effectiveSystemPrompt,
-    images: [],
+    systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
@@ -568,7 +733,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           label: 'First output chunk',
           status: 'info',
           provider: chunkProvider,
-          model: getProviderModelId(chunkProvider),
+          model: resolveRequestedModel(
+            chunkProvider,
+            chunkProvider === policy.primaryProvider
+              ? policy.primaryModel
+              : (chunkProvider === policy.fallbackProvider ? policy.fallbackModel : '')
+          ),
           message: `First output chunk arrived from ${chunkProvider}.`,
           elapsedMs: firstChunkMs,
         }, traceStartedAt).catch(() => {});
@@ -587,7 +757,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           label: 'First reasoning chunk',
           status: 'info',
           provider: thinkingProvider,
-          model: getProviderModelId(thinkingProvider),
+          model: resolveRequestedModel(
+            thinkingProvider,
+            thinkingProvider === policy.primaryProvider
+              ? policy.primaryModel
+              : (thinkingProvider === policy.fallbackProvider ? policy.fallbackModel : '')
+          ),
           message: `First reasoning chunk arrived from ${thinkingProvider}.`,
           elapsedMs: firstThinkingMs,
         }, traceStartedAt).catch(() => {});
@@ -597,6 +772,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       } catch { /* client disconnected */ }
     },
     onProviderError: (data) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'error',
+        phase: 'provider-error',
+        status: 'error',
+        summary: data?.message || 'A main chat provider attempt failed.',
+        detail: data,
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       traceStats.providerErrors += 1;
       recordAiEvent(runtimeOperationId, 'provider_error', {
         provider: data && data.provider ? data.provider : null,
@@ -611,7 +796,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         label: 'Provider attempt failed',
         status: 'error',
         provider: data && data.provider ? data.provider : '',
-        model: getProviderModelId(data && data.provider ? data.provider : ''),
+        model: safeString(data && data.model, '') || getProviderModelId(data && data.provider ? data.provider : ''),
         code: data && data.code ? data.code : 'PROVIDER_EXEC_FAILED',
         message: data && data.message ? data.message : 'Provider failed',
         detail: data || null,
@@ -621,6 +806,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       } catch { /* client disconnected */ }
     },
     onFallback: (data) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'fallback',
+        phase: 'provider-fallback',
+        status: 'warning',
+        summary: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
+        detail: data,
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       traceStats.fallbacks += 1;
       recordAiEvent(runtimeOperationId, 'fallback', {
         provider: data && data.from ? data.from : null,
@@ -631,13 +826,28 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         label: 'Fallback engaged',
         status: 'warning',
         provider: data && data.to ? data.to : '',
-        model: getProviderModelId(data && data.to ? data.to : ''),
+        model: safeString(data && data.toModel, '') || getProviderModelId(data && data.to ? data.to : ''),
         code: data && data.reason ? data.reason : 'PROVIDER_ERROR',
         message: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
         detail: data || null,
       }, traceStartedAt).catch(() => {});
       try {
         res.write('event: fallback\ndata: ' + JSON.stringify(data) + '\n\n');
+      } catch { /* client disconnected */ }
+    },
+    onStatus: (status) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'status',
+        phase: status?.phase || status?.type || 'status',
+        status: status?.type || 'info',
+        summary: status?.message || 'Main chat emitted a status update.',
+        detail: status,
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
+      try {
+        res.write('event: status\ndata: ' + JSON.stringify(status) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onDone: async (data) => {
@@ -734,10 +944,59 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             timestamp: new Date(),
           });
         }
+        await learnFromInteraction({
+          role: 'assistant',
+          agentId: 'chat',
+          content: compliantData.fullResponse,
+        }, { surface: 'chat' }).catch(() => {});
+        await recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+          type: 'response',
+          phase: 'done',
+          status: 'ok',
+          summary: 'Main chat finished responding.',
+          detail: {
+            content: compliantData.fullResponse,
+            providerUsed: compliantData.providerUsed || null,
+            modelUsed: compliantData.modelUsed || null,
+            usage: compliantData.usage || null,
+            fallbackUsed: Boolean(compliantData.fallbackUsed),
+            attempts: attempts.length,
+            toolIterations: compliantData.toolIterations || 0,
+          },
+        }, {
+          surface: 'chat',
+          conversationId: conversation._id.toString(),
+        }).catch(() => {});
+        if (Array.isArray(compliantData.toolActions) && compliantData.toolActions.length > 0) {
+          await recordAgentToolUsage('chat', compliantData.toolActions, { surface: 'chat' }).catch(() => {});
+        }
 
-        if (conversation.title === 'New Conversation' && conversation.messages.length >= 2) {
+        // Generate a meaningful conversation title after the first exchange
+        if (isNewConversation && conversation.messages.length >= 2) {
           const firstUserMsg = conversation.messages.find((m) => m.role === 'user');
-          if (firstUserMsg) conversation.title = safeString(firstUserMsg.content, '').slice(0, 80);
+          if (firstUserMsg) {
+            const userContent = safeString(firstUserMsg.content, '');
+            const coidMatch = userContent.match(/COID[\s/]*MID[:\s]*(\d+)/i);
+            const caseMatch = userContent.match(/CASE[:\s]*(\S+)/i);
+            const categoryMatch = userContent.match(/CATEGORY[:\s]*(\S+)/i);
+            const invMatch = userContent.match(/INV-(\d{4,})/i);
+
+            const parts = [];
+            if (coidMatch) parts.push('COID ' + coidMatch[1]);
+            if (invMatch) parts.push('INV-' + invMatch[1]);
+            if (caseMatch) parts.push('Case ' + caseMatch[1]);
+            if (categoryMatch) parts.push(categoryMatch[1].replace(/-/g, ' '));
+
+            if (parts.length > 0) {
+              conversation.title = parts.join(' \u2014 ');
+            } else {
+              // Fall back to trimmed first line / first 60 chars
+              const trimmed = userContent.replace(/\s+/g, ' ').trim();
+              conversation.title = trimmed.length > 60
+                ? trimmed.slice(0, 60) + '...'
+                : trimmed || 'Untitled';
+            }
+          }
         }
 
         // Persist Escalation record when image triage produced valid parseFields.
@@ -788,7 +1047,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           stats: buildTraceStats(traceStats),
           outcome: buildOutcome({
             providerUsed: compliantData.providerUsed || policy.primaryProvider,
-            modelUsed: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
             winner: compliantData.providerUsed || policy.primaryProvider,
             fallbackUsed: Boolean(compliantData.fallbackUsed),
             fallbackFrom: compliantData.fallbackFrom || null,
@@ -804,7 +1063,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           label: 'Conversation saved',
           status: 'success',
           provider: compliantData.providerUsed || policy.primaryProvider,
-          model: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+          model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
           message: `Saved response and conversation state in ${latencyMs}ms.`,
           elapsedMs: latencyMs,
           detail: {
@@ -856,6 +1115,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
+            modelUsed: compliantData.modelUsed || null,
             fallbackUsed: compliantData.fallbackUsed,
             fallbackFrom: compliantData.fallbackFrom || null,
             mode: compliantData.mode || policy.mode,
@@ -885,7 +1145,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           stats: buildTraceStats(traceStats),
           outcome: buildOutcome({
             providerUsed: policy.primaryProvider,
-            modelUsed: getProviderModelId(policy.primaryProvider),
+            modelUsed: primaryTraceModel,
             totalMs: Date.now() - turnStartedAt,
             firstThinkingMs,
             firstChunkMs,
@@ -899,7 +1159,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           label: 'Conversation save failed',
           status: 'error',
           provider: policy.primaryProvider,
-          model: getProviderModelId(policy.primaryProvider),
+          model: primaryTraceModel,
           code: 'ONDONE_SAVE_FAILED',
           message: onDoneErr.message || 'Failed to save chat conversation',
         }, traceStartedAt).catch(() => {});
@@ -925,6 +1185,20 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       streamSettled = true;
       clearInterval(heartbeat);
       clearTimeout(sseSafetyTimeout);
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'error',
+        phase: 'error',
+        status: 'error',
+        summary: err.message || 'Main chat failed.',
+        detail: {
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          detail: err.detail || '',
+          attempts: err.attempts || [],
+        },
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       recordAiEvent(runtimeOperationId, 'error', {
         lastError: {
           code: err.code || 'PROVIDER_EXEC_FAILED',
@@ -954,7 +1228,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         stats: buildTraceStats(traceStats),
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: safeString(err && err.modelUsed, '') || primaryTraceModel,
           totalMs: latencyMs,
           firstThinkingMs,
           firstChunkMs,
@@ -968,7 +1242,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         label: 'Request failed',
         status: 'error',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: safeString(err && err.modelUsed, '') || primaryTraceModel,
         code: err.code || 'PROVIDER_EXEC_FAILED',
         message: err.message || 'Chat failed',
         detail: {
@@ -1040,7 +1314,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         stats: buildTraceStats(traceStats),
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - turnStartedAt,
           firstThinkingMs,
           firstChunkMs,
@@ -1054,7 +1328,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         label: 'Request aborted',
         status: 'warning',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: primaryTraceModel,
         code: 'CLIENT_ABORT',
         message: 'Chat request aborted before completion',
         detail: { attempts: abortData.attempts || [] },
@@ -1118,7 +1392,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         label: 'Client disconnected',
         status: 'warning',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: primaryTraceModel,
         code: 'CLIENT_DISCONNECTED',
         message: 'The client connection closed before the request settled.',
       }, traceStartedAt).catch(() => {});
@@ -1134,7 +1408,9 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     provider, // backward-compat alias
     mode,
     primaryProvider,
+    primaryModel,
     fallbackProvider,
+    fallbackModel,
     parallelProviders,
     timeoutMs,
     settings: rawSettings,
@@ -1151,6 +1427,12 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       code: 'INVALID_CONVERSATION_ID',
       error: 'conversationId must be a valid ObjectId',
     });
+  }
+  if (primaryModel !== undefined && typeof primaryModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'primaryModel must be a string' });
+  }
+  if (fallbackModel !== undefined && typeof fallbackModel !== 'string') {
+    return res.status(400).json({ ok: false, code: 'INVALID_MODEL', error: 'fallbackModel must be a string' });
   }
   const retryValidationError = getChatGenerationValidationError({
     provider,
@@ -1186,6 +1468,21 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (!lastUserMsg) {
     return res.status(400).json({ ok: false, code: 'NO_USER_MSG', error: 'No user message to retry' });
   }
+  await learnFromInteraction(lastUserMsg, { surface: 'chat' }).catch(() => {});
+  await recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+    type: 'message',
+    phase: 'retry-input',
+    status: 'received',
+    summary: 'Main chat started a retry from the latest user message.',
+    detail: lastUserMsg.content,
+    metadata: {
+      retry: true,
+      conversationId: conversation._id.toString(),
+    },
+  }, {
+    surface: 'chat',
+    conversationId: conversation._id.toString(),
+  }).catch(() => {});
   const normalizedImagesResult = normalizeChatImages(lastUserMsg.images || []);
   if (!normalizedImagesResult.ok) {
     return res.status(400).json({
@@ -1213,13 +1510,17 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     policy,
     policyError,
     requestedFallback,
+    requestedFallbackModel,
     requestedMode,
+    requestedPrimaryModel,
     requestedPrimaryProvider,
   } = await prepareChatRequest({
     conversationProvider: conversation.provider,
     requestedProvider: provider,
     requestedPrimaryProvider: primaryProvider,
+    requestedPrimaryModel: primaryModel,
     requestedFallbackProvider: fallbackProvider,
+    requestedFallbackModel: fallbackModel,
     requestedParallelProviders: parallelProviders,
     requestedMode: mode,
     timeoutMs,
@@ -1230,6 +1531,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (policyError) {
     return res.status(policyError.status).json(policyError.body);
   }
+  const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
+  const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
 
   const traceStartedAt = new Date();
   const trace = await createTrace({
@@ -1247,7 +1550,9 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       primaryProvider: requestedPrimaryProvider,
+      primaryModel: requestedPrimaryModel,
       fallbackProvider: requestedFallback,
+      fallbackModel: requestedFallbackModel,
       parallelProviders: parallelProviders || [],
     },
     resolved: {
@@ -1255,7 +1560,9 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       reasoningEffort: effectiveReasoningEffort,
       timeoutMs: effectiveTimeoutMs,
       primaryProvider: policy.primaryProvider,
+      primaryModel: policy.primaryModel,
       fallbackProvider: policy.fallbackProvider,
+      fallbackModel: policy.fallbackModel,
       parallelProviders: policy.parallelProviders || [],
     },
   }).catch(() => null);
@@ -1264,7 +1571,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     label: 'Retry request received',
     status: 'info',
     provider: policy.primaryProvider,
-    model: getProviderModelId(policy.primaryProvider),
+    model: primaryTraceModel,
     message: `Retry queued for ${policy.primaryProvider}.`,
   }, traceStartedAt);
   await appendTraceEvent(trace?._id, {
@@ -1291,7 +1598,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       status: 'error',
       outcome: buildOutcome({
         providerUsed: policy.primaryProvider,
-        modelUsed: getProviderModelId(policy.primaryProvider),
+        modelUsed: primaryTraceModel,
         totalMs: Date.now() - traceStartedAt.getTime(),
         completedAt: new Date(),
         errorCode: guardrail.blockCode || 'BUDGET_GUARDRAIL_BLOCKED',
@@ -1320,7 +1627,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         status: 'error',
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - traceStartedAt.getTime(),
           completedAt: new Date(),
           errorCode: 'PARALLEL_MODE_DISABLED',
@@ -1347,7 +1654,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         status: 'error',
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - traceStartedAt.getTime(),
           completedAt: new Date(),
           errorCode: 'PARALLEL_TURN_LIMIT',
@@ -1383,7 +1690,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     baseSystemPrompt: contextBundle.systemPrompt,
     emitStatus: async (statusMessage) => {
       try {
-        res.write('data: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
+        res.write('event: status\ndata: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onTranscriptionStart: async (stageMeta) => {
@@ -1428,6 +1735,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       ? { provider: req.body.imageParserProvider, model: req.body.imageParserModel || undefined }
       : null,
   });
+  const useSharedAgentTools = policy.mode !== 'parallel';
+  const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
       key: 'inv_match_completed',
@@ -1482,7 +1791,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     label: 'Retry accepted',
     status: 'info',
     provider: policy.primaryProvider,
-    model: getProviderModelId(policy.primaryProvider),
+    model: primaryTraceModel,
     message: 'SSE stream opened and retry accepted by the server.',
   }, traceStartedAt);
   res.write('event: start\ndata: ' + JSON.stringify({
@@ -1492,7 +1801,9 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     retry: true,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
+    primaryModel: policy.primaryModel || null,
     fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
+    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
     parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,
@@ -1599,14 +1910,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     }
   }, SSE_SAFETY_TIMEOUT_MS);
 
-  const cleanupFn = startChatOrchestration({
-    mode: policy.mode,
-    primaryProvider: policy.primaryProvider,
-    fallbackProvider: policy.fallbackProvider,
-    parallelProviders: policy.parallelProviders || undefined,
+  const cleanupFn = startMainChatExecution({
+    useAgentTools: useSharedAgentTools,
+    policy,
     messages: contextBundle.messagesForModel,
-    systemPrompt: effectiveSystemPrompt,
-    images: [],
+    systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
     onChunk: ({ provider: chunkProvider, text }) => {
@@ -1620,7 +1928,12 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           label: 'First output chunk',
           status: 'info',
           provider: chunkProvider,
-          model: getProviderModelId(chunkProvider),
+          model: resolveRequestedModel(
+            chunkProvider,
+            chunkProvider === policy.primaryProvider
+              ? policy.primaryModel
+              : (chunkProvider === policy.fallbackProvider ? policy.fallbackModel : '')
+          ),
           message: `First output chunk arrived from ${chunkProvider}.`,
           elapsedMs: firstChunkMs,
         }, traceStartedAt).catch(() => {});
@@ -1637,7 +1950,12 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           label: 'First reasoning chunk',
           status: 'info',
           provider: thinkingProvider,
-          model: getProviderModelId(thinkingProvider),
+          model: resolveRequestedModel(
+            thinkingProvider,
+            thinkingProvider === policy.primaryProvider
+              ? policy.primaryModel
+              : (thinkingProvider === policy.fallbackProvider ? policy.fallbackModel : '')
+          ),
           message: `First reasoning chunk arrived from ${thinkingProvider}.`,
           elapsedMs: firstThinkingMs,
         }, traceStartedAt).catch(() => {});
@@ -1645,6 +1963,16 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       try { res.write('event: thinking\ndata: ' + JSON.stringify({ provider: thinkingProvider, thinking }) + '\n\n'); } catch { /* gone */ }
     },
     onProviderError: (data) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'error',
+        phase: 'retry-provider-error',
+        status: 'error',
+        summary: data?.message || 'A main chat retry provider attempt failed.',
+        detail: data,
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       traceStats.providerErrors += 1;
       recordAiEvent(retryRuntimeOperationId, 'provider_error', {
         provider: data && data.provider ? data.provider : null,
@@ -1659,7 +1987,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         label: 'Provider attempt failed',
         status: 'error',
         provider: data && data.provider ? data.provider : '',
-        model: getProviderModelId(data && data.provider ? data.provider : ''),
+        model: safeString(data && data.model, '') || getProviderModelId(data && data.provider ? data.provider : ''),
         code: data && data.code ? data.code : 'PROVIDER_EXEC_FAILED',
         message: data && data.message ? data.message : 'Provider failed',
         detail: data || null,
@@ -1667,6 +1995,19 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       try { res.write('event: provider_error\ndata: ' + JSON.stringify(data) + '\n\n'); } catch { /* gone */ }
     },
     onFallback: (data) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'fallback',
+        phase: 'retry-provider-fallback',
+        status: 'warning',
+        summary: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
+        detail: {
+          retry: true,
+          ...data,
+        },
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       traceStats.fallbacks += 1;
       recordAiEvent(retryRuntimeOperationId, 'fallback', {
         provider: data && data.from ? data.from : null,
@@ -1677,12 +2018,30 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         label: 'Fallback engaged',
         status: 'warning',
         provider: data && data.to ? data.to : '',
-        model: getProviderModelId(data && data.to ? data.to : ''),
+        model: safeString(data && data.toModel, '') || getProviderModelId(data && data.to ? data.to : ''),
         code: data && data.reason ? data.reason : 'PROVIDER_ERROR',
         message: `${data && data.from ? data.from : 'primary'} -> ${data && data.to ? data.to : 'fallback'}`,
         detail: data || null,
       }, traceStartedAt).catch(() => {});
       try { res.write('event: fallback\ndata: ' + JSON.stringify(data) + '\n\n'); } catch { /* gone */ }
+    },
+    onStatus: (status) => {
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'status',
+        phase: status?.phase || status?.type || 'status',
+        status: status?.type || 'info',
+        summary: status?.message || 'Main chat retry emitted a status update.',
+        detail: {
+          retry: true,
+          ...status,
+        },
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
+      try {
+        res.write('event: status\ndata: ' + JSON.stringify(status) + '\n\n');
+      } catch { /* gone */ }
     },
     onDone: async (data) => {
       retryStreamSettled = true;
@@ -1777,6 +2136,33 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             timestamp: new Date(),
           });
         }
+        await learnFromInteraction({
+          role: 'assistant',
+          agentId: 'chat',
+          content: compliantData.fullResponse,
+        }, { surface: 'chat' }).catch(() => {});
+        await recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+          type: 'response',
+          phase: 'retry-done',
+          status: 'ok',
+          summary: 'Main chat finished a retry response.',
+          detail: {
+            retry: true,
+            content: compliantData.fullResponse,
+            providerUsed: compliantData.providerUsed || null,
+            modelUsed: compliantData.modelUsed || null,
+            usage: compliantData.usage || null,
+            fallbackUsed: Boolean(compliantData.fallbackUsed),
+            attempts: attempts.length,
+            toolIterations: compliantData.toolIterations || 0,
+          },
+        }, {
+          surface: 'chat',
+          conversationId: conversation._id.toString(),
+        }).catch(() => {});
+        if (Array.isArray(compliantData.toolActions) && compliantData.toolActions.length > 0) {
+          await recordAgentToolUsage('chat', compliantData.toolActions, { surface: 'chat' }).catch(() => {});
+        }
         await saveConversationLenient(conversation);
         await setTraceAttempts(trace?._id, attempts);
         await setTraceUsage(trace?._id, compliantData.usage);
@@ -1786,7 +2172,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           stats: buildTraceStats(traceStats),
           outcome: buildOutcome({
             providerUsed: compliantData.providerUsed || policy.primaryProvider,
-            modelUsed: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
             winner: compliantData.providerUsed || policy.primaryProvider,
             fallbackUsed: Boolean(compliantData.fallbackUsed),
             fallbackFrom: compliantData.fallbackFrom || null,
@@ -1802,7 +2188,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           label: 'Retry saved',
           status: 'success',
           provider: compliantData.providerUsed || policy.primaryProvider,
-          model: (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+          model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
           message: `Saved retried response in ${latencyMs}ms.`,
           elapsedMs: latencyMs,
           detail: {
@@ -1854,6 +2240,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
+            modelUsed: compliantData.modelUsed || null,
             fallbackUsed: compliantData.fallbackUsed,
             fallbackFrom: compliantData.fallbackFrom || null,
             mode: compliantData.mode || policy.mode,
@@ -1882,7 +2269,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           stats: buildTraceStats(traceStats),
           outcome: buildOutcome({
             providerUsed: policy.primaryProvider,
-            modelUsed: getProviderModelId(policy.primaryProvider),
+            modelUsed: primaryTraceModel,
             totalMs: Date.now() - turnStartedAt,
             firstThinkingMs,
             firstChunkMs,
@@ -1896,7 +2283,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           label: 'Retry save failed',
           status: 'error',
           provider: policy.primaryProvider,
-          model: getProviderModelId(policy.primaryProvider),
+          model: primaryTraceModel,
           code: 'ONDONE_SAVE_FAILED',
           message: onDoneErr.message || 'Failed to save retried chat conversation',
         }, traceStartedAt).catch(() => {});
@@ -1922,6 +2309,21 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       retryStreamSettled = true;
       clearInterval(heartbeat);
       clearTimeout(sseSafetyTimeout);
+      recordAgentActivity(CHAT_ACTIVITY_AGENT_ID, {
+        type: 'error',
+        phase: 'retry-error',
+        status: 'error',
+        summary: err.message || 'Main chat retry failed.',
+        detail: {
+          retry: true,
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          detail: err.detail || '',
+          attempts: err.attempts || [],
+        },
+      }, {
+        surface: 'chat',
+        conversationId: conversation._id.toString(),
+      }).catch(() => {});
       recordAiEvent(retryRuntimeOperationId, 'error', {
         lastError: {
           code: err.code || 'PROVIDER_EXEC_FAILED',
@@ -1951,7 +2353,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         stats: buildTraceStats(traceStats),
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: safeString(err && err.modelUsed, '') || primaryTraceModel,
           totalMs: latencyMs,
           firstThinkingMs,
           firstChunkMs,
@@ -1965,7 +2367,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         label: 'Retry failed',
         status: 'error',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: safeString(err && err.modelUsed, '') || primaryTraceModel,
         code: err.code || 'PROVIDER_EXEC_FAILED',
         message: err.message || 'Chat retry failed',
         detail: {
@@ -2037,7 +2439,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         stats: buildTraceStats(traceStats),
         outcome: buildOutcome({
           providerUsed: policy.primaryProvider,
-          modelUsed: getProviderModelId(policy.primaryProvider),
+          modelUsed: primaryTraceModel,
           totalMs: Date.now() - turnStartedAt,
           firstThinkingMs,
           firstChunkMs,
@@ -2051,7 +2453,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         label: 'Retry aborted',
         status: 'warning',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: primaryTraceModel,
         code: 'CLIENT_ABORT',
         message: 'Chat retry aborted before completion',
         detail: { attempts: abortData.attempts || [] },
@@ -2110,7 +2512,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         label: 'Client disconnected',
         status: 'warning',
         provider: policy.primaryProvider,
-        model: getProviderModelId(policy.primaryProvider),
+        model: primaryTraceModel,
         code: 'CLIENT_DISCONNECTED',
         message: 'The client connection closed before the retry settled.',
       }, traceStartedAt).catch(() => {});

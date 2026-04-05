@@ -1,6 +1,4 @@
 import { apiFetch as trackedFetch } from '../../api/http.js';
-import { consumeSSEStream } from '../../api/sse.js';
-
 const GMAIL_API_BASE = '/api/gmail';
 
 /**
@@ -42,46 +40,4 @@ export async function apiFetch(path, opts = {}, accountEmail) {
     throw new Error(`Server error: ${res.status} ${res.statusText}`);
   }
   return res.json();
-}
-
-// Gmail AI transport wrapper: POST to /api/gmail/ai and stream SSE chunks.
-export function sendGmailAI({ prompt, emailContext, conversationHistory, onChunk, onDone, onError }) {
-  const controller = new AbortController();
-
-  (async () => {
-    try {
-      const res = await trackedFetch(`${GMAIL_API_BASE}/ai`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, emailContext, conversationHistory }),
-        signal: controller.signal,
-      });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        onError?.(err.error || 'Request failed');
-        return;
-      }
-
-      let streamSettled = false;
-      await consumeSSEStream(res, (eventType, data) => {
-        if (eventType === 'chunk' && data?.text) onChunk?.(data.text);
-        else if (eventType === 'done') {
-          streamSettled = true;
-          onDone?.(data);
-        } else if (eventType === 'error') {
-          streamSettled = true;
-          onError?.(data?.error || 'AI error');
-        }
-      });
-
-      if (!streamSettled && !controller.signal.aborted) {
-        onError?.('The Gmail AI stream ended before completion.');
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') onError?.(err.message || 'Network error');
-    }
-  })();
-
-  return { abort: () => controller.abort() };
 }

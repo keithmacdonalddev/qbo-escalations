@@ -1,10 +1,12 @@
 import './CopilotPanel.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
+import ModelOverrideControl from './ModelOverrideControl.jsx';
 import {
   DEFAULT_PROVIDER,
   DEFAULT_REASONING_EFFORT,
   getAlternateProvider,
+  getProviderModelSuggestions,
   getProviderShortLabel,
   getReasoningEffortOptions,
   PROVIDER_FAMILY,
@@ -19,6 +21,9 @@ import {
   useSharedAgentSession,
 } from '../lib/agentSessions.js';
 import useCopilotRun from '../hooks/useCopilotRun.js';
+
+const COPILOT_PRIMARY_MODEL_LIST_ID = 'copilot-primary-model-options';
+const COPILOT_FALLBACK_MODEL_LIST_ID = 'copilot-fallback-model-options';
 
 /* SVG icons for mode buttons and empty states */
 const CopilotIcon = () => (
@@ -111,6 +116,8 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
       providerKeys: ['qbo-copilot-provider', 'qbo-chat-provider'],
       modeKeys: ['qbo-copilot-mode', 'qbo-chat-mode'],
       fallbackProviderKeys: ['qbo-copilot-fallback-provider', 'qbo-chat-fallback-provider'],
+      modelKeys: ['qbo-copilot-model', 'qbo-chat-model'],
+      fallbackModelKeys: ['qbo-copilot-fallback-model', 'qbo-chat-fallback-model'],
       reasoningEffortKeys: ['qbo-copilot-reasoning-effort', 'qbo-chat-reasoning-effort'],
       defaultMode: 'fallback',
       supportedModes: ['single', 'fallback'],
@@ -128,6 +135,8 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
       provider: storedPreferences.provider,
       providerMode: storedPreferences.mode,
       fallbackProvider: storedPreferences.fallbackProvider,
+      model: storedPreferences.model,
+      fallbackModel: storedPreferences.fallbackModel,
       reasoningEffort: storedPreferences.reasoningEffort,
     };
   }, [escalationId]);
@@ -148,10 +157,18 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
     provider,
     providerMode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     usage,
   } = session;
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const primaryModelSuggestions = useMemo(() => getProviderModelSuggestions(provider), [provider]);
+  const fallbackModelSuggestions = useMemo(() => getProviderModelSuggestions(fallbackProvider), [fallbackProvider]);
+  const providerButtonValue = getProviderShortLabel(provider);
+  const providerButtonTitle = providerMode === 'fallback'
+    ? `Primary provider: ${getProviderShortLabel(provider)}. Fallback provider: ${getProviderShortLabel(fallbackProvider)}.`
+    : `Primary provider: ${getProviderShortLabel(provider)}.`;
 
   const modeOptions = useMemo(() => (
     escalationId
@@ -181,6 +198,8 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
     provider,
     providerMode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     needsQuery,
     patchSession,
@@ -193,7 +212,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
       ? getAlternateProvider(provider)
       : fallbackProvider;
     if (nextFallback !== fallbackProvider) {
-      patchSession({ fallbackProvider: nextFallback });
+      patchSession({ fallbackProvider: nextFallback, fallbackModel: '' });
     }
   }, [provider, fallbackProvider, patchSession]);
 
@@ -201,8 +220,10 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
     writeStoredPreference('qbo-copilot-provider', provider);
     writeStoredPreference('qbo-copilot-mode', providerMode);
     writeStoredPreference('qbo-copilot-fallback-provider', fallbackProvider);
+    writeStoredPreference('qbo-copilot-model', model);
+    writeStoredPreference('qbo-copilot-fallback-model', fallbackModel);
     writeStoredPreference('qbo-copilot-reasoning-effort', reasoningEffort);
-  }, [provider, providerMode, fallbackProvider, reasoningEffort]);
+  }, [fallbackModel, fallbackProvider, model, provider, providerMode, reasoningEffort]);
 
   const renderedOutput = useMemo(() => {
     if (!output) return null;
@@ -232,12 +253,23 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
           <h2 className="copilot-title">{title}</h2>
         </div>
         <div style={{ position: 'relative' }} ref={providerMenuRef}>
-          <button type="button" className="workspace-agent-provider-btn" onClick={() => setProviderMenuOpen((prev) => !prev)}>
-            {getProviderShortLabel(provider)}
-            {providerMode === 'fallback' ? ` + ${getProviderShortLabel(fallbackProvider)}` : ''}
+          <button
+            type="button"
+            className="workspace-agent-provider-btn"
+            onClick={() => setProviderMenuOpen((prev) => !prev)}
+            aria-label="Change copilot model and provider"
+            title={providerButtonTitle}
+          >
+            <span className="workspace-agent-provider-btn-text">
+              <span className="workspace-agent-provider-btn-kicker">Primary</span>
+              <span className="workspace-agent-provider-btn-value">{providerButtonValue}</span>
+            </span>
+            <svg className="workspace-agent-provider-btn-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
           {providerMenuOpen && (
-            <div className="workspace-agent-provider-popover" style={{ left: 'auto', right: 0, width: 260 }}>
+            <div className="workspace-agent-provider-popover" style={{ left: 'auto', right: 0, width: 340 }}>
               <div className="provider-popover-label">Provider</div>
               {PROVIDER_OPTIONS.map((option) => (
                 <button
@@ -245,11 +277,15 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                   type="button"
                   className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
                   onClick={() => {
-                    const patch = { provider: option.value };
+                    const patch = { provider: option.value, model: '' };
                     const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
                     const allowed = getReasoningEffortOptions(nextFamily);
                     if (!allowed.some((o) => o.value === reasoningEffort)) {
                       patch.reasoningEffort = 'high';
+                    }
+                    if (option.value === fallbackProvider) {
+                      patch.fallbackProvider = provider;
+                      patch.fallbackModel = '';
                     }
                     patchSession(patch);
                   }}
@@ -258,6 +294,14 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                   <span className="check">{provider === option.value ? '\u2713' : ''}</span>
                 </button>
               ))}
+              <ModelOverrideControl
+                label="Primary Model"
+                provider={provider}
+                model={model}
+                onChange={(value) => patchSession({ model: value })}
+                listId={COPILOT_PRIMARY_MODEL_LIST_ID}
+                suggestions={primaryModelSuggestions}
+              />
               <div className="provider-popover-divider" />
               <div className="provider-popover-label">Mode</div>
               {[
@@ -283,12 +327,20 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                       key={option.value}
                       type="button"
                       className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
-                      onClick={() => patchSession({ fallbackProvider: option.value })}
+                      onClick={() => patchSession({ fallbackProvider: option.value, fallbackModel: '' })}
                     >
                       <span>{option.label}</span>
                       <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
                     </button>
                   ))}
+                  <ModelOverrideControl
+                    label="Fallback Model"
+                    provider={fallbackProvider}
+                    model={fallbackModel}
+                    onChange={(value) => patchSession({ fallbackModel: value })}
+                    listId={COPILOT_FALLBACK_MODEL_LIST_ID}
+                    suggestions={fallbackModelSuggestions}
+                  />
                 </>
               )}
               <div className="provider-popover-divider" />

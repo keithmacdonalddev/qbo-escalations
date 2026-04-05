@@ -1,43 +1,24 @@
-/* ==========================================================
-   END DESIGN SYSTEM FOUNDATION
-   ========================================================== */
-
-
 /* ============================================================
-   DESIGN SYSTEM v2 — RESEARCHED VALUES
-   Applied from confirmed documentation of:
-     - Material Design 3 (M3) motion & shape systems
-     - Tailwind CSS v4 shadow/elevation tokens
-     - Apple Human Interface Guidelines
-     - GitHub Primer accessibility patterns
-     - Stripe, Linear, Vercel Geist interactive patterns
-     - shadcn/ui component conventions
-
-   APPEND-ONLY — no existing rules modified.
-   All new custom properties use --ds- prefix OR unique names
-   to avoid collisions with existing tokens.
+   DESIGN SYSTEM v2 — Slate Tokens & Utilities
+   Extends the foundation with M3 motion aliases,
+   additional shadow tokens, typography tokens, and
+   interactive enhancements.
    ============================================================ */
 
 
 /* ==========================================================
-   A. Motion Token System — M3 Standard Easing + Duration Scale
-   (Material Design 3, confirmed from m3.material.io)
-
-   These are the CANONICAL M3 curve names. The existing
-   --ease-standard/decelerate/accelerate/emphasized tokens
-   use slightly different values. These M3 aliases provide
-   the exact spec values for strict M3 compliance.
+   A. Motion Token System — M3 Aliases + Duration Scale
    ========================================================== */
 
 :root {
-  /* M3 canonical easing curves (exact values from spec) */
+  /* M3 canonical easing curves */
   --ease-m3-standard: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-m3-decelerate: cubic-bezier(0.0, 0, 0.2, 1);
   --ease-m3-accelerate: cubic-bezier(0.4, 0, 1, 1);
   --ease-m3-emphasized-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
   --ease-m3-emphasized-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
 
-  /* M3 duration scale (50ms increments, from spec) */
+  /* M3 duration scale */
   --dur-short-1: 50ms;
   --dur-short-2: 100ms;
   --dur-short-3: 150ms;
@@ -52,72 +33,27 @@
 
 
 /* ==========================================================
-   B. Shadow / Elevation System — Tailwind v4 Dual-Layer
-   (Confirmed exact values from tailwindcss.com/docs/box-shadow)
-
-   Fills gaps in existing shadow scale:
-     --shadow-2xs, --shadow-2xl, --shadow-inner
-
-   Existing --shadow-sm/md/lg/xl/xs preserved.
-   Dark mode: M3 approach — eliminate depth shadows,
-   use surface differentiation + subtle border-glow.
+   B. Shadow / Elevation — Additional Tokens
    ========================================================== */
 
 :root {
-  /* 2xs — barely visible, for resting state differentiation */
-  --shadow-2xs: 0 1px rgb(0 0 0 / 0.05);
-
-  /* 2xl — maximum elevation, for modals/dialogs over overlay */
-  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
-
-  /* inner — for inset fields, pressed states, sunken wells */
-  --shadow-inner: inset 0 2px 4px rgb(0 0 0 / 0.05);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --shadow-2xs: 0 0 0 1px rgb(255 255 255 / 0.04);
-    --shadow-2xl: 0 0 0 1px rgb(255 255 255 / 0.06), 0 24px 64px rgb(0 0 0 / 0.5);
-    --shadow-inner: inset 0 1px 3px rgb(0 0 0 / 0.15);
-  }
-}
-
-
-/* ==========================================================
-   C. Border Radius — M3 Shape System Gap Fill
-   (Material Design 3 shape scale from m3.material.io)
-
-   Existing: --radius-xs(3), --radius-sm(4), --radius-md(8),
-             --radius-lg(12), --radius-xl(16), --radius-2xl(20),
-             --radius-pill(999), --radius-full(9999)
-
-   Missing: --radius-none (explicit zero for overrides)
-   ========================================================== */
-
-:root {
+  --shadow-2xs: 0 1px rgb(0 0 0 / 0.08);
+  --shadow-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.4);
+  --shadow-inner: inset 0 2px 4px rgb(0 0 0 / 0.1);
   --radius-none: 0;
 }
 
 
 /* ==========================================================
-   D. Typography Enhancement — Design System Tokens
-   (M3 type scale + Tailwind spacing + Apple system font)
-
-   Adds letter-spacing (tracking) and line-height (leading)
-   tokens as CSS custom properties. These complement the
-   existing typography utility classes.
-
-   Also adds gap classes: .text-headline, .text-title-lg,
-   .text-label-lg, .text-label, .text-label-sm
-   (not present in existing typography system)
+   C. Typography Enhancement Tokens
    ========================================================== */
 
 :root {
   /* Tracking (letter-spacing) tokens */
-  --tracking-tight: -0.025em;   /* headings 20px+ */
-  --tracking-normal: 0em;       /* body text */
-  --tracking-wide: 0.025em;     /* small labels 12px- */
-  --tracking-wider: 0.05em;     /* overline text */
+  --tracking-tight: -0.025em;
+  --tracking-normal: 0em;
+  --tracking-wide: 0.025em;
+  --tracking-wider: 0.05em;
 
   /* Leading (line-height) tokens */
   --leading-tight: 1.25;
@@ -125,30 +61,29 @@
   --leading-normal: 1.5;
   --leading-relaxed: 1.625;
 
-  /* System font stack — extended (Apple HIG + Segoe UI for Windows) */
-  --ds-font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  /* Font stacks */
+  --ds-font-system: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ds-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
 }
 
-/* Additional typography utility classes (M3 type scale adapted for web)
-   These fill gaps between existing .text-display and .text-title */
+/* Additional typography utility classes */
 
 .text-headline {
   font-size: 24px;
   font-weight: 600;
-  line-height: 1.3;
-  letter-spacing: -0.02em;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
   color: var(--ink);
 }
 
 .text-title-lg {
   font-size: 20px;
   font-weight: 600;
-  line-height: 1.4;
-  letter-spacing: -0.015em;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
-/* Label hierarchy — for form labels, nav items, metadata, tags */
 .text-label-lg {
   font-size: 14px;
   font-weight: 500;
@@ -181,23 +116,9 @@
 
 
 /* ==========================================================
-   E. Accessibility Foundation — Extended
-   (GitHub Primer sr-only, WCAG 2.2 focus, M3 reduced motion)
-
-   Existing coverage:
-     - .sr-only (line ~321) — NOT duplicated
-     - prefers-reduced-motion (line ~3438) — targeted rules only
-     - prefers-contrast: more/less (lines ~14551-14626) — NOT duplicated
-     - :focus-visible (lines ~371, ~14573, ~14644) — NOT duplicated
-
-   NEW: Universal prefers-reduced-motion catch-all that covers
-   ALL elements (existing rule only targets specific selectors).
-   Also: :focus:not(:focus-visible) for mouse-user outline removal.
+   D. Accessibility Foundation
    ========================================================== */
 
-/* Universal reduced motion — complete coverage
-   This catch-all ensures NO animation escapes reduced-motion.
-   The existing @media block at ~3438 only targets specific elements. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -209,25 +130,16 @@
   }
 }
 
-/* Remove outline for mouse/pointer users (keyboard gets :focus-visible)
-   This prevents the outline flash on click while preserving Tab navigation. */
 :focus:not(:focus-visible) {
   outline: none;
 }
 
 
 /* ==========================================================
-   F. Interactive Element Enhancements
-   (Linear hover-lift, M3 elevation change, Stripe input focus)
-
-   These use highly specific selectors with CSS custom property
-   fallbacks to avoid breaking anything if tokens are missing.
+   E. Interactive Element Enhancements
    ========================================================== */
 
-/* --- Button hover lift (Linear pattern) ---
-   Subtle translateY(-1px) on hover gives tactile "lift" feedback.
-   Existing .btn:active at line ~955 uses scale(0.97).
-   We add the hover state (which was missing) and refine active. */
+/* Button hover lift */
 .btn:not(:disabled):hover {
   transform: translateY(-1px);
   transition: transform var(--dur-short-3, 150ms) var(--ease-m3-standard, cubic-bezier(0.4, 0, 0.2, 1)),
@@ -240,9 +152,7 @@
   transition-duration: var(--dur-short-1, 50ms);
 }
 
-/* --- Card hover elevation (M3 pattern) ---
-   Cards gain shadow depth on hover, signaling interactivity.
-   Uses specific class names from the existing codebase. */
+/* Card hover elevation */
 .card-hoverable:hover,
 .compose-card:hover,
 .escalation-card:hover,
@@ -251,24 +161,20 @@
   transition: box-shadow var(--dur-short-4, 200ms) var(--ease-m3-standard, cubic-bezier(0.4, 0, 0.2, 1));
 }
 
-/* --- Input focus transition (Stripe pattern) ---
-   Smooth border-color and box-shadow transitions on form inputs.
-   Uses :where() for zero specificity so existing theme overrides win. */
+/* Input focus transition */
 :where(input, textarea, select) {
   transition: border-color var(--dur-short-3, 150ms) var(--ease-m3-standard, cubic-bezier(0.4, 0, 0.2, 1)),
               box-shadow var(--dur-short-3, 150ms) var(--ease-m3-standard, cubic-bezier(0.4, 0, 0.2, 1));
 }
 
-/* --- Sidebar item transitions (GitHub Primer + Discord step) ---
-   Smooth background and color transitions for navigation items.
-   Uses :where() for zero specificity to avoid overriding theme styles. */
+/* Sidebar item transitions */
 :where(.sidebar-nav-item) {
   transition: background-color var(--dur-short-2, 100ms) var(--ease-m3-standard, cubic-bezier(0.4, 0, 0.2, 1)),
               color var(--dur-short-2, 100ms) ease,
               border-color var(--dur-short-3, 150ms) ease;
 }
 
-/* --- Link hover transition --- */
+/* Link hover transition */
 :where(a) {
   transition: color var(--dur-short-2, 100ms) ease,
               opacity var(--dur-short-2, 100ms) ease;
@@ -276,23 +182,19 @@
 
 
 /* ==========================================================
-   G. Smooth Scroll — Global + Container
-   Respects prefers-reduced-motion (covered by universal rule above).
+   F. Smooth Scroll
    ========================================================== */
 
 html {
   scroll-behavior: smooth;
 }
 
-/* Already covered by the universal reduced-motion rule above,
-   but explicit for clarity in case that rule is ever removed */
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
   }
 }
 
-/* Navigable content containers */
 .settings-panel,
 .chat-messages {
   scroll-behavior: smooth;
@@ -300,13 +202,10 @@ html {
 
 
 /* ==========================================================
-   H. Selection & Scrollbar Refinements
-   Custom scrollbar styling for a cohesive experience.
-   Selection already handled at line ~14671. Not duplicated.
+   G. Scrollbar — Slate
+   Neutral scrollbars, no accent tinting.
    ========================================================== */
 
-/* --- Scrollbar — Webkit (Chrome, Edge, Safari) ---
-   Thin, warm-tinted scrollbar that blends with the design system. */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -324,55 +223,34 @@ html {
 }
 
 ::-webkit-scrollbar-thumb {
-  background-color: var(--ink-tertiary, #9a8b7c);
+  background-color: rgba(255, 255, 255, 0.10);
   border-radius: var(--radius-full, 9999px);
   border: 2px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--ink-secondary, #6e5f52);
+  background-color: rgba(255, 255, 255, 0.18);
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background-color: var(--ink, #2a2420);
+  background-color: rgba(255, 255, 255, 0.25);
 }
 
-/* Hide scrollbar on very narrow containers (sidebar, dropdowns) */
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
 
-/* --- Scrollbar — Firefox ---
-   Firefox uses scrollbar-width and scrollbar-color properties. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--ink-tertiary, #9a8b7c) transparent;
-}
-
-/* Dark mode scrollbar refinement */
-@media (prefers-color-scheme: dark) {
-  ::-webkit-scrollbar-thumb {
-    background-color: var(--ink-tertiary, #6e6254);
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background-color: var(--ink-secondary, #a89a8a);
-  }
-
-  ::-webkit-scrollbar-thumb:active {
-    background-color: var(--ink, #ede6dc);
-  }
+  scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
 }
 
 
 /* ==========================================================
-   I. Additional Interactive Micro-Patterns
-   Small details that elevate the overall feel.
+   H. Interactive Micro-Patterns
    ========================================================== */
 
-/* --- Disabled state visual treatment ---
-   Consistent disabled appearance across all interactive elements. */
 :where(button, input, select, textarea)[disabled],
 :where(.btn):disabled {
   opacity: 0.5;
@@ -380,24 +258,17 @@ html {
   pointer-events: none;
 }
 
-/* --- Placeholder text consistency ---
-   Ensures placeholder text uses the tertiary ink color
-   across all themes. Uses :where() for zero specificity. */
 :where(input, textarea)::placeholder {
   color: var(--ink-tertiary);
-  opacity: 1; /* Firefox sets opacity < 1 by default */
+  opacity: 1;
 }
 
-/* --- Image rendering optimization ---
-   Prevents blurry images on HiDPI displays and ensures
-   icons render crisply. */
 img,
 svg {
   max-width: 100%;
   height: auto;
 }
 
-/* Small icons (under 24px) get crisp-edges rendering */
 img[width="16"],
 img[width="20"],
 img[width="24"],
@@ -408,8 +279,6 @@ svg[width="24"] {
   image-rendering: crisp-edges;
 }
 
-/* --- Print media reduction ---
-   Strip non-essential UI in print context. */
 @media print {
   .sidebar,
   .sidebar-collapse-btn,
@@ -425,8 +294,5 @@ svg[width="24"] {
 
   * {
     box-shadow: none !important;
-    text-shadow: none !important;
   }
 }
-
-

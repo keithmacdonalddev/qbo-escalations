@@ -41,23 +41,31 @@ export default function useParserGallery() {
         if (filters.provider) params.set('provider', filters.provider);
         if (filters.status) params.set('status', filters.status);
 
+        const historyUrl = `/api/image-parser/history?${params}`;
+        console.log('[useParserGallery] fetching history URL:', historyUrl);
+
         // Fetch history and stats independently so a stats failure doesn't
         // block results from rendering.
         const [historySettled, statsSettled] = await Promise.allSettled([
-          apiFetch(`/api/image-parser/history?${params}`, { signal: controller.signal }).then(r => r.json()),
+          apiFetch(historyUrl, { signal: controller.signal }).then(r => r.json()),
           apiFetch('/api/image-parser/stats', { signal: controller.signal }).then(r => r.json()),
         ]);
+
+        console.log('[useParserGallery] historySettled:', JSON.stringify(historySettled, null, 2));
 
         if (cancelled) return;
 
         // Process history result
         if (historySettled.status === 'fulfilled' && historySettled.value.ok) {
+          console.log('[useParserGallery] BRANCH: fulfilled + ok — setting', historySettled.value.results?.length, 'results');
           setResults(historySettled.value.results);
           setTotal(historySettled.value.total);
           setPages(historySettled.value.pages);
         } else if (historySettled.status === 'fulfilled') {
+          console.log('[useParserGallery] BRANCH: fulfilled but NOT ok — value:', historySettled.value);
           setError(historySettled.value.error || 'Failed to fetch history');
         } else {
+          console.log('[useParserGallery] BRANCH: rejected — reason:', historySettled.reason);
           const err = historySettled.reason;
           if (err?.name === 'AbortError') return;
           setError(err?.message || 'Failed to fetch history');

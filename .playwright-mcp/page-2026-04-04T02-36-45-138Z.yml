@@ -1,0 +1,134 @@
+- generic [ref=e3]:
+  - link "Skip to main content" [ref=e4] [cursor=pointer]:
+    - /url: "#main-content"
+  - generic:
+    - generic: "2"
+    - generic: "3"
+    - generic: "1"
+    - generic:
+      - text: avg
+      - generic: 13.9ms
+    - generic [ref=e5]:
+      - button "❙❙" [ref=e6] [cursor=pointer]
+      - button "Clear all segments and reset stats" [ref=e7] [cursor=pointer]:
+        - img [ref=e8]
+      - button "▸" [ref=e10] [cursor=pointer]
+  - complementary [ref=e11]:
+    - generic [ref=e12]:
+      - heading "QBO Assist" [level=1] [ref=e13]
+      - button "Expand sidebar" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+    - navigation [ref=e18]:
+      - link [ref=e19] [cursor=pointer]:
+        - /url: "#/chat"
+        - img [ref=e21]
+      - link [ref=e23] [cursor=pointer]:
+        - /url: "#/dashboard"
+        - img [ref=e24]
+      - link [ref=e29] [cursor=pointer]:
+        - /url: "#/investigations"
+        - img [ref=e30]
+      - link [ref=e33] [cursor=pointer]:
+        - /url: "#/playbook"
+        - img [ref=e34]
+      - link [ref=e37] [cursor=pointer]:
+        - /url: "#/templates"
+        - img [ref=e38]
+      - link [ref=e41] [cursor=pointer]:
+        - /url: "#/analytics"
+        - img [ref=e42]
+      - link [ref=e43] [cursor=pointer]:
+        - /url: "#/gallery"
+        - img [ref=e44]
+      - link [ref=e48] [cursor=pointer]:
+        - /url: "#/usage"
+        - img [ref=e49]
+      - link [ref=e51] [cursor=pointer]:
+        - /url: "#/workspace"
+        - img [ref=e52]
+  - generic [ref=e54]:
+    - banner [ref=e55]:
+      - generic [ref=e56]:
+        - button "Inbox" [ref=e57] [cursor=pointer]:
+          - img [ref=e58]
+        - button "Test suite" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+        - button "Open settings" [ref=e65] [cursor=pointer]:
+          - img [ref=e66]
+    - main [ref=e69]:
+      - generic [ref=e70]:
+        - generic [ref=e75]:
+          - heading "Chat" [level=2] [ref=e76]
+          - generic [ref=e77]:
+            - button "New Chat" [ref=e78] [cursor=pointer]
+            - button "· Retry Last Response" [disabled]
+            - button "· View Trace Logs" [disabled]
+            - button "· Copy full conversation" [disabled]
+          - log "Chat messages" [ref=e81]:
+            - generic [ref=e82]:
+              - img [ref=e83]
+              - generic [ref=e85]: QBO Escalation Assistant
+              - generic [ref=e86]: Paste escalation screenshots (Ctrl+V) and hit Send. Claude Opus 4.6 (Default) will parse, save, and recommend next steps.
+              - generic [ref=e87]: Start a new conversation or select one from the sidebar
+          - tablist "Agent tabs" [ref=e90]:
+            - tab "Chat" [selected] [ref=e91] [cursor=pointer]
+            - tab "Workspace" [ref=e92] [cursor=pointer]
+            - tab "Co-pilot" [ref=e93] [cursor=pointer]
+          - generic [ref=e95]:
+            - generic [ref=e96]:
+              - button "Change model and mode settings" [ref=e98] [cursor=pointer]:
+                - text: Claude Opus 4.6 (Default) · Single · High
+                - generic [ref=e99]: ▾
+              - generic [ref=e100]:
+                - button "Compose settings" [ref=e102] [cursor=pointer]:
+                  - img [ref=e103]
+                - generic "Keyboard shortcuts" [ref=e106]: "?"
+            - textbox "Chat message input" [active] [ref=e109]:
+              - /placeholder: What's the escalation? Type / for commands.
+            - generic [ref=e110]:
+              - generic [ref=e111]:
+                - button "Parse image from file" [ref=e113] [cursor=pointer]:
+                  - img [ref=e114]
+                - button "Open webcam for image parser" [ref=e117] [cursor=pointer]:
+                  - img [ref=e118]
+                - button "Insert template" [ref=e121] [cursor=pointer]:
+                  - img [ref=e122]
+                - button "Parse screenshot" [ref=e124] [cursor=pointer]:
+                  - img [ref=e125]
+              - generic [ref=e131]: Drop a screenshot to parse it into text, use webcam, or type / for commands
+              - generic [ref=e132]: 0 chars
+              - button "Send message" [disabled]:
+                - img
+        - complementary "Agent dock" [ref=e133]:
+          - region "Agent dock panel" [ref=e134]:
+            - heading "Agent Panel" [level=2] [ref=e135]
+            - generic [ref=e137]:
+              - button "Workspace" [ref=e138] [cursor=pointer]
+              - button "Chat" [ref=e139] [cursor=pointer]
+              - button "Co-pilot" [ref=e140] [cursor=pointer]
+            - generic [ref=e142]:
+              - generic [ref=e144]:
+                - generic [ref=e145]:
+                  - generic [ref=e146]:
+                    - generic [ref=e147]: Live Chat Monitor
+                    - generic [ref=e148]: Idle
+                  - generic [ref=e149]: No active main chat request.
+                - generic [ref=e150]:
+                  - generic [ref=e152]: Request Activity
+                  - generic [ref=e153]: No active or recent request activity for the main chat.
+                - generic [ref=e154]:
+                  - generic [ref=e155]: Reasoning
+                  - generic [ref=e156]: Reasoning appears here when the model sends it.
+              - generic [ref=e158]:
+                - generic [ref=e159]: Opus 4.6
+                - generic [ref=e160]: Compose in the main chat
+  - button "Toggle network waterfall" [ref=e161] [cursor=pointer]:
+    - img [ref=e162]
+    - generic:
+      - generic: Network Waterfall
+      - generic: Monitor API request timing and spot pileups without browser DevTools.
+      - generic: No activity
+      - generic:
+        - generic: Glowing = requests in flight
+        - generic: Dim = idle, no active requests
+        - generic: Red = errors detected

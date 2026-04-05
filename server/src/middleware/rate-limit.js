@@ -17,7 +17,10 @@ function createRateLimiter({
   }
 
   return function rateLimitMiddleware(req, res, next) {
-    if (process.env.RATE_LIMIT_DISABLED === '1' || process.env.NODE_ENV === 'test') {
+    const isNodeTestRun = Boolean(process.env.NODE_TEST_CONTEXT)
+      || process.execArgv.includes('--test')
+      || process.argv.includes('--test');
+    if (process.env.RATE_LIMIT_DISABLED === '1' || process.env.NODE_ENV === 'test' || isNodeTestRun) {
       return next();
     }
 

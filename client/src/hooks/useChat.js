@@ -10,6 +10,7 @@ import {
 import {
   bindSurfaceDefaultsApplied,
   normalizeSurfaceFallback,
+  normalizeSurfaceModel,
   normalizeSurfaceMode,
   normalizeSurfaceProvider,
   readSurfacePreferences,
@@ -38,6 +39,8 @@ export function useChat(options = {}) {
       providerKeys: 'qbo-chat-provider',
       modeKeys: 'qbo-chat-mode',
       fallbackProviderKeys: 'qbo-chat-fallback-provider',
+      modelKeys: 'qbo-chat-model',
+      fallbackModelKeys: 'qbo-chat-fallback-model',
       reasoningEffortKeys: 'qbo-chat-reasoning-effort',
       defaultMode: DEFAULT_MODE,
       supportedModes: SUPPORTED_MODES,
@@ -48,6 +51,8 @@ export function useChat(options = {}) {
   const [provider, setProviderState] = useState(initialPreferencesRef.current.provider);
   const [mode, setModeState] = useState(initialPreferencesRef.current.mode);
   const [fallbackProvider, setFallbackProviderState] = useState(initialPreferencesRef.current.fallbackProvider);
+  const [model, setModelState] = useState(initialPreferencesRef.current.model);
+  const [fallbackModel, setFallbackModelState] = useState(initialPreferencesRef.current.fallbackModel);
   const [reasoningEffort, setReasoningEffortState] = useState(initialPreferencesRef.current.reasoningEffort);
   const [parallelProviders, setParallelProvidersState] = useState([]);
   const [splitModeActive, setSplitModeActive] = useState(false);
@@ -103,6 +108,8 @@ export function useChat(options = {}) {
   const modeRef = useRef(mode);
   const splitModeActiveRef = useRef(false);
   const fallbackProviderRef = useRef(fallbackProvider);
+  const modelRef = useRef(model);
+  const fallbackModelRef = useRef(fallbackModel);
   const parallelProvidersRef = useRef([]);
   const aiSettingsRef = useRef(aiSettings);
   const reasoningEffortRef = useRef(reasoningEffort);
@@ -124,6 +131,7 @@ export function useChat(options = {}) {
 
   const setProvider = useCallback((nextProvider) => {
     const previous = providerRef.current;
+    const previousFallback = fallbackProviderRef.current;
     const normalized = normalizeSurfaceProvider(nextProvider);
     providerRef.current = normalized;
     setProviderState(normalized);
@@ -136,8 +144,19 @@ export function useChat(options = {}) {
     }
 
     const fallback = normalizeSurfaceFallback(normalized, fallbackProviderRef.current);
+    const providerChanged = previous !== normalized;
     fallbackProviderRef.current = fallback;
     setFallbackProviderState(fallback);
+    if (providerChanged) {
+      modelRef.current = '';
+      setModelState('');
+      writeStoredPreference('qbo-chat-model', '');
+      if (fallback !== previousFallback) {
+        fallbackModelRef.current = '';
+        setFallbackModelState('');
+        writeStoredPreference('qbo-chat-fallback-model', '');
+      }
+    }
 
     writeStoredPreference('qbo-chat-provider', normalized);
     writeStoredPreference('qbo-chat-fallback-provider', fallback);
@@ -151,9 +170,15 @@ export function useChat(options = {}) {
   }, []);
 
   const setFallbackProvider = useCallback((nextProvider) => {
+    const previous = fallbackProviderRef.current;
     const normalized = normalizeSurfaceFallback(providerRef.current, nextProvider);
     fallbackProviderRef.current = normalized;
     setFallbackProviderState(normalized);
+    if (previous !== normalized) {
+      fallbackModelRef.current = '';
+      setFallbackModelState('');
+      writeStoredPreference('qbo-chat-fallback-model', '');
+    }
     writeStoredPreference('qbo-chat-fallback-provider', normalized);
   }, []);
 
@@ -171,6 +196,20 @@ export function useChat(options = {}) {
     reasoningEffortRef.current = normalized;
     setReasoningEffortState(normalized);
     writeStoredPreference('qbo-chat-reasoning-effort', normalized);
+  }, []);
+
+  const setModel = useCallback((nextModel) => {
+    const normalized = normalizeSurfaceModel(nextModel);
+    modelRef.current = normalized;
+    setModelState(normalized);
+    writeStoredPreference('qbo-chat-model', normalized);
+  }, []);
+
+  const setFallbackModel = useCallback((nextModel) => {
+    const normalized = normalizeSurfaceModel(nextModel);
+    fallbackModelRef.current = normalized;
+    setFallbackModelState(normalized);
+    writeStoredPreference('qbo-chat-fallback-model', normalized);
   }, []);
 
   const { clearChatMessagesSnapshot } = useChatSessionPersistence({
@@ -235,15 +274,29 @@ export function useChat(options = {}) {
   }, [mode]);
 
   useEffect(() => {
+    conversationIdRef.current = conversationId || null;
+  }, [conversationId]);
+
+  useEffect(() => {
     fallbackProviderRef.current = fallbackProvider;
   }, [fallbackProvider]);
+
+  useEffect(() => {
+    modelRef.current = model;
+  }, [model]);
+
+  useEffect(() => {
+    fallbackModelRef.current = fallbackModel;
+  }, [fallbackModel]);
 
   useEffect(() => bindSurfaceDefaultsApplied('chat', {
     setProvider,
     setMode,
     setFallbackProvider,
+    setModel,
+    setFallbackModel,
     setReasoningEffort,
-  }), [setFallbackProvider, setMode, setProvider, setReasoningEffort]);
+  }), [setFallbackModel, setFallbackProvider, setMode, setModel, setProvider, setReasoningEffort]);
 
   useEffect(() => {
     aiSettingsRef.current = aiSettings;
@@ -272,6 +325,8 @@ export function useChat(options = {}) {
     parallelStreamingRef,
     pushProcessEvent,
     reasoningEffortRef,
+    modelRef,
+    fallbackModelRef,
     resetProcessEvents,
     scheduleStreamFlush,
     splitModeActiveRef,
@@ -292,6 +347,8 @@ export function useChat(options = {}) {
     setParallelProviders,
     setParallelStreaming,
     setProvider,
+    setModel,
+    setFallbackModel,
     setResponseTime,
     setRuntimeWarnings,
     setSplitModeActive,
@@ -347,6 +404,8 @@ export function useChat(options = {}) {
     provider,
     mode,
     fallbackProvider,
+    model,
+    fallbackModel,
     reasoningEffort,
     parallelProviders,
     isStreaming,
@@ -366,6 +425,8 @@ export function useChat(options = {}) {
     setProvider,
     setMode,
     setFallbackProvider,
+    setModel,
+    setFallbackModel,
     setReasoningEffort,
     setParallelProviders,
     dismissFallbackNotice,
@@ -373,6 +434,7 @@ export function useChat(options = {}) {
     acceptParallelTurn,
     unacceptParallelTurn,
     triageCard,
+    setTriageCard,
     invMatches,
     abortStream,
     selectConversation,

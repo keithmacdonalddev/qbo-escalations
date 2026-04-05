@@ -42,6 +42,26 @@ function clearAllMocks() {
   _lastHttpRequestBody = null;
 }
 
+function snapshotHttpsCapture() {
+  return {
+    options: _lastHttpsRequestOptions
+      ? { ..._lastHttpsRequestOptions, headers: { ...(_lastHttpsRequestOptions.headers || {}) } }
+      : null,
+    rawBody: _lastHttpsRequestBody,
+    body: _lastHttpsRequestBody ? JSON.parse(_lastHttpsRequestBody) : null,
+  };
+}
+
+function snapshotHttpCapture() {
+  return {
+    options: _lastHttpRequestOptions
+      ? { ..._lastHttpRequestOptions, headers: { ...(_lastHttpRequestOptions.headers || {}) } }
+      : null,
+    rawBody: _lastHttpRequestBody,
+    body: _lastHttpRequestBody ? JSON.parse(_lastHttpRequestBody) : null,
+  };
+}
+
 // Patch https.request to capture options and body
 https.request = function patchedHttpsRequest(options, callback) {
   _lastHttpsRequestOptions = options;
@@ -148,52 +168,48 @@ test('Provider request body: OpenAI', async (t) => {
     });
 
     await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+    const capture = snapshotHttpsCapture();
 
     await t.test('sends to api.openai.com hostname', () => {
-      assert.equal(_lastHttpsRequestOptions.hostname, 'api.openai.com');
+      assert.equal(capture.options.hostname, 'api.openai.com');
     });
 
     await t.test('sends to /v1/chat/completions path', () => {
-      assert.equal(_lastHttpsRequestOptions.path, '/v1/chat/completions');
+      assert.equal(capture.options.path, '/v1/chat/completions');
     });
 
     await t.test('uses POST method', () => {
-      assert.equal(_lastHttpsRequestOptions.method, 'POST');
+      assert.equal(capture.options.method, 'POST');
     });
 
     await t.test('sends Authorization Bearer header', () => {
-      assert.equal(_lastHttpsRequestOptions.headers['Authorization'], 'Bearer sk-test-openai-key');
+      assert.equal(capture.options.headers['Authorization'], 'Bearer sk-test-openai-key');
     });
 
     await t.test('sends Content-Type application/json', () => {
-      assert.equal(_lastHttpsRequestOptions.headers['Content-Type'], 'application/json');
+      assert.equal(capture.options.headers['Content-Type'], 'application/json');
     });
 
     await t.test('body contains model gpt-4o by default', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.model, 'gpt-4o');
+      assert.equal(capture.body.model, 'gpt-4o');
     });
 
     await t.test('body contains temperature 0.1', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.temperature, 0.1);
+      assert.equal(capture.body.temperature, 0.1);
     });
 
     await t.test('body contains max_tokens 4096', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.max_tokens, 4096);
+      assert.equal(capture.body.max_tokens, 4096);
     });
 
     await t.test('body messages include system + user roles', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.messages.length, 2);
-      assert.equal(body.messages[0].role, 'system');
-      assert.equal(body.messages[1].role, 'user');
+      assert.equal(capture.body.messages.length, 2);
+      assert.equal(capture.body.messages[0].role, 'system');
+      assert.equal(capture.body.messages[1].role, 'user');
     });
 
     await t.test('user message includes image_url with data URL', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      const userContent = body.messages[1].content;
+      const userContent = capture.body.messages[1].content;
       assert.ok(Array.isArray(userContent));
       const imageBlock = userContent.find(c => c.type === 'image_url');
       assert.ok(imageBlock);
@@ -201,8 +217,8 @@ test('Provider request body: OpenAI', async (t) => {
     });
 
     await t.test('Content-Length header matches actual body', () => {
-      const expectedLength = Buffer.byteLength(_lastHttpsRequestBody);
-      assert.equal(Number(_lastHttpsRequestOptions.headers['Content-Length']), expectedLength);
+      const expectedLength = Buffer.byteLength(capture.rawBody);
+      assert.equal(Number(capture.options.headers['Content-Length']), expectedLength);
     });
   } finally {
     clearAllMocks();
@@ -229,27 +245,27 @@ test('Provider request body: Anthropic', async (t) => {
     });
 
     await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    const capture = snapshotHttpsCapture();
 
     await t.test('sends to api.anthropic.com hostname', () => {
-      assert.equal(_lastHttpsRequestOptions.hostname, 'api.anthropic.com');
+      assert.equal(capture.options.hostname, 'api.anthropic.com');
     });
 
     await t.test('sends to /v1/messages path', () => {
-      assert.equal(_lastHttpsRequestOptions.path, '/v1/messages');
+      assert.equal(capture.options.path, '/v1/messages');
     });
 
     await t.test('sends x-api-key header (not Authorization Bearer)', () => {
-      assert.equal(_lastHttpsRequestOptions.headers['x-api-key'], 'sk-ant-test-key');
-      assert.equal(_lastHttpsRequestOptions.headers['Authorization'], undefined);
+      assert.equal(capture.options.headers['x-api-key'], 'sk-ant-test-key');
+      assert.equal(capture.options.headers['Authorization'], undefined);
     });
 
     await t.test('sends anthropic-version header', () => {
-      assert.equal(_lastHttpsRequestOptions.headers['anthropic-version'], '2023-06-01');
+      assert.equal(capture.options.headers['anthropic-version'], '2023-06-01');
     });
 
     await t.test('body uses Anthropic content block format for images', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      const userMsg = body.messages[0];
+      const userMsg = capture.body.messages[0];
       assert.equal(userMsg.role, 'user');
       const imageBlock = userMsg.content.find(c => c.type === 'image');
       assert.ok(imageBlock, 'should have image type content block');
@@ -259,26 +275,23 @@ test('Provider request body: Anthropic', async (t) => {
     });
 
     await t.test('body uses system field (not messages role system)', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(typeof body.system, 'string');
-      assert.ok(body.system.length > 0);
+      assert.equal(typeof capture.body.system, 'string');
+      assert.ok(capture.body.system.length > 0);
       // Anthropic: system is a top-level field, not in messages array
-      assert.equal(body.messages.length, 1);
+      assert.equal(capture.body.messages.length, 1);
     });
 
     await t.test('body contains model claude-sonnet-4-20250514 by default', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.model, 'claude-sonnet-4-20250514');
+      assert.equal(capture.body.model, 'claude-sonnet-4-20250514');
     });
 
     await t.test('body does NOT contain temperature (Anthropic default)', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.temperature, undefined);
+      assert.equal(capture.body.temperature, undefined);
     });
 
     await t.test('Content-Length matches payload', () => {
-      const expectedLength = Buffer.byteLength(_lastHttpsRequestBody);
-      assert.equal(Number(_lastHttpsRequestOptions.headers['Content-Length']), expectedLength);
+      const expectedLength = Buffer.byteLength(capture.rawBody);
+      assert.equal(Number(capture.options.headers['Content-Length']), expectedLength);
     });
 
     await t.test('Anthropic usage maps input_tokens/output_tokens correctly', async () => {
@@ -317,40 +330,38 @@ test('Provider request body: Kimi', async (t) => {
     });
 
     await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+    const capture = snapshotHttpsCapture();
 
     await t.test('sends to api.moonshot.ai hostname', () => {
-      assert.equal(_lastHttpsRequestOptions.hostname, 'api.moonshot.ai');
+      assert.equal(capture.options.hostname, 'api.moonshot.ai');
     });
 
     await t.test('sends to /v1/chat/completions path', () => {
-      assert.equal(_lastHttpsRequestOptions.path, '/v1/chat/completions');
+      assert.equal(capture.options.path, '/v1/chat/completions');
     });
 
     await t.test('sends Authorization Bearer header', () => {
-      assert.equal(_lastHttpsRequestOptions.headers['Authorization'], 'Bearer mk-test-kimi-key');
+      assert.equal(capture.options.headers['Authorization'], 'Bearer mk-test-kimi-key');
     });
 
     await t.test('body contains temperature: 1 (CRITICAL — Kimi rejects other values)', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.temperature, 1, 'Kimi MUST have temperature exactly 1');
+      assert.equal(capture.body.temperature, 1, 'Kimi MUST have temperature exactly 1');
     });
 
     await t.test('body contains model kimi-k2.5 by default', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      assert.equal(body.model, 'kimi-k2.5');
+      assert.equal(capture.body.model, 'kimi-k2.5');
     });
 
     await t.test('body uses image_url format (same as OpenAI)', () => {
-      const body = JSON.parse(_lastHttpsRequestBody);
-      const userContent = body.messages[1].content;
+      const userContent = capture.body.messages[1].content;
       const imageBlock = userContent.find(c => c.type === 'image_url');
       assert.ok(imageBlock, 'Kimi uses OpenAI-compatible image_url format');
       assert.ok(imageBlock.image_url.url.startsWith('data:image/'));
     });
 
     await t.test('Content-Length matches payload', () => {
-      const expectedLength = Buffer.byteLength(_lastHttpsRequestBody);
-      assert.equal(Number(_lastHttpsRequestOptions.headers['Content-Length']), expectedLength);
+      const expectedLength = Buffer.byteLength(capture.rawBody);
+      assert.equal(Number(capture.options.headers['Content-Length']), expectedLength);
     });
   } finally {
     clearAllMocks();
@@ -369,37 +380,35 @@ test('Provider request body: LM Studio', async (t) => {
     });
 
     await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'qwen2.5-vl-7b' });
+    const capture = snapshotHttpCapture();
 
     await t.test('sends via HTTP (not HTTPS)', () => {
       // LM Studio is local, uses http
-      assert.ok(_lastHttpRequestOptions);
+      assert.ok(capture.options);
     });
 
     await t.test('sends to /v1/chat/completions path', () => {
-      assert.equal(_lastHttpRequestOptions.path, '/v1/chat/completions');
+      assert.equal(capture.options.path, '/v1/chat/completions');
     });
 
     await t.test('body contains temperature 0.1', () => {
-      const body = JSON.parse(_lastHttpRequestBody);
-      assert.equal(body.temperature, 0.1);
+      assert.equal(capture.body.temperature, 0.1);
     });
 
     await t.test('body contains stream: false', () => {
-      const body = JSON.parse(_lastHttpRequestBody);
-      assert.equal(body.stream, false);
+      assert.equal(capture.body.stream, false);
     });
 
     await t.test('body uses image_url format with data URL', () => {
-      const body = JSON.parse(_lastHttpRequestBody);
-      const userContent = body.messages[1].content;
+      const userContent = capture.body.messages[1].content;
       const imageBlock = userContent.find(c => c.type === 'image_url');
       assert.ok(imageBlock);
       assert.ok(imageBlock.image_url.url.startsWith('data:image/'));
     });
 
     await t.test('Content-Length matches payload', () => {
-      const expectedLength = Buffer.byteLength(_lastHttpRequestBody);
-      assert.equal(Number(_lastHttpRequestOptions.headers['Content-Length']), expectedLength);
+      const expectedLength = Buffer.byteLength(capture.rawBody);
+      assert.equal(Number(capture.options.headers['Content-Length']), expectedLength);
     });
   } finally {
     clearAllMocks();
@@ -1120,6 +1129,7 @@ test('checkProviderAvailability edge cases', async (t) => {
     delete process.env.MOONSHOT_API_KEY;
 
     mockHttpRequest(200, JSON.stringify({ data: [{ id: 'test-model' }] }));
+    mockHttpsRequest(200, { content: [{ text: 'ok' }] });
     try {
       const result = await checkProviderAvailability();
       assert.equal(result['lm-studio'].available, true);

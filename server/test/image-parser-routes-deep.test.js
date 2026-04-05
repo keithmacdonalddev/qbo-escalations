@@ -500,7 +500,8 @@ test('POST /keys/test deep tests', async (t) => {
     try {
       await handler(makeReq({ provider: 'openai', key: 'sk-bad' }), res);
       assert.equal(res.payload.ok, false);
-      assert.match(res.payload.error, /[Ii]nvalid API key/);
+      assert.equal(res.payload.error, 'API key rejected');
+      assert.match(res.payload.detail, /Incorrect API key/);
     } finally {
       restoreHttps();
     }
@@ -512,7 +513,8 @@ test('POST /keys/test deep tests', async (t) => {
     try {
       await handler(makeReq({ provider: 'anthropic', key: 'sk-ant-forbidden' }), res);
       assert.equal(res.payload.ok, false);
-      assert.match(res.payload.error, /[Ii]nvalid API key/);
+      assert.equal(res.payload.error, 'API key rejected');
+      assert.match(res.payload.detail, /Forbidden/);
     } finally {
       restoreHttps();
     }

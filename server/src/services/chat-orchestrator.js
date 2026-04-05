@@ -4,6 +4,7 @@ const {
   normalizeProvider,
   isValidProvider,
 } = require('./providers/registry');
+const { getProviderModelId } = require('./providers/catalog');
 const {
   recordSuccess,
   recordFailure,
@@ -16,7 +17,15 @@ function normalizeMode(mode) {
   return VALID_MODES.has(mode) ? mode : 'single';
 }
 
-function resolvePolicy({ mode, primaryProvider, fallbackProvider, parallelProviders }) {
+function normalizeModelOverride(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function resolveProviderModel(providerId, modelOverride) {
+  return normalizeModelOverride(modelOverride) || getProviderModelId(providerId) || '';
+}
+
+function resolvePolicy({ mode, primaryProvider, primaryModel, fallbackProvider, fallbackModel, parallelProviders }) {
   const resolvedMode = normalizeMode(mode);
   const resolvedPrimary = normalizeProvider(primaryProvider);
   const resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
@@ -24,7 +33,9 @@ function resolvePolicy({ mode, primaryProvider, fallbackProvider, parallelProvid
   const policy = {
     mode: resolvedMode,
     primaryProvider: resolvedPrimary,
+    primaryModel: normalizeModelOverride(primaryModel),
     fallbackProvider: resolvedFallback,
+    fallbackModel: normalizeModelOverride(fallbackModel),
   };
 
   if (parallelProviders && Array.isArray(parallelProviders) && parallelProviders.length >= 2) {
@@ -107,6 +118,7 @@ function normalizeProviderError(provider, err, defaultCode = 'PROVIDER_EXEC_FAIL
 
 function runAttempt({
   providerId,
+  model,
   messages,
   systemPrompt,
   images,
@@ -137,6 +149,7 @@ function runAttempt({
       messages,
       systemPrompt,
       images,
+      model: normalizeModelOverride(model) || undefined,
       reasoningEffort,
       timeoutMs,
       onChunk: (text) => {
@@ -158,6 +171,7 @@ function runAttempt({
         finalize({
           ok: true,
           provider: providerId,
+          model: resolveProviderModel(providerId, (usageMeta && usageMeta.model) || model),
           fullResponse: fullResponse || '',
           thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
@@ -171,6 +185,7 @@ function runAttempt({
         finalize({
           ok: false,
           provider: providerId,
+          model: resolveProviderModel(providerId, model),
           error: normalized,
           thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
@@ -184,6 +199,7 @@ function runAttempt({
     finalize({
       ok: false,
       provider: providerId,
+      model: resolveProviderModel(providerId, model),
       error: normalized,
       thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
@@ -207,6 +223,7 @@ function runAttempt({
       finalize({
         ok: false,
         provider: providerId,
+        model: resolveProviderModel(providerId, model),
         error,
         thinking: thinkingText,
         latencyMs: Date.now() - startedAt,
@@ -228,6 +245,7 @@ function runAttempt({
     finalize({
       ok: false,
       provider: providerId,
+      model: resolveProviderModel(providerId, model),
       error: { code: 'ABORT', message: `${providerId} request aborted` },
       thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
@@ -266,8 +284,10 @@ function toAttempt(result) {
   if (result.usage) {
     attempt.inputTokens = result.usage.inputTokens;
     attempt.outputTokens = result.usage.outputTokens;
-    attempt.model = result.usage.model;
+    attempt.model = result.usage.model || result.model;
     attempt.usage = result.usage;
+  } else if (result.model) {
+    attempt.model = result.model;
   }
 
   return attempt;
@@ -288,10 +308,31 @@ function resolveSequentialProviders(policy) {
     : [policy.primaryProvider, policy.fallbackProvider];
 }
 
+function buildUnhealthyFallbackDetail(providerHealth) {
+  if (!providerHealth || providerHealth.healthy) return '';
+  if (providerHealth.lastErrorMessage) return providerHealth.lastErrorMessage;
+  if (providerHealth.consecutiveFailures > 0) {
+    return `${providerHealth.consecutiveFailures} recent failure${providerHealth.consecutiveFailures === 1 ? '' : 's'} triggered the temporary unhealthy state.`;
+  }
+  return '';
+}
+
+function getPolicyModel(policy, providerId) {
+  if (providerId === policy.primaryProvider) {
+    return policy.primaryModel || '';
+  }
+  if (providerId === policy.fallbackProvider) {
+    return policy.fallbackModel || '';
+  }
+  return '';
+}
+
 function startChatOrchestration({
   mode,
   primaryProvider,
+  primaryModel,
   fallbackProvider,
+  fallbackModel,
   parallelProviders,
   messages,
   systemPrompt,
@@ -306,7 +347,14 @@ function startChatOrchestration({
   onError,
   onAbort,
 }) {
-  const policy = resolvePolicy({ mode, primaryProvider, fallbackProvider, parallelProviders });
+  const policy = resolvePolicy({
+    mode,
+    primaryProvider,
+    primaryModel,
+    fallbackProvider,
+    fallbackModel,
+    parallelProviders,
+  });
 
   let cancelled = false;
   let orchestrationSettled = false;
@@ -325,6 +373,7 @@ function startChatOrchestration({
     return new Promise((resolve) => {
       const cleanup = runAttempt({
         providerId,
+        model: getPolicyModel(policy, providerId),
         messages,
         systemPrompt,
         images,
@@ -388,6 +437,7 @@ function startChatOrchestration({
         if (result.ok) {
           successful.push({
             provider: result.provider,
+            model: result.usage?.model || result.model || '',
             status: 'ok',
             fullResponse: result.fullResponse || '',
             thinking: result.thinking || '',
@@ -397,6 +447,7 @@ function startChatOrchestration({
         } else {
           onProviderError?.({
             provider: result.provider,
+            model: result.usage?.model || result.model || '',
             code: result.error.code,
             message: result.error.message,
             detail: result.error.detail || '',
@@ -410,6 +461,7 @@ function startChatOrchestration({
           .filter((r) => !r.ok)
           .map((r) => ({
             provider: r.provider,
+            model: r.usage?.model || r.model || '',
             status: 'error',
             errorCode: r.error.code,
             errorMessage: r.error.message,
@@ -434,6 +486,7 @@ function startChatOrchestration({
         orchestrationSettled = true;
         onDone?.({
           providerUsed: 'parallel',
+          modelUsed: '',
           provider: policy.primaryProvider, // backward compatibility for old clients
           fallbackUsed: false,
           fallbackFrom: null,
@@ -453,6 +506,7 @@ function startChatOrchestration({
         code: (lastError && lastError.code) || 'PROVIDER_EXEC_FAILED',
         message: (lastError && lastError.message) || 'All provider attempts failed',
         detail: (lastError && lastError.detail) || '',
+        modelUsed: lastResult?.usage?.model || lastResult?.model || '',
         attempts,
         mode: policy.mode,
         usage: lastResult ? lastResult.usage || null : null,
@@ -462,6 +516,19 @@ function startChatOrchestration({
 
     const sequence = resolveSequentialProviders(policy);
     let fallbackFrom = null;
+    if (sequence.length > 1 && sequence[0] !== policy.primaryProvider) {
+      const primaryHealth = getProviderHealth(policy.primaryProvider);
+      fallbackFrom = policy.primaryProvider;
+      onFallback?.({
+        from: policy.primaryProvider,
+        fromModel: resolveProviderModel(policy.primaryProvider, getPolicyModel(policy, policy.primaryProvider)),
+        to: sequence[0],
+        toModel: resolveProviderModel(sequence[0], getPolicyModel(policy, sequence[0])),
+        reason: 'PRIMARY_UNHEALTHY',
+        detail: buildUnhealthyFallbackDetail(primaryHealth),
+        preflight: true,
+      });
+    }
     for (let i = 0; i < sequence.length; i++) {
       if (cancelled) return;
 
@@ -475,6 +542,7 @@ function startChatOrchestration({
         orchestrationSettled = true;
         onDone?.({
           providerUsed: providerId,
+          modelUsed: result.usage?.model || result.model || '',
           provider: providerId, // backward compatibility
           fallbackUsed: Boolean(fallbackFrom),
           fallbackFrom,
@@ -492,6 +560,7 @@ function startChatOrchestration({
 
       onProviderError?.({
         provider: providerId,
+        model: result.usage?.model || result.model || '',
         code: result.error.code,
         message: result.error.message,
         detail: result.error.detail || '',
@@ -505,6 +574,7 @@ function startChatOrchestration({
           code: result.error.code || 'PROVIDER_EXEC_FAILED',
           message: result.error.message || 'All provider attempts failed',
           detail: result.error.detail || '',
+          modelUsed: result.usage?.model || result.model || '',
           attempts,
           mode: policy.mode,
           usage: result.usage || null,
@@ -516,8 +586,11 @@ function startChatOrchestration({
       fallbackFrom = providerId;
       onFallback?.({
         from: providerId,
+        fromModel: result.usage?.model || result.model || '',
         to: nextProvider,
+        toModel: resolveProviderModel(nextProvider, getPolicyModel(policy, nextProvider)),
         reason: result.error.code || 'PROVIDER_EXEC_FAILED',
+        detail: result.error.detail || '',
       });
     }
   })().catch((err) => {
@@ -528,6 +601,7 @@ function startChatOrchestration({
       code: normalized.code,
       message: normalized.message,
       detail: normalized.detail || '',
+      modelUsed: resolveProviderModel(policy.primaryProvider, policy.primaryModel),
       attempts,
       mode: policy.mode,
       usage: null,
@@ -552,6 +626,8 @@ function startChatOrchestration({
 module.exports = {
   VALID_MODES,
   normalizeMode,
+  normalizeModelOverride,
+  resolveProviderModel,
   resolvePolicy,
   startChatOrchestration,
 };

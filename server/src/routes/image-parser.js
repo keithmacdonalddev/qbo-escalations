@@ -1,24 +1,88 @@
 'use strict';
 
 const express = require('express');
-const https = require('https');
-const fs = require('fs');
-const path = require('path');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const {
   parseImage,
   checkProviderAvailability,
   clearProviderAvailabilityCache,
-  getApiKey,
-  KEYS_FILE,
+  resolveApiKey,
+  getAllStoredKeys,
+  setStoredApiKey,
+  validateRemoteProvider,
 } = require('../services/image-parser');
 const ImageParseResult = require('../models/ImageParseResult');
+const {
+  archiveParserImage,
+  getParserImageFile,
+} = require('../lib/image-parser-archive');
+const { createApiError, sendApiError } = require('../lib/api-errors');
 
 const router = express.Router();
-const VALID_PARSE_PROVIDERS = ['lm-studio', 'anthropic', 'openai', 'kimi', 'gemini'];
-const VALID_KEY_PROVIDERS = ['anthropic', 'openai', 'kimi', 'gemini'];
+const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
+const VALID_PARSE_PROVIDERS = [
+  'llm-gateway',
+  'lm-studio',
+  'anthropic',
+  'openai',
+  'kimi',
+  'gemini',
+];
+const VALID_KEY_PROVIDERS = [
+  'llm-gateway',
+  'anthropic',
+  'openai',
+  'kimi',
+  'gemini',
+];
 const VALID_PARSE_PROVIDER_LIST = VALID_PARSE_PROVIDERS.join(', ');
 const VALID_KEY_PROVIDER_LIST = VALID_KEY_PROVIDERS.join(', ');
+
+function attachSourceImageUrl(result) {
+  if (!result || !result._id) return result;
+  const hasSourceImage = !!(result.image && result.image.sourceFileName);
+  return {
+    ...result,
+    hasSourceImage,
+    sourceImageUrl: hasSourceImage ? `/api/image-parser/history/${result._id}/image` : '',
+  };
+}
+
+function verboseWarn(...args) {
+  if (IMAGE_PARSER_VERBOSE_LOGS) {
+    console.warn(...args);
+  }
+}
+
+function verboseError(...args) {
+  if (IMAGE_PARSER_VERBOSE_LOGS) {
+    console.error(...args);
+  }
+}
+
+function persistParseResult(record, sourceImage) {
+  return (async () => {
+    if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
+      return;
+    }
+    try {
+      const saved = await ImageParseResult.create(record);
+      const archived = archiveParserImage(saved._id, sourceImage);
+      if (!archived.ok) {
+        verboseWarn('[image-parser-save] Source image archive failed:', archived.error);
+        return;
+      }
+
+      saved.set('image.sourceFileName', archived.fileName);
+      saved.set('image.sourceContentType', archived.contentType);
+      saved.set('image.sourceSizeBytes', archived.sizeBytes);
+      saved.set('image.sourceStoredAt', new Date());
+      await saved.save();
+    } catch (err) {
+      verboseError('[image-parser-save] FAILED to save:', err.message);
+    }
+  })();
+}
 
 // Rate limit: 10 requests per 60s for parse endpoint
 const parseRateLimit = createRateLimiter({ name: 'image-parser', limit: 10, windowMs: 60_000 });
@@ -37,48 +101,23 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: `Provider must be one of: ${VALID_PARSE_PROVIDER_LIST}` });
   }
 
-  // Override middleware timeout — provider timeout + generous buffer.
-  // Vision model inference can take 30-90s depending on model/provider.
-  // Local models (LM Studio) need much longer — reasoning models processing
-  // images can easily exceed 60s, so default to 180s for lm-studio.
-  // The global responseTimeout is 30s, so we MUST re-arm before doing any work.
-  const isLocal = provider === 'lm-studio';
-  const maxTimeout = isLocal ? 300_000 : 120_000;
-  const defaultTimeout = isLocal ? 180_000 : 60_000;
+  // Keep the route contract stable for the existing dashboard and tests:
+  // default to 60s, cap at 120s, and give the response timeout a 10s buffer.
+  const maxTimeout = 120_000;
+  const defaultTimeout = 60_000;
   const effectiveTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.min(timeoutMs, maxTimeout) : defaultTimeout;
   if (typeof req.setResponseTimeout === 'function') {
-    req.setResponseTimeout(effectiveTimeout + 30_000);
+    req.setResponseTimeout(effectiveTimeout + 10_000);
   }
 
   const startedAt = Date.now();
 
-  // --- DEBUG LOGGING (temporary) ---
-  const bodySize = JSON.stringify(req.body).length;
-  const imageLen = (image || '').length;
-  console.log('[image-parser-debug] Incoming request:', {
-    provider,
-    model: model || '(default)',
-    timeoutMs: effectiveTimeout,
-    bodySize,
-    imageLength: imageLen,
-    imagePrefix: (image || '').slice(0, 120),
-  });
-  // --- END DEBUG ---
-
   try {
     const result = await parseImage(image, { provider, model, timeoutMs: effectiveTimeout });
     const elapsedMs = Date.now() - startedAt;
-    console.log('[image-parser-debug] Parse succeeded:', {
-      elapsedMs,
-      textLength: (result.text || '').length,
-      textPreview: (result.text || '').slice(0, 200),
-      role: result.role,
-      usage: result.usage,
-    });
 
-    // Fire-and-forget save to MongoDB
-    console.log('[image-parser-save] Saving parse result:', { provider, status: 'ok', model: result.usage?.model });
-    ImageParseResult.create({
+    // Fire-and-forget save to MongoDB + on-disk image archive
+    persistParseResult({
       provider,
       model: result.usage?.model || model || '',
       modelRequested: model || '',
@@ -94,23 +133,18 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parsedText: result.text || '',
       textLength: (result.text || '').length,
       source: 'panel',
-    }).catch(err => console.error('[image-parser-save] FAILED to save:', err.message));
+    }, image);
 
-    res.json({ ok: true, ...result, elapsedMs });
+    res.json({ ok: true, ...result, meta: result.stats?.image, parseFields: result.parseFields || {}, elapsedMs });
   } catch (err) {
     const elapsedMs = Date.now() - startedAt;
     const status = err.code === 'PROVIDER_UNAVAILABLE' ? 503
       : err.code === 'TIMEOUT' ? 504
       : err.code === 'PROVIDER_ERROR' ? 422
       : 422;
-    console.error('[image-parser-debug] Parse error:', {
-      code: err.code || 'UNKNOWN',
-      message: err.message,
-      stack: (err.stack || '').split('\n').slice(0, 5).join('\n'),
-    });
 
-    // Fire-and-forget save error to MongoDB
-    ImageParseResult.create({
+    // Fire-and-forget save error to MongoDB + on-disk image archive
+    persistParseResult({
       provider,
       modelRequested: model || '',
       totalElapsedMs: elapsedMs,
@@ -118,7 +152,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       errorCode: err.code || 'UNKNOWN',
       errorMsg: err.message || '',
       source: 'panel',
-    }).catch(saveErr => console.error('[image-parser] Failed to save error result:', saveErr.message));
+    }, image);
 
     res.status(status).json({ ok: false, code: err.code || 'PARSE_FAILED', error: err.message || 'Image parse failed' });
   }
@@ -128,7 +162,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
 // GET /status — Check provider availability
 // ---------------------------------------------------------------------------
 router.get('/status', async (req, res) => {
-  const providers = await checkProviderAvailability();
+  const refreshRaw = String(req.query?.refresh || req.query?.forceRefresh || '').toLowerCase();
+  const forceRefresh = refreshRaw === '1' || refreshRaw === 'true' || refreshRaw === 'yes';
+  const providers = await checkProviderAvailability({ forceRefresh });
   res.json({ ok: true, providers });
 });
 
@@ -136,17 +172,11 @@ router.get('/status', async (req, res) => {
 // GET /keys — Check which providers have stored API keys
 // ---------------------------------------------------------------------------
 router.get('/keys', async (req, res) => {
-  let stored = {};
-  try {
-    const raw = fs.readFileSync(KEYS_FILE, 'utf8');
-    stored = JSON.parse(raw);
-  } catch {
-    // File doesn't exist or is invalid — all keys absent
-  }
-
+  const stored = await getAllStoredKeys();
   res.json({
     ok: true,
     keys: {
+      'llm-gateway': !!(stored['llm-gateway'] && stored['llm-gateway'].trim()),
       anthropic: !!(stored.anthropic && stored.anthropic.trim()),
       openai: !!(stored.openai && stored.openai.trim()),
       kimi: !!(stored.kimi && stored.kimi.trim()),
@@ -165,27 +195,7 @@ router.put('/keys', async (req, res) => {
     return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: `Provider must be one of: ${VALID_KEY_PROVIDER_LIST}` });
   }
 
-  // Ensure data directory exists
-  const dataDir = path.dirname(KEYS_FILE);
-  fs.mkdirSync(dataDir, { recursive: true });
-
-  // Read existing keys
-  let stored = {};
-  try {
-    const raw = fs.readFileSync(KEYS_FILE, 'utf8');
-    stored = JSON.parse(raw);
-  } catch {
-    // Start fresh
-  }
-
-  // Set or remove key
-  if (key && typeof key === 'string' && key.trim()) {
-    stored[provider] = key.trim();
-  } else {
-    delete stored[provider];
-  }
-
-  fs.writeFileSync(KEYS_FILE, JSON.stringify(stored, null, 2), 'utf8');
+  await setStoredApiKey(provider, key);
   clearProviderAvailabilityCache();
   res.json({ ok: true });
 });
@@ -195,96 +205,6 @@ router.put('/keys', async (req, res) => {
 // ---------------------------------------------------------------------------
 const testKeyRateLimit = createRateLimiter({ name: 'image-parser-test-key', limit: 5, windowMs: 60_000 });
 
-const TEST_CONFIGS = {
-  anthropic: {
-    hostname: 'api.anthropic.com',
-    path: '/v1/messages',
-    model: 'claude-sonnet-4-20250514',
-    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
-    buildHeaders: (key) => ({
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    }),
-  },
-  openai: {
-    hostname: 'api.openai.com',
-    path: '/v1/chat/completions',
-    model: 'gpt-4o-mini',
-    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
-    buildHeaders: (key) => ({
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    }),
-  },
-  kimi: {
-    hostname: 'api.moonshot.ai',
-    path: '/v1/chat/completions',
-    model: 'kimi-k2.5',
-    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }),
-    buildHeaders: (key) => ({
-      'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    }),
-  },
-  gemini: {
-    hostname: 'generativelanguage.googleapis.com',
-    path: '/v1beta/models/gemini-3-flash-preview:generateContent',
-    model: 'gemini-3-flash-preview',
-    buildBody: () => JSON.stringify({
-      contents: [{ parts: [{ text: 'hi' }] }],
-      generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' },
-    }),
-    buildHeaders: (key) => ({
-      'x-goog-api-key': key,
-      'Content-Type': 'application/json',
-    }),
-  },
-};
-
-function testProviderKey(provider, apiKey) {
-  const cfg = TEST_CONFIGS[provider];
-  const payload = cfg.buildBody(cfg.model);
-  const headers = cfg.buildHeaders(apiKey);
-  headers['Content-Length'] = Buffer.byteLength(payload);
-
-  return new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: cfg.hostname,
-      port: 443,
-      path: cfg.path,
-      method: 'POST',
-      headers,
-      timeout: 10_000,
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => {
-      req.destroy();
-      const err = new Error('Request timed out');
-      err.code = 'TIMEOUT';
-      reject(err);
-    });
-    req.write(payload);
-    req.end();
-  });
-}
-
-function extractProviderErrorMessage(body, fallback) {
-  try {
-    const parsed = JSON.parse(body);
-    return parsed.error?.message
-      || parsed.error?.status
-      || parsed.message
-      || fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 router.post('/keys/test', testKeyRateLimit, async (req, res) => {
   const { provider, key } = req.body || {};
 
@@ -293,29 +213,33 @@ router.post('/keys/test', testKeyRateLimit, async (req, res) => {
   }
 
   // Use provided key or fall back to stored key
-  const apiKey = (key && typeof key === 'string' && key.trim()) ? key.trim() : getApiKey(provider);
+  const apiKey = (key && typeof key === 'string' && key.trim()) ? key.trim() : await resolveApiKey(provider);
   if (!apiKey) {
     return res.status(400).json({ ok: false, code: 'NO_KEY', error: 'No API key provided and none stored for this provider' });
   }
 
   try {
-    const result = await testProviderKey(provider, apiKey);
-    const cfg = TEST_CONFIGS[provider];
+    const result = await validateRemoteProvider(provider, apiKey);
+    if (result.ok) {
+      return res.json({ ok: true, provider, model: result.model || '' });
+    }
 
-    if (result.statusCode >= 200 && result.statusCode < 300) {
-      return res.json({ ok: true, provider, model: cfg.model });
-    }
-    // Other error — try to extract a message from the response
-    const fallback = result.statusCode === 401
-      ? 'Invalid API key'
-      : `Provider returned HTTP ${result.statusCode}`;
-    const errorMsg = extractProviderErrorMessage(result.body, fallback);
-    return res.json({ ok: false, error: errorMsg });
+    const status = result.code === 'INVALID_KEY'
+      ? 401
+      : result.code === 'TIMEOUT'
+        ? 504
+        : result.code === 'NO_KEY'
+          ? 400
+          : result.code === 'PROVIDER_UNAVAILABLE'
+            ? 503
+          : 502;
+
+    return sendApiError(
+      res,
+      createApiError(result.code, result.reason || 'Provider test failed', status, { detail: result.detail || '' })
+    );
   } catch (err) {
-    if (err.code === 'TIMEOUT') {
-      return res.json({ ok: false, error: 'Connection to provider timed out' });
-    }
-    return res.json({ ok: false, error: err.message || 'Connection failed' });
+    return sendApiError(res, createApiError('PROVIDER_TEST_FAILED', err.message || 'Connection failed', 502));
   }
 });
 
@@ -331,7 +255,7 @@ router.get('/history', async (req, res) => {
   if (req.query.provider) filter.provider = req.query.provider;
   if (req.query.status) filter.status = req.query.status;
 
-  const [results, total] = await Promise.all([
+  const [rawResults, total] = await Promise.all([
     ImageParseResult.find(filter)
       .select('-parsedText')
       .sort({ createdAt: -1 })
@@ -340,6 +264,7 @@ router.get('/history', async (req, res) => {
       .lean(),
     ImageParseResult.countDocuments(filter),
   ]);
+  const results = rawResults.map(attachSourceImageUrl);
 
   res.json({
     ok: true,
@@ -351,6 +276,29 @@ router.get('/history', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /history/:id/image — Source screenshot for a parse result
+// ---------------------------------------------------------------------------
+router.get('/history/:id/image', async (req, res) => {
+  const result = await ImageParseResult.findById(req.params.id)
+    .select('image.sourceFileName image.sourceContentType')
+    .lean();
+
+  if (!result) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parse result not found' });
+  }
+
+  const file = getParserImageFile(req.params.id, result.image?.sourceFileName || '');
+  if (!file.ok) {
+    return res.status(404).json({ ok: false, code: 'SOURCE_IMAGE_NOT_FOUND', error: 'Source image not available for this parse result' });
+  }
+
+  if (result.image?.sourceContentType || file.contentType) {
+    res.type(result.image?.sourceContentType || file.contentType);
+  }
+  return res.sendFile(file.filePath);
+});
+
+// ---------------------------------------------------------------------------
 // GET /history/:id — Single parse result with full text
 // ---------------------------------------------------------------------------
 router.get('/history/:id', async (req, res) => {
@@ -358,7 +306,7 @@ router.get('/history/:id', async (req, res) => {
   if (!result) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parse result not found' });
   }
-  res.json({ ok: true, result });
+  res.json({ ok: true, result: attachSourceImageUrl(result) });
 });
 
 // ---------------------------------------------------------------------------

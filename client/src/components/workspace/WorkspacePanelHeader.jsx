@@ -1,5 +1,15 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { getProviderShortLabel, getReasoningEffortOptions, PROVIDER_FAMILY, PROVIDER_OPTIONS } from '../../lib/providerCatalog.js';
+import ModelOverrideControl from '../ModelOverrideControl.jsx';
+import {
+  getProviderModelSuggestions,
+  getProviderShortLabel,
+  getReasoningEffortOptions,
+  PROVIDER_FAMILY,
+  PROVIDER_OPTIONS,
+} from '../../lib/providerCatalog.js';
+
+const WORKSPACE_PRIMARY_MODEL_LIST_ID = 'workspace-agent-primary-model-options';
+const WORKSPACE_FALLBACK_MODEL_LIST_ID = 'workspace-agent-fallback-model-options';
 
 export default function WorkspacePanelHeader({
   embedded = false,
@@ -10,6 +20,8 @@ export default function WorkspacePanelHeader({
   provider,
   mode,
   fallbackProvider,
+  model,
+  fallbackModel,
   reasoningEffort,
   patchSession,
   historyOpen = false,
@@ -20,7 +32,13 @@ export default function WorkspacePanelHeader({
   onClose,
 }) {
   const providerLabel = getProviderShortLabel(provider);
-  const fallbackLabel = mode === 'fallback' ? ` + ${getProviderShortLabel(fallbackProvider)}` : '';
+  const fallbackLabel = mode === 'fallback' ? getProviderShortLabel(fallbackProvider) : '';
+  const primaryModelSuggestions = getProviderModelSuggestions(provider);
+  const fallbackModelSuggestions = getProviderModelSuggestions(fallbackProvider);
+  const buttonValue = providerLabel;
+  const buttonTitle = mode === 'fallback'
+    ? `Primary provider: ${providerLabel}. Fallback provider: ${fallbackLabel}.`
+    : `Primary provider: ${providerLabel}.`;
 
   return (
     <>
@@ -30,10 +48,16 @@ export default function WorkspacePanelHeader({
             className="workspace-agent-provider-btn"
             type="button"
             onClick={onToggleProviderMenu}
-            aria-label="Choose workspace provider"
+            aria-label="Change workspace model and provider"
+            title={buttonTitle}
           >
-            {providerLabel}
-            {fallbackLabel}
+            <span className="workspace-agent-provider-btn-text">
+              <span className="workspace-agent-provider-btn-kicker">Primary</span>
+              <span className="workspace-agent-provider-btn-value">{buttonValue}</span>
+            </span>
+            <svg className="workspace-agent-provider-btn-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
           <div className="workspace-agent-toolbar-actions">
             <button
@@ -100,10 +124,16 @@ export default function WorkspacePanelHeader({
               className="workspace-agent-provider-btn"
               type="button"
               onClick={onToggleProviderMenu}
-              aria-label="Choose workspace provider"
+              aria-label="Change workspace model and provider"
+              title={buttonTitle}
             >
-              {providerLabel}
-              {fallbackLabel}
+              <span className="workspace-agent-provider-btn-text">
+                <span className="workspace-agent-provider-btn-kicker">Primary</span>
+                <span className="workspace-agent-provider-btn-value">{buttonValue}</span>
+              </span>
+              <svg className="workspace-agent-provider-btn-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
             </button>
           </div>
           <div className="workspace-agent-header-actions">
@@ -162,7 +192,9 @@ export default function WorkspacePanelHeader({
       <AnimatePresence>
         {providerMenuOpen && (
           <motion.div
-            className="workspace-agent-provider-popover"
+            className="workspace-agent-settings-tray"
+            role="region"
+            aria-label="Workspace model and provider settings"
             initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }}
@@ -175,11 +207,15 @@ export default function WorkspacePanelHeader({
                 type="button"
                 className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
                 onClick={() => {
-                  const patch = { provider: option.value };
+                  const patch = { provider: option.value, model: '' };
                   const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
                   const allowed = getReasoningEffortOptions(nextFamily);
                   if (!allowed.some((o) => o.value === reasoningEffort)) {
                     patch.reasoningEffort = 'high';
+                  }
+                  if (option.value === fallbackProvider) {
+                    patch.fallbackProvider = provider;
+                    patch.fallbackModel = '';
                   }
                   patchSession(patch);
                 }}
@@ -188,6 +224,15 @@ export default function WorkspacePanelHeader({
                 <span className="check">{provider === option.value ? '\u2713' : ''}</span>
               </button>
             ))}
+            <ModelOverrideControl
+              label="Primary Model"
+              provider={provider}
+              model={model}
+              onChange={(value) => patchSession({ model: value })}
+              listId={WORKSPACE_PRIMARY_MODEL_LIST_ID}
+              suggestions={primaryModelSuggestions}
+              className="workspace-agent-model-field"
+            />
             <div className="provider-popover-divider" />
             <div className="provider-popover-label">Mode</div>
             {[
@@ -210,15 +255,24 @@ export default function WorkspacePanelHeader({
                 <div className="provider-popover-label">Fallback Provider</div>
                 {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => (
                   <button
-                    key={option.value}
-                    type="button"
-                    className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
-                    onClick={() => patchSession({ fallbackProvider: option.value })}
-                  >
-                    <span>{option.label}</span>
-                    <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
-                  </button>
+                  key={option.value}
+                  type="button"
+                  className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
+                  onClick={() => patchSession({ fallbackProvider: option.value, fallbackModel: '' })}
+                >
+                  <span>{option.label}</span>
+                  <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                </button>
                 ))}
+                <ModelOverrideControl
+                  label="Fallback Model"
+                  provider={fallbackProvider}
+                  model={fallbackModel}
+                  onChange={(value) => patchSession({ fallbackModel: value })}
+                  listId={WORKSPACE_FALLBACK_MODEL_LIST_ID}
+                  suggestions={fallbackModelSuggestions}
+                  className="workspace-agent-model-field"
+                />
               </>
             )}
             <div className="provider-popover-divider" />

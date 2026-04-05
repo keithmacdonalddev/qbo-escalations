@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import ConfirmModal from './ConfirmModal.jsx';
 import { DuplicateInvBanner, SimilarInvBanner } from './InvMatchBanner.jsx';
+import { apiFetchJson } from '../api/http.js';
 import './InvestigationsView.css';
 import { formatDateShort as formatDate } from '../utils/dateFormatting.js';
 
@@ -23,36 +24,31 @@ const SORT_OPTIONS = [
 
 async function fetchInvestigations(params) {
   const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`/api/investigations?${qs}`);
-  return res.json();
+  return apiFetchJson(`/api/investigations?${qs}`, {}, 'Failed to load investigations');
 }
 
 async function fetchStats() {
-  const res = await fetch('/api/investigations/stats');
-  return res.json();
+  return apiFetchJson('/api/investigations/stats', {}, 'Failed to load investigation stats');
 }
 
 async function updateInvestigation(id, fields) {
-  const res = await fetch(`/api/investigations/${id}`, {
+  return apiFetchJson(`/api/investigations/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
-  });
-  return res.json();
+  }, 'Failed to update investigation');
 }
 
 async function deleteInvestigation(id) {
-  const res = await fetch(`/api/investigations/${id}`, { method: 'DELETE' });
-  return res.json();
+  return apiFetchJson(`/api/investigations/${id}`, { method: 'DELETE' }, 'Failed to delete investigation');
 }
 
 async function bulkImportInvestigations(investigations) {
-  const res = await fetch('/api/investigations/bulk', {
+  return apiFetchJson('/api/investigations/bulk', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ investigations }),
-  });
-  return res.json();
+  }, 'Failed to import investigations');
 }
 
 // ---------------------------------------------------------------------------
@@ -228,37 +224,49 @@ export default function InvestigationsView() {
   }, []);
 
   const handleFieldSave = useCallback(async (id, field, value) => {
-    const result = await updateInvestigation(id, { [field]: value });
-    if (result.ok) {
-      setInvestigations(prev => prev.map(inv =>
-        inv._id === id ? { ...inv, ...result.investigation } : inv
-      ));
-      // Refresh stats since status changes affect counts
-      if (field === 'status') loadStats();
+    try {
+      const result = await updateInvestigation(id, { [field]: value });
+      if (result.ok) {
+        setInvestigations(prev => prev.map(inv =>
+          inv._id === id ? { ...inv, ...result.investigation } : inv
+        ));
+        if (field === 'status') loadStats();
+      }
+    } catch (err) {
+      console.warn('[investigations] update failed:', err);
     }
   }, [loadStats]);
 
   const handleBulkSave = useCallback(async (id, fields) => {
-    const result = await updateInvestigation(id, fields);
-    if (result.ok) {
-      setInvestigations(prev => prev.map(inv =>
-        inv._id === id ? { ...inv, ...result.investigation } : inv
-      ));
-      if ('status' in fields) loadStats();
+    try {
+      const result = await updateInvestigation(id, fields);
+      if (result.ok) {
+        setInvestigations(prev => prev.map(inv =>
+          inv._id === id ? { ...inv, ...result.investigation } : inv
+        ));
+        if ('status' in fields) loadStats();
+      }
+      return result;
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Failed to update investigation' };
     }
-    return result;
   }, [loadStats]);
 
   const handleDelete = useCallback(async () => {
     if (!deleteTarget) return;
-    const result = await deleteInvestigation(deleteTarget);
-    if (result.ok) {
-      setInvestigations(prev => prev.filter(inv => inv._id !== deleteTarget));
-      setTotal(prev => prev - 1);
-      if (expandedId === deleteTarget) setExpandedId(null);
-      loadStats();
+    try {
+      const result = await deleteInvestigation(deleteTarget);
+      if (result.ok) {
+        setInvestigations(prev => prev.filter(inv => inv._id !== deleteTarget));
+        setTotal(prev => prev - 1);
+        if (expandedId === deleteTarget) setExpandedId(null);
+        loadStats();
+      }
+    } catch (err) {
+      console.warn('[investigations] delete failed:', err);
+    } finally {
+      setDeleteTarget(null);
     }
-    setDeleteTarget(null);
   }, [deleteTarget, expandedId, loadStats]);
 
   // Import handlers

@@ -53,21 +53,6 @@ function detectImageParseTurn(messages, parallelIndex) {
   return false;
 }
 
-function formatTokenEstimate(value) {
-  const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0) return '0';
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(Math.round(n));
-}
-
-function formatProcessEventTime(value) {
-  if (!value) return '';
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return '';
-  return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
 function formatStreamingElapsed(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return '0.0s';
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -126,6 +111,7 @@ export default function ChatThreadStack({
   messagesEndRef,
   isStreaming,
   newConversation,
+  hideTriageCard = false,
 }) {
   const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
   const groupedMessages = useMemo(() => groupMessagesForRendering(messages), [messages]);
@@ -260,7 +246,7 @@ export default function ChatThreadStack({
           </div>
         )}
 
-        <div className="chat-messages" aria-live="polite">
+        <div className="chat-messages" role="log" aria-label="Chat messages" aria-live="polite">
           {runtimeWarnings.length > 0 && (
             <div className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--warning)', background: 'var(--warning-subtle)' }}>
               <strong style={{ marginRight: 'var(--sp-2)', color: 'var(--warning)' }}>Budget Notice:</strong>
@@ -273,62 +259,6 @@ export default function ChatThreadStack({
               >
                 Dismiss
               </button>
-            </div>
-          )}
-
-          {contextDebug?.budgets && (
-            <div className="parallel-context-line">
-              <span className="ctx-dot" style={{ background: 'var(--accent)' }} />
-              <span>
-                Context {contextDebug.knowledgeMode} • {formatTokenEstimate(contextDebug.budgets.estimatedInputTokens)} est input tokens
-              </span>
-              <span className="ctx-hints">
-                S {formatTokenEstimate(contextDebug.budgets.systemChars / 4)} | H {formatTokenEstimate(contextDebug.budgets.historyChars / 4)} | R {formatTokenEstimate(contextDebug.budgets.retrievalChars / 4)}
-              </span>
-            </div>
-          )}
-
-          {showRuntimeDiagnostics && processEvents.length > 0 && (
-            <div className="chat-process-panel" role="status" aria-live="polite">
-              <div className="chat-process-header" onClick={() => setActivityExpanded((prev) => !prev)} style={{ cursor: 'pointer', userSelect: 'none' }}>
-                <span>Request Activity <span style={{ fontSize: '0.7em', opacity: 0.5, marginLeft: 6 }}>{activityExpanded ? '▲' : '▼'}</span></span>
-                {activityExpanded && (
-                  <button
-                    className="btn btn-sm btn-ghost"
-                    onClick={(e) => { e.stopPropagation(); clearProcessEvents(); }}
-                    type="button"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
-              {activityExpanded && <div className="chat-process-list">
-                {processEvents.slice(-14).map((event) => (
-                  <div key={event.id} className={`chat-process-item is-${event.level || 'info'}`}>
-                    <span className="chat-process-dot" />
-                    <div className="chat-process-body">
-                      <div className="chat-process-title">
-                        <strong>{event.title || 'Event'}</strong>
-                        <span>{formatProcessEventTime(event.at)}</span>
-                      </div>
-                      <div className="chat-process-message">{event.message}</div>
-                      {(event.code || event.provider || Number.isFinite(event.latencyMs)) && (
-                        <div className="chat-process-meta">
-                          {event.code && <span className="mono">{event.code}</span>}
-                          {event.provider && <span>{getProviderLabel(event.provider)}</span>}
-                          {Number.isFinite(event.latencyMs) && <span>{event.latencyMs}ms</span>}
-                        </div>
-                      )}
-                      {event.detail && (
-                        <details className="chat-process-detail">
-                          <summary>Details</summary>
-                          <pre>{event.detail}</pre>
-                        </details>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>}
             </div>
           )}
 
@@ -437,7 +367,7 @@ export default function ChatThreadStack({
             })}
           </AnimatePresence>
 
-          {triageCard && (
+          {triageCard && !hideTriageCard && (
             <TriageCard triageCard={triageCard} />
           )}
 

@@ -9,19 +9,15 @@
  */
 
 const { reportServerError } = require('../lib/server-error-pipeline');
+const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const PARSE_PROMPT =
-  'Parse this escalation screenshot. Read the image exactly as shown. ' +
-  'Extract all fields: COID, MID, case number, client contact, agent name, ' +
-  'what they are attempting, expected outcome, actual outcome, troubleshooting steps, ' +
-  'whether they tried a test account, and issue category. ' +
-  'Do not guess unclear names, IDs, numbers, or labels. ' +
-  'If a field is unreadable or uncertain, return an empty string for that field. ' +
-  'Prefer exact transcription over summarizing. Return ONLY the JSON.';
+function getParsePrompt() {
+  return getRenderedAgentPrompt('sdk-image-parse');
+}
 
 const OUTPUT_SCHEMA = {
   type: 'object',
@@ -155,7 +151,7 @@ async function parseImageWithSDK(imageBase64, options = {}) {
         },
         {
           type: 'text',
-          text: PARSE_PROMPT,
+          text: getParsePrompt(),
         },
       ],
     },

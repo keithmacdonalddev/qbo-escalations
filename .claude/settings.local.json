@@ -50,55 +50,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/inject-context.mjs",
-            "timeout": 15,
-            "statusMessage": "Initializing memory system..."
-          },
-          {
-            "type": "command",
             "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/config-freshness.mjs",
             "timeout": 10,
             "statusMessage": "Checking config freshness..."
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/capture-observation.mjs",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/finalize-session.mjs",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/generate-folder-context.mjs",
-            "timeout": 15,
-            "statusMessage": "Generating folder context..."
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "cd \"$CLAUDE_PROJECT_DIR\" 2>/dev/null || cd \"$(git rev-parse --show-toplevel)\" 2>/dev/null; node .claude/hooks/finalize-session.mjs",
-            "timeout": 10
           }
         ]
       }

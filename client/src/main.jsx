@@ -15,6 +15,7 @@ import './design-system-v2.css';
 import './themes/atmospherics.css';
 import './themes/new-atmospherics.css';
 import './themes/apple.css';
+import './overhaul.css';
 
 installRuntimeGuards({ isDev: import.meta.env.DEV, hot: import.meta.hot });
 
