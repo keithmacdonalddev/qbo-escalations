@@ -160,13 +160,14 @@ module.exports = {
     }
 
     // --- Provider policy — use the agent's declared preferredProvider ----
-    const primaryProvider = normalizeProvider(module.exports.preferredProvider);
+    const runtimePolicy = options.runtimePolicy || null;
+    const primaryProvider = normalizeProvider(runtimePolicy?.primaryProvider || module.exports.preferredProvider);
     const policy = resolvePolicy({
-      mode: 'fallback',
+      mode: runtimePolicy?.mode || 'fallback',
       primaryProvider,
-      primaryModel: normalizeModelOverride(null),
-      fallbackProvider: getAlternateProvider(primaryProvider),
-      fallbackModel: normalizeModelOverride(null),
+      primaryModel: normalizeModelOverride(runtimePolicy?.primaryModel || null),
+      fallbackProvider: normalizeProvider(runtimePolicy?.fallbackProvider || getAlternateProvider(primaryProvider)),
+      fallbackModel: normalizeModelOverride(runtimePolicy?.fallbackModel || null),
     });
 
     // --- Session tracking -----------------------------------------------
@@ -205,7 +206,7 @@ module.exports = {
           sessionId,
           policy,
           requestedPrimaryProvider: primaryProvider,
-          effectiveReasoningEffort: 'high',
+          effectiveReasoningEffort: runtimePolicy?.reasoningEffort || 'high',
           timeoutMs: DEFAULT_TIMEOUT_MS,
           workspaceRole: systemPrompt,
           workspaceChatOnlyRole: systemPrompt,

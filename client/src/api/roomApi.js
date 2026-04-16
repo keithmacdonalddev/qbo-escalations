@@ -76,14 +76,14 @@ export async function listAvailableAgents() {
  * Send a message to a room and consume the multi-agent SSE stream.
  *
  * @param {string} roomId
- * @param {{ message?: string, parsedImageContext?: object }} payload
+ * @param {{ message?: string, parsedImageContext?: object, agentRuntime?: object }} payload
  *   At least one of `message` or `parsedImageContext` must be present.
  *   parsedImageContext shape:
  *   { transcription, parseFields, confidence?, validationPassed?, fieldsFound?, role, originalImageMeta }
  * @param {{ onRoomStart?: Function, onAgentStart?: Function, onChunk?: Function, onThinking?: Function, onAgentDone?: Function, onRoomDone?: Function, onAgentError?: Function, onError?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendRoomMessage(roomId, { message, parsedImageContext, systemInitiated, systemMessage } = {}, { onRoomStart, onAgentStart, onChunk, onThinking, onActions, onStatus, onAgentDone, onRoomDone, onAgentError, onError }) {
+export function sendRoomMessage(roomId, { message, parsedImageContext, systemInitiated, systemMessage, agentRuntime } = {}, { onRoomStart, onAgentStart, onChunk, onThinking, onActions, onStatus, onAgentDone, onRoomDone, onAgentError, onError }) {
   const controller = new AbortController();
   const url = `${BASE}/${roomId}/send`;
 
@@ -99,6 +99,7 @@ export function sendRoomMessage(roomId, { message, parsedImageContext, systemIni
           ...(parsedImageContext && { parsedImageContext }),
           ...(systemInitiated ? { systemInitiated: true } : {}),
           ...(systemMessage ? { systemMessage } : {}),
+          ...(agentRuntime && typeof agentRuntime === 'object' ? { agentRuntime } : {}),
         }),
         signal: controller.signal,
         timeout: STREAM_TIMEOUT_MS,

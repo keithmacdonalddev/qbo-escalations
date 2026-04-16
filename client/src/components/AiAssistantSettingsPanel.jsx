@@ -8,12 +8,14 @@ import {
   DEFAULT_REASONING_EFFORT,
   PROVIDER_OPTIONS,
   getAlternateProvider,
+  getProviderDefaultModel,
   getReasoningEffortOptions,
   PROVIDER_FAMILY,
   normalizeProvider,
   normalizeReasoningEffort,
 } from '../lib/providerCatalog.js';
 import {
+  SURFACE_DEFAULTS_APPLIED_EVENT,
   readStoredPreference,
   writeStoredPreference,
   normalizeSurfaceMode,
@@ -124,7 +126,9 @@ function readAgentState(agent) {
   const mode = normalizeSurfaceMode(rawMode || defaultMode, supportedModes, defaultMode);
   const rawEffort = readStoredPreference(storageKey(storagePrefix, 'reasoning-effort'));
   const reasoningEffort = normalizeReasoningEffort(rawEffort || DEFAULT_REASONING_EFFORT);
-  return { provider, mode, fallbackProvider, reasoningEffort };
+  const model = readStoredPreference(storageKey(storagePrefix, 'model')) || getProviderDefaultModel(provider);
+  const fallbackModel = readStoredPreference(storageKey(storagePrefix, 'fallback-model')) || getProviderDefaultModel(fallbackProvider);
+  return { provider, mode, fallbackProvider, model, fallbackModel, reasoningEffort };
 }
 
 function writeAgentState(agent, state) {
@@ -137,6 +141,11 @@ function writeAgentState(agent, state) {
   writeStoredPreference(storageKey(storagePrefix, 'provider'), state.provider);
   writeStoredPreference(storageKey(storagePrefix, 'mode'), state.mode);
   writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), state.fallbackProvider);
+  writeStoredPreference(storageKey(storagePrefix, 'model'), state.model || getProviderDefaultModel(state.provider));
+  writeStoredPreference(
+    storageKey(storagePrefix, 'fallback-model'),
+    state.fallbackModel || getProviderDefaultModel(state.fallbackProvider)
+  );
   writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), state.reasoningEffort);
 }
 
@@ -558,18 +567,26 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
           <div className="agent-card-models">
             <div className="agent-card-field">
               <label className="agent-card-field-label">Model</label>
-              <select
-                className="agent-card-select"
-                value={draft.provider}
-                onChange={(e) => {
-                  const next = normalizeProvider(e.target.value);
-                  const nextFallback = normalizeSurfaceFallback(next, draft.fallbackProvider);
-                  onChange({ ...draft, provider: next, fallbackProvider: nextFallback });
-                }}
-              >
-                {PROVIDER_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
+                <select
+                  className="agent-card-select"
+                  value={draft.provider}
+                  onChange={(e) => {
+                    const next = normalizeProvider(e.target.value);
+                    const nextFallback = normalizeSurfaceFallback(next, draft.fallbackProvider);
+                    onChange({
+                      ...draft,
+                      provider: next,
+                      fallbackProvider: nextFallback,
+                      model: getProviderDefaultModel(next),
+                      fallbackModel: nextFallback === draft.fallbackProvider
+                        ? draft.fallbackModel
+                        : getProviderDefaultModel(nextFallback),
+                    });
+                  }}
+                >
+                  {PROVIDER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
               </select>
             </div>
 
@@ -590,7 +607,11 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                     value={draft.fallbackProvider}
                     onChange={(e) => {
                       const next = normalizeProvider(e.target.value);
-                      onChange({ ...draft, fallbackProvider: next });
+                      onChange({
+                        ...draft,
+                        fallbackProvider: next,
+                        fallbackModel: getProviderDefaultModel(next),
+                      });
                     }}
                   >
                     {PROVIDER_OPTIONS.filter((opt) => opt.value !== draft.provider).map((opt) => (
@@ -738,6 +759,16 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
       AGENTS.forEach((agent) => {
         writeAgentState(agent, agentDrafts[agent.id]);
       });
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(SURFACE_DEFAULTS_APPLIED_EVENT, {
+          detail: {
+            surfaces: Object.fromEntries(
+              AGENTS.map((agent) => [agent.id, { ...agentDrafts[agent.id] }])
+            ),
+          },
+        }));
+      }
 
       // Persist global settings
       if (setAiSettings) {

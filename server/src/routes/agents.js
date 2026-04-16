@@ -390,7 +390,7 @@ router.post('/test-model', async (req, res, next) => {
       ok: true,
       provider: providerId,
       providerLabel: getProviderLabel(providerId),
-      model: model || getProviderModelId(providerId) || '',
+      model: result.usage?.model || model || getProviderModelId(providerId) || '',
       reasoningEffort,
       latencyMs: result.latencyMs,
       output,

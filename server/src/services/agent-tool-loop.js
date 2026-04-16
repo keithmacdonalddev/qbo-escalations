@@ -23,14 +23,15 @@ async function runAgentToolLoop({
   onActions,
   onStatus,
   isCancelled,
+  runtimePolicy = null,
 }) {
-  const primaryProvider = normalizeProvider(agent.preferredProvider);
+  const primaryProvider = normalizeProvider(runtimePolicy?.primaryProvider || agent.preferredProvider);
   const policy = resolvePolicy({
-    mode: 'fallback',
+    mode: runtimePolicy?.mode || 'fallback',
     primaryProvider,
-    primaryModel: normalizeModelOverride(null),
-    fallbackProvider: getAlternateProvider(primaryProvider),
-    fallbackModel: normalizeModelOverride(null),
+    primaryModel: normalizeModelOverride(runtimePolicy?.primaryModel || null),
+    fallbackProvider: normalizeProvider(runtimePolicy?.fallbackProvider || getAlternateProvider(primaryProvider)),
+    fallbackModel: normalizeModelOverride(runtimePolicy?.fallbackModel || null),
   });
 
   Object.assign(WORKSPACE_TOOL_HANDLERS, SHARED_AGENT_TOOL_HANDLERS);
@@ -60,7 +61,7 @@ async function runAgentToolLoop({
         primaryModel: policy.primaryModel,
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
-        reasoningEffort: 'medium',
+        reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
       }).promise;
 
       currentResponse = result.fullResponse || '';
@@ -83,7 +84,7 @@ async function runAgentToolLoop({
           fullResponse: currentResponse.trim(),
           usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
           providerUsed: finalProviderUsed || primaryProvider,
-          modelUsed: finalModelUsed || aggregatedUsage?.model || null,
+          modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
           actions: allActionResults,
           iterations: iteration - 1,
         };
@@ -122,7 +123,7 @@ async function runAgentToolLoop({
       fullResponse: currentResponse.replace(/ACTION:\s*\{[\s\S]*?\}\s*(?=\n|$)/g, '').trim(),
       usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
       providerUsed: finalProviderUsed || primaryProvider,
-      modelUsed: finalModelUsed || aggregatedUsage?.model || null,
+      modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
       actions: allActionResults,
       iterations: TOOL_LOOP_MAX_ITERATIONS,
     };

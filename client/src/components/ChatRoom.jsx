@@ -47,6 +47,39 @@ function formatEventTime(ts) {
   return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+function getPresenceTone(state) {
+  if (state === 'responding' || state === 'thinking' || state === 'using-tools') return 'active';
+  if (state === 'social') return 'warm';
+  if (state === 'error') return 'error';
+  return 'idle';
+}
+
+function formatPresenceNote(state, note) {
+  const clean = typeof note === 'string' ? note.trim() : '';
+  if (clean) return clean;
+  if (state === 'responding') return 'Responding';
+  if (state === 'thinking') return 'Thinking';
+  if (state === 'using-tools') return 'Using tools';
+  if (state === 'social') return 'Engaged';
+  if (state === 'error') return 'Error';
+  return 'Ready';
+}
+
+function shouldShowEventInActivityRail(event) {
+  if (!event?.type) return false;
+  return [
+    'room-start',
+    'room-autonomy',
+    'autonomous-room-turn',
+    'agent-actions',
+    'tool_loop',
+    'tool_ready',
+    'social_nudge',
+    'agent-error',
+    'room-interrupt',
+  ].includes(event.type);
+}
+
 function buildRoomTranscript(room, messages, agents) {
   const title = room?.title || 'Untitled Room';
   const agentNameById = new Map(
@@ -544,45 +577,84 @@ function RoomSettingsPanel({ room, onClose }) {
   );
 }
 
-function RoomPresenceStrip({ activeAgents = [], agentPresence = {}, streamingAgents }) {
+function RoomStatusSidebar({
+  open = false,
+  onToggle,
+  activeAgents = [],
+  agentPresence = {},
+  streamingAgents,
+  roomEvents = [],
+}) {
   const activeSet = streamingAgents instanceof Set ? streamingAgents : new Set(streamingAgents || []);
+  const visibleEvents = roomEvents.filter(shouldShowEventInActivityRail).slice(0, 8);
+  const hasSignal = activeAgents.length > 0 || visibleEvents.length > 0;
 
   return (
-    <div className="chat-room-presence-strip">
-      {activeAgents.map((agent) => {
-        const agentId = agent.id || agent._id || agent.agentId;
-        const presence = agentPresence?.[agentId] || {};
-        const state = activeSet.has(agentId) ? 'responding' : (presence.state || 'idle');
-        const note = presence.note || (state === 'idle' ? 'Listening' : state);
+    <aside className={`chat-room-status-sidebar${open ? ' is-open' : ''}`} aria-label="Room status">
+      <button
+        type="button"
+        className="chat-room-status-toggle"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={open ? 'Collapse room status sidebar' : 'Expand room status sidebar'}
+        title={open ? 'Collapse room status' : 'Open room status'}
+      >
+        <span className="chat-room-status-toggle-kicker">Room</span>
+        <span className="chat-room-status-toggle-label">Status</span>
+        {hasSignal && <span className="chat-room-status-toggle-dot" aria-hidden="true" />}
+      </button>
 
-        return (
-          <div key={agentId} className={`chat-room-presence-pill is-${state}`}>
-            <AgentAvatar agent={agent} size={18} interactive={false} />
-            <div className="chat-room-presence-copy">
-              <span className="chat-room-presence-name">{agent.name || agentId}</span>
-              <span className="chat-room-presence-note">{note}</span>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+      {open && (
+        <div className="chat-room-status-panel">
+          <div className="chat-room-status-section">
+            <div className="chat-room-status-heading">Agents</div>
+            {activeAgents.length > 0 ? (
+              <div className="chat-room-status-list">
+                {activeAgents.map((agent) => {
+                  const agentId = agent.id || agent._id || agent.agentId;
+                  const presence = agentPresence?.[agentId] || {};
+                  const state = activeSet.has(agentId) ? 'responding' : (presence.state || 'idle');
+                  const tone = getPresenceTone(state);
+                  const displayName = agent.shortName || agent.name || agentId;
+                  const note = formatPresenceNote(state, presence.note);
 
-function RoomEventRail({ roomEvents = [] }) {
-  if (!roomEvents.length) return null;
-  return (
-    <div className="chat-room-event-rail" aria-label="Room activity">
-      {roomEvents.slice(0, 8).map((event) => (
-        <div key={event.id} className={`chat-room-event-card is-${event.type}`}>
-          <div className="chat-room-event-top">
-            <span className="chat-room-event-title">{event.title}</span>
-            <span className="chat-room-event-time">{formatEventTime(event.at)}</span>
+                  return (
+                    <div key={agentId} className={`chat-room-status-row tone-${tone}`}>
+                      <AgentAvatar agent={agent} size={18} interactive={false} />
+                      <div className="chat-room-status-copy">
+                        <span className="chat-room-status-name">{displayName}</span>
+                        <span className="chat-room-status-note">{note}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="chat-room-status-empty">No active agents.</div>
+            )}
           </div>
-          <div className="chat-room-event-detail">{event.detail}</div>
+
+          <div className="chat-room-status-section">
+            <div className="chat-room-status-heading">Activity</div>
+            {visibleEvents.length > 0 ? (
+              <div className="chat-room-status-list">
+                {visibleEvents.map((event) => (
+                  <div key={event.id} className={`chat-room-status-row is-event tone-${event.type}`}>
+                    <div className="chat-room-status-copy">
+                      <span className="chat-room-status-name">{event.title}</span>
+                      <span className="chat-room-status-note">{event.detail}</span>
+                    </div>
+                    <span className="chat-room-status-time">{formatEventTime(event.at)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="chat-room-status-empty">No notable room activity.</div>
+            )}
+          </div>
         </div>
-      ))}
-    </div>
+      )}
+    </aside>
   );
 }
 
@@ -607,6 +679,7 @@ function RoomChatView({
   onDeleteRoom,
 }) {
   const [showSettings, setShowSettings] = useState(false);
+  const [statusSidebarOpen, setStatusSidebarOpen] = useState(false);
   const handleNudgeAgent = useCallback((agent) => {
     const agentId = agent?.id || agent?._id || agent?.agentId;
     if (!agentId || !onSend) return;
@@ -729,13 +802,14 @@ function RoomChatView({
         <RoomSettingsPanel room={room} onClose={() => setShowSettings(false)} />
       )}
 
-      <RoomPresenceStrip
+      <RoomStatusSidebar
+        open={statusSidebarOpen}
+        onToggle={() => setStatusSidebarOpen((value) => !value)}
         activeAgents={activeAgents}
         agentPresence={agentPresence}
         streamingAgents={streamingAgents}
+        roomEvents={roomEvents}
       />
-
-      <RoomEventRail roomEvents={roomEvents} />
 
       {/* Error banner */}
       {error && (

@@ -6511,49 +6511,51 @@ body {
 .agent-settings-shell {
   display: flex !important;
   flex-direction: column !important;
-  gap: 24px !important;
+  gap: 12px !important;
   padding: 0 !important;
-  padding-bottom: 24px !important;
+  padding-bottom: 12px !important;
 }
 
 /* ── Header ── */
 .agent-settings-header {
-  padding: 8px 0 0 !important;
+  padding: 0 0 0 !important;
 }
 
 .agent-settings-title {
-  margin: 0 0 6px !important;
+  margin: 0 0 2px !important;
   font-size: 22px !important;
   font-weight: 700 !important;
   color: #f5f5f7 !important;
   letter-spacing: -0.3px !important;
+  line-height: 1.2 !important;
 }
 
 .agent-settings-subtitle {
   margin: 0 !important;
   font-size: 14px !important;
   color: #a1a1a6 !important;
-  line-height: 1.5 !important;
+  line-height: 1.35 !important;
 }
 
 /* ── 1-column full-width card grid ── */
 .agent-cards-grid {
   display: flex !important;
   flex-direction: column !important;
-  gap: 10px !important;
+  gap: 6px !important;
   perspective: 1000px !important;
   perspective-origin: center center !important;
 }
 
-/* ── Framer Motion wrappers must pass perspective through to .agent-card ── */
-.agent-cards-grid > * {
+/* ── Framer Motion wrappers (perspective removed per user request) ── */
+/* .agent-cards-grid > * {
   transform-style: preserve-3d !important;
-}
+} */
 
 /* ── Card entrance stagger (targets the motion.div wrapper > .agent-card) ── */
+/* Rotation animations removed per user request */
 @keyframes agentCardIn {
-  from { opacity: 0; transform: translateY(10px) rotateX(var(--rot-x, 0deg)) rotateY(var(--rot-y, 0deg)); }
-  to   { opacity: 1; transform: translateY(0) rotateX(var(--rot-x, 0deg)) rotateY(var(--rot-y, 0deg)); }
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .agent-cards-grid > *:nth-child(1) > .agent-card { animation: agentCardIn 360ms cubic-bezier(0.2, 0, 0, 1) 0ms both !important; }
@@ -6577,7 +6579,7 @@ body {
   /* transition is set inline on mousemove/mouseleave for dynamic tilt control */
   transition: border-color 300ms ease !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04) !important;
-  transform: rotateX(var(--rot-x, 0deg)) rotateY(var(--rot-y, 0deg)) !important;
+  /* Rotation animations removed per user request */
   transform-style: preserve-3d !important;
   will-change: transform !important;
 }
@@ -6653,10 +6655,10 @@ body {
 .agent-card-identity {
   width: 27% !important;
   min-width: 175px !important;
-  padding: 18px 20px !important;
+  padding: 12px 14px !important;
   display: flex !important;
   align-items: flex-start !important;
-  gap: 12px !important;
+  gap: 10px !important;
   border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
   flex-shrink: 0 !important;
 }
@@ -6698,10 +6700,10 @@ body {
 .agent-card-meta {
   flex: 1 !important;
   min-width: 0 !important;
-  padding-top: 2px !important;
+  padding-top: 0px !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 3px !important;
+  gap: 2px !important;
 }
 
 .agent-card-name {
@@ -6709,13 +6711,13 @@ body {
   font-weight: 600 !important;
   color: #f5f5f7 !important;
   letter-spacing: -0.3px !important;
-  line-height: 1.3 !important;
+  line-height: 1.2 !important;
 }
 
 .agent-card-desc {
   font-size: 12px !important;
   color: #86868b !important;
-  line-height: 1.4 !important;
+  line-height: 1.3 !important;
 }
 
 .agent-card-body {
@@ -6737,20 +6739,20 @@ body {
 
 /* ── Zone 2: Model selectors (center, flex:1) ── */
 .agent-card-models {
-  padding: 18px 20px !important;
+  padding: 12px 14px !important;
   border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 10px !important;
+  gap: 7px !important;
   min-width: 0 !important;
 }
 
 /* ── Zone 3: Mode + Effort (right ~27%) ── */
 .agent-card-controls {
-  padding: 18px 20px !important;
+  padding: 12px 14px !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 12px !important;
+  gap: 8px !important;
   min-width: 0 !important;
   overflow: hidden !important;
 }
@@ -6759,7 +6761,7 @@ body {
 .agent-card-field {
   display: flex !important;
   flex-direction: column !important;
-  gap: 6px !important;
+  gap: 4px !important;
 }
 
 /* ── Field label ── */
@@ -6858,9 +6860,9 @@ body {
 .agent-card-footer {
   display: grid !important;
   grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) !important;
-  gap: 16px !important;
+  gap: 10px !important;
   align-items: stretch !important;
-  padding: 16px 20px 18px !important;
+  padding: 10px 14px 12px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.03)) !important;
   border-radius: 0 0 14px 14px !important;
@@ -6872,7 +6874,7 @@ body {
 .agent-card-test-action {
   display: grid !important;
   align-content: start !important;
-  gap: 8px !important;
+  gap: 5px !important;
 }
 
 .agent-card-test-surface {
@@ -6883,8 +6885,8 @@ body {
   position: relative !important;
   overflow: hidden !important;
   border-radius: 12px !important;
-  min-height: 76px !important;
-  padding: 14px 16px !important;
+  min-height: 64px !important;
+  padding: 10px 12px !important;
   border: 1px solid rgba(255, 255, 255, 0.08) !important;
   background:
     radial-gradient(circle at top right, color-mix(in srgb, var(--agent-color, #0a84ff) 16%, transparent), transparent 42%),
@@ -6926,7 +6928,7 @@ body {
 
 .agent-card-test-panel-head {
   display: flex !important;
-  gap: 12px !important;
+  gap: 8px !important;
   align-items: flex-start !important;
 }
 
@@ -6975,7 +6977,7 @@ body {
 .agent-card-test-copy {
   min-width: 0 !important;
   display: grid !important;
-  gap: 4px !important;
+  gap: 2px !important;
 }
 
 .agent-card-test-title {
@@ -6993,8 +6995,8 @@ body {
 }
 
 .agent-card-test-progress {
-  margin-top: 10px !important;
-  height: 7px !important;
+  margin-top: 6px !important;
+  height: 6px !important;
   border-radius: 999px !important;
   background: rgba(255, 255, 255, 0.05) !important;
   overflow: hidden !important;
@@ -7012,12 +7014,12 @@ body {
 }
 
 .agent-card-test-detail {
-  margin-top: 10px !important;
-  padding-top: 10px !important;
+  margin-top: 6px !important;
+  padding-top: 6px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
   color: #8e8e93 !important;
   font-size: 10px !important;
-  line-height: 1.5 !important;
+  line-height: 1.4 !important;
   word-break: break-word !important;
 }
 

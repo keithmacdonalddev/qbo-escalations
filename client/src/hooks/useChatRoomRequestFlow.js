@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { sendRoomMessage } from '../api/roomApi.js';
+import { readRoomAgentRuntimeSelections } from '../lib/roomAgentRuntime.js';
 
 /**
  * Orchestrates sending a message to a chat room and wiring the SSE stream
@@ -85,7 +86,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
       autoContinueCountRef.current += 1;
       sendMessageRef.current?.('', null, {
         systemInitiated: true,
-        systemMessage: 'Keep the room alive naturally for one more beat. Continue the current thread with a fresh angle, a disagreement, a joke, or a useful tangent. One or two agents is enough. Do not force all agents to speak.',
+        systemMessage: 'Keep the room alive naturally for one more beat. Continue the current thread with a fresh angle, a disagreement, a joke, or a useful tangent. One or two agents is enough. Do not force all agents to speak. Each agent must speak only for itself and must not script another agent\'s reply.',
       });
     }, 3200);
   }, []);
@@ -146,6 +147,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
       parsedImageContext: parsedImageContext || undefined,
       systemInitiated,
       systemMessage: systemInitiated ? (systemMessage || 'Keep the room alive naturally for one more beat.') : undefined,
+      agentRuntime: readRoomAgentRuntimeSelections(),
     }, {
       onRoomStart(data) {
         // Stream officially started — participatingAgents available

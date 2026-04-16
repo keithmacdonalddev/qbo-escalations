@@ -7,9 +7,11 @@ const { buildAgentContext } = require('./room-context-builder');
 const { getAgentIdentity, recordAgentNudge } = require('./agent-identity-service');
 const { runAgentToolLoop } = require('./agent-tool-loop');
 const { getRoom } = require('./chat-room-service');
+const { resolveAgentRuntimePolicy } = require('./room-agent-runtime');
 const { startChatOrchestration } = require('./chat-orchestrator');
 const { logUsage } = require('../lib/usage-writer');
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
+const { getProviderModelId } = require('./providers/registry');
 
 /**
  * Parse @mentions from a message string.
@@ -33,6 +35,103 @@ function parseMentions(text) {
     }
   }
   return mentions;
+}
+
+function resolveReportedModel(providerId, explicitModel = '') {
+  return explicitModel || getProviderModelId(providerId) || '';
+}
+
+function normalizeSpeakerKey(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[`*_~[\]()]/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function buildAgentSpeakerAliasSet(agent) {
+  const aliases = new Set();
+  const candidates = [
+    agent?.id,
+    agent?.name,
+    agent?.shortName,
+    String(agent?.id || '').replace(/-/g, ' '),
+  ];
+  for (const candidate of candidates) {
+    const key = normalizeSpeakerKey(candidate);
+    if (key) aliases.add(key);
+  }
+  return aliases;
+}
+
+function parseSpeakerTaggedLine(line) {
+  const match = String(line || '').match(/^\s*(?:[-*>]\s*)?(?:\*\*)?\[?([A-Za-z0-9][A-Za-z0-9 _-]{0,80})\]?(?:\*\*)?\s*:\s*(.*)$/);
+  if (!match) return null;
+  return {
+    speaker: normalizeSpeakerKey(match[1]),
+    content: match[2] || '',
+  };
+}
+
+function sanitizeRoomAgentResponse(agent, rawText) {
+  const text = String(rawText || '');
+  if (!text.trim()) {
+    return { text: '', strippedOtherSpeakerContent: false };
+  }
+
+  const selfAliases = buildAgentSpeakerAliasSet(agent);
+  const otherAliases = new Set();
+  for (const otherAgent of getAllAgents()) {
+    if (!otherAgent || otherAgent.id === agent?.id) continue;
+    for (const alias of buildAgentSpeakerAliasSet(otherAgent)) {
+      otherAliases.add(alias);
+    }
+  }
+
+  const keptLines = [];
+  let strippedOtherSpeakerContent = false;
+
+  for (const line of text.split(/\r?\n/)) {
+    const parsed = parseSpeakerTaggedLine(line);
+    if (!parsed) {
+      keptLines.push(line);
+      continue;
+    }
+
+    if (selfAliases.has(parsed.speaker)) {
+      keptLines.push(parsed.content);
+      continue;
+    }
+
+    if (otherAliases.has(parsed.speaker)) {
+      strippedOtherSpeakerContent = true;
+      break;
+    }
+
+    keptLines.push(line);
+  }
+
+  return {
+    text: keptLines.join('\n').trim(),
+    strippedOtherSpeakerContent,
+  };
+}
+
+function getSafeSanitizedRoomAgentResponse(agent, rawText) {
+  const fallbackText = String(rawText || '').trim();
+  try {
+    const result = sanitizeRoomAgentResponse(agent, rawText);
+    return {
+      text: typeof result?.text === 'string' ? result.text : fallbackText,
+      strippedOtherSpeakerContent: Boolean(result?.strippedOtherSpeakerContent),
+    };
+  } catch {
+    return {
+      text: fallbackText,
+      strippedOtherSpeakerContent: false,
+    };
+  }
 }
 
 /**
@@ -333,6 +432,7 @@ function startRoomOrchestration({
   userMessage,
   mentions,
   parsedImageContext,  // Parsed image data for image-analyst agent
+  agentRuntimeSelections = {},
   onRoomStart,
   onAgentStart,
   onChunk,
@@ -666,17 +766,23 @@ function startRoomOrchestration({
    */
   async function runAgent(agent) {
     const agentStartedAt = Date.now();
+    const runtimePolicy = resolveAgentRuntimePolicy(agent, agentRuntimeSelections);
 
     onAgentStart?.({
       agentId: agent.id,
       agentName: agent.name,
-      provider: agent.preferredProvider,
+      provider: runtimePolicy.primaryProvider,
+      model: runtimePolicy.reportedModel,
+      reasoningEffort: runtimePolicy.reasoningEffort,
     });
 
     // --- Tool-executing agents (workspace) ---
     if (agent.useActionFlow && typeof agent.executeWithActions === 'function') {
       try {
-        const contextResult = await buildAgentContext(agent, room, { parsedImageContext });
+        const contextResult = await buildAgentContext(agent, room, {
+          parsedImageContext,
+          runtimeSelections: agentRuntimeSelections,
+        });
         if (cancelled) return;
 
         return new Promise((resolve) => {
@@ -706,11 +812,11 @@ function startRoomOrchestration({
             {
               onChunk: ({ text }) => {
                 if (cancelled || settled) return;
-                onChunk?.({ agentId: agent.id, provider: agent.preferredProvider, text });
+                onChunk?.({ agentId: agent.id, provider: runtimePolicy.primaryProvider, text });
               },
               onThinking: ({ thinking, provider, phase }) => {
                 if (cancelled || settled) return;
-                onThinkingChunk?.({ agentId: agent.id, provider: provider || agent.preferredProvider, thinking });
+                onThinkingChunk?.({ agentId: agent.id, provider: provider || runtimePolicy.primaryProvider, thinking });
               },
               onActions: (data) => {
                 if (cancelled || settled) return;
@@ -731,11 +837,17 @@ function startRoomOrchestration({
               onDone: (data) => {
                 if (cancelled || settled) return;
                 const latencyMs = Date.now() - agentStartedAt;
+                const sanitizedResponse = getSafeSanitizedRoomAgentResponse(agent, data.fullResponse || '');
+                const resolvedProvider = data.providerUsed || runtimePolicy.primaryProvider;
+                const resolvedModel = resolveReportedModel(
+                  resolvedProvider,
+                  data.modelUsed || data.usage?.model || runtimePolicy.primaryModel || ''
+                );
                 const agentUsage = data.usage ? {
                   inputTokens: data.usage.inputTokens || 0,
                   outputTokens: data.usage.outputTokens || 0,
                   totalTokens: data.usage.totalTokens || 0,
-                  model: data.modelUsed || agent.preferredProvider,
+                  model: resolvedModel,
                   totalCostMicros: data.usage.totalCostMicros || 0,
                   usageAvailable: true,
                 } : { usageAvailable: false };
@@ -746,7 +858,7 @@ function startRoomOrchestration({
                   status: 'ok',
                   latencyMs,
                   usage: agentUsage.usageAvailable ? agentUsage : null,
-                  provider: data.providerUsed || agent.preferredProvider,
+                  provider: resolvedProvider,
                   model: agentUsage.model || '',
                 });
 
@@ -756,7 +868,7 @@ function startRoomOrchestration({
                     requestId: roomRequestId + ':' + agent.id,
                     service: 'chat',
                     category: 'room',
-                    provider: data.providerUsed || agent.preferredProvider,
+                    provider: resolvedProvider,
                     model: agentUsage.model || '',
                     inputTokens: agentUsage.inputTokens || 0,
                     outputTokens: agentUsage.outputTokens || 0,
@@ -771,14 +883,16 @@ function startRoomOrchestration({
                 onAgentDone?.({
                   agentId: agent.id,
                   agentName: agent.name,
-                  fullResponse: data.fullResponse,
+                  fullResponse: sanitizedResponse.text,
                   thinking: '',  // thinking streamed via onThinking
                   usage: agentUsage.usageAvailable ? agentUsage : null,
-                  provider: data.providerUsed || agent.preferredProvider,
+                  provider: resolvedProvider,
                   latencyMs,
+                  model: resolvedModel,
                   citations: contextResult.citations || [],
                   actions: data.actions || [],
                   iterations: data.iterations || 0,
+                  strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
                 });
 
                 settleAgent();
@@ -798,7 +912,7 @@ function startRoomOrchestration({
                   requestId: roomRequestId + ':' + agent.id,
                   service: 'chat',
                   category: 'room',
-                  provider: agent.preferredProvider,
+                  provider: runtimePolicy.primaryProvider,
                   model: '',
                   inputTokens: 0,
                   outputTokens: 0,
@@ -820,6 +934,7 @@ function startRoomOrchestration({
               },
             },
             {
+              runtimePolicy,
               isAborted: () => cancelled,
               setPass1Request: (value) => {
                 pass1Request = value;
@@ -845,7 +960,7 @@ function startRoomOrchestration({
           requestId: roomRequestId + ':' + agent.id,
           service: 'chat',
           category: 'room',
-          provider: agent.preferredProvider,
+          provider: runtimePolicy.primaryProvider,
           model: '',
           inputTokens: 0,
           outputTokens: 0,
@@ -868,7 +983,10 @@ function startRoomOrchestration({
 
     // --- Standard chat agents (existing flow) ---
     try {
-      const contextResult = await buildAgentContext(agent, room, { parsedImageContext });
+      const contextResult = await buildAgentContext(agent, room, {
+        parsedImageContext,
+        runtimeSelections: agentRuntimeSelections,
+      });
       if (cancelled) return;
 
       if (agent.supportsAgentTools) {
@@ -882,6 +1000,7 @@ function startRoomOrchestration({
           agent,
           systemPrompt: contextResult.systemPrompt,
           messagesForModel: contextResult.messagesForModel,
+          runtimePolicy,
           onActions: (data) => {
             if (cancelled) return;
             onActions?.({ agentId: agent.id, ...data });
@@ -895,27 +1014,33 @@ function startRoomOrchestration({
         if (cancelled) return;
 
         const latencyMs = Date.now() - agentStartedAt;
+        const sanitizedResponse = getSafeSanitizedRoomAgentResponse(agent, toolLoopResult.fullResponse || '');
         agentUsages.push({
           agentId: agent.id,
           agentName: agent.name,
           status: 'ok',
           latencyMs,
           usage: toolLoopResult.usage || null,
-          provider: toolLoopResult.providerUsed || agent.preferredProvider,
-          model: toolLoopResult.modelUsed || '',
+          provider: toolLoopResult.providerUsed || runtimePolicy.primaryProvider,
+          model: resolveReportedModel(
+            toolLoopResult.providerUsed || runtimePolicy.primaryProvider,
+            toolLoopResult.modelUsed || toolLoopResult.usage?.model || runtimePolicy.primaryModel || ''
+          ),
         });
 
         onAgentDone?.({
           agentId: agent.id,
           agentName: agent.name,
-          fullResponse: toolLoopResult.fullResponse || '',
+          fullResponse: sanitizedResponse.text,
           thinking: '',
           usage: toolLoopResult.usage || null,
-          provider: toolLoopResult.providerUsed || agent.preferredProvider,
+          provider: toolLoopResult.providerUsed || runtimePolicy.primaryProvider,
           latencyMs,
+          model: toolLoopResult.modelUsed || runtimePolicy.reportedModel,
           citations: contextResult.citations || [],
           actions: toolLoopResult.actions || [],
           iterations: toolLoopResult.iterations || 0,
+          strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
         });
         return;
       }
@@ -934,12 +1059,15 @@ function startRoomOrchestration({
         }
 
         const cleanup = startChatOrchestration({
-          mode: 'single',
-          primaryProvider: agent.preferredProvider,
+          mode: runtimePolicy.mode || 'single',
+          primaryProvider: runtimePolicy.primaryProvider,
+          primaryModel: runtimePolicy.primaryModel || undefined,
+          fallbackProvider: runtimePolicy.mode === 'fallback' ? runtimePolicy.fallbackProvider : undefined,
+          fallbackModel: runtimePolicy.mode === 'fallback' ? (runtimePolicy.fallbackModel || undefined) : undefined,
           messages: contextResult.messagesForModel,
           systemPrompt: contextResult.systemPrompt,
           images: [],
-          reasoningEffort: DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,
+          reasoningEffort: runtimePolicy.reasoningEffort || DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,
           onChunk: ({ provider, text }) => {
             if (cancelled || settled) return;
             fullResponse += text;
@@ -952,15 +1080,24 @@ function startRoomOrchestration({
           },
           onDone: (data) => {
             const latencyMs = Date.now() - agentStartedAt;
+            const sanitizedResponse = getSafeSanitizedRoomAgentResponse(agent, data.fullResponse || fullResponse);
             agentUsage = data.usage || null;
+            const resolvedProvider = data.providerUsed || runtimePolicy.primaryProvider;
+            const resolvedModel = resolveReportedModel(
+              resolvedProvider,
+              data.modelUsed || agentUsage?.model || runtimePolicy.primaryModel || ''
+            );
+            if (agentUsage) {
+              agentUsage = { ...agentUsage, model: resolvedModel };
+            }
             const usageRecord = {
               agentId: agent.id,
               agentName: agent.name,
               status: 'ok',
               latencyMs,
               usage: agentUsage,
-              provider: data.providerUsed || agent.preferredProvider,
-              model: agentUsage?.model || '',
+              provider: resolvedProvider,
+              model: resolvedModel,
             };
             agentUsages.push(usageRecord);
 
@@ -970,8 +1107,8 @@ function startRoomOrchestration({
                 requestId: roomRequestId + ':' + agent.id,
                 service: 'chat',
                 category: 'room',
-                provider: data.providerUsed || agent.preferredProvider,
-                model: agentUsage.model || '',
+                provider: resolvedProvider,
+                model: resolvedModel,
                 inputTokens: agentUsage.inputTokens || 0,
                 outputTokens: agentUsage.outputTokens || 0,
                 usageAvailable: true,
@@ -986,12 +1123,14 @@ function startRoomOrchestration({
             onAgentDone?.({
               agentId: agent.id,
               agentName: agent.name,
-              fullResponse: data.fullResponse || fullResponse,
+              fullResponse: sanitizedResponse.text,
               thinking: data.thinking || thinking,
               usage: agentUsage,
-              provider: data.providerUsed || agent.preferredProvider,
+              provider: resolvedProvider,
               latencyMs,
+              model: resolvedModel,
               citations: contextResult.citations || [],
+              strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
             });
 
             settleAgent();
@@ -1012,8 +1151,8 @@ function startRoomOrchestration({
               requestId: roomRequestId + ':' + agent.id,
               service: 'chat',
               category: 'room',
-              provider: agent.preferredProvider,
-              model: err.usage?.model || agent.preferredProvider,
+              provider: runtimePolicy.primaryProvider,
+              model: resolveReportedModel(runtimePolicy.primaryProvider, err.usage?.model || runtimePolicy.primaryModel || ''),
               inputTokens: err.usage?.inputTokens || 0,
               outputTokens: err.usage?.outputTokens || 0,
               usageAvailable: !!err.usage,
@@ -1047,7 +1186,7 @@ function startRoomOrchestration({
               requestId: roomRequestId + ':' + agent.id,
               service: 'chat',
               category: 'room',
-              provider: agent.preferredProvider,
+              provider: runtimePolicy.primaryProvider,
               model: '',
               inputTokens: 0,
               outputTokens: 0,
@@ -1079,7 +1218,7 @@ function startRoomOrchestration({
         requestId: roomRequestId + ':' + agent.id,
         service: 'chat',
         category: 'room',
-        provider: agent.preferredProvider,
+        provider: runtimePolicy.primaryProvider,
         model: '',
         inputTokens: 0,
         outputTokens: 0,

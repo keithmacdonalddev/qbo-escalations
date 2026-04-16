@@ -8,6 +8,7 @@ const { parseMentions, startRoomOrchestration } = require('../../services/room-o
 const { learnFromInteraction, recordAgentActivity, recordAgentToolUsage } = require('../../services/agent-identity-service');
 const { emitRoomEvent } = require('../../services/room-realtime-runtime');
 const { clearRoomOrchestration, interruptRoomOrchestration, registerRoomOrchestration } = require('../../services/room-orchestration-runtime');
+const { normalizeRoomAgentRuntimeSelections } = require('../../services/room-agent-runtime');
 const { requireValidId } = require('./middleware');
 
 const router = express.Router();
@@ -42,8 +43,9 @@ setInterval(() => {
 router.post('/:id/send', requireValidId, async (req, res) => {
   const roomId = req.params.id;
   const requestId = randomUUID();
-  const { message, parsedImageContext, systemInitiated, systemMessage } = req.body || {};
+  const { message, parsedImageContext, systemInitiated, systemMessage, agentRuntime } = req.body || {};
   const isSystemInitiated = Boolean(systemInitiated);
+  const agentRuntimeSelections = normalizeRoomAgentRuntimeSelections(agentRuntime);
 
   // Validate: at least one of message or parsedImageContext required
   if ((!message || typeof message !== 'string' || !message.trim()) && !parsedImageContext && !isSystemInitiated) {
@@ -97,7 +99,7 @@ router.post('/:id/send', requireValidId, async (req, res) => {
 
   // Derive message content — use placeholder for image-only sends
   const messageContent = isSystemInitiated
-    ? (String(systemMessage || '').trim() || 'Keep the room alive naturally for one more beat.')
+    ? (String(systemMessage || '').trim() || 'Keep the room alive naturally for one more beat. Each agent must speak only for itself and must not script another agent\'s reply.')
     : ((message && message.trim()) || '(image attached)');
 
   // Parse @mentions from message
@@ -239,6 +241,7 @@ router.post('/:id/send', requireValidId, async (req, res) => {
     userMessage: messageContent,
     mentions,
     parsedImageContext,
+    agentRuntimeSelections,
 
     onRoomStart: (data) => {
       if (isSystemInitiated) {

@@ -3,6 +3,7 @@
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { summarizeMessages } = require('../lib/chat-context-builder');
 const { buildRoomMemoryContext } = require('./room-memory');
+const { buildRoomRuntimeContext } = require('./room-agent-runtime');
 const { buildAgentIdentityOverlay } = require('./room-agents/agent-profiles');
 const { SHARED_AGENT_TOOL_LINES } = require('./shared-agent-tools');
 const {
@@ -92,7 +93,9 @@ async function buildAgentContext(agent, room, opts = {}) {
   return {
     systemPrompt: [
       result.systemPrompt || '',
+      'You are sending exactly one chat bubble as yourself. Never write dialogue for another agent, never script a multi-speaker scene, and never include transcript prefixes like "[Copilot]:" or "QBO Analyst:" for anyone else in your final answer. If you want another agent to speak, nudge them or mention them, but do not write their reply for them.',
       buildAgentIdentityOverlay(identity?.profile || agent.id),
+      buildRoomRuntimeContext(agent.id, room.activeAgents || [], opts.runtimeSelections || {}),
       buildIdentityMemoryContext(identity),
       buildRelationshipCoordinationContext(identity, room.activeAgents || []),
       hasSharedAgentTools ? SHARED_AGENT_TOOL_LINES : '',
