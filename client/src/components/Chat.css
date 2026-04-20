@@ -183,11 +183,22 @@
 .compose-box-actions .compose-action-btn {
   width: 28px;
   height: 28px;
+  color: rgba(10, 132, 255, 0.8) !important;
 }
 
 .compose-box-actions .compose-action-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.compose-box-actions .compose-action-btn:hover:not(:disabled) {
+  color: #0a84ff !important;
+}
+
+.compose-box-actions .compose-action-btn:disabled,
+.compose-box-actions .compose-action-btn[disabled] {
+  color: rgba(255, 255, 255, 0.25) !important;
+  opacity: 1 !important;
 }
 
 .provider-chip {
