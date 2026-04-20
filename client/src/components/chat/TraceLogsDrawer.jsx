@@ -4,13 +4,21 @@ import { getConversationTraces } from '../../api/traceApi.js';
 export default function TraceLogsDrawer({ conversationId, open, onClose }) {
   const [traces, setTraces] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!open || !conversationId) return;
     setLoading(true);
+    setError(null);
     getConversationTraces(conversationId)
-      .then(setTraces)
-      .catch(() => setTraces([]))
+      .then((next) => {
+        setTraces(next);
+        setError(null);
+      })
+      .catch((err) => {
+        setTraces([]);
+        setError(err?.message || 'Failed to load trace logs.');
+      })
       .finally(() => setLoading(false));
   }, [open, conversationId]);
 
@@ -61,12 +69,17 @@ export default function TraceLogsDrawer({ conversationId, open, onClose }) {
           {loading && (
             <div className="trace-drawer-loading">Loading traces...</div>
           )}
-          {!loading && traces.length === 0 && (
+          {!loading && error && (
+            <div className="trace-drawer-error" role="alert">
+              {error}
+            </div>
+          )}
+          {!loading && !error && traces.length === 0 && (
             <div className="trace-drawer-empty">
               No traces found for this conversation.
             </div>
           )}
-          {!loading &&
+          {!loading && !error &&
             traces.map((t) => (
               <div key={t._id} className="trace-drawer-item">
                 <div className="trace-drawer-item-header">

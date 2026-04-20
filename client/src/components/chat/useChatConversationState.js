@@ -157,11 +157,6 @@ export default function useChatConversationState({
     }
   }, [linkedEscalation, resolvingEscalation, toast]);
 
-  const handleOpenTraceLogs = useCallback(() => {
-    if (!conversationId) return;
-    window.location.hash = `#/usage?tab=traces&conversationId=${encodeURIComponent(conversationId)}`;
-  }, [conversationId]);
-
   const handleCopyConversation = useCallback(async () => {
     if (!conversationId) return;
     try {
@@ -200,7 +195,6 @@ export default function useChatConversationState({
     setParseMeta,
     resetConversationState,
     handleResolveEscalation,
-    handleOpenTraceLogs,
     handleCopyConversation,
     handleFork,
   };

@@ -45,7 +45,6 @@ export default function ChatSurfaceShell({
   exportCopied,
   onStartFreshConversation,
   onRetryLastResponse,
-  onOpenTraceLogs, // kept for backward compat but unused — drawer replaces navigation
   onCopyConversation,
   threadContent,
   composeArea,

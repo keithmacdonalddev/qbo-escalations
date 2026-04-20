@@ -351,7 +351,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setParseMeta,
     resetConversationState,
     handleResolveEscalation,
-    handleOpenTraceLogs,
     handleCopyConversation,
     handleFork,
   } = useChatConversationState({
@@ -673,7 +672,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
             exportCopied={exportCopied}
             onStartFreshConversation={startFreshConversation}
             onRetryLastResponse={handleRetryLastResponse}
-            onOpenTraceLogs={handleOpenTraceLogs}
             onCopyConversation={handleCopyConversation}
             threadContent={
               <ChatThreadStack
@@ -710,10 +708,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 discardedProviders={discardedProviders}
                 handleFork={handleFork}
                 handleQuickAction={handleQuickAction}
-                linkedEscalation={linkedEscalation}
-                handleResolveEscalation={handleResolveEscalation}
-                resolvingEscalation={resolvingEscalation}
-                forkInfo={forkInfo}
                 parseMeta={parseMeta}
                 savedEscalationId={savedEscalationId}
                 messagesEndRef={messagesEndRef}
