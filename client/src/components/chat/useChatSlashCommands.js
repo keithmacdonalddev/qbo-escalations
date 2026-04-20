@@ -16,7 +16,6 @@ export default function useChatSlashCommands({
   provider,
   effectiveMode,
   reasoningEffort,
-  showCopilot,
   isStreaming,
   input,
   setInput,
@@ -28,7 +27,6 @@ export default function useChatSlashCommands({
   setProvider,
   setMode,
   setReasoningEffort,
-  setShowCopilot,
 }) {
   const toast = useToast();
 
@@ -38,8 +36,7 @@ export default function useChatSlashCommands({
     provider,
     effectiveMode,
     reasoningEffort,
-    showCopilot,
-  }), [effectiveMode, provider, reasoningEffort, showCopilot]);
+  }), [effectiveMode, provider, reasoningEffort]);
 
   const trimmedInput = input.trimStart();
   const slashMenuOpen = !isStreaming && trimmedInput.startsWith('/');
@@ -176,11 +173,6 @@ export default function useChatSlashCommands({
         toast.success(`Reasoning effort set to ${nextEffort}.`);
         return true;
       }
-      case 'copilot':
-        setShowCopilot(!showCopilot);
-        setInput('');
-        toast.info(!showCopilot ? 'Co-pilot opened.' : 'Co-pilot closed.');
-        return true;
       case 'attach':
       case 'upload':
         setInput('');
@@ -206,9 +198,7 @@ export default function useChatSlashCommands({
     setMode,
     setProvider,
     setReasoningEffort,
-    setShowCopilot,
     setShowWebcam,
-    showCopilot,
     startFreshConversation,
     toast,
   ]);

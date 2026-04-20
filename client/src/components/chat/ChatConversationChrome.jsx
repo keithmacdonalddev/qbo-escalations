@@ -1,13 +1,8 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import CopilotPanel from '../CopilotPanel.jsx';
-
 export default function ChatConversationChrome({
   linkedEscalation,
   handleResolveEscalation,
   resolvingEscalation,
   forkInfo,
-  showCopilot,
-  savedEscalationId,
   children,
 }) {
   return (
@@ -74,26 +69,6 @@ export default function ChatConversationChrome({
           </span>
         </div>
       )}
-
-      <AnimatePresence>
-        {showCopilot && (
-          <motion.div
-            key="copilot-drawer"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2, ease: 'easeInOut' }}
-            style={{ overflow: 'hidden' }}
-          >
-            <div style={{ padding: 'var(--sp-2) 0' }}>
-              <CopilotPanel
-                escalationId={savedEscalationId}
-                title="Co-pilot"
-              />
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {children}
     </>

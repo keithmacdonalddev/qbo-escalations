@@ -7,7 +7,6 @@ export default function useChatCommandComposer({
   provider,
   effectiveMode,
   reasoningEffort,
-  showCopilot,
   isStreaming,
   input,
   setInput,
@@ -38,7 +37,6 @@ export default function useChatCommandComposer({
   setProvider,
   setMode,
   setReasoningEffort,
-  setShowCopilot,
   appendProcessEvent,
 }) {
   const {
@@ -84,7 +82,6 @@ export default function useChatCommandComposer({
     provider,
     effectiveMode,
     reasoningEffort,
-    showCopilot,
     isStreaming,
     input,
     setInput,
@@ -96,7 +93,6 @@ export default function useChatCommandComposer({
     setProvider,
     setMode,
     setReasoningEffort,
-    setShowCopilot,
   });
 
   const handleComposeFocus = useCallback(() => {

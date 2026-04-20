@@ -274,8 +274,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     showProviderPopover,
     setShowProviderPopover,
     providerPopoverRef,
-    showCopilot,
-    setShowCopilot,
     streamElapsedMs,
     setStreamElapsedMs,
     liveRequestRuntime,
@@ -385,7 +383,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setInput,
     setImages,
     setShowWebcam,
-    setShowCopilot,
     setComposeFocused,
     setIsComposeDragOver,
     setStreamElapsedMs,
@@ -520,7 +517,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     provider,
     effectiveMode,
     reasoningEffort,
-    showCopilot,
     isStreaming,
     input,
     setInput,
@@ -552,7 +548,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setProvider,
     setMode,
     setReasoningEffort,
-    setShowCopilot,
     appendProcessEvent,
   });
 
@@ -606,8 +601,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
           handleResolveEscalation={handleResolveEscalation}
           resolvingEscalation={resolvingEscalation}
           forkInfo={forkInfo}
-          showCopilot={showCopilot}
-          savedEscalationId={savedEscalationId}
         >
           <ChatSurfaceShell
             conversationId={conversationId}

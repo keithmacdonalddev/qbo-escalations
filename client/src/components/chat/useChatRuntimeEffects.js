@@ -19,7 +19,6 @@ export default function useChatRuntimeEffects({
   setInput,
   setImages,
   setShowWebcam,
-  setShowCopilot,
   setComposeFocused,
   setIsComposeDragOver,
   setStreamElapsedMs,
@@ -47,7 +46,6 @@ export default function useChatRuntimeEffects({
     resetConversationState();
     setImages([]);
     setShowWebcam(false);
-    setShowCopilot(false);
     setComposeFocused(false);
     setIsComposeDragOver(false);
     dismissFallbackNotice();
@@ -70,7 +68,6 @@ export default function useChatRuntimeEffects({
     setError,
     setImages,
     setIsComposeDragOver,
-    setShowCopilot,
     setShowWebcam,
   ]);
 

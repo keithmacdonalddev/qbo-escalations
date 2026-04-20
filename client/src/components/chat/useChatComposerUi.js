@@ -7,7 +7,6 @@ export default function useChatComposerUi() {
   const [templateCategory, setTemplateCategory] = useState('');
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [showProviderPopover, setShowProviderPopover] = useState(false);
-  const [showCopilot, setShowCopilot] = useState(false);
   const [composeFocused, setComposeFocused] = useState(false);
   const [input, setInput] = useState(() => {
     if (!import.meta.env.DEV) return '';
@@ -78,8 +77,6 @@ export default function useChatComposerUi() {
     showProviderPopover,
     setShowProviderPopover,
     providerPopoverRef,
-    showCopilot,
-    setShowCopilot,
     streamElapsedMs,
     setStreamElapsedMs,
     liveRequestRuntime,

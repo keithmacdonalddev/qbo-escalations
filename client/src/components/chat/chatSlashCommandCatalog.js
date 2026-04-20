@@ -84,14 +84,6 @@ const SLASH_COMMAND_CATALOG = [
     keywords: ['reasoning', 'low', 'medium', 'high', 'xhigh'],
   },
   {
-    id: 'copilot',
-    command: '/copilot',
-    insertValue: '/copilot',
-    description: ({ showCopilot }) => `${showCopilot ? 'Hide' : 'Show'} the inline Co-pilot drawer.`,
-    example: '/copilot',
-    keywords: ['drawer', 'assistant', 'toggle'],
-  },
-  {
     id: 'attach',
     command: '/attach',
     insertValue: '/attach',
@@ -144,13 +136,11 @@ export function createSlashCommands({
   provider,
   effectiveMode,
   reasoningEffort,
-  showCopilot,
 }) {
   const context = {
     provider,
     effectiveMode,
     reasoningEffort,
-    showCopilot,
   };
 
   return SLASH_COMMAND_CATALOG.map((command) => ({
