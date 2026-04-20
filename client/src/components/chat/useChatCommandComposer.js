@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { computeGhostText } from '../../data/smartComposeSuggestions.js';
 import { tel, TEL } from '../../lib/devTelemetry.js';
 import useChatComposerMediaAndTemplates from './useChatComposerMediaAndTemplates.js';
 import useChatSlashCommands from './useChatSlashCommands.js';
@@ -13,8 +12,6 @@ export default function useChatCommandComposer({
   isStreaming,
   input,
   setInput,
-  ghostText,
-  setGhostText,
   images,
   setImages,
   showWebcam,
@@ -25,12 +22,6 @@ export default function useChatCommandComposer({
   setIsComposeDragOver,
   slashMenuIndex,
   setSlashMenuIndex,
-  smartComposeEnabled,
-  setSmartComposeEnabled,
-  contextPillEnabled,
-  setContextPillEnabled,
-  copiedField,
-  setCopiedField,
   composeFocused,
   setComposeFocused,
   templateCategory,
@@ -100,7 +91,6 @@ export default function useChatCommandComposer({
     isStreaming,
     input,
     setInput,
-    setGhostText,
     setSlashMenuIndex,
     startFreshConversation,
     focusComposerWithValue,
@@ -112,27 +102,6 @@ export default function useChatCommandComposer({
     setSurfaceTab,
     setShowCopilot,
   });
-
-  const toggleSmartCompose = useCallback((enabled) => {
-    setSmartComposeEnabled(enabled);
-    try { window.localStorage.setItem('qbo-smart-compose-enabled', String(enabled)); } catch {}
-    if (!enabled) setGhostText('');
-  }, [setGhostText, setSmartComposeEnabled]);
-
-  const toggleContextPill = useCallback((enabled) => {
-    setContextPillEnabled(enabled);
-    try { window.localStorage.setItem('qbo-context-pill-enabled', String(enabled)); } catch {}
-  }, [setContextPillEnabled]);
-
-  const handleCopyField = useCallback(async (fieldName, value) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopiedField(fieldName);
-      setTimeout(() => setCopiedField(null), 1500);
-    } catch {
-      // silent
-    }
-  }, [setCopiedField]);
 
   const handleComposeFocus = useCallback(() => {
     setComposeFocused(true);
@@ -155,8 +124,7 @@ export default function useChatCommandComposer({
     sendMessage(trimmedInput, [], provider);
     setInput('');
     setImages([]);
-    setGhostText('');
-  }, [executeSlashCommand, input, isStreaming, pendingImageParseRef, provider, sendMessage, setGhostText, setImages, setInput, setParseMeta]);
+  }, [executeSlashCommand, input, isStreaming, pendingImageParseRef, provider, sendMessage, setImages, setInput, setParseMeta]);
 
   const handleQuickAction = useCallback((value) => {
     if (isStreaming || !value) return;
@@ -189,32 +157,17 @@ export default function useChatCommandComposer({
         }
       }
     }
-    if (e.key === 'Tab' && ghostText) {
-      e.preventDefault();
-      setInput((prev) => prev + ghostText);
-      setGhostText('');
-      return;
-    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
     }
-  }, [activateSlashCommand, filteredSlashCommands, ghostText, handleSubmit, input, insertSlashCommand, setGhostText, setInput, setSlashMenuIndex, slashMenuIndex, slashMenuOpen]);
+  }, [activateSlashCommand, filteredSlashCommands, handleSubmit, input, insertSlashCommand, setInput, setSlashMenuIndex, slashMenuIndex, slashMenuOpen]);
 
   const handleComposeInputChange = useCallback((e) => {
-    const val = e.target.value;
-    setInput(val);
-    if (val.trimStart().startsWith('/')) {
-      setGhostText('');
-    } else if (smartComposeEnabled) {
-      setGhostText(computeGhostText(val));
-    }
-  }, [setGhostText, setInput, smartComposeEnabled]);
+    setInput(e.target.value);
+  }, [setInput]);
 
   return {
-    toggleSmartCompose,
-    toggleContextPill,
-    handleCopyField,
     handleComposeFocus,
     handleComposeBlur,
     handleAttachClick,
@@ -239,10 +192,7 @@ export default function useChatCommandComposer({
     handleTemplateInsert,
     handleTemplateCategoryChange,
     removeImage,
-    copiedField,
     composeFocused,
-    smartComposeEnabled,
-    contextPillEnabled,
     showWebcam,
     isComposeDragOver,
     slashMenuIndex,

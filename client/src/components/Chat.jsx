@@ -273,16 +273,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setLoadingTemplates,
     showProviderPopover,
     setShowProviderPopover,
-    showSettingsPopover,
-    setShowSettingsPopover,
     providerPopoverRef,
-    settingsPopoverRef,
-    smartComposeEnabled,
-    setSmartComposeEnabled,
-    contextPillEnabled,
-    setContextPillEnabled,
-    copiedField,
-    setCopiedField,
     showCopilot,
     setShowCopilot,
     surfaceTab,
@@ -295,8 +286,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setComposeFocused,
     input,
     setInput,
-    ghostText,
-    setGhostText,
     images,
     setImages,
     showWebcam,
@@ -397,7 +386,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     messagesEndRef,
     scrollFrameRef,
     setInput,
-    setGhostText,
     setImages,
     setShowWebcam,
     setShowCopilot,
@@ -511,9 +499,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
   }
 
   const {
-    toggleSmartCompose,
-    toggleContextPill,
-    handleCopyField,
     handleComposeFocus,
     handleComposeBlur,
     handleAttachClick,
@@ -544,8 +529,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     isStreaming,
     input,
     setInput,
-    ghostText,
-    setGhostText,
     images,
     setImages,
     showWebcam,
@@ -556,12 +539,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setIsComposeDragOver,
     slashMenuIndex,
     setSlashMenuIndex,
-    smartComposeEnabled,
-    setSmartComposeEnabled,
-    contextPillEnabled,
-    setContextPillEnabled,
-    copiedField,
-    setCopiedField,
     composeFocused,
     setComposeFocused,
     templateCategory,
@@ -627,25 +604,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     };
   }, [showProviderPopover]);
 
-  // Close settings popover on outside click or Escape
-  useEffect(() => {
-    if (!showSettingsPopover) return;
-    const handleClick = (e) => {
-      if (settingsPopoverRef.current && !settingsPopoverRef.current.contains(e.target)) {
-        setShowSettingsPopover(false);
-      }
-    };
-    const handleKey = (e) => {
-      if (e.key === 'Escape') setShowSettingsPopover(false);
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('keydown', handleKey);
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('keydown', handleKey);
-    };
-  }, [showSettingsPopover]);
-
   return (
     <div className="chat-with-thinking">
       <div className="chat-container">
@@ -656,9 +614,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
           forkInfo={forkInfo}
           showCopilot={showCopilot}
           savedEscalationId={savedEscalationId}
-          contextPillEnabled={contextPillEnabled}
-          copiedField={copiedField}
-          handleCopyField={handleCopyField}
         >
           <ChatSurfaceShell
             chat={chat}
@@ -722,7 +677,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
             composeArea={
               <ChatComposeArea
                 providerPopoverRef={providerPopoverRef}
-                settingsPopoverRef={settingsPopoverRef}
                 provider={provider}
                 mode={mode}
                 fallbackProvider={fallbackProvider}
@@ -732,8 +686,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 parallelProviders={parallelProviders}
                 showProviderPopover={showProviderPopover}
                 setShowProviderPopover={setShowProviderPopover}
-                showSettingsPopover={showSettingsPopover}
-                setShowSettingsPopover={setShowSettingsPopover}
                 setProvider={setProvider}
                 setMode={setMode}
                 setFallbackProvider={setFallbackProvider}
@@ -741,10 +693,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 setFallbackModel={setFallbackModel}
                 setReasoningEffort={setReasoningEffort}
                 setParallelProviders={setParallelProviders}
-                smartComposeEnabled={smartComposeEnabled}
-                toggleSmartCompose={toggleSmartCompose}
-                contextPillEnabled={contextPillEnabled}
-                toggleContextPill={toggleContextPill}
                 composeFocused={composeFocused}
                 handleComposeFocus={handleComposeFocus}
                 handleComposeBlur={handleComposeBlur}
@@ -758,7 +706,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 handleComposeInputChange={handleComposeInputChange}
                 handleKeyDown={handleKeyDown}
                 handlePaste={handlePaste}
-                ghostText={ghostText}
                 isStreaming={isStreaming}
                 images={images}
                 imageInputRef={imageInputRef}

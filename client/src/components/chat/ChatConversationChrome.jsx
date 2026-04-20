@@ -8,9 +8,6 @@ export default function ChatConversationChrome({
   forkInfo,
   showCopilot,
   savedEscalationId,
-  contextPillEnabled,
-  copiedField,
-  handleCopyField,
   children,
 }) {
   return (
@@ -97,66 +94,6 @@ export default function ChatConversationChrome({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {contextPillEnabled && linkedEscalation && (linkedEscalation.coid || linkedEscalation.caseNumber || linkedEscalation.category || linkedEscalation.status) && (
-        <div className="context-pill">
-          {linkedEscalation.coid && (
-            <>
-              <button
-                className={`context-pill-field${copiedField === 'coid' ? ' is-copied' : ''}`}
-                onClick={() => handleCopyField('coid', linkedEscalation.coid)}
-                title="Click to copy COID"
-                type="button"
-              >
-                <span className="field-label">COID</span>
-                <span className="field-value">{linkedEscalation.coid}</span>
-              </button>
-              <span className="context-pill-divider" />
-            </>
-          )}
-          {linkedEscalation.caseNumber && (
-            <>
-              <button
-                className={`context-pill-field${copiedField === 'case' ? ' is-copied' : ''}`}
-                onClick={() => handleCopyField('case', linkedEscalation.caseNumber)}
-                title="Click to copy case number"
-                type="button"
-              >
-                <span className="field-label">Case</span>
-                <span className="field-value">#{linkedEscalation.caseNumber}</span>
-              </button>
-              <span className="context-pill-divider" />
-            </>
-          )}
-          {linkedEscalation.category && linkedEscalation.category !== 'unknown' && (
-            <>
-              <button
-                className={`context-pill-field${copiedField === 'category' ? ' is-copied' : ''}`}
-                onClick={() => handleCopyField('category', linkedEscalation.category)}
-                title="Click to copy category"
-                type="button"
-              >
-                <span className={`cat-badge cat-${linkedEscalation.category}`} style={{ fontSize: 'var(--text-xs)' }}>
-                  {linkedEscalation.category.replace('-', ' ')}
-                </span>
-              </button>
-              <span className="context-pill-divider" />
-            </>
-          )}
-          {linkedEscalation.status && (
-            <button
-              className={`context-pill-field${copiedField === 'status' ? ' is-copied' : ''}`}
-              onClick={() => handleCopyField('status', linkedEscalation.status)}
-              title="Click to copy status"
-              type="button"
-            >
-              <span className={`badge badge-${linkedEscalation.status === 'open' ? 'open' : linkedEscalation.status === 'in-progress' ? 'progress' : linkedEscalation.status === 'resolved' ? 'resolved' : 'escalated'}`} style={{ fontSize: 'var(--text-xs)' }}>
-                {linkedEscalation.status}
-              </span>
-            </button>
-          )}
-        </div>
-      )}
 
       {children}
     </>

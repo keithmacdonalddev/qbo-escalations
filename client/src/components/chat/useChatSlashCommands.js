@@ -21,7 +21,6 @@ export default function useChatSlashCommands({
   isStreaming,
   input,
   setInput,
-  setGhostText,
   setSlashMenuIndex,
   startFreshConversation,
   focusComposerWithValue,
@@ -133,7 +132,6 @@ export default function useChatSlashCommands({
         }
         setProvider(resolvedProvider);
         setInput('');
-        setGhostText('');
         toast.success(`Provider set to ${getProviderLabel(resolvedProvider)}.`);
         return true;
       }
@@ -151,7 +149,6 @@ export default function useChatSlashCommands({
         const nextMode = modeAliases.get(argToken);
         setMode(nextMode);
         setInput('');
-        setGhostText('');
         toast.success(`Mode set to ${nextMode}.`);
         return true;
       }
@@ -179,7 +176,6 @@ export default function useChatSlashCommands({
         }
         setReasoningEffort(nextEffort);
         setInput('');
-        setGhostText('');
         toast.success(`Reasoning effort set to ${nextEffort}.`);
         return true;
       }
@@ -200,7 +196,6 @@ export default function useChatSlashCommands({
           setShowCopilot(false);
         }
         setInput('');
-        setGhostText('');
         toast.success(`Switched to ${nextTab}.`);
         return true;
       }
@@ -208,13 +203,11 @@ export default function useChatSlashCommands({
         setSurfaceTab('chat');
         setShowCopilot(!showCopilot);
         setInput('');
-        setGhostText('');
         toast.info(!showCopilot ? 'Co-pilot opened.' : 'Co-pilot closed.');
         return true;
       case 'attach':
       case 'upload':
         setInput('');
-        setGhostText('');
         handleAttachClick();
         toast.info('Choose an image to load into the parser.');
         return true;
@@ -222,7 +215,6 @@ export default function useChatSlashCommands({
       case 'camera':
         setSurfaceTab('chat');
         setInput('');
-        setGhostText('');
         setShowWebcam(true);
         toast.info('Webcam capture opened for the image parser.');
         return true;
@@ -235,7 +227,6 @@ export default function useChatSlashCommands({
     handleAttachClick,
     provider,
     providerAliasMap,
-    setGhostText,
     setInput,
     setMode,
     setProvider,

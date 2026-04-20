@@ -79,7 +79,6 @@ function ParsedEscalationPreviewCard({ preview, onClear }) {
 
 export default function ChatComposeArea({
   providerPopoverRef,
-  settingsPopoverRef,
   provider,
   mode,
   fallbackProvider,
@@ -89,8 +88,6 @@ export default function ChatComposeArea({
   parallelProviders,
   showProviderPopover,
   setShowProviderPopover,
-  showSettingsPopover,
-  setShowSettingsPopover,
   setProvider,
   setMode,
   setFallbackProvider,
@@ -98,10 +95,6 @@ export default function ChatComposeArea({
   setFallbackModel,
   setReasoningEffort,
   setParallelProviders,
-  smartComposeEnabled,
-  toggleSmartCompose,
-  contextPillEnabled,
-  toggleContextPill,
   composeFocused,
   handleComposeFocus,
   handleComposeBlur,
@@ -115,7 +108,6 @@ export default function ChatComposeArea({
   handleComposeInputChange,
   handleKeyDown,
   handlePaste,
-  ghostText,
   isStreaming,
   images,
   imageInputRef,
@@ -160,7 +152,6 @@ export default function ChatComposeArea({
         >
           <ChatComposeControls
             providerPopoverRef={providerPopoverRef}
-            settingsPopoverRef={settingsPopoverRef}
             provider={provider}
             mode={mode}
             fallbackProvider={fallbackProvider}
@@ -170,8 +161,6 @@ export default function ChatComposeArea({
             parallelProviders={parallelProviders}
             showProviderPopover={showProviderPopover}
             setShowProviderPopover={setShowProviderPopover}
-            showSettingsPopover={showSettingsPopover}
-            setShowSettingsPopover={setShowSettingsPopover}
             setProvider={setProvider}
             setMode={setMode}
             setFallbackProvider={setFallbackProvider}
@@ -179,10 +168,6 @@ export default function ChatComposeArea({
             setFallbackModel={setFallbackModel}
             setReasoningEffort={setReasoningEffort}
             setParallelProviders={setParallelProviders}
-            smartComposeEnabled={smartComposeEnabled}
-            toggleSmartCompose={toggleSmartCompose}
-            contextPillEnabled={contextPillEnabled}
-            toggleContextPill={toggleContextPill}
           />
 
           <div className="compose-body" style={{ position: 'relative' }}>
@@ -211,12 +196,6 @@ export default function ChatComposeArea({
                 disabled={isStreaming}
                 aria-label="Chat message input"
               />
-              {smartComposeEnabled && ghostText && (
-                <div className="compose-ghost-overlay" aria-hidden="true">
-                  <span style={{ visibility: 'hidden' }}>{input}</span>
-                  <span className="compose-ghost-text">{ghostText}</span>
-                </div>
-              )}
             </div>
             {slashMenuOpen && (
               <div className="slash-command-menu" role="listbox" aria-label="Slash commands">

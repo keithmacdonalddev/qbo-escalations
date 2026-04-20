@@ -24,7 +24,6 @@ function getReasoningEffortLabel(value) {
 
 export default function ChatComposeControls({
   providerPopoverRef,
-  settingsPopoverRef,
   provider,
   mode,
   fallbackProvider,
@@ -34,8 +33,6 @@ export default function ChatComposeControls({
   parallelProviders,
   showProviderPopover,
   setShowProviderPopover,
-  showSettingsPopover,
-  setShowSettingsPopover,
   setProvider,
   setMode,
   setFallbackProvider,
@@ -43,10 +40,6 @@ export default function ChatComposeControls({
   setFallbackModel,
   setReasoningEffort,
   setParallelProviders,
-  smartComposeEnabled,
-  toggleSmartCompose,
-  contextPillEnabled,
-  toggleContextPill,
 }) {
   const modeLabel = MODE_OPTIONS.find((entry) => entry.value === mode)?.label || 'Single';
   const effortLabel = getReasoningEffortLabel(reasoningEffort);
@@ -221,64 +214,6 @@ export default function ChatComposeControls({
         </AnimatePresence>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
-        <div ref={settingsPopoverRef} style={{ position: 'relative' }}>
-          <button
-            className={`compose-settings-btn${showSettingsPopover ? ' is-open' : ''}`}
-            onClick={() => setShowSettingsPopover((prev) => !prev)}
-            type="button"
-            aria-label="Compose settings"
-            aria-expanded={showSettingsPopover}
-          >
-            <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-            </svg>
-          </button>
-
-          <AnimatePresence>
-            {showSettingsPopover && (
-              <motion.div key="settings-popover" className="compose-settings-popover" {...popover} transition={transitions.fast}>
-                <div className="provider-popover-label">Compose Settings</div>
-                <button
-                  className="compose-settings-toggle"
-                  onClick={() => toggleSmartCompose((prev) => !prev)}
-                  type="button"
-                >
-                  <span className={`compose-toggle-indicator${smartComposeEnabled ? ' is-on' : ''}`} />
-                  <span className="compose-settings-toggle-text">
-                    <span className="compose-settings-toggle-title">Smart Compose</span>
-                    <span className="compose-settings-toggle-desc">Ghost-text suggestions as you type</span>
-                  </span>
-                </button>
-                <button
-                  className="compose-settings-toggle"
-                  onClick={() => toggleContextPill((prev) => !prev)}
-                  type="button"
-                >
-                  <span className={`compose-toggle-indicator${contextPillEnabled ? ' is-on' : ''}`} />
-                  <span className="compose-settings-toggle-text">
-                    <span className="compose-settings-toggle-title">Context Pill</span>
-                    <span className="compose-settings-toggle-desc">Show COID, case, category above input</span>
-                  </span>
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div className="compose-help-btn" aria-label="Keyboard shortcuts">
-          ?
-          <div className="compose-help-tooltip">
-            <kbd>Enter</kbd> Send message<br />
-            <kbd>Shift</kbd>+<kbd>Enter</kbd> New line<br />
-            <kbd>Ctrl</kbd>+<kbd>V</kbd> Paste images<br />
-            <kbd>Ctrl</kbd>+<kbd>N</kbd> New conversation<br />
-            <kbd>Tab</kbd> Accept suggestion<br />
-            <kbd>/</kbd> Slash commands
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

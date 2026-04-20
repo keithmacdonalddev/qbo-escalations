@@ -18,7 +18,6 @@ export default function useChatRuntimeEffects({
   messagesEndRef,
   scrollFrameRef,
   setInput,
-  setGhostText,
   setImages,
   setShowWebcam,
   setShowCopilot,
@@ -39,13 +38,12 @@ export default function useChatRuntimeEffects({
 
   const focusComposerWithValue = useCallback((nextValue) => {
     setInput(nextValue);
-    setGhostText('');
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
       const length = nextValue.length;
       textareaRef.current?.setSelectionRange(length, length);
     });
-  }, [setGhostText, setInput, textareaRef]);
+  }, [setInput, textareaRef]);
 
   const startFreshConversation = useCallback(() => {
     resetConversationState();
@@ -55,7 +53,6 @@ export default function useChatRuntimeEffects({
     setSurfaceTab('chat');
     setComposeFocused(false);
     setIsComposeDragOver(false);
-    setGhostText('');
     dismissFallbackNotice();
     dismissRuntimeWarnings();
     clearProcessEvents();
@@ -74,7 +71,6 @@ export default function useChatRuntimeEffects({
     resetConversationState,
     setComposeFocused,
     setError,
-    setGhostText,
     setImages,
     setIsComposeDragOver,
     setShowCopilot,
