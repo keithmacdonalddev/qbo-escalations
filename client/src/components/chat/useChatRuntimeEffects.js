@@ -11,7 +11,6 @@ export default function useChatRuntimeEffects({
   parallelStreaming = {},
   provider = null,
   thinkingStartTime = null,
-  surfaceTab = 'chat',
   messages = [],
   input = '',
   textareaRef,
@@ -21,7 +20,6 @@ export default function useChatRuntimeEffects({
   setImages,
   setShowWebcam,
   setShowCopilot,
-  setSurfaceTab,
   setComposeFocused,
   setIsComposeDragOver,
   setStreamElapsedMs,
@@ -50,7 +48,6 @@ export default function useChatRuntimeEffects({
     setImages([]);
     setShowWebcam(false);
     setShowCopilot(false);
-    setSurfaceTab('chat');
     setComposeFocused(false);
     setIsComposeDragOver(false);
     dismissFallbackNotice();
@@ -75,7 +72,6 @@ export default function useChatRuntimeEffects({
     setIsComposeDragOver,
     setShowCopilot,
     setShowWebcam,
-    setSurfaceTab,
   ]);
 
   useEffect(() => {
@@ -167,7 +163,7 @@ export default function useChatRuntimeEffects({
 
   useEffect(() => {
     const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
-    if (!showRuntimeDiagnostics || !isStreaming || surfaceTab !== 'chat') {
+    if (!showRuntimeDiagnostics || !isStreaming) {
       setLiveRequestRuntime(null);
       return;
     }
@@ -211,7 +207,7 @@ export default function useChatRuntimeEffects({
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [aiSettings?.debug?.showContextDebug, isStreaming, setLiveRequestRuntime, surfaceTab]);
+  }, [aiSettings?.debug?.showContextDebug, isStreaming, setLiveRequestRuntime]);
 
   return {
     focusComposerWithValue,

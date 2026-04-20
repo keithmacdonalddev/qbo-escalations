@@ -17,7 +17,6 @@ export default function useChatSlashCommands({
   effectiveMode,
   reasoningEffort,
   showCopilot,
-  surfaceTab,
   isStreaming,
   input,
   setInput,
@@ -29,7 +28,6 @@ export default function useChatSlashCommands({
   setProvider,
   setMode,
   setReasoningEffort,
-  setSurfaceTab,
   setShowCopilot,
 }) {
   const toast = useToast();
@@ -41,8 +39,7 @@ export default function useChatSlashCommands({
     effectiveMode,
     reasoningEffort,
     showCopilot,
-    surfaceTab,
-  }), [effectiveMode, provider, reasoningEffort, showCopilot, surfaceTab]);
+  }), [effectiveMode, provider, reasoningEffort, showCopilot]);
 
   const trimmedInput = input.trimStart();
   const slashMenuOpen = !isStreaming && trimmedInput.startsWith('/');
@@ -179,28 +176,7 @@ export default function useChatSlashCommands({
         toast.success(`Reasoning effort set to ${nextEffort}.`);
         return true;
       }
-      case 'tab': {
-        const tabAliases = new Map([
-          ['chat', 'chat'],
-          ['workspace', 'workspace'],
-          ['copilot', 'copilot'],
-        ]);
-        if (!argToken || !tabAliases.has(argToken)) {
-          focusComposerWithValue('/tab ');
-          toast.info('Try /tab chat, /tab workspace, or /tab copilot.');
-          return true;
-        }
-        const nextTab = tabAliases.get(argToken);
-        setSurfaceTab(nextTab);
-        if (nextTab !== 'chat') {
-          setShowCopilot(false);
-        }
-        setInput('');
-        toast.success(`Switched to ${nextTab}.`);
-        return true;
-      }
       case 'copilot':
-        setSurfaceTab('chat');
         setShowCopilot(!showCopilot);
         setInput('');
         toast.info(!showCopilot ? 'Co-pilot opened.' : 'Co-pilot closed.');
@@ -213,7 +189,6 @@ export default function useChatSlashCommands({
         return true;
       case 'webcam':
       case 'camera':
-        setSurfaceTab('chat');
         setInput('');
         setShowWebcam(true);
         toast.info('Webcam capture opened for the image parser.');
@@ -233,7 +208,6 @@ export default function useChatSlashCommands({
     setReasoningEffort,
     setShowCopilot,
     setShowWebcam,
-    setSurfaceTab,
     showCopilot,
     startFreshConversation,
     toast,

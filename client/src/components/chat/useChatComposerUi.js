@@ -8,7 +8,6 @@ export default function useChatComposerUi() {
   const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [showProviderPopover, setShowProviderPopover] = useState(false);
   const [showCopilot, setShowCopilot] = useState(false);
-  const [surfaceTab, setSurfaceTab] = useState('chat');
   const [composeFocused, setComposeFocused] = useState(false);
   const [input, setInput] = useState(() => {
     if (!import.meta.env.DEV) return '';
@@ -37,12 +36,6 @@ export default function useChatComposerUi() {
   const textareaRef = useRef(null);
   const imageInputRef = useRef(null);
   const scrollFrameRef = useRef(0);
-
-  useEffect(() => {
-    if (surfaceTab === 'chat') return;
-    setShowCopilot(false);
-    setShowTemplatePicker(false);
-  }, [surfaceTab]);
 
   useEffect(() => {
     if (!showProviderPopover) return;
@@ -87,8 +80,6 @@ export default function useChatComposerUi() {
     providerPopoverRef,
     showCopilot,
     setShowCopilot,
-    surfaceTab,
-    setSurfaceTab,
     streamElapsedMs,
     setStreamElapsedMs,
     liveRequestRuntime,

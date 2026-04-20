@@ -276,8 +276,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     providerPopoverRef,
     showCopilot,
     setShowCopilot,
-    surfaceTab,
-    setSurfaceTab,
     streamElapsedMs,
     setStreamElapsedMs,
     liveRequestRuntime,
@@ -379,7 +377,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     parallelStreaming,
     provider,
     thinkingStartTime,
-    surfaceTab,
     messages,
     input,
     textareaRef,
@@ -389,7 +386,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setImages,
     setShowWebcam,
     setShowCopilot,
-    setSurfaceTab,
     setComposeFocused,
     setIsComposeDragOver,
     setStreamElapsedMs,
@@ -525,7 +521,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     effectiveMode,
     reasoningEffort,
     showCopilot,
-    surfaceTab,
     isStreaming,
     input,
     setInput,
@@ -557,7 +552,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setProvider,
     setMode,
     setReasoningEffort,
-    setSurfaceTab,
     setShowCopilot,
     appendProcessEvent,
   });
@@ -616,11 +610,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
           savedEscalationId={savedEscalationId}
         >
           <ChatSurfaceShell
-            chat={chat}
-            surfaceTab={surfaceTab}
-            onSurfaceTabChange={setSurfaceTab}
             conversationId={conversationId}
-            conversationIdFromRoute={conversationIdFromRoute}
             messages={messages}
             isStreaming={isStreaming}
             canRetryLastResponse={canRetryLastResponse}

@@ -84,14 +84,6 @@ const SLASH_COMMAND_CATALOG = [
     keywords: ['reasoning', 'low', 'medium', 'high', 'xhigh'],
   },
   {
-    id: 'tab',
-    command: '/tab',
-    insertValue: '/tab ',
-    description: ({ surfaceTab }) => `Switch panel tabs. Current: ${surfaceTab}.`,
-    example: '/tab workspace',
-    keywords: ['workspace', 'copilot', 'chat', 'panel'],
-  },
-  {
     id: 'copilot',
     command: '/copilot',
     insertValue: '/copilot',
@@ -153,14 +145,12 @@ export function createSlashCommands({
   effectiveMode,
   reasoningEffort,
   showCopilot,
-  surfaceTab,
 }) {
   const context = {
     provider,
     effectiveMode,
     reasoningEffort,
     showCopilot,
-    surfaceTab,
   };
 
   return SLASH_COMMAND_CATALOG.map((command) => ({

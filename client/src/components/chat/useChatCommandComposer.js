@@ -8,7 +8,6 @@ export default function useChatCommandComposer({
   effectiveMode,
   reasoningEffort,
   showCopilot,
-  surfaceTab,
   isStreaming,
   input,
   setInput,
@@ -39,7 +38,6 @@ export default function useChatCommandComposer({
   setProvider,
   setMode,
   setReasoningEffort,
-  setSurfaceTab,
   setShowCopilot,
   appendProcessEvent,
 }) {
@@ -87,7 +85,6 @@ export default function useChatCommandComposer({
     effectiveMode,
     reasoningEffort,
     showCopilot,
-    surfaceTab,
     isStreaming,
     input,
     setInput,
@@ -99,7 +96,6 @@ export default function useChatCommandComposer({
     setProvider,
     setMode,
     setReasoningEffort,
-    setSurfaceTab,
     setShowCopilot,
   });
 
