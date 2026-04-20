@@ -106,78 +106,6 @@
   overflow: visible;
 }
 
-.compose-card-header-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  flex-wrap: nowrap;
-  margin: 0;
-  position: relative;
-  z-index: 1;
-}
-
-.compose-card-tab-row {
-  display: flex;
-  justify-content: flex-end;
-  align-items: flex-end;
-  margin: 0;
-  min-height: 0;
-  padding-right: 12px;
-  position: relative;
-  z-index: 1;
-}
-
-.compose-card-tab-strip {
-  display: flex;
-  align-items: flex-end;
-  justify-content: flex-start;
-  gap: 0;
-  overflow: visible;
-  max-width: none;
-  flex: 0 0 auto;
-}
-
-.compose-card-tab-strip::-webkit-scrollbar {
-  display: none;
-}
-
-.compose-card-tab {
-  appearance: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--ink-tertiary);
-  border-radius: 0;
-  padding: 7px 12px 8px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color var(--duration-fast) ease, border-color var(--duration-fast) ease;
-}
-
-.compose-card-tab + .compose-card-tab {
-  margin-left: 4px;
-}
-
-.compose-card-tab:hover {
-  color: var(--ink);
-}
-
-.compose-card-tab.is-active {
-  background: transparent;
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-  position: relative;
-  z-index: 1;
-}
-
-.compose-card-tab.is-active::after {
-  display: none;
-}
-
 .agent-compose-tabs {
   display: flex;
   align-items: flex-end;
@@ -884,11 +812,6 @@
   margin: 0;
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.compose-card-header-row .compose-card-tab-row {
-  margin: 0 0 0 auto;
-  flex: 0 0 auto;
 }
 
 .quick-action-chip {
