@@ -603,14 +603,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
           forkInfo={forkInfo}
         >
           <ChatSurfaceShell
-            conversationId={conversationId}
-            messages={messages}
-            isStreaming={isStreaming}
-            canRetryLastResponse={canRetryLastResponse}
-            exportCopied={exportCopied}
-            onStartFreshConversation={startFreshConversation}
-            onRetryLastResponse={handleRetryLastResponse}
-            onCopyConversation={handleCopyConversation}
             threadContent={
               <ChatThreadStack
                 aiSettings={aiSettings}
@@ -714,6 +706,13 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 onClearParsedEscalationPreview={clearParsedEscalationPreview}
                 composeStatusNotice={composeStatusNotice}
                 onImageParsed={handleImageParsed}
+                conversationId={conversationId}
+                messages={messages}
+                canRetryLastResponse={canRetryLastResponse}
+                exportCopied={exportCopied}
+                onStartFreshConversation={startFreshConversation}
+                onRetryLastResponse={handleRetryLastResponse}
+                onCopyConversation={handleCopyConversation}
               />
             }
           />

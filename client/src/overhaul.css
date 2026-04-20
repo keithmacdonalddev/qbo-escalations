@@ -1148,44 +1148,10 @@ code, pre {
   color: #f5f5f7 !important;
 }
 
-/* Chat action buttons — always visible at top */
-.chat-action-row {
-  position: sticky !important;
-  top: 0 !important;
-  z-index: 20 !important;
-  background: rgba(28, 28, 30, 0.9) !important;
-  backdrop-filter: blur(16px) saturate(180%) !important;
-  -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
-  display: flex !important;
-  justify-content: flex-end !important;
-  align-items: center !important;
-  gap: 0 !important;
-  padding: 6px 12px !important;
-  border-bottom: 0.5px solid rgba(84, 84, 88, 0.25) !important;
-}
-
-.chat-action-row .copy-btn + .copy-btn::before {
-  content: '\00b7' !important;
-  color: #636366 !important;
-  font-size: 16px !important;
-  font-weight: 700 !important;
-  margin-right: 4px !important;
-  pointer-events: none !important;
-}
-
 .copy-btn.is-copied {
   background: rgba(48, 209, 88, 0.12) !important;
   color: #30d158 !important;
   border-color: rgba(48, 209, 88, 0.2) !important;
-}
-
-/* Disabled action buttons when no conversation */
-.chat-action-row button:disabled,
-.chat-action-row button[disabled],
-.chat-action-row .disabled {
-  opacity: 0.4 !important;
-  pointer-events: none !important;
-  cursor: not-allowed !important;
 }
 
 /* Usage badge */
@@ -5208,13 +5174,6 @@ body:has(.streaming-cursor) .chat-bubble:not(:has(.streaming-cursor)) {
   transition: all 600ms ease !important;
 }
 
-/* Action buttons row dims and disables */
-body:has(.streaming-cursor) .chat-action-row {
-  opacity: 0.3 !important;
-  pointer-events: none !important;
-  transition: opacity 400ms ease !important;
-}
-
 /* --- Part 4b: Return Transitions ---
    Spring-back when streaming completes. The bouncy easing
    IS the "handoff moment" — everything snaps back to life. */
@@ -5231,10 +5190,6 @@ body:has(.streaming-cursor) .chat-action-row {
 .chat-bubble {
   transition: opacity 500ms cubic-bezier(0.16, 1, 0.3, 1),
               filter 500ms cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-.chat-action-row {
-  transition: opacity 400ms cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 

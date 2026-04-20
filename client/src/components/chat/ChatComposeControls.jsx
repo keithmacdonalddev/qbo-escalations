@@ -40,6 +40,7 @@ export default function ChatComposeControls({
   setFallbackModel,
   setReasoningEffort,
   setParallelProviders,
+  trailingActions = null,
 }) {
   const modeLabel = MODE_OPTIONS.find((entry) => entry.value === mode)?.label || 'Single';
   const effortLabel = getReasoningEffortLabel(reasoningEffort);
@@ -214,6 +215,7 @@ export default function ChatComposeControls({
         </AnimatePresence>
       </div>
 
+      {trailingActions}
     </div>
   );
 }

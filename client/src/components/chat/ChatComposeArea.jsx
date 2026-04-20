@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import Tooltip from '../Tooltip.jsx';
 import WebcamCapture from '../WebcamCapture.jsx';
 import ChatComposeControls from './ChatComposeControls.jsx';
 import ImageParserPopup from './ImageParserPopup.jsx';
+import TraceLogsDrawer from './TraceLogsDrawer.jsx';
 import { transitions } from '../../utils/motion.js';
 import './ImageParserPopup.css';
 
@@ -133,12 +135,93 @@ export default function ChatComposeArea({
   onClearParsedEscalationPreview,
   composeStatusNotice,
   onImageParsed,
+  conversationId,
+  messages,
+  canRetryLastResponse,
+  exportCopied,
+  onStartFreshConversation,
+  onRetryLastResponse,
+  onCopyConversation,
 }) {
+  const [traceDrawerOpen, setTraceDrawerOpen] = useState(false);
   const sendDisabled = (!input.trim())
     || (effectiveMode === 'parallel' && (parallelProviders.length < 2 || parallelProviders.length > 4));
   const composePlaceholder = parsedEscalationPreview
     ? 'Add a follow-up after the main chat replies, if needed.'
     : "What's the escalation? Type / for commands.";
+  const hasConversation = Array.isArray(messages) && messages.length > 1 && !isStreaming && Boolean(conversationId);
+
+  const composeBoxActions = (
+    <div className="compose-box-actions">
+      <Tooltip text="Start a new conversation" level="low">
+        <button
+          className="compose-action-btn"
+          onClick={onStartFreshConversation}
+          type="button"
+          aria-label="Start a new conversation"
+        >
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.375-9.375Z" />
+          </svg>
+        </button>
+      </Tooltip>
+
+      <Tooltip text="Retry last response" level="low">
+        <button
+          className="compose-action-btn"
+          onClick={onRetryLastResponse}
+          type="button"
+          aria-label="Retry last response"
+          disabled={!canRetryLastResponse}
+        >
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 12a9 9 0 1 0 3.51-7.14" />
+            <polyline points="3 4 3 10 9 10" />
+          </svg>
+        </button>
+      </Tooltip>
+
+      <Tooltip text="View trace logs for this conversation" level="low">
+        <button
+          className="compose-action-btn"
+          onClick={() => setTraceDrawerOpen(true)}
+          type="button"
+          aria-label="View trace logs"
+          disabled={!hasConversation}
+        >
+          <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="8" y1="13" x2="16" y2="13" />
+            <line x1="8" y1="17" x2="16" y2="17" />
+            <line x1="8" y1="9" x2="10" y2="9" />
+          </svg>
+        </button>
+      </Tooltip>
+
+      <Tooltip text={exportCopied ? 'Copied to clipboard' : 'Copy full conversation'} level="low">
+        <button
+          className={`compose-action-btn${exportCopied ? ' is-active' : ''}`}
+          onClick={onCopyConversation}
+          type="button"
+          aria-label="Copy full conversation"
+          disabled={!hasConversation}
+        >
+          {exportCopied ? (
+            <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          ) : (
+            <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+          )}
+        </button>
+      </Tooltip>
+    </div>
+  );
 
   return (
     <>
@@ -168,6 +251,7 @@ export default function ChatComposeArea({
             setFallbackModel={setFallbackModel}
             setReasoningEffort={setReasoningEffort}
             setParallelProviders={setParallelProviders}
+            trailingActions={composeBoxActions}
           />
 
           <div className="compose-body" style={{ position: 'relative' }}>
@@ -412,6 +496,12 @@ export default function ChatComposeArea({
           setImageParserSeed(null);
         }}
         onParsed={onImageParsed}
+      />
+
+      <TraceLogsDrawer
+        conversationId={conversationId}
+        open={traceDrawerOpen}
+        onClose={() => setTraceDrawerOpen(false)}
       />
     </>
   );
