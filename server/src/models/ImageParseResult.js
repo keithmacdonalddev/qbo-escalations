@@ -7,6 +7,7 @@ const imageParseResultSchema = new mongoose.Schema({
   provider:       { type: String, required: true },           // 'llm-gateway', 'lm-studio', 'anthropic', 'openai', 'kimi', 'gemini'
   model:          { type: String, default: '' },              // model ID actually used
   modelRequested: { type: String, default: '' },              // model ID user requested
+  parserPromptId: { type: String, default: 'image-parser' },  // prompt/harness used for the parse
 
   // Image input stats
   image: {

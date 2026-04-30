@@ -70,6 +70,7 @@ export default function CaseIntakeTimeline({ caseIntake }) {
   const triage = caseIntake.triageCard && typeof caseIntake.triageCard === 'object'
     ? caseIntake.triageCard
     : null;
+  const followUpCount = Array.isArray(caseIntake.followUps) ? caseIntake.followUps.length : 0;
 
   return (
     <section className="case-intake-strip" aria-label="Case intake workflow">
@@ -106,6 +107,13 @@ export default function CaseIntakeTimeline({ caseIntake }) {
         <div className="case-intake-next">
           <span>Immediate next step</span>
           <strong>{triage.action}</strong>
+        </div>
+      )}
+
+      {followUpCount > 0 && (
+        <div className="case-intake-next">
+          <span>Follow-up context</span>
+          <strong>{followUpCount} parsed transcript{followUpCount === 1 ? '' : 's'} attached</strong>
         </div>
       )}
     </section>

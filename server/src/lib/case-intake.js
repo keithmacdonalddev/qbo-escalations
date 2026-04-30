@@ -94,6 +94,41 @@ function summarizeTriageCard(card) {
   return [prefix, read].filter(Boolean).join(' - ').slice(0, 220);
 }
 
+function appendCaseIntakeFollowUp(existing, {
+  transcript,
+  parserProvider,
+  parserModel,
+  traceId,
+  note,
+  createdAt,
+} = {}) {
+  const cleanTranscript = safeString(transcript, '').trim();
+  const intake = normalizeExistingIntake(existing);
+  if (!cleanTranscript) return intake;
+
+  const now = normalizeDate(createdAt);
+  const nextFollowUps = [
+    ...(Array.isArray(intake.followUps) ? intake.followUps : []),
+    {
+      id: randomUUID(),
+      source: 'follow-up-chat-parser',
+      transcript: cleanTranscript,
+      note: safeString(note, 'Follow-up context after the original escalation template.'),
+      parserProvider: safeString(parserProvider, ''),
+      parserModel: safeString(parserModel, ''),
+      traceId: safeString(traceId, ''),
+      createdAt: now,
+    },
+  ].slice(-20);
+
+  return {
+    ...intake,
+    source: intake.source || 'escalation-template-parser',
+    followUps: nextFollowUps,
+    updatedAt: now,
+  };
+}
+
 function buildCaseIntakeFromParsedEscalation({
   existing,
   sourceText,
@@ -266,6 +301,7 @@ function failCaseIntakeAnalystRun(existing, {
 
 module.exports = {
   CASE_STATUS,
+  appendCaseIntakeFollowUp,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,

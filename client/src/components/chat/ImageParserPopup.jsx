@@ -7,12 +7,21 @@ import {
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
 } from '../../lib/imageParserCatalog.js';
+import {
+  getAgentRuntimeDefinition,
+  readAgentRuntimeState,
+} from '../../lib/agentRuntimeSettings.js';
 import { transitions } from '../../utils/motion.js';
 
 const IMAGE_PARSER_PROVIDERS = [
   { value: '', label: 'Select provider...' },
   ...IMAGE_PARSER_PROVIDER_OPTIONS,
 ];
+const PARSER_MODE_OPTIONS = [
+  { value: 'escalation-template-parser', label: 'Escalation Template' },
+  { value: 'follow-up-chat-parser', label: 'Follow-Up Chat' },
+];
+const DEFAULT_PARSER_MODE = 'escalation-template-parser';
 const IMAGE_PARSER_POPUP_MODEL_LIST_ID = 'chat-image-parser-model-options';
 
 const ScanIcon = ({ size = 18 }) => (
@@ -40,14 +49,30 @@ const CloseIcon = ({ size = 14 }) => (
   </svg>
 );
 
-export default function ImageParserPopup({ open, onClose, onParsed, seedImage = null }) {
+function normalizeParserMode(value) {
+  return PARSER_MODE_OPTIONS.some((option) => option.value === value)
+    ? value
+    : DEFAULT_PARSER_MODE;
+}
+
+function readParserRuntime(parserMode) {
+  const definition = getAgentRuntimeDefinition(parserMode);
+  const state = definition ? readAgentRuntimeState(definition) : {};
+  return {
+    provider: state.provider || localStorage.getItem('qbo-image-parser-provider') || '',
+    model: state.model || localStorage.getItem('qbo-image-parser-model') || '',
+  };
+}
+
+function getParserModeLabel(parserMode) {
+  return PARSER_MODE_OPTIONS.find((option) => option.value === parserMode)?.label || 'Screenshot';
+}
+
+export default function ImageParserPopup({ open, onClose, onParsed, seedImage = null, parserMode: initialParserMode = DEFAULT_PARSER_MODE }) {
   const { parse, parsing, result, error, checkAvailability } = useImageParser();
-  const [provider, setProvider] = useState(() =>
-    localStorage.getItem('qbo-image-parser-provider') || ''
-  );
-  const [model, setModel] = useState(() =>
-    localStorage.getItem('qbo-image-parser-model') || ''
-  );
+  const [parserMode, setParserMode] = useState(() => normalizeParserMode(initialParserMode));
+  const [provider, setProvider] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).provider);
+  const [model, setModel] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).model);
   const [imagePreview, setImagePreview] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -57,6 +82,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
   const popupRef = useRef(null);
+  const parserModeLabel = getParserModeLabel(parserMode);
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
@@ -87,12 +113,17 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
   useEffect(() => {
     if (!open) return;
+    const nextParserMode = normalizeParserMode(seedImage?.parserMode || seedImage?.promptId || initialParserMode);
+    const runtime = readParserRuntime(nextParserMode);
+    setParserMode(nextParserMode);
+    setProvider(runtime.provider);
+    setModel(runtime.model);
     const src = typeof seedImage === 'string' ? seedImage : seedImage?.src;
     if (!src) return;
     setValidationError('');
     setImagePreview(src);
     setImageBase64(src);
-  }, [open, seedImage]);
+  }, [initialParserMode, open, seedImage]);
 
   // Close on outside click
   useEffect(() => {
@@ -180,18 +211,35 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     }
   }, [processFile]);
 
+  const handleParserModeChange = useCallback((value) => {
+    const nextParserMode = normalizeParserMode(value);
+    const runtime = readParserRuntime(nextParserMode);
+    setParserMode(nextParserMode);
+    setProvider(runtime.provider);
+    setModel(runtime.model);
+    setValidationError('');
+  }, []);
+
   const handleParse = useCallback(async () => {
     if (!imageBase64 || !provider) return;
     setValidationError('');
-    const data = await parse(imageBase64, { provider, model: model || undefined });
+    const data = await parse(imageBase64, {
+      provider,
+      model: model || undefined,
+      promptId: parserMode,
+    });
     if (data?.parseMeta && data.parseMeta.passed === false) {
       const issue = data.parseMeta.issues?.[0] || data.parseMeta.canonicalTemplate?.issues?.[0]?.code || 'validation failed';
-      setValidationError(`Parser output did not match the canonical escalation template (${issue}). Retry with a clearer screenshot or another parser model.`);
+      const label = parserMode === 'follow-up-chat-parser'
+        ? 'follow-up chat transcript format'
+        : 'canonical escalation template';
+      setValidationError(`Parser output did not match the ${label} (${issue}). Retry with a clearer screenshot or another parser model.`);
       return;
     }
     if (data?.text) {
       onParsed({
         ...data,
+        parserPromptId: data.promptId || parserMode,
         providerUsed: provider,
         modelUsed: data?.usage?.model || model || '',
       });
@@ -201,7 +249,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       setValidationError('');
       onClose();
     }
-  }, [imageBase64, provider, model, parse, onParsed, onClose]);
+  }, [imageBase64, provider, model, parserMode, parse, onParsed, onClose]);
 
   const handleClear = useCallback(() => {
     setValidationError('');
@@ -246,7 +294,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
           <div className="ip-popup-header">
             <div className="ip-popup-header-left">
               <span className="ip-popup-header-icon"><ScanIcon /></span>
-              <span className="ip-popup-title">Parse Screenshot</span>
+              <span className="ip-popup-title">Parse {parserModeLabel}</span>
               {provider && (
                 <span
                   className={`ip-popup-status${isProviderOnline ? ' is-online' : providerStatus ? ' is-offline' : ''}`}
@@ -263,6 +311,14 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
           {/* Config row */}
           <div className="ip-popup-config">
+            <label className="ip-popup-field">
+              <span>Parser</span>
+              <select value={parserMode} onChange={(e) => handleParserModeChange(e.target.value)}>
+                {PARSER_MODE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </label>
             <label className="ip-popup-field">
               <span>Provider</span>
               <select value={provider} onChange={(e) => setProvider(e.target.value)}>
@@ -353,7 +409,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
               ) : (
                 <>
                   <ScanIcon size={14} />
-                  Parse and Insert
+                  Parse and Send
                 </>
               )}
             </button>

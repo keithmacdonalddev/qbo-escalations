@@ -206,6 +206,27 @@ function buildParsedEscalationSubmission(preview, note = '') {
   };
 }
 
+function isFollowUpParseResult(parsedText, text) {
+  if (parsedText && typeof parsedText === 'object') {
+    if (parsedText.parserPromptId === 'follow-up-chat-parser' || parsedText.promptId === 'follow-up-chat-parser') return true;
+    if (parsedText.role === 'follow-up-chat') return true;
+  }
+  return /^Context type:\s*phone-agent-follow-up/im.test(text || '');
+}
+
+function buildFollowUpContextSubmission(text) {
+  const cleanText = safeText(text);
+  return {
+    displayContent: cleanText,
+    payloadMessage: [
+      'Use this parsed phone-agent follow-up chat as additional live case context.',
+      'It happened after the original escalation template. Do not treat it as a new escalation.',
+      'Update diagnosis, missing information, severity, or next action only if this context changes them.',
+      '',
+      cleanText,
+    ].join('\n'),
+  };
+}
 export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, routeView = 'chat' }) {
   const {
     messages,
@@ -442,6 +463,48 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     const parserModel = typeof parsedText === 'object' && parsedText
       ? safeText(parsedText.modelUsed || parsedText.usage?.model || parsedText.model || '')
       : '';
+    const parserPromptId = typeof parsedText === 'object' && parsedText
+      ? safeText(parsedText.parserPromptId || parsedText.promptId || '')
+      : '';
+
+    if (isFollowUpParseResult(parsedText, text)) {
+      const submission = buildFollowUpContextSubmission(text);
+      if (isStreaming) {
+        setInput((prev) => {
+          const cleanPrev = typeof prev === 'string' ? prev.trimEnd() : '';
+          return cleanPrev ? `${cleanPrev}\n\n${submission.displayContent}` : submission.displayContent;
+        });
+        appendProcessEvent({
+          level: 'warning',
+          title: 'Follow-up context parsed',
+          message: 'The main chat is still responding, so the parsed follow-up transcript was placed in the composer to send next.',
+          code: 'FOLLOW_UP_CONTEXT_WAITING',
+          provider,
+        });
+        return;
+      }
+
+      sendMessage(submission.displayContent, [], provider, [], {
+        payloadMessage: submission.payloadMessage,
+        displayContent: submission.displayContent,
+        requestExtras: {
+          followUpContextText: text,
+          followUpContextSource: 'follow-up-chat-parser',
+          followUpContextProvider: parserProvider || provider,
+          followUpContextModel: parserModel || '',
+        },
+      });
+      appendProcessEvent({
+        level: 'info',
+        title: 'Follow-up context sent',
+        message: 'Parsed phone-agent chat context was added to this case and sent to the main chat.',
+        code: 'FOLLOW_UP_CONTEXT_SENT',
+        provider,
+        parserPromptId,
+      });
+      return;
+    }
+
     const preview = {
       ...buildParsedEscalationPreviewFromText(text),
       parserProvider,
@@ -459,8 +522,11 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
   }, [
     appendProcessEvent,
     focusComposerWithValue,
+    isStreaming,
     provider,
+    sendMessage,
     setActivityExpanded,
+    setInput,
     setParseMeta,
     setTriageCard,
     submitParsedEscalationPreview,

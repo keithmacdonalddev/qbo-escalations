@@ -54,6 +54,7 @@ const {
   prepareChatRequest,
 } = require('../../services/chat-request-service');
 const {
+  appendCaseIntakeFollowUp,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
@@ -216,6 +217,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     parsedEscalationSource,
     parsedEscalationProvider,
     parsedEscalationModel,
+    followUpContextText,
+    followUpContextSource,
+    followUpContextProvider,
+    followUpContextModel,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -546,6 +551,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   const parsedEscalationCanonicalText = safeString(parsedEscalationSource, '') === 'image-parser'
     ? safeString(parsedEscalationText, '')
     : '';
+  const followUpTranscript = safeString(followUpContextSource, '') === 'follow-up-chat-parser'
+    ? safeString(followUpContextText, '')
+    : '';
   if (parsedEscalationCanonicalText || imageTriageContext) {
     conversation.caseIntake = buildCaseIntakeFromParsedEscalation({
       existing: conversation.caseIntake,
@@ -557,6 +565,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       analystModel: policy.primaryModel || primaryTraceModel,
       traceId: trace ? trace._id.toString() : null,
       startedAt: traceStartedAt,
+    });
+    conversation.markModified?.('caseIntake');
+  }
+  if (followUpTranscript) {
+    conversation.caseIntake = appendCaseIntakeFollowUp(conversation.caseIntake, {
+      transcript: followUpTranscript,
+      parserProvider: followUpContextProvider || 'follow-up-chat-parser',
+      parserModel: followUpContextModel || '',
+      traceId: trace ? trace._id.toString() : null,
+      createdAt: traceStartedAt,
     });
     conversation.markModified?.('caseIntake');
   }

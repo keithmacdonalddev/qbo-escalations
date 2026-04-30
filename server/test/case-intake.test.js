@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  appendCaseIntakeFollowUp,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
@@ -105,4 +106,33 @@ test('failCaseIntakeAnalystRun marks analyst failures for review', () => {
   assert.equal(analyst.status, 'failed');
   assert.equal(analyst.summary, 'Timed out');
   assert.deepEqual(analyst.detail, { code: 'TIMEOUT', message: 'Timed out' });
+});
+
+test('appendCaseIntakeFollowUp stores parsed phone-agent chat context without changing analyst status', () => {
+  const intake = buildCaseIntakeFromParsedEscalation({
+    sourceText: 'COID/MID: 123\nCASE: 456',
+    imageTriageContext: {
+      parseFields: { coid: '123' },
+      triageCard: { category: 'payroll', severity: 'P3', read: 'Payroll issue.' },
+    },
+    analystProvider: 'gpt-5.5',
+    analystModel: 'gpt-5.5',
+    startedAt: STARTED_AT,
+  });
+
+  const updated = appendCaseIntakeFollowUp(intake, {
+    transcript: 'Context type: phone-agent-follow-up\n\nVerbatim transcript:\nAgent: Customer confirmed the payroll year.\n\nParser note:\nThis is follow-up context.',
+    parserProvider: 'llm-gateway',
+    parserModel: 'auto',
+    traceId: 'trace-2',
+    createdAt: COMPLETED_AT,
+  });
+
+  assert.equal(updated.status, 'analyst-running');
+  assert.equal(updated.followUps.length, 1);
+  assert.equal(updated.followUps[0].source, 'follow-up-chat-parser');
+  assert.match(updated.followUps[0].transcript, /Customer confirmed/);
+  assert.equal(updated.followUps[0].parserProvider, 'llm-gateway');
+  assert.equal(updated.followUps[0].traceId, 'trace-2');
+  assert.equal(updated.canonicalTemplate, intake.canonicalTemplate);
 });

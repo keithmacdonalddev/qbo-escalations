@@ -41,6 +41,7 @@ export default function useImageParser() {
           image: imageBase64,
           provider,
           model: model || undefined,
+          promptId: overrides.promptId || overrides.parserPromptId || undefined,
           timeoutMs: overrides.timeoutMs,
         }),
         timeout: 210_000,  // 210s — local models (LM Studio) can take up to 180s

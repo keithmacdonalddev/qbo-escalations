@@ -6,6 +6,7 @@ const {
   parseImage,
   checkProviderAvailability,
   clearProviderAvailabilityCache,
+  normalizeImageParsePromptId,
   resolveApiKey,
   getAllStoredKeys,
   setStoredApiKey,
@@ -91,7 +92,7 @@ const parseRateLimit = createRateLimiter({ name: 'image-parser', limit: 10, wind
 // POST /parse — Parse an escalation screenshot or INV list image
 // ---------------------------------------------------------------------------
 router.post('/parse', parseRateLimit, async (req, res) => {
-  const { image, provider, model, timeoutMs } = req.body || {};
+  const { image, provider, model, timeoutMs, promptId, parserPromptId } = req.body || {};
 
   // Validate required fields
   if (!image) {
@@ -111,9 +112,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   }
 
   const startedAt = Date.now();
+  const effectivePromptId = normalizeImageParsePromptId(promptId || parserPromptId);
 
   try {
-    const result = await parseImage(image, { provider, model, timeoutMs: effectiveTimeout });
+    const result = await parseImage(image, {
+      provider,
+      model,
+      timeoutMs: effectiveTimeout,
+      promptId: effectivePromptId,
+    });
     const elapsedMs = Date.now() - startedAt;
 
     // Fire-and-forget save to MongoDB + on-disk image archive
@@ -130,12 +137,13 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       conversionTimeMs: result.stats?.image?.conversionTimeMs || 0,
       status: 'ok',
       role: result.role || '',
+      parserPromptId: result.promptId || effectivePromptId,
       parsedText: result.text || '',
       textLength: (result.text || '').length,
       source: 'panel',
     }, image);
 
-    res.json({ ok: true, ...result, meta: result.stats?.image, parseFields: result.parseFields || {}, elapsedMs });
+    res.json({ ok: true, ...result, promptId: result.promptId || effectivePromptId, meta: result.stats?.image, parseFields: result.parseFields || {}, elapsedMs });
   } catch (err) {
     const elapsedMs = Date.now() - startedAt;
     const status = err.code === 'PROVIDER_UNAVAILABLE' ? 503
@@ -147,6 +155,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     persistParseResult({
       provider,
       modelRequested: model || '',
+      parserPromptId: effectivePromptId,
       totalElapsedMs: elapsedMs,
       status: err.message?.includes('timed out') ? 'timeout' : 'error',
       errorCode: err.code || 'UNKNOWN',

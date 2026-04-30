@@ -32,6 +32,12 @@ const LLM_GATEWAY_DEFAULT_MODEL = process.env.LLM_GATEWAY_DEFAULT_MODEL || 'auto
 const DEFAULT_TIMEOUT_MS = 60000;
 const KEYS_FILE = path.join(__dirname, '..', '..', 'data', 'image-parser-keys.json');
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
+const DEFAULT_IMAGE_PARSE_PROMPT_ID = 'image-parser';
+const IMAGE_PARSE_PROMPT_IDS = new Set([
+  DEFAULT_IMAGE_PARSE_PROMPT_ID,
+  'escalation-template-parser',
+  'follow-up-chat-parser',
+]);
 const PROVIDER_AVAILABILITY_CACHE_TTL_MS = (() => {
   const raw = Number.parseInt(process.env.IMAGE_PARSER_STATUS_CACHE_TTL_MS, 10);
   return Number.isFinite(raw) && raw >= 0 ? raw : 60_000;
@@ -58,6 +64,11 @@ function verboseError(...args) {
   if (IMAGE_PARSER_VERBOSE_LOGS) {
     console.error(...args);
   }
+}
+
+function normalizeImageParsePromptId(value) {
+  const promptId = typeof value === 'string' ? value.trim() : '';
+  return IMAGE_PARSE_PROMPT_IDS.has(promptId) ? promptId : DEFAULT_IMAGE_PARSE_PROMPT_ID;
 }
 
 function isMongoKeyStoreReady() {
@@ -1127,7 +1138,11 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
 // ---------------------------------------------------------------------------
 // Role auto-detection from response text
 // ---------------------------------------------------------------------------
-function detectRole(responseText) {
+function detectRole(responseText, options = {}) {
+  const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
+  if (promptId === 'follow-up-chat-parser') return 'follow-up-chat';
+  if (/^Context type:\s*phone-agent-follow-up/im.test(responseText)) return 'follow-up-chat';
+  if (promptId === 'escalation-template-parser') return 'escalation';
   if (/INV-\d{5,}/.test(responseText)) return 'inv-list';
   if (/COID\/MID:|CASE:|CX IS ATTEMPTING TO:/i.test(responseText)) return 'escalation';
   return 'unknown';
@@ -1145,7 +1160,36 @@ function hasStructuredParseValue(field, value) {
   return true;
 }
 
+function buildFollowUpParseMeta(text) {
+  const clean = typeof text === 'string' ? text.trim() : '';
+  const issues = [];
+  const hasContextType = /^Context type:\s*phone-agent-follow-up/im.test(clean);
+  const hasTranscriptHeading = /^Verbatim transcript:/im.test(clean);
+  const hasParserNote = /^Parser note:/im.test(clean);
+  const transcriptMatch = clean.match(/Verbatim transcript:\s*([\s\S]*?)(?:\nParser note:|$)/i);
+  const transcript = transcriptMatch ? transcriptMatch[1].trim() : '';
+
+  if (!hasContextType) issues.push('missing_context_type');
+  if (!hasTranscriptHeading) issues.push('missing_verbatim_transcript');
+  if (!transcript) issues.push('empty_transcript');
+  if (!hasParserNote) issues.push('missing_parser_note');
+
+  return {
+    type: 'follow-up-chat',
+    passed: issues.length === 0,
+    score: issues.length === 0 ? 1 : Math.max(0, 1 - (issues.length * 0.25)),
+    confidence: issues.length === 0 ? 'high' : 'low',
+    issues,
+  };
+}
 function buildStructuredParseResult(text, role) {
+  if (role === 'follow-up-chat') {
+    return {
+      parseFields: {},
+      parseMeta: buildFollowUpParseMeta(text),
+    };
+  }
+
   if (role !== 'escalation') {
     return {
       parseFields: {},
@@ -1213,7 +1257,8 @@ function buildStructuredParseResult(text, role) {
  */
 async function parseImage(imageBase64, options = {}) {
   const { provider, model, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
-  const systemPrompt = getRenderedAgentPrompt('image-parser');
+  const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
+  const systemPrompt = getRenderedAgentPrompt(promptId);
 
   if (!imageBase64 || typeof imageBase64 !== 'string' || !imageBase64.trim()) {
     const err = new Error('Image data is required');
@@ -1271,12 +1316,13 @@ async function parseImage(imageBase64, options = {}) {
     conversionTimeMs: convStats.conversionTimeMs || 0,
   };
 
-  const role = detectRole(result.text);
+  const role = detectRole(result.text, { promptId });
   const { parseFields, parseMeta } = buildStructuredParseResult(result.text, role);
 
   return {
     text: result.text,
     role,
+    promptId,
     usage: result.usage,
     parseFields,
     parseMeta,
@@ -1375,6 +1421,7 @@ module.exports = {
   checkProviderAvailability,
   clearProviderAvailabilityCache,
   normalizeBase64,
+  normalizeImageParsePromptId,
   detectMediaTypeFromBase64,
   detectRole,
   convertToPngIfNeeded,
