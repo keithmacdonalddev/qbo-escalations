@@ -89,6 +89,62 @@ const SSE_SAFETY_TIMEOUT_MS = Number.isFinite(rawSseSafetyTimeoutMs) && rawSseSa
 const MAIN_CHAT_TOOL_AGENT_ID = 'main-chat-assistant';
 const CHAT_ACTIVITY_AGENT_ID = 'chat';
 
+function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceId } = {}) {
+  const runs = Array.isArray(caseIntake?.runs) ? caseIntake.runs : [];
+  const parserRun = runs.find((run) => run?.phase === 'parse-template');
+  const triageRun = runs.find((run) => run?.phase === 'triage');
+
+  if (parserRun) {
+    recordAgentActivity('escalation-template-parser', {
+      type: 'case-intake',
+      phase: 'parse-template',
+      status: parserRun.status || 'completed',
+      summary: parserRun.summary || 'Escalation template parser captured a canonical template.',
+      detail: {
+        provider: parserRun.provider || '',
+        model: parserRun.model || '',
+        traceId: parserRun.traceId || traceId || '',
+      },
+      conversationId,
+      metadata: { traceId: parserRun.traceId || traceId || '' },
+    }, { surface: 'chat', conversationId }).catch(() => {});
+  }
+
+  if (triageRun) {
+    recordAgentActivity('triage-agent', {
+      type: 'case-intake',
+      phase: 'triage',
+      status: triageRun.status || 'completed',
+      summary: triageRun.summary || 'Triage agent prepared a first-pass case card.',
+      detail: {
+        provider: triageRun.provider || '',
+        model: triageRun.model || '',
+        traceId: triageRun.traceId || traceId || '',
+      },
+      conversationId,
+      metadata: { traceId: triageRun.traceId || traceId || '' },
+    }, { surface: 'chat', conversationId }).catch(() => {});
+  }
+}
+
+function recordFollowUpParserActivity(followUp, { conversationId, traceId } = {}) {
+  if (!followUp?.transcript) return;
+  recordAgentActivity('follow-up-chat-parser', {
+    type: 'case-intake',
+    phase: 'follow-up-context',
+    status: 'ok',
+    summary: 'Parsed phone-agent follow-up chat context.',
+    detail: {
+      parserProvider: followUp.parserProvider || '',
+      parserModel: followUp.parserModel || '',
+      transcriptChars: followUp.transcript.length,
+      traceId: followUp.traceId || traceId || '',
+    },
+    conversationId,
+    metadata: { traceId: followUp.traceId || traceId || '' },
+  }, { surface: 'chat', conversationId }).catch(() => {});
+}
+
 async function buildMainChatSystemPrompt(basePrompt, enableTools) {
   const normalizedBase = safeString(basePrompt, '');
   const identity = await getAgentIdentity('chat').catch(() => null);
@@ -567,6 +623,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       startedAt: traceStartedAt,
     });
     conversation.markModified?.('caseIntake');
+    recordCaseIntakeWorkflowActivities(conversation.caseIntake, {
+      conversationId: conversation._id ? conversation._id.toString() : '',
+      traceId: trace ? trace._id.toString() : '',
+    });
   }
   if (followUpTranscript) {
     conversation.caseIntake = appendCaseIntakeFollowUp(conversation.caseIntake, {
@@ -577,6 +637,13 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       createdAt: traceStartedAt,
     });
     conversation.markModified?.('caseIntake');
+    const latestFollowUp = Array.isArray(conversation.caseIntake?.followUps)
+      ? conversation.caseIntake.followUps[conversation.caseIntake.followUps.length - 1]
+      : null;
+    recordFollowUpParserActivity(latestFollowUp, {
+      conversationId: conversation._id ? conversation._id.toString() : '',
+      traceId: trace ? trace._id.toString() : '',
+    });
   }
   const useSharedAgentTools = policy.mode !== 'parallel';
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
