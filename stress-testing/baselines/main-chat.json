@@ -1,0 +1,65 @@
+{
+  "slice": "main-chat",
+  "checks": [
+    {
+      "label": "Main chat now reports five scenarios",
+      "path": "fixtures",
+      "lengthMin": 5
+    },
+    {
+      "label": "Retry falls back from claude",
+      "path": "fixtures[0].assertions.retryFallbackFrom",
+      "equals": "claude"
+    },
+    {
+      "label": "Retry completes on codex fallback",
+      "path": "fixtures[0].assertions.retryProviderUsed",
+      "equals": "gpt-5.5"
+    },
+    {
+      "label": "Retry emits provider_error",
+      "path": "fixtures[0].assertions.providerErrorEventSeen",
+      "equals": true
+    },
+    {
+      "label": "Retry emits fallback",
+      "path": "fixtures[0].assertions.fallbackEventSeen",
+      "equals": true
+    },
+    {
+      "label": "Image-only requests stay rejected",
+      "path": "fixtures[1].assertions.code",
+      "equals": "CHAT_IMAGES_DISABLED"
+    },
+    {
+      "label": "Missing conversation sends stay 404",
+      "path": "fixtures[2].assertions.code",
+      "equals": "NOT_FOUND"
+    },
+    {
+      "label": "Three-turn load conversation persists six messages",
+      "path": "fixtures[3].assertions.persistedMessageCount",
+      "min": 6
+    },
+    {
+      "label": "Concurrent burst creates distinct conversations",
+      "path": "fixtures[4].assertions.distinctConversationIds",
+      "equals": true
+    },
+    {
+      "label": "Concurrent burst persists replies in both conversations",
+      "path": "fixtures[4].assertions.firstConversationMessageCount",
+      "min": 2
+    },
+    {
+      "label": "Trace coverage exists across retry plus load scenarios",
+      "path": "observability.traces.count",
+      "min": 7
+    },
+    {
+      "label": "Usage coverage exists across retry plus load scenarios",
+      "path": "observability.usage.count",
+      "min": 7
+    }
+  ]
+}

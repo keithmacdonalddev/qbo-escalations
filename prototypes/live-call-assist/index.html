@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Live Call Assist - QBO Escalations</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">
+          <span></span>
+          <span></span>
+        </div>
+        <div>
+          <h1>Live Call Assist</h1>
+          <p>Dual-input transcription test surface for QBO escalation calls</p>
+        </div>
+      </div>
+      <div class="session-state">
+        <span class="state-pill idle" id="sessionState">Idle</span>
+        <span class="session-clock" id="sessionClock">00:00</span>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <section class="setup-rail" aria-label="Audio setup">
+        <div class="panel setup-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Audio Inputs</h2>
+              <p>Both inputs stay live for the whole call. No switching.</p>
+            </div>
+            <button class="icon-button" id="refreshDevicesBtn" type="button" title="Refresh devices" aria-label="Refresh devices">
+              <span aria-hidden="true">R</span>
+            </button>
+          </div>
+
+          <div class="setup-actions">
+            <button class="primary-button" id="permissionBtn" type="button">Enable Microphones</button>
+            <button class="secondary-button" id="recordTestBtn" type="button" disabled>Record Test</button>
+          </div>
+
+          <article class="input-card" data-source-card="customer">
+            <div class="input-card-header">
+              <div>
+                <h3>Customer Audio</h3>
+                <p>Headset tap from the work PC</p>
+              </div>
+              <span class="source-badge customer">Customer</span>
+            </div>
+            <label class="field-label" for="customerDevice">Input device</label>
+            <select id="customerDevice"></select>
+            <div class="meter-row">
+              <div class="meter">
+                <span id="customerMeter"></span>
+              </div>
+              <output id="customerLevel">0%</output>
+            </div>
+            <div class="audio-playback" id="customerPlaybackWrap" hidden>
+              <span>Test clip</span>
+              <audio id="customerPlayback" controls></audio>
+            </div>
+          </article>
+
+          <article class="input-card" data-source-card="keith">
+            <div class="input-card-header">
+              <div>
+                <h3>Keith Mic</h3>
+                <p>Your USB mic or desk mic</p>
+              </div>
+              <span class="source-badge keith">Keith</span>
+            </div>
+            <label class="field-label" for="keithDevice">Input device</label>
+            <select id="keithDevice"></select>
+            <div class="meter-row">
+              <div class="meter">
+                <span id="keithMeter"></span>
+              </div>
+              <output id="keithLevel">0%</output>
+            </div>
+            <div class="audio-playback" id="keithPlaybackWrap" hidden>
+              <span>Test clip</span>
+              <audio id="keithPlayback" controls></audio>
+            </div>
+          </article>
+
+          <div class="panel-section">
+            <h3>Speech Provider</h3>
+            <label class="field-label" for="providerSelect">Provider mode</label>
+            <select id="providerSelect">
+              <option value="mock">Mock realtime transcriber</option>
+              <option value="deepgram" disabled>Deepgram adapter placeholder</option>
+              <option value="assemblyai" disabled>AssemblyAI adapter placeholder</option>
+            </select>
+            <p class="small-note">
+              Mock mode proves the two-input flow now. Real provider keys should be handled by a server adapter, not pasted into browser code.
+            </p>
+          </div>
+
+          <div class="panel-section privacy-box">
+            <h3>Privacy Defaults</h3>
+            <ul>
+              <li>Raw audio is not saved by this prototype.</li>
+              <li>Test clips stay only in this browser tab.</li>
+              <li>Delete session clears transcript and chat memory.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="call-workspace" aria-label="Live call workspace">
+        <div class="control-strip">
+          <div class="control-group">
+            <button class="primary-button" id="startCallBtn" type="button" disabled>Start Call</button>
+            <button class="secondary-button" id="pauseCallBtn" type="button" disabled>Pause</button>
+            <button class="danger-button" id="stopCallBtn" type="button" disabled>Stop</button>
+          </div>
+          <div class="control-group compact">
+            <button class="secondary-button" id="addSampleBtn" type="button">Add Sample Turn</button>
+            <button class="secondary-button" id="clearTranscriptBtn" type="button">Clear Transcript</button>
+            <button class="danger-button" id="deleteSessionBtn" type="button">Delete Session</button>
+          </div>
+        </div>
+
+        <section class="panel transcript-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Conversation Timeline</h2>
+              <p>Segments are merged by timestamps across both live inputs.</p>
+            </div>
+            <div class="timeline-stats">
+              <span id="segmentCount">0 segments</span>
+              <span id="overlapCount">0 overlaps</span>
+            </div>
+          </div>
+
+          <form class="manual-segment" id="manualSegmentForm">
+            <select id="manualSource" aria-label="Speaker source">
+              <option value="customer">Customer</option>
+              <option value="customer-2">Customer Speaker 2</option>
+              <option value="keith">Keith</option>
+              <option value="unknown">Unknown</option>
+            </select>
+            <input id="manualText" type="text" autocomplete="off" placeholder="Add a real line you heard for testing" />
+            <button class="secondary-button" type="submit">Add</button>
+          </form>
+
+          <div class="partial-row" id="partialRow" aria-live="polite"></div>
+          <div class="timeline" id="timeline">
+            <div class="empty-state">
+              <h3>No transcript yet</h3>
+              <p>Start a call, record a test, or add sample turns to test the merged conversation flow.</p>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <aside class="agent-rail" aria-label="QBO agent chat">
+        <section class="panel agent-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>QBO Agent</h2>
+              <p>Private guidance while the call keeps transcribing.</p>
+            </div>
+            <span class="state-pill ready" id="agentContextState">0 lines</span>
+          </div>
+
+          <div class="quick-actions" aria-label="Agent quick actions">
+            <button class="secondary-button" data-agent-action="summary" type="button">Summarize</button>
+            <button class="secondary-button" data-agent-action="next" type="button">Next Step</button>
+            <button class="secondary-button" data-agent-action="draft" type="button">Draft Escalation</button>
+          </div>
+
+          <div class="chat-log" id="chatLog">
+            <article class="chat-message agent">
+              <span class="chat-role">Agent</span>
+              <p>Ask for help any time. The active transcript stays available as context while the call continues.</p>
+            </article>
+          </div>
+
+          <form class="chat-form" id="chatForm">
+            <textarea id="chatInput" rows="3" placeholder="Ask the QBO agent privately while the customer call continues"></textarea>
+            <button class="primary-button" id="chatSendBtn" type="submit">Send</button>
+          </form>
+        </section>
+
+        <section class="panel summary-panel">
+          <div class="panel-heading">
+            <div>
+              <h2>Rolling Context</h2>
+              <p>What the agent will use by default.</p>
+            </div>
+          </div>
+          <div class="rolling-summary" id="rollingSummary">
+            No call context yet.
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <template id="partialTemplate">
+      <article class="partial-card">
+        <span class="partial-speaker"></span>
+        <p></p>
+      </article>
+    </template>
+
+    <template id="segmentTemplate">
+      <article class="segment">
+        <div class="segment-meta">
+          <span class="speaker"></span>
+          <span class="time-range"></span>
+          <span class="overlap-flag" hidden>Overlap</span>
+        </div>
+        <p class="segment-text"></p>
+        <div class="segment-actions">
+          <button type="button" data-action="rename">Rename</button>
+          <button type="button" data-action="edit">Edit</button>
+          <button type="button" data-action="delete">Delete</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

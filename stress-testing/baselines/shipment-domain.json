@@ -1,0 +1,85 @@
+{
+  "slice": "shipment-domain",
+  "checks": [
+    {
+      "label": "Shipment-domain runner reports six scenarios",
+      "path": "fixtures",
+      "lengthMin": 6
+    },
+    {
+      "label": "UPS carrier detection is stable",
+      "path": "fixtures[0].assertions.upsCarrier",
+      "equals": "ups"
+    },
+    {
+      "label": "Canada Post carrier detection is stable",
+      "path": "fixtures[0].assertions.canadaPostCarrier",
+      "equals": "canada-post"
+    },
+    {
+      "label": "Duplicate shipment create remains an upsert",
+      "path": "fixtures[0].assertions.duplicateCount",
+      "equals": 1
+    },
+    {
+      "label": "Delivered shipments become inactive",
+      "path": "fixtures[1].assertions.deliveredActive",
+      "equals": false
+    },
+    {
+      "label": "Delivered shipments set actualDelivery",
+      "path": "fixtures[1].assertions.deliveredActualDeliverySet",
+      "equals": true
+    },
+    {
+      "label": "Active list excludes delivered shipment",
+      "path": "fixtures[1].assertions.activeListExcludesDelivered",
+      "equals": true
+    },
+    {
+      "label": "Shipping email scanner creates one shipment",
+      "path": "fixtures[2].assertions.scanCreated",
+      "equals": 1
+    },
+    {
+      "label": "Duplicate source email scan is skipped",
+      "path": "fixtures[2].assertions.duplicateScanCreated",
+      "equals": 0
+    },
+    {
+      "label": "Shipment context includes parsed active shipment",
+      "path": "fixtures[2].assertions.contextIncludesParsed",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment update handler reaches exception",
+      "path": "fixtures[3].assertions.updateStatus",
+      "equals": "exception"
+    },
+    {
+      "label": "Workspace shipment markDelivered handler deactivates shipment",
+      "path": "fixtures[3].assertions.markDeliveredActive",
+      "equals": false
+    },
+    {
+      "label": "Workspace shipment track handler detects FedEx",
+      "path": "fixtures[3].assertions.trackUnknownCarrier",
+      "equals": "fedex"
+    },
+    {
+      "label": "Missing tracking validation stays stable",
+      "path": "fixtures[4].assertions.missingTrackingCode",
+      "equals": "MISSING_FIELD"
+    },
+    {
+      "label": "Not-found patch validation stays stable",
+      "path": "fixtures[4].assertions.notFoundPatchCode",
+      "equals": "NOT_FOUND"
+    },
+    {
+      "label": "Runner cleanup leaves no seeded shipments",
+      "path": "fixtures[5].assertions.remainingShipments",
+      "equals": 0
+    }
+  ]
+}

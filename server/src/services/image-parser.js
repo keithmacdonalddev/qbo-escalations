@@ -11,6 +11,11 @@ const { buildServerTriageCard } = require('../lib/chat-triage');
 const { validateCanonicalEscalationTemplateText } = require('../lib/escalation-template-contract');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const { validateParsedEscalation } = require('../lib/parse-validation');
+const {
+  isStubbed: isProvidersStubbed,
+  getProviderStub,
+  MissingProviderStubError,
+} = require('../lib/harness-provider-gate');
 
 // sharp is used to convert unsupported image formats (WebP) to PNG for
 // providers that only accept PNG/JPEG (e.g. LM Studio / llama.cpp).
@@ -358,6 +363,12 @@ function testRemoteProviderKey(provider, apiKey) {
 }
 
 async function validateRemoteProvider(provider, apiKey) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub(provider, 'validateRemoteProvider');
+    if (!stub) throw new MissingProviderStubError(provider, 'validateRemoteProvider');
+    return stub({ provider, apiKey });
+  }
+
   const label = getRemoteProviderLabel(provider);
   const trimmedKey = typeof apiKey === 'string' ? apiKey.trim() : '';
   if (!trimmedKey) {
@@ -1182,6 +1193,7 @@ function buildFollowUpParseMeta(text) {
     issues,
   };
 }
+
 function buildStructuredParseResult(text, role) {
   if (role === 'follow-up-chat') {
     return {
@@ -1278,29 +1290,42 @@ async function parseImage(imageBase64, options = {}) {
 
   let result;
   const providerStartTime = Date.now();
-  switch (provider) {
-    case 'llm-gateway':
-      result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
-      break;
-    case 'lm-studio':
-      result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
-      break;
-    case 'anthropic':
-      result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
-      break;
-    case 'openai':
-      result = await callOpenAI(systemPrompt, normalized.dataUrl, model, timeoutMs);
-      break;
-    case 'gemini':
-      result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
-      break;
-    case 'kimi':
-      result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
-      break;
-    default: {
-      const err = new Error(`Invalid provider: ${provider}. Must be one of: llm-gateway, lm-studio, anthropic, openai, kimi, gemini`);
-      err.code = 'INVALID_PROVIDER';
-      throw err;
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub(provider, 'parseImage');
+    if (!stub) throw new MissingProviderStubError(provider, 'parseImage');
+    result = await stub({
+      provider,
+      imageBase64,
+      normalized,
+      systemPrompt,
+      model,
+      timeoutMs,
+    });
+  } else {
+    switch (provider) {
+      case 'llm-gateway':
+        result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        break;
+      case 'lm-studio':
+        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+        break;
+      case 'anthropic':
+        result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+        break;
+      case 'openai':
+        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        break;
+      case 'gemini':
+        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+        break;
+      case 'kimi':
+        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        break;
+      default: {
+        const err = new Error(`Invalid provider: ${provider}. Must be one of: llm-gateway, lm-studio, anthropic, openai, kimi, gemini`);
+        err.code = 'INVALID_PROVIDER';
+        throw err;
+      }
     }
   }
   const providerLatencyMs = Date.now() - providerStartTime;
@@ -1347,20 +1372,26 @@ async function resolveProviderAvailability() {
   const gatewayKey = await resolveApiKey('llm-gateway');
   providers['llm-gateway'] = await validateRemoteProvider('llm-gateway', gatewayKey);
 
-  const lmStudioSnapshot = await getModelSnapshot(LM_STUDIO_API_URL, { timeoutMs: 3000 });
-  const lmStudioModel = lmStudioSnapshot.loadedModel || lmStudioSnapshot.availableModel || null;
-  const lmStudioReason = lmStudioSnapshot.loadedModel
-    ? `Model loaded: ${lmStudioSnapshot.loadedModel}`
-    : lmStudioSnapshot.availableModel
-      ? `Model available: ${lmStudioSnapshot.availableModel}`
-      : (lmStudioSnapshot.status === 'no_model_loaded' || lmStudioSnapshot.status === 'no_models_available')
-        ? 'No model loaded in LM Studio'
-        : lmStudioSnapshot.reason || 'LM Studio unavailable';
-  providers['lm-studio'] = {
-    available: !!lmStudioModel,
-    model: lmStudioModel,
-    reason: lmStudioReason,
-  };
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('lm-studio', 'providerAvailability');
+    if (!stub) throw new MissingProviderStubError('lm-studio', 'providerAvailability');
+    providers['lm-studio'] = await stub({ apiUrl: LM_STUDIO_API_URL });
+  } else {
+    const lmStudioSnapshot = await getModelSnapshot(LM_STUDIO_API_URL, { timeoutMs: 3000 });
+    const lmStudioModel = lmStudioSnapshot.loadedModel || lmStudioSnapshot.availableModel || null;
+    const lmStudioReason = lmStudioSnapshot.loadedModel
+      ? `Model loaded: ${lmStudioSnapshot.loadedModel}`
+      : lmStudioSnapshot.availableModel
+        ? `Model available: ${lmStudioSnapshot.availableModel}`
+        : (lmStudioSnapshot.status === 'no_model_loaded' || lmStudioSnapshot.status === 'no_models_available')
+          ? 'No model loaded in LM Studio'
+          : lmStudioSnapshot.reason || 'LM Studio unavailable';
+    providers['lm-studio'] = {
+      available: !!lmStudioModel,
+      model: lmStudioModel,
+      reason: lmStudioReason,
+    };
+  }
 
   const anthropicKey = await resolveApiKey('anthropic');
   providers['anthropic'] = await validateRemoteProvider('anthropic', anthropicKey);

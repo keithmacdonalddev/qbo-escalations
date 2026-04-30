@@ -1,0 +1,1 @@
+RELATED INV AGENT (second step - parallel): searches INV database for related invs, gives a weight to each related INV, reasons for the given weight/grade, whether it is open/closed, validity, links to the related invs page. Saves to the database.

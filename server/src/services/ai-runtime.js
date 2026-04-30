@@ -34,7 +34,9 @@ function stopPruning() {
 }
 
 // Auto-start
-startPruning();
+if (process.env.DISABLE_RUNTIME_PRUNING !== '1') {
+  startPruning();
+}
 const KIND_PREFIXES = Object.freeze({
   chat: 'ch',
   copilot: 'cp',

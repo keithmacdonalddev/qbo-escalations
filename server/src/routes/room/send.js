@@ -9,38 +9,22 @@ const { learnFromInteraction, recordAgentActivity, recordAgentToolUsage } = requ
 const { emitRoomEvent } = require('../../services/room-realtime-runtime');
 const { clearRoomOrchestration, interruptRoomOrchestration, registerRoomOrchestration } = require('../../services/room-orchestration-runtime');
 const { normalizeRoomAgentRuntimeSelections } = require('../../services/room-agent-runtime');
+const { createRateLimiter } = require('../../middleware/rate-limit');
 const { requireValidId } = require('./middleware');
 
 const router = express.Router();
 
 const HEARTBEAT_MS = 15000;
 const SAFETY_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
-const RATE_WINDOW_MS = 60 * 1000;
-const RATE_LIMIT = 10;
 
-// Simple in-memory rate limiter per room
-const rateBuckets = new Map();
+const roomSendLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  limit: 10,
+  name: 'room-send',
+  keyFn: (req) => `room-send:${req.params.id}`,
+});
 
-function checkRateLimit(roomId) {
-  const now = Date.now();
-  let bucket = rateBuckets.get(roomId);
-  if (!bucket || now - bucket.windowStart > RATE_WINDOW_MS) {
-    bucket = { windowStart: now, count: 0 };
-    rateBuckets.set(roomId, bucket);
-  }
-  bucket.count += 1;
-  return bucket.count <= RATE_LIMIT;
-}
-
-// Clean stale rate buckets every 5 minutes to prevent memory leak
-setInterval(() => {
-  const cutoff = Date.now() - RATE_WINDOW_MS * 2;
-  for (const [key, bucket] of rateBuckets) {
-    if (bucket.windowStart < cutoff) rateBuckets.delete(key);
-  }
-}, 5 * 60 * 1000).unref();
-
-router.post('/:id/send', requireValidId, async (req, res) => {
+router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
   const roomId = req.params.id;
   const requestId = randomUUID();
   const { message, parsedImageContext, systemInitiated, systemMessage, agentRuntime } = req.body || {};
@@ -72,15 +56,6 @@ router.post('/:id/send', requireValidId, async (req, res) => {
       ok: false,
       code: 'MESSAGE_TOO_LONG',
       error: 'Message must be under 50,000 characters',
-    });
-  }
-
-  // Rate limit
-  if (!checkRateLimit(roomId)) {
-    return res.status(429).json({
-      ok: false,
-      code: 'RATE_LIMITED',
-      error: 'Too many messages. Please wait before sending again.',
     });
   }
 

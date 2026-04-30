@@ -1,0 +1,40 @@
+{
+  "slice": "connected-services",
+  "checks": [
+    {
+      "label": "Connected-services runner now reports four scenarios",
+      "path": "fixtures",
+      "lengthMin": 4
+    },
+    {
+      "label": "Harness Gmail account stays stable",
+      "path": "fixtures[0].assertions.gmailAccount",
+      "equals": "harness@example.com"
+    },
+    {
+      "label": "Harness inbox returns the first deterministic message",
+      "path": "fixtures[0].assertions.firstMessageId",
+      "equals": "gmail-msg-1-1"
+    },
+    {
+      "label": "Harness Gmail write scenario keeps deterministic filter id",
+      "path": "fixtures[1].assertions.createdFilterId",
+      "equals": "filter-harness-1"
+    },
+    {
+      "label": "Harness Calendar event create remains deterministic",
+      "path": "fixtures[2].assertions.createdCalendarEventId",
+      "equals": "calendar-event-1"
+    },
+    {
+      "label": "Freebusy covers the primary calendar",
+      "path": "fixtures[2].assertions.freebusyCalendarIds",
+      "includes": "primary"
+    },
+    {
+      "label": "Validation and business failure scenario surfaces FILTER_REJECTED",
+      "path": "fixtures[3].assertions.rejectedFilterCode",
+      "equals": "FILTER_REJECTED"
+    }
+  ]
+}

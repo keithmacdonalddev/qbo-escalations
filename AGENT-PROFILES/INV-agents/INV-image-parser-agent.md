@@ -1,0 +1,1 @@
+INV IMAGE PARSER (first step): creates new INV-chat record in the database, parses images of invs, returns a completed inv template in text, adds them to the new record with the default meta data. Returns the completed template to the user for a pass/fail check. It always must be 100% accuracy to the original raw image.

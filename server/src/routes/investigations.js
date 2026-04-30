@@ -345,7 +345,7 @@ router.patch('/:id', async (req, res) => {
   const investigation = await Investigation.findByIdAndUpdate(
     req.params.id,
     { $set: updates },
-    { new: true, runValidators: true },
+    { returnDocument: 'after', runValidators: true },
   ).lean();
 
   if (!investigation) {

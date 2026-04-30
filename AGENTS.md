@@ -1,8 +1,10 @@
 # AGENTS.md
 
+> **FOR OPENAI CODEX ONLY** — Claude Code sessions defer to `CLAUDE.md` and root `CLAUDE.md` for authoritative guidance. Content in this file that overlaps with those files applies to Codex only.
+
 ## Project Agent Rules
 
-The user is not a professional developer. The user has minimal programming experience who knows some technical context but very little. Keep that in mind when conversing and providing explanations.
+The user is a self-taught / solo hobbyist developer. Explain clearly, warn about risks, suggest next steps.
 
 ### Prototype Isolation (Default)
 
@@ -29,33 +31,48 @@ The user is not a professional developer. The user has minimal programming exper
 - Keep prototype files and experiments out of core test/review paths by default.
 - Prefer separate branch for prototypes when feasible.
 
-### Testing Guidance (Targeted by Default)
+### Browser Automation
 
-- This repo already has an existing server-side Node test suite under `server/test/**/*.test.js`.
-- Default to **small, targeted verification** instead of broad test runs during normal implementation work.
-- Do **not** run the full suite by default. Prefer the smallest relevant command once when a change touches behavior that is already covered or risky enough to justify a check.
-- The image parser area has dedicated coverage in `server/test/image-parser*.test.js`. When working on image parsing behavior, prefer those focused tests before considering anything broader.
-- Use the repo's existing targeted commands when they fit:
-  - `npm run test:image-parser` for the image parser suite
-  - `npm --prefix server test` only when a broader server change truly warrants it
-- Avoid adding throwaway test harnesses or ad-hoc test scripts. Add or update tests when the user asks, when fixing a regression, or when the changed behavior is difficult to verify safely by inspection alone.
-- In final reports, state exactly what test command was run and why it was chosen. If none were run, state that explicitly.
+Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
 
-### Process Control Safety (Strict)
+Core workflow:
 
-- Never start, restart, stop, kill, or otherwise manage server/client processes unless the user explicitly asks for it in the current prompt message.
-- This includes app servers, API servers, frontend dev servers, workers, watchers, and local client processes.
-- If process control is not explicitly requested, do not perform it.
+1. `agent-browser open <url>` - Navigate to page
+2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
+3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
+4. Re-snapshot after page changes
+### Development Commands and Environment
 
-### Verification and Accuracy Discipline (Strict)
-
-- Do not make status claims (e.g., "fixed", "removed", "not present") from memory, prior outputs, or editor state alone.
-- Before any final claim, re-verify directly from disk in the current workspace using:
-  - `git diff` (or `git status --short`) for change presence
-  - `rg` for symbol/log-string confirmation
-  - `Get-Content`/file read for line-level proof when needed
-- If new commits or edits may have landed during review, re-run verification commands immediately before responding.
-- If uncertainty remains, state uncertainty explicitly and verify again before asserting.
+- Root commands:
+  - `npm run dev` (client + server concurrently)
+  - `npm run dev:client`
+  - `npm run dev:server`
+  - `npm run build`
+  - `npm start`
+- Server commands:
+  - `npm --prefix server test`
+  - `npm --prefix server run dev`
+- Client commands:
+  - `npm --prefix client run dev`
+  - `npm --prefix client run build`
+  - `npm --prefix client run preview`
+- Server runtime environment variables (keep explicit and version-controlled via `server/.env.example`):
+  - `PORT`
+  - `MONGODB_URI`
+  - `MONGODB_DNS_SERVERS`
+  - `CLAUDE_CHAT_TIMEOUT_MS`
+  - `PARSE_TIMEOUT_MS`
+  - `CLAUDE_IMAGE_HELP_TIMEOUT_MS`
+  - `CLAUDE_SUPPORTS_IMAGE_INPUT`
+  - `CLAUDE_CHAT_MODEL`
+  - `CLAUDE_PARSE_MODEL`
+  - `CODEX_CHAT_MODEL`
+  - `CODEX_REASONING_EFFORT`
+  - `CODEX_CHAT_TIMEOUT_MS`
+  - `CODEX_PARSE_MODEL`
+  - `CODEX_PARSE_REASONING_EFFORT`
+  - `CODEX_PARSE_TIMEOUT_MS`
+- Server startup should fail fast if required runtime settings are missing.
 
 ### Incident Note (2026-02-28)
 

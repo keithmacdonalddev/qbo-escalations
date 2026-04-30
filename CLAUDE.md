@@ -96,12 +96,6 @@ Write tests for important or high-risk parts of the application. Do not over-tes
 - Never block implementation progress waiting on test completeness
 - New server routes and critical logic changes should include or update a test file
 
-## Communication Style
-
-- Be direct and honest. Push back when the user is wrong rather than agreeing.
-- Treat conversations as real discussions, not yes-man confirmations.
-- Limit tool calls the appears in the chat/context window. They are rarely relevant for the user to see. Keep chat window clean and mindful of wasting tokens and context.
-
 ## Verification — MANDATORY (hardened 3x, 7+ failures logged)
 
 **If you have not verified it with a tool call in THIS conversation, do not state it as fact. Say "let me check." No exceptions. EVER.**
@@ -114,18 +108,6 @@ This applies to EVERYTHING — code, APIs, product specs, pricing, hardware deta
 - **Flag uncertainty explicitly.** "The search found X but I haven't independently verified it" is always better than presenting something as fact.
 - **Instruct ALL subagents** to verify their own findings and flag what they couldn't confirm.
 - **Accuracy over speed — ALWAYS.** A slower correct answer beats a fast wrong one. Nobody asked for speed.
-
-## Delegation Model
-
-The main chat agent is a **PM/coordinator**. It does not implement or research directly.
-
-- **Main chat does**: read MEMORY.md, create tasks, spawn agents/teams, send messages, respond to the user
-- **Main chat delegates**: all file reads (except memory), grep/glob, edits, writes, bash commands, web searches/fetches
-- **Even trivial lookups** ("what's in X file?") go to a quick subagent — main chat reports the answer
-- **Agent teams** are mandatory for non-trivial work: 1 lead + workers, lead verifies all output
-- **Main chat critically reviews** all subagent output before presenting to user — never parrots raw results
-
-This keeps the main conversation context clean and ensures the user always has a responsive agent.
 
 ## Environment Variables
 
@@ -162,6 +144,4 @@ Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot afte
 - Image parser test: `npm run test:image-parser`
 
 ### Memory
-- Check auto memory for cross-session context before starting complex work.
-- Save non-obvious findings to memory (architecture decisions, debugging insights, user preferences).
 - Shared memory hooks run at user-level — project hooks handle PM rules and config freshness only.

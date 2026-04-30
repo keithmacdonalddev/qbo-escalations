@@ -2,6 +2,7 @@
 
 const { google } = require('googleapis');
 const GmailAuth = require('../models/GmailAuth');
+const { runIfStubbed } = require('../lib/harness-service-gate');
 
 // ---------------------------------------------------------------------------
 // Concurrency-limited Promise.all (avoids Gmail API rate limits)
@@ -1325,44 +1326,52 @@ async function getUnifiedUnreadCounts() {
   return { ok: true, counts };
 }
 
+function wrapHarnessedGmailFunction(kind, impl) {
+  return function wrappedHarnessedGmailFunction(...args) {
+    const stubbed = runIfStubbed('gmail', kind, args);
+    if (stubbed.handled) return stubbed.value;
+    return impl(...args);
+  };
+}
+
 module.exports = {
   // Constants
   SYSTEM_LABELS,
   // Shared auth (reused by calendar service)
   getAuth,
   // OAuth flow
-  getAuthUrl,
-  handleCallback,
-  disconnect,
-  getAuthStatus,
+  getAuthUrl: wrapHarnessedGmailFunction('getAuthUrl', getAuthUrl),
+  handleCallback: wrapHarnessedGmailFunction('handleCallback', handleCallback),
+  disconnect: wrapHarnessedGmailFunction('disconnect', disconnect),
+  getAuthStatus: wrapHarnessedGmailFunction('getAuthStatus', getAuthStatus),
   // Multi-account
-  listAccounts,
-  switchAccount,
+  listAccounts: wrapHarnessedGmailFunction('listAccounts', listAccounts),
+  switchAccount: wrapHarnessedGmailFunction('switchAccount', switchAccount),
   // Unified inbox
-  listUnifiedMessages,
-  getUnifiedUnreadCounts,
+  listUnifiedMessages: wrapHarnessedGmailFunction('listUnifiedMessages', listUnifiedMessages),
+  getUnifiedUnreadCounts: wrapHarnessedGmailFunction('getUnifiedUnreadCounts', getUnifiedUnreadCounts),
   // Data operations
-  getProfile,
-  listMessages,
-  getMessage,
-  listLabels,
-  createLabel,
-  createDraft,
-  listDrafts,
+  getProfile: wrapHarnessedGmailFunction('getProfile', getProfile),
+  listMessages: wrapHarnessedGmailFunction('listMessages', listMessages),
+  getMessage: wrapHarnessedGmailFunction('getMessage', getMessage),
+  listLabels: wrapHarnessedGmailFunction('listLabels', listLabels),
+  createLabel: wrapHarnessedGmailFunction('createLabel', createLabel),
+  createDraft: wrapHarnessedGmailFunction('createDraft', createDraft),
+  listDrafts: wrapHarnessedGmailFunction('listDrafts', listDrafts),
   // Send operations
-  sendMessage,
-  sendDraft,
+  sendMessage: wrapHarnessedGmailFunction('sendMessage', sendMessage),
+  sendDraft: wrapHarnessedGmailFunction('sendDraft', sendDraft),
   // Message modification
-  modifyMessage,
-  trashMessage,
-  untrashMessage,
-  deleteMessage,
-  batchModify,
-  scanSubscriptions,
+  modifyMessage: wrapHarnessedGmailFunction('modifyMessage', modifyMessage),
+  trashMessage: wrapHarnessedGmailFunction('trashMessage', trashMessage),
+  untrashMessage: wrapHarnessedGmailFunction('untrashMessage', untrashMessage),
+  deleteMessage: wrapHarnessedGmailFunction('deleteMessage', deleteMessage),
+  batchModify: wrapHarnessedGmailFunction('batchModify', batchModify),
+  scanSubscriptions: wrapHarnessedGmailFunction('scanSubscriptions', scanSubscriptions),
   // Filter operations
-  listFilters,
-  createFilter,
-  deleteFilter,
+  listFilters: wrapHarnessedGmailFunction('listFilters', listFilters),
+  createFilter: wrapHarnessedGmailFunction('createFilter', createFilter),
+  deleteFilter: wrapHarnessedGmailFunction('deleteFilter', deleteFilter),
   // Tracker pixel stripping
   stripTrackingPixels,
 };

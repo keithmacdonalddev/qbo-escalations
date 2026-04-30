@@ -74,6 +74,7 @@ function createApp() {
   app.use('/api/investigations', require('./routes/investigations'));
   app.use('/api/preferences', require('./routes/preferences'));
   app.use('/api/image-parser', require('./routes/image-parser'));
+  app.use('/api/live-call-assist', require('./routes/live-call-assist'));
   app.use('/api/test-runner', require('./routes/test-runner'));
   app.use('/api/rooms', require('./routes/room'));
 

@@ -4,6 +4,11 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 const fs = require('fs');
+const {
+  isStubbed: isProvidersStubbed,
+  getProviderStub,
+  MissingProviderStubError,
+} = require('../lib/harness-provider-gate');
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -313,6 +318,11 @@ function buildUsageObject(json, fallbackModel) {
 // Returns:   cleanup()  →  { usage, partialResponse }
 // ---------------------------------------------------------------------------
 function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError }) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('lm-studio', 'chat');
+    if (!stub) throw new MissingProviderStubError('lm-studio', 'chat');
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError });
+  }
   const baseUrl = DEFAULT_API_URL;
   const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
   let fullResponse = '';
@@ -468,6 +478,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
 // parseEscalation() — non-streaming JSON extraction from image or text
 // ---------------------------------------------------------------------------
 async function parseEscalation(imageBase64OrText, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('lm-studio', 'parseEscalation');
+    if (!stub) throw new MissingProviderStubError('lm-studio', 'parseEscalation');
+    return stub(imageBase64OrText, options);
+  }
   const input = typeof imageBase64OrText === 'string' ? imageBase64OrText : '';
   const isBase64Image = input.startsWith('data:image') || /^[A-Za-z0-9+/=]{100,}$/.test(input);
   const effectiveTimeoutMs = parsePositiveInt(options.timeoutMs, PARSE_TIMEOUT_MS);
@@ -537,6 +552,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
 // transcribeImage() — extract visible text from an image
 // ---------------------------------------------------------------------------
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('lm-studio', 'transcribeImage');
+    if (!stub) throw new MissingProviderStubError('lm-studio', 'transcribeImage');
+    return stub(imageBase64OrPath, options);
+  }
   const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
   if (!input) throw new Error('transcribeImage: image input is empty');
 
@@ -604,6 +624,11 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
 // warmUp() — verify LM Studio is reachable and cache model name
 // ---------------------------------------------------------------------------
 async function warmUp() {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('lm-studio', 'warmUp');
+    if (stub) return stub();
+    return;
+  }
   try {
     const snapshot = await getModelSnapshot(DEFAULT_API_URL);
     const model = snapshot.loadedModel || snapshot.availableModel || 'local';

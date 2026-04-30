@@ -49,73 +49,119 @@ function normalizeRuns(caseIntake) {
   });
 }
 
-function buildSummary(caseIntake) {
-  const triage = caseIntake?.triageCard && typeof caseIntake.triageCard === 'object'
-    ? caseIntake.triageCard
-    : null;
-  if (!triage) return '';
-  const prefix = [triage.severity, triage.category].filter(Boolean).join(' ');
-  const read = typeof triage.read === 'string' ? triage.read.trim() : '';
-  return [prefix, read].filter(Boolean).join(' - ');
+function safeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
-export default function CaseIntakeTimeline({ caseIntake }) {
-  if (!caseIntake || caseIntake.status === 'none') return null;
+function formatMissingInfo(value) {
+  if (Array.isArray(value)) return value.filter(Boolean).join('; ');
+  return safeText(value);
+}
 
-  const status = typeof caseIntake.status === 'string' && caseIntake.status
+function normalizeTriageCard(caseIntake, fallbackTriageCard) {
+  if (caseIntake?.triageCard && typeof caseIntake.triageCard === 'object') {
+    return caseIntake.triageCard;
+  }
+  if (fallbackTriageCard && typeof fallbackTriageCard === 'object') {
+    return fallbackTriageCard;
+  }
+  return null;
+}
+
+function buildTriageRows(triage) {
+  if (!triage) return [];
+  return [
+    [triage.severity || triage.category ? 'Decision' : '', [triage.severity, triage.category].filter(Boolean).join(' / ')],
+    ['Quick read', safeText(triage.read || triage.quickRead)],
+    ['Next step', safeText(triage.action || triage.immediateNextStep)],
+    ['Missing info', formatMissingInfo(triage.missingInfo)],
+    ['Confidence', safeText(triage.confidence)],
+    ['Category check', safeText(triage.categoryCheck)],
+  ].filter(([label, value]) => label && value);
+}
+
+export default function CaseIntakeTimeline({
+  caseIntake,
+  parsedTemplateText = '',
+  fallbackTriageCard = null,
+}) {
+  const templateText = safeText(parsedTemplateText || caseIntake?.canonicalTemplate);
+  const hasWorkflow = Boolean(templateText || (caseIntake && caseIntake.status && caseIntake.status !== 'none'));
+  if (!hasWorkflow) return null;
+
+  const status = typeof caseIntake?.status === 'string' && caseIntake.status
     ? caseIntake.status
     : 'active';
   const runs = normalizeRuns(caseIntake);
-  const summary = buildSummary(caseIntake);
-  const triage = caseIntake.triageCard && typeof caseIntake.triageCard === 'object'
-    ? caseIntake.triageCard
-    : null;
-  const followUpCount = Array.isArray(caseIntake.followUps) ? caseIntake.followUps.length : 0;
+  const triage = normalizeTriageCard(caseIntake, fallbackTriageCard);
+  const triageRows = buildTriageRows(triage);
+  const followUpCount = Array.isArray(caseIntake?.followUps) ? caseIntake.followUps.length : 0;
+  const analystRun = runs.find((run) => run.phase === 'analyst');
+  const analystStatus = analystRun?.status || 'pending';
+  const analystSummary = safeText(analystRun?.summary);
 
   return (
-    <section className="case-intake-strip" aria-label="Case intake workflow">
-      <div className="case-intake-head">
-        <div>
-          <div className="case-intake-kicker">Case Intake</div>
-          <div className="case-intake-title">
-            {summary || 'Escalation workflow is active'}
-          </div>
-        </div>
-        <span className={`case-intake-state is-${status}`}>
-          {status.replace(/-/g, ' ')}
-        </span>
-      </div>
-
-      <div className="case-intake-runs">
+    <section className={`case-workflow-surface is-${status}`} aria-label="Escalation workflow">
+      <div className="case-workflow-stage-line" aria-label="Workflow progress">
         {runs.map((run) => (
-          <div key={run.phase} className={`case-intake-run is-${run.status || 'pending'}`}>
-            <span className="case-intake-dot" aria-hidden="true" />
-            <div className="case-intake-run-body">
-              <div className="case-intake-run-row">
-                <span className="case-intake-run-label">{run.label}</span>
-                <span className="case-intake-run-status">{run.statusLabel}</span>
-              </div>
-              {run.meta && (
-                <div className="case-intake-run-meta">{run.meta}</div>
-              )}
-            </div>
-          </div>
+          <span key={run.phase} className={`case-workflow-step is-${run.status || 'pending'}`}>
+            <span className="case-workflow-dot" aria-hidden="true" />
+            <span>{run.label}</span>
+          </span>
         ))}
       </div>
 
-      {triage?.action && (
-        <div className="case-intake-next">
-          <span>Immediate next step</span>
-          <strong>{triage.action}</strong>
-        </div>
-      )}
+      <div className="case-workflow-decision-row">
+        <section className="case-workflow-pane case-workflow-template-pane" aria-label="Parsed template">
+          <div className="case-workflow-pane-title">
+            <strong>Template</strong>
+            <span>Exact parser output</span>
+          </div>
+          {templateText ? (
+            <pre className="case-workflow-template-text">{templateText}</pre>
+          ) : (
+            <div className="case-workflow-waiting">
+              <span className="case-workflow-spinner" aria-hidden="true" />
+              <strong>Parsing template...</strong>
+            </div>
+          )}
+        </section>
 
-      {followUpCount > 0 && (
-        <div className="case-intake-next">
-          <span>Follow-up context</span>
-          <strong>{followUpCount} parsed transcript{followUpCount === 1 ? '' : 's'} attached</strong>
-        </div>
-      )}
+        <section className="case-workflow-pane case-workflow-triage-pane" aria-label="Triage">
+          <div className="case-workflow-pane-title">
+            <strong>Triage</strong>
+            <span>Fast decision support</span>
+          </div>
+
+          {triageRows.length > 0 ? (
+            <div className="case-workflow-brief">
+              {triageRows.map(([label, value]) => (
+                <div key={label} className="case-workflow-brief-line">
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="case-workflow-waiting">
+              <span className="case-workflow-spinner" aria-hidden="true" />
+              <strong>Triage agent is reading the template...</strong>
+            </div>
+          )}
+
+          <div className={`case-workflow-analyst-state is-${analystStatus}`}>
+            <span className="case-workflow-dot" aria-hidden="true" />
+            <strong>QBO Analyst</strong>
+            <span>{analystSummary || (analystStatus === 'running' ? 'Building guidance below.' : getRunStatusLabel(analystStatus))}</span>
+          </div>
+
+          {followUpCount > 0 && (
+            <div className="case-workflow-followups">
+              {followUpCount} follow-up transcript{followUpCount === 1 ? '' : 's'} attached
+            </div>
+          )}
+        </section>
+      </div>
     </section>
   );
 }

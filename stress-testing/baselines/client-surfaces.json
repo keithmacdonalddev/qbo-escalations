@@ -1,0 +1,130 @@
+{
+  "slice": "client-surfaces",
+  "checks": [
+    {
+      "label": "Client surfaces now report five browser scenarios",
+      "path": "fixtures",
+      "lengthMin": 5
+    },
+    {
+      "label": "Happy-path browser run reaches a concrete chat conversation route",
+      "path": "fixtures[0].assertions.conversationHashSet",
+      "equals": true
+    },
+    {
+      "label": "Happy-path browser run observed the live stop button state",
+      "path": "fixtures[0].assertions.stopButtonSeen",
+      "equals": true
+    },
+    {
+      "label": "Happy-path browser run renders the final streamed response",
+      "path": "fixtures[0].assertions.finalResponseVisible",
+      "equals": true
+    },
+    {
+      "label": "Fallback browser run shows the fallback banner",
+      "path": "fixtures[1].assertions.fallbackBannerVisible",
+      "equals": true
+    },
+    {
+      "label": "Fallback browser run renders the fallback response text",
+      "path": "fixtures[1].assertions.finalProviderTextVisible",
+      "equals": true
+    },
+    {
+      "label": "Route-change browser run really visited settings",
+      "path": "fixtures[2].assertions.settingsRouteVisited",
+      "equals": true
+    },
+    {
+      "label": "Route-change browser run renders the final response after refresh",
+      "path": "fixtures[2].assertions.finalResponseVisibleAfterRefresh",
+      "equals": true
+    },
+    {
+      "label": "Route-change browser run shows the final response only once after refresh",
+      "path": "fixtures[2].assertions.duplicateResponseCountAfterRefresh",
+      "equals": 1
+    },
+    {
+      "label": "Workspace shipment browser run observes shipment API traffic",
+      "path": "fixtures[3].assertions.shipmentRequestCount",
+      "min": 1
+    },
+    {
+      "label": "Workspace shipment browser run renders first active shipment",
+      "path": "fixtures[3].assertions.firstActiveVisible",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment browser run renders second active shipment",
+      "path": "fixtures[3].assertions.secondActiveVisible",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment browser run hides delivered shipment",
+      "path": "fixtures[3].assertions.deliveredHidden",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment browser run expands tracking details",
+      "path": "fixtures[3].assertions.trackingDetailsVisible",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment browser run keeps UPS tracking link",
+      "path": "fixtures[3].assertions.trackingLinkIsUps",
+      "equals": true
+    },
+    {
+      "label": "Workspace shipment browser cleanup leaves no seeded shipments",
+      "path": "fixtures[3].assertions.cleanupRemainingShipments",
+      "equals": 0
+    },
+    {
+      "label": "Room browser run stays on the seeded room route",
+      "path": "fixtures[4].assertions.roomHashMatches",
+      "equals": true
+    },
+    {
+      "label": "Room browser run sends through the room API",
+      "path": "fixtures[4].assertions.roomSendRequestCount",
+      "min": 1
+    },
+    {
+      "label": "Room browser run renders the user message",
+      "path": "fixtures[4].assertions.userMessageVisible",
+      "equals": true
+    },
+    {
+      "label": "Room browser run renders at least two agent groups",
+      "path": "fixtures[4].assertions.agentMessageGroupCount",
+      "min": 2
+    },
+    {
+      "label": "Room browser run renders both deterministic agent responses",
+      "path": "fixtures[4].assertions.finalTextOccurrence",
+      "min": 2
+    },
+    {
+      "label": "Room browser run persists at least two assistant messages",
+      "path": "fixtures[4].assertions.persistedAssistantCount",
+      "min": 2
+    },
+    {
+      "label": "Room browser cleanup leaves no seeded rooms",
+      "path": "fixtures[4].assertions.cleanupRemainingRooms",
+      "equals": 0
+    },
+    {
+      "label": "Client surfaces generate chat traces",
+      "path": "observability.traces.count",
+      "min": 3
+    },
+    {
+      "label": "Client surfaces generate chat usage records",
+      "path": "observability.usage.count",
+      "min": 3
+    }
+  ]
+}

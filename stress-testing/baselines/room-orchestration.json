@@ -1,0 +1,40 @@
+{
+  "slice": "room-orchestration",
+  "checks": [
+    {
+      "label": "Room runner now reports four scenarios",
+      "path": "fixtures",
+      "lengthMin": 4
+    },
+    {
+      "label": "Two agents start in the first all-agent turn",
+      "path": "fixtures[0].assertions.uniqueAgentStartCount",
+      "min": 2
+    },
+    {
+      "label": "Two agents emit agent_done in the first turn",
+      "path": "fixtures[0].assertions.uniqueAgentDoneCount",
+      "min": 2
+    },
+    {
+      "label": "Second turn still starts two agents",
+      "path": "fixtures[1].assertions.uniqueAgentStartCount",
+      "min": 2
+    },
+    {
+      "label": "Second turn grows persisted assistant messages",
+      "path": "fixtures[1].assertions.persistedAssistantCount",
+      "min": 4
+    },
+    {
+      "label": "Missing content validation stays stable",
+      "path": "fixtures[2].assertions.code",
+      "equals": "MISSING_CONTENT"
+    },
+    {
+      "label": "Invalid image context validation stays stable",
+      "path": "fixtures[3].assertions.code",
+      "equals": "INVALID_IMAGE_CONTEXT"
+    }
+  ]
+}

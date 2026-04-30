@@ -3,6 +3,11 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { extractCodexUsage } = require('../lib/usage-extractor');
+const {
+  isStubbed: isProvidersStubbed,
+  getProviderStub,
+  MissingProviderStubError,
+} = require('../lib/harness-provider-gate');
 
 const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.5';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
@@ -97,6 +102,11 @@ function formatCliFailure(code, stderr) {
  * @returns {function} cleanup
  */
 function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError }) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('codex', 'chat');
+    if (!stub) throw new MissingProviderStubError('codex', 'chat');
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError });
+  }
   const prompt = buildPrompt(messages, systemPrompt);
   const tempFiles = writeImageTempFiles(images);
   const effectiveModel = model || DEFAULT_MODEL;
@@ -219,6 +229,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
 }
 
 async function warmUp() {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('codex', 'warmUp');
+    if (stub) return stub();
+    return;
+  }
   return new Promise((resolve) => {
     const child = spawn('codex', [
       'exec',
@@ -263,6 +278,11 @@ async function warmUp() {
  * @returns {Promise<{fields: Object, usage: Object|null}>} Wrapper with parsed fields and usage metadata
  */
 async function parseEscalation(imageBase64OrText, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('codex', 'parseEscalation');
+    if (!stub) throw new MissingProviderStubError('codex', 'parseEscalation');
+    return stub(imageBase64OrText, options);
+  }
   const input = typeof imageBase64OrText === 'string' ? imageBase64OrText : '';
   const isBase64Image = input.startsWith('data:image') || /^[A-Za-z0-9+/=]{100,}$/.test(input);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
@@ -431,6 +451,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
  * @returns {Promise<{text: string, usage: Object|null}>}
  */
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('codex', 'transcribeImage');
+    if (!stub) throw new MissingProviderStubError('codex', 'transcribeImage');
+    return stub(imageBase64OrPath, options);
+  }
   const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
   if (!input) throw new Error('transcribeImage: image input is empty');
 

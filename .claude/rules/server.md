@@ -11,4 +11,4 @@ paths:
 - Claude AI integration via CLI subprocess — no API keys in server code.
 - Image parsing uses sharp + custom parsers. Test with `npm run test:image-parser`.
 - Never start, stop, or restart the server process.
-- Do NOT write or run tests.
+- Testing: follow the project's root `CLAUDE.md` testing policy — write tests for high-risk or critical paths using `node:test` + `supertest` + `mongodb-memory-server` under `server/test/`. Do not over-test trivial changes. Do not run the test suite mid-implementation.

@@ -459,6 +459,16 @@ function startRoomOrchestration({
     activeCleanups.clear();
   }
 
+  async function emitAgentDone(payload) {
+    if (typeof onAgentDone !== 'function') return;
+    await onAgentDone(payload);
+  }
+
+  async function emitAgentError(payload) {
+    if (typeof onAgentError !== 'function') return;
+    await onAgentError(payload);
+  }
+
   (async () => {
     try {
       // --- 1. Resolve which agents should respond ---
@@ -834,7 +844,7 @@ function startRoomOrchestration({
                 if (cancelled || settled) return;
                 onStatus?.({ agentId: agent.id, type: 'fallback', ...data });
               },
-              onDone: (data) => {
+              onDone: async (data) => {
                 if (cancelled || settled) return;
                 const latencyMs = Date.now() - agentStartedAt;
                 const sanitizedResponse = getSafeSanitizedRoomAgentResponse(agent, data.fullResponse || '');
@@ -880,24 +890,28 @@ function startRoomOrchestration({
                   });
                 }
 
-                onAgentDone?.({
-                  agentId: agent.id,
-                  agentName: agent.name,
-                  fullResponse: sanitizedResponse.text,
-                  thinking: '',  // thinking streamed via onThinking
-                  usage: agentUsage.usageAvailable ? agentUsage : null,
-                  provider: resolvedProvider,
-                  latencyMs,
-                  model: resolvedModel,
-                  citations: contextResult.citations || [],
-                  actions: data.actions || [],
-                  iterations: data.iterations || 0,
-                  strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
-                });
-
-                settleAgent();
+                try {
+                  await emitAgentDone({
+                    agentId: agent.id,
+                    agentName: agent.name,
+                    fullResponse: sanitizedResponse.text,
+                    thinking: '',  // thinking streamed via onThinking
+                    usage: agentUsage.usageAvailable ? agentUsage : null,
+                    provider: resolvedProvider,
+                    latencyMs,
+                    model: resolvedModel,
+                    citations: contextResult.citations || [],
+                    actions: data.actions || [],
+                    iterations: data.iterations || 0,
+                    strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
+                  });
+                } catch {
+                  // The route-level callback owns its own error handling.
+                } finally {
+                  settleAgent();
+                }
               },
-              onError: (err) => {
+              onError: async (err) => {
                 const latencyMs = Date.now() - agentStartedAt;
                 agentUsages.push({
                   agentId: agent.id,
@@ -923,14 +937,18 @@ function startRoomOrchestration({
                   latencyMs,
                 });
 
-                onAgentError?.({
-                  agentId: agent.id,
-                  agentName: agent.name,
-                  error: err.error || err.message || 'Workspace execution failed',
-                  code: err.code || 'WORKSPACE_ERROR',
-                });
-
-                settleAgent();
+                try {
+                  await emitAgentError({
+                    agentId: agent.id,
+                    agentName: agent.name,
+                    error: err.error || err.message || 'Workspace execution failed',
+                    code: err.code || 'WORKSPACE_ERROR',
+                  });
+                } catch {
+                  // The route-level callback owns its own error handling.
+                } finally {
+                  settleAgent();
+                }
               },
             },
             {
@@ -971,7 +989,7 @@ function startRoomOrchestration({
           latencyMs,
         });
 
-        onAgentError?.({
+        await emitAgentError({
           agentId: agent.id,
           agentName: agent.name,
           error: err.message || 'Failed to build agent context',
@@ -1028,7 +1046,7 @@ function startRoomOrchestration({
           ),
         });
 
-        onAgentDone?.({
+        await emitAgentDone({
           agentId: agent.id,
           agentName: agent.name,
           fullResponse: sanitizedResponse.text,
@@ -1078,7 +1096,7 @@ function startRoomOrchestration({
             thinking += thinkingText;
             onThinkingChunk?.({ agentId: agent.id, provider, thinking: thinkingText });
           },
-          onDone: (data) => {
+          onDone: async (data) => {
             const latencyMs = Date.now() - agentStartedAt;
             const sanitizedResponse = getSafeSanitizedRoomAgentResponse(agent, data.fullResponse || fullResponse);
             agentUsage = data.usage || null;
@@ -1119,23 +1137,26 @@ function startRoomOrchestration({
               });
             }
 
-            // Fire-and-forget: callback handles its own DB writes + error logging
-            onAgentDone?.({
-              agentId: agent.id,
-              agentName: agent.name,
-              fullResponse: sanitizedResponse.text,
-              thinking: data.thinking || thinking,
-              usage: agentUsage,
-              provider: resolvedProvider,
-              latencyMs,
-              model: resolvedModel,
-              citations: contextResult.citations || [],
-              strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
-            });
-
-            settleAgent();
+            try {
+              await emitAgentDone({
+                agentId: agent.id,
+                agentName: agent.name,
+                fullResponse: sanitizedResponse.text,
+                thinking: data.thinking || thinking,
+                usage: agentUsage,
+                provider: resolvedProvider,
+                latencyMs,
+                model: resolvedModel,
+                citations: contextResult.citations || [],
+                strippedOtherSpeakerContent: sanitizedResponse.strippedOtherSpeakerContent,
+              });
+            } catch {
+              // The route-level callback owns its own error handling.
+            } finally {
+              settleAgent();
+            }
           },
-          onError: (err) => {
+          onError: async (err) => {
             const latencyMs = Date.now() - agentStartedAt;
             agentUsages.push({
               agentId: agent.id,
@@ -1161,15 +1182,18 @@ function startRoomOrchestration({
               latencyMs,
             });
 
-            // Fire-and-forget: callback handles its own DB writes + error logging
-            onAgentError?.({
-              agentId: agent.id,
-              agentName: agent.name,
-              error: err.message || 'Agent failed',
-              code: err.code || 'AGENT_FAILED',
-            });
-
-            settleAgent();
+            try {
+              await emitAgentError({
+                agentId: agent.id,
+                agentName: agent.name,
+                error: err.message || 'Agent failed',
+                code: err.code || 'AGENT_FAILED',
+              });
+            } catch {
+              // The route-level callback owns its own error handling.
+            } finally {
+              settleAgent();
+            }
           },
           onAbort: () => {
             const latencyMs = Date.now() - agentStartedAt;
@@ -1229,7 +1253,7 @@ function startRoomOrchestration({
         latencyMs,
       });
 
-      onAgentError?.({
+      await emitAgentError({
         agentId: agent.id,
         agentName: agent.name,
         error: err.message || 'Failed to build agent context',

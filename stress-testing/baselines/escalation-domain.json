@@ -1,0 +1,70 @@
+{
+  "slice": "escalation-domain",
+  "checks": [
+    {
+      "label": "Escalation-domain runner reports six scenarios",
+      "path": "fixtures",
+      "lengthMin": 6
+    },
+    {
+      "label": "Source escalation resolves and sets resolvedAt",
+      "path": "fixtures[0].assertions.sourceResolvedAtSet",
+      "equals": true
+    },
+    {
+      "label": "Similar search finds at least one technical escalation",
+      "path": "fixtures[0].assertions.similarCount",
+      "min": 1
+    },
+    {
+      "label": "Knowledge draft generation stays deterministic",
+      "path": "fixtures[1].assertions.generated",
+      "equals": true
+    },
+    {
+      "label": "Knowledge draft approval persists",
+      "path": "fixtures[1].assertions.reviewStatus",
+      "equals": "approved"
+    },
+    {
+      "label": "Case-history-only publish remains safely blocked",
+      "path": "fixtures[1].assertions.blockedPublishCode",
+      "equals": "KNOWLEDGE_NOT_PUBLISHABLE"
+    },
+    {
+      "label": "Investigation duplicate prevention remains active",
+      "path": "fixtures[2].assertions.duplicatePrevented",
+      "equals": true
+    },
+    {
+      "label": "Investigation patch reaches in-progress",
+      "path": "fixtures[2].assertions.patchedStatus",
+      "equals": "in-progress"
+    },
+    {
+      "label": "Template render resolves all variables",
+      "path": "fixtures[3].assertions.unresolvedVarCount",
+      "equals": 0
+    },
+    {
+      "label": "Template usage increments once",
+      "path": "fixtures[3].assertions.usageCount",
+      "equals": 1
+    },
+    {
+      "label": "Domain validation returns missing params for similar search",
+      "path": "fixtures[4].assertions.missingSimilarCode",
+      "equals": "MISSING_PARAMS"
+    },
+    {
+      "label": "Runner cleanup leaves no seeded escalations",
+      "path": "fixtures[5].assertions.remainingEscalations",
+      "equals": 0
+    },
+    {
+      "label": "Runner cleanup leaves no seeded templates",
+      "path": "fixtures[5].assertions.remainingTemplates",
+      "equals": 0
+    }
+  ]
+}

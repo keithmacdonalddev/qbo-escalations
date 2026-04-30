@@ -139,7 +139,9 @@ function stopPruning() {
 }
 
 // Auto-start
-startPruning();
+if (process.env.DISABLE_RUNTIME_PRUNING !== '1') {
+  startPruning();
+}
 
 function createSessionId() {
   return `ws-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

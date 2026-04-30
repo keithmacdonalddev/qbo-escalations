@@ -28,17 +28,17 @@ function groupMessagesForRendering(messages) {
       seenTurnIds.add(turnId);
 
       const turnMessages = messages
-        .map((m, idx) => ({ ...m, _index: idx }))
+        .map((m, idx) => ({ ...m, _index: idx, _originalIndex: m._originalIndex ?? idx }))
         .filter(m => m.role === 'assistant' && m.mode === 'parallel' && m.attemptMeta?.turnId === turnId);
 
       groups.push({
         type: 'parallel-pair',
         turnId,
         responses: turnMessages,
-        firstIndex: turnMessages[0]._index,
+        firstIndex: turnMessages[0]._originalIndex ?? turnMessages[0]._index,
       });
     } else {
-      groups.push({ type: 'single', message: msg, index: i });
+      groups.push({ type: 'single', message: msg, index: msg._originalIndex ?? i });
     }
   }
 
@@ -64,6 +64,37 @@ function formatStreamingElapsed(ms) {
 
 function getReasoningEffortLabel(value) {
   return REASONING_EFFORT_OPTIONS.find((option) => option.value === value)?.label || 'High';
+}
+
+const ESCALATION_FIELD_LABELS = Object.freeze([
+  'COID/MID',
+  'CASE',
+  'CLIENT/CONTACT',
+  'CX IS ATTEMPTING TO',
+  'EXPECTED OUTCOME',
+  'ACTUAL OUTCOME',
+  'KB/TOOLS USED',
+  'TRIED TEST ACCOUNT',
+  'TS STEPS',
+]);
+
+function isParsedEscalationTemplate(content) {
+  if (typeof content !== 'string' || !content.trim()) return false;
+  const matchedCount = ESCALATION_FIELD_LABELS.reduce((count, label) => {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return count + (new RegExp(`^${escapedLabel}\\s*:`, 'im').test(content) ? 1 : 0);
+  }, 0);
+  return matchedCount >= 4;
+}
+
+function findLatestParsedEscalationText(messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg?.role === 'user' && isParsedEscalationTemplate(msg.content)) {
+      return msg.content.trim();
+    }
+  }
+  return '';
 }
 
 export default function ChatThreadStack({
@@ -110,15 +141,35 @@ export default function ChatThreadStack({
   isStreaming,
   newConversation,
   hideTriageCard = false,
+  liveCallPanel = null,
 }) {
   const showRuntimeDiagnostics = Boolean(aiSettings?.debug?.showContextDebug);
-  const groupedMessages = useMemo(() => groupMessagesForRendering(messages), [messages]);
+  const latestParsedTemplateText = useMemo(
+    () => findLatestParsedEscalationText(messages),
+    [messages]
+  );
+  const canonicalTemplateText = typeof caseIntake?.canonicalTemplate === 'string' && caseIntake.canonicalTemplate.trim()
+    ? caseIntake.canonicalTemplate.trim()
+    : latestParsedTemplateText;
+  const showCaseWorkflowSurface = Boolean(
+    canonicalTemplateText
+      || (caseIntake && caseIntake.status && caseIntake.status !== 'none')
+  );
+  const renderMessages = useMemo(() => {
+    if (!showCaseWorkflowSurface) return messages;
+    return messages
+      .map((message, originalIndex) => ({ ...message, _originalIndex: originalIndex }))
+      .filter((message) => !(message.role === 'user' && isParsedEscalationTemplate(message.content)));
+  }, [messages, showCaseWorkflowSurface]);
+  const groupedMessages = useMemo(() => groupMessagesForRendering(renderMessages), [renderMessages]);
   const lastAssistantIndex = useMemo(() => {
-    for (let j = messages.length - 1; j >= 0; j--) {
-      if (messages[j].role === 'assistant') return j;
+    for (let j = renderMessages.length - 1; j >= 0; j--) {
+      if (renderMessages[j].role === 'assistant') {
+        return renderMessages[j]._originalIndex ?? j;
+      }
     }
     return -1;
-  }, [messages]);
+  }, [renderMessages]);
   const canRetryLastResponse = Boolean(
     conversationId
       && !isStreaming
@@ -182,7 +233,17 @@ export default function ChatThreadStack({
     <div className="chat-with-thinking">
       <div className="chat-container">
         <div className="chat-messages" role="log" aria-label="Chat messages" aria-live="polite">
-          <CaseIntakeTimeline caseIntake={caseIntake} />
+          {liveCallPanel && (
+            <div className="live-call-thread-slot">
+              {liveCallPanel}
+            </div>
+          )}
+
+          <CaseIntakeTimeline
+            caseIntake={caseIntake}
+            parsedTemplateText={canonicalTemplateText}
+            fallbackTriageCard={triageCard}
+          />
 
           {runtimeWarnings.length > 0 && (
             <div className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--warning)', background: 'var(--warning-subtle)' }}>
@@ -222,7 +283,7 @@ export default function ChatThreadStack({
             )}
           </AnimatePresence>
 
-          {messages.length === 0 && !isStreaming && (
+          {messages.length === 0 && !isStreaming && !liveCallPanel && (
             <motion.div
               className="empty-state empty-state-enhanced"
               style={{ marginTop: 'var(--sp-10)' }}
@@ -304,7 +365,7 @@ export default function ChatThreadStack({
             })}
           </AnimatePresence>
 
-          {triageCard && !hideTriageCard && (
+          {triageCard && !hideTriageCard && !showCaseWorkflowSurface && (
             <TriageCard triageCard={triageCard} />
           )}
 

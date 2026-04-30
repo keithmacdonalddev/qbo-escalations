@@ -1,0 +1,78 @@
+{
+  "slice": "runtime-and-observability",
+  "checks": [
+    {
+      "label": "Runtime slice now reports four scenarios",
+      "path": "fixtures",
+      "lengthMin": 4
+    },
+    {
+      "label": "Runtime health exposes the active /api/chat request during the delayed probe",
+      "path": "fixtures[0].assertions.activeChatRequestVisible",
+      "equals": true
+    },
+    {
+      "label": "Runtime health drops back to zero active AI operations afterward",
+      "path": "fixtures[0].assertions.totalActiveOperationsAfterRequest",
+      "equals": 0
+    },
+    {
+      "label": "Usage summary sees at least three requests in the observability scenario",
+      "path": "fixtures[1].assertions.usageTotalRequests",
+      "min": 3
+    },
+    {
+      "label": "Trace summary sees at least two chat traces",
+      "path": "fixtures[1].assertions.tracesTotal",
+      "min": 2
+    },
+    {
+      "label": "Provider health records the forced claude failure",
+      "path": "fixtures[1].assertions.claudeConsecutiveFailures",
+      "min": 1
+    },
+    {
+      "label": "Usage invalid date handling stays stable",
+      "path": "fixtures[2].assertions.usageInvalidDateCode",
+      "equals": "INVALID_DATE"
+    },
+    {
+      "label": "Trace invalid filter handling stays stable",
+      "path": "fixtures[2].assertions.tracesInvalidServiceCode",
+      "equals": "INVALID_FILTER"
+    },
+    {
+      "label": "Test-runner provider plan matches the catalog count",
+      "path": "fixtures[3].assertions.plannedTestCount",
+      "equalsPath": "fixtures[3].assertions.providerGroupTestCount"
+    },
+    {
+      "label": "Test-runner emits one result event per planned provider test",
+      "path": "fixtures[3].assertions.observedTestResultCount",
+      "equalsPath": "fixtures[3].assertions.suiteTotal"
+    },
+    {
+      "label": "Test-runner provider suite still has coverage",
+      "path": "fixtures[3].assertions.suiteTotal",
+      "min": 1
+    },
+    {
+      "label": "Test-runner provider run returns a supported exit code",
+      "path": "fixtures[3].assertions.suiteExitCode",
+      "oneOf": [
+        0,
+        1
+      ]
+    },
+    {
+      "label": "Runtime slice collects chat traces internally",
+      "path": "observability.traces.count",
+      "min": 2
+    },
+    {
+      "label": "Runtime slice collects chat usage internally",
+      "path": "observability.usage.count",
+      "min": 3
+    }
+  ]
+}

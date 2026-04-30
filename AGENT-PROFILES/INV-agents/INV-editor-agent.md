@@ -1,0 +1,1 @@
+INV EDITOR (second step - parallel): reviews each field of the raw parsed INV template data and provides an edited clean final version based on clear guardrails for each field. Saves clean final to database. Returns the completed template to the user for a pass/fail check.

@@ -1,0 +1,45 @@
+{
+  "slice": "image-intake-and-parse",
+  "checks": [
+    {
+      "label": "Image parser now reports four scenarios",
+      "path": "fixtures",
+      "lengthMin": 4
+    },
+    {
+      "label": "Image parser provider is available in harness mode",
+      "path": "fixtures[0].assertions.providerAvailable",
+      "equals": true
+    },
+    {
+      "label": "Parsed category stays on payroll fixture",
+      "path": "fixtures[0].assertions.parseCategory",
+      "equals": "payroll"
+    },
+    {
+      "label": "Archived image can be retrieved",
+      "path": "fixtures[0].assertions.archivedImageStatus",
+      "equals": 200
+    },
+    {
+      "label": "Missing image validation stays stable",
+      "path": "fixtures[1].assertions.code",
+      "equals": "MISSING_IMAGE"
+    },
+    {
+      "label": "Forced provider outage flips availability off",
+      "path": "fixtures[2].assertions.openaiAvailable",
+      "equals": false
+    },
+    {
+      "label": "Forced parse timeout returns TIMEOUT",
+      "path": "fixtures[3].assertions.timeoutCode",
+      "equals": "TIMEOUT"
+    },
+    {
+      "label": "Stats retain at least one recent error after the forced timeout",
+      "path": "fixtures[3].assertions.statsRecentErrorCount",
+      "min": 1
+    }
+  ]
+}

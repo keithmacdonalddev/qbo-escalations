@@ -520,7 +520,7 @@ async function incrementMatchCount(invId) {
       $inc: { affectedCount: 1 },
       $set: { lastMatchedAt: new Date() },
     },
-    { new: true },
+    { returnDocument: 'after' },
   );
 }
 

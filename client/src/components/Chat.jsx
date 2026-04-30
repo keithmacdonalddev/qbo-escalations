@@ -6,6 +6,7 @@ import ChatComposeArea from './chat/ChatComposeArea.jsx';
 import ChatThreadStack from './chat/ChatThreadStack.jsx';
 import ChatTemplatePicker from './chat/ChatTemplatePicker.jsx';
 import ChatSurfaceShell from './chat/ChatSurfaceShell.jsx';
+import LiveCallAssistPanel from './chat/LiveCallAssistPanel.jsx';
 import useChatCommandComposer from './chat/useChatCommandComposer.js';
 import useChatConversationState from './chat/useChatConversationState.js';
 import useChatComposerUi from './chat/useChatComposerUi.js';
@@ -227,6 +228,7 @@ function buildFollowUpContextSubmission(text) {
     ].join('\n'),
   };
 }
+
 export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, routeView = 'chat' }) {
   const {
     messages,
@@ -281,6 +283,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
   } = chat;
   const [parsedDraftState, setParsedDraftState] = useState(null);
   const [parsedEscalationPreview, setParsedEscalationPreview] = useState(null);
+  const [liveCallOpen, setLiveCallOpen] = useState(false);
 
   // Effective mode accounts for persistent split mode from prior parallel turns
   const effectiveMode = splitModeActive ? 'parallel' : mode;
@@ -449,6 +452,47 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setTriageCard,
   ]);
 
+  const handleLiveCallSendTranscript = useCallback((payload) => {
+    const displayContent = safeText(payload?.displayContent);
+    const payloadMessage = safeText(payload?.payloadMessage) || displayContent;
+    if (!displayContent || !payloadMessage) return false;
+
+    sendMessage(displayContent, [], provider, [], {
+      payloadMessage,
+      displayContent,
+      requestExtras: {
+        liveCallTranscript: safeText(payload?.transcriptText),
+        liveCallProvider: payload?.provider || 'elevenlabs',
+        liveCallModel: payload?.modelId || 'scribe_v2_realtime',
+        liveCallElapsedMs: Number.isFinite(Number(payload?.elapsedMs)) ? Number(payload.elapsedMs) : undefined,
+      },
+    });
+    setInput('');
+    appendProcessEvent({
+      level: 'info',
+      title: 'Live call transcript sent',
+      message: 'Started the main chat using the current live call transcript.',
+    });
+    return true;
+  }, [
+    appendProcessEvent,
+    provider,
+    sendMessage,
+    setInput,
+  ]);
+
+  const handleLiveCallInsertTranscript = useCallback((transcriptText) => {
+    const cleanTranscript = safeText(transcriptText);
+    if (!cleanTranscript) return;
+    setInput((prev) => {
+      const cleanPrev = typeof prev === 'string' ? prev.trimEnd() : '';
+      return cleanPrev ? `${cleanPrev}\n\n${cleanTranscript}` : cleanTranscript;
+    });
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus?.();
+    });
+  }, [setInput, textareaRef]);
+
   const handleImageParsed = useCallback(async (parsedText) => {
     const text = typeof parsedText === 'string' ? parsedText : parsedText?.text || '';
     if (!text.trim()) return;
@@ -521,15 +565,15 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     });
   }, [
     appendProcessEvent,
-    focusComposerWithValue,
-    isStreaming,
-    provider,
-    sendMessage,
-    setActivityExpanded,
-    setInput,
-    setParseMeta,
-    setTriageCard,
-    submitParsedEscalationPreview,
+      focusComposerWithValue,
+      isStreaming,
+      provider,
+      sendMessage,
+      setActivityExpanded,
+      setInput,
+      setParseMeta,
+      setTriageCard,
+      submitParsedEscalationPreview,
   ]);
 
   useEffect(() => {
@@ -729,6 +773,15 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 clearProcessEvents={clearProcessEvents}
                 caseIntake={caseIntake}
                 hideTriageCard={Boolean(parsedEscalationPreview && parsedDraftState?.phase !== 'sent')}
+                liveCallPanel={liveCallOpen ? (
+                  <LiveCallAssistPanel
+                    open
+                    disabled={isStreaming}
+                    onClose={() => setLiveCallOpen(false)}
+                    onInsertTranscript={handleLiveCallInsertTranscript}
+                    onSendTranscript={handleLiveCallSendTranscript}
+                  />
+                ) : null}
               />
             }
             composeArea={
@@ -795,6 +848,8 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 onStartFreshConversation={startFreshConversation}
                 onRetryLastResponse={handleRetryLastResponse}
                 onCopyConversation={handleCopyConversation}
+                liveCallOpen={liveCallOpen}
+                onToggleLiveCall={() => setLiveCallOpen((prev) => !prev)}
               />
             }
           />

@@ -2,6 +2,7 @@
 
 const { google } = require('googleapis');
 const { getAuth } = require('./gmail');
+const { runIfStubbed } = require('../lib/harness-service-gate');
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -317,12 +318,20 @@ async function findFreeTime(calendarIds = ['primary'], timeMin, timeMax, timeZon
   return { ok: true, calendars: result, timeMin, timeMax };
 }
 
+function wrapHarnessedCalendarFunction(kind, impl) {
+  return function wrappedHarnessedCalendarFunction(...args) {
+    const stubbed = runIfStubbed('calendar', kind, args);
+    if (stubbed.handled) return stubbed.value;
+    return impl(...args);
+  };
+}
+
 module.exports = {
-  listCalendars,
-  listEvents,
-  getEvent,
-  createEvent,
-  updateEvent,
-  deleteEvent,
-  findFreeTime,
+  listCalendars: wrapHarnessedCalendarFunction('listCalendars', listCalendars),
+  listEvents: wrapHarnessedCalendarFunction('listEvents', listEvents),
+  getEvent: wrapHarnessedCalendarFunction('getEvent', getEvent),
+  createEvent: wrapHarnessedCalendarFunction('createEvent', createEvent),
+  updateEvent: wrapHarnessedCalendarFunction('updateEvent', updateEvent),
+  deleteEvent: wrapHarnessedCalendarFunction('deleteEvent', deleteEvent),
+  findFreeTime: wrapHarnessedCalendarFunction('findFreeTime', findFreeTime),
 };

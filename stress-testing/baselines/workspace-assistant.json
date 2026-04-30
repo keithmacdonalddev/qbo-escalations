@@ -1,0 +1,50 @@
+{
+  "slice": "workspace-assistant",
+  "checks": [
+    {
+      "label": "Workspace runner now reports four scenarios",
+      "path": "fixtures",
+      "lengthMin": 4
+    },
+    {
+      "label": "Workspace session finishes",
+      "path": "fixtures[0].assertions.finalStatus",
+      "equals": "done"
+    },
+    {
+      "label": "Workspace stream emits multiple events",
+      "path": "fixtures[0].assertions.eventCount",
+      "min": 5
+    },
+    {
+      "label": "Workspace conversation history persists",
+      "path": "fixtures[0].assertions.historyMessageCount",
+      "min": 2
+    },
+    {
+      "label": "Unsupported agent type validation stays stable",
+      "path": "fixtures[1].assertions.unsupportedAgentTypeCode",
+      "equals": "UNSUPPORTED_AGENT_TYPE"
+    },
+    {
+      "label": "Missing prompt validation stays stable",
+      "path": "fixtures[1].assertions.missingPromptCode",
+      "equals": "MISSING_PROMPT"
+    },
+    {
+      "label": "Replay omits the created event when since=1",
+      "path": "fixtures[2].assertions.replayOmittedCreated",
+      "equals": true
+    },
+    {
+      "label": "Invalid provider session ends in error",
+      "path": "fixtures[3].assertions.finalStatus",
+      "equals": "error"
+    },
+    {
+      "label": "Invalid provider replay surfaces INVALID_PROVIDER",
+      "path": "fixtures[3].assertions.errorCode",
+      "equals": "INVALID_PROVIDER"
+    }
+  ]
+}

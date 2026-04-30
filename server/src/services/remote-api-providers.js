@@ -3,6 +3,11 @@
 const http = require('http');
 const https = require('https');
 const { resolveApiKey: getImageParserApiKey } = require('./image-parser');
+const {
+  isStubbed: isProvidersStubbed,
+  getProviderStub,
+  MissingProviderStubError,
+} = require('../lib/harness-provider-gate');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -572,16 +577,22 @@ function requestGeminiChat({
 }
 
 function createBufferedChatProvider(providerId, requestHandler) {
-  return function chat({
-    messages,
-    systemPrompt,
-    model,
-    timeoutMs,
-    onChunk,
-    onDone,
-    onError,
-    onThinkingChunk,
-  }) {
+  return function chat(args) {
+    if (isProvidersStubbed()) {
+      const stub = getProviderStub(providerId, 'chat');
+      if (!stub) throw new MissingProviderStubError(providerId, 'chat');
+      return stub(args);
+    }
+    const {
+      messages,
+      systemPrompt,
+      model,
+      timeoutMs,
+      onChunk,
+      onDone,
+      onError,
+      onThinkingChunk,
+    } = args;
     let cancelled = false;
     let cancelRequest = null;
 

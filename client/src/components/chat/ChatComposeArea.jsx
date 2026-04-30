@@ -8,6 +8,35 @@ import TraceLogsDrawer from './TraceLogsDrawer.jsx';
 import { transitions } from '../../utils/motion.js';
 import './ImageParserPopup.css';
 
+const DEFAULT_IMAGE_PARSER_MODE = 'escalation-template-parser';
+
+const MAIN_CHAT_WORKFLOWS = Object.freeze([
+  {
+    id: 'escalation',
+    label: 'Escalation',
+    hint: 'Parse template screenshot',
+    parserMode: 'escalation-template-parser',
+  },
+  {
+    id: 'inv',
+    label: 'INV',
+    hint: 'Reserved workflow',
+    disabled: true,
+  },
+  {
+    id: 'follow-up',
+    label: 'Follow-up',
+    hint: 'Parse phone-agent chat',
+    parserMode: 'follow-up-chat-parser',
+  },
+  {
+    id: 'general',
+    label: 'General',
+    hint: 'Ask QBO Analyst',
+    action: 'focus-chat',
+  },
+]);
+
 function ParsedEscalationPreviewCard({ preview, onClear }) {
   if (!preview) return null;
 
@@ -142,14 +171,43 @@ export default function ChatComposeArea({
   onStartFreshConversation,
   onRetryLastResponse,
   onCopyConversation,
+  liveCallOpen,
+  onToggleLiveCall,
 }) {
   const [traceDrawerOpen, setTraceDrawerOpen] = useState(false);
+  const [imageParserMode, setImageParserMode] = useState(DEFAULT_IMAGE_PARSER_MODE);
   const sendDisabled = (!input.trim())
     || (effectiveMode === 'parallel' && (parallelProviders.length < 2 || parallelProviders.length > 4));
   const composePlaceholder = parsedEscalationPreview
     ? 'Add a follow-up after the main chat replies, if needed.'
-    : "What's the escalation? Type / for commands.";
+    : 'Ask QBO Analyst or start a workflow...';
   const hasConversation = Array.isArray(messages) && messages.length > 1 && !isStreaming && Boolean(conversationId);
+
+  const openImageParserWorkflow = (parserMode = DEFAULT_IMAGE_PARSER_MODE) => {
+    setImageParserMode(parserMode);
+    setImageParserSeed((current) => {
+      if (!current) return current;
+      if (typeof current === 'string') {
+        return { src: current, parserMode };
+      }
+      return {
+        ...current,
+        parserMode,
+      };
+    });
+    setShowImageParser(true);
+  };
+
+  const handleWorkflowClick = (workflow) => {
+    if (workflow.disabled || isStreaming) return;
+    if (workflow.parserMode) {
+      openImageParserWorkflow(workflow.parserMode);
+      return;
+    }
+    if (workflow.action === 'focus-chat') {
+      requestAnimationFrame(() => textareaRef.current?.focus?.());
+    }
+  };
 
   const composeBoxActions = (
     <div className="compose-box-actions">
@@ -233,6 +291,23 @@ export default function ChatComposeArea({
           onDragLeave={handleComposeDragLeave}
           onDrop={handleComposeDrop}
         >
+          <div className="main-chat-workflows" aria-label="Start a workflow from main chat">
+            {MAIN_CHAT_WORKFLOWS.map((workflow) => (
+              <button
+                key={workflow.id}
+                type="button"
+                className={`main-chat-workflow-chip${workflow.parserMode === imageParserMode && showImageParser ? ' is-active' : ''}`}
+                onClick={() => handleWorkflowClick(workflow)}
+                disabled={workflow.disabled || isStreaming}
+                title={workflow.hint}
+                aria-label={`${workflow.label}: ${workflow.hint}`}
+              >
+                <span>{workflow.label}</span>
+                <small>{workflow.hint}</small>
+              </button>
+            ))}
+          </div>
+
           <ChatComposeControls
             providerPopoverRef={providerPopoverRef}
             provider={provider}
@@ -374,7 +449,7 @@ export default function ChatComposeArea({
               <Tooltip text="Open the image parser" level="medium">
                 <button
                   className={`compose-action-btn${showImageParser ? ' is-active' : ''}`}
-                  onClick={() => setShowImageParser(true)}
+                  onClick={() => openImageParserWorkflow(DEFAULT_IMAGE_PARSER_MODE)}
                   type="button"
                   aria-label="Parse screenshot"
                   disabled={isStreaming}
@@ -385,6 +460,22 @@ export default function ChatComposeArea({
                     <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
                     <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
                     <rect x="7" y="7" width="10" height="10" rx="1" />
+                  </svg>
+                </button>
+              </Tooltip>
+
+              <Tooltip text="Open Live Call Assist" level="medium">
+                <button
+                  className={`compose-action-btn${liveCallOpen ? ' is-active' : ''}`}
+                  onClick={onToggleLiveCall}
+                  type="button"
+                  aria-label="Open Live Call Assist"
+                  disabled={isStreaming}
+                >
+                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="22" />
                   </svg>
                 </button>
               </Tooltip>
@@ -433,7 +524,7 @@ export default function ChatComposeArea({
                 ? 'Enter runs the command. Tab completes it. Type // to send a literal slash.'
                 : parsedEscalationPreview
                   ? 'The compact preview above was already sent to the main chat. Use this box only for follow-up messages.'
-                  : 'Drop a screenshot to parse it into text, use webcam, or type / for commands'}
+                  : 'Paste or drop a screenshot to start Escalation, or type a normal analyst message.'}
             </span>
 
             <span className="compose-char-count">{input.length} chars</span>
@@ -491,6 +582,7 @@ export default function ChatComposeArea({
       <ImageParserPopup
         open={showImageParser}
         seedImage={imageParserSeed}
+        parserMode={imageParserMode}
         onClose={() => {
           setShowImageParser(false);
           setImageParserSeed(null);

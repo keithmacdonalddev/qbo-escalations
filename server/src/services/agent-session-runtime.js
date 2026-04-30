@@ -251,7 +251,9 @@ function stopPruning() {
 }
 
 // Auto-start
-startPruning();
+if (process.env.DISABLE_RUNTIME_PRUNING !== '1') {
+  startPruning();
+}
 
 module.exports = {
   createAgentSession,

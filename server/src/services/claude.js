@@ -5,6 +5,11 @@ const os = require('os');
 const { extractClaudeUsage } = require('../lib/usage-extractor');
 const { reportServerError } = require('../lib/server-error-pipeline');
 const { parseImageWithSDK } = require('./sdk-image-parse');
+const {
+  isStubbed: isProvidersStubbed,
+  getProviderStub,
+  MissingProviderStubError,
+} = require('../lib/harness-provider-gate');
 const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
 
 // Concurrency limiter for SDK image parsing — only 1 at a time to prevent
@@ -214,6 +219,11 @@ async function writeTempImageFile(imageInput, prefix, index) {
  * @returns {function} cleanup - Call to kill the subprocess
  */
 function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError }) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('claude', 'chat');
+    if (!stub) throw new MissingProviderStubError('claude', 'chat');
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError });
+  }
   const prompt = buildPrompt(messages);
   const tempFiles = [];
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
@@ -456,6 +466,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
  * @returns {Promise<{fields: Object, usage: Object|null}>} Wrapper with parsed fields and usage metadata
  */
 async function parseEscalation(imageBase64OrText, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('claude', 'parseEscalation');
+    if (!stub) throw new MissingProviderStubError('claude', 'parseEscalation');
+    return stub(imageBase64OrText, options);
+  }
   const source = typeof imageBase64OrText === 'string' ? imageBase64OrText : '';
   const isBase64Image = source.startsWith('data:image') ||
     /^[A-Za-z0-9+/=]{100,}/.test(source);
@@ -894,6 +909,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
  * Warm up the Claude CLI to reduce first-request latency.
  */
 async function warmUp() {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('claude', 'warmUp');
+    if (stub) return stub();
+    return; // silent no-op in harness mode — warmUp has no caller-visible contract
+  }
   return new Promise((resolve) => {
     const child = spawn('claude', ['-p', '--output-format', 'text', '--max-turns', '1'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1000,6 +1020,11 @@ function extractFinalText(msg) {
  * @returns {Promise<{text: string, usage: Object|null}>}
  */
 async function prompt(promptText, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('claude', 'prompt');
+    if (!stub) throw new MissingProviderStubError('claude', 'prompt');
+    return stub(promptText, options);
+  }
   const args = ['-p', '--output-format', 'text', '--max-turns', '1'];
   if (options.model) args.push('--model', options.model);
   const effort = normalizeClaudeEffort(options.reasoningEffort);
@@ -1110,6 +1135,11 @@ async function prompt(promptText, options = {}) {
 const TRANSCRIBE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS, 60000);
 
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  if (isProvidersStubbed()) {
+    const stub = getProviderStub('claude', 'transcribeImage');
+    if (!stub) throw new MissingProviderStubError('claude', 'transcribeImage');
+    return stub(imageBase64OrPath, options);
+  }
   const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
   if (!input) throw new Error('transcribeImage: image input is empty');
 

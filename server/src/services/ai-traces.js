@@ -255,7 +255,7 @@ async function patchTrace(traceId, setPatch = {}) {
   return AiTrace.findByIdAndUpdate(
     traceId,
     { $set: setPatch },
-    { new: true }
+    { returnDocument: 'after' }
   ).lean();
 }
 
@@ -289,7 +289,7 @@ async function appendTraceEvent(traceId, event, startedAt = null) {
         },
       },
     },
-    { new: true }
+    { returnDocument: 'after' }
   ).lean();
 }
 

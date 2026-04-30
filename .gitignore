@@ -7,3 +7,5 @@ Thumbs.db
 server/uploads/
 server/data/
 tmp/
+stress-testing/reports/**/*.json
+stress-testing/reports/**/artifacts/

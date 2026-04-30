@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QBO Escalation Intake Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">QBO Assist</div>
+          <h1 id="pageTitle">Main Chat</h1>
+        </div>
+        <div class="run-state is-hidden" id="runState">
+          <span id="workflowState">escalation</span>
+          <span id="parserState">parser</span>
+          <span id="triageRunState">triage</span>
+          <span id="analystRunState">analyst</span>
+        </div>
+        <button class="secondary-button is-hidden" id="resetButton" type="button">Reset</button>
+      </header>
+
+      <nav class="workflow-launcher" id="workflowLauncher" aria-label="Start workflow">
+        <button class="workflow-chip is-active" type="button" data-workflow="escalation" aria-current="true">Escalation</button>
+        <button class="workflow-chip" type="button" data-workflow="inv">INV</button>
+        <button class="workflow-chip" type="button" data-workflow="followup">Follow-up</button>
+        <button class="workflow-chip" type="button" data-workflow="general">General</button>
+      </nav>
+
+      <section class="intake" id="emptyState" aria-label="Escalation screenshot intake">
+        <button class="drop-target" id="dropTarget" type="button">
+          <span class="drop-icon">
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M12 3v12M7 8l5-5 5 5M5 21h14" />
+            </svg>
+          </span>
+          <span>
+            <strong id="workflowActionLabel">Drop or paste escalation screenshot</strong>
+            <small id="workflowActionHint">Template parser starts the workflow.</small>
+          </span>
+        </button>
+      </section>
+
+      <section class="parse-strip is-hidden" id="parseStage" aria-label="Parsing screenshot" aria-live="polite">
+        <div class="scan-line">
+          <span class="spinner"></span>
+          <strong>Parsing exact template</strong>
+          <span class="scan-progress"><span></span></span>
+        </div>
+      </section>
+
+      <section class="case-view is-hidden" id="caseView" aria-label="Escalation workspace">
+        <div class="decision-row">
+          <section class="pane template-pane" aria-label="Parsed template">
+            <h2 class="pane-title">Template</h2>
+            <pre id="templateText"></pre>
+          </section>
+
+          <section class="pane triage-pane" aria-label="Triage workspace">
+            <h2 class="pane-title">Triage</h2>
+            <div class="triage-brief" id="triageBody">
+              <span class="spinner"></span>
+              <strong>Waiting for parsed template...</strong>
+            </div>
+            <div class="mini-thread" id="triageThread" aria-label="Triage challenge thread"></div>
+            <form class="mini-composer" id="triageForm">
+              <input id="triageInput" type="text" autocomplete="off" placeholder="Challenge triage..." disabled />
+              <button id="triageSend" type="submit" disabled>Ask</button>
+            </form>
+          </section>
+        </div>
+
+        <section class="pane analyst-pane" aria-label="Main chat">
+          <div class="pane-header">
+            <div>
+              <span class="eyebrow">Main Chat</span>
+              <h2>QBO Analyst</h2>
+            </div>
+          </div>
+          <div class="chat-stream" id="chatStream"></div>
+          <form class="chat-composer" id="chatForm">
+            <input id="chatInput" type="text" autocomplete="off" placeholder="Ask analyst..." disabled />
+            <button id="chatSend" type="submit" disabled>Send</button>
+          </form>
+        </section>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
