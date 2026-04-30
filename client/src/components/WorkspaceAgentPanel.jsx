@@ -287,7 +287,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
                 <span>Primary attempt: {getProviderShortLabel(providerStatus.failedProvider)}</span>
               )}
               {providerStatus.activeModel && (
-                <span>Model: {providerStatus.activeModel}</span>
+                <span>Model ID: {providerStatus.activeModel}</span>
               )}
             </div>
           )}

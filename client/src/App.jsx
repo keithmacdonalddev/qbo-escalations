@@ -167,7 +167,7 @@ function App() {
       case 'agents':
         return (
           <Profiler id="Agents" onRender={flame.onRender}>
-          <motion.div key={`agents-${route.agentId || 'index'}`} {...motionProps}>
+          <motion.div key="agents" {...motionProps}>
             <AgentsView agentIdFromRoute={route.agentId || null} />
           </motion.div>
           </Profiler>

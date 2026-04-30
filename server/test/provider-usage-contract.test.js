@@ -223,7 +223,7 @@ await t.test('codex chat() onDone receives usage as second argument', (t, done) 
 
     emitLines(fakeChild, [
       JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'Codex says hi' } }),
-      JSON.stringify({ type: 'usage', prompt_tokens: 15, completion_tokens: 20, model: 'gpt-5.3-codex' }),
+      JSON.stringify({ type: 'usage', prompt_tokens: 15, completion_tokens: 20, model: 'gpt-5.5' }),
     ]);
     closeChild(fakeChild, 0);
   });
@@ -244,7 +244,7 @@ await t.test('codex chat() onError receives err._usage on failure', (t, done) =>
     });
 
     emitLines(fakeChild, [
-      JSON.stringify({ type: 'usage', prompt_tokens: 8, completion_tokens: 0, model: 'gpt-5.3-codex' }),
+      JSON.stringify({ type: 'usage', prompt_tokens: 8, completion_tokens: 0, model: 'gpt-5.5' }),
     ]);
     closeChild(fakeChild, 1);
   });
@@ -262,7 +262,7 @@ await t.test('codex chat() cleanup() returns usage and partialResponse', (t, don
 
     emitLines(fakeChild, [
       JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'partial codex' } }),
-      JSON.stringify({ type: 'usage', prompt_tokens: 4, completion_tokens: 6, model: 'gpt-5.3-codex' }),
+      JSON.stringify({ type: 'usage', prompt_tokens: 4, completion_tokens: 6, model: 'gpt-5.5' }),
     ]);
 
     const abortData = cleanup();
@@ -289,7 +289,7 @@ await t.test('codex parseEscalation() returns { fields, usage } wrapper', async 
           text: '{"category":"tax","attemptingTo":"File GST","actualOutcome":"Error","tsSteps":"Retried","triedTestAccount":"no"}',
         },
       }),
-      JSON.stringify({ type: 'usage', prompt_tokens: 40, completion_tokens: 35, model: 'gpt-5.3-codex' }),
+      JSON.stringify({ type: 'usage', prompt_tokens: 40, completion_tokens: 35, model: 'gpt-5.5' }),
     ]);
     closeChild(fakeChild, 0);
     return promise;
@@ -314,7 +314,7 @@ await t.test('claude chat() usage prefers model from event over env fallback', (
       onChunk() {},
       onDone(_, usage) {
         assert.ok(usage, 'usage should not be null');
-        assert.equal(usage.model, 'claude-opus-4-6', 'should use model from event');
+        assert.equal(usage.model, 'claude-opus-4-7', 'should use model from event');
         done();
       },
       onError(err) { done(err); },
@@ -322,7 +322,7 @@ await t.test('claude chat() usage prefers model from event over env fallback', (
 
     emitLines(fakeChild, [
       JSON.stringify({
-        type: 'result', result: 'ok', model: 'claude-opus-4-6',
+        type: 'result', result: 'ok', model: 'claude-opus-4-7',
         usage: { input_tokens: 1, output_tokens: 1 },
       }),
     ]);

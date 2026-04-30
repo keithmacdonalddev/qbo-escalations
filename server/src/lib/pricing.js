@@ -17,8 +17,8 @@ const path = require('path');
  * Override stale values via PRICING_CONFIG_PATH env var.
  */
 const DEFAULT_PRICING = {
-  // Claude models — Anthropic pricing as of 2026-02-27
-  'claude-opus-4-6':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
+  // Claude models — Anthropic pricing as of 2026-04-29
+  'claude-opus-4-7':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
   'claude-opus-4-5':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
   'claude-4-6-opus':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // alias
   'claude-sonnet-4-6':            { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // $3/$15 per MTok
@@ -33,7 +33,7 @@ const DEFAULT_PRICING = {
   'gpt-5.4':                      { inputNanosPerToken: 2500,  outputNanosPerToken: 15000  }, // $2.50/$15 per MTok
   'gpt-5.4-mini':                 { inputNanosPerToken: 375,   outputNanosPerToken: 2250   }, // $0.375/$2.25 per MTok (OpenAI pricing page, 2026-03-19)
   'gpt-5.4-pro':                  { inputNanosPerToken: 30000, outputNanosPerToken: 180000 }, // $30/$180 per MTok
-  'gpt-5.3-codex':                { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
+  'gpt-5.5':                      { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // Codex baseline until pricing is verified
   'gpt-4o':                       { inputNanosPerToken: 2500,  outputNanosPerToken: 10000  }, // $2.50/$10 per MTok
   'gpt-4o-mini':                  { inputNanosPerToken: 150,   outputNanosPerToken: 600    }, // $0.15/$0.60 per MTok
   'gpt-5-mini':                   { inputNanosPerToken: 250,   outputNanosPerToken: 2000   }, // $0.25/$2 per MTok
@@ -50,8 +50,7 @@ const PRICING_VERSION = '2026-03-06';
 const PROVIDER_FALLBACKS = {
   claude:                       { inputNanosPerToken: 3000,  outputNanosPerToken: 15000 },
   'claude-sonnet-4-6':          { inputNanosPerToken: 3000,  outputNanosPerToken: 15000 },
-  'chatgpt-5.3-codex-high':    { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
-  'gpt-5.3-codex-high':        { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
+  'gpt-5.5':                    { inputNanosPerToken: 2500,  outputNanosPerToken: 10000 },
   'gpt-5.4':                    { inputNanosPerToken: 2500,  outputNanosPerToken: 15000 },
   'gpt-5.4-mini':               { inputNanosPerToken: 375,   outputNanosPerToken: 2250  },
   'gpt-5.4-pro':                { inputNanosPerToken: 30000, outputNanosPerToken: 180000 },
@@ -179,7 +178,7 @@ function getRates(model, provider) {
  * @param {number} inputTokens  — raw prompt token count
  * @param {number} outputTokens — raw completion token count
  * @param {string} [model]      — exact model ID from CLI output
- * @param {string} [provider]   — provider identifier (claude, chatgpt-5.3-codex-high)
+ * @param {string} [provider]   — provider identifier (claude, gpt-5.5)
  * @returns {{ inputCostMicros: number, outputCostMicros: number, totalCostMicros: number,
  *             inputCostNanos: number, outputCostNanos: number, totalCostNanos: number,
  *             rateFound: boolean }}

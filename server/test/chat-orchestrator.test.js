@@ -76,14 +76,14 @@ await t.test('fallback mode switches to alternate provider on primary failure', 
   const out = await runChat({
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
   });
 
   assert.equal(out.result, 'done');
-  assert.equal(out.data.providerUsed, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.providerUsed, 'gpt-5.5');
   assert.equal(out.data.fallbackUsed, true);
   assert.equal(out.data.fallbackFrom, 'claude');
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 1);
@@ -111,7 +111,7 @@ await t.test('explicit model overrides propagate through fallback orchestration'
     mode: 'fallback',
     primaryProvider: 'claude',
     primaryModel: 'claude-custom-model',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     fallbackModel: 'codex-custom-model',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
@@ -121,7 +121,7 @@ await t.test('explicit model overrides propagate through fallback orchestration'
   assert.equal(primaryModel, 'claude-custom-model');
   assert.equal(fallbackModel, 'codex-custom-model');
   assert.equal(out.result, 'done');
-  assert.equal(out.data.providerUsed, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.providerUsed, 'gpt-5.5');
   assert.equal(out.data.modelUsed, 'codex-custom-model');
 
   const providerErrorEvent = out.events.find((event) => event.type === 'provider_error');
@@ -150,7 +150,7 @@ await t.test('fallback mode returns terminal error when both providers fail', as
   const out = await runChat({
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -229,14 +229,14 @@ await t.test('fallback mode prefers healthy provider when primary is unhealthy',
   const out = await runChat({
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
   });
 
   assert.equal(out.result, 'done');
-  assert.equal(out.data.providerUsed, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.providerUsed, 'gpt-5.5');
   assert.equal(out.data.fallbackUsed, false);
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 0);
 });
@@ -256,7 +256,7 @@ await t.test('parallel mode returns both provider responses', async () => {
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -267,7 +267,7 @@ await t.test('parallel mode returns both provider responses', async () => {
   assert.ok(Array.isArray(out.data.results));
   assert.equal(out.data.results.length, 2);
   const claudeResult = out.data.results.find((r) => r.provider === 'claude');
-  const codexResult = out.data.results.find((r) => r.provider === 'chatgpt-5.3-codex-high');
+  const codexResult = out.data.results.find((r) => r.provider === 'gpt-5.5');
   assert.equal(claudeResult.status, 'ok');
   assert.equal(claudeResult.fullResponse, 'claude-final');
   assert.equal(codexResult.status, 'ok');
@@ -476,7 +476,7 @@ await t.test('cancel is idempotent — second call is a no-op', async () => {
 
 await t.test('parallel cancel includes all provider results including pre-cancel completions', async () => {
   const claudeUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
-  const codexUsage = { inputTokens: 80, outputTokens: 0, model: 'gpt-5.3-codex' };
+  const codexUsage = { inputTokens: 80, outputTokens: 0, model: 'gpt-5.5' };
 
   claude.chat = ({ onDone }) => {
     // Claude finishes quickly
@@ -496,7 +496,7 @@ await t.test('parallel cancel includes all provider results including pre-cancel
   const cleanup = startChatOrchestration({
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -515,7 +515,7 @@ await t.test('parallel cancel includes all provider results including pre-cancel
   assert.equal(abortData.attempts.length, 2, 'must include both provider results');
 
   const claudeAttempt = abortData.attempts.find((a) => a.provider === 'claude');
-  const codexAttempt = abortData.attempts.find((a) => a.provider === 'chatgpt-5.3-codex-high');
+  const codexAttempt = abortData.attempts.find((a) => a.provider === 'gpt-5.5');
   assert.ok(claudeAttempt, 'claude attempt must be present');
   assert.ok(codexAttempt, 'codex attempt must be present');
   assert.equal(claudeAttempt.status, 'ok');
@@ -527,7 +527,7 @@ await t.test('parallel cancel includes all provider results including pre-cancel
 
 await t.test('parallel mode propagates per-result usage', async () => {
   const claudeUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-sonnet-4-6' };
-  const codexUsage = { inputTokens: 80, outputTokens: 40, model: 'gpt-5.3-codex' };
+  const codexUsage = { inputTokens: 80, outputTokens: 40, model: 'gpt-5.5' };
   claude.chat = ({ onDone }) => {
     setTimeout(() => onDone('claude-final', claudeUsage), 5);
     return () => {};
@@ -540,7 +540,7 @@ await t.test('parallel mode propagates per-result usage', async () => {
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -548,7 +548,7 @@ await t.test('parallel mode propagates per-result usage', async () => {
 
   assert.equal(out.result, 'done');
   const claudeResult = out.data.results.find((r) => r.provider === 'claude');
-  const codexResult = out.data.results.find((r) => r.provider === 'chatgpt-5.3-codex-high');
+  const codexResult = out.data.results.find((r) => r.provider === 'gpt-5.5');
   assert.deepStrictEqual(claudeResult.usage, claudeUsage);
   assert.deepStrictEqual(codexResult.usage, codexUsage);
 });
@@ -568,7 +568,7 @@ await t.test('parallel mode succeeds when one provider fails and one succeeds', 
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -579,7 +579,7 @@ await t.test('parallel mode succeeds when one provider fails and one succeeds', 
   assert.ok(Array.isArray(out.data.results));
   assert.equal(out.data.results.length, 2);
   const failed = out.data.results.find((r) => r.provider === 'claude');
-  const ok = out.data.results.find((r) => r.provider === 'chatgpt-5.3-codex-high');
+  const ok = out.data.results.find((r) => r.provider === 'gpt-5.5');
   assert.equal(failed.status, 'error');
   assert.equal(ok.status, 'ok');
   assert.equal(ok.fullResponse, 'codex-final');
@@ -707,7 +707,7 @@ await t.test('parallel mode with 3 parallelProviders returns 3 ordered results',
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -720,7 +720,7 @@ await t.test('parallel mode with 3 parallelProviders returns 3 ordered results',
 
   // Verify ordering matches the requested parallelProviders
   assert.equal(out.data.results[0].provider, 'claude');
-  assert.equal(out.data.results[1].provider, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.results[1].provider, 'gpt-5.5');
   assert.equal(out.data.results[2].provider, 'claude-sonnet-4-6');
 
   // Verify each result has the expected fields
@@ -747,7 +747,7 @@ await t.test('parallel mode with 4 parallelProviders handles mixed success and f
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6', 'gpt-5-mini'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -760,7 +760,7 @@ await t.test('parallel mode with 4 parallelProviders handles mixed success and f
 
   // Verify ordering matches parallelProviders
   assert.equal(out.data.results[0].provider, 'claude');
-  assert.equal(out.data.results[1].provider, 'chatgpt-5.3-codex-high');
+  assert.equal(out.data.results[1].provider, 'gpt-5.5');
   assert.equal(out.data.results[2].provider, 'claude-sonnet-4-6');
   assert.equal(out.data.results[3].provider, 'gpt-5-mini');
 
@@ -789,7 +789,7 @@ await t.test('parallel mode with 2 parallelProviders behaves like legacy primary
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+    parallelProviders: ['claude', 'gpt-5.5'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -800,7 +800,7 @@ await t.test('parallel mode with 2 parallelProviders behaves like legacy primary
   assert.ok(Array.isArray(out.data.results));
   assert.equal(out.data.results.length, 2);
   const claudeResult = out.data.results.find((r) => r.provider === 'claude');
-  const codexResult = out.data.results.find((r) => r.provider === 'chatgpt-5.3-codex-high');
+  const codexResult = out.data.results.find((r) => r.provider === 'gpt-5.5');
   assert.equal(claudeResult.status, 'ok');
   assert.equal(claudeResult.fullResponse, 'claude-final');
   assert.equal(codexResult.status, 'ok');
@@ -849,7 +849,7 @@ await t.test('resolvePolicy rejects when primaryProvider not in parallelProvider
     () => resolvePolicy({
       mode: 'parallel',
       primaryProvider: 'gpt-5-mini',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+      parallelProviders: ['claude', 'gpt-5.5'],
     }),
     (err) => {
       assert.equal(err.code, 'INVALID_PARALLEL_PROVIDERS');
@@ -862,10 +862,10 @@ await t.test('resolvePolicy accepts all 4 valid providers in parallelProviders',
   const policy = resolvePolicy({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6', 'gpt-5-mini'],
   });
   assert.equal(policy.parallelProviders.length, 4);
-  assert.deepEqual(policy.parallelProviders, ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini']);
+  assert.deepEqual(policy.parallelProviders, ['claude', 'gpt-5.5', 'claude-sonnet-4-6', 'gpt-5-mini']);
 });
 
 await t.test('resolvePolicy with empty parallelProviders array falls through to legacy behavior', async () => {
@@ -917,7 +917,7 @@ await t.test('parallel cancel with 3 providers aborts in-flight and preserves co
     const handle = setTimeout(() => onDone('codex-done'), 500);
     return () => {
       clearTimeout(handle);
-      return { usage: { inputTokens: 10, outputTokens: 0, model: 'gpt-5.3-codex' }, partialResponse: '' };
+      return { usage: { inputTokens: 10, outputTokens: 0, model: 'gpt-5.5' }, partialResponse: '' };
     };
   };
 
@@ -925,7 +925,7 @@ await t.test('parallel cancel with 3 providers aborts in-flight and preserves co
   const cleanup = startChatOrchestration({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],

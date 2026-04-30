@@ -4,75 +4,29 @@ import { useToast } from '../hooks/useToast.jsx';
 import { apiFetchJson } from '../api/http.js';
 import { DEFAULT_AI_SETTINGS } from '../hooks/useAiSettings.js';
 import {
-  DEFAULT_PROVIDER,
   DEFAULT_REASONING_EFFORT,
   PROVIDER_OPTIONS,
-  getAlternateProvider,
-  getProviderDefaultModel,
   getReasoningEffortOptions,
   PROVIDER_FAMILY,
   normalizeProvider,
-  normalizeReasoningEffort,
 } from '../lib/providerCatalog.js';
 import {
   SURFACE_DEFAULTS_APPLIED_EVENT,
-  readStoredPreference,
-  writeStoredPreference,
-  normalizeSurfaceMode,
   normalizeSurfaceFallback,
 } from '../lib/surfacePreferences.js';
+import {
+  AGENT_RUNTIME_DEFINITIONS as AGENTS,
+  dispatchAgentRuntimeDefaultsApplied,
+  readAgentRuntimeState,
+  writeAgentRuntimeState,
+} from '../lib/agentRuntimeSettings.js';
+import { syncAiAssistantDefaultsToServer } from '../lib/aiAssistantPreferences.js';
 import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
 } from '../lib/imageParserCatalog.js';
 import { staggerChild, staggerContainer, transitions } from '../utils/motion.js';
-
-// ---------------------------------------------------------------------------
-// Agent definitions
-// ---------------------------------------------------------------------------
-const AGENTS = [
-  {
-    id: 'chat',
-    label: 'Chat',
-    description: 'Main escalation assistant',
-    color: '#0a84ff',
-    storagePrefix: 'qbo-chat',
-    supportsModes: true,
-    defaultMode: 'single',
-    supportedModes: ['single', 'fallback'],
-  },
-  {
-    id: 'workspace',
-    label: 'Workspace',
-    description: 'Inbox, calendar, and background actions',
-    color: '#30d158',
-    storagePrefix: 'qbo-workspace',
-    supportsModes: true,
-    defaultMode: 'fallback',
-    supportedModes: ['single', 'fallback'],
-  },
-  {
-    id: 'copilot',
-    label: 'Copilot',
-    description: 'Search, templates, and trend analysis',
-    color: '#bf5af2',
-    storagePrefix: 'qbo-copilot',
-    supportsModes: true,
-    defaultMode: 'fallback',
-    supportedModes: ['single', 'fallback'],
-  },
-  {
-    id: 'image-parser',
-    label: 'Image Parser',
-    description: 'Screenshot and document analysis',
-    color: '#f0b232',
-    storagePrefix: 'qbo-image-parser',
-    supportsModes: false,
-    defaultMode: 'single',
-    supportedModes: ['single'],
-  },
-];
 
 const AGENT_ICONS = {
   chat: (
@@ -99,55 +53,6 @@ const AGENT_ICONS = {
     </svg>
   ),
 };
-
-// ---------------------------------------------------------------------------
-// Storage key helpers
-// ---------------------------------------------------------------------------
-function storageKey(prefix, field) {
-  return `${prefix}-${field}`;
-}
-
-function readAgentState(agent) {
-  const { storagePrefix, defaultMode, supportedModes } = agent;
-  if (agent.id === 'image-parser') {
-    return {
-      provider: localStorage.getItem(storageKey(storagePrefix, 'provider')) || '',
-      model: localStorage.getItem(storageKey(storagePrefix, 'model')) || '',
-    };
-  }
-  const rawProvider = readStoredPreference(storageKey(storagePrefix, 'provider'));
-  const provider = normalizeProvider(rawProvider || DEFAULT_PROVIDER);
-  const rawFallback = readStoredPreference(storageKey(storagePrefix, 'fallback-provider'));
-  const fallbackProvider = normalizeSurfaceFallback(
-    provider,
-    rawFallback || getAlternateProvider(provider)
-  );
-  const rawMode = readStoredPreference(storageKey(storagePrefix, 'mode'));
-  const mode = normalizeSurfaceMode(rawMode || defaultMode, supportedModes, defaultMode);
-  const rawEffort = readStoredPreference(storageKey(storagePrefix, 'reasoning-effort'));
-  const reasoningEffort = normalizeReasoningEffort(rawEffort || DEFAULT_REASONING_EFFORT);
-  const model = readStoredPreference(storageKey(storagePrefix, 'model')) || getProviderDefaultModel(provider);
-  const fallbackModel = readStoredPreference(storageKey(storagePrefix, 'fallback-model')) || getProviderDefaultModel(fallbackProvider);
-  return { provider, mode, fallbackProvider, model, fallbackModel, reasoningEffort };
-}
-
-function writeAgentState(agent, state) {
-  const { storagePrefix } = agent;
-  if (agent.id === 'image-parser') {
-    writeStoredPreference(storageKey(storagePrefix, 'provider'), state.provider);
-    writeStoredPreference(storageKey(storagePrefix, 'model'), state.model);
-    return;
-  }
-  writeStoredPreference(storageKey(storagePrefix, 'provider'), state.provider);
-  writeStoredPreference(storageKey(storagePrefix, 'mode'), state.mode);
-  writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), state.fallbackProvider);
-  writeStoredPreference(storageKey(storagePrefix, 'model'), state.model || getProviderDefaultModel(state.provider));
-  writeStoredPreference(
-    storageKey(storagePrefix, 'fallback-model'),
-    state.fallbackModel || getProviderDefaultModel(state.fallbackProvider)
-  );
-  writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), state.reasoningEffort);
-}
 
 // ---------------------------------------------------------------------------
 // Image parser status check
@@ -573,17 +478,17 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                   onChange={(e) => {
                     const next = normalizeProvider(e.target.value);
                     const nextFallback = normalizeSurfaceFallback(next, draft.fallbackProvider);
-                    onChange({
-                      ...draft,
-                      provider: next,
-                      fallbackProvider: nextFallback,
-                      model: getProviderDefaultModel(next),
-                      fallbackModel: nextFallback === draft.fallbackProvider
-                        ? draft.fallbackModel
-                        : getProviderDefaultModel(nextFallback),
-                    });
-                  }}
-                >
+                      onChange({
+                        ...draft,
+                        provider: next,
+                        fallbackProvider: nextFallback,
+                        model: '',
+                        fallbackModel: nextFallback === draft.fallbackProvider
+                          ? draft.fallbackModel
+                          : '',
+                      });
+                    }}
+                  >
                   {PROVIDER_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
@@ -607,13 +512,13 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                     value={draft.fallbackProvider}
                     onChange={(e) => {
                       const next = normalizeProvider(e.target.value);
-                      onChange({
-                        ...draft,
-                        fallbackProvider: next,
-                        fallbackModel: getProviderDefaultModel(next),
-                      });
-                    }}
-                  >
+                        onChange({
+                          ...draft,
+                          fallbackProvider: next,
+                          fallbackModel: '',
+                        });
+                      }}
+                    >
                     {PROVIDER_OPTIONS.filter((opt) => opt.value !== draft.provider).map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
@@ -686,10 +591,10 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
 
   // Per-agent draft state — initialised from localStorage
   const [agentDrafts, setAgentDrafts] = useState(() =>
-    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentState(agent)]))
+    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentRuntimeState(agent)]))
   );
   const [savedAgentState, setSavedAgentState] = useState(() =>
-    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentState(agent)]))
+    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentRuntimeState(agent)]))
   );
 
   // Global settings draft (context / memory / guardrails)
@@ -701,8 +606,30 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
 
   // Sync global draft when aiSettings prop changes (e.g. reset from outside)
   useEffect(() => {
-    setDraft(cloneSettings(aiSettings));
+    const next = cloneSettings(aiSettings);
+    setDraft(next);
+    setSavedGlobalState(next);
   }, [aiSettings]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const handleDefaultsApplied = (event) => {
+      const surfaces = event?.detail?.surfaces;
+      if (!surfaces || typeof surfaces !== 'object') return;
+      const nextAgentState = Object.fromEntries(
+        AGENTS.map((agent) => [
+          agent.id,
+          surfaces[agent.id] || readAgentRuntimeState(agent),
+        ])
+      );
+      setAgentDrafts(nextAgentState);
+      setSavedAgentState(nextAgentState);
+    };
+
+    window.addEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
+    return () => window.removeEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
+  }, []);
 
   // Reset save state timer after success — 1400ms matches the Dynamic Island hold duration
   useEffect(() => {
@@ -756,30 +683,25 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
     setSaveState('saving');
     try {
       // Persist per-agent state to localStorage
-      AGENTS.forEach((agent) => {
-        writeAgentState(agent, agentDrafts[agent.id]);
-      });
+      const newSaved = Object.fromEntries(
+        AGENTS.map((agent) => [
+          agent.id,
+          writeAgentRuntimeState(agent, agentDrafts[agent.id]),
+        ])
+      );
 
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(SURFACE_DEFAULTS_APPLIED_EVENT, {
-          detail: {
-            surfaces: Object.fromEntries(
-              AGENTS.map((agent) => [agent.id, { ...agentDrafts[agent.id] }])
-            ),
-          },
-        }));
-      }
+      dispatchAgentRuntimeDefaultsApplied(newSaved);
 
       // Persist global settings
-      if (setAiSettings) {
-        setAiSettings(draft);
-      }
+      const savedSettings = setAiSettings ? setAiSettings(draft) : draft;
 
-      const newSaved = Object.fromEntries(
-        AGENTS.map((agent) => [agent.id, { ...agentDrafts[agent.id] }])
-      );
+      await syncAiAssistantDefaultsToServer({
+        settings: savedSettings,
+        agents: newSaved,
+      });
+
       setSavedAgentState(newSaved);
-      setSavedGlobalState(cloneSettings(draft));
+      setSavedGlobalState(cloneSettings(savedSettings));
       setSaveState('success');
       const msg = 'AI settings saved.';
       announce(msg);

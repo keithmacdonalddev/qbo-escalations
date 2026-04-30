@@ -65,17 +65,17 @@ await t.test('fallback mode switches providers when primary fails', async () => 
       triedTestAccount: 'yes',
       caseNumber: 'CS-111',
     },
-    usage: { inputTokens: 80, outputTokens: 40, model: 'gpt-5.3-codex' },
+    usage: { inputTokens: 80, outputTokens: 40, model: 'gpt-5.5' },
   });
 
   const out = await parseWithPolicy({
     text: 'Login issue escalation text',
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
   });
 
-  assert.equal(out.meta.providerUsed, 'chatgpt-5.3-codex-high');
+  assert.equal(out.meta.providerUsed, 'gpt-5.5');
   assert.equal(out.meta.fallbackUsed, true);
   assert.equal(out.meta.fallbackFrom, 'claude');
   assert.equal(out.meta.attempts.length, 2);
@@ -105,20 +105,20 @@ await t.test('parallel mode returns candidates and chooses deterministic winner'
       caseNumber: 'CS-222',
       coid: '45678',
     },
-    usage: { inputTokens: 80, outputTokens: 60, model: 'gpt-5.3-codex' },
+    usage: { inputTokens: 80, outputTokens: 60, model: 'gpt-5.5' },
   });
 
   const out = await parseWithPolicy({
     text: 'Parallel parse test',
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     minScore: 0,
   });
 
   assert.equal(out.meta.mode, 'parallel');
-  assert.equal(out.meta.providerUsed, 'chatgpt-5.3-codex-high');
-  assert.equal(out.meta.winner, 'chatgpt-5.3-codex-high');
+  assert.equal(out.meta.providerUsed, 'gpt-5.5');
+  assert.equal(out.meta.winner, 'gpt-5.5');
   assert.ok(Array.isArray(out.meta.candidates));
   assert.equal(out.meta.candidates.length, 2);
   assert.equal(out.meta.attempts.length, 2);
@@ -149,7 +149,7 @@ await t.test('uses regex terminal fallback when all providers fail and text look
     ].join('\n'),
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
   });
 
   assert.equal(out.meta.providerUsed, 'regex');
@@ -182,7 +182,7 @@ await t.test('parallel mode can regex-fallback when both providers fail on escal
     ].join('\n'),
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
   });
 
   assert.equal(out.meta.mode, 'parallel');
@@ -233,7 +233,7 @@ await t.test('fallback mode threads usage into meta.attempts for both success an
     throw err;
   };
 
-  const successUsage = { inputTokens: 80, outputTokens: 40, model: 'gpt-5.3-codex' };
+  const successUsage = { inputTokens: 80, outputTokens: 40, model: 'gpt-5.5' };
   codex.parseEscalation = async () => ({
     fields: {
       category: 'technical',
@@ -250,7 +250,7 @@ await t.test('fallback mode threads usage into meta.attempts for both success an
     text: 'Login issue escalation text',
     mode: 'fallback',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
   });
 
   // Failed attempt carries usage from err._usage
@@ -266,7 +266,7 @@ await t.test('fallback mode threads usage into meta.attempts for both success an
 
 await t.test('parallel mode threads usage into meta.candidates', async () => {
   const claudeUsage = { inputTokens: 90, outputTokens: 30, model: 'claude-sonnet-4-6' };
-  const codexUsage = { inputTokens: 80, outputTokens: 60, model: 'gpt-5.3-codex' };
+  const codexUsage = { inputTokens: 80, outputTokens: 60, model: 'gpt-5.5' };
   claude.parseEscalation = async () => ({
     fields: {
       category: 'technical',
@@ -295,12 +295,12 @@ await t.test('parallel mode threads usage into meta.candidates', async () => {
     text: 'Parallel parse test',
     mode: 'parallel',
     primaryProvider: 'claude',
-    fallbackProvider: 'chatgpt-5.3-codex-high',
+    fallbackProvider: 'gpt-5.5',
     minScore: 0,
   });
 
   const claudeCandidate = out.meta.candidates.find((c) => c.provider === 'claude');
-  const codexCandidate = out.meta.candidates.find((c) => c.provider === 'chatgpt-5.3-codex-high');
+  const codexCandidate = out.meta.candidates.find((c) => c.provider === 'gpt-5.5');
   assert.deepStrictEqual(claudeCandidate.usage, claudeUsage);
   assert.deepStrictEqual(codexCandidate.usage, codexUsage);
 
@@ -371,7 +371,7 @@ await t.test('throws PARSE_FAILED when regex fallback exists but fails validatio
       ].join('\n'),
       mode: 'fallback',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
       allowRegexFallback: true,
     }),
     (err) => {

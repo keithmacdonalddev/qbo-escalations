@@ -235,7 +235,7 @@ await t.test('POST /api/chat (fallback) → UsageLog for primary error + fallbac
       message: 'Fallback test',
       mode: 'fallback',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     })
     .expect(200);
 
@@ -251,7 +251,7 @@ await t.test('POST /api/chat (fallback) → UsageLog for primary error + fallbac
   assert.ok(primary, 'primary attempt log');
   assert.equal(primary.status, 'error');
 
-  const fallback = docs.find((d) => d.provider === 'chatgpt-5.3-codex-high');
+  const fallback = docs.find((d) => d.provider === 'gpt-5.5');
   assert.ok(fallback, 'fallback attempt log');
   assert.equal(fallback.status, 'ok');
   assert.equal(fallback.inputTokens, 300);
@@ -307,7 +307,7 @@ await t.test('POST /api/chat mode persisted in UsageLog for every attempt', asyn
       message: 'Mode test',
       mode: 'fallback',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     })
     .expect(200);
 

@@ -249,7 +249,7 @@ test('abort suite', async (t) => {
       message: 'test abort during fallback',
       mode: 'fallback',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
     await sse.waitForEvent('fallback');
@@ -293,7 +293,7 @@ test('abort suite', async (t) => {
       message: 'test abort during parallel',
       mode: 'parallel',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
     await sse.waitForEvent('chunk');
@@ -458,7 +458,7 @@ test('abort suite', async (t) => {
       message: 'test abort during 3-way parallel',
       mode: 'parallel',
       primaryProvider: 'claude',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6'],
     });
 
     await sse.waitForEvent('chunk');
@@ -501,7 +501,7 @@ test('abort suite', async (t) => {
       message: 'test abort with partial settlement',
       mode: 'parallel',
       primaryProvider: 'claude',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
     await sse.waitForEvent('chunk');

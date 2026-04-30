@@ -12,6 +12,10 @@ export default function TriageCard({ triageCard }) {
 
   const severity = triageCard.severity || 'P3';
   const colors = SEVERITY_COLORS[severity] || SEVERITY_COLORS.P3;
+  const missingInfo = Array.isArray(triageCard.missingInfo)
+    ? triageCard.missingInfo.filter(Boolean)
+    : (triageCard.missingInfo ? [triageCard.missingInfo] : []);
+  const confidence = triageCard.confidence || '';
 
   return (
     <motion.div
@@ -29,7 +33,6 @@ export default function TriageCard({ triageCard }) {
         alignSelf: 'flex-start',
       }}
     >
-      {/* Header: severity badge + category + TRIAGE label */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -53,6 +56,25 @@ export default function TriageCard({ triageCard }) {
         }}>
           {severity}
         </span>
+        {confidence && (
+          <span style={{
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            color: '#dbdee1',
+            fontWeight: 700,
+            fontSize: '10px',
+            padding: '1px 6px',
+            borderRadius: '8px',
+            height: '16px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            textTransform: 'uppercase',
+            fontFamily: 'var(--font-mono)',
+            lineHeight: 1,
+          }}>
+            {confidence}
+          </span>
+        )}
         <span style={{
           fontSize: '12px',
           fontWeight: 600,
@@ -70,7 +92,7 @@ export default function TriageCard({ triageCard }) {
           letterSpacing: '0.04em',
           opacity: 0.5,
         }}>
-          Triage
+          Triage Agent
         </span>
       </div>
 
@@ -114,6 +136,30 @@ export default function TriageCard({ triageCard }) {
           paddingTop: '3px',
         }}>
           Immediate next step: {triageCard.action}
+        </div>
+      )}
+
+      {missingInfo.length > 0 && (
+        <div style={{
+          fontSize: '12px',
+          color: '#949ba4',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
+          paddingTop: '4px',
+          marginTop: '4px',
+          lineHeight: 1.35,
+        }}>
+          <strong style={{ color: '#dbdee1' }}>Missing info:</strong> {missingInfo.join('; ')}
+        </div>
+      )}
+
+      {triageCard.categoryCheck && (
+        <div style={{
+          fontSize: '12px',
+          color: '#8f949f',
+          marginTop: '3px',
+          lineHeight: 1.35,
+        }}>
+          <strong style={{ color: '#dbdee1' }}>Category check:</strong> {triageCard.categoryCheck}
         </div>
       )}
     </motion.div>

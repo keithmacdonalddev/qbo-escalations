@@ -25,12 +25,20 @@ test('buildServerTriageCard produces a focused payroll export triage for missing
   assert.match(triage.action, /tax year/i);
   assert.match(triage.action, /Archived Forms/i);
   assert.doesNotMatch(triage.action, /Tell the agent/i);
+  assert.equal(triage.confidence, 'medium');
+  assert.deepEqual(triage.missingInfo, [
+    'COID/MID or case number',
+    'Whether this reproduces in a test account',
+  ]);
+  assert.match(triage.categoryCheck, /T4 forms are generated from payroll workflows/i);
 });
 
 test('buildFallbackTriageCard uses the stronger generic next-step wording', () => {
   const triage = buildFallbackTriageCard();
 
   assert.equal(triage.severity, 'P3');
+  assert.equal(triage.confidence, 'low');
   assert.match(triage.action, /Reproduce the exact failing step once/i);
   assert.match(triage.action, /isolated or company-wide/i);
+  assert.ok(triage.missingInfo.includes('Canonical escalation fields did not validate'));
 });

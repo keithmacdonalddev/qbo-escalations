@@ -95,11 +95,11 @@ test('extractClaudeUsage prefers event model over fallbackModel', () => {
 test('extractCodexUsage handles top-level usage shape', () => {
   const r = extractCodexUsage({
     usage: { prompt_tokens: 500, completion_tokens: 100 },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.equal(r.inputTokens, 500);
   assert.equal(r.outputTokens, 100);
-  assert.equal(r.model, 'gpt-5.3-codex');
+  assert.equal(r.model, 'gpt-5.5');
   assert.equal(r.usageComplete, true);
 });
 
@@ -125,13 +125,13 @@ test('extractCodexUsage handles item with nested usage sub-object', () => {
     item: {
       type: 'usage',
       usage: { prompt_tokens: 300, completion_tokens: 75 },
-      model: 'gpt-5.3-codex',
+      model: 'gpt-5.5',
     },
   });
   assert.notEqual(r, null);
   assert.equal(r.inputTokens, 300);
   assert.equal(r.outputTokens, 75);
-  assert.equal(r.model, 'gpt-5.3-codex');
+  assert.equal(r.model, 'gpt-5.5');
 });
 
 test('extractCodexUsage handles direct usage event shape', () => {
@@ -153,7 +153,7 @@ test('extractCodexUsage returns null for non-usage events', () => {
 test('extractCodexUsage detects top-level reasoning_tokens', () => {
   const r = extractCodexUsage({
     usage: { prompt_tokens: 500, completion_tokens: 100, reasoning_tokens: 300 },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.equal(r.usageComplete, false);
 });
@@ -161,7 +161,7 @@ test('extractCodexUsage detects top-level reasoning_tokens', () => {
 test('extractCodexUsage preserves reasoning-only events', () => {
   const r = extractCodexUsage({
     usage: { prompt_tokens: 0, completion_tokens: 0, reasoning_tokens: 300 },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.notEqual(r, null);
   assert.equal(r.usageComplete, false);
@@ -174,7 +174,7 @@ test('extractCodexUsage detects nested output_tokens_details.reasoning_tokens', 
       completion_tokens: 100,
       output_tokens_details: { reasoning_tokens: 200 },
     },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.equal(r.usageComplete, false);
 });
@@ -186,7 +186,7 @@ test('extractCodexUsage detects nested input_tokens_details.cached_tokens', () =
       completion_tokens: 100,
       input_tokens_details: { cached_tokens: 400 },
     },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.equal(r.usageComplete, false);
 });
@@ -198,7 +198,7 @@ test('extractCodexUsage detects nested-only billable dimensions with zero top-le
       completion_tokens: 0,
       output_tokens_details: { reasoning_tokens: 150 },
     },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.notEqual(r, null);
   assert.equal(r.usageComplete, false);
@@ -222,18 +222,10 @@ test('extractUsageFromMessage dispatches to Claude for claude provider', () => {
   assert.equal(r.inputTokens, 100);
 });
 
-test('extractUsageFromMessage dispatches to Codex for chatgpt-5.3-codex-high provider', () => {
+test('extractUsageFromMessage dispatches to Codex for gpt-5.5 provider', () => {
   const r = extractUsageFromMessage(
-    { usage: { prompt_tokens: 100, completion_tokens: 50 }, model: 'gpt-5.3-codex' },
-    'chatgpt-5.3-codex-high'
-  );
-  assert.equal(r.inputTokens, 100);
-});
-
-test('extractUsageFromMessage dispatches to Codex for gpt-5.3-codex-high provider', () => {
-  const r = extractUsageFromMessage(
-    { usage: { prompt_tokens: 100, completion_tokens: 50 }, model: 'gpt-5.3-codex' },
-    'gpt-5.3-codex-high'
+    { usage: { prompt_tokens: 100, completion_tokens: 50 }, model: 'gpt-5.5' },
+    'gpt-5.5'
   );
   assert.equal(r.inputTokens, 100);
 });
@@ -276,7 +268,7 @@ test('extractClaudeUsage returns null for empty usage object {}', () => {
 test('extractCodexUsage returns null for empty usage object {}', () => {
   const r = extractCodexUsage({
     usage: {},
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.equal(r, null, 'empty {} usage should be null (unknown), not zero-token result');
 });
@@ -298,8 +290,8 @@ test('extractUsageFromMessage returns null for empty usage via Claude provider',
 
 test('extractUsageFromMessage returns null for empty usage via Codex provider', () => {
   const r = extractUsageFromMessage(
-    { usage: {}, model: 'gpt-5.3-codex' },
-    'chatgpt-5.3-codex-high'
+    { usage: {}, model: 'gpt-5.5' },
+    'gpt-5.5'
   );
   assert.equal(r, null);
 });
@@ -325,11 +317,11 @@ test('extractClaudeUsage falls through empty primary usage to populated message.
 test('extractCodexUsage falls through empty top-level usage to populated item.usage', () => {
   const r = extractCodexUsage({
     usage: {},
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
     item: {
       type: 'usage',
       usage: { prompt_tokens: 400, completion_tokens: 90 },
-      model: 'gpt-5.3-codex',
+      model: 'gpt-5.5',
     },
   });
   assert.notEqual(r, null, 'should fall through to item.usage');
@@ -382,9 +374,9 @@ test('extractUsageFromMessage falls through empty Codex usage to item.usage', ()
   const r = extractUsageFromMessage(
     {
       usage: {},
-      item: { type: 'usage', usage: { prompt_tokens: 600, completion_tokens: 120 }, model: 'gpt-5.3-codex' },
+      item: { type: 'usage', usage: { prompt_tokens: 600, completion_tokens: 120 }, model: 'gpt-5.5' },
     },
-    'chatgpt-5.3-codex-high'
+    'gpt-5.5'
   );
   assert.notEqual(r, null);
   assert.equal(r.inputTokens, 600);
@@ -404,7 +396,7 @@ test('extractClaudeUsage still returns result for explicit { input_tokens: 0, ou
 test('extractCodexUsage still returns result for explicit { prompt_tokens: 0, completion_tokens: 0 }', () => {
   const r = extractCodexUsage({
     usage: { prompt_tokens: 0, completion_tokens: 0 },
-    model: 'gpt-5.3-codex',
+    model: 'gpt-5.5',
   });
   assert.notEqual(r, null, 'explicit zero tokens is known-zero, not unknown');
   assert.equal(r.inputTokens, 0);

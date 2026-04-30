@@ -53,6 +53,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const [isDragOver, setIsDragOver] = useState(false);
   const [availability, setAvailability] = useState(null);
   const [showWebcam, setShowWebcam] = useState(false);
+  const [validationError, setValidationError] = useState('');
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
   const popupRef = useRef(null);
@@ -88,6 +89,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     if (!open) return;
     const src = typeof seedImage === 'string' ? seedImage : seedImage?.src;
     if (!src) return;
+    setValidationError('');
     setImagePreview(src);
     setImageBase64(src);
   }, [open, seedImage]);
@@ -125,6 +127,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target.result;
+      setValidationError('');
       setImagePreview(dataUrl);
       setImageBase64(dataUrl);
     };
@@ -179,17 +182,25 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
   const handleParse = useCallback(async () => {
     if (!imageBase64 || !provider) return;
+    setValidationError('');
     const data = await parse(imageBase64, { provider, model: model || undefined });
+    if (data?.parseMeta && data.parseMeta.passed === false) {
+      const issue = data.parseMeta.issues?.[0] || data.parseMeta.canonicalTemplate?.issues?.[0]?.code || 'validation failed';
+      setValidationError(`Parser output did not match the canonical escalation template (${issue}). Retry with a clearer screenshot or another parser model.`);
+      return;
+    }
     if (data?.text) {
       onParsed(data.text);
       // Reset state for next use
       setImagePreview(null);
       setImageBase64(null);
+      setValidationError('');
       onClose();
     }
   }, [imageBase64, provider, model, parse, onParsed, onClose]);
 
   const handleClear = useCallback(() => {
+    setValidationError('');
     setImagePreview(null);
     setImageBase64(null);
   }, []);
@@ -198,6 +209,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     const src = typeof payload === 'string' ? payload : payload?.src;
     if (!src) return;
     setShowWebcam(false);
+    setValidationError('');
     setImagePreview(src);
     setImageBase64(src);
   }, []);
@@ -311,7 +323,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
           />
 
           {/* Error */}
-          {error && <div className="ip-popup-error">{error}</div>}
+          {(error || validationError) && <div className="ip-popup-error">{error || validationError}</div>}
 
           <div className="ip-popup-actions">
             <button

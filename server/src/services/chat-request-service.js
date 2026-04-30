@@ -5,6 +5,7 @@ const chatImageModule = require('../lib/chat-image');
 const { evaluateChatGuardrails } = require('../lib/chat-guardrails');
 const chatTriageModule = require('../lib/chat-triage');
 const { parseEscalationText } = require('../lib/escalation-parser');
+const { validateCanonicalEscalationTemplateText } = require('../lib/escalation-template-contract');
 const { validateParsedEscalation } = require('../lib/parse-validation');
 const {
   VALID_MODES,
@@ -373,14 +374,29 @@ function buildParserDerivedTriageContext({
   }
 
   const regexParsed = parseEscalationText(text);
-  const validation = validateParsedEscalation(regexParsed, { sourceText: text });
+  const semanticValidation = validateParsedEscalation(regexParsed, { sourceText: text });
+  const canonicalTemplate = validateCanonicalEscalationTemplateText(text);
+  const validation = {
+    ...semanticValidation,
+    passed: semanticValidation.passed && canonicalTemplate.ok,
+    issues: [
+      ...semanticValidation.issues,
+      ...canonicalTemplate.issues.map((issue) => `canonical_${issue.code}`),
+    ],
+  };
   const parsedFields = validation.passed ? validation.normalizedFields : {};
-  const error = validation.passed
-    ? null
-    : {
-        code: 'PARSE_VALIDATION_FAILED',
-        message: `Image parser output did not validate (score ${validation.score})`,
-      };
+  let error = null;
+  if (!semanticValidation.passed) {
+    error = {
+      code: 'PARSE_VALIDATION_FAILED',
+      message: `Image parser output did not validate (score ${semanticValidation.score})`,
+    };
+  } else if (!canonicalTemplate.ok) {
+    error = {
+      code: 'CANONICAL_TEMPLATE_VALIDATION_FAILED',
+      message: 'Image parser output did not match the canonical escalation template.',
+    };
+  }
   const attempts = [
     buildImageParserAttempt({
       provider: parserProvider,
@@ -424,6 +440,12 @@ function buildParserDerivedTriageContext({
         confidence: validation.confidence,
         issues: validation.issues,
         fieldsFound: validation.fieldsFound,
+        semanticPassed: semanticValidation.passed,
+        canonicalTemplate: {
+          passed: canonicalTemplate.ok,
+          issues: canonicalTemplate.issues,
+          labels: canonicalTemplate.labels,
+        },
       },
       parsedBy: parserProvider,
       confidence: validation.confidence,
@@ -688,6 +710,7 @@ async function buildChatImageAugmentation({
 module.exports = {
   DEFAULT_PROVIDER,
   buildChatImageAugmentation,
+  buildParserDerivedTriageContext,
   getChatGenerationValidationError,
   getParallelOpenTurnLimit,
   isParallelModeEnabled,

@@ -3,9 +3,19 @@ import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   DEFAULT_AI_SETTINGS,
   deepSet,
+  hasStoredAiSettings,
   persistAiSettings,
   readStoredAiSettings,
 } from '../lib/aiSettingsStore.js';
+import {
+  hasStoredAgentRuntimeDefaults,
+  readAllAgentRuntimeStatesBySurfaceId,
+} from '../lib/agentRuntimeSettings.js';
+import {
+  applyAgentRuntimeDefaults,
+  loadAiAssistantDefaultsFromServer,
+  syncAiAssistantDefaultsToServer,
+} from '../lib/aiAssistantPreferences.js';
 
 export { DEFAULT_AI_SETTINGS } from '../lib/aiSettingsStore.js';
 
@@ -16,6 +26,41 @@ export default function useAiSettings() {
   useEffect(() => {
     aiSettingsRef.current = aiSettings;
   }, [aiSettings]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    loadAiAssistantDefaultsFromServer()
+      .then((defaults) => {
+        if (cancelled) return;
+
+        if (defaults?.settings) {
+          const normalized = persistAiSettings(defaults.settings);
+          aiSettingsRef.current = normalized;
+          setAiSettingsState(normalized);
+        }
+
+        if (defaults?.agents) {
+          applyAgentRuntimeDefaults(defaults.agents);
+        }
+
+        const serverHasAgents = Boolean(defaults?.agents);
+        const serverHasSettings = Boolean(defaults?.settings);
+        if ((!serverHasAgents && hasStoredAgentRuntimeDefaults()) || (!serverHasSettings && hasStoredAiSettings())) {
+          syncAiAssistantDefaultsToServer({
+            settings: aiSettingsRef.current,
+            agents: readAllAgentRuntimeStatesBySurfaceId(),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {
+        // Local browser settings remain usable when the server preference read fails.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const setAiSettings = useCallback((nextValueOrUpdater) => {
     const current = aiSettingsRef.current;

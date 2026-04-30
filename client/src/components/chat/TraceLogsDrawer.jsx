@@ -1,5 +1,26 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getConversationTraces } from '../../api/traceApi.js';
+import { getProviderLabel } from '../../lib/providerCatalog.js';
+
+function getTraceProviderId(trace) {
+  return trace?.outcome?.providerUsed || trace?.resolved?.primaryProvider || trace?.requested?.primaryProvider || '';
+}
+
+function getTraceModelId(trace) {
+  return trace?.outcome?.modelUsed ||
+    trace?.requested?.primaryModel ||
+    trace?.model ||
+    trace?.resolvedModel ||
+    '';
+}
+
+function formatTraceRuntime(trace) {
+  const providerId = getTraceProviderId(trace);
+  const modelId = getTraceModelId(trace);
+  const providerLabel = providerId ? getProviderLabel(providerId) : '';
+  if (providerLabel && modelId) return `${providerLabel} / ${modelId}`;
+  return providerLabel || modelId || 'Unknown runtime';
+}
 
 export default function TraceLogsDrawer({ conversationId, open, onClose }) {
   const [traces, setTraces] = useState([]);
@@ -84,11 +105,7 @@ export default function TraceLogsDrawer({ conversationId, open, onClose }) {
               <div key={t._id} className="trace-drawer-item">
                 <div className="trace-drawer-item-header">
                   <span className="trace-drawer-model">
-                    {t.outcome?.modelUsed ||
-                      t.requested?.primaryModel ||
-                      t.model ||
-                      t.resolvedModel ||
-                      'Unknown model'}
+                    {formatTraceRuntime(t)}
                   </span>
                   <span className="trace-drawer-time">
                     {new Date(
@@ -140,7 +157,7 @@ export default function TraceLogsDrawer({ conversationId, open, onClose }) {
                 )}
                 {t.outcome?.providerUsed && (
                   <div className="trace-drawer-provider">
-                    Provider: {t.outcome.providerUsed}
+                    Provider: {getProviderLabel(t.outcome.providerUsed)}
                     {t.outcome.modelUsed ? ` / ${t.outcome.modelUsed}` : ''}
                     {t.outcome.fallbackUsed ? ' (fallback)' : ''}
                   </div>

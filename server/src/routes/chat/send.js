@@ -140,6 +140,14 @@ function startMainChatExecution({
       type: 'tool_ready',
       message: 'Assistant tools enabled. Inspecting before answering when needed.',
     });
+    const handleToolLoopStatus = (status) => {
+      onStatus?.(status);
+      if (status?.type === 'provider_error') {
+        onProviderError?.(status);
+      } else if (status?.type === 'fallback') {
+        onFallback?.(status);
+      }
+    };
     const result = await runAgentToolLoop({
       agent: {
         id: MAIN_CHAT_TOOL_AGENT_ID,
@@ -147,10 +155,10 @@ function startMainChatExecution({
       },
       systemPrompt,
       messagesForModel: messages,
-      onStatus,
+      onStatus: handleToolLoopStatus,
       onActions: ({ results }) => {
         const count = Array.isArray(results) ? results.length : 0;
-        onStatus?.({
+        handleToolLoopStatus({
           type: 'tool_actions',
           message: `Completed ${count} tool action${count === 1 ? '' : 's'}.`,
         });
@@ -164,9 +172,9 @@ function startMainChatExecution({
       providerUsed: result.providerUsed || policy.primaryProvider,
       modelUsed: result.modelUsed || null,
       mode: policy.mode,
-      fallbackUsed: false,
-      fallbackFrom: null,
-      attempts: [],
+      fallbackUsed: Boolean(result.fallbackUsed),
+      fallbackFrom: result.fallbackFrom || null,
+      attempts: Array.isArray(result.attempts) ? result.attempts : [],
       thinking: '',
       providerThinking: {},
       toolActions: result.actions || [],

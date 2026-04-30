@@ -45,6 +45,7 @@ export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'Extra High' },
+  { value: 'max', label: 'Max' },
 ]);
 
 const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
@@ -196,7 +197,7 @@ export function isAllowedEffort(providerOrFamily, effort) {
   return getAllowedEfforts(providerOrFamily).includes(effort);
 }
 
-const PREFERRED_CODEX_FALLBACK = 'chatgpt-5.3-codex-high';
+const PREFERRED_CODEX_FALLBACK = 'gpt-5.5';
 export const PROVIDER_FAMILY = Object.freeze(
   PROVIDER_CATALOG.reduce((acc, entry) => {
     acc[entry.id] = entry.family;

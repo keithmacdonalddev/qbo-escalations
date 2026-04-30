@@ -41,8 +41,11 @@ async function runAgentToolLoop({
     let aggregatedUsage = null;
     let finalProviderUsed = null;
     let finalModelUsed = null;
+    let fallbackUsed = false;
+    let fallbackFrom = null;
     let currentResponse = '';
     const allActionResults = [];
+    const allAttempts = [];
     const executionState = createWorkspaceExecutionState({});
 
     for (let iteration = 1; iteration <= TOOL_LOOP_MAX_ITERATIONS; iteration++) {
@@ -62,11 +65,17 @@ async function runAgentToolLoop({
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
+        onStatus,
       }).promise;
 
       currentResponse = result.fullResponse || '';
       finalProviderUsed = result.providerUsed || finalProviderUsed;
       finalModelUsed = result.modelUsed || finalModelUsed;
+      fallbackUsed = fallbackUsed || Boolean(result.fallbackUsed);
+      fallbackFrom = fallbackFrom || result.fallbackFrom || null;
+      if (Array.isArray(result.attempts) && result.attempts.length > 0) {
+        allAttempts.push(...result.attempts);
+      }
       if (result.usage) {
         if (!aggregatedUsage) {
           aggregatedUsage = { ...result.usage };
@@ -85,6 +94,9 @@ async function runAgentToolLoop({
           usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
           providerUsed: finalProviderUsed || primaryProvider,
           modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
+          fallbackUsed,
+          fallbackFrom,
+          attempts: allAttempts,
           actions: allActionResults,
           iterations: iteration - 1,
         };
@@ -124,6 +136,9 @@ async function runAgentToolLoop({
       usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
       providerUsed: finalProviderUsed || primaryProvider,
       modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
+      fallbackUsed,
+      fallbackFrom,
+      attempts: allAttempts,
       actions: allActionResults,
       iterations: TOOL_LOOP_MAX_ITERATIONS,
     };

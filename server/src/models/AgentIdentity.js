@@ -99,6 +99,4 @@ const agentIdentitySchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-agentIdentitySchema.index({ agentId: 1 }, { unique: true });
-
 module.exports = mongoose.model('AgentIdentity', agentIdentitySchema);

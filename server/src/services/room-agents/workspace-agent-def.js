@@ -60,7 +60,7 @@ module.exports = {
   triggerMentions: ['@workspace', '@ea', '@assistant'],
   priority: 10,
   maxContextMessages: 20,
-  preferredProvider: 'claude-opus-4-6',
+  preferredProvider: 'claude-opus-4-7',
   supportsTools: true,
   useActionFlow: true,
 

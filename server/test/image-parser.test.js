@@ -316,10 +316,10 @@ test('parseImage derives structured escalation fields and parse confidence', asy
           'COID/MID: 12345 / 67890',
           'CASE: CS-2026-001',
           'CLIENT/CONTACT: Jane Smith',
-          'AGENT: John Doe',
           'CX IS ATTEMPTING TO: submit payroll',
           'EXPECTED OUTCOME: payroll should submit successfully',
           'ACTUAL OUTCOME: QBO shows a payroll tax calculation error',
+          'KB/TOOLS USED: payroll help article',
           'TRIED TEST ACCOUNT: yes',
           'TS STEPS: cleared cache and retried in incognito',
         ].join('\n'),
@@ -339,6 +339,7 @@ test('parseImage derives structured escalation fields and parse confidence', asy
     assert.equal(result.parseFields.category, 'payroll');
     assert.equal(result.parseMeta?.passed, true);
     assert.equal(result.parseMeta?.confidence, 'high');
+    assert.equal(result.parseMeta?.canonicalTemplate?.passed, true);
     assert.ok(Array.isArray(result.parseMeta?.issues));
   } finally {
     clearHttpMock();

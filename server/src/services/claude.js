@@ -43,11 +43,10 @@ function didCliExitSuccessfully(code) {
 
 const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_CHAT_TIMEOUT_MS, 180000);
 const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_PARSE_TIMEOUT_MS, 300000);
-const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
+const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 function normalizeClaudeEffort(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'xhigh') return 'high';
   return CLAUDE_ALLOWED_EFFORTS.has(normalized) ? normalized : null;
 }
 
@@ -996,7 +995,7 @@ function extractFinalText(msg) {
  * @param {Object} [options]
  * @param {string} [options.systemPrompt] - Optional system prompt prepended
  * @param {string} [options.model] - Override model
- * @param {string} [options.reasoningEffort] - Effort level (low/medium/high)
+ * @param {string} [options.reasoningEffort] - Effort level (low/medium/high/xhigh/max)
  * @param {number} [options.timeoutMs] - Timeout in ms (default CHAT_TIMEOUT_MS)
  * @returns {Promise<{text: string, usage: Object|null}>}
  */
@@ -1104,7 +1103,7 @@ async function prompt(promptText, options = {}) {
  * @param {string} imageBase64OrPath - Base64 image data or absolute file path
  * @param {Object} [options]
  * @param {string} [options.model] - Override model
- * @param {string} [options.reasoningEffort] - Effort level (low/medium/high)
+ * @param {string} [options.reasoningEffort] - Effort level (low/medium/high/xhigh/max)
  * @param {number} [options.timeoutMs] - Timeout in ms (default 60 000)
  * @returns {Promise<{text: string, usage: Object|null}>}
  */

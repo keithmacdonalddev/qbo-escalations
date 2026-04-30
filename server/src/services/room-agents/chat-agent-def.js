@@ -16,7 +16,7 @@ module.exports = {
   triggerMentions: ['@analyst', '@qbo', '@chat'],
   priority: 10,
   maxContextMessages: 30,
-  preferredProvider: 'claude-opus-4-6',
+  preferredProvider: 'claude-opus-4-7',
   supportsAgentTools: true,
 
   /**

@@ -20,7 +20,7 @@ const SELECTABLE_PROVIDER_IDS = Object.freeze(
   PROVIDER_CATALOG.filter((entry) => entry.selectable !== false).map((entry) => entry.id)
 );
 const DEFAULT_PROVIDER_ID = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
-const PREFERRED_CODEX_FALLBACK = 'chatgpt-5.3-codex-high';
+const PREFERRED_CODEX_FALLBACK = 'gpt-5.5';
 
 function buildProviderOption(entry) {
   return {

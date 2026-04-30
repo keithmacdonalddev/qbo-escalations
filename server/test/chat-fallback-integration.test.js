@@ -86,7 +86,7 @@ test('chat-fallback-integration suite', async (t) => {
         message: 'fallback please',
         mode: 'fallback',
         primaryProvider: 'claude',
-        fallbackProvider: 'chatgpt-5.3-codex-high',
+        fallbackProvider: 'gpt-5.5',
       });
 
     assert.equal(res.status, 200);
@@ -96,7 +96,7 @@ test('chat-fallback-integration suite', async (t) => {
 
     const done = parseEvent(res.text, 'done');
     assert.ok(done);
-    assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
+    assert.equal(done.providerUsed, 'gpt-5.5');
     assert.equal(done.fallbackUsed, true);
     assert.equal(done.fallbackFrom, 'claude');
   });
@@ -126,14 +126,14 @@ test('chat-fallback-integration suite', async (t) => {
         conversationId: start.conversationId,
         mode: 'fallback',
         primaryProvider: 'claude',
-        fallbackProvider: 'chatgpt-5.3-codex-high',
+        fallbackProvider: 'gpt-5.5',
       });
 
     assert.equal(retry.status, 200);
     assert.match(retry.text, /event: fallback/);
     const done = parseEvent(retry.text, 'done');
     assert.ok(done);
-    assert.equal(done.providerUsed, 'chatgpt-5.3-codex-high');
+    assert.equal(done.providerUsed, 'gpt-5.5');
     assert.equal(done.fallbackUsed, true);
     assert.equal(done.fallbackFrom, 'claude');
   });
@@ -153,7 +153,7 @@ test('chat-fallback-integration suite', async (t) => {
         message: 'flag test',
         mode: 'fallback',
         primaryProvider: 'claude',
-        fallbackProvider: 'chatgpt-5.3-codex-high',
+        fallbackProvider: 'gpt-5.5',
       });
 
     assert.equal(res.status, 200);
@@ -181,7 +181,7 @@ test('chat-fallback-integration suite', async (t) => {
       .post('/api/chat')
       .send({
         message: 'parity off',
-        provider: 'chatgpt-5.3-codex-high',
+        provider: 'gpt-5.5',
         mode: 'fallback',
         fallbackProvider: 'claude',
       });

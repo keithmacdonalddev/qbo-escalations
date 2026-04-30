@@ -516,19 +516,6 @@ function startChatOrchestration({
 
     const sequence = resolveSequentialProviders(policy);
     let fallbackFrom = null;
-    if (sequence.length > 1 && sequence[0] !== policy.primaryProvider) {
-      const primaryHealth = getProviderHealth(policy.primaryProvider);
-      fallbackFrom = policy.primaryProvider;
-      onFallback?.({
-        from: policy.primaryProvider,
-        fromModel: resolveProviderModel(policy.primaryProvider, getPolicyModel(policy, policy.primaryProvider)),
-        to: sequence[0],
-        toModel: resolveProviderModel(sequence[0], getPolicyModel(policy, sequence[0])),
-        reason: 'PRIMARY_UNHEALTHY',
-        detail: buildUnhealthyFallbackDetail(primaryHealth),
-        preflight: true,
-      });
-    }
     for (let i = 0; i < sequence.length; i++) {
       if (cancelled) return;
 

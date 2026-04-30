@@ -181,6 +181,15 @@ export function readStoredAiSettings() {
   }
 }
 
+export function hasStoredAiSettings() {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(STORAGE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
 export function persistAiSettings(rawSettings) {
   const normalized = normalizeAiSettings(rawSettings);
   if (typeof window !== 'undefined') {

@@ -28,7 +28,7 @@ const SEED_LOGS = [
     createdAt: new Date('2026-02-20T10:00:00Z'),
   },
   {
-    requestId: 'seed-2', attemptIndex: 0, service: 'parse', provider: 'chatgpt-5.3-codex-high',
+    requestId: 'seed-2', attemptIndex: 0, service: 'parse', provider: 'gpt-5.5',
     model: 'gpt-4o', inputTokens: 800, outputTokens: 200,
     totalTokens: 1000, usageAvailable: true, usageComplete: true,
     inputCostNanos: 2_000_000, outputCostNanos: 2_000_000, totalCostNanos: 4_000_000,

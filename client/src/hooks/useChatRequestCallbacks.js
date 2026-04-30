@@ -11,6 +11,7 @@ import {
   createRequestTerminalHandlers,
   normalizeProvider,
 } from '../lib/chatRequestCallbackHandlers.js';
+import { getProviderShortLabel } from '../lib/providerCatalog.js';
 
 const DEFAULT_MODE = 'single';
 const MODES = new Set(['single', 'fallback', 'parallel']);
@@ -170,6 +171,7 @@ export default function useChatRequestCallbacks({
         ? (data.fullResponse || '')
         : (streamingTextRef.current || data.fullResponse || '');
       const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProviderForRequest);
+      const finalProviderLabel = getProviderShortLabel(finalProvider);
 
       setMessages((prev) => [...prev, {
         role: 'assistant',
@@ -201,9 +203,9 @@ export default function useChatRequestCallbacks({
     pushProcessEvent({
       level: 'success',
       title: selectedSuccessTitle,
-      message: `${selectedSuccessMessage} in ${elapsed || 0}ms using ${data.providerUsed || data.provider || selectedProviderForRequest}.`,
+      message: `${selectedSuccessMessage} in ${elapsed || 0}ms using ${finalProviderLabel}.`,
       code: selectedSuccessCode,
-      provider: normalizeProvider(data.providerUsed || data.provider || selectedProviderForRequest),
+      provider: finalProvider,
       elapsedMs: elapsed || 0,
       fallbackUsed: Boolean(data.fallbackUsed),
       fallbackFrom: data.fallbackFrom || null,
@@ -276,6 +278,7 @@ export default function useChatRequestCallbacks({
       setCurrentTraceId(data.traceId || null);
       if (data.primaryProvider) setProvider(data.primaryProvider);
       const activeProvider = normalizeProvider(data.primaryProvider || data.provider || selectedProviderForRequest);
+      const activeProviderLabel = getProviderShortLabel(activeProvider);
       setStreamProvider(activeProvider);
       setContextDebug(shouldShowContextDebug() ? (data.contextDebug || null) : null);
       setRuntimeWarnings(Array.isArray(data.warnings) ? data.warnings : []);
@@ -283,8 +286,8 @@ export default function useChatRequestCallbacks({
         level: 'info',
         title: isRetry ? 'Retry accepted' : 'Server accepted request',
         message: isRetry
-          ? `Conversation ${data.conversationId} retry started with ${activeProvider}.`
-          : `Conversation ${data.conversationId} is active. Using ${activeProvider} in ${data.mode || selectedModeForRequest} mode.`,
+          ? `Conversation ${data.conversationId} retry started with ${activeProviderLabel}.`
+          : `Conversation ${data.conversationId} is active. Using ${activeProviderLabel} in ${data.mode || selectedModeForRequest} mode.`,
         code: isRetry ? 'RETRY_ACCEPTED' : 'REQUEST_ACCEPTED',
         conversationId: data.conversationId,
         provider: activeProvider,
@@ -353,7 +356,7 @@ export default function useChatRequestCallbacks({
         pushProcessEvent({
           level: 'info',
           title: 'Provider responding',
-          message: `${chunkProvider} started streaming output.`,
+          message: `${getProviderShortLabel(chunkProvider)} started streaming output.`,
           code: 'STREAM_STARTED',
           provider: chunkProvider,
         });

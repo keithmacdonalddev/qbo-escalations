@@ -16,6 +16,7 @@ import './themes/atmospherics.css';
 import './themes/new-atmospherics.css';
 import './themes/apple.css';
 import './overhaul.css';
+import './components/AgentsView.css';
 
 installRuntimeGuards({ isDev: import.meta.env.DEV, hot: import.meta.hot });
 

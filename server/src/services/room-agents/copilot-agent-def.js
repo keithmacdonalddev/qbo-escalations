@@ -41,7 +41,7 @@ module.exports = {
   // Priority 20 — runs in stage 2, after QBO Analyst (priority 10)
   priority: 20,
   maxContextMessages: 15,
-  preferredProvider: 'claude-opus-4-6',
+  preferredProvider: 'claude-opus-4-7',
   supportsAgentTools: true,
 
   /**

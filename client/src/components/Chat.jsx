@@ -101,8 +101,8 @@ function buildStructuredParseBlock(fields = {}) {
     fields.expectedOutcome ? `EXPECTED OUTCOME: ${fields.expectedOutcome}` : '',
     fields.actualOutcome ? `ACTUAL OUTCOME: ${fields.actualOutcome}` : '',
     fields.kbToolsUsed ? `KB/TOOLS USED: ${fields.kbToolsUsed}` : '',
-    fields.tsSteps ? `TS STEPS: ${fields.tsSteps}` : '',
     fields.triedTestAccount ? `TRIED TEST ACCOUNT: ${fields.triedTestAccount}` : '',
+    fields.tsSteps ? `TS STEPS: ${fields.tsSteps}` : '',
     fields.category ? `CATEGORY: ${fields.category}` : '',
     fields.severity ? `SEVERITY: ${fields.severity}` : '',
   ].filter(Boolean);
@@ -191,6 +191,9 @@ function buildParsedEscalationSubmission(preview, note = '') {
         triage.category ? `Category: ${formatCategory(triage.category)}` : '',
         triage.read ? `Read: ${triage.read}` : '',
         triage.action ? `Action: ${triage.action}` : '',
+        Array.isArray(triage.missingInfo) && triage.missingInfo.length > 0 ? `Missing info: ${triage.missingInfo.join('; ')}` : '',
+        triage.confidence ? `Confidence: ${triage.confidence}` : '',
+        triage.categoryCheck ? `Category check: ${triage.categoryCheck}` : '',
       ].filter(Boolean).join('\n')
       : '',
     preview?.sourceText ? `Raw extracted screenshot text:\n${preview.sourceText}` : '',

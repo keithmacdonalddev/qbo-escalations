@@ -327,7 +327,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
       message: 'Parallel test message',
       provider: 'claude',
       mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
   assert.equal(chatRes.status, 200);
@@ -338,7 +338,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
   assert.ok(startMatch);
   const startData = JSON.parse(startMatch[1]);
   assert.equal(startData.mode, 'parallel');
-  assert.deepEqual((startData.parallelProviders || []).sort(), ['chatgpt-5.3-codex-high', 'claude']);
+  assert.deepEqual((startData.parallelProviders || []).sort(), ['gpt-5.5', 'claude']);
 
   const doneMatch = chatRes.text.match(/event: done\s+data: (.+)/);
   assert.ok(doneMatch);
@@ -354,7 +354,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
   assert.equal(firstTurn.service, 'chat');
   assert.equal(String(firstTurn.conversationId), startData.conversationId);
   assert.equal(firstTurn.candidates.length, 2);
-  assert.deepEqual(firstTurn.candidates.map((c) => c.provider).sort(), ['chatgpt-5.3-codex-high', 'claude']);
+  assert.deepEqual(firstTurn.candidates.map((c) => c.provider).sort(), ['gpt-5.5', 'claude']);
 
   const afterFirstRun = await Conversation.findById(startData.conversationId).lean();
   assert.equal(afterFirstRun.messages.length, 3);
@@ -362,7 +362,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
     .filter((m) => m.role === 'assistant')
     .map((m) => m.provider)
     .sort();
-  assert.deepEqual(firstAssistantProviders, ['chatgpt-5.3-codex-high', 'claude']);
+  assert.deepEqual(firstAssistantProviders, ['gpt-5.5', 'claude']);
 
   const retryRes = await agent
     .post('/api/chat/retry')
@@ -370,7 +370,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
       conversationId: startData.conversationId,
       provider: 'claude',
       mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
   assert.equal(retryRes.status, 200);
@@ -389,7 +389,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
     .filter((m) => m.role === 'assistant')
     .map((m) => m.provider)
     .sort();
-  assert.deepEqual(retryAssistantProviders, ['chatgpt-5.3-codex-high', 'claude']);
+  assert.deepEqual(retryAssistantProviders, ['gpt-5.5', 'claude']);
 });
 
 await t.test('parallel accept endpoint commits exactly one winner and is idempotent', async () => {
@@ -399,7 +399,7 @@ await t.test('parallel accept endpoint commits exactly one winner and is idempot
       message: 'Parallel accept message',
       provider: 'claude',
       mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
   assert.equal(chatRes.status, 200);
@@ -449,7 +449,7 @@ await t.test('parallel accept endpoint commits exactly one winner and is idempot
     .post(`/api/chat/parallel/${doneData.turnId}/accept`)
     .send({
       conversationId: startData.conversationId,
-      provider: 'chatgpt-5.3-codex-high',
+      provider: 'gpt-5.5',
     });
   assert.equal(conflictingAccept.status, 409);
   assert.equal(conflictingAccept.body.code, 'TURN_ALREADY_ACCEPTED');
@@ -462,7 +462,7 @@ await t.test('parallel unaccept endpoint restores both candidates after winner-o
       message: 'Parallel unaccept message',
       provider: 'claude',
       mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
 
   assert.equal(chatRes.status, 200);
@@ -495,7 +495,7 @@ await t.test('parallel unaccept endpoint restores both candidates after winner-o
   assert.equal(assistantsAfterUnaccept.length, 2);
   assert.deepEqual(
     assistantsAfterUnaccept.map((m) => m.provider).sort(),
-    ['chatgpt-5.3-codex-high', 'claude']
+    ['gpt-5.5', 'claude']
   );
   for (const assistant of assistantsAfterUnaccept) {
     assert.equal(assistant.attemptMeta.accepted, false);
@@ -517,7 +517,7 @@ await t.test('parallel discard endpoint removes unaccepted candidates', async ()
       message: 'Parallel discard message',
       provider: 'claude',
       mode: 'parallel',
-      fallbackProvider: 'chatgpt-5.3-codex-high',
+      fallbackProvider: 'gpt-5.5',
     });
   assert.equal(chatRes.status, 200);
 
@@ -763,7 +763,7 @@ await t.test('POST /api/chat rejects parallelProviders with 5 providers', async 
     .send({
       message: 'test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6', 'gpt-5-mini', 'claude'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6', 'gpt-5-mini', 'claude'],
     });
 
   assert.equal(res.status, 400);
@@ -805,7 +805,7 @@ await t.test('POST /api/chat rejects when primaryProvider not in parallelProvide
       message: 'test',
       mode: 'parallel',
       primaryProvider: 'gpt-5-mini',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high'],
+      parallelProviders: ['claude', 'gpt-5.5'],
     });
 
   assert.equal(res.status, 400);
@@ -839,7 +839,7 @@ await t.test('parallel accept rejects provider not in requestedProviders for 3-w
     .send({
       message: 'accept reject test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'chatgpt-5.3-codex-high', 'claude-sonnet-4-6'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6'],
     });
   assert.equal(chatRes.status, 200);
 

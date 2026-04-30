@@ -209,7 +209,7 @@ test('usage-writer integration suite', async (t) => {
     resetDrain();
     logUsage({
       requestId: 'req-small-nanos', attemptIndex: 0, service: 'chat',
-      provider: 'chatgpt-5.3-codex-high',
+      provider: 'gpt-5.5',
       model: 'gpt-4o-mini',
       inputTokens: 1, outputTokens: 0,
       usageAvailable: true,

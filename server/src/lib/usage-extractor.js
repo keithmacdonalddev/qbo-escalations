@@ -137,7 +137,7 @@ function extractCodexUsage(event, opts) {
  */
 const CODEX_PROVIDERS = new Set([
   ...getCodexProviderIds(),
-  'gpt-5.3-codex-high',
+  'gpt-5.5',
   'codex',
   'openai',
 ]);
@@ -146,7 +146,7 @@ const CODEX_PROVIDERS = new Set([
  * Dispatch to the correct extractor by provider ID.
  *
  * @param {Object} msg — parsed JSON event from CLI stdout
- * @param {string} provider — 'claude' or 'chatgpt-5.3-codex-high' (or similar)
+ * @param {string} provider — 'claude' or 'gpt-5.5' (or similar)
  * @param {Object} [opts]
  * @param {string} [opts.fallbackModel] — contextual model fallback (caller knows chat vs parse vs dev)
  * @returns {{ inputTokens: number, outputTokens: number, model: string, rawUsage: Object, usageComplete: boolean } | null}

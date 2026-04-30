@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const { extractCodexUsage } = require('../lib/usage-extractor');
 
-const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.3-codex';
+const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.5';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
 const CODEX_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
 function parsePositiveInt(value, fallback) {

@@ -8,6 +8,7 @@ const { getLoadedModel, getModelSnapshot } = require('./lm-studio');
 const ImageParserApiKey = require('../models/ImageParserApiKey');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
+const { validateCanonicalEscalationTemplateText } = require('../lib/escalation-template-contract');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const { validateParsedEscalation } = require('../lib/parse-validation');
 
@@ -1152,6 +1153,7 @@ function buildStructuredParseResult(text, role) {
     };
   }
 
+  const canonicalTemplate = validateCanonicalEscalationTemplateText(text);
   const parsed = parseEscalationText(text);
   const validation = validateParsedEscalation(parsed, { sourceText: text });
   const parseFields = {};
@@ -1172,11 +1174,20 @@ function buildStructuredParseResult(text, role) {
   return {
     parseFields,
     parseMeta: {
-      passed: validation.passed,
+      passed: validation.passed && canonicalTemplate.ok,
       score: validation.score,
       confidence: validation.confidence,
-      issues: validation.issues,
+      issues: [
+        ...validation.issues,
+        ...canonicalTemplate.issues.map((issue) => `canonical_${issue.code}`),
+      ],
       fieldsFound: validation.fieldsFound,
+      semanticPassed: validation.passed,
+      canonicalTemplate: {
+        passed: canonicalTemplate.ok,
+        issues: canonicalTemplate.issues,
+        labels: canonicalTemplate.labels,
+      },
     },
   };
 }

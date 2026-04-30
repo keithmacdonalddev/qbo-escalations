@@ -68,8 +68,24 @@ const WORKSPACE_ONLY_TOOLS = Object.freeze([
   { name: 'shipment.track', kind: 'read', description: 'Get carrier tracking URL and latest info for a package.', params: '{ trackingNumber }' },
 ]);
 
+const TRIAGE_TOOL_NAMES = new Set([
+  'db.searchEscalations',
+  'db.getEscalation',
+  'db.searchInvestigations',
+  'db.getInvestigation',
+  'db.searchTemplates',
+]);
+
+const PARSER_AGENT_IDS = new Set([
+  'escalation-template-parser',
+  'follow-up-chat-parser',
+]);
+
 const AGENT_PROMPT_MAP = Object.freeze({
   'chat-core': 'chat',
+  'escalation-template-parser': 'escalation-template-parser',
+  'triage-agent': 'triage-agent',
+  'follow-up-chat-parser': 'follow-up-chat-parser',
   'workspace-action': 'workspace',
   'copilot-agent': 'copilot',
   'image-parser': 'image-analyst',
@@ -312,6 +328,12 @@ function buildRelationshipMap(agentId, relationshipNotes = [], historyEntries = 
 
 function buildAvailableTools(agentId) {
   const base = [...SHARED_AGENT_TOOLS];
+  if (PARSER_AGENT_IDS.has(agentId)) {
+    return [];
+  }
+  if (agentId === 'triage-agent') {
+    return base.filter((tool) => TRIAGE_TOOL_NAMES.has(tool.name));
+  }
   if (agentId === 'workspace') {
     return [...WORKSPACE_ONLY_TOOLS, ...base];
   }

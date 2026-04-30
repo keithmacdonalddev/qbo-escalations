@@ -1,0 +1,493 @@
+.agent-profiles-page.app-content-constrained {
+  width: min(1440px, calc(100% - 48px)) !important;
+  max-width: min(1440px, calc(100% - 48px)) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  box-sizing: border-box;
+  display: grid;
+  gap: 10px;
+}
+
+.app-content-constrained.agent-profiles-page .page-header.agent-profiles-titlebar {
+  margin-bottom: 0 !important;
+  padding-bottom: 4px !important;
+  border-bottom: 0 !important;
+}
+
+.app-content-constrained.agent-profiles-page .page-header.agent-profiles-titlebar .page-title {
+  font-size: 21px !important;
+  line-height: 1.05 !important;
+}
+
+.app-content-constrained.agent-profiles-page .page-header.agent-profiles-titlebar .text-secondary {
+  margin: 3px 0 0;
+  font-size: 12px !important;
+}
+
+.agent-profiles-shell {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  max-width: 100%;
+}
+
+.agent-profile-pane,
+.agent-section-stack,
+.agent-expanded-grid {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.agent-profile-pane {
+  overflow: hidden;
+}
+
+.agent-profiles-page .card {
+  box-sizing: border-box;
+}
+
+.agent-directory.card {
+  position: sticky;
+  top: 8px;
+  width: 260px !important;
+  min-width: 0 !important;
+  max-height: calc(100vh - 84px);
+  overflow: hidden;
+  display: grid;
+  gap: 8px;
+  padding: 8px !important;
+  border-radius: 8px !important;
+}
+
+.agent-directory-search {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-directory-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.agent-directory-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.agent-directory-header .text-secondary {
+  font-size: 11px;
+}
+
+.agent-directory-search input[type="search"] {
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.agent-directory-list {
+  overflow: auto;
+  display: grid;
+  gap: 4px;
+  padding-right: 2px;
+}
+
+.agent-list-row {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  border: 1px solid var(--line-subtle);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--ink);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.agent-list-row:hover {
+  border-color: rgba(10, 132, 255, 0.32);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.agent-list-row.is-selected {
+  border-color: var(--accent);
+  background: rgba(10, 132, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(10, 132, 255, 0.55);
+}
+
+.agent-list-row-copy {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.agent-list-row-copy strong,
+.agent-list-row-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-list-row-copy strong {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.agent-list-row-copy span {
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.agent-profile-header.card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px !important;
+  border-radius: 8px !important;
+}
+
+.agent-profile-header-main {
+  min-width: 0;
+}
+
+.agent-profile-name-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-profile-name-row h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px !important;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-profile-headline {
+  margin: 3px 0 0;
+  font-size: 12px !important;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-profile-badges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  flex-wrap: wrap;
+  max-width: 390px;
+}
+
+.agent-profiles-page .badge {
+  padding: 2px 7px !important;
+  font-size: 10px !important;
+  line-height: 1.25 !important;
+  white-space: nowrap;
+}
+
+.agent-profiles-page .agent-runtime-badge {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.agent-summary-card.card {
+  min-height: 68px;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px !important;
+  border-radius: 8px !important;
+}
+
+.agent-summary-card h3,
+.agent-panel h4,
+.agent-details-summary h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.agent-summary-card div {
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-summary-card p {
+  margin: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.agent-details-section.card {
+  padding: 9px 10px !important;
+  border-radius: 8px !important;
+}
+
+.agent-details-section summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.agent-details-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.agent-details-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.agent-details-summary p {
+  margin: 2px 0 0;
+  font-size: 11px !important;
+  line-height: 1.25;
+}
+
+.agent-details-summary > span {
+  font-size: 11px !important;
+  flex: 0 0 auto;
+}
+
+.agent-details-body {
+  margin-top: 10px;
+}
+
+.agent-profile-details {
+  display: grid;
+  gap: 9px;
+}
+
+.agent-definition-grid,
+.agent-count-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-definition,
+.agent-tag-block {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.agent-definition > span:last-child {
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-tag-list {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.agent-two-column,
+.agent-prompt-version-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.agent-admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-runtime-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-runtime-primary-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 0.45fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.agent-runtime-advanced {
+  padding-top: 3px;
+}
+
+.agent-runtime-advanced summary {
+  width: fit-content;
+  color: var(--ink-tertiary);
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.agent-runtime-advanced[open] summary {
+  margin-bottom: 8px;
+}
+
+.agent-runtime-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-runtime-field {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.agent-runtime-field input,
+.agent-runtime-field select {
+  width: 100%;
+  min-height: 32px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.agent-runtime-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-self: end;
+}
+
+.agent-panel.card-compact,
+.agent-count-card.card-compact,
+.agent-compact-item.card-compact {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+}
+
+.agent-count-card strong {
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.agent-compact-item-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: start;
+}
+
+.agent-compact-item-head strong {
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.agent-compact-item .text-secondary {
+  font-size: 11px !important;
+}
+
+.agent-compact-item-body {
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.agent-timeline-list {
+  display: grid;
+  gap: 5px;
+}
+
+.agent-empty-state {
+  font-size: 12px !important;
+}
+
+.agent-inline-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px !important;
+}
+
+@media (max-width: 1180px) {
+  .agent-profile-header.card {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .agent-profile-badges {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    max-width: none;
+  }
+
+  .agent-definition-grid,
+  .agent-admin-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .agent-profiles-shell,
+  .agent-overview-grid,
+  .agent-two-column,
+  .agent-prompt-version-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-directory.card {
+    position: static;
+    width: auto !important;
+    max-height: 260px;
+  }
+}
+
+@media (max-width: 640px) {
+  .agent-profiles-page.app-content-constrained {
+    width: calc(100% - 16px) !important;
+    max-width: calc(100% - 16px) !important;
+  }
+
+  .agent-profile-header.card {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .agent-profile-name-row h2 {
+    font-size: 17px !important;
+  }
+
+  .agent-definition-grid,
+  .agent-count-grid,
+  .agent-admin-form-grid,
+  .agent-runtime-primary-row,
+  .agent-runtime-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

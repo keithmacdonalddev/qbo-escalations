@@ -7,7 +7,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
  * Normalize a raw tool event into a canonical schema at capture time.
  *
  * @param {Object} rawEvent - { tool, status, details } from toToolEvents()
- * @param {string} provider - provider ID (e.g. 'claude', 'gpt-5.3-codex-high')
+ * @param {string} provider - provider ID (e.g. 'claude', 'gpt-5.5')
  * @returns {{ toolFamily: string, operation: string, pathsRead: string[], pathsWritten: string[], raw: Object, provider: string }}
  */
 function normalizeToolEvent(rawEvent, provider) {

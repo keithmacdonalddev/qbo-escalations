@@ -6,9 +6,19 @@ const userPreferencesSchema = new mongoose.Schema({
   _id:                    { type: String, default: 'singleton' },
   defaultGmailAccount:    { type: String, default: '', trim: true, lowercase: true },
   defaultCalendarAccount: { type: String, default: '', trim: true, lowercase: true },
+  aiAssistantDefaults:    { type: mongoose.Schema.Types.Mixed, default: null },
 }, {
   timestamps: true,
 });
+
+function cloneJsonObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Get the singleton preferences doc, creating it if missing.
@@ -33,6 +43,9 @@ userPreferencesSchema.statics.upsert = async function (fields = {}) {
   }
   if (fields.defaultCalendarAccount !== undefined) {
     $set.defaultCalendarAccount = (fields.defaultCalendarAccount || '').trim().toLowerCase();
+  }
+  if (fields.aiAssistantDefaults !== undefined) {
+    $set.aiAssistantDefaults = cloneJsonObject(fields.aiAssistantDefaults);
   }
   if (Object.keys($set).length === 0) {
     return this.get();

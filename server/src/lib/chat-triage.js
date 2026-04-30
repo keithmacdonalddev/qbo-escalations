@@ -87,6 +87,32 @@ function buildFieldHaystack(fields) {
   ].join(' ').toLowerCase();
 }
 
+function hasAnyIdentifier(fields) {
+  return Boolean(
+    normalizeSpacing(fields && fields.coid)
+    || normalizeSpacing(fields && fields.mid)
+    || normalizeSpacing(fields && fields.caseNumber)
+  );
+}
+
+function hasSpecificActualOutcome(fields) {
+  const actual = normalizeSpacing(fields && fields.actualOutcome).toLowerCase();
+  if (!actual) return false;
+  if (actual.length >= 24) return true;
+  return /\b(error|message|code|missing|failed|fails|unable|cannot|can't|blocked|blank|not|didn'?t)\b/.test(actual);
+}
+
+function fieldLooksUnknown(value) {
+  const normalized = normalizeSpacing(value).toLowerCase();
+  return !normalized || normalized === 'unknown' || normalized === 'n/a' || normalized === 'na';
+}
+
+function pushUnique(items, value) {
+  const text = normalizeSpacing(value);
+  if (!text || items.includes(text)) return;
+  items.push(text);
+}
+
 function extractFormType(haystack) {
   if (!haystack) return '';
   if (/\bt4a\b/.test(haystack)) return 'T4A';
@@ -237,6 +263,78 @@ function buildTriageAction(fields, category) {
   return detectSpecializedTriage(fields, category, buildFieldHaystack(fields)).action;
 }
 
+function buildMissingInfo(fields, category) {
+  const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  const haystack = buildFieldHaystack(sourceFields);
+  const missing = [];
+
+  if (!hasAnyIdentifier(sourceFields)) pushUnique(missing, 'COID/MID or case number');
+  if (fieldLooksUnknown(sourceFields.clientContact)) pushUnique(missing, 'Client/contact name');
+  if (fieldLooksUnknown(sourceFields.attemptingTo)) pushUnique(missing, 'Exact customer goal');
+  if (!hasSpecificActualOutcome(sourceFields)) pushUnique(missing, 'Exact actual outcome or error text');
+  if (fieldLooksUnknown(sourceFields.tsSteps)) pushUnique(missing, 'Troubleshooting already attempted');
+  if (fieldLooksUnknown(sourceFields.triedTestAccount)) pushUnique(missing, 'Whether this reproduces in a test account');
+
+  if (category === 'payroll') {
+    if (!/\b(20\d{2}|tax year|payroll period|pay date|t4|t4a|w-?2|1099)\b/.test(haystack)) {
+      pushUnique(missing, 'Payroll period, pay date, or tax year');
+    }
+  } else if (category === 'bank-feeds') {
+    if (!/\b(bank|account|feed|connection)\b/.test(haystack)) {
+      pushUnique(missing, 'Bank name and whether one or all accounts are affected');
+    }
+  } else if (category === 'permissions') {
+    if (!/\b(role|admin|user|permission|access)\b/.test(haystack)) {
+      pushUnique(missing, 'Affected user role and admin reproduction result');
+    }
+  } else if (category === 'reports') {
+    if (!/\b(report|date range|basis|cash|accrual|filter)\b/.test(haystack)) {
+      pushUnique(missing, 'Report name, basis, filters, and date range');
+    }
+  }
+
+  return missing.length > 0 ? missing.slice(0, 5) : ['No obvious gaps from the parsed template.'];
+}
+
+function inferTriageConfidence(fields, category, missingInfo) {
+  const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  const missingCount = Array.isArray(missingInfo) && missingInfo[0] !== 'No obvious gaps from the parsed template.'
+    ? missingInfo.length
+    : 0;
+  const coreSignals = [
+    normalizeSpacing(sourceFields.attemptingTo),
+    hasSpecificActualOutcome(sourceFields) ? 'actual' : '',
+    normalizeSpacing(sourceFields.tsSteps),
+    hasAnyIdentifier(sourceFields) ? 'identifier' : '',
+    category && category !== 'technical' ? category : '',
+  ].filter(Boolean).length;
+
+  if (coreSignals >= 4 && missingCount <= 1) return 'high';
+  if (coreSignals >= 3 && missingCount <= 3) return 'medium';
+  return 'low';
+}
+
+function buildCategoryCheck(fields, category) {
+  const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  const haystack = buildFieldHaystack(sourceFields);
+  const categoryLabel = category.replace(/-/g, ' ');
+  const formType = extractFormType(haystack);
+
+  if (category === 'payroll' && formType) {
+    return `${categoryLabel} because ${formType} forms are generated from payroll workflows; tax is secondary unless the blocker is tax setup or filing setup.`;
+  }
+  if (category === 'payroll' && /\bcra\b/.test(haystack)) {
+    return 'Payroll because the CRA mention is tied to a payroll form or export workflow, not a standalone sales-tax setup issue.';
+  }
+  if (category === 'technical' && /(sign in|sign-in|login|mfa|2fa|verification code)/.test(haystack)) {
+    return 'Technical because the blocker is authentication/session flow rather than a product-area workflow.';
+  }
+  if (category === 'permissions') {
+    return 'Permissions because the next proof point is role/access comparison, especially admin versus affected user behavior.';
+  }
+  return `Fits ${categoryLabel} based on the failing workflow and actual outcome; revisit if follow-up context names a different product area.`;
+}
+
 function isNonEscalationIntent(messageText) {
   const text = safeString(messageText, '').toLowerCase().trim();
   if (!text) return false;
@@ -265,6 +363,13 @@ function buildFallbackTriageCard() {
     severity: 'P3',
     read: 'The screenshot indicates a QBO workflow issue that needs focused troubleshooting to isolate the exact failure point.',
     action: 'Reproduce the exact failing step once, capture the precise result or error text, and confirm whether the issue is isolated or company-wide before escalating.',
+    missingInfo: [
+      'Canonical escalation fields did not validate',
+      'Exact actual outcome or error text',
+      'Troubleshooting already attempted',
+    ],
+    confidence: 'low',
+    categoryCheck: 'Technical is the safest default until the canonical template validates and points to a product area.',
   };
 }
 
@@ -274,6 +379,7 @@ function buildServerTriageCard(fields) {
   const specialized = detectSpecializedTriage(sourceFields, baseCategory, buildFieldHaystack(sourceFields));
   const category = normalizeTriageCategory(specialized.category || baseCategory);
   const severity = inferTriageSeverity(sourceFields);
+  const missingInfo = buildMissingInfo(sourceFields, category);
   return {
     agent: firstNonEmpty([sourceFields.agentName], 'Unknown'),
     client: firstNonEmpty([sourceFields.clientContact], 'Unknown'),
@@ -281,6 +387,9 @@ function buildServerTriageCard(fields) {
     severity,
     read: specialized.read || buildTriageRead(sourceFields, category),
     action: specialized.action || buildTriageAction(sourceFields, category),
+    missingInfo,
+    confidence: inferTriageConfidence(sourceFields, category, missingInfo),
+    categoryCheck: buildCategoryCheck(sourceFields, category),
   };
 }
 
@@ -296,8 +405,8 @@ function buildTriageRefBlock(parseFields) {
     f.attemptingTo ? `CX Attempting: ${f.attemptingTo}` : '',
     f.expectedOutcome ? `Expected Outcome: ${f.expectedOutcome}` : '',
     f.actualOutcome ? `Actual Outcome: ${f.actualOutcome}` : '',
-    f.tsSteps ? `TS Steps: ${f.tsSteps}` : '',
     f.triedTestAccount ? `Tried Test Account: ${f.triedTestAccount}` : '',
+    f.tsSteps ? `TS Steps: ${f.tsSteps}` : '',
     f.category ? `Category: ${f.category}` : '',
     f.severity ? `Severity: ${f.severity}` : '',
     f.product ? `Product: ${f.product}` : '',
