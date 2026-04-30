@@ -39,6 +39,14 @@ const conversationSchema = new mongoose.Schema({
   systemPromptHash: { type: String, default: '' },
   forkedFrom: { type: mongoose.Schema.Types.ObjectId, ref: 'Conversation', default: null },
   forkMessageIndex: { type: Number, default: null },
+  caseIntake: {
+    type: mongoose.Schema.Types.Mixed,
+    default: () => ({
+      status: 'none',
+      runs: [],
+      followUps: [],
+    }),
+  },
   // Denormalized fields — kept in sync by pre-save hook.
   // Lets list queries skip the messages array entirely.
   messageCount: { type: Number, default: 0 },

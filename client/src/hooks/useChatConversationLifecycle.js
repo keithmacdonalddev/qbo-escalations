@@ -42,6 +42,7 @@ export default function useChatConversationLifecycle({
   setThinkingStartTime,
   setThinkingText,
   setTriageCard,
+  setCaseIntake,
   setMode,
   splitModeActiveRef,
   streamingTextRef,
@@ -52,6 +53,7 @@ export default function useChatConversationLifecycle({
     setError(null);
     setFallbackNotice(null);
     setTriageCard(null);
+    setCaseIntake(null);
     setInvMatches(null);
     setContextDebug(null);
     setRuntimeWarnings([]);
@@ -73,6 +75,7 @@ export default function useChatConversationLifecycle({
     setThinkingStartTime,
     setThinkingText,
     setTriageCard,
+    setCaseIntake,
     thinkingTextRef,
   ]);
 
@@ -130,6 +133,7 @@ export default function useChatConversationLifecycle({
       splitModeActiveRef.current = hadParallel;
 
       setMessages(normalizedMessages);
+      setCaseIntake(conv.caseIntake || null);
     } catch (err) {
       setError(err?.message);
     }
@@ -138,6 +142,7 @@ export default function useChatConversationLifecycle({
     resetStreamingState,
     resetTransientState,
     setConversationId,
+    setCaseIntake,
     setError,
     setMessages,
     setMode,
@@ -151,6 +156,7 @@ export default function useChatConversationLifecycle({
     setConversationId(null);
     conversationIdRef.current = null;
     setMessages([]);
+    setCaseIntake(null);
     clearChatMessagesSnapshot();
     resetProcessEvents();
     setStreamingText('');
@@ -169,6 +175,7 @@ export default function useChatConversationLifecycle({
     resetProcessEvents,
     setConversationId,
     setMessages,
+    setCaseIntake,
     setParallelStreaming,
     setSplitModeActive,
     setStreamingText,

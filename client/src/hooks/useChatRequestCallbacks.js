@@ -127,6 +127,7 @@ export default function useChatRequestCallbacks({
   setThinkingText,
   setThinkingStartTime,
   setTriageCard,
+  setCaseIntake,
   shouldShowContextDebug,
   startTimeRef,
   streamingTextRef,
@@ -145,6 +146,9 @@ export default function useChatRequestCallbacks({
     setResponseTime(elapsed);
     setContextDebug(shouldShowContextDebug() ? (data.contextDebug || null) : null);
     setRuntimeWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+    if (data.caseIntake) {
+      setCaseIntake(data.caseIntake);
+    }
 
     const providerThinking = data?.providerThinking && typeof data.providerThinking === 'object' && !Array.isArray(data.providerThinking)
       ? data.providerThinking
@@ -248,6 +252,7 @@ export default function useChatRequestCallbacks({
     setParallelStreaming,
     setResponseTime,
     setRuntimeWarnings,
+    setCaseIntake,
     setSplitModeActive,
     setStreamProvider,
     setStreamingText,
@@ -282,6 +287,9 @@ export default function useChatRequestCallbacks({
       setStreamProvider(activeProvider);
       setContextDebug(shouldShowContextDebug() ? (data.contextDebug || null) : null);
       setRuntimeWarnings(Array.isArray(data.warnings) ? data.warnings : []);
+      if (data.caseIntake) {
+        setCaseIntake(data.caseIntake);
+      }
       pushProcessEvent({
         level: 'info',
         title: isRetry ? 'Retry accepted' : 'Server accepted request',
@@ -313,6 +321,21 @@ export default function useChatRequestCallbacks({
         title: 'Triage card received',
         message: `${data.severity || '?'} ${data.category || 'unknown'} — ${(data.read || '').slice(0, 80)}`,
         code: 'TRIAGE_CARD',
+      });
+    },
+    onCaseIntake: (data) => {
+      if (!data || typeof data !== 'object') return;
+      setCaseIntake(data);
+      const activeRun = Array.isArray(data.runs)
+        ? data.runs.find((run) => run?.id && run.id === data.activeRunId)
+          || [...data.runs].reverse().find((run) => run?.status === 'running')
+        : null;
+      pushProcessEvent({
+        level: data.status === 'failed' ? 'error' : 'info',
+        title: 'Case workflow updated',
+        message: activeRun?.summary || data.triageCard?.read || data.status || 'Case workflow state changed.',
+        code: 'CASE_INTAKE',
+        provider: activeRun?.provider || undefined,
       });
     },
     onInvMatches: (data) => {
@@ -415,6 +438,7 @@ export default function useChatRequestCallbacks({
             conversationIdRef.current = conversation._id || conversationIdRef.current;
             setProvider(conversationProvider);
             setMessages(normalizedMessages);
+            setCaseIntake(conversation.caseIntake || null);
             setSplitModeActive(hadParallel);
             setStreamProvider(recoveredProvider);
             if (!String(thinkingTextRef.current || '').trim() && recoveredThinking.trim()) {
@@ -437,6 +461,9 @@ export default function useChatRequestCallbacks({
       }
 
       if (!recovered) {
+        if (normalized.caseIntake) {
+          setCaseIntake(normalized.caseIntake);
+        }
         setError(normalized);
         tel(TEL.CHAT_ERROR, `${selectedFailureTelMessage}: ${normalized.message}`, {
           code: normalized.code,
@@ -506,6 +533,7 @@ export default function useChatRequestCallbacks({
     setMessages,
     setResponseTime,
     setRuntimeWarnings,
+    setCaseIntake,
     shouldShowContextDebug,
     thinkingTextRef,
     streamingTextRef,

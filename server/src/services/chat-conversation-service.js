@@ -228,6 +228,7 @@ async function forkConversation(id, fromMessageIndex) {
     provider: normalizeProvider(source.provider),
     escalationId: source.escalationId || null,
     systemPromptHash: source.systemPromptHash || '',
+    caseIntake: source.caseIntake ? JSON.parse(JSON.stringify(source.caseIntake)) : undefined,
     forkedFrom: source._id,
     forkMessageIndex: sliceEnd - 1,
   });

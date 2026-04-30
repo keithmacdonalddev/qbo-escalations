@@ -190,7 +190,11 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       return;
     }
     if (data?.text) {
-      onParsed(data.text);
+      onParsed({
+        ...data,
+        providerUsed: provider,
+        modelUsed: data?.usage?.model || model || '',
+      });
       // Reset state for next use
       setImagePreview(null);
       setImageBase64(null);

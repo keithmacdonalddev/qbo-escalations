@@ -22,6 +22,7 @@ export default function useChatStreamState({ initialStreamProvider = null } = {}
   const [contextDebug, setContextDebug] = useState(null);
   const [runtimeWarnings, setRuntimeWarnings] = useState([]);
   const [triageCard, setTriageCard] = useState(null);
+  const [caseIntake, setCaseIntake] = useState(null);
   const [invMatches, setInvMatches] = useState(null);
   const [processEvents, setProcessEvents] = useState([]);
   const [thinkingText, setThinkingText] = useState('');
@@ -134,6 +135,8 @@ export default function useChatStreamState({ initialStreamProvider = null } = {}
     setRuntimeWarnings,
     triageCard,
     setTriageCard,
+    caseIntake,
+    setCaseIntake,
     invMatches,
     setInvMatches,
     processEvents,

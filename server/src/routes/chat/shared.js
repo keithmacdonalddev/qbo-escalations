@@ -41,6 +41,7 @@ async function saveConversationLenient(conversation) {
           messages: serializedMessages,
           escalationId: conversation.escalationId || null,
           systemPromptHash: conversation.systemPromptHash || '',
+          caseIntake: conversation.caseIntake || { status: 'none', runs: [], followUps: [] },
           updatedAt: new Date(),
         },
       }

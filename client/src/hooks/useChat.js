@@ -86,6 +86,8 @@ export function useChat(options = {}) {
     setRuntimeWarnings,
     triageCard,
     setTriageCard,
+    caseIntake,
+    setCaseIntake,
     invMatches,
     setInvMatches,
     processEvents,
@@ -245,6 +247,7 @@ export function useChat(options = {}) {
     setThinkingStartTime,
     setThinkingText,
     setTriageCard,
+    setCaseIntake,
     setMode,
     setProvider,
     splitModeActiveRef,
@@ -357,6 +360,7 @@ export function useChat(options = {}) {
     setThinkingStartTime,
     setThinkingText,
     setTriageCard,
+    setCaseIntake,
     shouldShowContextDebug,
   });
   const abortStream = useCallback(() => {
@@ -372,6 +376,28 @@ export function useChat(options = {}) {
     clearScheduledStreamFlush();
     setIsStreaming(false);
     isStreamingRef.current = false;
+    setCaseIntake((prev) => {
+      if (!prev || prev.status !== 'analyst-running') return prev;
+      const nextRuns = Array.isArray(prev.runs)
+        ? prev.runs.map((run) => (
+            run?.phase === 'analyst' && run.status === 'running'
+              ? {
+                  ...run,
+                  status: 'failed',
+                  completedAt: new Date().toISOString(),
+                  summary: 'Request cancelled before the analyst finished.',
+                }
+              : run
+          ))
+        : [];
+      return {
+        ...prev,
+        status: 'failed',
+        runs: nextRuns,
+        activeRunId: '',
+        updatedAt: new Date().toISOString(),
+      };
+    });
     setTriageCard(null);
     setInvMatches(null);
     setStreamingText('');
@@ -383,7 +409,7 @@ export function useChat(options = {}) {
     setIsThinking(false);
     isThinkingRef.current = false;
     setThinkingStartTime(null);
-  }, [clearScheduledStreamFlush, pushProcessEvent]);
+  }, [clearScheduledStreamFlush, pushProcessEvent, setCaseIntake]);
 
   const dismissFallbackNotice = useCallback(() => {
     setFallbackNotice(null);
@@ -435,6 +461,8 @@ export function useChat(options = {}) {
     unacceptParallelTurn,
     triageCard,
     setTriageCard,
+    caseIntake,
+    setCaseIntake,
     invMatches,
     abortStream,
     selectConversation,

@@ -54,6 +54,11 @@ const {
   prepareChatRequest,
 } = require('../../services/chat-request-service');
 const {
+  buildCaseIntakeFromParsedEscalation,
+  completeCaseIntakeAnalystRun,
+  failCaseIntakeAnalystRun,
+} = require('../../lib/case-intake');
+const {
   buildContextDebugPayload,
   deriveFallbackReasonCode,
   ensureMessagesArray,
@@ -538,6 +543,23 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     parsedEscalationProvider: parsedEscalationProvider || policy.primaryProvider,
     parsedEscalationModel: parsedEscalationModel || '',
   });
+  const parsedEscalationCanonicalText = safeString(parsedEscalationSource, '') === 'image-parser'
+    ? safeString(parsedEscalationText, '')
+    : '';
+  if (parsedEscalationCanonicalText || imageTriageContext) {
+    conversation.caseIntake = buildCaseIntakeFromParsedEscalation({
+      existing: conversation.caseIntake,
+      sourceText: parsedEscalationCanonicalText,
+      imageTriageContext,
+      parserProvider: parsedEscalationProvider || 'image-parser',
+      parserModel: parsedEscalationModel || '',
+      analystProvider: policy.primaryProvider,
+      analystModel: policy.primaryModel || primaryTraceModel,
+      traceId: trace ? trace._id.toString() : null,
+      startedAt: traceStartedAt,
+    });
+    conversation.markModified?.('caseIntake');
+  }
   const useSharedAgentTools = policy.mode !== 'parallel';
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
   if (invMatchResult.matches.length > 0) {
@@ -622,7 +644,13 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     turnId: requestTurnId,
     warnings: guardrail.warnings || [],
     contextDebug: contextDebugPayload,
+    caseIntake: conversation.caseIntake || null,
   }) + '\n\n');
+  if (!responseClosed && conversation.caseIntake && conversation.caseIntake.status !== 'none') {
+    try {
+      res.write('event: case_intake\ndata: ' + JSON.stringify(conversation.caseIntake) + '\n\n');
+    } catch { /* client disconnected */ }
+  }
   // Emit transcription result as an SSE event so the client knows text was extracted.
   if (imageTranscription && imageTranscription.text && !responseClosed) {
     try {
@@ -711,10 +739,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     console.error('[chat] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
     streamSettled = true;
     clearInterval(heartbeat);
+    if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+      conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+        provider: policy.primaryProvider,
+        model: primaryTraceModel,
+        traceId: trace ? trace._id.toString() : null,
+        error: {
+          code: 'SSE_STREAM_TIMEOUT',
+          message: 'Request timed out - please try again',
+        },
+        completedAt: new Date(),
+      });
+      conversation.markModified?.('caseIntake');
+      saveConversationLenient(conversation).catch(() => {});
+    }
     try {
       res.write('event: error\ndata: ' + JSON.stringify({
         error: 'Request timed out — please try again',
         code: 'SSE_STREAM_TIMEOUT',
+        caseIntake: conversation.caseIntake || null,
       }) + '\n\n');
       res.end();
     } catch { /* client already gone */ }
@@ -1046,6 +1089,30 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           }
         }
 
+        if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+          const analystModelUsed = safeString(compliantData.modelUsed, '')
+            || (compliantData.usage && compliantData.usage.model)
+            || getProviderModelId(compliantData.providerUsed || policy.primaryProvider);
+          const analystSummary = safeString(compliantData.fullResponse, '')
+            .replace(/\s+/g, ' ')
+            .trim()
+            .slice(0, 240);
+          conversation.caseIntake = completeCaseIntakeAnalystRun(conversation.caseIntake, {
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: analystModelUsed,
+            traceId: trace ? trace._id.toString() : null,
+            summary: analystSummary || 'Deep support guidance completed.',
+            detail: {
+              usage: compliantData.usage || null,
+              fallbackUsed: Boolean(compliantData.fallbackUsed),
+              fallbackFrom: compliantData.fallbackFrom || null,
+              attempts: attempts.length,
+            },
+            completedAt: new Date(),
+          });
+          conversation.markModified?.('caseIntake');
+        }
+
         await saveConversationLenient(conversation);
         await setTraceAttempts(trace?._id, attempts);
         await setTraceUsage(trace?._id, compliantData.usage);
@@ -1144,6 +1211,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             citations: contextBundle.citations || [],
             quickActions,
             escalationId: conversation.escalationId ? conversation.escalationId.toString() : null,
+            caseIntake: conversation.caseIntake || null,
           }) + '\n\n');
           res.end();
         } catch { /* client gone */ }
@@ -1267,6 +1335,21 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         detail: err.detail || '',
         severity: 'error',
       });
+      if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+        conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+          provider: policy.primaryProvider,
+          model: safeString(err && err.modelUsed, '') || primaryTraceModel,
+          traceId: trace ? trace._id.toString() : null,
+          error: {
+            code: err.code || 'PROVIDER_EXEC_FAILED',
+            message: err.message || 'Chat failed',
+            detail: err.detail || '',
+          },
+          completedAt: new Date(),
+        });
+        conversation.markModified?.('caseIntake');
+        saveConversationLenient(conversation).catch(() => {});
+      }
       if (requestTurnId && policy.mode === 'parallel') {
         ParallelCandidateTurn.findOneAndUpdate(
           { turnId: requestTurnId },
@@ -1298,6 +1381,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           attempts: err.attempts || [],
           warnings: guardrail.warnings || [],
           contextDebug: contextDebugPayload,
+          caseIntake: conversation.caseIntake || null,
         }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
@@ -1341,6 +1425,20 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         message: 'Chat request aborted before completion',
         detail: { attempts: abortData.attempts || [] },
       }, traceStartedAt).catch(() => {});
+      if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+        conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+          provider: policy.primaryProvider,
+          model: primaryTraceModel,
+          traceId: trace ? trace._id.toString() : null,
+          error: {
+            code: 'CLIENT_ABORT',
+            message: 'Chat request aborted before completion',
+          },
+          completedAt: new Date(),
+        });
+        conversation.markModified?.('caseIntake');
+        saveConversationLenient(conversation).catch(() => {});
+      }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           error: 'Chat request aborted before completion',
@@ -1348,6 +1446,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           attempts: abortData.attempts || [],
           warnings: guardrail.warnings || [],
           contextDebug: contextDebugPayload,
+          caseIntake: conversation.caseIntake || null,
         }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }
@@ -1369,10 +1468,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         },
       });
       if (cleanupFn) cleanupFn();
+      if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+        conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+          provider: policy.primaryProvider,
+          model: primaryTraceModel,
+          traceId: trace ? trace._id.toString() : null,
+          error: {
+            code: 'AUTO_ABORT',
+            message: reason,
+          },
+          completedAt: new Date(),
+        });
+        conversation.markModified?.('caseIntake');
+        saveConversationLenient(conversation).catch(() => {});
+      }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           error: reason,
           code: 'AUTO_ABORT',
+          caseIntake: conversation.caseIntake || null,
         }) + '\n\n');
         res.end();
       } catch { /* client disconnected */ }

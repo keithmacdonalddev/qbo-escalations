@@ -7,6 +7,7 @@ import ChatMessage from '../ChatMessage.jsx';
 import ParallelResponsePair from '../ParallelResponsePair.jsx';
 import TriageCard from '../TriageCard.jsx';
 import InvMatchBanner from '../InvMatchBanner.jsx';
+import CaseIntakeTimeline from './CaseIntakeTimeline.jsx';
 
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
@@ -88,6 +89,7 @@ export default function ChatThreadStack({
   activityExpanded,
   setActivityExpanded,
   clearProcessEvents,
+  caseIntake,
   triageCard,
   invMatches,
   error,
@@ -180,6 +182,8 @@ export default function ChatThreadStack({
     <div className="chat-with-thinking">
       <div className="chat-container">
         <div className="chat-messages" role="log" aria-label="Chat messages" aria-live="polite">
+          <CaseIntakeTimeline caseIntake={caseIntake} />
+
           {runtimeWarnings.length > 0 && (
             <div className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--warning)', background: 'var(--warning-subtle)' }}>
               <strong style={{ marginRight: 'var(--sp-2)', color: 'var(--warning)' }}>Budget Notice:</strong>

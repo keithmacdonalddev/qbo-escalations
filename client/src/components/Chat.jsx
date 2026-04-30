@@ -244,6 +244,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     unacceptParallelTurn,
     triageCard,
     setTriageCard,
+    caseIntake,
     invMatches,
     abortStream,
     selectConversation,
@@ -410,7 +411,8 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
       requestExtras: {
         parsedEscalationText: preview.sourceText,
         parsedEscalationSource: 'image-parser',
-        parsedEscalationProvider: provider,
+        parsedEscalationProvider: preview.parserProvider || provider,
+        parsedEscalationModel: preview.parserModel || '',
       },
     });
     setParsedDraftState({ phase: 'sent' });
@@ -434,7 +436,17 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     setActivityExpanded(false);
     setParseMeta(null);
     setTriageCard(null);
-    const preview = buildParsedEscalationPreviewFromText(text);
+    const parserProvider = typeof parsedText === 'object' && parsedText
+      ? safeText(parsedText.providerUsed || parsedText.provider || '')
+      : '';
+    const parserModel = typeof parsedText === 'object' && parsedText
+      ? safeText(parsedText.modelUsed || parsedText.usage?.model || parsedText.model || '')
+      : '';
+    const preview = {
+      ...buildParsedEscalationPreviewFromText(text),
+      parserProvider,
+      parserModel,
+    };
     setParsedEscalationPreview(preview);
     submitParsedEscalationPreview('', preview);
     appendProcessEvent({
@@ -649,6 +661,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 activityExpanded={activityExpanded}
                 setActivityExpanded={setActivityExpanded}
                 clearProcessEvents={clearProcessEvents}
+                caseIntake={caseIntake}
                 hideTriageCard={Boolean(parsedEscalationPreview && parsedDraftState?.phase !== 'sent')}
               />
             }

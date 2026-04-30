@@ -72,6 +72,7 @@ export default function useChatRequestFlow({
   setThinkingStartTime,
   setThinkingText,
   setTriageCard,
+  setCaseIntake,
   shouldShowContextDebug,
 }) {
   const { createHandlers, buildRequestSeedEvent, resetActiveRequestState } = useChatRequestCallbacks({
@@ -104,6 +105,7 @@ export default function useChatRequestFlow({
     setThinkingText,
     setThinkingStartTime,
     setTriageCard,
+    setCaseIntake,
     shouldShowContextDebug,
     startTimeRef,
     streamingTextRef,

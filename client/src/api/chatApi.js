@@ -11,7 +11,7 @@ const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
  * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onInvMatches, onLocalStage }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat`;
   const hasImages = Array.isArray(body.images) && body.images.length > 0;
@@ -66,6 +66,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         else if (eventType === 'message' && data?.type === 'status') onStatus?.(data);
         else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'case_intake') onCaseIntake?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
@@ -108,7 +109,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
  * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onInvMatches, onLocalStage }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage }) {
   const controller = new AbortController();
   const url = `${BASE}/chat/retry`;
 
@@ -142,6 +143,7 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
         else if (eventType === 'message' && data?.type === 'status') onStatus?.(data);
         else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
         else if (eventType === 'triage_card') onTriageCard?.(data);
+        else if (eventType === 'case_intake') onCaseIntake?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
