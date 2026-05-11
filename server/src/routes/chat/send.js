@@ -92,6 +92,7 @@ const CHAT_ACTIVITY_AGENT_ID = 'chat';
 function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceId } = {}) {
   const runs = Array.isArray(caseIntake?.runs) ? caseIntake.runs : [];
   const parserRun = runs.find((run) => run?.phase === 'parse-template');
+  const knownIssueRun = runs.find((run) => run?.phase === 'known-issue-search');
   const triageRun = runs.find((run) => run?.phase === 'triage');
 
   if (parserRun) {
@@ -103,10 +104,33 @@ function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceI
       detail: {
         provider: parserRun.provider || '',
         model: parserRun.model || '',
+        durationMs: Number.isFinite(Number(parserRun.durationMs)) ? Number(parserRun.durationMs) : null,
+        fallbackUsed: Boolean(parserRun.fallbackUsed),
+        fallbackFrom: parserRun.fallbackFrom || '',
         traceId: parserRun.traceId || traceId || '',
       },
       conversationId,
       metadata: { traceId: parserRun.traceId || traceId || '' },
+    }, { surface: 'chat', conversationId }).catch(() => {});
+  }
+
+  if (knownIssueRun) {
+    recordAgentActivity('known-issue-search-agent', {
+      type: 'case-intake',
+      phase: 'known-issue-search',
+      status: knownIssueRun.status || 'completed',
+      summary: knownIssueRun.summary || 'Known Issue Search Agent checked active investigations.',
+      detail: {
+        provider: knownIssueRun.provider || '',
+        model: knownIssueRun.model || '',
+        durationMs: Number.isFinite(Number(knownIssueRun.durationMs)) ? Number(knownIssueRun.durationMs) : null,
+        fallbackUsed: Boolean(knownIssueRun.fallbackUsed),
+        fallbackFrom: knownIssueRun.fallbackFrom || '',
+        traceId: knownIssueRun.traceId || traceId || '',
+        resultStatus: knownIssueRun.detail?.status || '',
+      },
+      conversationId,
+      metadata: { traceId: knownIssueRun.traceId || traceId || '' },
     }, { surface: 'chat', conversationId }).catch(() => {});
   }
 
@@ -119,6 +143,10 @@ function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceI
       detail: {
         provider: triageRun.provider || '',
         model: triageRun.model || '',
+        durationMs: Number.isFinite(Number(triageRun.durationMs)) ? Number(triageRun.durationMs) : null,
+        fallbackUsed: Boolean(triageRun.fallbackUsed || triageRun.detail?.fallback?.used),
+        fallbackFrom: triageRun.fallbackFrom || '',
+        usedDefaultRuntime: Boolean(triageRun.detail?.runtime?.usedDefault),
         traceId: triageRun.traceId || traceId || '',
       },
       conversationId,
@@ -197,6 +225,7 @@ function startMainChatExecution({
   }
 
   let cancelled = false;
+  let abortToolLoop = null;
   Promise.resolve().then(async () => {
     onStatus?.({
       type: 'tool_ready',
@@ -217,6 +246,17 @@ function startMainChatExecution({
       },
       systemPrompt,
       messagesForModel: messages,
+      timeoutMs,
+      runtimePolicy: {
+        mode: policy.mode,
+        primaryProvider: policy.primaryProvider,
+        primaryModel: policy.primaryModel,
+        fallbackProvider: policy.fallbackProvider,
+        fallbackModel: policy.fallbackModel,
+        reasoningEffort,
+      },
+      onChunk,
+      onThinkingChunk,
       onStatus: handleToolLoopStatus,
       onActions: ({ results }) => {
         const count = Array.isArray(results) ? results.length : 0;
@@ -226,6 +266,9 @@ function startMainChatExecution({
         });
       },
       isCancelled: () => cancelled,
+      registerAbort: (abortFn) => {
+        abortToolLoop = typeof abortFn === 'function' ? abortFn : null;
+      },
     });
     if (cancelled) return;
     await onDone({
@@ -237,8 +280,8 @@ function startMainChatExecution({
       fallbackUsed: Boolean(result.fallbackUsed),
       fallbackFrom: result.fallbackFrom || null,
       attempts: Array.isArray(result.attempts) ? result.attempts : [],
-      thinking: '',
-      providerThinking: {},
+      thinking: result.thinking || '',
+      providerThinking: result.providerThinking || {},
       toolActions: result.actions || [],
       toolIterations: result.iterations || 0,
     });
@@ -249,6 +292,10 @@ function startMainChatExecution({
 
   return () => {
     cancelled = true;
+    if (abortToolLoop) {
+      try { abortToolLoop('Main chat request aborted'); } catch { /* ignore */ }
+      abortToolLoop = null;
+    }
   };
 }
 
@@ -273,10 +320,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     parsedEscalationSource,
     parsedEscalationProvider,
     parsedEscalationModel,
+    parsedEscalationElapsedMs,
     followUpContextText,
     followUpContextSource,
     followUpContextProvider,
     followUpContextModel,
+    agentRuntime,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -554,7 +603,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     baseSystemPrompt: contextBundle.systemPrompt,
     emitStatus: async (statusMessage) => {
       try {
-        res.write('event: status\ndata: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
+        const payload = statusMessage && typeof statusMessage === 'object'
+          ? { type: 'status', ...statusMessage }
+          : { type: 'status', message: statusMessage };
+        res.write('event: status\ndata: ' + JSON.stringify(payload) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onTranscriptionStart: async (stageMeta) => {
@@ -583,26 +635,45 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           : 'Image transcription failed — chat continued without screenshot parsing.',
       }, traceStartedAt);
     },
+    onKnownIssueStart: async (stageMeta) => {
+      const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
+      const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
+      await appendTraceEvent(trace?._id, {
+        key: 'known_issue_search_started',
+        label: 'Known Issue Search Agent started',
+        status: 'info',
+        provider: traceProvider,
+        model: traceModel,
+        message: 'Searching active INV investigations before triage.',
+      }, traceStartedAt);
+    },
     onTriageStart: async (stageMeta) => {
       const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
       const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
       await appendTraceEvent(trace?._id, {
         key: 'triage_started',
-        label: 'Image triage started',
+        label: 'Triage Agent started',
         status: 'info',
         provider: traceProvider,
         model: traceModel,
-        message: 'Deriving structured escalation fields from image parser output.',
+        message: 'Running the configured Triage Agent against parsed escalation text.',
       }, traceStartedAt);
     },
     imageParserConfig: req.body.imageParserProvider
-      ? { provider: req.body.imageParserProvider, model: req.body.imageParserModel || undefined }
+      ? {
+          provider: req.body.imageParserProvider,
+          model: req.body.imageParserModel || undefined,
+          promptId: req.body.imageParserPromptId || 'escalation-template-parser',
+        }
       : null,
     parsedEscalationText: safeString(parsedEscalationSource, '') === 'image-parser'
       ? safeString(parsedEscalationText, '')
       : '',
     parsedEscalationProvider: parsedEscalationProvider || policy.primaryProvider,
     parsedEscalationModel: parsedEscalationModel || '',
+    parsedEscalationElapsedMs,
+    triageAgentRuntime: agentRuntime,
+    fallbackPolicy: policy,
   });
   const parsedEscalationCanonicalText = safeString(parsedEscalationSource, '') === 'image-parser'
     ? safeString(parsedEscalationText, '')
@@ -645,7 +716,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       traceId: trace ? trace._id.toString() : '',
     });
   }
-  const useSharedAgentTools = policy.mode !== 'parallel';
+  const useSharedAgentTools = policy.mode !== 'parallel' && !runtimeSettings.debug.disableSharedAgentTools;
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
@@ -653,6 +724,14 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       label: 'INV matching completed',
       status: 'success',
       message: `${invMatchResult.matches.length} known issue(s) matched.`,
+    }, traceStartedAt);
+  } else if (imageTriageContext?.knownIssueSearchResult) {
+    await appendTraceEvent(trace?._id, {
+      key: 'known_issue_search_completed',
+      label: 'Known Issue Search Agent completed',
+      status: imageTriageContext.knownIssueSearchResult.ok ? 'success' : 'warning',
+      message: imageTriageContext.knownIssueSearchResult.summary || 'Known issue search completed without a matched INV.',
+      detail: imageTriageContext.knownIssueSearchResult.validation || null,
     }, traceStartedAt);
   }
 
@@ -705,6 +784,37 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 
   const contextDebugPayload = buildContextDebugPayload(runtimeSettings, contextBundle.contextDebug, guardrail.costEstimate);
   let responseClosed = false;
+  let streamSettled = false;
+  let runtimeOperationId = null;
+  let heartbeat = null;
+  let sseSafetyTimeout = null;
+  let cleanupFn = null;
+
+  // Clean up on client disconnect. Attach this before any SSE writes so fast
+  // disconnects cannot miss the close event and leave timers alive.
+  res.on('close', () => {
+    responseClosed = true;
+    if (heartbeat) clearInterval(heartbeat);
+    if (sseSafetyTimeout) clearTimeout(sseSafetyTimeout);
+    if (!streamSettled) {
+      if (runtimeOperationId) {
+        updateAiOperation(runtimeOperationId, {
+          clientConnected: false,
+          phase: 'aborting',
+        });
+      }
+      appendTraceEvent(trace?._id, {
+        key: 'client_disconnected',
+        label: 'Client disconnected',
+        status: 'warning',
+        provider: policy.primaryProvider,
+        model: primaryTraceModel,
+        code: 'CLIENT_DISCONNECTED',
+        message: 'The client connection closed before the request settled.',
+      }, traceStartedAt).catch(() => {});
+      if (cleanupFn) cleanupFn();
+    }
+  });
 
   // Send start event with conversation ID
   await appendTraceEvent(trace?._id, {
@@ -748,11 +858,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }
   // Triage is already awaited — emit trace events and triage card SSE synchronously.
   if (imageTriageContext) {
-    const triageMeta = imageTriageContext.parseMeta;
+    const triageMeta = imageTriageContext.triageMeta || imageTriageContext.parseMeta;
+    const triageUsedRuleFallback = Boolean(triageMeta?.usedRuleFallback || imageTriageContext.triageCard?.fallback?.used);
     patchTrace(trace?._id, {
       triage: buildParseStage(
         triageMeta,
-        triageMeta ? 'ok' : 'error',
+        triageMeta ? (triageUsedRuleFallback ? 'warning' : 'ok') : 'error',
         {
           latencyMs: imageTriageContext.elapsedMs || 0,
           startedAt: traceStartedAt,
@@ -765,13 +876,13 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }).catch(() => {});
     appendTraceEvent(trace?._id, {
       key: triageMeta ? 'triage_completed' : 'triage_failed',
-      label: triageMeta ? 'Image triage completed' : 'Image triage failed',
-      status: triageMeta ? 'success' : 'error',
+      label: triageMeta ? (triageUsedRuleFallback ? 'Triage fallback used' : 'Triage Agent completed') : 'Image triage failed',
+      status: triageMeta ? (triageUsedRuleFallback ? 'warning' : 'success') : 'error',
       provider: triageMeta?.providerUsed || policy.primaryProvider,
       model: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
       code: imageTriageContext.error?.code || '',
       message: triageMeta
-        ? `Image triage completed in ${imageTriageContext.elapsedMs || 0}ms.`
+        ? `${triageUsedRuleFallback ? 'Triage Agent fallback completed' : 'Triage Agent completed'} in ${imageTriageContext.elapsedMs || 0}ms.`
         : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
       detail: triageMeta?.validation || imageTriageContext.error || null,
     }, traceStartedAt).catch(() => {});
@@ -789,7 +900,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }
   const turnStartedAt = Date.now();
   const requestId = req.requestId;
-  let streamSettled = false;
   const traceStats = {
     chunkCount: 0,
     chunkChars: 0,
@@ -811,15 +921,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     messageCount: contextBundle.messagesForModel.length,
     providers: (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]).filter(Boolean),
   });
-  const runtimeOperationId = runtimeOperation.id;
+  runtimeOperationId = runtimeOperation.id;
 
   // Set up heartbeat
-  const heartbeat = setInterval(() => {
+  heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
   }, 15000);
+  if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   // SSE safety timeout — force-close if stream never settles
-  const sseSafetyTimeout = setTimeout(() => {
+  sseSafetyTimeout = setTimeout(() => {
     if (streamSettled || responseClosed) return;
     console.error('[chat] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
     streamSettled = true;
@@ -850,8 +961,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       try { cleanupFn(); } catch { /* ignore */ }
     }
   }, SSE_SAFETY_TIMEOUT_MS);
+  if (typeof sseSafetyTimeout.unref === 'function') sseSafetyTimeout.unref();
 
-  const cleanupFn = startMainChatExecution({
+  cleanupFn = startMainChatExecution({
     useAgentTools: useSharedAgentTools,
     policy,
     messages: contextBundle.messagesForModel,
@@ -1049,6 +1161,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
               content: result.fullResponse,
               thinking: getProviderThinking(providerThinking, result.provider, result.thinking || ''),
               provider: result.provider,
+              modelUsed: safeString(result.modelUsed, '') || (result.usage && result.usage.model) || getProviderModelId(result.provider),
               mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
               traceRequestId: req.requestId,
@@ -1068,6 +1181,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             content: compliantData.fullResponse,
             thinking: getProviderThinking(providerThinking, compliantData.providerUsed, compliantData.thinking || ''),
             provider: compliantData.providerUsed,
+            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
             mode: compliantData.mode || policy.mode,
             fallbackFrom: compliantData.fallbackFrom || null,
             traceRequestId: req.requestId,
@@ -1098,6 +1212,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             fallbackUsed: Boolean(compliantData.fallbackUsed),
             attempts: attempts.length,
             toolIterations: compliantData.toolIterations || 0,
+            durationMs: latencyMs,
           },
         }, {
           surface: 'chat',
@@ -1270,12 +1385,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
 
         try {
           const usagePayload = buildUsageSubdoc(compliantData.usage);
+          const responseModelUsed = safeString(compliantData.modelUsed, '')
+            || (compliantData.usage && compliantData.usage.model)
+            || getProviderModelId(compliantData.providerUsed || policy.primaryProvider);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
             traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
-            modelUsed: compliantData.modelUsed || null,
+            modelUsed: responseModelUsed || null,
             fallbackUsed: compliantData.fallbackUsed,
             fallbackFrom: compliantData.fallbackFrom || null,
             mode: compliantData.mode || policy.mode,
@@ -1578,34 +1696,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       deleteAiOperation(runtimeOperationId);
     },
   });
-
-  // Clean up on client disconnect.
-  // NOTE: must use res.on('close'), NOT req.on('close'). By the time this
-  // async handler runs, Express has already consumed and closed the request
-  // body stream, so req's 'close' event has already fired before we can
-  // register a listener. The response stream's 'close' event correctly fires
-  // when the underlying TCP socket is torn down (e.g. client tab close).
-  res.on('close', () => {
-    responseClosed = true;
-    clearInterval(heartbeat);
-    clearTimeout(sseSafetyTimeout);
-    if (!streamSettled) {
-      updateAiOperation(runtimeOperationId, {
-        clientConnected: false,
-        phase: 'aborting',
-      });
-      appendTraceEvent(trace?._id, {
-        key: 'client_disconnected',
-        label: 'Client disconnected',
-        status: 'warning',
-        provider: policy.primaryProvider,
-        model: primaryTraceModel,
-        code: 'CLIENT_DISCONNECTED',
-        message: 'The client connection closed before the request settled.',
-      }, traceStartedAt).catch(() => {});
-      if (cleanupFn) cleanupFn();
-    }
-  });
+  if (responseClosed && cleanupFn && !streamSettled) cleanupFn();
 });
 
 // POST /api/chat/retry -- Retry last message in a conversation (removes bad assistant response, re-sends)
@@ -1619,6 +1710,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     fallbackProvider,
     fallbackModel,
     parallelProviders,
+    agentRuntime,
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
@@ -1897,7 +1989,10 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     baseSystemPrompt: contextBundle.systemPrompt,
     emitStatus: async (statusMessage) => {
       try {
-        res.write('event: status\ndata: ' + JSON.stringify({ type: 'status', message: statusMessage }) + '\n\n');
+        const payload = statusMessage && typeof statusMessage === 'object'
+          ? { type: 'status', ...statusMessage }
+          : { type: 'status', message: statusMessage };
+        res.write('event: status\ndata: ' + JSON.stringify(payload) + '\n\n');
       } catch { /* client disconnected */ }
     },
     onTranscriptionStart: async (stageMeta) => {
@@ -1926,23 +2021,41 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           : 'Image transcription failed — chat continued without screenshot parsing.',
       }, traceStartedAt);
     },
+    onKnownIssueStart: async (stageMeta) => {
+      const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
+      const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
+      await appendTraceEvent(trace?._id, {
+        key: 'known_issue_search_started',
+        label: 'Known Issue Search Agent started',
+        status: 'info',
+        provider: traceProvider,
+        model: traceModel,
+        message: 'Searching active INV investigations before triage.',
+      }, traceStartedAt);
+    },
     onTriageStart: async (stageMeta) => {
       const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
       const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
       await appendTraceEvent(trace?._id, {
         key: 'triage_started',
-        label: 'Image triage started',
+        label: 'Triage Agent started',
         status: 'info',
         provider: traceProvider,
         model: traceModel,
-        message: 'Deriving structured escalation fields from image parser output.',
+        message: 'Running the configured Triage Agent against parsed escalation text.',
       }, traceStartedAt);
     },
     imageParserConfig: req.body.imageParserProvider
-      ? { provider: req.body.imageParserProvider, model: req.body.imageParserModel || undefined }
+      ? {
+          provider: req.body.imageParserProvider,
+          model: req.body.imageParserModel || undefined,
+          promptId: req.body.imageParserPromptId || 'escalation-template-parser',
+        }
       : null,
+    triageAgentRuntime: agentRuntime,
+    fallbackPolicy: policy,
   });
-  const useSharedAgentTools = policy.mode !== 'parallel';
+  const useSharedAgentTools = policy.mode !== 'parallel' && !runtimeSettings.debug.disableSharedAgentTools;
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
@@ -1950,6 +2063,14 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       label: 'INV matching completed',
       status: 'success',
       message: `${invMatchResult.matches.length} known issue(s) matched.`,
+    }, traceStartedAt);
+  } else if (imageTriageContext?.knownIssueSearchResult) {
+    await appendTraceEvent(trace?._id, {
+      key: 'known_issue_search_completed',
+      label: 'Known Issue Search Agent completed',
+      status: imageTriageContext.knownIssueSearchResult.ok ? 'success' : 'warning',
+      message: imageTriageContext.knownIssueSearchResult.summary || 'Known issue search completed without a matched INV.',
+      detail: imageTriageContext.knownIssueSearchResult.validation || null,
     }, traceStartedAt);
   }
 
@@ -2029,11 +2150,12 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   }
   // Triage already resolved — emit trace events and triage card SSE synchronously.
   if (imageTriageContext) {
-    const triageMeta = imageTriageContext.parseMeta;
+    const triageMeta = imageTriageContext.triageMeta || imageTriageContext.parseMeta;
+    const triageUsedRuleFallback = Boolean(triageMeta?.usedRuleFallback || imageTriageContext.triageCard?.fallback?.used);
     patchTrace(trace?._id, {
       triage: buildParseStage(
         triageMeta,
-        triageMeta ? 'ok' : 'error',
+        triageMeta ? (triageUsedRuleFallback ? 'warning' : 'ok') : 'error',
         {
           latencyMs: imageTriageContext.elapsedMs || 0,
           startedAt: traceStartedAt,
@@ -2046,13 +2168,13 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     }).catch(() => {});
     appendTraceEvent(trace?._id, {
       key: triageMeta ? 'triage_completed' : 'triage_failed',
-      label: triageMeta ? 'Image triage completed' : 'Image triage failed',
-      status: triageMeta ? 'success' : 'error',
+      label: triageMeta ? (triageUsedRuleFallback ? 'Triage fallback used' : 'Triage Agent completed') : 'Image triage failed',
+      status: triageMeta ? (triageUsedRuleFallback ? 'warning' : 'success') : 'error',
       provider: triageMeta?.providerUsed || policy.primaryProvider,
       model: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
       code: imageTriageContext.error?.code || '',
       message: triageMeta
-        ? `Image triage completed in ${imageTriageContext.elapsedMs || 0}ms.`
+        ? `${triageUsedRuleFallback ? 'Triage Agent fallback completed' : 'Triage Agent completed'} in ${imageTriageContext.elapsedMs || 0}ms.`
         : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
       detail: triageMeta?.validation || imageTriageContext.error || null,
     }, traceStartedAt).catch(() => {});
@@ -2098,6 +2220,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   const heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* gone */ }
   }, 15000);
+  if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   // SSE safety timeout — force-close if retry stream never settles
   const sseSafetyTimeout = setTimeout(() => {
@@ -2116,6 +2239,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       try { cleanupFn(); } catch { /* ignore */ }
     }
   }, SSE_SAFETY_TIMEOUT_MS);
+  if (typeof sseSafetyTimeout.unref === 'function') sseSafetyTimeout.unref();
 
   const cleanupFn = startMainChatExecution({
     useAgentTools: useSharedAgentTools,
@@ -2312,6 +2436,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
               content: result.fullResponse,
               thinking: getProviderThinking(providerThinking, result.provider, result.thinking || ''),
               provider: result.provider,
+              modelUsed: safeString(result.modelUsed, '') || (result.usage && result.usage.model) || getProviderModelId(result.provider),
               mode: compliantData.mode || policy.mode,
               fallbackFrom: null,
               traceRequestId: req.requestId,
@@ -2331,6 +2456,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             content: compliantData.fullResponse,
             thinking: getProviderThinking(providerThinking, compliantData.providerUsed, compliantData.thinking || ''),
             provider: compliantData.providerUsed,
+            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
             mode: compliantData.mode || policy.mode,
             fallbackFrom: compliantData.fallbackFrom || null,
             traceRequestId: req.requestId,
@@ -2362,6 +2488,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
             fallbackUsed: Boolean(compliantData.fallbackUsed),
             attempts: attempts.length,
             toolIterations: compliantData.toolIterations || 0,
+            durationMs: latencyMs,
           },
         }, {
           surface: 'chat',
@@ -2442,12 +2569,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
 
         try {
           const retryUsagePayload = buildUsageSubdoc(compliantData.usage);
+          const retryResponseModelUsed = safeString(compliantData.modelUsed, '')
+            || (compliantData.usage && compliantData.usage.model)
+            || getProviderModelId(compliantData.providerUsed || policy.primaryProvider);
           res.write('event: done\ndata: ' + JSON.stringify({
             conversationId: conversation._id.toString(),
             traceId: trace ? trace._id.toString() : null,
             provider: compliantData.mode === 'parallel' ? policy.primaryProvider : compliantData.providerUsed, // backward-compat
             providerUsed: compliantData.providerUsed,
-            modelUsed: compliantData.modelUsed || null,
+            modelUsed: retryResponseModelUsed || null,
             fallbackUsed: compliantData.fallbackUsed,
             fallbackFrom: compliantData.fallbackFrom || null,
             mode: compliantData.mode || policy.mode,

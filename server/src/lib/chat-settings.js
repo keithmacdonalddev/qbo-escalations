@@ -44,6 +44,7 @@ const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   debug: Object.freeze({
     showContextDebug: false,
     emitContextDebugSse: false,
+    disableSharedAgentTools: false,
   }),
 });
 
@@ -185,6 +186,7 @@ function normalizeChatRuntimeSettings(rawSettings) {
     debug: {
       showContextDebug: Boolean(debugInput.showContextDebug),
       emitContextDebugSse: Boolean(debugInput.emitContextDebugSse),
+      disableSharedAgentTools: Boolean(debugInput.disableSharedAgentTools),
     },
   };
 

@@ -6,6 +6,7 @@ function createRateLimiter({
   limit = DEFAULT_LIMIT,
   name = 'rate-limit',
   keyFn,
+  disableInTests = true,
 } = {}) {
   const buckets = new Map();
   let reqCount = 0;
@@ -20,7 +21,11 @@ function createRateLimiter({
     const isNodeTestRun = Boolean(process.env.NODE_TEST_CONTEXT)
       || process.execArgv.includes('--test')
       || process.argv.includes('--test');
-    if (process.env.RATE_LIMIT_DISABLED === '1' || process.env.NODE_ENV === 'test' || isNodeTestRun) {
+    if (
+      process.env.RATE_LIMIT_DISABLED === '1'
+      || process.env.NODE_ENV === 'test'
+      || (disableInTests && isNodeTestRun)
+    ) {
       return next();
     }
 

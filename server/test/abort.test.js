@@ -41,7 +41,16 @@ function parseSseEvents(raw) {
  * Returns { req, dataPromise, waitForEvent, destroy, getRawChunks }.
  */
 function sseRequest(port, body) {
-  const payload = JSON.stringify(body);
+  const payload = JSON.stringify({
+    ...body,
+    settings: {
+      ...(body && body.settings ? body.settings : {}),
+      debug: {
+        ...(body && body.settings && body.settings.debug ? body.settings.debug : {}),
+        disableSharedAgentTools: true,
+      },
+    },
+  });
   let chunks = '';
   let eventListeners = [];
   let resolveData;
@@ -108,6 +117,7 @@ function sseRequest(port, body) {
       const socket = (responseRef && responseRef.socket) || req.socket;
       if (socket) socket.destroy();
       req.destroy();
+      agent.destroy();
     },
     getRawChunks() {
       return chunks;
@@ -132,31 +142,47 @@ async function createTestConversation(title) {
 // --test-isolation=none.
 // ---------------------------------------------------------------------------
 
-test('abort suite', async (t) => {
   let app;
   let server;
+  let serverSockets;
   let port;
   let originalClaudeChat;
   let originalCodexChat;
 
-  t.before(async () => {
+  test.before(async () => {
     originalClaudeChat = claude.chat;
     originalCodexChat = codex.chat;
     await connect();
     app = createApp();
     server = app.listen(0);
+    serverSockets = new Set();
+    server.on('connection', (socket) => {
+      serverSockets.add(socket);
+      socket.on('close', () => serverSockets.delete(socket));
+    });
     port = server.address().port;
   });
 
-  t.afterEach(() => {
+  test.afterEach(() => {
     claude.chat = originalClaudeChat;
     codex.chat = originalCodexChat;
   });
 
-  t.after(async () => {
+  test.after(async () => {
     claude.chat = originalClaudeChat;
     codex.chat = originalCodexChat;
-    if (server) await new Promise((resolve) => server.close(resolve));
+    if (server) {
+      const closePromise = new Promise((resolve) => server.close(() => resolve()));
+      if (serverSockets) {
+        for (const socket of serverSockets) socket.destroy();
+        serverSockets.clear();
+      }
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+      await Promise.race([
+        closePromise,
+        new Promise((resolve) => setTimeout(resolve, 1000)),
+      ]);
+    }
     await disconnect();
   });
 
@@ -164,7 +190,7 @@ test('abort suite', async (t) => {
   // Test 1
   // -------------------------------------------------------------------------
 
-  await t.test('client disconnect during streaming calls orchestration cleanup', async () => {
+  test('client disconnect during streaming calls orchestration cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -194,7 +220,7 @@ test('abort suite', async (t) => {
   // Test 2
   // -------------------------------------------------------------------------
 
-  await t.test('client disconnect after stream settled does NOT call cleanup', async () => {
+  test('client disconnect after stream settled does NOT call cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -223,7 +249,7 @@ test('abort suite', async (t) => {
   // Test 3
   // -------------------------------------------------------------------------
 
-  await t.test('abort during fallback cancels in-flight fallback provider', async () => {
+  test('abort during fallback cancels in-flight fallback provider', async () => {
     let codexCleanupCalled = false;
 
     claude.chat = ({ onError }) => {
@@ -264,7 +290,7 @@ test('abort suite', async (t) => {
   // Test 4
   // -------------------------------------------------------------------------
 
-  await t.test('abort during parallel cancels all in-flight providers', async () => {
+  test('abort during parallel cancels all in-flight providers', async () => {
     let claudeCleanupCalled = false;
     let codexCleanupCalled = false;
 
@@ -308,7 +334,7 @@ test('abort suite', async (t) => {
   // Test 5
   // -------------------------------------------------------------------------
 
-  await t.test('client disconnect after error settlement does NOT call cleanup', async () => {
+  test('client disconnect after error settlement does NOT call cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onError }) => {
@@ -338,7 +364,7 @@ test('abort suite', async (t) => {
   // Test 6
   // -------------------------------------------------------------------------
 
-  await t.test('double destroy does not crash or double-invoke cleanup', async () => {
+  test('double destroy does not crash or double-invoke cleanup', async () => {
     let cleanupCount = 0;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -369,7 +395,7 @@ test('abort suite', async (t) => {
   // Test 7
   // -------------------------------------------------------------------------
 
-  await t.test('abort before provider emits any data still triggers cleanup', async () => {
+  test('abort before provider emits any data still triggers cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onDone }) => {
@@ -398,7 +424,7 @@ test('abort suite', async (t) => {
   // Test 8
   // -------------------------------------------------------------------------
 
-  await t.test('user message persisted to conversation before abort', async () => {
+  test('user message persisted to conversation before abort', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('partial');
       const handle = setTimeout(() => onDone('full'), 30_000);
@@ -429,7 +455,7 @@ test('abort suite', async (t) => {
   // Test 9
   // -------------------------------------------------------------------------
 
-  await t.test('abort during 3-way parallel cancels all in-flight providers', async () => {
+  test('abort during 3-way parallel cancels all in-flight providers', async () => {
     let claudeCleanupCount = 0;
     let codexCleanupCount = 0;
 
@@ -473,7 +499,7 @@ test('abort suite', async (t) => {
   // Test 10
   // -------------------------------------------------------------------------
 
-  await t.test('abort when one parallel provider already settled only cleans up in-flight', async () => {
+  test('abort when one parallel provider already settled only cleans up in-flight', async () => {
     let claudeCleanupCalled = false;
     let codexCleanupCalled = false;
 
@@ -517,7 +543,7 @@ test('abort suite', async (t) => {
   // Test 11
   // -------------------------------------------------------------------------
 
-  await t.test('SSE stream contains chunk events before abort', async () => {
+  test('SSE stream contains chunk events before abort', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('hello ');
       onChunk('world');
@@ -549,7 +575,7 @@ test('abort suite', async (t) => {
   // Test 12
   // -------------------------------------------------------------------------
 
-  await t.test('abort when provider cleanup throws does not crash server', async () => {
+  test('abort when provider cleanup throws does not crash server', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('partial');
       const handle = setTimeout(() => onDone('full'), 30_000);
@@ -595,7 +621,7 @@ test('abort suite', async (t) => {
   // Test 13
   // -------------------------------------------------------------------------
 
-  await t.test('abort during streaming does not prevent future requests', async () => {
+  test('abort during streaming does not prevent future requests', async () => {
     let firstCleanupCalled = false;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -640,7 +666,7 @@ test('abort suite', async (t) => {
   // Test 14
   // -------------------------------------------------------------------------
 
-  await t.test('provider late onDone after abort is a no-op', async () => {
+  test('provider late onDone after abort is a no-op', async () => {
     let cleanupCalled = false;
     let onDoneRef = null;
 
@@ -674,7 +700,7 @@ test('abort suite', async (t) => {
   // Test 15
   // -------------------------------------------------------------------------
 
-  await t.test('rapid sequential abort requests are isolated', async () => {
+  test('rapid sequential abort requests are isolated', async () => {
     let cleanupCallCount = 0;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -701,4 +727,3 @@ test('abort suite', async (t) => {
 
     assert.equal(cleanupCallCount, 3, 'each abort must trigger exactly one cleanup (got ' + cleanupCallCount + ')');
   });
-});

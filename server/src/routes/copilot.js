@@ -52,6 +52,7 @@ function initSSE(res) {
   const heartbeat = setInterval(() => {
     try { res.write(':heartbeat\n\n'); } catch { /* gone */ }
   }, 15000);
+  if (typeof heartbeat.unref === 'function') heartbeat.unref();
   return heartbeat;
 }
 
@@ -269,12 +270,15 @@ function streamCopilotChat({
         });
       }
       if (requestId) {
-        const u = (err && err._usage) || {};
+        const attemptWithUsage = Array.isArray(err && err.attempts)
+          ? err.attempts.find((attempt) => attempt && (attempt.usage || attempt.inputTokens || attempt.outputTokens))
+          : null;
+        const u = (err && err._usage) || (err && err.usage) || (attemptWithUsage && (attemptWithUsage.usage || attemptWithUsage)) || {};
         const isTimeout = err && err.message && /timed?\s*out/i.test(err.message);
         logUsage({
           requestId, attemptIndex: 0, service: 'copilot', provider: policy.primaryProvider,
           model: u.model, inputTokens: u.inputTokens, outputTokens: u.outputTokens,
-          usageAvailable: !!(err && err._usage), usageComplete: u.usageComplete, rawUsage: u.rawUsage,
+          usageAvailable: Boolean(u && (u.inputTokens || u.outputTokens || u.rawUsage)), usageComplete: u.usageComplete, rawUsage: u.rawUsage,
           category: copilotAction, status: isTimeout ? 'timeout' : 'error',
         });
       }

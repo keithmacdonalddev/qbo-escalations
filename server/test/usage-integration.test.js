@@ -50,11 +50,11 @@ function parseSseEvents(payload) {
   return events;
 }
 
-test("usage-integration suite", async (t) => {
 let app;
 let agent;
 let httpServer;
 let httpPort;
+let httpServerSockets;
 let originalClaudeChat;
 let originalCodexChat;
 let originalClaudeParse;
@@ -93,7 +93,52 @@ function makeFakeStreamHanging(abortUsage) {
   };
 }
 
-t.before(async () => {
+function postAndAbort({ port, path, body, timeoutMs = 2500 }) {
+  const payload = JSON.stringify(body || {});
+  return new Promise((resolve) => {
+    let settled = false;
+    let req = null;
+    let responseStarted = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      if (req) req.destroy();
+      finish();
+    }, timeoutMs);
+
+    req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        responseStarted = true;
+        res.resume();
+        setTimeout(() => {
+          req.destroy();
+        }, 25);
+      },
+    );
+    req.on('error', finish);
+    req.on('close', () => {
+      if (responseStarted) finish();
+    });
+    req.write(payload);
+    req.end();
+  });
+}
+
+test.before(async () => {
   process.env.NODE_ENV = 'test';
   delete process.env.ADMIN_API_KEY;
   delete process.env.EDITOR_API_KEY;
@@ -140,21 +185,41 @@ t.before(async () => {
 
   // Start an http server for raw request tests (abort/disconnect)
   httpServer = http.createServer(app);
+  httpServerSockets = new Set();
+  httpServer.on('connection', (socket) => {
+    httpServerSockets.add(socket);
+    socket.on('close', () => httpServerSockets.delete(socket));
+  });
   await new Promise((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
   httpPort = httpServer.address().port;
 });
 
-t.after(async () => {
+test.after(async () => {
   claude.chat = originalClaudeChat;
   codex.chat = originalCodexChat;
   claude.parseEscalation = originalClaudeParse;
   codex.parseEscalation = originalCodexParse;
 
-  if (httpServer) await new Promise((r) => httpServer.close(r));
+  if (httpServer) {
+    const closePromise = new Promise((resolve) => {
+      httpServer.close(() => resolve());
+    });
+    if (httpServerSockets) {
+      for (const socket of httpServerSockets) socket.destroy();
+      httpServerSockets.clear();
+    }
+    if (typeof httpServer.closeAllConnections === 'function') {
+      httpServer.closeAllConnections();
+    }
+    await Promise.race([
+      closePromise,
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+  }
   await disconnect();
 });
 
-t.beforeEach(async () => {
+test.beforeEach(async () => {
   resetDrain();
   currentClaudeStub = makeFakeStreamOk(FAKE_USAGE);
   currentCodexStub = makeFakeStreamOk(FAKE_USAGE_CODEX);
@@ -170,7 +235,7 @@ t.beforeEach(async () => {
 // ================================================================
 //  /api/chat — single mode, ok path
 // ================================================================
-await t.test('POST /api/chat (single, ok) → UsageLog service=chat, status=ok, correct tokens', async () => {
+test('POST /api/chat (single, ok) → UsageLog service=chat, status=ok, correct tokens', async () => {
   const res = await agent
     .post('/api/chat')
     .send({ message: 'What is bank feeds?', mode: 'single' })
@@ -201,7 +266,7 @@ await t.test('POST /api/chat (single, ok) → UsageLog service=chat, status=ok, 
 // ================================================================
 //  /api/chat — single mode, error path
 // ================================================================
-await t.test('POST /api/chat (single, error) → UsageLog status=error, partial usage', async () => {
+test('POST /api/chat (single, error) → UsageLog status=error, partial usage', async () => {
   currentClaudeStub = makeFakeStreamError({ ...FAKE_USAGE, inputTokens: 100, outputTokens: 0 });
 
   const res = await agent
@@ -225,7 +290,7 @@ await t.test('POST /api/chat (single, error) → UsageLog status=error, partial 
 // ================================================================
 //  /api/chat — fallback mode: primary fails → fallback succeeds
 // ================================================================
-await t.test('POST /api/chat (fallback) → UsageLog for primary error + fallback ok', async () => {
+test('POST /api/chat (fallback) → UsageLog for primary error + fallback ok', async () => {
   currentClaudeStub = makeFakeStreamError(null);
   currentCodexStub = makeFakeStreamOk(FAKE_USAGE_CODEX);
 
@@ -261,7 +326,7 @@ await t.test('POST /api/chat (fallback) → UsageLog for primary error + fallbac
 // ================================================================
 //  /api/chat — conversationId propagated to UsageLog
 // ================================================================
-await t.test('POST /api/chat writes conversationId into UsageLog', async () => {
+test('POST /api/chat writes conversationId into UsageLog', async () => {
   const res = await agent.post('/api/chat').send({ message: 'ConvId test' }).expect(200);
 
   const startEvent = parseSseEvents(res.text).find((e) => e.event === 'start');
@@ -278,7 +343,7 @@ await t.test('POST /api/chat writes conversationId into UsageLog', async () => {
 // ================================================================
 //  /api/chat — usageAvailable=false when provider returns no usage
 // ================================================================
-await t.test('POST /api/chat with null usage → usageAvailable=false', async () => {
+test('POST /api/chat with null usage → usageAvailable=false', async () => {
   currentClaudeStub = makeFakeStreamOk(null);
 
   await agent.post('/api/chat').send({ message: 'No usage' }).expect(200);
@@ -297,7 +362,7 @@ await t.test('POST /api/chat with null usage → usageAvailable=false', async ()
 // ================================================================
 //  /api/chat — mode field persisted correctly
 // ================================================================
-await t.test('POST /api/chat mode persisted in UsageLog for every attempt', async () => {
+test('POST /api/chat mode persisted in UsageLog for every attempt', async () => {
   currentClaudeStub = makeFakeStreamError(null);
   currentCodexStub = makeFakeStreamOk(FAKE_USAGE_CODEX);
 
@@ -323,7 +388,7 @@ await t.test('POST /api/chat mode persisted in UsageLog for every attempt', asyn
 // ================================================================
 //  /api/chat/retry — ok path
 // ================================================================
-await t.test('POST /api/chat/retry → UsageLog service=chat with correct conversationId', async () => {
+test('POST /api/chat/retry → UsageLog service=chat with correct conversationId', async () => {
   // First: create a conversation with a user + assistant turn
   const chatRes = await agent.post('/api/chat').send({ message: 'Initial message' }).expect(200);
   const conversationId = JSON.parse(parseSseEvents(chatRes.text).find((e) => e.event === 'start').data).conversationId;
@@ -355,7 +420,7 @@ await t.test('POST /api/chat/retry → UsageLog service=chat with correct conver
 // ================================================================
 //  /api/chat/retry — error path
 // ================================================================
-await t.test('POST /api/chat/retry (error) → UsageLog status=error', async () => {
+test('POST /api/chat/retry (error) → UsageLog status=error', async () => {
   // Create conversation first with ok stub
   const chatRes = await agent.post('/api/chat').send({ message: 'Setup' }).expect(200);
   const conversationId = JSON.parse(parseSseEvents(chatRes.text).find((e) => e.event === 'start').data).conversationId;
@@ -382,27 +447,15 @@ await t.test('POST /api/chat/retry (error) → UsageLog status=error', async () 
 // ================================================================
 //  /api/chat — client disconnect / abort fires onAbort usage log
 // ================================================================
-await t.test('POST /api/chat client disconnect → abort path does not misclassify as ok', async () => {
+test('POST /api/chat client disconnect → abort path does not misclassify as ok', async () => {
   // Hanging stub: never resolves, returned cleanup carries abort usage
   currentClaudeStub = makeFakeStreamHanging({ model: 'claude-sonnet-4-5-20250514', inputTokens: 42, outputTokens: 0, usageComplete: false });
 
-  // Use raw HTTP so we can destroy the connection mid-stream
-  const payload = JSON.stringify({ message: 'abort me' });
-  await new Promise((resolve) => {
-    const req = http.request(
-      { hostname: '127.0.0.1', port: httpPort, path: '/api/chat', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
-      (res) => {
-        // As soon as we get the response headers (SSE started), destroy.
-        res.once('data', () => {
-          req.destroy();
-        });
-        res.on('error', () => { /* expected */ });
-      },
-    );
-    req.on('error', () => { /* ECONNRESET expected */ });
-    req.on('close', () => resolve());
-    req.write(payload);
-    req.end();
+  // Use raw HTTP so we can destroy the connection mid-stream.
+  await postAndAbort({
+    port: httpPort,
+    path: '/api/chat',
+    body: { message: 'abort me' },
   });
 
   // Give the server a moment to process the close event and fire onAbort
@@ -423,7 +476,7 @@ await t.test('POST /api/chat client disconnect → abort path does not misclassi
 // ================================================================
 //  /api/copilot — client disconnect fires abort usage log
 // ================================================================
-await t.test('POST /api/copilot/analyze-escalation client disconnect → UsageLog status=abort', async () => {
+test('POST /api/copilot/analyze-escalation client disconnect → UsageLog status=abort', async () => {
   const esc = await Escalation.create({
     category: 'billing',
     attemptingTo: 'Cancel subscription',
@@ -434,21 +487,10 @@ await t.test('POST /api/copilot/analyze-escalation client disconnect → UsageLo
   // Hanging stub: copilot's streamClaude never settles
   currentClaudeStub = makeFakeStreamHanging({ model: 'claude-sonnet-4-5-20250514', inputTokens: 10, outputTokens: 0 });
 
-  const payload = JSON.stringify({ escalationId: esc._id.toString() });
-  await new Promise((resolve) => {
-    const req = http.request(
-      { hostname: '127.0.0.1', port: httpPort, path: '/api/copilot/analyze-escalation', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } },
-      (res) => {
-        res.once('data', () => {
-          req.destroy();
-        });
-        res.on('error', () => { /* expected */ });
-      },
-    );
-    req.on('error', () => { /* ECONNRESET expected */ });
-    req.on('close', () => resolve());
-    req.write(payload);
-    req.end();
+  await postAndAbort({
+    port: httpPort,
+    path: '/api/copilot/analyze-escalation',
+    body: { escalationId: esc._id.toString() },
   });
 
   await new Promise((r) => setTimeout(r, 150));
@@ -467,7 +509,7 @@ await t.test('POST /api/copilot/analyze-escalation client disconnect → UsageLo
 // ================================================================
 //  /api/copilot — all 7 endpoints log with correct category
 // ================================================================
-await t.test('each copilot endpoint writes UsageLog with correct category', async () => {
+test('each copilot endpoint writes UsageLog with correct category', async () => {
   const esc = await Escalation.create({
     category: 'technical',
     attemptingTo: 'Export reports',
@@ -530,7 +572,7 @@ await t.test('each copilot endpoint writes UsageLog with correct category', asyn
 // ================================================================
 //  /api/copilot — ok path (detailed field check)
 // ================================================================
-await t.test('POST /api/copilot/analyze-escalation (ok) → full field check', async () => {
+test('POST /api/copilot/analyze-escalation (ok) → full field check', async () => {
   const esc = await Escalation.create({
     category: 'billing',
     attemptingTo: 'Cancel subscription',
@@ -540,7 +582,7 @@ await t.test('POST /api/copilot/analyze-escalation (ok) → full field check', a
 
   const res = await agent
     .post('/api/copilot/analyze-escalation')
-    .send({ escalationId: esc._id.toString() })
+    .send({ escalationId: esc._id.toString(), mode: 'single' })
     .expect(200);
 
   assert.ok(parseSseEvents(res.text).find((e) => e.event === 'done'));
@@ -562,7 +604,7 @@ await t.test('POST /api/copilot/analyze-escalation (ok) → full field check', a
 // ================================================================
 //  /api/copilot — error path
 // ================================================================
-await t.test('POST /api/copilot/analyze-escalation (error) → UsageLog status=error', async () => {
+test('POST /api/copilot/analyze-escalation (error) → UsageLog status=error', async () => {
   currentClaudeStub = makeFakeStreamError({ ...FAKE_USAGE, inputTokens: 50, outputTokens: 0 });
 
   const esc = await Escalation.create({
@@ -574,7 +616,7 @@ await t.test('POST /api/copilot/analyze-escalation (error) → UsageLog status=e
 
   const res = await agent
     .post('/api/copilot/analyze-escalation')
-    .send({ escalationId: esc._id.toString() })
+    .send({ escalationId: esc._id.toString(), mode: 'single' })
     .expect(200);
 
   assert.ok(parseSseEvents(res.text).find((e) => e.event === 'error'));
@@ -591,7 +633,7 @@ await t.test('POST /api/copilot/analyze-escalation (error) → UsageLog status=e
 // ================================================================
 //  /api/chat/parse-escalation — ok path
 // ================================================================
-await t.test('POST /api/chat/parse-escalation (ok) → UsageLog service=parse', async () => {
+test('POST /api/chat/parse-escalation (ok) → UsageLog service=parse', async () => {
   const SAMPLE_PNG = 'data:image/png;base64,' +
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z8UkAAAAASUVORK5CYII=';
 
@@ -615,7 +657,7 @@ await t.test('POST /api/chat/parse-escalation (ok) → UsageLog service=parse', 
 // ================================================================
 //  400 validation errors do NOT create UsageLog entries
 // ================================================================
-await t.test('400 validation errors do not create UsageLog entries', async () => {
+test('400 validation errors do not create UsageLog entries', async () => {
   await agent.post('/api/chat').send({}).expect(400);
   await agent.post('/api/copilot/analyze-escalation').send({}).expect(400);
   await agent.post('/api/copilot/generate-template').send({}).expect(400);
@@ -625,5 +667,4 @@ await t.test('400 validation errors do not create UsageLog entries', async () =>
 
   const count = await UsageLog.countDocuments({});
   assert.equal(count, 0, 'no UsageLog entries for 400 errors');
-});
 });

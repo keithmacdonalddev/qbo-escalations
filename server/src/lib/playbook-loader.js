@@ -316,6 +316,7 @@ function startWatcher() {
         buildSystemPrompt();
       }
     });
+    if (typeof watcher.unref === 'function') watcher.unref();
     watcher.on('error', (err) => {
       console.warn('Playbook watcher error:', err.message);
     });

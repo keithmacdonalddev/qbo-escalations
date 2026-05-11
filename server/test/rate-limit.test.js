@@ -31,7 +31,12 @@ test('rate limiter allows requests under limit and blocks when exceeded', () => 
     delete process.env.RATE_LIMIT_DISABLED;
     process.env.NODE_ENV = 'development';
 
-    const limiter = createRateLimiter({ name: 'unit', limit: 2, windowMs: 1000 });
+    const limiter = createRateLimiter({
+      name: 'unit',
+      limit: 2,
+      windowMs: 1000,
+      disableInTests: false,
+    });
     let nextCount = 0;
     const next = () => { nextCount++; };
 
@@ -52,6 +57,10 @@ test('rate limiter allows requests under limit and blocks when exceeded', () => 
     assert.equal(res3.statusCode, 429);
     assert.equal(res3.payload.code, 'RATE_LIMITED');
   } finally {
-    process.env.NODE_ENV = prevEnv;
+    if (prevEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = prevEnv;
+    }
   }
 });

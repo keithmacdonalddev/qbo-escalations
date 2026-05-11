@@ -230,6 +230,7 @@ function runAttempt({
         usage: abortUsage,
       });
     }, timeoutMs);
+    if (typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
   }
 
   // Cancel function (R16): must call finalize with abort result so Promise resolves
@@ -414,6 +415,7 @@ function startChatOrchestration({
           }
           resolve('GLOBAL_TIMEOUT');
         }, globalTimeoutMs);
+        if (typeof globalTimeoutHandle.unref === 'function') globalTimeoutHandle.unref();
       });
 
       const raceResult = await Promise.race([providerRace, globalTimeoutPromise]);
@@ -603,10 +605,14 @@ function startChatOrchestration({
       try { cancelFn(); } catch { /* ignore */ }
     }
     activeCleanups.clear();
+    const abortData = { attempts: allSettledResults.map(toAttempt) };
+    const attemptWithUsage = abortData.attempts.find((attempt) => attempt && attempt.usage);
+    if (attemptWithUsage) abortData.usage = attemptWithUsage.usage;
     // Only fire onAbort for genuine in-flight aborts, not post-completion cleanup
     if (!orchestrationSettled) {
-      onAbort?.({ attempts: allSettledResults.map(toAttempt) });
+      onAbort?.(abortData);
     }
+    return abortData;
   };
 }
 

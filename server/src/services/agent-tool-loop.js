@@ -21,9 +21,15 @@ async function runAgentToolLoop({
   systemPrompt,
   messagesForModel,
   onActions,
+  onChunk,
+  onThinkingChunk,
   onStatus,
   isCancelled,
   runtimePolicy = null,
+  timeoutMs,
+  allowedToolNames = null,
+  includeActionParamsInResults = false,
+  registerAbort = null,
 }) {
   const primaryProvider = normalizeProvider(runtimePolicy?.primaryProvider || agent.preferredProvider);
   const policy = resolvePolicy({
@@ -34,7 +40,17 @@ async function runAgentToolLoop({
     fallbackModel: normalizeModelOverride(runtimePolicy?.fallbackModel || null),
   });
 
-  Object.assign(WORKSPACE_TOOL_HANDLERS, SHARED_AGENT_TOOL_HANDLERS);
+  const allowedTools = Array.isArray(allowedToolNames)
+    ? new Set(allowedToolNames.filter(Boolean))
+    : (allowedToolNames instanceof Set ? allowedToolNames : null);
+  const sharedHandlers = allowedTools
+    ? Object.fromEntries(
+        Object.entries(SHARED_AGENT_TOOL_HANDLERS)
+          .filter(([toolName]) => allowedTools.has(toolName))
+      )
+    : SHARED_AGENT_TOOL_HANDLERS;
+
+  Object.assign(WORKSPACE_TOOL_HANDLERS, sharedHandlers);
 
   try {
     let currentMessages = messagesForModel;
@@ -44,9 +60,14 @@ async function runAgentToolLoop({
     let fallbackUsed = false;
     let fallbackFrom = null;
     let currentResponse = '';
+    let thinkingText = '';
+    const providerThinking = {};
     const allActionResults = [];
     const allAttempts = [];
     const executionState = createWorkspaceExecutionState({});
+    const effectiveTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs
+      : TOOL_LOOP_TIMEOUT_MS;
 
     for (let iteration = 1; iteration <= TOOL_LOOP_MAX_ITERATIONS; iteration++) {
       if (isCancelled?.()) {
@@ -55,22 +76,49 @@ async function runAgentToolLoop({
         throw err;
       }
 
-      const result = await startWorkspaceCollectedChat({
+      const collectedChat = startWorkspaceCollectedChat({
         messages: currentMessages,
         systemPrompt,
-        timeoutMs: TOOL_LOOP_TIMEOUT_MS,
+        timeoutMs: effectiveTimeoutMs,
         mode: policy.mode,
         primaryProvider: policy.primaryProvider,
         primaryModel: policy.primaryModel,
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
+        onThinkingChunk: (thinking, provider) => {
+          const chunk = typeof thinking === 'string' ? thinking : '';
+          const thinkingProvider = provider || finalProviderUsed || policy.primaryProvider;
+          if (chunk) {
+            thinkingText += chunk;
+            providerThinking[thinkingProvider] = `${providerThinking[thinkingProvider] || ''}${chunk}`;
+            onThinkingChunk?.({ provider: thinkingProvider, thinking: chunk });
+          }
+        },
         onStatus,
-      }).promise;
+      });
+      if (typeof registerAbort === 'function') registerAbort(collectedChat.abort);
+      let result;
+      try {
+        result = await collectedChat.promise;
+      } finally {
+        if (typeof registerAbort === 'function') registerAbort(null);
+      }
 
       currentResponse = result.fullResponse || '';
       finalProviderUsed = result.providerUsed || finalProviderUsed;
       finalModelUsed = result.modelUsed || finalModelUsed;
+      if (result.thinking && !thinkingText.includes(result.thinking)) {
+        thinkingText += result.thinking;
+      }
+      if (result.providerThinking && typeof result.providerThinking === 'object') {
+        for (const [provider, thinking] of Object.entries(result.providerThinking)) {
+          const chunk = typeof thinking === 'string' ? thinking : '';
+          if (provider && chunk && !String(providerThinking[provider] || '').includes(chunk)) {
+            providerThinking[provider] = `${providerThinking[provider] || ''}${chunk}`;
+          }
+        }
+      }
       fallbackUsed = fallbackUsed || Boolean(result.fallbackUsed);
       fallbackFrom = fallbackFrom || result.fallbackFrom || null;
       if (Array.isArray(result.attempts) && result.attempts.length > 0) {
@@ -89,14 +137,23 @@ async function runAgentToolLoop({
 
       const actions = parseWorkspaceActions(currentResponse);
       if (actions.length === 0) {
+        const finalResponse = currentResponse.trim();
+        if (finalResponse) {
+          onChunk?.({
+            provider: finalProviderUsed || primaryProvider,
+            text: finalResponse,
+          });
+        }
         return {
-          fullResponse: currentResponse.trim(),
+          fullResponse: finalResponse,
           usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
           providerUsed: finalProviderUsed || primaryProvider,
           modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
           fallbackUsed,
           fallbackFrom,
           attempts: allAttempts,
+          thinking: thinkingText,
+          providerThinking,
           actions: allActionResults,
           iterations: iteration - 1,
         };
@@ -109,7 +166,13 @@ async function runAgentToolLoop({
         iteration,
       });
 
-      const actionResults = await executeWorkspaceActions(actions, executionState);
+      const rawActionResults = await executeWorkspaceActions(actions, executionState);
+      const actionResults = includeActionParamsInResults
+        ? rawActionResults.map((result, index) => ({
+            ...result,
+            params: actions[index]?.params || {},
+          }))
+        : rawActionResults;
       allActionResults.push(...actionResults);
       onActions?.({ iteration, results: actionResults });
 
@@ -131,14 +194,24 @@ async function runAgentToolLoop({
       ];
     }
 
+    const finalResponse = currentResponse.replace(/ACTION:\s*\{[\s\S]*?\}\s*(?=\n|$)/g, '').trim();
+    if (finalResponse) {
+      onChunk?.({
+        provider: finalProviderUsed || primaryProvider,
+        text: finalResponse,
+      });
+    }
+
     return {
-      fullResponse: currentResponse.replace(/ACTION:\s*\{[\s\S]*?\}\s*(?=\n|$)/g, '').trim(),
+      fullResponse: finalResponse,
       usage: buildWorkspaceUsageSubdoc(aggregatedUsage, finalProviderUsed || primaryProvider),
       providerUsed: finalProviderUsed || primaryProvider,
       modelUsed: finalModelUsed || aggregatedUsage?.model || runtimePolicy?.primaryModel || null,
       fallbackUsed,
       fallbackFrom,
       attempts: allAttempts,
+      thinking: thinkingText,
+      providerThinking,
       actions: allActionResults,
       iterations: TOOL_LOOP_MAX_ITERATIONS,
     };
