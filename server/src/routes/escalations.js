@@ -6,6 +6,11 @@ const crypto = require('crypto');
 const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
 const { hasCategoryPlaybook, publishKnowledgeCandidate, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
+const {
+  createLinkedEscalationFromConversation,
+  linkEscalationToConversation,
+  workflowErrorResponse,
+} = require('../lib/escalation-dedup');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { parseEscalationText, looksLikeEscalation } = require('../lib/escalation-parser');
@@ -818,6 +823,25 @@ router.post('/', async (req, res) => {
     if (req.body[key] !== undefined) fields[key] = req.body[key];
   }
 
+  if (req.body.conversationId) {
+    try {
+      const linked = await createLinkedEscalationFromConversation({
+        conversationId: req.body.conversationId,
+        fields,
+        source: deriveSourceFromPayload(req.body),
+      });
+      return res.status(linked.reusedExisting ? 200 : 201).json({
+        ok: true,
+        escalation: linked.escalation.toObject(),
+        duplicateSafety: linked.duplicateSafety,
+      });
+    } catch (err) {
+      const response = workflowErrorResponse(err);
+      if (response) return res.status(response.statusCode).json(response.body);
+      throw err;
+    }
+  }
+
   const escalation = new Escalation({
     ...fields,
     source: deriveSourceFromPayload(req.body),
@@ -1203,26 +1227,27 @@ router.post('/:id/transition', async (req, res) => {
 
 // POST /api/escalations/:id/link -- Link escalation to a conversation
 router.post('/:id/link', async (req, res) => {
-  const { conversationId } = req.body;
+  const { conversationId, force } = req.body;
   if (!conversationId) {
     return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
   }
 
-  const escalation = await Escalation.findByIdAndUpdate(
-    req.params.id,
-    { $set: { conversationId } },
-    { returnDocument: 'after' },
-  );
-
-  if (!escalation) {
-    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  try {
+    const linked = await linkEscalationToConversation({
+      escalationId: req.params.id,
+      conversationId,
+      force: force === true,
+    });
+    return res.json({
+      ok: true,
+      escalation: linked.escalation.toObject(),
+      duplicateSafety: linked.duplicateSafety,
+    });
+  } catch (err) {
+    const response = workflowErrorResponse(err);
+    if (response) return res.status(response.statusCode).json(response.body);
+    throw err;
   }
-
-  // Also link the conversation back to the escalation
-  const Conversation = require('../models/Conversation');
-  await Conversation.findByIdAndUpdate(conversationId, { $set: { escalationId: req.params.id } });
-
-  res.json({ ok: true, escalation: escalation.toObject() });
 });
 
 // POST /api/escalations/:id/screenshots -- Attach screenshots to an escalation
@@ -1368,12 +1393,6 @@ router.post('/from-conversation', async (req, res) => {
     return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
   }
 
-  const Conversation = require('../models/Conversation');
-  const conversation = await Conversation.findById(conversationId);
-  if (!conversation) {
-    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Conversation not found' });
-  }
-
   // Pick allowed fields
   const allowed = ['coid', 'mid', 'caseNumber', 'clientContact', 'agentName',
     'attemptingTo', 'expectedOutcome', 'actualOutcome', 'tsSteps',
@@ -1383,19 +1402,22 @@ router.post('/from-conversation', async (req, res) => {
     if (fields[key] !== undefined) escalationFields[key] = fields[key];
   }
 
-  // Create escalation linked to conversation
-  const escalation = new Escalation({
-    ...escalationFields,
-    conversationId,
-    source: 'chat',
-  });
-  await escalation.save();
-
-  // Link conversation back to escalation
-  conversation.escalationId = escalation._id;
-  await conversation.save();
-
-  res.status(201).json({ ok: true, escalation: escalation.toObject() });
+  try {
+    const linked = await createLinkedEscalationFromConversation({
+      conversationId,
+      fields: escalationFields,
+      source: 'chat',
+    });
+    return res.status(linked.reusedExisting ? 200 : 201).json({
+      ok: true,
+      escalation: linked.escalation.toObject(),
+      duplicateSafety: linked.duplicateSafety,
+    });
+  } catch (err) {
+    const response = workflowErrorResponse(err);
+    if (response) return res.status(response.statusCode).json(response.body);
+    throw err;
+  }
 });
 
 // POST /api/escalations/parse -- Parse escalation from image/text and persist it.
@@ -1431,7 +1453,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   if (!resolvedImage && !resolvedText) {
     return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Image, text, or conversationId required' });
   }
-  if (!isValidParseMode(mode)) {
+  if (mode !== 'quick' && !isValidParseMode(mode)) {
     return res.status(400).json({ ok: false, code: 'INVALID_MODE', error: 'Unsupported parse mode' });
   }
   if (provider !== undefined && !isValidProvider(provider)) {
@@ -1443,16 +1465,53 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   if (fallbackProvider !== undefined && !isValidProvider(fallbackProvider)) {
     return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: 'Unsupported fallback provider' });
   }
+  if (mode === 'quick' && !resolvedText) {
+    return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Text required for quick mode' });
+  }
+  if (mode === 'quick' && !looksLikeEscalation(resolvedText)) {
+    return res.status(422).json({ ok: false, code: 'NOT_ESCALATION_TEXT', error: 'Text does not look like escalation content' });
+  }
+
+  const escParseRequestId = req.requestId;
+  const resolvedMode = mode === 'quick' ? 'single' : resolveParseMode(mode);
+  const traceStartedAt = new Date();
+  const trace = await createTrace({
+    requestId: req.requestId,
+    parentTraceId: traceId || null,
+    service: 'parse',
+    route: '/api/escalations/parse',
+    turnKind: 'parse',
+    conversationId: conversationId || null,
+    promptPreview: resolvedText || '[image parse]',
+    messageLength: typeof resolvedText === 'string' ? resolvedText.length : 0,
+    normalizedImages: resolvedImage ? [resolvedImage] : [],
+    clientImageMeta: resolvedImageMeta ? [resolvedImageMeta] : [],
+    requested: {
+      mode: resolvedMode,
+      timeoutMs,
+      primaryProvider: primaryProvider || provider || '',
+      fallbackProvider: fallbackProvider || '',
+      parallelProviders: [],
+    },
+    resolved: {
+      mode: resolvedMode,
+      timeoutMs,
+      primaryProvider: primaryProvider || provider || '',
+      fallbackProvider: fallbackProvider || '',
+      parallelProviders: [],
+    },
+  }).catch(() => null);
+  await appendTraceEvent(trace?._id, {
+    key: 'parse_received',
+    label: 'Parse request received',
+    status: 'info',
+    provider: mode === 'quick' ? 'regex' : (primaryProvider || provider || ''),
+    model: mode === 'quick' ? 'regex' : getProviderModelId(primaryProvider || provider || ''),
+    message: 'Structured parse request accepted.',
+  }, traceStartedAt);
 
   if (mode === 'quick') {
     // No AI call — no usage logging
-    if (!resolvedText) {
-      return res.status(400).json({ ok: false, code: 'MISSING_INPUT', error: 'Text required for quick mode' });
-    }
-    if (!looksLikeEscalation(resolvedText)) {
-      return res.status(422).json({ ok: false, code: 'NOT_ESCALATION_TEXT', error: 'Text does not look like escalation content' });
-    }
-
     const quickParsed = parseEscalationText(resolvedText);
     const quickValidation = validateParsedEscalation(quickParsed, { sourceText: resolvedText });
     const quickMeta = toParseResponseMeta({
@@ -1477,23 +1536,41 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       },
     });
 
-    const escalation = new Escalation({
-      ...quickValidation.normalizedFields,
-      source: 'manual',
-      parseMeta: {
-        mode: quickMeta.mode,
-        providerUsed: quickMeta.providerUsed,
-        winner: quickMeta.winner || quickMeta.providerUsed,
-        fallbackUsed: quickMeta.fallbackUsed,
-        fallbackFrom: '',
-        validationScore: quickMeta.validation ? quickMeta.validation.score : null,
-        validationConfidence: quickMeta.validation ? quickMeta.validation.confidence : '',
-        validationIssues: quickMeta.validation ? quickMeta.validation.issues : [],
-        usedRegexFallback: quickMeta.usedRegexFallback,
-        attempts: quickMeta.attempts,
-      },
-    });
-    await escalation.save();
+    const quickParseMeta = {
+      mode: quickMeta.mode,
+      providerUsed: quickMeta.providerUsed,
+      winner: quickMeta.winner || quickMeta.providerUsed,
+      fallbackUsed: quickMeta.fallbackUsed,
+      fallbackFrom: '',
+      validationScore: quickMeta.validation ? quickMeta.validation.score : null,
+      validationConfidence: quickMeta.validation ? quickMeta.validation.confidence : '',
+      validationIssues: quickMeta.validation ? quickMeta.validation.issues : [],
+      usedRegexFallback: quickMeta.usedRegexFallback,
+      attempts: quickMeta.attempts,
+    };
+    let linked = null;
+    if (conversationId) {
+      try {
+        linked = await createLinkedEscalationFromConversation({
+          conversationId,
+          fields: quickValidation.normalizedFields,
+          source: 'chat',
+          parseMeta: quickParseMeta,
+        });
+      } catch (err) {
+        const response = workflowErrorResponse(err);
+        if (response) return res.status(response.statusCode).json(response.body);
+        throw err;
+      }
+    }
+    const escalation = linked
+      ? linked.escalation
+      : new Escalation({
+        ...quickValidation.normalizedFields,
+        source: 'manual',
+        parseMeta: quickParseMeta,
+      });
+    if (!linked) await escalation.save();
     await patchTrace(trace?._id, {
       status: 'ok',
       escalationId: escalation._id,
@@ -1542,51 +1619,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       }, traceStartedAt);
     }
 
-    return res.status(201).json({
+    return res.status(linked && linked.reusedExisting ? 200 : 201).json({
       ok: true,
       escalation: escalation.toObject(),
+      duplicateSafety: linked ? linked.duplicateSafety : undefined,
       _meta: quickMeta,
       traceId: trace ? trace._id.toString() : null,
     });
   }
 
-  const escParseRequestId = req.requestId;
-  const resolvedMode = resolveParseMode(mode);
-  const traceStartedAt = new Date();
-  const trace = await createTrace({
-    requestId: req.requestId,
-    parentTraceId: traceId || null,
-    service: 'parse',
-    route: '/api/escalations/parse',
-    turnKind: 'parse',
-    conversationId: conversationId || null,
-    promptPreview: resolvedText || '[image parse]',
-    messageLength: typeof resolvedText === 'string' ? resolvedText.length : 0,
-    normalizedImages: resolvedImage ? [resolvedImage] : [],
-    clientImageMeta: resolvedImageMeta ? [resolvedImageMeta] : [],
-    requested: {
-      mode: resolvedMode,
-      timeoutMs,
-      primaryProvider: primaryProvider || provider || '',
-      fallbackProvider: fallbackProvider || '',
-      parallelProviders: [],
-    },
-    resolved: {
-      mode: resolvedMode,
-      timeoutMs,
-      primaryProvider: primaryProvider || provider || '',
-      fallbackProvider: fallbackProvider || '',
-      parallelProviders: [],
-    },
-  }).catch(() => null);
-  await appendTraceEvent(trace?._id, {
-    key: 'parse_received',
-    label: 'Parse request received',
-    status: 'info',
-    provider: primaryProvider || provider || '',
-    model: getProviderModelId(primaryProvider || provider || ''),
-    message: 'Structured parse request accepted.',
-  }, traceStartedAt);
   const runtimeOperation = createAiOperation({
     kind: 'parse',
     route: '/api/escalations/parse',
@@ -1639,23 +1680,41 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       provider: parseMeta.providerUsed || primaryProvider || provider || null,
     });
 
-    const escalation = new Escalation({
-      ...parseResult.fields,
-      source: resolvedImage ? 'screenshot' : (conversationId ? 'chat' : 'manual'),
-      parseMeta: {
-        mode: parseMeta.mode,
-        providerUsed: parseMeta.providerUsed,
-        winner: parseMeta.winner || parseMeta.providerUsed,
-        fallbackUsed: parseMeta.fallbackUsed,
-        fallbackFrom: parseMeta.fallbackFrom || '',
-        validationScore: parseMeta.validation ? parseMeta.validation.score : null,
-        validationConfidence: parseMeta.validation ? parseMeta.validation.confidence : '',
-        validationIssues: parseMeta.validation ? parseMeta.validation.issues : [],
-        usedRegexFallback: parseMeta.usedRegexFallback,
-        attempts: parseMeta.attempts,
-      },
-    });
-    await escalation.save();
+    const persistedParseMeta = {
+      mode: parseMeta.mode,
+      providerUsed: parseMeta.providerUsed,
+      winner: parseMeta.winner || parseMeta.providerUsed,
+      fallbackUsed: parseMeta.fallbackUsed,
+      fallbackFrom: parseMeta.fallbackFrom || '',
+      validationScore: parseMeta.validation ? parseMeta.validation.score : null,
+      validationConfidence: parseMeta.validation ? parseMeta.validation.confidence : '',
+      validationIssues: parseMeta.validation ? parseMeta.validation.issues : [],
+      usedRegexFallback: parseMeta.usedRegexFallback,
+      attempts: parseMeta.attempts,
+    };
+    let linked = null;
+    if (conversationId) {
+      try {
+        linked = await createLinkedEscalationFromConversation({
+          conversationId,
+          fields: parseResult.fields,
+          source: resolvedImage ? 'screenshot' : 'chat',
+          parseMeta: persistedParseMeta,
+        });
+      } catch (err) {
+        const response = workflowErrorResponse(err);
+        if (response) return res.status(response.statusCode).json(response.body);
+        throw err;
+      }
+    }
+    const escalation = linked
+      ? linked.escalation
+      : new Escalation({
+        ...parseResult.fields,
+        source: resolvedImage ? 'screenshot' : 'manual',
+        parseMeta: persistedParseMeta,
+      });
+    if (!linked) await escalation.save();
     await setTraceAttempts(trace?._id, parseMeta.attempts || []);
     await setTraceUsage(trace?._id, (parseMeta.attempts || []).find((attempt) => attempt.status === 'ok' && attempt.provider === parseMeta.providerUsed)?.usage || null);
     await patchTrace(trace?._id, {
@@ -1730,9 +1789,10 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       provider: parseMeta.providerUsed || primaryProvider || provider || null,
     });
     deleteAiOperation(runtimeOperationId);
-    return res.status(201).json({
+    return res.status(linked && linked.reusedExisting ? 200 : 201).json({
       ok: true,
       escalation: escalation.toObject(),
+      duplicateSafety: linked ? linked.duplicateSafety : undefined,
       _meta: parseMeta,
       traceId: trace ? trace._id.toString() : null,
     });

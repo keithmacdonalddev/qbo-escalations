@@ -153,6 +153,114 @@ await t.test('from-conversation links both records and deleting conversation unl
   assert.equal(escalationAfterDelete.conversationId, null);
 });
 
+await t.test('from-conversation is idempotent for the same conversation', async () => {
+  const conversation = await Conversation.create({
+    title: 'Idempotent link test',
+    messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
+    provider: 'claude',
+  });
+
+  const first = await agent
+    .post('/api/escalations/from-conversation')
+    .send({
+      conversationId: conversation._id.toString(),
+      category: 'general',
+      attemptingTo: 'Create an invoice',
+    });
+  assert.equal(first.status, 201);
+
+  const second = await agent
+    .post('/api/escalations/from-conversation')
+    .send({
+      conversationId: conversation._id.toString(),
+      category: 'technical',
+      attemptingTo: 'Retry should not create a second record',
+    });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.duplicateSafety.reusedExisting, true);
+  assert.equal(second.body.escalation._id, first.body.escalation._id);
+
+  assert.equal(await Escalation.countDocuments({ conversationId: conversation._id }), 1);
+  const conversationAfter = await Conversation.findById(conversation._id).lean();
+  assert.equal(String(conversationAfter.escalationId), first.body.escalation._id);
+});
+
+await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
+  const conversation = await Conversation.create({
+    title: 'Duplicate link guard',
+    messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
+    provider: 'claude',
+  });
+
+  const first = await agent
+    .post('/api/escalations/from-conversation')
+    .send({
+      conversationId: conversation._id.toString(),
+      category: 'general',
+      attemptingTo: 'Initial linked escalation',
+    });
+  assert.equal(first.status, 201);
+
+  const second = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'technical',
+      attemptingTo: 'Separate manual escalation',
+    });
+  assert.equal(second.status, 201);
+
+  const rejected = await agent
+    .post(`/api/escalations/${second.body.escalation._id}/link`)
+    .send({ conversationId: conversation._id.toString() });
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.body.code, 'CONVERSATION_ALREADY_LINKED');
+
+  const forced = await agent
+    .post(`/api/escalations/${second.body.escalation._id}/link`)
+    .send({ conversationId: conversation._id.toString(), force: true });
+  assert.equal(forced.status, 200);
+  assert.equal(forced.body.duplicateSafety.reason, 'forced_relink');
+
+  const firstAfter = await Escalation.findById(first.body.escalation._id).lean();
+  const secondAfter = await Escalation.findById(second.body.escalation._id).lean();
+  const conversationAfter = await Conversation.findById(conversation._id).lean();
+  assert.equal(firstAfter.conversationId, null);
+  assert.equal(String(secondAfter.conversationId), conversation._id.toString());
+  assert.equal(String(conversationAfter.escalationId), second.body.escalation._id);
+});
+
+await t.test('parse with conversationId reuses the existing linked escalation on retry', async () => {
+  const conversation = await Conversation.create({
+    title: 'Parse retry guard',
+    messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
+    provider: 'claude',
+  });
+  const text = [
+    'COID/MID: 12345 / 67890',
+    'CASE: CS-2026-004321',
+    'CLIENT/CONTACT: Example Client',
+    'CX IS ATTEMPTING TO: Run payroll',
+    'EXPECTED OUTCOME: Payroll should submit',
+    'ACTUAL OUTCOME: Submission fails',
+    'TRIED TEST ACCOUNT: unknown',
+    'TS STEPS: Cleared cache',
+  ].join('\n');
+
+  const first = await agent
+    .post('/api/escalations/parse')
+    .send({ conversationId: conversation._id.toString(), text, mode: 'quick' });
+  assert.equal(first.status, 201);
+
+  const second = await agent
+    .post('/api/escalations/parse')
+    .send({ conversationId: conversation._id.toString(), text, mode: 'quick' });
+  assert.equal(second.status, 200);
+  assert.equal(second.body.duplicateSafety.reusedExisting, true);
+  assert.equal(second.body.escalation._id, first.body.escalation._id);
+
+  assert.equal(await Escalation.countDocuments({ conversationId: conversation._id }), 1);
+});
+
 await t.test('deleting escalation unlinks linked conversation', async () => {
   const conversation = await Conversation.create({
     title: 'Unlink test',

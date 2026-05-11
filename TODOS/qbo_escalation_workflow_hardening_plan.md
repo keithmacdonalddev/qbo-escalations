@@ -1,6 +1,6 @@
 # QBO Escalation Workflow Hardening Plan
 
-Last updated: 2026-05-04
+Last updated: 2026-05-11
 
 ## Purpose
 
@@ -28,8 +28,8 @@ We are reviewing the hardening areas one by one before implementation.
 | --- | --- | --- |
 | 1. Canonical intake reliability | In discussion | Keep the parser agent narrow; the app/server owns the evidence envelope around its output. |
 | 2. Case lifecycle consistency | Not yet discussed in detail | Add clearer states and likely a notification / attention center. |
-| 3. Duplicate and retry safety | Not yet discussed in detail | Prevent retries, refreshes, and re-parses from creating duplicate records. |
-| 4. Known issue / INV confidence boundaries | Not yet discussed in detail | Treat INV matches as candidates unless evidence or human review confirms them. |
+| 3. Duplicate and retry safety | First guard implemented | Reuse existing conversation-linked escalations on retries/re-parses; next add cross-conversation duplicate warnings. |
+| 4. Known issue / INV confidence boundaries | Initial known issue search implemented | Treat INV matches as candidates unless evidence or human review confirms them. |
 | 5. Resolution discipline | Not yet discussed in detail | Do not allow resolved cases with no resolution summary or reason. |
 | 6. Knowledge candidate safety | Not yet discussed in detail | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
 | 7. Evidence ledger | Not yet discussed in detail | Add a thin event trail around the existing workflow. |
@@ -44,6 +44,13 @@ We are reviewing the hardening areas one by one before implementation.
 - Current recommendation: harden the QBO escalation workflow before building the ontology vertical slice.
 - Current ontology direction: start with an MVP trail / pathfinder inside the existing workflow, not a separate ontology product.
 - Item 1 clarification: the image parser agent is treated as a narrow, tested transcriber for one screenshot template into one text template. Canonical intake reliability should not expand that agent's job.
+
+### 2026-05-11
+
+- Operational dependency check: `llm-gateway` was started on `127.0.0.1:4100`; LM Studio's local server was started on `127.0.0.1:1234`; QBO image-parser status reported `llm-gateway` available with `google/gemma-4-e4b`.
+- Item 3 first implementation: conversation-linked escalation creation is now idempotent for manual create, `from-conversation`, parse-with-conversation, and chat-side automatic screenshot persist.
+- Item 3 link safety: linking a conversation to a second escalation now returns a conflict unless the caller explicitly sends `force: true`, which makes intentional relinking visible in code.
+- Item 3 remaining gap: the app still needs cross-conversation duplicate candidate warnings using COID, case number, screenshot hash, category, symptom text, and time window signals.
 
 ## 1. Canonical Intake Reliability
 
@@ -170,9 +177,26 @@ The workflow should protect against duplicate:
 
 ### Current Understanding
 
-The app appears to have partial protections today, such as linking one escalation to a conversation and allowing only one knowledge candidate per escalation.
+The app now has a first server-side guard for the strongest duplicate signal: a source conversation should point at one durable escalation record.
+
+The guarded paths are:
+
+- `POST /api/escalations` when a `conversationId` is supplied
+- `POST /api/escalations/from-conversation`
+- `POST /api/escalations/parse` when a `conversationId` is supplied
+- automatic screenshot escalation persist from the main chat flow
+- `POST /api/escalations/:id/link`
+
+Repeated sends, refreshes, and re-parses from the same conversation should reuse the existing linked escalation instead of creating a second record.
 
 The likely remaining risk is the same real-world case entering through a different conversation or retry path and becoming a separate escalation record.
+
+### Implemented Guard Behavior
+
+- If a conversation already has `escalationId`, creation returns the existing escalation with duplicate safety metadata.
+- If an escalation already points to the conversation but the conversation link is stale, the app reconciles the conversation back-link.
+- If a link request would attach one conversation to a second escalation, the server returns a conflict unless `force: true` is supplied.
+- If forced relinking is used, the old escalation is unlinked from the conversation before the new one is linked.
 
 ### Candidate Duplicate Signals
 

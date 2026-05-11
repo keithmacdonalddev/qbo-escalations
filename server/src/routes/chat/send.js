@@ -3,7 +3,6 @@
 const express = require('express');
 const { randomUUID } = require('node:crypto');
 const Conversation = require('../../models/Conversation');
-const Escalation = require('../../models/Escalation');
 const ParallelCandidateTurn = require('../../models/ParallelCandidateTurn');
 const { normalizeChatRuntimeSettings } = require('../../lib/chat-settings');
 const { normalizeChatImages } = require('../../lib/chat-image');
@@ -59,6 +58,7 @@ const {
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
 } = require('../../lib/case-intake');
+const { createLinkedEscalationFromConversation } = require('../../lib/escalation-dedup');
 const {
   buildContextDebugPayload,
   deriveFallbackReasonCode,
@@ -1263,10 +1263,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         ) {
           try {
             const triageMeta = imageTriageContext.parseMeta || {};
-            const escalation = new Escalation({
-              ...imageTriageContext.parseFields,
+            const linked = await createLinkedEscalationFromConversation({
+              conversation,
+              fields: imageTriageContext.parseFields,
               source: 'screenshot',
-              conversationId: conversation._id,
               parseMeta: {
                 mode: triageMeta.mode || '',
                 providerUsed: triageMeta.providerUsed || '',
@@ -1280,9 +1280,13 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
                 attempts: triageMeta.attempts || [],
               },
             });
-            await escalation.save();
-            conversation.escalationId = escalation._id;
-            console.log('[chat] Escalation persisted from chat triage: %s (conv %s)', escalation._id, conversation._id);
+            conversation.escalationId = linked.escalation._id;
+            console.log(
+              '[chat] Escalation %s from chat triage: %s (conv %s)',
+              linked.reusedExisting ? 'reused' : 'persisted',
+              linked.escalation._id,
+              conversation._id
+            );
           } catch (escErr) {
             // Non-fatal — do not break the chat flow if escalation persist fails
             console.warn('[chat] Failed to persist escalation from triage (non-fatal):', escErr.message);
