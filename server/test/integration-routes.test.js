@@ -185,6 +185,53 @@ await t.test('from-conversation is idempotent for the same conversation', async 
   assert.equal(String(conversationAfter.escalationId), first.body.escalation._id);
 });
 
+await t.test('from-conversation warns but allows likely duplicates from different conversations', async () => {
+  const [firstConversation, secondConversation] = await Conversation.create([
+    {
+      title: 'Original customer case',
+      messages: [{ role: 'user', content: 'Payroll export fails', timestamp: new Date() }],
+      provider: 'claude',
+    },
+    {
+      title: 'Retry through a new conversation',
+      messages: [{ role: 'user', content: 'Same payroll export issue', timestamp: new Date() }],
+      provider: 'claude',
+    },
+  ]);
+
+  const first = await agent
+    .post('/api/escalations/from-conversation')
+    .send({
+      conversationId: firstConversation._id.toString(),
+      category: 'payroll',
+      coid: '987654',
+      caseNumber: 'CS-2026-000777',
+      attemptingTo: 'Export T4 XML',
+      actualOutcome: 'T4 XML export fails before download',
+    });
+  assert.equal(first.status, 201);
+
+  const second = await agent
+    .post('/api/escalations/from-conversation')
+    .send({
+      conversationId: secondConversation._id.toString(),
+      category: 'payroll',
+      coid: '987654',
+      caseNumber: 'CS-2026-000777',
+      attemptingTo: 'Export T4 XML',
+      actualOutcome: 'T4 XML export fails before download',
+    });
+  assert.equal(second.status, 201);
+  assert.notEqual(second.body.escalation._id, first.body.escalation._id);
+  assert.equal(second.body.duplicateSafety.reusedExisting, false);
+  assert.equal(second.body.duplicateSafety.warnings.length, 1);
+  assert.equal(second.body.duplicateSafety.warnings[0].code, 'POSSIBLE_DUPLICATE_ESCALATION');
+  assert.equal(second.body.duplicateSafety.warnings[0].candidates[0].escalationId, first.body.escalation._id);
+  assert.ok(second.body.duplicateSafety.warnings[0].candidates[0].signals.includes('same_case_number'));
+
+  assert.equal(await Escalation.countDocuments({ caseNumber: 'CS-2026-000777' }), 2);
+});
+
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
   const conversation = await Conversation.create({
     title: 'Duplicate link guard',
@@ -683,6 +730,33 @@ await t.test('screenshot upload normalizes and deduplicates by hash', async () =
     .send({ images: [SAMPLE_PNG_DATA_URL] });
   assert.equal(secondUpload.status, 400);
   assert.ok(secondUpload.body.skippedDuplicates >= 1);
+});
+
+await t.test('screenshot upload warns when another escalation already has the same image hash', async () => {
+  const firstEscalation = await agent
+    .post('/api/escalations')
+    .send({ category: 'technical', attemptingTo: 'Review screenshot A' });
+  assert.equal(firstEscalation.status, 201);
+
+  const firstUpload = await agent
+    .post(`/api/escalations/${firstEscalation.body.escalation._id}/screenshots`)
+    .send({ images: [SAMPLE_PNG_DATA_URL] });
+  assert.equal(firstUpload.status, 201);
+  assert.equal(firstUpload.body.duplicateSafety.warnings.length, 0);
+
+  const secondEscalation = await agent
+    .post('/api/escalations')
+    .send({ category: 'technical', attemptingTo: 'Review screenshot B' });
+  assert.equal(secondEscalation.status, 201);
+
+  const secondUpload = await agent
+    .post(`/api/escalations/${secondEscalation.body.escalation._id}/screenshots`)
+    .send({ images: [SAMPLE_PNG_DATA_URL] });
+  assert.equal(secondUpload.status, 201);
+  assert.equal(secondUpload.body.duplicateSafety.warnings.length, 1);
+  assert.equal(secondUpload.body.duplicateSafety.warnings[0].code, 'POSSIBLE_DUPLICATE_ESCALATION');
+  assert.equal(secondUpload.body.duplicateSafety.warnings[0].candidates[0].escalationId, firstEscalation.body.escalation._id);
+  assert.ok(secondUpload.body.duplicateSafety.warnings[0].candidates[0].signals.includes('same_screenshot_hash'));
 });
 
 // ---------- Phase 5: New provider ID acceptance ----------

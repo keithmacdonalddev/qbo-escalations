@@ -28,7 +28,7 @@ We are reviewing the hardening areas one by one before implementation.
 | --- | --- | --- |
 | 1. Canonical intake reliability | In discussion | Keep the parser agent narrow; the app/server owns the evidence envelope around its output. |
 | 2. Case lifecycle consistency | Not yet discussed in detail | Add clearer states and likely a notification / attention center. |
-| 3. Duplicate and retry safety | First guard implemented | Reuse existing conversation-linked escalations on retries/re-parses; next add cross-conversation duplicate warnings. |
+| 3. Duplicate and retry safety | Cross-conversation warnings implemented | Reuse existing conversation-linked escalations on retries/re-parses; warn when different conversations or screenshot uploads look like the same real-world issue. |
 | 4. Known issue / INV confidence boundaries | Initial known issue search implemented | Treat INV matches as candidates unless evidence or human review confirms them. |
 | 5. Resolution discipline | Not yet discussed in detail | Do not allow resolved cases with no resolution summary or reason. |
 | 6. Knowledge candidate safety | Not yet discussed in detail | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
@@ -50,7 +50,8 @@ We are reviewing the hardening areas one by one before implementation.
 - Operational dependency check: `llm-gateway` was started on `127.0.0.1:4100`; LM Studio's local server was started on `127.0.0.1:1234`; QBO image-parser status reported `llm-gateway` available with `google/gemma-4-e4b`.
 - Item 3 first implementation: conversation-linked escalation creation is now idempotent for manual create, `from-conversation`, parse-with-conversation, and chat-side automatic screenshot persist.
 - Item 3 link safety: linking a conversation to a second escalation now returns a conflict unless the caller explicitly sends `force: true`, which makes intentional relinking visible in code.
-- Item 3 remaining gap: the app still needs cross-conversation duplicate candidate warnings using COID, case number, screenshot hash, category, symptom text, and time window signals.
+- Item 3 second implementation: new escalation creation now returns possible-duplicate warning metadata when another escalation from a different conversation or intake path shares strong signals such as case number, COID, screenshot hash, category, symptom text, and a recent time window.
+- Item 3 remaining gap: duplicate warnings are API metadata first; the app still needs a durable attention-center surface that lets the user resolve, dismiss, or intentionally split likely duplicates.
 
 ## 1. Canonical Intake Reliability
 
@@ -189,7 +190,7 @@ The guarded paths are:
 
 Repeated sends, refreshes, and re-parses from the same conversation should reuse the existing linked escalation instead of creating a second record.
 
-The likely remaining risk is the same real-world case entering through a different conversation or retry path and becoming a separate escalation record.
+The remaining risk is no longer silent server-side creation. The server now allows the separate record but returns warning metadata so the client or future attention center can make the overlap visible.
 
 ### Implemented Guard Behavior
 
@@ -197,6 +198,8 @@ The likely remaining risk is the same real-world case entering through a differe
 - If an escalation already points to the conversation but the conversation link is stale, the app reconciles the conversation back-link.
 - If a link request would attach one conversation to a second escalation, the server returns a conflict unless `force: true` is supplied.
 - If forced relinking is used, the old escalation is unlinked from the conversation before the new one is linked.
+- If a different conversation or manual intake creates a similar escalation, the server does not block it; it returns `duplicateSafety.warnings[]` with scored candidates and the signals that matched.
+- If a screenshot is attached to an escalation and another escalation already has the same normalized screenshot hash, the upload response includes the same possible-duplicate warning shape.
 
 ### Candidate Duplicate Signals
 

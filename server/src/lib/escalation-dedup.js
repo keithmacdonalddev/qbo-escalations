@@ -3,6 +3,46 @@
 const Escalation = require('../models/Escalation');
 const Conversation = require('../models/Conversation');
 
+const DUPLICATE_WARNING_THRESHOLD = 50;
+const DUPLICATE_LOOKBACK_DAYS = 30;
+const DUPLICATE_QUERY_LIMIT = 50;
+const DUPLICATE_RESPONSE_LIMIT = 5;
+
+const STOP_WORDS = new Set([
+  'about',
+  'account',
+  'after',
+  'again',
+  'also',
+  'cannot',
+  'cleared',
+  'customer',
+  'expected',
+  'failed',
+  'fails',
+  'from',
+  'have',
+  'into',
+  'issue',
+  'image',
+  'needs',
+  'online',
+  'outcome',
+  'quickbooks',
+  'review',
+  'screen',
+  'screenshot',
+  'should',
+  'shown',
+  'that',
+  'their',
+  'there',
+  'this',
+  'tried',
+  'with',
+  'would',
+]);
+
 function isValidObjectId(value) {
   return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value);
 }
@@ -18,6 +58,277 @@ function sameObjectId(a, b) {
   const left = objectIdString(a);
   const right = objectIdString(b);
   return Boolean(left && right && left === right);
+}
+
+function escapeRegex(value) {
+  return safeString(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function safeString(value) {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  try {
+    return String(value);
+  } catch {
+    return '';
+  }
+}
+
+function compactText(value, maxChars = 160) {
+  const compact = safeString(value).replace(/\s+/g, ' ').trim();
+  if (!compact) return '';
+  if (!Number.isFinite(maxChars) || maxChars <= 0 || compact.length <= maxChars) return compact;
+  return compact.slice(0, Math.max(0, maxChars - 3)).trimEnd() + '...';
+}
+
+function normalizeComparable(value) {
+  return compactText(value, 500).toLowerCase();
+}
+
+function normalizeIdentifier(value) {
+  return compactText(value, 120).toLowerCase();
+}
+
+function normalizeHashes(value) {
+  const raw = Array.isArray(value) ? value : [value];
+  const out = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const hash = normalizeIdentifier(item);
+    if (!hash || seen.has(hash)) continue;
+    seen.add(hash);
+    out.push(hash);
+  }
+  return out;
+}
+
+function symptomText(fields = {}) {
+  return [
+    fields.attemptingTo,
+    fields.expectedOutcome,
+    fields.actualOutcome,
+    fields.tsSteps,
+  ].map((value) => safeString(value)).join(' ');
+}
+
+function tokenizeSymptoms(value) {
+  const tokens = normalizeComparable(value)
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !STOP_WORDS.has(token));
+  return new Set(tokens.slice(0, 80));
+}
+
+function tokenOverlap(left, right) {
+  if (!left.size || !right.size) return 0;
+  let matches = 0;
+  for (const token of left) {
+    if (right.has(token)) matches++;
+  }
+  return matches / Math.min(left.size, right.size);
+}
+
+function addSignal(signals, signal) {
+  if (!signals.includes(signal)) signals.push(signal);
+}
+
+function duplicateConfidence(score) {
+  if (score >= 75) return 'high';
+  if (score >= 65) return 'medium';
+  return 'low';
+}
+
+function fieldsFromEscalation(escalation) {
+  return {
+    coid: escalation && escalation.coid,
+    caseNumber: escalation && escalation.caseNumber,
+    category: escalation && escalation.category,
+    attemptingTo: escalation && escalation.attemptingTo,
+    expectedOutcome: escalation && escalation.expectedOutcome,
+    actualOutcome: escalation && escalation.actualOutcome,
+    tsSteps: escalation && escalation.tsSteps,
+    screenshotHashes: escalation && escalation.screenshotHashes,
+  };
+}
+
+function scoreDuplicateCandidate(candidate, incomingFields, now = new Date()) {
+  const incoming = incomingFields || {};
+  const signals = [];
+  let score = 0;
+
+  const incomingCaseNumber = normalizeIdentifier(incoming.caseNumber);
+  const candidateCaseNumber = normalizeIdentifier(candidate.caseNumber);
+  if (incomingCaseNumber && candidateCaseNumber && incomingCaseNumber === candidateCaseNumber) {
+    score += 75;
+    addSignal(signals, 'same_case_number');
+  }
+
+  const incomingCoid = normalizeIdentifier(incoming.coid);
+  const candidateCoid = normalizeIdentifier(candidate.coid);
+  if (incomingCoid && candidateCoid && incomingCoid === candidateCoid) {
+    score += 30;
+    addSignal(signals, 'same_coid');
+  }
+
+  const incomingHashes = normalizeHashes(incoming.screenshotHashes);
+  const candidateHashes = normalizeHashes(candidate.screenshotHashes);
+  if (incomingHashes.length > 0 && candidateHashes.some((hash) => incomingHashes.includes(hash))) {
+    score += 90;
+    addSignal(signals, 'same_screenshot_hash');
+  }
+
+  const incomingCategory = normalizeIdentifier(incoming.category);
+  const candidateCategory = normalizeIdentifier(candidate.category);
+  if (incomingCategory && incomingCategory !== 'unknown' && incomingCategory === candidateCategory) {
+    score += 10;
+    addSignal(signals, 'same_category');
+  }
+
+  const incomingTokens = tokenizeSymptoms(symptomText(incoming));
+  const candidateTokens = tokenizeSymptoms(symptomText(candidate));
+  const overlap = tokenOverlap(incomingTokens, candidateTokens);
+  if (overlap >= 0.5) {
+    score += 35;
+    addSignal(signals, 'strong_symptom_overlap');
+  } else if (overlap >= 0.3) {
+    score += 24;
+    addSignal(signals, 'moderate_symptom_overlap');
+  } else if (overlap >= 0.16) {
+    score += 12;
+    addSignal(signals, 'weak_symptom_overlap');
+  }
+
+  const createdAt = candidate.createdAt ? new Date(candidate.createdAt) : null;
+  if (createdAt && Number.isFinite(createdAt.getTime()) && Number.isFinite(now.getTime())) {
+    const ageDays = Math.abs(now.getTime() - createdAt.getTime()) / 86_400_000;
+    if (ageDays <= DUPLICATE_LOOKBACK_DAYS) {
+      score += 5;
+      addSignal(signals, 'recent_window');
+    }
+  }
+
+  return { score, signals, confidence: duplicateConfidence(score) };
+}
+
+function buildDuplicateCandidateSummary(candidate, scoreResult) {
+  return {
+    escalationId: objectIdString(candidate._id),
+    conversationId: objectIdString(candidate.conversationId) || null,
+    score: scoreResult.score,
+    confidence: scoreResult.confidence,
+    signals: scoreResult.signals,
+    status: candidate.status || '',
+    source: candidate.source || '',
+    coid: candidate.coid || '',
+    caseNumber: candidate.caseNumber || '',
+    category: candidate.category || '',
+    attemptingToPreview: compactText(candidate.attemptingTo, 140),
+    actualOutcomePreview: compactText(candidate.actualOutcome, 140),
+    createdAt: candidate.createdAt || null,
+  };
+}
+
+function buildDuplicateCandidateQuery(fields, {
+  excludeEscalationId = null,
+  excludeConversationId = null,
+  lookbackDays = DUPLICATE_LOOKBACK_DAYS,
+} = {}) {
+  const incoming = fields || {};
+  const or = [];
+  const caseNumber = compactText(incoming.caseNumber, 120);
+  const coid = compactText(incoming.coid, 120);
+  const screenshotHashes = normalizeHashes(incoming.screenshotHashes);
+  const category = compactText(incoming.category, 80);
+  const since = new Date(Date.now() - Math.max(1, lookbackDays) * 86_400_000);
+
+  if (caseNumber) or.push({ caseNumber: { $regex: `^${escapeRegex(caseNumber)}$`, $options: 'i' } });
+  if (coid) or.push({ coid: { $regex: `^${escapeRegex(coid)}$`, $options: 'i' } });
+  if (screenshotHashes.length > 0) or.push({ screenshotHashes: { $in: screenshotHashes } });
+  if (category && category !== 'unknown') {
+    or.push({ category, createdAt: { $gte: since } });
+  }
+
+  if (or.length === 0) return null;
+
+  const query = { $or: or };
+  const excludedEscalation = objectIdString(excludeEscalationId);
+  if (excludedEscalation && isValidObjectId(excludedEscalation)) {
+    query._id = { $ne: excludedEscalation };
+  }
+  const excludedConversation = objectIdString(excludeConversationId);
+  if (excludedConversation && isValidObjectId(excludedConversation)) {
+    query.conversationId = { $ne: excludedConversation };
+  }
+
+  return query;
+}
+
+async function findDuplicateEscalationCandidates({
+  fields,
+  excludeEscalationId = null,
+  excludeConversationId = null,
+  lookbackDays = DUPLICATE_LOOKBACK_DAYS,
+  limit = DUPLICATE_RESPONSE_LIMIT,
+  now = new Date(),
+} = {}) {
+  const query = buildDuplicateCandidateQuery(fields, {
+    excludeEscalationId,
+    excludeConversationId,
+    lookbackDays,
+  });
+  if (!query) return [];
+
+  const candidates = await Escalation.find(query)
+    .sort({ createdAt: -1, _id: -1 })
+    .limit(DUPLICATE_QUERY_LIMIT)
+    .lean();
+
+  return candidates
+    .map((candidate) => {
+      const scoreResult = scoreDuplicateCandidate(candidate, fields, now);
+      return buildDuplicateCandidateSummary(candidate, scoreResult);
+    })
+    .filter((candidate) => candidate.score >= DUPLICATE_WARNING_THRESHOLD)
+    .sort((a, b) => b.score - a.score || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, Math.max(1, limit));
+}
+
+async function buildDuplicateWarningsForEscalation(escalation, {
+  fields = null,
+  excludeEscalationId = null,
+  excludeConversationId = null,
+} = {}) {
+  if (!escalation) return [];
+  const candidates = await findDuplicateEscalationCandidates({
+    fields: {
+      ...fieldsFromEscalation(escalation),
+      ...(fields && typeof fields === 'object' ? fields : {}),
+    },
+    excludeEscalationId: excludeEscalationId || escalation._id,
+    excludeConversationId: excludeConversationId || escalation.conversationId,
+  });
+
+  if (candidates.length === 0) return [];
+
+  return [{
+    code: 'POSSIBLE_DUPLICATE_ESCALATION',
+    severity: candidates.some((candidate) => (
+      candidate.confidence === 'high'
+      || candidate.signals.includes('same_case_number')
+      || candidate.signals.includes('same_screenshot_hash')
+    )) ? 'warning' : 'info',
+    message: 'Possible duplicate escalation candidates found from another conversation or intake path.',
+    candidateCount: candidates.length,
+    candidates,
+  }];
+}
+
+async function withDuplicateWarnings(duplicateSafety, escalation, options = {}) {
+  const warnings = await buildDuplicateWarningsForEscalation(escalation, options);
+  return {
+    ...duplicateSafety,
+    warnings,
+  };
 }
 
 function makeWorkflowError(code, message, statusCode, detail = null) {
@@ -120,12 +431,12 @@ async function createLinkedEscalationFromConversation({
   return {
     escalation,
     reusedExisting: false,
-    duplicateSafety: {
+    duplicateSafety: await withDuplicateWarnings({
       reusedExisting: false,
       reason: 'created',
       conversationId: objectIdString(resolvedConversation._id),
       escalationId: objectIdString(escalation._id),
-    },
+    }, escalation, { fields: payload }),
   };
 }
 
@@ -219,9 +530,12 @@ function workflowErrorResponse(err) {
 }
 
 module.exports = {
+  buildDuplicateWarningsForEscalation,
   createLinkedEscalationFromConversation,
+  findDuplicateEscalationCandidates,
   findLinkedEscalation,
   isValidObjectId,
   linkEscalationToConversation,
+  scoreDuplicateCandidate,
   workflowErrorResponse,
 };

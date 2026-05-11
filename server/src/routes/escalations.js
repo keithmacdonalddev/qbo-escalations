@@ -7,6 +7,7 @@ const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
 const { hasCategoryPlaybook, publishKnowledgeCandidate, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 const {
+  buildDuplicateWarningsForEscalation,
   createLinkedEscalationFromConversation,
   linkEscalationToConversation,
   workflowErrorResponse,
@@ -847,7 +848,17 @@ router.post('/', async (req, res) => {
     source: deriveSourceFromPayload(req.body),
   });
   await escalation.save();
-  res.status(201).json({ ok: true, escalation: escalation.toObject() });
+  const warnings = await buildDuplicateWarningsForEscalation(escalation, { fields });
+  res.status(201).json({
+    ok: true,
+    escalation: escalation.toObject(),
+    duplicateSafety: {
+      reusedExisting: false,
+      reason: 'created',
+      escalationId: escalation._id.toString(),
+      warnings,
+    },
+  });
 });
 
 // PATCH /api/escalations/:id -- Update escalation
@@ -1333,6 +1344,7 @@ router.post('/:id/screenshots', screenshotRateLimit, async (req, res) => {
   escalation.screenshotHashes = nextHashes;
   escalation.source = 'screenshot';
   await escalation.save();
+  const warnings = await buildDuplicateWarningsForEscalation(escalation);
 
   res.status(201).json({
     ok: true,
@@ -1341,6 +1353,13 @@ router.post('/:id/screenshots', screenshotRateLimit, async (req, res) => {
     skippedDuplicates,
     screenshotPaths: escalation.screenshotPaths,
     escalation: escalation.toObject(),
+    duplicateSafety: {
+      reusedExisting: false,
+      reason: 'screenshot_attached',
+      escalationId: escalation._id.toString(),
+      conversationId: escalation.conversationId ? escalation.conversationId.toString() : null,
+      warnings,
+    },
   });
 });
 
@@ -1571,6 +1590,16 @@ router.post('/parse', parseRateLimit, async (req, res) => {
         parseMeta: quickParseMeta,
       });
     if (!linked) await escalation.save();
+    const duplicateSafety = linked
+      ? linked.duplicateSafety
+      : {
+        reusedExisting: false,
+        reason: 'created',
+        escalationId: escalation._id.toString(),
+        warnings: await buildDuplicateWarningsForEscalation(escalation, {
+          fields: quickValidation.normalizedFields,
+        }),
+      };
     await patchTrace(trace?._id, {
       status: 'ok',
       escalationId: escalation._id,
@@ -1622,7 +1651,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     return res.status(linked && linked.reusedExisting ? 200 : 201).json({
       ok: true,
       escalation: escalation.toObject(),
-      duplicateSafety: linked ? linked.duplicateSafety : undefined,
+      duplicateSafety,
       _meta: quickMeta,
       traceId: trace ? trace._id.toString() : null,
     });
@@ -1715,6 +1744,16 @@ router.post('/parse', parseRateLimit, async (req, res) => {
         parseMeta: persistedParseMeta,
       });
     if (!linked) await escalation.save();
+    const duplicateSafety = linked
+      ? linked.duplicateSafety
+      : {
+        reusedExisting: false,
+        reason: 'created',
+        escalationId: escalation._id.toString(),
+        warnings: await buildDuplicateWarningsForEscalation(escalation, {
+          fields: parseResult.fields,
+        }),
+      };
     await setTraceAttempts(trace?._id, parseMeta.attempts || []);
     await setTraceUsage(trace?._id, (parseMeta.attempts || []).find((attempt) => attempt.status === 'ok' && attempt.provider === parseMeta.providerUsed)?.usage || null);
     await patchTrace(trace?._id, {
@@ -1792,7 +1831,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     return res.status(linked && linked.reusedExisting ? 200 : 201).json({
       ok: true,
       escalation: escalation.toObject(),
-      duplicateSafety: linked ? linked.duplicateSafety : undefined,
+      duplicateSafety,
       _meta: parseMeta,
       traceId: trace ? trace._id.toString() : null,
     });
