@@ -4,6 +4,7 @@ import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import EscalationCard from './EscalationCard.jsx';
 import useEscalations, {
+  ATTENTION_STATUS_LABELS,
   ESCALATION_CATEGORIES,
   ESCALATION_STATUSES,
   ESCALATION_STATUS_LABELS,
@@ -37,6 +38,16 @@ export default function EscalationDashboard() {
     kqLoading,
     kqError,
     kqTotalAll,
+    attentionItems,
+    attentionTotal,
+    attentionCounts,
+    attentionStatusFilter,
+    setAttentionStatusFilter,
+    attentionLoading,
+    attentionError,
+    attentionTotalAll,
+    attentionUpdatingId,
+    handleAttentionStatusChange,
     requestDelete,
     deleteTarget,
     confirmDelete,
@@ -62,9 +73,11 @@ export default function EscalationDashboard() {
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
           {activeTab === 'escalations'
             ? 'All parsed escalations — filter, search, and track resolution status.'
-            : 'Review and track AI-generated knowledge drafts across all escalations.'}
+            : activeTab === 'attention'
+              ? 'Review workflow items that need a decision.'
+              : 'Review and track AI-generated knowledge drafts across all escalations.'}
         </span>
-        <Tooltip text={activeTab === 'escalations' ? 'Reload escalation data' : 'Reload knowledge queue'} level="medium">
+        <Tooltip text={activeTab === 'escalations' ? 'Reload escalation data' : activeTab === 'attention' ? 'Reload attention queue' : 'Reload knowledge queue'} level="medium">
           <button className="btn btn-secondary" onClick={refresh} type="button">
             Refresh
           </button>
@@ -88,6 +101,40 @@ export default function EscalationDashboard() {
           }}
         >
           Escalations
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('attention')}
+          style={{
+            padding: 'var(--sp-3) var(--sp-5)',
+            background: 'none',
+            border: 'none',
+            borderBottom: activeTab === 'attention' ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === 'attention' ? 'var(--ink-primary)' : 'var(--ink-secondary)',
+            fontWeight: activeTab === 'attention' ? 600 : 400,
+            cursor: 'pointer',
+            fontSize: 'var(--text-sm)',
+            transition: 'color 0.15s, border-color 0.15s',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--sp-2)',
+          }}
+        >
+          Attention
+          {attentionTotalAll > 0 && (
+            <span style={{
+              background: attentionCounts.open > 0 ? 'var(--warning, #eab308)' : 'var(--surface-raised, var(--bg-secondary))',
+              color: attentionCounts.open > 0 ? '#111827' : 'var(--ink-secondary)',
+              fontSize: 'var(--text-xs)',
+              borderRadius: '999px',
+              padding: '1px 7px',
+              fontWeight: 700,
+              minWidth: 20,
+              textAlign: 'center',
+            }}>
+              {attentionCounts.open || attentionTotalAll}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -320,6 +367,79 @@ export default function EscalationDashboard() {
         </>
       )}
 
+      {activeTab === 'attention' && (
+        <>
+          {attentionError && (
+            <div className="error-banner">
+              <span>{attentionError}</span>
+              <button onClick={refresh} type="button">Retry</button>
+            </div>
+          )}
+
+          <div className="attention-status-grid">
+            {['open', 'resolved', 'split', 'dismissed'].map(status => (
+              <button
+                key={status}
+                type="button"
+                onClick={() => setAttentionStatusFilter(attentionStatusFilter === status ? 'all' : status)}
+                className={`attention-status-tile${attentionStatusFilter === status ? ' is-active' : ''}`}
+              >
+                <span className="attention-status-value">{attentionCounts[status] || 0}</span>
+                <span className="attention-status-label">{ATTENTION_STATUS_LABELS[status]}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
+            <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
+              <select
+                value={attentionStatusFilter}
+                onChange={(e) => setAttentionStatusFilter(e.target.value)}
+                aria-label="Filter by attention status"
+                style={{ width: 'auto', minWidth: 150 }}
+              >
+                <option value="open">Open</option>
+                <option value="all">All Items</option>
+                <option value="resolved">Handled</option>
+                <option value="split">Separate</option>
+                <option value="dismissed">Dismissed</option>
+              </select>
+              <span className="text-secondary" style={{ fontSize: 'var(--text-xs)', alignSelf: 'center' }}>
+                {attentionTotal} item{attentionTotal !== 1 ? 's' : ''}
+              </span>
+            </div>
+          </div>
+
+          <div className="card attention-list-card">
+            {attentionLoading ? (
+              <div style={{ padding: 'var(--sp-8)', textAlign: 'center' }}>
+                <span className="spinner" />
+              </div>
+            ) : attentionItems.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-state-title">No Attention Items</div>
+                <div className="empty-state-desc">
+                  {attentionStatusFilter === 'open'
+                    ? 'Open review items appear here when the workflow finds something that needs a decision.'
+                    : 'No items match this status filter.'}
+                </div>
+              </div>
+            ) : (
+              <div className="attention-list">
+                {attentionItems.map(item => (
+                  <AttentionItemRow
+                    key={item._id}
+                    item={item}
+                    busy={attentionUpdatingId === item._id}
+                    onStatusChange={handleAttentionStatusChange}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
       {activeTab === 'knowledge' && (
         <>
           {kqError && (
@@ -470,6 +590,116 @@ export default function EscalationDashboard() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+function getEscalationRefId(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return value._id || '';
+}
+
+function getEscalationLabel(value) {
+  if (!value || typeof value !== 'object') return 'Escalation';
+  return value.caseNumber || value.coid || value.category || 'Escalation';
+}
+
+function formatSignals(signals = []) {
+  return signals
+    .map(signal => signal.replace(/_/g, ' '))
+    .slice(0, 4)
+    .join(', ');
+}
+
+function formatAttentionDate(value) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function AttentionItemRow({ item, busy, onStatusChange }) {
+  const sourceId = getEscalationRefId(item.sourceEscalationId);
+  const candidates = Array.isArray(item.candidates) ? item.candidates : [];
+  const primaryCandidate = candidates[0] || null;
+  const candidateId = primaryCandidate ? getEscalationRefId(primaryCandidate.escalationId) : '';
+  const isOpen = item.status === 'open';
+
+  return (
+    <div className="attention-item">
+      <div className="attention-item-main">
+        <div className="attention-item-header">
+          <span className={`attention-severity attention-severity-${item.severity || 'info'}`}>
+            {item.severity || 'info'}
+          </span>
+          <span className="attention-title">{item.title || 'Workflow review item'}</span>
+          <span className="attention-date">{formatAttentionDate(item.updatedAt || item.createdAt)}</span>
+        </div>
+        <div className="attention-summary">{item.summary || 'Review this workflow item.'}</div>
+        <div className="attention-meta">
+          <span>Source: {getEscalationLabel(item.sourceEscalationId)}</span>
+          {primaryCandidate && (
+            <span>Candidate: {getEscalationLabel(primaryCandidate.escalationId)} ({primaryCandidate.score || 0})</span>
+          )}
+          {item.signals?.length > 0 && <span>{formatSignals(item.signals)}</span>}
+        </div>
+      </div>
+      <div className="attention-actions">
+        {sourceId && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => { window.location.hash = `#/escalations/${sourceId}`; }}
+          >
+            Review
+          </button>
+        )}
+        {candidateId && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => { window.location.hash = `#/escalations/${candidateId}`; }}
+          >
+            Candidate
+          </button>
+        )}
+        {isOpen ? (
+          <>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy}
+              onClick={() => onStatusChange(item._id, 'resolved', 'Duplicate warning handled.')}
+            >
+              Handled
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              disabled={busy}
+              onClick={() => onStatusChange(item._id, 'split', 'Confirmed as separate escalation.')}
+            >
+              Separate
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={busy}
+              onClick={() => onStatusChange(item._id, 'dismissed', 'Dismissed by reviewer.')}
+            >
+              Dismiss
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={() => onStatusChange(item._id, 'open', '')}
+          >
+            Reopen
+          </button>
+        )}
+      </div>
     </div>
   );
 }

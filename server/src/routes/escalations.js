@@ -5,9 +5,10 @@ const path = require('path');
 const crypto = require('crypto');
 const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
+const EscalationAttentionItem = require('../models/EscalationAttentionItem');
 const { hasCategoryPlaybook, publishKnowledgeCandidate, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 const {
-  buildDuplicateWarningsForEscalation,
+  buildDuplicateSafetyForEscalation,
   createLinkedEscalationFromConversation,
   linkEscalationToConversation,
   workflowErrorResponse,
@@ -790,6 +791,80 @@ router.get('/knowledge-candidates', async (req, res) => {
   res.json({ ok: true, candidates, total, counts });
 });
 
+// GET /api/escalations/attention-items -- Durable workflow review items
+router.get('/attention-items', async (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = parseInt(req.query.offset) || 0;
+  const sort = req.query.sort || '-updatedAt';
+  const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
+
+  const status = safeString(req.query.status, 'open').trim();
+  const filter = {};
+  if (!status || status === 'open') {
+    filter.status = 'open';
+  } else if (status !== 'all') {
+    if (!validStatuses.has(status)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_STATUS', error: 'Invalid attention item status' });
+    }
+    filter.status = status;
+  }
+  if (req.query.kind) filter.kind = safeString(req.query.kind).trim();
+
+  const [items, total] = await Promise.all([
+    EscalationAttentionItem.find(filter)
+      .sort(sort)
+      .skip(offset)
+      .limit(limit)
+      .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+      .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+      .lean(),
+    EscalationAttentionItem.countDocuments(filter),
+  ]);
+
+  const statusCounts = await EscalationAttentionItem.aggregate([
+    { $group: { _id: '$status', count: { $sum: 1 } } },
+  ]);
+  const counts = { open: 0, resolved: 0, dismissed: 0, split: 0 };
+  for (const item of statusCounts) {
+    if (item._id in counts) counts[item._id] = item.count;
+  }
+
+  res.json({ ok: true, items, total, counts });
+});
+
+// PATCH /api/escalations/attention-items/:itemId -- Resolve or dismiss a review item
+router.patch('/attention-items/:itemId', async (req, res) => {
+  if (!isValidObjectId(req.params.itemId)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ATTENTION_ITEM_ID', error: 'Invalid attention item id' });
+  }
+
+  const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
+  const nextStatus = safeString(req.body && req.body.status, '').trim();
+  if (!validStatuses.has(nextStatus)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_STATUS', error: 'Invalid attention item status' });
+  }
+
+  const update = {
+    status: nextStatus,
+    resolutionNote: compactText(req.body && req.body.resolutionNote, 500),
+    resolvedAt: nextStatus === 'open' ? null : new Date(),
+  };
+
+  const item = await EscalationAttentionItem.findByIdAndUpdate(
+    req.params.itemId,
+    { $set: update },
+    { returnDocument: 'after', runValidators: true }
+  )
+    .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+    .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt');
+
+  if (!item) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Attention item not found' });
+  }
+
+  res.json({ ok: true, item: item.toObject() });
+});
+
 // GET /api/escalations -- List with filters
 router.get('/', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -848,16 +923,11 @@ router.post('/', async (req, res) => {
     source: deriveSourceFromPayload(req.body),
   });
   await escalation.save();
-  const warnings = await buildDuplicateWarningsForEscalation(escalation, { fields });
+  const duplicateSafety = await buildDuplicateSafetyForEscalation(escalation, { fields });
   res.status(201).json({
     ok: true,
     escalation: escalation.toObject(),
-    duplicateSafety: {
-      reusedExisting: false,
-      reason: 'created',
-      escalationId: escalation._id.toString(),
-      warnings,
-    },
+    duplicateSafety,
   });
 });
 
@@ -1344,7 +1414,9 @@ router.post('/:id/screenshots', screenshotRateLimit, async (req, res) => {
   escalation.screenshotHashes = nextHashes;
   escalation.source = 'screenshot';
   await escalation.save();
-  const warnings = await buildDuplicateWarningsForEscalation(escalation);
+  const duplicateSafety = await buildDuplicateSafetyForEscalation(escalation, {
+    reason: 'screenshot_attached',
+  });
 
   res.status(201).json({
     ok: true,
@@ -1353,13 +1425,7 @@ router.post('/:id/screenshots', screenshotRateLimit, async (req, res) => {
     skippedDuplicates,
     screenshotPaths: escalation.screenshotPaths,
     escalation: escalation.toObject(),
-    duplicateSafety: {
-      reusedExisting: false,
-      reason: 'screenshot_attached',
-      escalationId: escalation._id.toString(),
-      conversationId: escalation.conversationId ? escalation.conversationId.toString() : null,
-      warnings,
-    },
+    duplicateSafety,
   });
 });
 
@@ -1592,14 +1658,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     if (!linked) await escalation.save();
     const duplicateSafety = linked
       ? linked.duplicateSafety
-      : {
-        reusedExisting: false,
-        reason: 'created',
-        escalationId: escalation._id.toString(),
-        warnings: await buildDuplicateWarningsForEscalation(escalation, {
-          fields: quickValidation.normalizedFields,
-        }),
-      };
+      : await buildDuplicateSafetyForEscalation(escalation, {
+        fields: quickValidation.normalizedFields,
+      });
     await patchTrace(trace?._id, {
       status: 'ok',
       escalationId: escalation._id,
@@ -1746,14 +1807,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     if (!linked) await escalation.save();
     const duplicateSafety = linked
       ? linked.duplicateSafety
-      : {
-        reusedExisting: false,
-        reason: 'created',
-        escalationId: escalation._id.toString(),
-        warnings: await buildDuplicateWarningsForEscalation(escalation, {
-          fields: parseResult.fields,
-        }),
-      };
+      : await buildDuplicateSafetyForEscalation(escalation, {
+        fields: parseResult.fields,
+      });
     await setTraceAttempts(trace?._id, parseMeta.attempts || []);
     await setTraceUsage(trace?._id, (parseMeta.attempts || []).find((attempt) => attempt.status === 'ok' && attempt.provider === parseMeta.providerUsed)?.usage || null);
     await patchTrace(trace?._id, {

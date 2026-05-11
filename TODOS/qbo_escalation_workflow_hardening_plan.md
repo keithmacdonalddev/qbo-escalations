@@ -27,8 +27,8 @@ We are reviewing the hardening areas one by one before implementation.
 | Area | Status | Current Direction |
 | --- | --- | --- |
 | 1. Canonical intake reliability | In discussion | Keep the parser agent narrow; the app/server owns the evidence envelope around its output. |
-| 2. Case lifecycle consistency | Not yet discussed in detail | Add clearer states and likely a notification / attention center. |
-| 3. Duplicate and retry safety | Cross-conversation warnings implemented | Reuse existing conversation-linked escalations on retries/re-parses; warn when different conversations or screenshot uploads look like the same real-world issue. |
+| 2. Case lifecycle consistency | First attention surface implemented | Use a durable attention queue for workflow items that need a user decision; next broaden beyond duplicate warnings. |
+| 3. Duplicate and retry safety | Durable warnings implemented | Reuse existing conversation-linked escalations on retries/re-parses; warn and create review items when different conversations or screenshot uploads look like the same real-world issue. |
 | 4. Known issue / INV confidence boundaries | Initial known issue search implemented | Treat INV matches as candidates unless evidence or human review confirms them. |
 | 5. Resolution discipline | Not yet discussed in detail | Do not allow resolved cases with no resolution summary or reason. |
 | 6. Knowledge candidate safety | Not yet discussed in detail | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
@@ -51,7 +51,9 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 3 first implementation: conversation-linked escalation creation is now idempotent for manual create, `from-conversation`, parse-with-conversation, and chat-side automatic screenshot persist.
 - Item 3 link safety: linking a conversation to a second escalation now returns a conflict unless the caller explicitly sends `force: true`, which makes intentional relinking visible in code.
 - Item 3 second implementation: new escalation creation now returns possible-duplicate warning metadata when another escalation from a different conversation or intake path shares strong signals such as case number, COID, screenshot hash, category, symptom text, and a recent time window.
-- Item 3 remaining gap: duplicate warnings are API metadata first; the app still needs a durable attention-center surface that lets the user resolve, dismiss, or intentionally split likely duplicates.
+- Item 2 first implementation: duplicate warnings now create durable `EscalationAttentionItem` records and the Escalation Dashboard has an Attention tab with open/handled/separate/dismissed review states.
+- Item 3 durable warning behavior: duplicate warnings remain non-blocking but can now be handled, dismissed, or marked as intentional separate escalations from the dashboard.
+- Item 2 remaining gap: the attention queue only covers duplicate warnings so far; stale open cases, missing links, unresolved parser/triage issues, and resolution discipline still need review-item producers.
 
 ## 1. Canonical Intake Reliability
 
@@ -155,6 +157,17 @@ Possible attention items:
 - knowledge draft is ready for review
 - knowledge draft was approved but not published
 
+### Current Implementation
+
+The first attention-center surface is intentionally narrow:
+
+- possible duplicate escalations become durable attention items
+- items can be filtered by open, handled, separate, and dismissed
+- the dashboard links back to the source escalation and the strongest duplicate candidate
+- closing an item records the chosen review state instead of deleting the evidence
+
+This gives the workflow a real review queue without requiring the full lifecycle model yet.
+
 ### Open Questions
 
 - Should the attention center be its own page or part of the existing escalation dashboard?
@@ -200,6 +213,7 @@ The remaining risk is no longer silent server-side creation. The server now allo
 - If forced relinking is used, the old escalation is unlinked from the conversation before the new one is linked.
 - If a different conversation or manual intake creates a similar escalation, the server does not block it; it returns `duplicateSafety.warnings[]` with scored candidates and the signals that matched.
 - If a screenshot is attached to an escalation and another escalation already has the same normalized screenshot hash, the upload response includes the same possible-duplicate warning shape.
+- Duplicate warnings are persisted as attention items so the user can handle, dismiss, or intentionally split them later instead of losing the warning after the API response.
 
 ### Candidate Duplicate Signals
 

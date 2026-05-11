@@ -6,6 +6,7 @@ const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Conversation = require('../src/models/Conversation');
 const Escalation = require('../src/models/Escalation');
+const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
 const Template = require('../src/models/Template');
 const ParallelCandidateTurn = require('../src/models/ParallelCandidateTurn');
 const claude = require('../src/services/claude');
@@ -101,6 +102,7 @@ t.beforeEach(async () => {
   await Promise.all([
     Conversation.deleteMany({}),
     Escalation.deleteMany({}),
+    EscalationAttentionItem.deleteMany({}),
     Template.deleteMany({}),
     ParallelCandidateTurn.deleteMany({}),
   ]);
@@ -228,8 +230,29 @@ await t.test('from-conversation warns but allows likely duplicates from differen
   assert.equal(second.body.duplicateSafety.warnings[0].code, 'POSSIBLE_DUPLICATE_ESCALATION');
   assert.equal(second.body.duplicateSafety.warnings[0].candidates[0].escalationId, first.body.escalation._id);
   assert.ok(second.body.duplicateSafety.warnings[0].candidates[0].signals.includes('same_case_number'));
+  assert.equal(second.body.duplicateSafety.attentionItems.length, 1);
 
   assert.equal(await Escalation.countDocuments({ caseNumber: 'CS-2026-000777' }), 2);
+
+  const listed = await agent.get('/api/escalations/attention-items?status=open');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.counts.open, 1);
+  assert.equal(listed.body.items[0].kind, 'possible-duplicate');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, second.body.escalation._id);
+  assert.equal(listed.body.items[0].candidates[0].escalationId._id, first.body.escalation._id);
+
+  const markedSplit = await agent
+    .patch(`/api/escalations/attention-items/${listed.body.items[0]._id}`)
+    .send({ status: 'split', resolutionNote: 'Separate customer impact.' });
+  assert.equal(markedSplit.status, 200);
+  assert.equal(markedSplit.body.item.status, 'split');
+  assert.ok(markedSplit.body.item.resolvedAt);
+
+  const afterClose = await agent.get('/api/escalations/attention-items?status=open');
+  assert.equal(afterClose.status, 200);
+  assert.equal(afterClose.body.total, 0);
+  assert.equal(afterClose.body.counts.split, 1);
 });
 
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
@@ -757,6 +780,7 @@ await t.test('screenshot upload warns when another escalation already has the sa
   assert.equal(secondUpload.body.duplicateSafety.warnings[0].code, 'POSSIBLE_DUPLICATE_ESCALATION');
   assert.equal(secondUpload.body.duplicateSafety.warnings[0].candidates[0].escalationId, firstEscalation.body.escalation._id);
   assert.ok(secondUpload.body.duplicateSafety.warnings[0].candidates[0].signals.includes('same_screenshot_hash'));
+  assert.equal(secondUpload.body.duplicateSafety.attentionItems.length, 1);
 });
 
 // ---------- Phase 5: New provider ID acceptance ----------

@@ -163,6 +163,25 @@ export async function listKnowledgeCandidates({ reviewStatus, category, reusable
   return { candidates: data.candidates, total: data.total, counts: data.counts };
 }
 
+/** List workflow attention items for review */
+export async function listAttentionItems({ status = 'open', kind, sort = '-updatedAt', limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({ status, limit, offset, sort });
+  if (kind) params.set('kind', kind);
+
+  const data = await apiFetchJson(`${BASE}/attention-items?${params}`, {}, 'Failed to list attention items');
+  return { items: data.items, total: data.total, counts: data.counts };
+}
+
+/** Update a workflow attention item review state */
+export async function updateAttentionItem(id, { status, resolutionNote = '' } = {}) {
+  const data = await apiFetchJson(`${BASE}/attention-items/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status, resolutionNote }),
+  }, 'Failed to update attention item');
+  return data.item;
+}
+
 /** Fetch knowledge gap analysis for playbook coverage */
 export async function getKnowledgeGaps(days = 30) {
   return apiFetchJson(`${BASE}/knowledge-gaps?days=${days}`, {}, 'Failed to fetch knowledge gaps');

@@ -2,6 +2,7 @@
 
 const Escalation = require('../models/Escalation');
 const Conversation = require('../models/Conversation');
+const EscalationAttentionItem = require('../models/EscalationAttentionItem');
 
 const DUPLICATE_WARNING_THRESHOLD = 50;
 const DUPLICATE_LOOKBACK_DAYS = 30;
@@ -100,6 +101,11 @@ function normalizeHashes(value) {
     out.push(hash);
   }
   return out;
+}
+
+function objectIdOrNull(value) {
+  const id = objectIdString(value);
+  return isValidObjectId(id) ? id : null;
 }
 
 function symptomText(fields = {}) {
@@ -323,12 +329,159 @@ async function buildDuplicateWarningsForEscalation(escalation, {
   }];
 }
 
+function duplicateAttentionFingerprint(escalation, warning) {
+  const sourceId = objectIdString(escalation && escalation._id);
+  const candidateIds = (warning && Array.isArray(warning.candidates) ? warning.candidates : [])
+    .map((candidate) => objectIdString(candidate.escalationId))
+    .filter(Boolean)
+    .sort();
+  if (!sourceId || candidateIds.length === 0) return '';
+  return `possible-duplicate:${sourceId}:${candidateIds.join(',')}`;
+}
+
+function uniqueSignals(candidates) {
+  const out = [];
+  for (const candidate of candidates || []) {
+    for (const signal of candidate.signals || []) {
+      if (!out.includes(signal)) out.push(signal);
+    }
+  }
+  return out;
+}
+
+function mapAttentionCandidate(candidate) {
+  return {
+    escalationId: objectIdOrNull(candidate.escalationId),
+    conversationId: objectIdOrNull(candidate.conversationId),
+    score: Number.isFinite(Number(candidate.score)) ? Number(candidate.score) : 0,
+    confidence: safeString(candidate.confidence),
+    signals: Array.isArray(candidate.signals) ? candidate.signals.map(safeString).filter(Boolean) : [],
+    status: safeString(candidate.status),
+    source: safeString(candidate.source),
+    coid: safeString(candidate.coid),
+    caseNumber: safeString(candidate.caseNumber),
+    category: safeString(candidate.category),
+    attemptingToPreview: compactText(candidate.attemptingToPreview, 140),
+    actualOutcomePreview: compactText(candidate.actualOutcomePreview, 140),
+    createdAt: candidate.createdAt || null,
+  };
+}
+
+function attentionItemSummary(item) {
+  if (!item) return null;
+  const doc = typeof item.toObject === 'function' ? item.toObject() : item;
+  return {
+    id: objectIdString(doc._id),
+    status: doc.status || '',
+    kind: doc.kind || '',
+    severity: doc.severity || '',
+    fingerprint: doc.fingerprint || '',
+  };
+}
+
+async function persistDuplicateAttentionItems({ escalation, warnings } = {}) {
+  if (!escalation || !Array.isArray(warnings) || warnings.length === 0) return [];
+
+  const persisted = [];
+  for (const warning of warnings) {
+    if (!warning || warning.code !== 'POSSIBLE_DUPLICATE_ESCALATION') continue;
+    const fingerprint = duplicateAttentionFingerprint(escalation, warning);
+    if (!fingerprint) continue;
+
+    const candidates = (warning.candidates || [])
+      .map(mapAttentionCandidate)
+      .filter((candidate) => candidate.escalationId);
+    if (candidates.length === 0) continue;
+
+    const signals = uniqueSignals(candidates);
+    const strongest = candidates[0];
+    const sourceId = objectIdOrNull(escalation._id);
+    const sourceConversationId = objectIdOrNull(escalation.conversationId);
+    const title = 'Possible duplicate escalation';
+    const summary = strongest && strongest.caseNumber
+      ? `Possible duplicate of case ${strongest.caseNumber}.`
+      : 'Possible duplicate escalation candidate found.';
+
+    const item = await EscalationAttentionItem.findOneAndUpdate(
+      { fingerprint },
+      {
+        $setOnInsert: {
+          kind: 'possible-duplicate',
+          status: 'open',
+          sourceEscalationId: sourceId,
+          sourceConversationId,
+          fingerprint,
+          title,
+        },
+        $set: {
+          severity: warning.severity || 'info',
+          summary,
+          candidates,
+          signals,
+          candidateCount: candidates.length,
+          lastDetectedAt: new Date(),
+        },
+        $inc: { occurrenceCount: 1 },
+      },
+      { upsert: true, returnDocument: 'after', runValidators: true }
+    );
+    persisted.push(item);
+  }
+
+  return persisted;
+}
+
+function attachAttentionItemsToWarnings(warnings, attentionItems) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  if (!Array.isArray(attentionItems) || attentionItems.length === 0) {
+    return warnings;
+  }
+
+  const byFingerprint = new Map();
+  for (const item of attentionItems) {
+    const summary = attentionItemSummary(item);
+    if (summary && summary.fingerprint) byFingerprint.set(summary.fingerprint, summary);
+  }
+
+  return warnings.map((warning) => {
+    const fingerprint = warning && warning.code === 'POSSIBLE_DUPLICATE_ESCALATION'
+      ? duplicateAttentionFingerprint({ _id: warning.sourceEscalationId || null }, warning)
+      : '';
+    const attentionItem = byFingerprint.get(fingerprint);
+    if (!attentionItem) return warning;
+    return {
+      ...warning,
+      attentionItemIds: [attentionItem.id],
+    };
+  });
+}
+
 async function withDuplicateWarnings(duplicateSafety, escalation, options = {}) {
   const warnings = await buildDuplicateWarningsForEscalation(escalation, options);
+  const attentionItems = await persistDuplicateAttentionItems({ escalation, warnings });
   return {
     ...duplicateSafety,
-    warnings,
+    warnings: attachAttentionItemsToWarnings(
+      warnings.map((warning) => ({
+        ...warning,
+        sourceEscalationId: objectIdString(escalation && escalation._id),
+      })),
+      attentionItems
+    ),
+    attentionItems: attentionItems.map(attentionItemSummary).filter(Boolean),
   };
+}
+
+async function buildDuplicateSafetyForEscalation(escalation, {
+  fields = null,
+  reason = 'created',
+} = {}) {
+  return withDuplicateWarnings({
+    reusedExisting: false,
+    reason,
+    escalationId: objectIdString(escalation && escalation._id),
+    conversationId: objectIdString(escalation && escalation.conversationId) || null,
+  }, escalation, { fields });
 }
 
 function makeWorkflowError(code, message, statusCode, detail = null) {
@@ -530,12 +683,14 @@ function workflowErrorResponse(err) {
 }
 
 module.exports = {
+  buildDuplicateSafetyForEscalation,
   buildDuplicateWarningsForEscalation,
   createLinkedEscalationFromConversation,
   findDuplicateEscalationCandidates,
   findLinkedEscalation,
   isValidObjectId,
   linkEscalationToConversation,
+  persistDuplicateAttentionItems,
   scoreDuplicateCandidate,
   workflowErrorResponse,
 };

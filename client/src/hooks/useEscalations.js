@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { deleteEscalation, listEscalations, listKnowledgeCandidates, updateEscalation } from '../api/escalationsApi.js';
+import {
+  deleteEscalation,
+  listAttentionItems,
+  listEscalations,
+  listKnowledgeCandidates,
+  updateAttentionItem,
+  updateEscalation,
+} from '../api/escalationsApi.js';
 import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from './useToast.jsx';
 import { tel, TEL } from '../lib/devTelemetry.js';
@@ -31,6 +38,12 @@ export const REVIEW_STATUS_COLORS = {
   published: 'var(--accent)',
   rejected: 'var(--danger)',
 };
+export const ATTENTION_STATUS_LABELS = {
+  open: 'Open',
+  resolved: 'Handled',
+  dismissed: 'Dismissed',
+  split: 'Separate',
+};
 
 export default function useEscalations() {
   const toast = useToast();
@@ -55,6 +68,13 @@ export default function useEscalations() {
   const [kqCategoryFilter, setKqCategoryFilter] = useState('');
   const [kqLoading, setKqLoading] = useState(false);
   const [kqError, setKqError] = useState(null);
+  const [attentionItems, setAttentionItems] = useState([]);
+  const [attentionTotal, setAttentionTotal] = useState(0);
+  const [attentionCounts, setAttentionCounts] = useState({ open: 0, resolved: 0, dismissed: 0, split: 0 });
+  const [attentionStatusFilter, setAttentionStatusFilter] = useState('open');
+  const [attentionLoading, setAttentionLoading] = useState(false);
+  const [attentionError, setAttentionError] = useState(null);
+  const [attentionUpdatingId, setAttentionUpdatingId] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
@@ -119,6 +139,38 @@ export default function useEscalations() {
     if (activeTab === 'knowledge') loadKnowledgeQueue();
   }, [activeTab, loadKnowledgeQueue]);
 
+  const loadAttentionQueue = useCallback(async () => {
+    setAttentionLoading(true);
+    try {
+      const data = await listAttentionItems({
+        status: attentionStatusFilter || 'open',
+      });
+      setAttentionItems(data.items);
+      setAttentionTotal(data.total);
+      setAttentionCounts(data.counts);
+      setAttentionError(null);
+    } catch (err) {
+      setAttentionError(err?.message || 'Failed to load attention items');
+    }
+    setAttentionLoading(false);
+  }, [attentionStatusFilter]);
+
+  useEffect(() => {
+    if (activeTab === 'attention') loadAttentionQueue();
+  }, [activeTab, loadAttentionQueue]);
+
+  const handleAttentionStatusChange = useCallback(async (id, status, resolutionNote = '') => {
+    if (!id || attentionUpdatingId) return;
+    setAttentionUpdatingId(id);
+    try {
+      await updateAttentionItem(id, { status, resolutionNote });
+      await loadAttentionQueue();
+    } catch (err) {
+      toastRef.current.error(err?.message || 'Failed to update attention item');
+    }
+    setAttentionUpdatingId('');
+  }, [attentionUpdatingId, loadAttentionQueue]);
+
   const handleStatusChange = useCallback(async (id, newStatus) => {
     tel(TEL.USER_ACTION, `Changed escalation status to ${newStatus}`, { escalationId: id, newStatus });
     try {
@@ -153,10 +205,15 @@ export default function useEscalations() {
       loadEscalations();
       return;
     }
+    if (activeTab === 'attention') {
+      loadAttentionQueue();
+      return;
+    }
     loadKnowledgeQueue();
-  }, [activeTab, loadEscalations, loadKnowledgeQueue]);
+  }, [activeTab, loadAttentionQueue, loadEscalations, loadKnowledgeQueue]);
 
   const kqTotalAll = kqCounts.draft + kqCounts.approved + kqCounts.published + kqCounts.rejected;
+  const attentionTotalAll = attentionCounts.open + attentionCounts.resolved + attentionCounts.dismissed + attentionCounts.split;
 
   return {
     activeTab,
@@ -182,6 +239,16 @@ export default function useEscalations() {
     kqLoading,
     kqError,
     kqTotalAll,
+    attentionItems,
+    attentionTotal,
+    attentionCounts,
+    attentionStatusFilter,
+    setAttentionStatusFilter,
+    attentionLoading,
+    attentionError,
+    attentionTotalAll,
+    attentionUpdatingId,
+    handleAttentionStatusChange,
     requestDelete,
     deleteTarget,
     confirmDelete,
