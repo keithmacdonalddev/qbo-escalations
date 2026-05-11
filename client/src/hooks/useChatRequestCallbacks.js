@@ -153,6 +153,9 @@ export default function useChatRequestCallbacks({
     const providerThinking = data?.providerThinking && typeof data.providerThinking === 'object' && !Array.isArray(data.providerThinking)
       ? data.providerThinking
       : null;
+    const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProviderForRequest);
+    const finalModelUsed = data.modelUsed || data.usage?.model || '';
+    const finalProviderLabel = getProviderShortLabel(finalProvider);
 
     const parallelResultBatch = buildParallelResultBatch({
       data,
@@ -174,14 +177,13 @@ export default function useChatRequestCallbacks({
       const finalText = data.responseRepaired
         ? (data.fullResponse || '')
         : (streamingTextRef.current || data.fullResponse || '');
-      const finalProvider = normalizeProvider(data.providerUsed || data.provider || selectedProviderForRequest);
-      const finalProviderLabel = getProviderShortLabel(finalProvider);
 
       setMessages((prev) => [...prev, {
         role: 'assistant',
         content: finalText,
         thinking: data.thinking || '',
         provider: finalProvider,
+        modelUsed: finalModelUsed,
         mode: data.mode || selectedModeForRequest,
         fallbackFrom: data.fallbackFrom || null,
         attemptMeta: data.attempts
@@ -316,11 +318,23 @@ export default function useChatRequestCallbacks({
     },
     onTriageCard: (data) => {
       setTriageCard(data);
+      const fallback = data?.fallback && data.fallback.used;
+      const fallbackReason = typeof data?.fallback?.reason === 'string' ? data.fallback.reason.trim() : '';
+      const defaultRuntime = Boolean(data?.runtime?.usedDefault);
+      const runtimeWarning = typeof data?.runtime?.warning === 'string' ? data.runtime.warning.trim() : '';
       pushProcessEvent({
-        level: 'info',
-        title: 'Triage card received',
-        message: `${data.severity || '?'} ${data.category || 'unknown'} — ${(data.read || '').slice(0, 80)}`,
-        code: 'TRIAGE_CARD',
+        level: fallback || defaultRuntime ? 'warning' : 'info',
+        title: fallback
+          ? 'Triage Agent fallback used'
+          : defaultRuntime
+            ? 'Triage Agent default runtime used'
+            : 'Triage card received',
+        message: fallback
+          ? (fallbackReason || 'The configured Triage Agent did not produce a usable card; rule fallback is displayed.')
+          : defaultRuntime
+            ? (runtimeWarning || 'Triage Agent profile has no saved runtime; request/default runtime was used.')
+          : `${data.severity || '?'} ${data.category || 'unknown'} - ${(data.read || '').slice(0, 80)}`,
+        code: fallback ? 'TRIAGE_AGENT_FALLBACK' : defaultRuntime ? 'TRIAGE_AGENT_DEFAULT_RUNTIME' : 'TRIAGE_CARD',
       });
     },
     onCaseIntake: (data) => {
@@ -354,10 +368,11 @@ export default function useChatRequestCallbacks({
       const message = typeof data?.message === 'string' ? data.message.trim() : '';
       if (!message) return;
       pushProcessEvent({
-        level: 'info',
+        level: ['info', 'warning', 'error', 'success'].includes(data?.level) ? data.level : 'info',
         title: 'Server status',
         message,
         code: typeof data?.code === 'string' ? data.code : 'SERVER_STATUS',
+        provider: typeof data?.provider === 'string' ? data.provider : undefined,
       });
     },
     onThinking: (data) => {
@@ -447,9 +462,9 @@ export default function useChatRequestCallbacks({
             }
             setError(null);
             pushProcessEvent({
-              level: 'success',
-              title: 'Recovered saved response',
-              message: 'The stream connection dropped, but the saved assistant response and reasoning were recovered from the server.',
+              level: 'info',
+              title: 'Response restored',
+              message: 'Saved assistant response restored after the stream closed.',
               code: 'STREAM_RECOVERED',
               provider: recoveredProvider,
             });

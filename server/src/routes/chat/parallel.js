@@ -391,6 +391,7 @@ router.post('/parallel/:turnId/unaccept', parallelDecisionRateLimit, async (req,
           content,
           thinking: candidate.thinking || '',
           provider: candidate.provider,
+          modelUsed: candidate.modelUsed || candidate.usage?.model || '',
           mode: 'parallel',
           fallbackFrom: null,
           attemptMeta: {

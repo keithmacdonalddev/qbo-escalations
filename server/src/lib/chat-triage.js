@@ -122,6 +122,17 @@ function extractFormType(haystack) {
   return '';
 }
 
+function isClassProductServiceWorkflowMismatch(haystack) {
+  const text = safeString(haystack, '').toLowerCase();
+  if (!/\bclass(?:es)?\b/.test(text)) return false;
+  return (
+    /\bproducts?\s+(?:and|&)\s+services?\b/.test(text)
+    || /\bproduct\/service\b/.test(text)
+    || /\bproduct\s+and\s+service\b/.test(text)
+    || (/\bimport(?:ing)?\s+class(?:es)?\b/.test(text) && /\bproduct/.test(text))
+  );
+}
+
 function stripLeadIn(value) {
   const text = normalizeSpacing(value);
   if (!text) return '';
@@ -163,9 +174,21 @@ function buildTaxFormExportSummaryTriage(formType, haystack) {
   };
 }
 
+function buildClassProductServiceWorkflowTriage() {
+  return {
+    category: 'technical',
+    read: 'This looks like a workflow mismatch: the customer is trying to import Classes through Products and Services, but Classes are not managed through that import path. Treat this as guidance unless the correct Classes workflow also errors.',
+    action: 'Confirm class tracking and subscription eligibility, then have the agent use the proper Classes workflow instead of Products and Services. Escalate only if that correct Classes workflow produces a reproducible error.',
+  };
+}
+
 function detectSpecializedTriage(fields, category, haystack) {
   const formType = extractFormType(haystack);
   const categoryLabel = category.replace(/-/g, ' ');
+
+  if (isClassProductServiceWorkflowMismatch(haystack)) {
+    return buildClassProductServiceWorkflowTriage();
+  }
 
   if (
     formType
@@ -244,6 +267,7 @@ function inferTriageSeverity(fields) {
   const formType = extractFormType(haystack);
 
   if (/(outage|down for everyone|all users|system down|security breach|data loss)/.test(haystack)) return 'P1';
+  if (isClassProductServiceWorkflowMismatch(haystack)) return 'P3';
   if (
     /(deadline|due today|due now|urgent|cannot file|can't file|unable to file|cannot pay|can't pay|unable to pay)/.test(haystack)
     || (formType && /\bcra\b/.test(haystack) && /(deadline|urgent|today|cannot file|can't file)/.test(haystack))
@@ -267,6 +291,15 @@ function buildMissingInfo(fields, category) {
   const sourceFields = fields && typeof fields === 'object' ? fields : {};
   const haystack = buildFieldHaystack(sourceFields);
   const missing = [];
+
+  if (isClassProductServiceWorkflowMismatch(haystack)) {
+    return [
+      'Whether class tracking is turned on and the subscription supports it',
+      'Exact navigation path the agent used',
+      'Whether Gear > All lists > Classes reproduces an error',
+      'Whether duplicate class/category names already exist',
+    ];
+  }
 
   if (!hasAnyIdentifier(sourceFields)) pushUnique(missing, 'COID/MID or case number');
   if (fieldLooksUnknown(sourceFields.clientContact)) pushUnique(missing, 'Client/contact name');
@@ -298,6 +331,7 @@ function buildMissingInfo(fields, category) {
 
 function inferTriageConfidence(fields, category, missingInfo) {
   const sourceFields = fields && typeof fields === 'object' ? fields : {};
+  if (isClassProductServiceWorkflowMismatch(buildFieldHaystack(sourceFields))) return 'high';
   const missingCount = Array.isArray(missingInfo) && missingInfo[0] !== 'No obvious gaps from the parsed template.'
     ? missingInfo.length
     : 0;
@@ -320,6 +354,9 @@ function buildCategoryCheck(fields, category) {
   const categoryLabel = category.replace(/-/g, ' ');
   const formType = extractFormType(haystack);
 
+  if (isClassProductServiceWorkflowMismatch(haystack)) {
+    return 'Technical because the handoff needs workflow correction; revisit only if the proper Classes workflow fails too.';
+  }
   if (category === 'payroll' && formType) {
     return `${categoryLabel} because ${formType} forms are generated from payroll workflows; tax is secondary unless the blocker is tax setup or filing setup.`;
   }
@@ -435,6 +472,58 @@ function buildImageTurnSystemPrompt(baseSystemPrompt) {
   return base ? `${base}\n\n${runtimeRules}` : runtimeRules;
 }
 
+function buildKnownIssueSearchRefBlock(searchResult) {
+  if (!searchResult || typeof searchResult !== 'object') return '';
+  const status = safeString(searchResult.status, '').trim();
+  if (!status) return '';
+
+  const lines = [
+    '\n\n--- KNOWN ISSUE SEARCH AGENT RESULT ---',
+    `Status: ${status}`,
+  ];
+  if (searchResult.summary) lines.push(`Summary: ${searchResult.summary}`);
+  if (Array.isArray(searchResult.searches) && searchResult.searches.length > 0) {
+    lines.push('Searches run:');
+    for (const search of searchResult.searches.slice(0, 8)) {
+      const query = safeString(search.query, '').trim() || '(no text query)';
+      const bits = [
+        search.category ? `category ${search.category}` : '',
+        search.status ? `status ${search.status}` : '',
+        Number.isFinite(Number(search.resultCount)) ? `${search.resultCount} result(s)` : '',
+      ].filter(Boolean).join(', ');
+      lines.push(`- ${query}${bits ? ` (${bits})` : ''}`);
+    }
+  }
+  if (Array.isArray(searchResult.matches) && searchResult.matches.length > 0) {
+    lines.push('Matches:');
+    for (const match of searchResult.matches.slice(0, 5)) {
+      lines.push(`- ${match.invNumber} (${match.confidence || 'unknown'}): ${match.subject || '(no subject)'}`);
+      if (Array.isArray(match.evidenceFor) && match.evidenceFor.length > 0) {
+        lines.push(`  Evidence for: ${match.evidenceFor.join('; ')}`);
+      }
+      if (Array.isArray(match.evidenceAgainst) && match.evidenceAgainst.length > 0) {
+        lines.push(`  Evidence against: ${match.evidenceAgainst.join('; ')}`);
+      }
+      if (Array.isArray(match.missingConfirmations) && match.missingConfirmations.length > 0) {
+        lines.push(`  Confirm before using: ${match.missingConfirmations.join('; ')}`);
+      }
+    }
+  }
+  if (Array.isArray(searchResult.rejectedCandidates) && searchResult.rejectedCandidates.length > 0) {
+    lines.push('Rejected candidates:');
+    for (const rejected of searchResult.rejectedCandidates.slice(0, 6)) {
+      lines.push(`- ${rejected.invNumber || '(candidate)'}: ${rejected.reason || 'Rejected by search agent.'}`);
+    }
+  }
+  if (searchResult.noMatchReason) lines.push(`No-match reason: ${searchResult.noMatchReason}`);
+  if (Array.isArray(searchResult.needsMoreInfo) && searchResult.needsMoreInfo.length > 0) {
+    lines.push(`Needs more info: ${searchResult.needsMoreInfo.join('; ')}`);
+  }
+  lines.push('Use this search result as evidence. Do not treat rejected or low-confidence candidates as confirmed known issues.');
+  lines.push('--- END KNOWN ISSUE SEARCH AGENT RESULT ---\n');
+  return lines.join('\n');
+}
+
 function buildInvMatchRefBlock(matches) {
   if (!Array.isArray(matches) || matches.length === 0) return '';
   const entries = matches.map((match) => {
@@ -451,7 +540,7 @@ function buildInvMatchRefBlock(matches) {
   });
   return [
     '\n\n--- KNOWN ISSUE MATCHES (active INV investigations) ---',
-    'The following known issues were automatically matched to this escalation.',
+    'The following known issues were matched by the Known Issue Search Agent.',
     'Reference them in your response when relevant. In the Steps for Agent section, give the',
     'customer the INV number and add them to affected users if the issue matches.',
     '',
@@ -559,6 +648,7 @@ module.exports = {
   buildFallbackTriageCard,
   buildImageTurnSystemPrompt,
   buildInvMatchRefBlock,
+  buildKnownIssueSearchRefBlock,
   buildServerTriageCard,
   buildTriageRefBlock,
   isNonEscalationIntent,

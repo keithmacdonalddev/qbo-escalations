@@ -33,6 +33,28 @@ test('buildServerTriageCard produces a focused payroll export triage for missing
   assert.match(triage.categoryCheck, /T4 forms are generated from payroll workflows/i);
 });
 
+test('buildServerTriageCard treats class imports through Products and Services as workflow guidance', () => {
+  const triage = buildServerTriageCard({
+    clientContact: 'Joe Charest',
+    category: 'technical',
+    attemptingTo: 'Import Classes under product and services',
+    expectedOutcome: 'to be able to import Classes',
+    actualOutcome: 'getting error',
+    triedTestAccount: 'yes',
+    tsSteps: 'tried changing classes on customer csv file and name them category / getting error / no option for classes importation',
+  });
+
+  assert.equal(triage.category, 'technical');
+  assert.equal(triage.severity, 'P3');
+  assert.equal(triage.confidence, 'high');
+  assert.match(triage.read, /workflow mismatch/i);
+  assert.match(triage.read, /Products and Services/i);
+  assert.match(triage.action, /proper Classes workflow/i);
+  assert.match(triage.action, /Escalate only if/i);
+  assert.ok(triage.missingInfo.includes('Whether Gear > All lists > Classes reproduces an error'));
+  assert.match(triage.categoryCheck, /workflow correction/i);
+});
+
 test('buildFallbackTriageCard uses the stronger generic next-step wording', () => {
   const triage = buildFallbackTriageCard();
 

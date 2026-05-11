@@ -76,8 +76,17 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
     filePath: path.join(AGENT_PROMPTS_ROOT, 'triage-agent.md'),
   },
   {
-    id: 'follow-up-chat-parser',
+    id: 'known-issue-search-agent',
     order: 22,
+    name: 'Known Issue Search Agent',
+    promptType: 'system',
+    usedBy: 'INV investigation search before escalation triage',
+    description: 'Tool-using prompt for known-issue lookup, candidate rejection, and no-match confirmation.',
+    filePath: path.join(AGENT_PROMPTS_ROOT, 'known-issue-search-agent.md'),
+  },
+  {
+    id: 'follow-up-chat-parser',
+    order: 23,
     name: 'Follow-Up Chat Parser',
     promptType: 'system',
     usedBy: 'Phone-agent follow-up screenshot transcript parsing',

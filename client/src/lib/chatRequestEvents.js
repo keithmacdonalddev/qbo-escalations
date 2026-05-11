@@ -96,6 +96,7 @@ export function buildParallelResultBatch({
       content: result.fullResponse || parallelStreamingByProvider[result.provider] || '',
       thinking: result.thinking || '',
       provider: normalizeCatalogProvider(result.provider || selectedProvider),
+      modelUsed: result.modelUsed || result.usage?.model || result.model || '',
       mode: 'parallel',
       fallbackFrom: null,
       attemptMeta: {

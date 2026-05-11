@@ -1,6 +1,9 @@
 import { useState, useCallback } from 'react';
 
 const CONFIDENCE_LABELS = {
+  high: 'High Confidence',
+  medium: 'Medium Confidence',
+  low: 'Low Confidence',
   exact: 'Exact Match',
   likely: 'Likely Match',
   possible: 'Possible Match',
@@ -11,6 +14,13 @@ const CONFIDENCE_COLORS = {
   likely: '#d97706',
   possible: '#92400e',
 };
+
+function isStrongKnownIssueMatch(match) {
+  if (!match || typeof match !== 'object') return false;
+  const confidence = String(match.confidence || '').toLowerCase();
+  const score = Number(match.score || 0);
+  return confidence === 'high' || confidence === 'exact' || score >= 40;
+}
 
 function copyToClipboard(text) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -42,50 +52,52 @@ export default function InvMatchBanner({ matches }) {
     });
   }, []);
 
-  if (!Array.isArray(matches) || matches.length === 0) return null;
+  const strongMatches = Array.isArray(matches)
+    ? matches.filter(isStrongKnownIssueMatch).slice(0, 3)
+    : [];
+
+  if (strongMatches.length === 0) return null;
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
-        <span style={styles.icon}>!</span>
-        <span style={styles.title}>Known Issue Match</span>
-        <span style={styles.count}>{matches.length} INV{matches.length > 1 ? 's' : ''} matched</span>
+    <div className="inv-match-banner inv-match-banner--strong">
+      <div className="inv-match-banner-head">
+        <span className="inv-match-banner-icon">!</span>
+        <span className="inv-match-banner-title">Known issue candidate</span>
+        <span className="inv-match-banner-count">{strongMatches.length} strong match{strongMatches.length === 1 ? '' : 'es'}</span>
       </div>
-      <div style={styles.matchList}>
-        {matches.map((match) => (
-          <div key={match._id || match.invNumber} style={styles.matchRow}>
-            <div style={styles.matchTop}>
+      <div className="inv-match-banner-list">
+        {strongMatches.map((match) => (
+          <div key={match._id || match.invNumber} className="inv-match-banner-row">
+            <div className="inv-match-banner-top">
               <button
-                style={styles.invNumber}
+                className="inv-match-banner-number"
                 onClick={() => handleCopy(match.invNumber)}
                 title="Click to copy INV number"
+                type="button"
               >
                 {match.invNumber}
                 {copiedInv === match.invNumber && (
                   <span style={styles.copiedBadge}>Copied</span>
                 )}
               </button>
-              <span style={{
-                ...styles.confidenceBadge,
-                backgroundColor: CONFIDENCE_COLORS[match.confidence] || CONFIDENCE_COLORS.possible,
-              }}>
-                {CONFIDENCE_LABELS[match.confidence] || 'Possible Match'}
+              <span className="inv-match-banner-confidence">
+                {CONFIDENCE_LABELS[match.confidence] || 'Strong Match'}
               </span>
               {match.category && (
-                <span style={styles.categoryBadge}>{match.category}</span>
+                <span className="inv-match-banner-category">{match.category}</span>
               )}
             </div>
-            <div style={styles.subject}>{match.subject}</div>
+            <div className="inv-match-banner-subject">{match.subject}</div>
             {match.workaround && (
-              <div style={styles.workaround}>
-                <span style={styles.workaroundLabel}>Workaround:</span> {match.workaround}
+              <div className="inv-match-banner-workaround">
+                <span>Workaround:</span> {match.workaround}
               </div>
             )}
           </div>
         ))}
       </div>
-      <div style={styles.instructions}>
-        Give the agent the INV number. Tell them to add the customer to affected users.
+      <div className="inv-match-banner-instructions">
+        Use only if the symptom and workflow match this case.
       </div>
     </div>
   );

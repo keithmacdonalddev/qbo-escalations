@@ -49,7 +49,7 @@ router.get('/', async (req, res) => {
     : 50;
   const skip = Number.isFinite(parsedSkip) && parsedSkip > 0 ? parsedSkip : 0;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
-  const includeTotal = safeString(req.query.includeTotal, '') === '1';
+  const includeTotal = safeString(req.query.includeTotal, '1') !== '0';
 
   try {
     const result = await listConversations({ limit, skip, search, includeTotal });

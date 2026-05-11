@@ -8,8 +8,11 @@ import {
   getImageParserModelPlaceholder,
 } from '../../lib/imageParserCatalog.js';
 import {
+  dispatchAgentRuntimeDefaultsApplied,
   getAgentRuntimeDefinition,
+  hasStoredAgentRuntimeState,
   readAgentRuntimeState,
+  writeAgentRuntimeState,
 } from '../../lib/agentRuntimeSettings.js';
 import { transitions } from '../../utils/motion.js';
 
@@ -23,6 +26,8 @@ const PARSER_MODE_OPTIONS = [
 ];
 const DEFAULT_PARSER_MODE = 'escalation-template-parser';
 const IMAGE_PARSER_POPUP_MODEL_LIST_ID = 'chat-image-parser-model-options';
+const SHARED_IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
+const SHARED_IMAGE_PARSER_MODEL_KEY = 'qbo-image-parser-model';
 
 const ScanIcon = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -58,10 +63,30 @@ function normalizeParserMode(value) {
 function readParserRuntime(parserMode) {
   const definition = getAgentRuntimeDefinition(parserMode);
   const state = definition ? readAgentRuntimeState(definition) : {};
+  const hasAgentRuntime = definition ? hasStoredAgentRuntimeState(definition) : false;
+  if (state.provider || hasAgentRuntime) {
+    return {
+      provider: state.provider || '',
+      model: state.model || '',
+      source: 'agent-runtime',
+    };
+  }
+
+  const sharedProvider = localStorage.getItem(SHARED_IMAGE_PARSER_PROVIDER_KEY) || '';
+  const sharedModel = localStorage.getItem(SHARED_IMAGE_PARSER_MODEL_KEY) || '';
   return {
-    provider: state.provider || localStorage.getItem('qbo-image-parser-provider') || '',
-    model: state.model || localStorage.getItem('qbo-image-parser-model') || '',
+    provider: sharedProvider,
+    model: sharedModel,
+    source: sharedProvider ? 'shared-image-parser' : 'empty',
   };
+}
+
+function persistParserRuntime(parserMode, state) {
+  const definition = getAgentRuntimeDefinition(parserMode);
+  if (!definition) return state || {};
+  const normalized = writeAgentRuntimeState(definition, state);
+  dispatchAgentRuntimeDefaultsApplied({ [definition.id]: normalized });
+  return normalized;
 }
 
 function getParserModeLabel(parserMode) {
@@ -79,6 +104,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const [availability, setAvailability] = useState(null);
   const [showWebcam, setShowWebcam] = useState(false);
   const [validationError, setValidationError] = useState('');
+  const [runtimeNotice, setRuntimeNotice] = useState('');
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
   const popupRef = useRef(null);
@@ -103,13 +129,11 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     };
   }, [open, checkAvailability]);
 
-  // Persist provider/model
+  // Persist provider/model to the selected agent runtime so /agents and popup execution agree.
   useEffect(() => {
-    localStorage.setItem('qbo-image-parser-provider', provider);
-  }, [provider]);
-  useEffect(() => {
-    localStorage.setItem('qbo-image-parser-model', model);
-  }, [model]);
+    if (!open) return;
+    persistParserRuntime(parserMode, { provider, model });
+  }, [open, parserMode, provider, model]);
 
   useEffect(() => {
     if (!open) return;
@@ -118,6 +142,9 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     setParserMode(nextParserMode);
     setProvider(runtime.provider);
     setModel(runtime.model);
+    setRuntimeNotice(runtime.source === 'shared-image-parser'
+      ? `${getParserModeLabel(nextParserMode)} is using shared image parser defaults. Saving them to this agent runtime.`
+      : '');
     const src = typeof seedImage === 'string' ? seedImage : seedImage?.src;
     if (!src) return;
     setValidationError('');
@@ -217,6 +244,9 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     setParserMode(nextParserMode);
     setProvider(runtime.provider);
     setModel(runtime.model);
+    setRuntimeNotice(runtime.source === 'shared-image-parser'
+      ? `${getParserModeLabel(nextParserMode)} is using shared image parser defaults. Saving them to this agent runtime.`
+      : '');
     setValidationError('');
   }, []);
 
@@ -383,6 +413,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
           />
 
           {/* Error */}
+          {runtimeNotice && <div className="ip-popup-warning">{runtimeNotice}</div>}
           {(error || validationError) && <div className="ip-popup-error">{error || validationError}</div>}
 
           <div className="ip-popup-actions">

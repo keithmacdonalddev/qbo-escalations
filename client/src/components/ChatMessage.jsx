@@ -85,6 +85,7 @@ function ChatMessage({
   content,
   images,
   provider,
+  modelUsed,
   mode,
   fallbackFrom,
   timestamp,
@@ -124,6 +125,7 @@ function ChatMessage({
         .filter((field) => field.value)
       : []
   ), [parsedUserTemplate]);
+  const displayModel = safeText(modelUsed || usage?.model || '');
 
   // Separate bash events (for terminal preview) from other tool events
   const { bashEvents, otherEvents } = useMemo(() => {
@@ -148,6 +150,12 @@ function ChatMessage({
           <Tooltip text="AI model that generated this response" level="high">
             <span className={isDev ? 'eyebrow eyebrow--dev' : 'eyebrow'}>
               {getProviderLabel(provider)}
+              {displayModel && (
+                <span className="chat-model-signature">
+                  {' / '}
+                  {displayModel}
+                </span>
+              )}
               {fallbackFrom && (
                 <span style={{ marginLeft: 'var(--sp-2)', color: 'var(--ink-tertiary)', fontWeight: 400 }}>
                   (fallback from {getProviderLabel(fallbackFrom)})
@@ -337,6 +345,12 @@ function ChatMessage({
                     <span>{getProviderLabel(provider)}</span>
                   </span>
                 )}
+                {displayModel && (
+                  <span className="timestamp-hover-row">
+                    <span className="timestamp-hover-label">Model</span>
+                    <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{displayModel}</span>
+                  </span>
+                )}
                 {responseTimeMs && role === 'assistant' && (
                   <span className="timestamp-hover-row">
                     <span className="timestamp-hover-label">Latency</span>
@@ -362,7 +376,7 @@ function ChatMessage({
                         <span>${(usage.totalCostMicros / 1_000_000).toFixed(4)}</span>
                       </span>
                     )}
-                    {usage.model && (
+                    {usage.model && usage.model !== displayModel && (
                       <span className="timestamp-hover-row">
                         <span className="timestamp-hover-label">Model</span>
                         <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)' }}>{usage.model}</span>

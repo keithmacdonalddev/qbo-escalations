@@ -58,7 +58,7 @@ const SHARED_AGENT_TOOL_METADATA = {
   'db.searchInvestigations': {
     kind: 'read',
     description: 'Search investigations by INV number or text.',
-    params: '{ query?, status?, limit? }',
+    params: '{ query?, category?, status?, limit? }',
   },
   'db.getInvestigation': {
     kind: 'read',
@@ -122,6 +122,42 @@ const SHARED_AGENT_TOOL_LINES = buildSharedAgentToolLines();
 
 function escapeRegex(value) {
   return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeInvestigationStatusFilter(value) {
+  const statuses = Array.isArray(value)
+    ? value
+    : String(value || '').split(',');
+  const clean = statuses.map((item) => String(item || '').trim()).filter(Boolean);
+  if (clean.length === 0) return null;
+  if (clean.length === 1 && /^(active|open)$/i.test(clean[0])) {
+    return { $in: ['new', 'in-progress'] };
+  }
+  return clean.length === 1 ? clean[0] : { $in: clean };
+}
+
+function splitInvestigationSearchTerms(query) {
+  return String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 3)
+    .filter((term) => !new Set([
+      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'when', 'then', 'into',
+      'customer', 'client', 'trying', 'attempting', 'issue', 'error',
+    ]).has(term))
+    .slice(0, 8);
+}
+
+function mergeInvestigationDocs(primary = [], secondary = [], limit = 5) {
+  const byId = new Map();
+  for (const doc of [...primary, ...secondary]) {
+    const key = doc?._id ? String(doc._id) : `${doc?.invNumber || ''}:${doc?.subject || ''}`;
+    if (!key || byId.has(key)) continue;
+    byId.set(key, doc);
+    if (byId.size >= limit) break;
+  }
+  return [...byId.values()];
 }
 
 function normalizeAgentLookupKey(value) {
@@ -221,19 +257,53 @@ async function getEscalation(params = {}) {
 async function searchInvestigations(params = {}) {
   const limit = Math.min(Math.max(Number(params.limit) || 5, 1), 20);
   const filter = {};
-  if (params.status) filter.status = params.status;
+  const statusFilter = normalizeInvestigationStatusFilter(params.status || params.statuses);
+  if (statusFilter) filter.status = statusFilter;
+  if (params.category) filter.category = String(params.category).trim().toLowerCase();
 
   let docs = [];
-  if (params.query) {
-    const regex = new RegExp(escapeRegex(params.query), 'i');
-    docs = await Investigation.find({
-      ...filter,
-      $or: [
+  const query = String(params.query || '').trim();
+  if (query) {
+    try {
+      docs = await Investigation.find(
+        { ...filter, $text: { $search: query } },
+        { score: { $meta: 'textScore' } }
+      )
+        .sort({ score: { $meta: 'textScore' }, updatedAt: -1 })
+        .limit(limit)
+        .lean();
+    } catch {
+      docs = [];
+    }
+
+    const phraseRegex = new RegExp(escapeRegex(query), 'i');
+    const termRegexes = splitInvestigationSearchTerms(query).map((term) => new RegExp(escapeRegex(term), 'i'));
+    const regexClauses = [
+      { invNumber: phraseRegex },
+      { subject: phraseRegex },
+      { details: phraseRegex },
+      { notes: phraseRegex },
+      { workaround: phraseRegex },
+      { resolution: phraseRegex },
+      { symptoms: phraseRegex },
+    ];
+    for (const regex of termRegexes) {
+      regexClauses.push(
         { invNumber: regex },
         { subject: regex },
         { details: regex },
-      ],
+        { notes: regex },
+        { workaround: regex },
+        { resolution: regex },
+        { symptoms: regex }
+      );
+    }
+
+    const regexDocs = await Investigation.find({
+      ...filter,
+      $or: regexClauses,
     }).sort({ updatedAt: -1 }).limit(limit).lean();
+    docs = mergeInvestigationDocs(docs, regexDocs, limit);
   } else {
     docs = await Investigation.find(filter).sort({ updatedAt: -1 }).limit(limit).lean();
   }
@@ -244,9 +314,11 @@ async function searchInvestigations(params = {}) {
       id: doc._id,
       invNumber: doc.invNumber || null,
       subject: doc.subject || null,
+      category: doc.category || null,
       status: doc.status || null,
       affectedCount: doc.affectedCount || 0,
       updatedAt: doc.updatedAt || null,
+      score: doc.score || null,
     })),
     count: docs.length,
   };

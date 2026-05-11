@@ -62,11 +62,15 @@ test('chat integration with image parser agent', async (t) => {
     stubDefaults();
 
     // Mock parseImage to succeed
-    imageParserModule.parseImage = async (image, opts) => ({
-      text: 'COID/MID: 123\nCASE: CS-001',
-      role: 'escalation',
-      usage: { inputTokens: 50, outputTokens: 20, model: 'test-model' },
-    });
+    let parserOptions = null;
+    imageParserModule.parseImage = async (image, opts) => {
+      parserOptions = opts;
+      return {
+        text: 'COID/MID: 123\nCASE: CS-001',
+        role: 'escalation',
+        usage: { inputTokens: 50, outputTokens: 20, model: 'test-model' },
+      };
+    };
 
     // Mock transcription — should NOT be called
     let transcriptionCalled = false;
@@ -84,10 +88,15 @@ test('chat integration with image parser agent', async (t) => {
       baseSystemPrompt: 'You are a helper.',
       transcriptionModel: null,
       emitStatus: async () => {},
-      imageParserConfig: { provider: 'lm-studio', model: 'test-vision' },
+      imageParserConfig: {
+        provider: 'lm-studio',
+        model: 'test-vision',
+        promptId: 'escalation-template-parser',
+      },
     });
 
     assert.equal(transcriptionCalled, false, 'transcription should NOT be called when parser succeeds');
+    assert.equal(parserOptions.promptId, 'escalation-template-parser');
     assert.ok(result.imageTranscription);
     assert.equal(result.imageTranscription.source, 'image-parser-agent');
     assert.equal(result.imageTranscription.text, 'COID/MID: 123\nCASE: CS-001');
@@ -108,6 +117,7 @@ test('chat integration with image parser agent', async (t) => {
       transcriptionCalled = true;
       return { text: 'fallback transcription result', usage: null };
     };
+    const statuses = [];
 
     const result = await chatRequestService.buildChatImageAugmentation({
       normalizedImages: ['data:image/png;base64,AAAA'],
@@ -117,11 +127,12 @@ test('chat integration with image parser agent', async (t) => {
       effectiveTimeoutMs: 60000,
       baseSystemPrompt: 'You are a helper.',
       transcriptionModel: null,
-      emitStatus: async () => {},
+      emitStatus: async (status) => { statuses.push(status); },
       imageParserConfig: { provider: 'lm-studio' },
     });
 
     assert.equal(transcriptionCalled, true, 'transcription SHOULD be called when parser fails');
+    assert.ok(statuses.some((status) => status?.code === 'IMAGE_PARSER_FALLBACK'));
     assert.ok(result.imageTranscription);
     assert.equal(result.imageTranscription.text, 'fallback transcription result');
     // source should NOT be 'image-parser-agent' since we fell back
@@ -144,6 +155,7 @@ test('chat integration with image parser agent', async (t) => {
       transcriptionCalled = true;
       return { text: 'direct transcription', usage: null };
     };
+    const statuses = [];
 
     const result = await chatRequestService.buildChatImageAugmentation({
       normalizedImages: ['data:image/png;base64,AAAA'],
@@ -153,12 +165,13 @@ test('chat integration with image parser agent', async (t) => {
       effectiveTimeoutMs: 60000,
       baseSystemPrompt: 'You are a helper.',
       transcriptionModel: null,
-      emitStatus: async () => {},
+      emitStatus: async (status) => { statuses.push(status); },
       imageParserConfig: null,
     });
 
     assert.equal(parserCalled, false, 'parser should NOT be called when config is null');
     assert.equal(transcriptionCalled, true, 'transcription should be called directly');
+    assert.ok(statuses.some((status) => status?.code === 'IMAGE_PARSER_AGENT_DISABLED'));
     assert.ok(result.imageTranscription);
     assert.equal(result.imageTranscription.text, 'direct transcription');
   });
@@ -243,16 +256,22 @@ test('client localStorage config → server request body shape', async (t) => {
       images: ['data:image/png;base64,AAAA'],
       imageParserProvider: 'lm-studio',
       imageParserModel: 'qwen2.5-vl-7b',
+      imageParserPromptId: 'escalation-template-parser',
     };
 
     // Verify the server-side extraction logic matches
     const config = requestBody.imageParserProvider
-      ? { provider: requestBody.imageParserProvider, model: requestBody.imageParserModel || undefined }
+      ? {
+          provider: requestBody.imageParserProvider,
+          model: requestBody.imageParserModel || undefined,
+          promptId: requestBody.imageParserPromptId || 'escalation-template-parser',
+        }
       : null;
 
     assert.ok(config);
     assert.equal(config.provider, 'lm-studio');
     assert.equal(config.model, 'qwen2.5-vl-7b');
+    assert.equal(config.promptId, 'escalation-template-parser');
   });
 
   await t.test('request body without imageParserProvider results in null config', () => {
@@ -263,7 +282,11 @@ test('client localStorage config → server request body shape', async (t) => {
     };
 
     const config = requestBody.imageParserProvider
-      ? { provider: requestBody.imageParserProvider, model: requestBody.imageParserModel || undefined }
+      ? {
+          provider: requestBody.imageParserProvider,
+          model: requestBody.imageParserModel || undefined,
+          promptId: requestBody.imageParserPromptId || 'escalation-template-parser',
+        }
       : null;
 
     assert.equal(config, null);
@@ -278,12 +301,17 @@ test('client localStorage config → server request body shape', async (t) => {
     };
 
     const config = requestBody.imageParserProvider
-      ? { provider: requestBody.imageParserProvider, model: requestBody.imageParserModel || undefined }
+      ? {
+          provider: requestBody.imageParserProvider,
+          model: requestBody.imageParserModel || undefined,
+          promptId: requestBody.imageParserPromptId || 'escalation-template-parser',
+        }
       : null;
 
     assert.ok(config);
     assert.equal(config.provider, 'anthropic');
     assert.equal(config.model, undefined);
+    assert.equal(config.promptId, 'escalation-template-parser');
   });
 
   await t.test('empty string imageParserProvider is treated as falsy → null config', () => {
@@ -294,7 +322,11 @@ test('client localStorage config → server request body shape', async (t) => {
     };
 
     const config = requestBody.imageParserProvider
-      ? { provider: requestBody.imageParserProvider, model: requestBody.imageParserModel || undefined }
+      ? {
+          provider: requestBody.imageParserProvider,
+          model: requestBody.imageParserModel || undefined,
+          promptId: requestBody.imageParserPromptId || 'escalation-template-parser',
+        }
       : null;
 
     assert.equal(config, null);
@@ -309,7 +341,11 @@ test('client localStorage config → server request body shape', async (t) => {
       };
 
       const config = requestBody.imageParserProvider
-        ? { provider: requestBody.imageParserProvider, model: requestBody.imageParserModel || undefined }
+        ? {
+            provider: requestBody.imageParserProvider,
+            model: requestBody.imageParserModel || undefined,
+            promptId: requestBody.imageParserPromptId || 'escalation-template-parser',
+          }
         : null;
 
       assert.ok(config, `config should be non-null for provider: ${provider}`);

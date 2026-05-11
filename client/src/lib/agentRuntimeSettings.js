@@ -66,6 +66,18 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     supportedModes: ['single', 'fallback'],
   },
   {
+    id: 'known-issue-search-agent',
+    agentId: 'known-issue-search-agent',
+    label: 'Known Issue Search',
+    description: 'INV lookup, candidate rejection, and no-match confirmation',
+    color: '#34c759',
+    storagePrefix: 'qbo-known-issue-search-agent',
+    supportsModes: true,
+    supportsReasoning: true,
+    defaultMode: 'single',
+    supportedModes: ['single', 'fallback'],
+  },
+  {
     id: 'follow-up-chat-parser',
     agentId: 'follow-up-chat-parser',
     label: 'Follow-Up Chat Parser',
@@ -303,11 +315,20 @@ export function readAllAgentRuntimeStatesByAgentId() {
   );
 }
 
-export function readAllAgentRuntimeStatesBySurfaceId() {
+function readRuntimeStateWithMetadata(definition, options = {}) {
+  const state = readAgentRuntimeState(definition);
+  if (!options.includeConfigured) return state;
+  return {
+    ...state,
+    configured: hasStoredAgentRuntimeState(definition),
+  };
+}
+
+export function readAllAgentRuntimeStatesBySurfaceId(options = {}) {
   return Object.fromEntries(
     AGENT_RUNTIME_DEFINITIONS.map((definition) => [
       definition.id,
-      readAgentRuntimeState(definition),
+      readRuntimeStateWithMetadata(definition, options),
     ])
   );
 }

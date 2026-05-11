@@ -204,6 +204,12 @@ export default function ParallelResponsePair({
                 <span className="provider-name">
                   <span className="provider-dot" />
                   {getProviderLabel(r.provider)}
+                  {(r.modelUsed || r.usage?.model) && (
+                    <span className="parallel-model-signature">
+                      {' / '}
+                      {r.modelUsed || r.usage?.model}
+                    </span>
+                  )}
                   {isAccepted && (
                     <span className="badge badge-resolved" style={{ marginLeft: 'var(--sp-2)', fontSize: '9px', padding: '1px 6px' }}>
                       Accepted

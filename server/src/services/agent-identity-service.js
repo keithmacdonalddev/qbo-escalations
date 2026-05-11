@@ -22,7 +22,7 @@ const SHARED_AGENT_TOOLS = Object.freeze([
   { name: 'agentProfiles.nudge', kind: 'write', description: 'Nudge another agent to participate more naturally in the conversation.', params: '{ fromAgentId, toAgentId, note?, roomId?, surface? }' },
   { name: 'db.searchEscalations', kind: 'read', description: 'Search escalations by text, category, or status.', params: '{ query?, category?, status?, limit? }' },
   { name: 'db.getEscalation', kind: 'read', description: 'Fetch one escalation by id or caseNumber.', params: '{ id?, caseNumber? }' },
-  { name: 'db.searchInvestigations', kind: 'read', description: 'Search investigations by INV number or text.', params: '{ query?, status?, limit? }' },
+  { name: 'db.searchInvestigations', kind: 'read', description: 'Search investigations by INV number, category, status, or text.', params: '{ query?, category?, status?, limit? }' },
   { name: 'db.getInvestigation', kind: 'read', description: 'Fetch one investigation by id or invNumber.', params: '{ id?, invNumber? }' },
   { name: 'db.searchTemplates', kind: 'read', description: 'Search response templates by title, category, or body text.', params: '{ query?, category?, limit? }' },
   { name: 'db.searchConversations', kind: 'read', description: 'Search saved main-chat conversations by title or content.', params: '{ query?, limit? }' },
@@ -76,6 +76,11 @@ const TRIAGE_TOOL_NAMES = new Set([
   'db.searchTemplates',
 ]);
 
+const KNOWN_ISSUE_TOOL_NAMES = new Set([
+  'db.searchInvestigations',
+  'db.getInvestigation',
+]);
+
 const PARSER_AGENT_IDS = new Set([
   'escalation-template-parser',
   'follow-up-chat-parser',
@@ -85,6 +90,7 @@ const AGENT_PROMPT_MAP = Object.freeze({
   'chat-core': 'chat',
   'escalation-template-parser': 'escalation-template-parser',
   'triage-agent': 'triage-agent',
+  'known-issue-search-agent': 'known-issue-search-agent',
   'follow-up-chat-parser': 'follow-up-chat-parser',
   'workspace-action': 'workspace',
   'copilot-agent': 'copilot',
@@ -333,6 +339,9 @@ function buildAvailableTools(agentId) {
   }
   if (agentId === 'triage-agent') {
     return base.filter((tool) => TRIAGE_TOOL_NAMES.has(tool.name));
+  }
+  if (agentId === 'known-issue-search-agent') {
+    return base.filter((tool) => KNOWN_ISSUE_TOOL_NAMES.has(tool.name));
   }
   if (agentId === 'workspace') {
     return [...WORKSPACE_ONLY_TOOLS, ...base];

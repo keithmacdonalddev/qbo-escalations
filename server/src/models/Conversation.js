@@ -11,6 +11,7 @@ const messageSchema = new mongoose.Schema({
   images:    [{ type: String }],
   imageMeta: { type: [mongoose.Schema.Types.Mixed], default: [] },
   provider:  { type: String, enum: PROVIDERS },
+  modelUsed: { type: String, default: '' },
   mode:      { type: String, enum: CHAT_MODES },
   fallbackFrom: { type: String, enum: PROVIDERS },
   traceRequestId: { type: String, default: '' },

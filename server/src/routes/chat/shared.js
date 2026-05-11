@@ -1,7 +1,7 @@
 'use strict';
 
 const Conversation = require('../../models/Conversation');
-const { normalizeProvider } = require('../../services/providers/registry');
+const { getProviderModelId, normalizeProvider } = require('../../services/providers/registry');
 const { buildUsageSubdoc } = require('../../lib/chat-route-helpers');
 
 function isParallelAcceptEnabled() {
@@ -121,6 +121,7 @@ function toCandidateFromResult(result) {
     : (result.errorCode === 'TIMEOUT' ? 'timeout' : 'error');
   return {
     provider: result.provider,
+    modelUsed: result.modelUsed || result.usage?.model || result.model || getProviderModelId(result.provider),
     content: result.status === 'ok' ? (result.fullResponse || '') : '',
     thinking: typeof result.thinking === 'string' ? result.thinking : '',
     state,

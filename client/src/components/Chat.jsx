@@ -19,6 +19,25 @@ function safeText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeElapsedMs(value) {
+  if (value === null || value === undefined || value === '') return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : undefined;
+}
+
+function getParsedResultElapsedMs(result) {
+  if (!result || typeof result !== 'object') return undefined;
+  return normalizeElapsedMs(
+    result.elapsedMs
+      ?? result.totalElapsedMs
+      ?? result.providerLatencyMs
+      ?? result._meta?.latencyMs
+      ?? result._meta?.elapsedMs
+      ?? result._meta?.attempts?.find?.((attempt) => attempt?.status === 'ok')?.latencyMs
+      ?? result._meta?.attempts?.[0]?.latencyMs
+  );
+}
+
 function truncateText(value, max = 180) {
   const text = safeText(value).replace(/\s+/g, ' ');
   if (!text) return '';
@@ -52,6 +71,33 @@ const EXTRACTED_FIELD_KEYS = Object.freeze({
   'TRIED TEST ACCOUNT': 'triedTestAccount',
   'TS STEPS': 'tsSteps',
 });
+
+const ESCALATION_WORKFLOW_FIELD_LABELS = Object.freeze([
+  'COID/MID',
+  'CASE',
+  'CLIENT/CONTACT',
+  'CX IS ATTEMPTING TO',
+  'EXPECTED OUTCOME',
+  'ACTUAL OUTCOME',
+  'KB/TOOLS USED',
+  'TRIED TEST ACCOUNT',
+  'TS STEPS',
+]);
+
+function isParsedEscalationMessageContent(content) {
+  const text = safeText(content);
+  if (!text) return false;
+  const matchedCount = ESCALATION_WORKFLOW_FIELD_LABELS.reduce((count, label) => {
+    const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return count + (new RegExp(`^${escapedLabel}\\s*:`, 'im').test(text) ? 1 : 0);
+  }, 0);
+  return matchedCount >= 4;
+}
+
+function hasParsedEscalationMessage(messages) {
+  return Array.isArray(messages)
+    && messages.some((message) => message?.role === 'user' && isParsedEscalationMessageContent(message.content));
+}
 
 function parseExtractedEscalationText(sourceText) {
   const fields = {};
@@ -437,6 +483,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
         parsedEscalationSource: 'image-parser',
         parsedEscalationProvider: preview.parserProvider || provider,
         parsedEscalationModel: preview.parserModel || '',
+        parsedEscalationElapsedMs: preview.parserElapsedMs,
       },
     });
     setParsedDraftState({ phase: 'sent' });
@@ -507,6 +554,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     const parserModel = typeof parsedText === 'object' && parsedText
       ? safeText(parsedText.modelUsed || parsedText.usage?.model || parsedText.model || '')
       : '';
+    const parserElapsedMs = getParsedResultElapsedMs(parsedText);
     const parserPromptId = typeof parsedText === 'object' && parsedText
       ? safeText(parsedText.parserPromptId || parsedText.promptId || '')
       : '';
@@ -553,6 +601,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
       ...buildParsedEscalationPreviewFromText(text),
       parserProvider,
       parserModel,
+      parserElapsedMs,
     };
     setParsedEscalationPreview(preview);
     submitParsedEscalationPreview('', preview);
@@ -615,6 +664,11 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
         : 'Parsed escalation is already in the main chat. Use this box only for follow-up.',
     };
   }
+  const caseWorkflowActive = Boolean(
+    (caseIntake && caseIntake.status && caseIntake.status !== 'none')
+      || parsedDraftState?.phase === 'sent'
+      || hasParsedEscalationMessage(messages)
+  );
 
   const {
     handleComposeFocus,
@@ -850,6 +904,7 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
                 onCopyConversation={handleCopyConversation}
                 liveCallOpen={liveCallOpen}
                 onToggleLiveCall={() => setLiveCallOpen((prev) => !prev)}
+                caseWorkflowActive={caseWorkflowActive}
               />
             }
           />

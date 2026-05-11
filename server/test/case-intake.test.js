@@ -20,8 +20,10 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
       parseMeta: {
         providerUsed: 'llm-gateway',
         model: 'auto',
+        latencyMs: 1250,
         validation: { passed: true, score: 0.98 },
       },
+      elapsedMs: 2400,
       triageCard: {
         category: 'payroll',
         severity: 'P3',
@@ -46,8 +48,58 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
   assert.deepEqual(intake.runs.map((run) => run.phase), ['parse-template', 'triage', 'analyst']);
   assert.deepEqual(intake.runs.map((run) => run.status), ['completed', 'completed', 'running']);
   assert.equal(intake.runs[0].provider, 'llm-gateway');
+  assert.equal(intake.runs[0].durationMs, 1250);
+  assert.equal(intake.runs[1].durationMs, 2400);
   assert.equal(intake.runs[2].provider, 'gpt-5.5');
   assert.equal(intake.activeRunId, intake.runs[2].id);
+});
+
+test('buildCaseIntakeFromParsedEscalation records known issue search run when available', () => {
+  const intake = buildCaseIntakeFromParsedEscalation({
+    sourceText: 'COID/MID: 123\nCASE: 456',
+    imageTriageContext: {
+      parseFields: { coid: '123', caseNumber: '456' },
+      parseMeta: {
+        providerUsed: 'llm-gateway',
+        model: 'auto',
+        validation: { passed: true, score: 0.98 },
+      },
+      knownIssueSearchResult: {
+        ok: true,
+        status: 'match',
+        summary: '1 known issue candidate found.',
+        searches: [{ query: 'payroll direct deposit suspended', category: 'payroll', status: 'active', resultCount: 1 }],
+        matches: [{ invNumber: 'INV-151000', confidence: 'high', subject: 'Payroll suspended' }],
+        rejectedCandidates: [],
+        validation: { passed: true, issues: [], toolSearchCount: 1, fetchedInvestigationCount: 1 },
+        meta: { providerUsed: 'claude', model: 'claude-opus-4-7', latencyMs: 850, runtimeConfigured: true },
+      },
+      triageCard: {
+        category: 'payroll',
+        severity: 'P3',
+        read: 'Payroll suspension issue.',
+        action: 'Confirm the suspension reason.',
+        confidence: 'medium',
+      },
+    },
+    parserProvider: 'llm-gateway',
+    parserModel: 'auto',
+    analystProvider: 'gpt-5.5',
+    analystModel: 'gpt-5.5',
+    traceId: 'trace-1',
+    startedAt: STARTED_AT,
+  });
+
+  assert.deepEqual(
+    intake.runs.map((run) => run.phase),
+    ['parse-template', 'known-issue-search', 'triage', 'analyst']
+  );
+  const knownIssueRun = intake.runs.find((run) => run.phase === 'known-issue-search');
+  assert.equal(knownIssueRun.status, 'completed');
+  assert.equal(knownIssueRun.agentId, 'known-issue-search-agent');
+  assert.equal(knownIssueRun.durationMs, 850);
+  assert.equal(knownIssueRun.detail.matches[0].invNumber, 'INV-151000');
+  assert.equal(intake.knownIssueSearchResult.status, 'match');
 });
 
 test('completeCaseIntakeAnalystRun closes the active analyst run without losing parse state', () => {
@@ -76,6 +128,7 @@ test('completeCaseIntakeAnalystRun closes the active analyst run without losing 
   assert.equal(completed.parseFields.coid, '123');
   assert.equal(completed.activeRunId, '');
   assert.equal(analyst.status, 'completed');
+  assert.equal(analyst.durationMs, 5000);
   assert.equal(analyst.summary, 'Ask the phone agent for payroll tax-year details.');
   assert.deepEqual(analyst.detail, { attempts: 1 });
 });
@@ -104,6 +157,7 @@ test('failCaseIntakeAnalystRun marks analyst failures for review', () => {
   assert.equal(failed.status, 'failed');
   assert.equal(failed.activeRunId, '');
   assert.equal(analyst.status, 'failed');
+  assert.equal(analyst.durationMs, 5000);
   assert.equal(analyst.summary, 'Timed out');
   assert.deepEqual(analyst.detail, { code: 'TIMEOUT', message: 'Timed out' });
 });

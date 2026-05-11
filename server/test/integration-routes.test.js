@@ -259,8 +259,9 @@ await t.test('chat and retry endpoints stream SSE and persist conversation updat
 await t.test('chat and retry SSE expose per-request model overrides', async () => {
   const previousClaudeChat = claude.chat;
   const receivedModels = [];
-  claude.chat = ({ model, onChunk, onDone }) => {
+  claude.chat = ({ model, onChunk, onThinkingChunk, onDone }) => {
     receivedModels.push(model || null);
+    onThinkingChunk?.('override reasoning');
     onChunk('override response');
     onDone('override response');
     return () => {};
@@ -282,8 +283,12 @@ await t.test('chat and retry SSE expose per-request model overrides', async () =
 
     assert.equal(chatStart.primaryModel, 'claude-chat-override');
     assert.equal(chatStart.fallbackModel, null);
+    assert.ok(chatEvents.some((event) => event.event === 'thinking'));
+    assert.ok(chatEvents.some((event) => event.event === 'chunk'));
     assert.equal(chatDone.modelUsed, 'claude-chat-override');
     assert.equal(receivedModels[0], 'claude-chat-override');
+    let conversation = await Conversation.findById(chatStart.conversationId).lean();
+    assert.equal(conversation.messages.at(-1).modelUsed, 'claude-chat-override');
 
     const retryRes = await agent
       .post('/api/chat/retry')
@@ -300,8 +305,12 @@ await t.test('chat and retry SSE expose per-request model overrides', async () =
 
     assert.equal(retryStart.primaryModel, 'claude-retry-override');
     assert.equal(retryStart.fallbackModel, null);
+    assert.ok(retryEvents.some((event) => event.event === 'thinking'));
+    assert.ok(retryEvents.some((event) => event.event === 'chunk'));
     assert.equal(retryDone.modelUsed, 'claude-retry-override');
     assert.equal(receivedModels[1], 'claude-retry-override');
+    conversation = await Conversation.findById(chatStart.conversationId).lean();
+    assert.equal(conversation.messages.at(-1).modelUsed, 'claude-retry-override');
   } finally {
     claude.chat = previousClaudeChat;
   }
@@ -338,7 +347,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
   assert.ok(startMatch);
   const startData = JSON.parse(startMatch[1]);
   assert.equal(startData.mode, 'parallel');
-  assert.deepEqual((startData.parallelProviders || []).sort(), ['gpt-5.5', 'claude']);
+  assert.deepEqual((startData.parallelProviders || []).sort(), ['claude', 'gpt-5.5']);
 
   const doneMatch = chatRes.text.match(/event: done\s+data: (.+)/);
   assert.ok(doneMatch);
@@ -354,7 +363,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
   assert.equal(firstTurn.service, 'chat');
   assert.equal(String(firstTurn.conversationId), startData.conversationId);
   assert.equal(firstTurn.candidates.length, 2);
-  assert.deepEqual(firstTurn.candidates.map((c) => c.provider).sort(), ['gpt-5.5', 'claude']);
+  assert.deepEqual(firstTurn.candidates.map((c) => c.provider).sort(), ['claude', 'gpt-5.5']);
 
   const afterFirstRun = await Conversation.findById(startData.conversationId).lean();
   assert.equal(afterFirstRun.messages.length, 3);
@@ -362,7 +371,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
     .filter((m) => m.role === 'assistant')
     .map((m) => m.provider)
     .sort();
-  assert.deepEqual(firstAssistantProviders, ['gpt-5.5', 'claude']);
+  assert.deepEqual(firstAssistantProviders, ['claude', 'gpt-5.5']);
 
   const retryRes = await agent
     .post('/api/chat/retry')
@@ -389,7 +398,7 @@ await t.test('parallel chat mode persists both provider responses and retry repl
     .filter((m) => m.role === 'assistant')
     .map((m) => m.provider)
     .sort();
-  assert.deepEqual(retryAssistantProviders, ['gpt-5.5', 'claude']);
+  assert.deepEqual(retryAssistantProviders, ['claude', 'gpt-5.5']);
 });
 
 await t.test('parallel accept endpoint commits exactly one winner and is idempotent', async () => {
@@ -495,7 +504,7 @@ await t.test('parallel unaccept endpoint restores both candidates after winner-o
   assert.equal(assistantsAfterUnaccept.length, 2);
   assert.deepEqual(
     assistantsAfterUnaccept.map((m) => m.provider).sort(),
-    ['gpt-5.5', 'claude']
+    ['claude', 'gpt-5.5']
   );
   for (const assistant of assistantsAfterUnaccept) {
     assert.equal(assistant.attemptMeta.accepted, false);
@@ -739,6 +748,8 @@ await t.test('POST /api/chat emits triage_card for parsedEscalationText handoff'
   assert.ok(['P2', 'P3'].includes(triageData.severity));
   assert.ok(typeof triageData.read === 'string' && triageData.read.length > 0);
   assert.ok(typeof triageData.action === 'string' && triageData.action.length > 0);
+  assert.equal(triageData.fallback.used, true);
+  assert.match(triageData.fallback.reason, /canonical escalation template/i);
 });
 
 // ---------- Phase 6: N-way parallelProviders route tests ----------

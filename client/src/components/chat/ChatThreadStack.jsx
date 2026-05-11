@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { fadeSlideDown, fadeSlideUp, transitions } from '../../utils/motion.js';
-import { getProviderLabel } from '../../utils/markdown.jsx';
+import { getProviderLabel, renderMarkdown } from '../../utils/markdown.jsx';
 import { REASONING_EFFORT_OPTIONS } from '../../lib/providerCatalog.js';
 import ChatMessage from '../ChatMessage.jsx';
 import ParallelResponsePair from '../ParallelResponsePair.jsx';
@@ -97,6 +97,45 @@ function findLatestParsedEscalationText(messages) {
   return '';
 }
 
+function CaseAnalystGuidance({
+  content,
+  provider,
+  modelUsed = '',
+  isStreaming = false,
+  responseTimeMs = null,
+  usage = null,
+}) {
+  const text = typeof content === 'string' ? content.trim() : '';
+  const displayModel = modelUsed || usage?.model || '';
+  if (!text && !isStreaming) return null;
+
+  return (
+    <section className={`case-analyst-guidance${isStreaming ? ' is-streaming' : ''}`} aria-label="QBO Analyst guidance">
+      <div className="case-analyst-guidance-head">
+        <span className="case-workflow-dot" aria-hidden="true" />
+        <strong>QBO Analyst</strong>
+        <span>{isStreaming ? 'Working' : `${getProviderLabel(provider)}${displayModel ? ` / ${displayModel}` : ''}`}</span>
+      </div>
+      {text ? (
+        <div className="case-analyst-guidance-content">
+          {renderMarkdown(text)}
+        </div>
+      ) : (
+        <div className="case-workflow-waiting">
+          <span className="case-workflow-spinner" aria-hidden="true" />
+          <strong>Building guidance...</strong>
+        </div>
+      )}
+      {!isStreaming && (Number.isFinite(responseTimeMs) || usage) ? (
+        <div className="case-analyst-guidance-meta">
+          {Number.isFinite(responseTimeMs) ? <span>{responseTimeMs}ms</span> : null}
+          {usage?.totalTokens ? <span>{usage.totalTokens} tokens</span> : null}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 export default function ChatThreadStack({
   aiSettings = null,
   conversationId,
@@ -161,15 +200,31 @@ export default function ChatThreadStack({
       .map((message, originalIndex) => ({ ...message, _originalIndex: originalIndex }))
       .filter((message) => !(message.role === 'user' && isParsedEscalationTemplate(message.content)));
   }, [messages, showCaseWorkflowSurface]);
-  const groupedMessages = useMemo(() => groupMessagesForRendering(renderMessages), [renderMessages]);
-  const lastAssistantIndex = useMemo(() => {
+  const latestCaseAssistantMessage = useMemo(() => {
+    if (!showCaseWorkflowSurface || isStreaming) return null;
     for (let j = renderMessages.length - 1; j >= 0; j--) {
-      if (renderMessages[j].role === 'assistant') {
-        return renderMessages[j]._originalIndex ?? j;
+      if (renderMessages[j].role === 'assistant' && renderMessages[j].mode !== 'parallel') {
+        return renderMessages[j];
+      }
+    }
+    return null;
+  }, [isStreaming, renderMessages, showCaseWorkflowSurface]);
+  const promotedAssistantIndex = latestCaseAssistantMessage?._originalIndex ?? -1;
+  const renderThreadMessages = useMemo(() => {
+    if (!showCaseWorkflowSurface || promotedAssistantIndex < 0) return renderMessages;
+    return renderMessages.filter((message, index) => (
+      (message._originalIndex ?? index) !== promotedAssistantIndex
+    ));
+  }, [promotedAssistantIndex, renderMessages, showCaseWorkflowSurface]);
+  const groupedMessages = useMemo(() => groupMessagesForRendering(renderThreadMessages), [renderThreadMessages]);
+  const lastAssistantIndex = useMemo(() => {
+    for (let j = renderThreadMessages.length - 1; j >= 0; j--) {
+      if (renderThreadMessages[j].role === 'assistant') {
+        return renderThreadMessages[j]._originalIndex ?? j;
       }
     }
     return -1;
-  }, [renderMessages]);
+  }, [renderThreadMessages]);
   const canRetryLastResponse = Boolean(
     conversationId
       && !isStreaming
@@ -245,6 +300,12 @@ export default function ChatThreadStack({
             fallbackTriageCard={triageCard}
           />
 
+          {Array.isArray(invMatches) && invMatches.length > 0 && showCaseWorkflowSurface && (
+            <motion.div key="inv-match-banner-case" {...fadeSlideUp} transition={transitions.normal}>
+              <InvMatchBanner matches={invMatches} />
+            </motion.div>
+          )}
+
           {runtimeWarnings.length > 0 && (
             <div className="chat-bubble chat-bubble-system" style={{ border: '1px solid var(--warning)', background: 'var(--warning-subtle)' }}>
               <strong style={{ marginRight: 'var(--sp-2)', color: 'var(--warning)' }}>Budget Notice:</strong>
@@ -318,6 +379,7 @@ export default function ChatThreadStack({
                     <ParallelResponsePair
                       responses={turnResponses.map((response) => ({
                         provider: response.provider,
+                        modelUsed: response.modelUsed || response.usage?.model || '',
                         content: response.content,
                         isStreaming: false,
                         responseTimeMs: response.responseTimeMs,
@@ -350,6 +412,7 @@ export default function ChatThreadStack({
                     content={msg.content}
                     images={msg.images}
                     provider={msg.provider}
+                    modelUsed={msg.modelUsed || msg.usage?.model || ''}
                     mode={msg.mode}
                     fallbackFrom={msg.fallbackFrom}
                     timestamp={msg.timestamp}
@@ -365,11 +428,23 @@ export default function ChatThreadStack({
             })}
           </AnimatePresence>
 
+          {showCaseWorkflowSurface && latestCaseAssistantMessage && (
+            <motion.div key={`case-analyst-${promotedAssistantIndex}`} {...fadeSlideUp} transition={transitions.springGentle}>
+              <CaseAnalystGuidance
+                content={latestCaseAssistantMessage.content}
+                provider={latestCaseAssistantMessage.provider || provider}
+                modelUsed={latestCaseAssistantMessage.modelUsed || latestCaseAssistantMessage.usage?.model || ''}
+                responseTimeMs={latestCaseAssistantMessage.responseTimeMs}
+                usage={latestCaseAssistantMessage.usage}
+              />
+            </motion.div>
+          )}
+
           {triageCard && !hideTriageCard && !showCaseWorkflowSurface && (
             <TriageCard triageCard={triageCard} />
           )}
 
-          {Array.isArray(invMatches) && invMatches.length > 0 && (
+          {Array.isArray(invMatches) && invMatches.length > 0 && !showCaseWorkflowSurface && (
             <motion.div key="inv-match-banner" {...fadeSlideUp} transition={transitions.normal}>
               <InvMatchBanner matches={invMatches} />
             </motion.div>
@@ -383,13 +458,23 @@ export default function ChatThreadStack({
 
           {isStreaming && effectiveMode !== 'parallel' ? (
             <motion.div key="live-single-stream" {...fadeSlideUp} transition={transitions.normal}>
-              <ChatMessage
-                role="assistant"
-                content={streamingText || ''}
-                provider={streamProvider || provider}
-                mode={effectiveMode}
-                isStreaming
-              />
+              {showCaseWorkflowSurface ? (
+                <CaseAnalystGuidance
+                  content={streamingText || ''}
+                  provider={streamProvider || provider}
+                  modelUsed=""
+                  isStreaming
+                />
+              ) : (
+                <ChatMessage
+                  role="assistant"
+                  content={streamingText || ''}
+                  provider={streamProvider || provider}
+                  modelUsed=""
+                  mode={effectiveMode}
+                  isStreaming
+                />
+              )}
             </motion.div>
           ) : null}
 

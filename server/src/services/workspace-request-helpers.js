@@ -400,6 +400,8 @@ function startWorkspaceCollectedChat({
 
   const promise = new Promise((resolve, reject) => {
     let fullText = '';
+    let thinkingText = '';
+    const providerThinking = {};
     let settled = false;
     rejectPromise = reject;
 
@@ -428,6 +430,13 @@ function startWorkspaceCollectedChat({
         try { onChunk?.(text, provider); } catch { /* ignore caller callback errors */ }
       },
       onThinkingChunk: onThinkingChunk ? ({ thinking, provider }) => {
+        const chunk = typeof thinking === 'string' ? thinking : '';
+        if (chunk) {
+          thinkingText += chunk;
+          if (provider) {
+            providerThinking[provider] = `${providerThinking[provider] || ''}${chunk}`;
+          }
+        }
         try { onThinkingChunk?.(thinking, provider); } catch { /* ignore caller callback errors */ }
       } : undefined,
       onProviderError: (detail) => {
@@ -436,10 +445,13 @@ function startWorkspaceCollectedChat({
       onFallback: (detail) => {
         try { onStatus?.({ type: 'fallback', ...detail }); } catch { /* ignore */ }
       },
-      onDone: ({ fullResponse, providerUsed, modelUsed, fallbackUsed, fallbackFrom, attempts, usage }) => {
+      onDone: ({ fullResponse, providerUsed, modelUsed, fallbackUsed, fallbackFrom, attempts, usage, thinking, providerThinking: doneProviderThinking }) => {
         if (!settled) {
           settled = true;
           clearTimeout(timer);
+          const finalThinking = typeof thinking === 'string' && thinking
+            ? thinking
+            : thinkingText;
           resolve({
             fullResponse: typeof fullResponse === 'string' && fullResponse ? fullResponse : fullText,
             providerUsed: providerUsed || null,
@@ -448,6 +460,10 @@ function startWorkspaceCollectedChat({
             fallbackFrom: fallbackFrom || null,
             attempts: Array.isArray(attempts) ? attempts : [],
             usage: usage || null,
+            thinking: finalThinking,
+            providerThinking: doneProviderThinking && typeof doneProviderThinking === 'object'
+              ? doneProviderThinking
+              : providerThinking,
           });
         }
       },

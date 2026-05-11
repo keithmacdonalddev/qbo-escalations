@@ -9,6 +9,7 @@ import { transitions } from '../../utils/motion.js';
 import './ImageParserPopup.css';
 
 const DEFAULT_IMAGE_PARSER_MODE = 'escalation-template-parser';
+const FOLLOW_UP_IMAGE_PARSER_MODE = 'follow-up-chat-parser';
 
 const MAIN_CHAT_WORKFLOWS = Object.freeze([
   {
@@ -173,17 +174,35 @@ export default function ChatComposeArea({
   onCopyConversation,
   liveCallOpen,
   onToggleLiveCall,
+  caseWorkflowActive = false,
 }) {
   const [traceDrawerOpen, setTraceDrawerOpen] = useState(false);
   const [imageParserMode, setImageParserMode] = useState(DEFAULT_IMAGE_PARSER_MODE);
+  const preferredImageParserMode = caseWorkflowActive
+    ? FOLLOW_UP_IMAGE_PARSER_MODE
+    : DEFAULT_IMAGE_PARSER_MODE;
   const sendDisabled = (!input.trim())
     || (effectiveMode === 'parallel' && (parallelProviders.length < 2 || parallelProviders.length > 4));
-  const composePlaceholder = parsedEscalationPreview
+  const composePlaceholder = caseWorkflowActive
+    ? 'Challenge triage or add follow-up context...'
+    : parsedEscalationPreview
     ? 'Add a follow-up after the main chat replies, if needed.'
     : 'Ask QBO Analyst or start a workflow...';
   const hasConversation = Array.isArray(messages) && messages.length > 1 && !isStreaming && Boolean(conversationId);
 
-  const openImageParserWorkflow = (parserMode = DEFAULT_IMAGE_PARSER_MODE) => {
+  const hasImagePayload = (payload) => {
+    if (!payload) return false;
+    const items = Array.from(payload.items || []);
+    if (items.some((item) => item.kind === 'file' && item.type?.startsWith('image/'))) return true;
+    const files = Array.from(payload.files || []);
+    return files.some((file) => file?.type?.startsWith('image/'));
+  };
+
+  const prepareParserModeForIncomingImage = () => {
+    setImageParserMode(preferredImageParserMode);
+  };
+
+  const openImageParserWorkflow = (parserMode = preferredImageParserMode) => {
     setImageParserMode(parserMode);
     setImageParserSeed((current) => {
       if (!current) return current;
@@ -207,6 +226,21 @@ export default function ChatComposeArea({
     if (workflow.action === 'focus-chat') {
       requestAnimationFrame(() => textareaRef.current?.focus?.());
     }
+  };
+
+  const handleWorkflowAttachClick = () => {
+    prepareParserModeForIncomingImage();
+    handleAttachClick();
+  };
+
+  const handleWorkflowPaste = (event) => {
+    if (hasImagePayload(event.clipboardData)) prepareParserModeForIncomingImage();
+    handlePaste(event);
+  };
+
+  const handleWorkflowDrop = (event) => {
+    if (hasImagePayload(event.dataTransfer)) prepareParserModeForIncomingImage();
+    handleComposeDrop(event);
   };
 
   const composeBoxActions = (
@@ -285,49 +319,53 @@ export default function ChatComposeArea({
     <>
       <div className="compose-card-shell">
         <div
-          className={`compose-card${composeFocused ? ' is-focused' : ''}${isComposeDragOver ? ' is-dragover' : ''}`}
+          className={`compose-card${composeFocused ? ' is-focused' : ''}${isComposeDragOver ? ' is-dragover' : ''}${caseWorkflowActive ? ' is-case-workflow' : ''}`}
           onDragEnter={handleComposeDragEnter}
           onDragOver={handleComposeDragOver}
           onDragLeave={handleComposeDragLeave}
-          onDrop={handleComposeDrop}
+          onDrop={handleWorkflowDrop}
         >
-          <div className="main-chat-workflows" aria-label="Start a workflow from main chat">
-            {MAIN_CHAT_WORKFLOWS.map((workflow) => (
-              <button
-                key={workflow.id}
-                type="button"
-                className={`main-chat-workflow-chip${workflow.parserMode === imageParserMode && showImageParser ? ' is-active' : ''}`}
-                onClick={() => handleWorkflowClick(workflow)}
-                disabled={workflow.disabled || isStreaming}
-                title={workflow.hint}
-                aria-label={`${workflow.label}: ${workflow.hint}`}
-              >
-                <span>{workflow.label}</span>
-                <small>{workflow.hint}</small>
-              </button>
-            ))}
-          </div>
+          {!caseWorkflowActive && (
+            <>
+              <div className="main-chat-workflows" aria-label="Start a workflow from main chat">
+                {MAIN_CHAT_WORKFLOWS.map((workflow) => (
+                  <button
+                    key={workflow.id}
+                    type="button"
+                    className={`main-chat-workflow-chip${workflow.parserMode === imageParserMode && showImageParser ? ' is-active' : ''}`}
+                    onClick={() => handleWorkflowClick(workflow)}
+                    disabled={workflow.disabled || isStreaming}
+                    title={workflow.hint}
+                    aria-label={`${workflow.label}: ${workflow.hint}`}
+                  >
+                    <span>{workflow.label}</span>
+                    <small>{workflow.hint}</small>
+                  </button>
+                ))}
+              </div>
 
-          <ChatComposeControls
-            providerPopoverRef={providerPopoverRef}
-            provider={provider}
-            mode={mode}
-            fallbackProvider={fallbackProvider}
-            model={model}
-            fallbackModel={fallbackModel}
-            reasoningEffort={reasoningEffort}
-            parallelProviders={parallelProviders}
-            showProviderPopover={showProviderPopover}
-            setShowProviderPopover={setShowProviderPopover}
-            setProvider={setProvider}
-            setMode={setMode}
-            setFallbackProvider={setFallbackProvider}
-            setModel={setModel}
-            setFallbackModel={setFallbackModel}
-            setReasoningEffort={setReasoningEffort}
-            setParallelProviders={setParallelProviders}
-            trailingActions={composeBoxActions}
-          />
+              <ChatComposeControls
+                providerPopoverRef={providerPopoverRef}
+                provider={provider}
+                mode={mode}
+                fallbackProvider={fallbackProvider}
+                model={model}
+                fallbackModel={fallbackModel}
+                reasoningEffort={reasoningEffort}
+                parallelProviders={parallelProviders}
+                showProviderPopover={showProviderPopover}
+                setShowProviderPopover={setShowProviderPopover}
+                setProvider={setProvider}
+                setMode={setMode}
+                setFallbackProvider={setFallbackProvider}
+                setModel={setModel}
+                setFallbackModel={setFallbackModel}
+                setReasoningEffort={setReasoningEffort}
+                setParallelProviders={setParallelProviders}
+                trailingActions={composeBoxActions}
+              />
+            </>
+          )}
 
           <div className="compose-body" style={{ position: 'relative' }}>
             {parsedEscalationPreview && (
@@ -336,7 +374,7 @@ export default function ChatComposeArea({
                 onClear={onClearParsedEscalationPreview}
               />
             )}
-            {composeStatusNotice && (
+            {composeStatusNotice && !caseWorkflowActive && (
               <div className={`compose-status-notice is-${composeStatusNotice.tone || 'info'}`} role="status" aria-live="polite">
                 {composeStatusNotice.text}
               </div>
@@ -347,7 +385,7 @@ export default function ChatComposeArea({
                 value={input}
                 onChange={handleComposeInputChange}
                 onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
+                onPaste={handleWorkflowPaste}
                 onFocus={handleComposeFocus}
                 onBlur={handleComposeBlur}
                 placeholder={composePlaceholder}
@@ -395,7 +433,7 @@ export default function ChatComposeArea({
               <Tooltip text="Load a screenshot into the image parser (Ctrl+V)" level="low">
                 <button
                   className={`compose-action-btn${images.length > 0 ? ' is-active' : ''}`}
-                  onClick={handleAttachClick}
+                  onClick={handleWorkflowAttachClick}
                   type="button"
                   aria-label="Parse image from file"
                   disabled={isStreaming}
@@ -415,70 +453,92 @@ export default function ChatComposeArea({
                 aria-hidden="true"
               />
 
-              <Tooltip text="Capture a photo for the image parser" level="low">
-                <button
-                  className={`compose-action-btn${showWebcam ? ' is-active' : ''}`}
-                  onClick={() => setShowWebcam(true)}
-                  type="button"
-                  aria-label="Open webcam for image parser"
-                  disabled={isStreaming}
-                >
-                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="13" r="4" />
-                    <path d="M9 2L7.17 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-3.17L15 2H9z" />
-                  </svg>
-                </button>
-              </Tooltip>
+              {caseWorkflowActive ? (
+                <Tooltip text="Parse follow-up chat screenshot" level="medium">
+                  <button
+                    className={`compose-action-btn${showImageParser && imageParserMode === FOLLOW_UP_IMAGE_PARSER_MODE ? ' is-active' : ''}`}
+                    onClick={() => openImageParserWorkflow(FOLLOW_UP_IMAGE_PARSER_MODE)}
+                    type="button"
+                    aria-label="Parse follow-up chat screenshot"
+                    disabled={isStreaming}
+                  >
+                    <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                      <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                      <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                      <rect x="7" y="7" width="10" height="10" rx="1" />
+                    </svg>
+                  </button>
+                </Tooltip>
+              ) : (
+                <>
+                  <Tooltip text="Capture a photo for the image parser" level="low">
+                    <button
+                      className={`compose-action-btn${showWebcam ? ' is-active' : ''}`}
+                      onClick={() => setShowWebcam(true)}
+                      type="button"
+                      aria-label="Open webcam for image parser"
+                      disabled={isStreaming}
+                    >
+                      <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="13" r="4" />
+                        <path d="M9 2L7.17 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2h-3.17L15 2H9z" />
+                      </svg>
+                    </button>
+                  </Tooltip>
 
-              <Tooltip text="Insert a response template" level="medium">
-                <button
-                  className="compose-action-btn"
-                  onClick={openTemplatePicker}
-                  type="button"
-                  aria-label="Insert template"
-                  disabled={isStreaming}
-                >
-                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                    <line x1="3" y1="9" x2="21" y2="9" />
-                    <line x1="9" y1="21" x2="9" y2="9" />
-                  </svg>
-                </button>
-              </Tooltip>
+                  <Tooltip text="Insert a response template" level="medium">
+                    <button
+                      className="compose-action-btn"
+                      onClick={openTemplatePicker}
+                      type="button"
+                      aria-label="Insert template"
+                      disabled={isStreaming}
+                    >
+                      <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        <line x1="3" y1="9" x2="21" y2="9" />
+                        <line x1="9" y1="21" x2="9" y2="9" />
+                      </svg>
+                    </button>
+                  </Tooltip>
 
-              <Tooltip text="Open the image parser" level="medium">
-                <button
-                  className={`compose-action-btn${showImageParser ? ' is-active' : ''}`}
-                  onClick={() => openImageParserWorkflow(DEFAULT_IMAGE_PARSER_MODE)}
-                  type="button"
-                  aria-label="Parse screenshot"
-                  disabled={isStreaming}
-                >
-                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 7V5a2 2 0 0 1 2-2h2" />
-                    <path d="M17 3h2a2 2 0 0 1 2 2v2" />
-                    <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
-                    <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
-                    <rect x="7" y="7" width="10" height="10" rx="1" />
-                  </svg>
-                </button>
-              </Tooltip>
+                  <Tooltip text="Open the image parser" level="medium">
+                    <button
+                      className={`compose-action-btn${showImageParser ? ' is-active' : ''}`}
+                      onClick={() => openImageParserWorkflow(DEFAULT_IMAGE_PARSER_MODE)}
+                      type="button"
+                      aria-label="Parse screenshot"
+                      disabled={isStreaming}
+                    >
+                      <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+                        <path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                        <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+                        <path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                        <rect x="7" y="7" width="10" height="10" rx="1" />
+                      </svg>
+                    </button>
+                  </Tooltip>
 
-              <Tooltip text="Open Live Call Assist" level="medium">
-                <button
-                  className={`compose-action-btn${liveCallOpen ? ' is-active' : ''}`}
-                  onClick={onToggleLiveCall}
-                  type="button"
-                  aria-label="Open Live Call Assist"
-                  disabled={isStreaming}
-                >
-                  <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                    <line x1="12" y1="19" x2="12" y2="22" />
-                  </svg>
-                </button>
-              </Tooltip>
+                  <Tooltip text="Open Live Call Assist" level="medium">
+                    <button
+                      className={`compose-action-btn${liveCallOpen ? ' is-active' : ''}`}
+                      onClick={onToggleLiveCall}
+                      type="button"
+                      aria-label="Open Live Call Assist"
+                      disabled={isStreaming}
+                    >
+                      <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                      </svg>
+                    </button>
+                  </Tooltip>
+                </>
+              )}
 
               {images.length > 0 && (
                 <div
@@ -517,17 +577,23 @@ export default function ChatComposeArea({
                   </div>
                 </div>
               )}
+
+              {caseWorkflowActive && composeBoxActions}
             </div>
 
-            <span className="compose-footer-hint">
-              {slashMenuOpen
-                ? 'Enter runs the command. Tab completes it. Type // to send a literal slash.'
-                : parsedEscalationPreview
-                  ? 'The compact preview above was already sent to the main chat. Use this box only for follow-up messages.'
-                  : 'Paste or drop a screenshot to start Escalation, or type a normal analyst message.'}
-            </span>
+            {!caseWorkflowActive && (
+              <>
+                <span className="compose-footer-hint">
+                  {slashMenuOpen
+                    ? 'Enter runs the command. Tab completes it. Type // to send a literal slash.'
+                    : parsedEscalationPreview
+                      ? 'The compact preview above was already sent to the main chat. Use this box only for follow-up messages.'
+                      : 'Paste or drop a screenshot to start Escalation, or type a normal analyst message.'}
+                </span>
 
-            <span className="compose-char-count">{input.length} chars</span>
+                <span className="compose-char-count">{input.length} chars</span>
+              </>
+            )}
 
             <AnimatePresence mode="wait" initial={false}>
               {isStreaming ? (

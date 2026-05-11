@@ -136,9 +136,11 @@ function CompactConversationPane({
         .slice(-6)
       : []
   ), [messages]);
-  const recentProcessEvents = useMemo(() => (
-    Array.isArray(processEvents) ? processEvents.slice(-10).reverse() : []
-  ), [processEvents]);
+  const recentProcessEvents = useMemo(() => {
+    const events = Array.isArray(processEvents) ? processEvents.slice(-10).reverse() : [];
+    if (!liveMonitorMode) return events;
+    return events.filter((event) => event?.code !== 'STREAM_RECOVERED');
+  }, [liveMonitorMode, processEvents]);
   const liveParallelEntries = useMemo(() => (
     Object.entries(parallelStreaming || {}).filter(([, text]) => Boolean(text))
   ), [parallelStreaming]);

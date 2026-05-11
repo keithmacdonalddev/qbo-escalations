@@ -25,15 +25,77 @@ const {
 } = require('../../services/ai-traces');
 const {
   DEFAULT_PROVIDER,
+  buildAgentBackedTriageContext,
   isValidParseMode,
   resolveParseMode,
   toParseResponseMeta,
 } = require('../../services/chat-request-service');
-const { buildServerTriageCard } = require('../../lib/chat-triage');
+const { parseEscalationText } = require('../../lib/escalation-parser');
 const { logAttemptsUsage } = require('../../lib/chat-route-helpers');
 
 const router = express.Router();
 const parseRateLimit = createRateLimiter({ name: 'chat-parse', limit: 12, windowMs: 60_000 });
+
+function safeString(value) {
+  if (typeof value === 'string') return value;
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const normalized = safeString(value).trim();
+    if (normalized) return normalized;
+  }
+  return '';
+}
+
+function buildCanonicalTemplateTextFromFields(fields, sourceText = '') {
+  const regexFields = sourceText ? parseEscalationText(sourceText) : {};
+  const providerFields = fields && typeof fields === 'object' ? fields : {};
+  const fallbackFields = regexFields && typeof regexFields === 'object' ? regexFields : {};
+  const coid = firstNonEmpty(providerFields.coid, fallbackFields.coid);
+  const mid = firstNonEmpty(providerFields.mid, fallbackFields.mid);
+  const coidMid = coid && mid ? `${coid} / ${mid}` : (coid || mid);
+  return [
+    ['COID/MID', coidMid],
+    ['CASE', firstNonEmpty(providerFields.caseNumber, fallbackFields.caseNumber)],
+    ['CLIENT/CONTACT', firstNonEmpty(providerFields.clientContact, fallbackFields.clientContact)],
+    ['CX IS ATTEMPTING TO', firstNonEmpty(providerFields.attemptingTo, fallbackFields.attemptingTo)],
+    ['EXPECTED OUTCOME', firstNonEmpty(providerFields.expectedOutcome, fallbackFields.expectedOutcome)],
+    ['ACTUAL OUTCOME', firstNonEmpty(providerFields.actualOutcome, fallbackFields.actualOutcome)],
+    ['KB/TOOLS USED', firstNonEmpty(providerFields.kbToolsUsed, fallbackFields.kbToolsUsed)],
+    ['TRIED TEST ACCOUNT', firstNonEmpty(providerFields.triedTestAccount, fallbackFields.triedTestAccount)],
+    ['TS STEPS', firstNonEmpty(providerFields.tsSteps, fallbackFields.tsSteps)],
+  ].map(([label, value]) => `${label}: ${safeString(value).trim()}`).join('\n');
+}
+
+function buildParseFieldsOverride(fields, sourceText = '') {
+  const regexFields = sourceText ? parseEscalationText(sourceText) : {};
+  const providerFields = fields && typeof fields === 'object' ? fields : {};
+  const fallbackFields = regexFields && typeof regexFields === 'object' ? regexFields : {};
+  return {
+    coid: firstNonEmpty(providerFields.coid, fallbackFields.coid),
+    mid: firstNonEmpty(providerFields.mid, fallbackFields.mid),
+    caseNumber: firstNonEmpty(providerFields.caseNumber, fallbackFields.caseNumber),
+    clientContact: firstNonEmpty(providerFields.clientContact, fallbackFields.clientContact),
+    agentName: firstNonEmpty(providerFields.agentName, fallbackFields.agentName),
+    attemptingTo: firstNonEmpty(providerFields.attemptingTo, fallbackFields.attemptingTo),
+    expectedOutcome: firstNonEmpty(providerFields.expectedOutcome, fallbackFields.expectedOutcome),
+    actualOutcome: firstNonEmpty(providerFields.actualOutcome, fallbackFields.actualOutcome),
+    kbToolsUsed: firstNonEmpty(providerFields.kbToolsUsed, fallbackFields.kbToolsUsed),
+    triedTestAccount: firstNonEmpty(providerFields.triedTestAccount, fallbackFields.triedTestAccount),
+    tsSteps: firstNonEmpty(providerFields.tsSteps, fallbackFields.tsSteps),
+    category: firstNonEmpty(providerFields.category, fallbackFields.category),
+  };
+}
+
+function getWinningParseAttempt(responseMeta) {
+  const attempts = Array.isArray(responseMeta?.attempts) ? responseMeta.attempts : [];
+  return attempts.find((attempt) => attempt.status === 'ok' && attempt.provider === responseMeta.providerUsed)
+    || attempts.find((attempt) => attempt.status === 'ok')
+    || null;
+}
 
 // POST /api/chat/parse-escalation -- Parse escalation from image/text
 router.post('/parse-escalation', parseRateLimit, async (req, res) => {
@@ -48,6 +110,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
     reasoningEffort,
     timeoutMs,
     persist,
+    agentRuntime,
   } = req.body || {};
 
   if (!image && !text) {
@@ -192,7 +255,27 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
       allowRegexFallback: true,
     });
     const responseMeta = toParseResponseMeta(parseResult.meta);
-    const triageCard = buildServerTriageCard(parseResult.fields);
+    const winningAttempt = getWinningParseAttempt(responseMeta);
+    const parserTextForTriage = buildCanonicalTemplateTextFromFields(parseResult.fields, text);
+    const triageContext = await buildAgentBackedTriageContext({
+      parserText: parserTextForTriage,
+      parserProvider: responseMeta.providerUsed || selectedProvider,
+      parserUsage: winningAttempt?.usage || null,
+      parserModel: winningAttempt?.model || responseMeta.model || getProviderModelId(responseMeta.providerUsed || selectedProvider),
+      elapsedMs: winningAttempt?.latencyMs || 0,
+      parseFieldsOverride: buildParseFieldsOverride(parseResult.fields, text),
+      triageAgentRuntime: agentRuntime,
+      fallbackPolicy: {
+        mode: 'single',
+        primaryProvider: selectedProvider,
+        fallbackProvider,
+      },
+      reasoningEffort,
+      timeoutMs: requestedTimeoutMs,
+      runKnownIssueSearch: false,
+    });
+    const triageCard = triageContext.triageCard;
+    const triageMeta = triageContext.triageMeta;
     await setTraceAttempts(trace?._id, parseResult.meta?.attempts || []).catch(() => null);
     await setTraceUsage(
       trace?._id,
@@ -282,6 +365,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
         ok: true,
         escalation: escalation.toObject(),
         triageCard,
+        triageMeta,
         _meta: responseMeta,
         traceId: trace ? trace._id.toString() : null,
       });
@@ -290,6 +374,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
       ok: true,
       escalation: parseResult.fields,
       triageCard,
+      triageMeta,
       _meta: responseMeta,
       traceId: trace ? trace._id.toString() : null,
     });

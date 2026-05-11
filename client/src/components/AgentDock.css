@@ -504,3 +504,94 @@
 .compact-pane-compose-send--stop:hover {
   background: #f06e6c;
 }
+
+/* ----- Command Dock polish ----- */
+.compact-pane--live-monitor .compact-pane-messages {
+  padding: 16px 20px 10px;
+}
+
+.compact-pane--live-monitor .compact-pane-messages-inner {
+  gap: 12px;
+}
+
+.compact-pane-status-card,
+.compact-pane-section,
+.compact-pane-thinking {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.035)),
+    rgba(10, 11, 13, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 32px rgba(0, 0, 0, 0.18);
+}
+
+.compact-pane-status-card::before,
+.compact-pane-section::before,
+.compact-pane-thinking::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(45, 212, 191, 0.10), transparent 44%, rgba(96, 165, 250, 0.08));
+  opacity: 0.6;
+  mask-image: linear-gradient(to bottom, #000, transparent 48%);
+}
+
+.compact-pane-status-card > *,
+.compact-pane-section > *,
+.compact-pane-thinking > * {
+  position: relative;
+  z-index: 1;
+}
+
+.compact-pane-status-head span:first-child,
+.compact-pane-section-head span:first-child,
+.compact-pane-thinking-label {
+  color: rgba(255, 255, 255, 0.54);
+  font-size: 10.5px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.compact-pane-status-pill {
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink-secondary);
+}
+
+.compact-pane-status-pill.is-live {
+  border-color: rgba(52, 211, 153, 0.28);
+  background: rgba(52, 211, 153, 0.12);
+  color: #86efac;
+}
+
+.compact-pane-status-pill.is-error {
+  border-color: rgba(251, 113, 133, 0.28);
+  background: rgba(251, 113, 133, 0.12);
+  color: #fda4af;
+}
+
+.compact-pane-live-empty,
+.compact-pane-thinking-content {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.compact-pane-process-item {
+  border-bottom-color: rgba(255, 255, 255, 0.075);
+}
+
+.compact-pane-process-title strong {
+  color: var(--ink);
+  font-weight: 780;
+}
+
+.compact-pane-process-meta span {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.045);
+  border-radius: 999px;
+}

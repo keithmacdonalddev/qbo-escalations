@@ -5,10 +5,12 @@ import {
   DEFAULT_PROVIDER,
   normalizeProvider,
 } from '../lib/providerCatalog.js';
+import { readAllAgentRuntimeStatesBySurfaceId } from '../lib/agentRuntimeSettings.js';
 import { normalizeFallback } from '../lib/chatRequestCallbackHandlers.js';
 import useChatRequestCallbacks from './useChatRequestCallbacks.js';
 
 const DEFAULT_MODE = 'single';
+const ESCALATION_TEMPLATE_PARSER_ID = 'escalation-template-parser';
 const SUPPORTED_MODES = new Set(['single', 'fallback', 'parallel']);
 const RESERVED_REQUEST_KEYS = new Set([
   'message',
@@ -23,7 +25,22 @@ const RESERVED_REQUEST_KEYS = new Set([
   'parallelProviders',
   'reasoningEffort',
   'settings',
+  'agentRuntime',
+  'imageParserProvider',
+  'imageParserModel',
+  'imageParserPromptId',
 ]);
+
+function buildAgentRuntimePayload() {
+  const agentRuntime = readAllAgentRuntimeStatesBySurfaceId({ includeConfigured: true });
+  const parserRuntime = agentRuntime[ESCALATION_TEMPLATE_PARSER_ID] || {};
+  return {
+    agentRuntime,
+    imageParserProvider: parserRuntime.provider || undefined,
+    imageParserModel: parserRuntime.model || undefined,
+    imageParserPromptId: parserRuntime.provider ? ESCALATION_TEMPLATE_PARSER_ID : undefined,
+  };
+}
 
 function normalizeMode(mode) {
   return SUPPORTED_MODES.has(mode) ? mode : DEFAULT_MODE;
@@ -232,6 +249,7 @@ export default function useChatRequestFlow({
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
     const selectedModel = modelRef.current || undefined;
     const selectedFallbackModel = fallbackModelRef.current || undefined;
+    const runtimePayload = buildAgentRuntimePayload();
 
     setMessages((prev) => [...prev, {
       role: 'user',
@@ -262,6 +280,10 @@ export default function useChatRequestFlow({
           : undefined,
         reasoningEffort: reasoningEffortRef.current,
         settings: aiSettingsRef.current || undefined,
+        agentRuntime: runtimePayload.agentRuntime,
+        imageParserProvider: runtimePayload.imageParserProvider,
+        imageParserModel: runtimePayload.imageParserModel,
+        imageParserPromptId: runtimePayload.imageParserPromptId,
         ...requestExtras,
       },
       imageCount: normalizedImages.length,
@@ -292,6 +314,7 @@ export default function useChatRequestFlow({
     const selectedFallback = normalizeFallback(selectedProvider, fallbackProviderRef.current);
     const selectedModel = modelRef.current || undefined;
     const selectedFallbackModel = fallbackModelRef.current || undefined;
+    const runtimePayload = buildAgentRuntimePayload();
 
     setMessages((prev) => {
       if (prev.length === 0) return prev;
@@ -301,10 +324,6 @@ export default function useChatRequestFlow({
       }
       return next;
     });
-
-    // Include image parser config for retries (server reconstructs images from last user msg)
-    const retryImageParserProvider = localStorage.getItem('qbo-image-parser-provider') || '';
-    const retryImageParserModel = localStorage.getItem('qbo-image-parser-model') || '';
 
     return runRequest({
       isRetry: true,
@@ -324,8 +343,10 @@ export default function useChatRequestFlow({
           : undefined,
         reasoningEffort: reasoningEffortRef.current,
         settings: aiSettingsRef.current || undefined,
-        imageParserProvider: retryImageParserProvider || undefined,
-        imageParserModel: retryImageParserModel || undefined,
+        agentRuntime: runtimePayload.agentRuntime,
+        imageParserProvider: runtimePayload.imageParserProvider,
+        imageParserModel: runtimePayload.imageParserModel,
+        imageParserPromptId: runtimePayload.imageParserPromptId,
       },
       selectedSuccessTitle: 'Retry complete',
       selectedSuccessCode: 'RETRY_COMPLETE',

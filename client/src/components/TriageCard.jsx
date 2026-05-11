@@ -16,9 +16,18 @@ export default function TriageCard({ triageCard }) {
     ? triageCard.missingInfo.filter(Boolean)
     : (triageCard.missingInfo ? [triageCard.missingInfo] : []);
   const confidence = triageCard.confidence || '';
+  const fallbackUsed = Boolean(triageCard.fallback?.used);
+  const fallbackReason = typeof triageCard.fallback?.reason === 'string'
+    ? triageCard.fallback.reason.trim()
+    : '';
+  const defaultRuntimeUsed = Boolean(triageCard.runtime?.usedDefault);
+  const runtimeWarning = typeof triageCard.runtime?.warning === 'string'
+    ? triageCard.runtime.warning.trim()
+    : '';
 
   return (
     <motion.div
+      className="triage-card-root"
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, ease: 'easeOut' }}
@@ -92,9 +101,40 @@ export default function TriageCard({ triageCard }) {
           letterSpacing: '0.04em',
           opacity: 0.5,
         }}>
-          Triage Agent
+          {fallbackUsed ? 'Rule Fallback' : defaultRuntimeUsed ? 'Default Runtime' : 'Triage Agent'}
         </span>
       </div>
+
+      {fallbackUsed && (
+        <div style={{
+          border: '1px solid rgba(240, 178, 50, 0.28)',
+          background: 'rgba(240, 178, 50, 0.08)',
+          color: '#f0b232',
+          borderRadius: '6px',
+          padding: '5px 7px',
+          fontSize: '12px',
+          lineHeight: 1.35,
+          marginBottom: '6px',
+        }}>
+          Triage Agent did not produce a usable model result. Showing rule fallback.
+          {fallbackReason ? ` ${fallbackReason}` : ''}
+        </div>
+      )}
+
+      {defaultRuntimeUsed && (
+        <div style={{
+          border: '1px solid rgba(240, 178, 50, 0.24)',
+          background: 'rgba(240, 178, 50, 0.07)',
+          color: '#f0b232',
+          borderRadius: '6px',
+          padding: '5px 7px',
+          fontSize: '12px',
+          lineHeight: 1.35,
+          marginBottom: '6px',
+        }}>
+          {runtimeWarning || 'Triage Agent profile has no saved runtime. This card used the request/default chat runtime.'}
+        </div>
+      )}
 
       {/* Agent / Client row */}
       {(triageCard.agent !== 'Unknown' || triageCard.client !== 'Unknown') && (
