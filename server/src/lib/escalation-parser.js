@@ -14,19 +14,71 @@
  *   TS STEPS: ...
  */
 
-// Label patterns found in real QBO escalation DMs
-const FIELD_PATTERNS = [
-  { field: 'coid',            patterns: [/COID\/MID[:\s]*([^\n/]+)/i, /(?:COID|CO\s*ID|COMPANY\s*ID)[:\s]*([^\n/]+)/i] },
-  { field: 'mid',             patterns: [/COID\/MID[:\s]*[^/\n]+\/\s*([^\n]+)/i, /(?:^|\n)\s*(?:MID|MASTER\s*ID)[:\s]*([^\n]+)/i] },
-  { field: 'caseNumber',      patterns: [/(?:CASE(?:\s*(?:#|NUMBER|NUM))?)[:\s]*([^\n]+)/i, /(?:CS-\d{4}-\d+)/i] },
-  { field: 'clientContact',   patterns: [/(?:CLIENT(?:\s*\/\s*CONTACT)?|CONTACT|CUSTOMER|CX\s*NAME)[:\s]*([^\n]+)/i] },
-  { field: 'agentName',       patterns: [/(?:AGENT(?:\s*NAME)?|FROM|SENT\s*BY)[:\s]*([^\n]+)/i] },
-  { field: 'attemptingTo',    patterns: [/(?:CX\s*IS\s*ATTEMPTING\s*TO|ATTEMPTING\s*TO|ISSUE|PROBLEM|TRYING\s*TO)[:\s]*([^\n]+(?:\n(?![A-Z]{2,})[^\n]+)*)/i] },
-  { field: 'expectedOutcome', patterns: [/(?:EXPECTED\s*OUTCOME|EXPECTED\s*RESULT|SHOULD\s*BE)[:\s]*([^\n]+(?:\n(?![A-Z]{2,})[^\n]+)*)/i] },
-  { field: 'actualOutcome',   patterns: [/(?:ACTUAL\s*OUTCOME|ACTUAL\s*RESULT|INSTEAD|WHAT\s*HAPPENED)[:\s]*([^\n]+(?:\n(?![A-Z]{2,})[^\n]+)*)/i] },
-  { field: 'triedTestAccount',patterns: [/(?:TRIED\s*TEST\s*ACCOUNT|TEST\s*ACCOUNT)[:\s]*(yes|no|y|n|true|false)/i] },
-  { field: 'tsSteps',         patterns: [/(?:TS\s*STEPS|TROUBLESHOOTING\s*STEPS|STEPS\s*TAKEN|ALREADY\s*TRIED)[:\s]*([^\n]+(?:\n(?![A-Z]{2,})[^\n]+)*)/i] },
+const PARSED_FIELD_KEYS = [
+  'coid',
+  'mid',
+  'caseNumber',
+  'clientContact',
+  'agentName',
+  'attemptingTo',
+  'expectedOutcome',
+  'actualOutcome',
+  'triedTestAccount',
+  'tsSteps',
 ];
+
+const IGNORED_LABEL = '__ignored__';
+const MULTILINE_FIELD_KEYS = new Set([
+  'attemptingTo',
+  'expectedOutcome',
+  'actualOutcome',
+  'tsSteps',
+]);
+
+// Label aliases found in real QBO escalation DMs.
+const FIELD_LABELS = {
+  'COID/MID': 'coidMid',
+  COID: 'coid',
+  'CO ID': 'coid',
+  'COMPANY ID': 'coid',
+  MID: 'mid',
+  'MASTER ID': 'mid',
+  CASE: 'caseNumber',
+  'CASE #': 'caseNumber',
+  'CASE NUMBER': 'caseNumber',
+  'CASE NUM': 'caseNumber',
+  'CLIENT/CONTACT': 'clientContact',
+  CLIENT: 'clientContact',
+  CONTACT: 'clientContact',
+  CUSTOMER: 'clientContact',
+  'CX NAME': 'clientContact',
+  AGENT: 'agentName',
+  'AGENT NAME': 'agentName',
+  FROM: 'agentName',
+  'SENT BY': 'agentName',
+  'CX IS ATTEMPTING TO': 'attemptingTo',
+  'CX IS ATTEMPTING': 'attemptingTo',
+  'ATTEMPTING TO': 'attemptingTo',
+  ISSUE: 'attemptingTo',
+  PROBLEM: 'attemptingTo',
+  'TRYING TO': 'attemptingTo',
+  'EXPECTED OUTCOME': 'expectedOutcome',
+  'EXPECTED RESULT': 'expectedOutcome',
+  'SHOULD BE': 'expectedOutcome',
+  'ACTUAL OUTCOME': 'actualOutcome',
+  'ACTUAL RESULT': 'actualOutcome',
+  INSTEAD: 'actualOutcome',
+  'WHAT HAPPENED': 'actualOutcome',
+  'TRIED TEST ACCOUNT': 'triedTestAccount',
+  'TEST ACCOUNT': 'triedTestAccount',
+  'TS STEPS': 'tsSteps',
+  'TROUBLESHOOTING STEPS': 'tsSteps',
+  'STEPS TAKEN': 'tsSteps',
+  'ALREADY TRIED': 'tsSteps',
+  'KB/TOOLS USED': IGNORED_LABEL,
+  'KB/TOOLS': IGNORED_LABEL,
+  'KB TOOLS USED': IGNORED_LABEL,
+};
 
 // Category keywords for auto-classification
 const CATEGORY_KEYWORDS = {
@@ -44,6 +96,52 @@ const CATEGORY_KEYWORDS = {
   'technical':       ['error', 'bug', 'crash', 'loading', 'blank screen', 'slow', 'login', 'password', 'mfa', 'two-factor', '2fa', 'browser', 'cache', 'clear cache'],
 };
 
+function normalizeLabel(label) {
+  return String(label || '')
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function parseLabeledLine(line) {
+  const match = String(line || '').match(/^([^:\n]{2,80}):[ \t]*(.*)$/);
+  if (!match) return null;
+  const key = FIELD_LABELS[normalizeLabel(match[1])];
+  if (!key) return null;
+  return {
+    key,
+    value: match[2].trim(),
+  };
+}
+
+function appendFieldValue(result, key, value) {
+  if (!key || key === IGNORED_LABEL) return;
+  const text = String(value || '').trim();
+  if (!text) {
+    if (!Object.prototype.hasOwnProperty.call(result, key)) result[key] = '';
+    return;
+  }
+  result[key] = [result[key], text].filter(Boolean).join(' ').trim();
+}
+
+function splitCoidMid(value) {
+  const parts = String(value || '').split('/').map((part) => part.trim()).filter(Boolean);
+  return {
+    coid: parts[0] || '',
+    mid: parts[1] || '',
+  };
+}
+
+function countFoundFields(fields) {
+  return PARSED_FIELD_KEYS.reduce((count, key) => {
+    const value = fields[key];
+    if (!value) return count;
+    if (key === 'triedTestAccount' && value === 'unknown') return count;
+    return count + 1;
+  }, 0);
+}
+
 /**
  * Parse escalation text using regex patterns.
  * @param {string} text - Raw escalation text (from DM, paste, etc.)
@@ -51,17 +149,34 @@ const CATEGORY_KEYWORDS = {
  */
 function parseEscalationText(text) {
   const result = {};
-  const matched = {};
+  let currentKey = null;
 
-  for (const { field, patterns } of FIELD_PATTERNS) {
-    for (const pattern of patterns) {
-      const match = text.match(pattern);
-      if (match) {
-        result[field] = match[1].trim();
-        matched[field] = true;
-        break;
+  for (const rawLine of String(text || '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const labeled = parseLabeledLine(line);
+    if (labeled) {
+      currentKey = MULTILINE_FIELD_KEYS.has(labeled.key) ? labeled.key : null;
+      if (labeled.key === 'coidMid') {
+        const ids = splitCoidMid(labeled.value);
+        if (!result.coid) result.coid = ids.coid;
+        if (!result.mid) result.mid = ids.mid;
+      } else {
+        appendFieldValue(result, labeled.key, labeled.value);
       }
+      continue;
     }
+
+    appendFieldValue(result, currentKey, line);
+  }
+
+  if (!result.caseNumber) {
+    const caseMatch = String(text || '').match(/\bCS-\d{4}-\d+\b/i);
+    if (caseMatch) result.caseNumber = caseMatch[0];
+  }
+
+  for (const field of PARSED_FIELD_KEYS) {
     if (!result[field]) result[field] = '';
   }
 
@@ -77,7 +192,7 @@ function parseEscalationText(text) {
   result.category = classifyCategory(text);
 
   // Count how many fields were extracted
-  const fieldsFound = Object.values(matched).filter(Boolean).length;
+  const fieldsFound = countFoundFields(result);
   result._parseConfidence = fieldsFound >= 5 ? 'high' : fieldsFound >= 3 ? 'medium' : 'low';
   result._fieldsFound = fieldsFound;
   result._parsedBy = 'regex';

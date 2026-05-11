@@ -211,7 +211,7 @@ router.post('/parallel/:turnId/accept', parallelDecisionRateLimit, async (req, r
 
   const acceptedMessage = conversation.messages[firstTurnIndex] || null;
   const acceptedMessageIndex = firstTurnIndex;
-  ParallelCandidateTurn.findOneAndUpdate(
+  await ParallelCandidateTurn.findOneAndUpdate(
     { turnId, conversationId: conversation._id },
     {
       $set: {
@@ -311,7 +311,7 @@ router.post('/parallel/:turnId/discard', parallelDecisionRateLimit, async (req, 
   const retainedMessages = conversation.messages.filter((_, idx) => !turnIndexes.has(idx));
   conversation.set('messages', retainedMessages);
   await saveConversationLenient(conversation);
-  ParallelCandidateTurn.findOneAndUpdate(
+  await ParallelCandidateTurn.findOneAndUpdate(
     { turnId, conversationId: conversation._id },
     {
       $set: {
@@ -430,7 +430,7 @@ router.post('/parallel/:turnId/unaccept', parallelDecisionRateLimit, async (req,
   }
   await saveConversationLenient(conversation);
 
-  ParallelCandidateTurn.findOneAndUpdate(
+  await ParallelCandidateTurn.findOneAndUpdate(
     { turnId, conversationId: conversation._id },
     {
       $set: {

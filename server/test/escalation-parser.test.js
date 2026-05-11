@@ -68,6 +68,36 @@ test('parseEscalationText does not let MID spill into the next field when slash 
   assert.equal(parsed.clientContact, 'Doug Mckensie');
 });
 
+test('parseEscalationText keeps blank canonical fields blank for payroll suspended direct deposit case', () => {
+  const input = [
+    'COID/MID: 9341455791062508',
+    'CASE: 15155571621',
+    'CLIENT/CONTACT:',
+    'CX IS ATTEMPTING TO: paying her employees via DD',
+    'EXPECTED OUTCOME:',
+    'ACTUAL OUTCOME: payroll suspended',
+    'KB/TOOLS USED: Iboss, cs server',
+    'TRIED TEST ACCOUNT: no',
+    'TS STEPS:',
+    'cs server and iboss are showing that the payroll as 12/26/2025 is suspended',
+  ].join('\n');
+
+  const parsed = parseEscalationText(input);
+
+  assert.equal(parsed.coid, '9341455791062508');
+  assert.equal(parsed.caseNumber, '15155571621');
+  assert.equal(parsed.clientContact, '');
+  assert.equal(parsed.attemptingTo, 'paying her employees via DD');
+  assert.equal(parsed.expectedOutcome, '');
+  assert.equal(parsed.actualOutcome, 'payroll suspended');
+  assert.equal(parsed.triedTestAccount, 'no');
+  assert.equal(
+    parsed.tsSteps,
+    'cs server and iboss are showing that the payroll as 12/26/2025 is suspended'
+  );
+  assert.equal(parsed.category, 'payroll');
+});
+
 test('looksLikeEscalation returns false for plain short text', () => {
   const looksStructured = looksLikeEscalation('Need help, nothing else here');
   assert.equal(looksStructured, false);
