@@ -4,8 +4,13 @@ dist/
 *.log
 .DS_Store
 Thumbs.db
+desktop.ini
 server/uploads/
 server/data/
 tmp/
+.claude/memory/sessions/
+.playwright-mcp/
+server/.playwright-mcp/
+review-screenshots/
 stress-testing/reports/**/*.json
 stress-testing/reports/**/artifacts/
