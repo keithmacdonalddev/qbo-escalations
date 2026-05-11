@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Mission Control Hybrid Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js" defer></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-rail" aria-label="Primary navigation">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <div>
+            <strong>QBO Assist</strong>
+            <small>Agent Operations</small>
+          </div>
+        </div>
+
+        <nav class="nav-stack">
+          <a href="#" class="nav-item"><i data-lucide="layout-dashboard"></i><span>Dashboard</span></a>
+          <a href="#" class="nav-item"><i data-lucide="workflow"></i><span>Workflows</span></a>
+          <a href="#" class="nav-item is-active"><i data-lucide="bot"></i><span>Agents</span></a>
+          <a href="#" class="nav-item"><i data-lucide="file-search"></i><span>Investigations</span></a>
+          <a href="#" class="nav-item"><i data-lucide="book-open"></i><span>Playbook</span></a>
+          <a href="#" class="nav-item"><i data-lucide="bar-chart-3"></i><span>Analytics</span></a>
+        </nav>
+
+        <section class="rail-card health-card">
+          <div class="section-kicker">Platform Health</div>
+          <div class="health-ring" style="--pct: 98.7">
+            <strong>98.7%</strong>
+            <span>Healthy</span>
+          </div>
+          <button class="ghost-action" type="button">
+            <span>View health</span>
+            <i data-lucide="arrow-right"></i>
+          </button>
+        </section>
+
+        <section class="rail-card">
+          <div class="section-kicker">Open Review</div>
+          <strong class="rail-number">5</strong>
+          <p>Agents need prompt, model, or workflow review.</p>
+        </section>
+
+        <div class="rail-user">
+          <div class="avatar photo-avatar" aria-hidden="true"></div>
+          <div>
+            <strong>Ava Chen</strong>
+            <small>Platform Ops</small>
+          </div>
+          <button class="icon-button" type="button" aria-label="Account menu">
+            <i data-lucide="chevron-down"></i>
+          </button>
+        </div>
+      </aside>
+
+      <div class="workspace">
+        <header class="topbar">
+          <div class="crumb">
+            <i data-lucide="cloud-cog"></i>
+            <span id="topbarContext">Agent Mission Control</span>
+          </div>
+          <div class="status-pill">
+            <span class="status-dot"></span>
+            <span>System Status: Operational</span>
+          </div>
+          <div class="topbar-actions">
+            <label class="global-search">
+              <i data-lucide="search"></i>
+              <input id="globalSearch" type="search" placeholder="Search agents, roles, tools, workflows..." />
+            </label>
+            <button class="icon-button" type="button" aria-label="Notifications">
+              <i data-lucide="bell"></i>
+              <span class="count-dot">3</span>
+            </button>
+            <button class="primary-action" type="button">
+              <i data-lucide="plus"></i>
+              <span>Create Agent</span>
+            </button>
+          </div>
+        </header>
+
+        <main class="main-stage">
+          <canvas id="networkCanvas" class="network-canvas" aria-hidden="true"></canvas>
+
+          <section id="fleetView" class="view is-active" aria-labelledby="fleetTitle">
+            <section class="cinema-hero" aria-label="Agent operations overview">
+              <div class="hero-architecture" aria-hidden="true">
+                <div class="hero-grain"></div>
+                <div class="stage-ceiling"></div>
+                <div class="stage-monolith stage-monolith-left"></div>
+                <div class="stage-monolith stage-monolith-right"></div>
+                <div class="architecture-floor"></div>
+                <div class="architecture-wall architecture-wall-left"></div>
+                <div class="architecture-wall architecture-wall-right"></div>
+                <div class="light-blade light-blade-left"></div>
+                <div class="light-blade light-blade-center"></div>
+                <div class="light-sweep"></div>
+                <div class="stage-reflection"></div>
+                <div class="stage-rail stage-rail-front"></div>
+                <div class="stage-rail stage-rail-back"></div>
+                <div class="hero-haze"></div>
+              </div>
+
+              <div class="hero-copy-block">
+                <span class="hero-kicker">Agent Platform</span>
+                <h1 id="fleetTitle">Agent Mission Control</h1>
+                <p>Run the QBO escalation fleet like production infrastructure: trust, review pressure, workflow coverage, and dependencies in one command surface.</p>
+                <div class="hero-actions">
+                  <button class="primary-action hero-primary" type="button"><span>Explore Agents</span><i data-lucide="arrow-right"></i></button>
+                  <button class="secondary-action hero-secondary" type="button"><span>Build Custom Agent</span></button>
+                </div>
+              </div>
+
+              <article id="featuredAgentCard" class="featured-agent-card"></article>
+            </section>
+
+            <div class="page-title-row compact-title-row">
+              <div>
+                <h2>Fleet Operations</h2>
+                <p>Current health, coverage, dependencies, and review queues.</p>
+              </div>
+              <div class="title-actions">
+                <button class="secondary-action" type="button"><i data-lucide="upload"></i><span>Import</span></button>
+                <button class="secondary-action" type="button"><i data-lucide="download"></i><span>Export</span></button>
+              </div>
+            </div>
+
+            <section id="statsGrid" class="stats-grid" aria-label="Agent summary metrics"></section>
+
+            <section class="control-strip" aria-label="Agent filters">
+              <label class="filter-field search-field">
+                <i data-lucide="search"></i>
+                <input id="agentSearch" type="search" placeholder="Search by name, role, tool, or workflow" />
+              </label>
+              <label class="filter-field">
+                <span>Role</span>
+                <select id="roleFilter">
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label class="filter-field">
+                <span>Model</span>
+                <select id="modelFilter">
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <label class="filter-field">
+                <span>Status</span>
+                <select id="statusFilter">
+                  <option value="all">All</option>
+                </select>
+              </label>
+              <button id="clearFilters" class="text-action" type="button">
+                <i data-lucide="rotate-ccw"></i>
+                <span>Clear</span>
+              </button>
+              <div class="segmented" role="group" aria-label="View mode">
+                <button class="segment is-active" data-mode="grid" type="button"><i data-lucide="layout-grid"></i><span>Grid</span></button>
+                <button class="segment" data-mode="list" type="button"><i data-lucide="list"></i><span>List</span></button>
+                <button class="segment" data-mode="map" type="button"><i data-lucide="git-branch"></i><span>Map</span></button>
+              </div>
+            </section>
+
+            <div class="fleet-layout">
+              <aside class="left-stack">
+                <section class="panel">
+                  <div class="panel-head">
+                    <h2>Top Agents</h2>
+                    <button class="icon-button" type="button" aria-label="Sort top agents"><i data-lucide="arrow-up-down"></i></button>
+                  </div>
+                  <div id="topAgents" class="rank-list"></div>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-head">
+                    <h2>Workflow Coverage</h2>
+                    <span class="panel-note">28 active</span>
+                  </div>
+                  <div class="coverage-card">
+                    <div id="coverageDonut" class="coverage-donut"></div>
+                    <div id="coverageLegend" class="coverage-legend"></div>
+                  </div>
+                </section>
+              </aside>
+
+              <section class="center-stack">
+                <div class="panel agent-results-panel">
+                  <div class="panel-head">
+                    <div>
+                      <h2 id="resultTitle">Agent Fleet</h2>
+                      <p id="resultSubtitle"></p>
+                    </div>
+                    <button class="secondary-action compact" type="button"><i data-lucide="sliders-horizontal"></i><span>More filters</span></button>
+                  </div>
+                  <div id="agentResults" class="agent-grid"></div>
+                </div>
+              </section>
+
+              <aside class="right-stack">
+                <section class="panel attention-panel">
+                  <div class="panel-head">
+                    <h2>Needs Attention</h2>
+                    <span class="danger-dot"></span>
+                  </div>
+                  <div id="attentionList" class="attention-list"></div>
+                </section>
+
+                <section class="panel">
+                  <div class="panel-head">
+                    <h2>Review Queue</h2>
+                    <button class="ghost-action mini" type="button"><span>Open</span><i data-lucide="arrow-right"></i></button>
+                  </div>
+                  <div class="review-bars">
+                    <div><span>Human reviewed</span><strong>91%</strong><meter min="0" max="100" value="91"></meter></div>
+                    <div><span>Automated eval</span><strong>94%</strong><meter min="0" max="100" value="94"></meter></div>
+                    <div><span>Prompt drift</span><strong>7%</strong><meter min="0" max="100" value="7" class="warn-meter"></meter></div>
+                  </div>
+                </section>
+
+                <section class="panel activity-stream-panel">
+                  <div class="panel-head">
+                    <h2>Live Activity</h2>
+                    <span class="live-pill"><span></span>Live</span>
+                  </div>
+                  <div id="fleetActivity" class="activity-stream"></div>
+                </section>
+              </aside>
+            </div>
+          </section>
+
+          <section id="profileView" class="view" aria-labelledby="profileTitle">
+            <button id="backToFleet" class="back-link" type="button">
+              <i data-lucide="arrow-left"></i>
+              <span>Back to fleet</span>
+            </button>
+
+            <section id="profileHero" class="profile-hero"></section>
+
+            <nav class="profile-tabs" aria-label="Agent profile tabs">
+              <button class="profile-tab is-active" data-tab="overview" type="button">Overview</button>
+              <button class="profile-tab" data-tab="runtime" type="button">Runtime</button>
+              <button class="profile-tab" data-tab="prompt" type="button">Prompt</button>
+              <button class="profile-tab" data-tab="tools" type="button">Tools</button>
+              <button class="profile-tab" data-tab="memory" type="button">Memory</button>
+              <button class="profile-tab" data-tab="governance" type="button">Governance</button>
+              <button class="profile-tab" data-tab="admin" type="button">Admin</button>
+            </nav>
+
+            <div id="profilePanels" class="profile-panels"></div>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
