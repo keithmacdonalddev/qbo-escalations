@@ -8,6 +8,7 @@ import {
   recordAgentHarnessRun,
   recordAgentReview,
   updateAgentIdentity,
+  updateAgentRuntime,
 } from '../api/agentIdentitiesApi.js';
 import {
   getAgentPrompt,
@@ -450,15 +451,22 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
     try {
       setRuntimeSaveStatus('Saving runtime defaults...');
-      const updatedRuntime = writeAgentRuntimeState(selectedAgent.agentId, nextRuntime);
+      const localRuntime = writeAgentRuntimeState(selectedAgent.agentId, nextRuntime);
+      const updated = await updateAgentRuntime(
+        selectedAgent.agentId,
+        localRuntime,
+        `Updated runtime defaults for ${selectedAgent.profile?.roleTitle || selectedAgent.agentId}.`
+      );
+      const updatedRuntime = updated?.runtime || localRuntime;
       setRuntimeSelections((previous) => ({
         ...previous,
         [selectedAgent.agentId]: updatedRuntime,
       }));
+      applyUpdatedAgent(updated);
       dispatchAgentRuntimeDefaultsApplied({
         [selectedAgent.agentId]: updatedRuntime,
       });
-      setRuntimeSaveStatus('Runtime defaults saved.');
+      setRuntimeSaveStatus('Runtime defaults saved to server.');
     } catch (err) {
       setRuntimeSaveStatus(err.message || 'Failed to save runtime defaults.');
     }

@@ -21,6 +21,15 @@ export async function updateAgentIdentity(id, profile, summary) {
   return data.agent;
 }
 
+export async function updateAgentRuntime(id, runtime, summary) {
+  const data = await apiFetchJson(`${BASE}/${encodeURIComponent(id)}/runtime`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ runtime, summary }),
+  }, 'Failed to save agent runtime defaults');
+  return data.agent;
+}
+
 export async function getAgentIdentityHistory(id) {
   const data = await apiFetchJson(`${BASE}/${encodeURIComponent(id)}/history`, {}, 'Failed to load agent history');
   return data.history;

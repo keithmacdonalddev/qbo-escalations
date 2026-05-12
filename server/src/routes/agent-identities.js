@@ -9,6 +9,7 @@ const {
   recordAgentHarnessRun,
   recordAgentReview,
   updateAgentIdentity,
+  updateAgentRuntime,
 } = require('../services/agent-identity-service');
 
 const router = express.Router();
@@ -106,6 +107,18 @@ router.post('/:id/harness-runs', async (req, res) => {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
   }
   return res.status(201).json({ ok: true, agent, runs: agent.harness?.runs || [] });
+});
+
+router.patch('/:id/runtime', async (req, res) => {
+  const body = req.body || {};
+  const agent = await updateAgentRuntime(req.params.id, body.runtime || body, {
+    actor: 'user',
+    summary: typeof body.summary === 'string' ? body.summary : '',
+  });
+  if (!agent) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
+  }
+  return res.json({ ok: true, agent, runtime: agent.runtime || {} });
 });
 
 router.patch('/:id', async (req, res) => {

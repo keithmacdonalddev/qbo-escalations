@@ -122,4 +122,30 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
 
   const harnessRunsRes = await agent.get('/api/agent-identities/billing-audit-agent/harness-runs').expect(200);
   assert.equal(harnessRunsRes.body.runs.length, 1);
+
+  const runtimeRes = await agent
+    .patch('/api/agent-identities/triage-agent/runtime')
+    .send({
+      runtime: {
+        provider: 'gpt-5.5',
+        mode: 'fallback',
+        fallbackProvider: 'llm-gateway',
+        model: 'gpt-5.5',
+        fallbackModel: 'auto',
+        reasoningEffort: 'high',
+      },
+      summary: 'Persisted triage runtime defaults.',
+    })
+    .expect(200);
+
+  assert.equal(runtimeRes.body.ok, true);
+  assert.equal(runtimeRes.body.runtime.provider, 'gpt-5.5');
+  assert.equal(runtimeRes.body.runtime.mode, 'fallback');
+  assert.equal(runtimeRes.body.runtime.fallbackProvider, 'llm-gateway');
+  assert.equal(runtimeRes.body.runtime.reasoningEffort, 'high');
+  assert.equal(runtimeRes.body.agent.history.entries[0].type, 'runtime-defaults');
+
+  const triageRes = await agent.get('/api/agent-identities/triage-agent').expect(200);
+  assert.equal(triageRes.body.agent.runtime.provider, 'gpt-5.5');
+  assert.equal(triageRes.body.agent.runtime.configured, true);
 });

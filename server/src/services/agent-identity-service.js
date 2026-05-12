@@ -2,6 +2,14 @@
 
 const AgentIdentity = require('../models/AgentIdentity');
 const { getAgentPromptDefinition } = require('../lib/agent-prompt-store');
+const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
+const { normalizeModelOverride } = require('./chat-orchestrator');
+const {
+  getAlternateProvider,
+  getDefaultProvider,
+  isAllowedEffort,
+  normalizeProvider,
+} = require('./providers/registry');
 const {
   DEFAULT_PROFILES,
   mergeAgentProfile,
@@ -99,6 +107,12 @@ const AGENT_PROMPT_MAP = Object.freeze({
   'copilot-agent': 'copilot',
   'image-parser': 'image-analyst',
 });
+
+const IMAGE_RUNTIME_AGENT_IDS = new Set([
+  'escalation-template-parser',
+  'follow-up-chat-parser',
+  'image-analyst',
+]);
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -304,6 +318,56 @@ function buildCustomAgentProfile(agentId, overrides = {}) {
     avatarPrompt: sanitized.avatarPrompt || '',
     avatarSource: sanitized.avatarSource || '',
   };
+}
+
+function normalizeRuntimeMode(value) {
+  return safeText(value).toLowerCase() === 'fallback' ? 'fallback' : 'single';
+}
+
+function normalizeRuntimeReasoningEffort(provider, value) {
+  const requested = safeText(value).toLowerCase();
+  const fallback = DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort || 'high';
+  if (!requested) return fallback;
+  return isAllowedEffort(provider, requested) ? requested : fallback;
+}
+
+function normalizeAgentRuntimeState(agentId, input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const imageRuntime = IMAGE_RUNTIME_AGENT_IDS.has(agentId);
+  const mode = imageRuntime ? 'single' : normalizeRuntimeMode(source.mode);
+  const rawProvider = safeText(source.provider || source.primaryProvider);
+  const provider = imageRuntime && !rawProvider
+    ? ''
+    : normalizeProvider(rawProvider || getDefaultProvider());
+  const fallbackProvider = imageRuntime
+    ? ''
+    : (mode === 'fallback'
+        ? normalizeProvider(source.fallbackProvider || getAlternateProvider(provider))
+        : getAlternateProvider(provider));
+
+  return {
+    provider,
+    mode,
+    fallbackProvider,
+    model: normalizeModelOverride(source.model || source.primaryModel || ''),
+    fallbackModel: imageRuntime ? '' : normalizeModelOverride(source.fallbackModel || ''),
+    reasoningEffort: imageRuntime ? '' : normalizeRuntimeReasoningEffort(provider, source.reasoningEffort),
+    configured: source.configured !== false && Boolean(provider || source.configured),
+    source: safeText(source.source) || 'agent-profile',
+  };
+}
+
+function buildRuntimeSummary(runtime) {
+  if (!runtime?.configured) return 'Cleared agent runtime defaults.';
+  const parts = [
+    runtime.mode === 'fallback' ? 'Fallback runtime' : 'Runtime',
+    runtime.provider,
+    runtime.model ? `model ${runtime.model}` : '',
+    runtime.mode === 'fallback' && runtime.fallbackProvider ? `fallback ${runtime.fallbackProvider}` : '',
+    runtime.fallbackModel ? `fallback model ${runtime.fallbackModel}` : '',
+    runtime.reasoningEffort ? `effort ${runtime.reasoningEffort}` : '',
+  ].filter(Boolean);
+  return parts.join(' | ');
 }
 
 function resolveAgentProfile(agentId, doc = null) {
@@ -516,6 +580,7 @@ function buildMergedIdentity(agentId, doc = null, docsById = null) {
       runs: clone(doc?.harness?.runs || []),
       lastRunAt: doc?.harness?.lastRunAt || null,
     },
+    runtime: doc?.runtime?.configured ? clone(doc.runtime) : null,
     history: {
       entries: clone(doc?.history?.entries || []),
     },
@@ -617,6 +682,55 @@ async function updateAgentIdentity(agentId, profileUpdate, { actor = 'user', sum
     ...(doc.history?.entries || []),
   ]);
   await doc.save();
+  return getAgentIdentity(agentId);
+}
+
+async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summary = '' } = {}) {
+  if (!(await canMutateIdentity(agentId))) return null;
+  const updatedAt = new Date();
+  const runtime = normalizeAgentRuntimeState(agentId, runtimeUpdate);
+
+  await updateIdentityWithRetry(agentId, async (doc) => {
+    doc.runtime = {
+      ...runtime,
+      updatedBy: actor,
+      updatedAt,
+    };
+    doc.history.entries = pruneHistory([
+      {
+        type: 'runtime-defaults',
+        summary: safeText(summary) || buildRuntimeSummary(runtime),
+        actor,
+        metadata: {
+          provider: runtime.provider,
+          mode: runtime.mode,
+          fallbackProvider: runtime.fallbackProvider,
+          configured: runtime.configured,
+        },
+        createdAt: updatedAt,
+      },
+      ...(doc.history?.entries || []),
+    ]);
+    doc.activity = doc.activity || {};
+    doc.activity.entries = pruneActivity([
+      {
+        type: 'runtime',
+        phase: 'defaults',
+        surface: 'agent-profiles',
+        summary: safeText(summary) || buildRuntimeSummary(runtime),
+        detail: JSON.stringify(runtime),
+        status: runtime.configured ? 'configured' : 'cleared',
+        metadata: {
+          provider: runtime.provider,
+          mode: runtime.mode,
+          fallbackProvider: runtime.fallbackProvider,
+        },
+        createdAt: updatedAt,
+      },
+      ...(doc.activity?.entries || []),
+    ]);
+  });
+
   return getAgentIdentity(agentId);
 }
 
@@ -1474,4 +1588,5 @@ module.exports = {
   recordAgentReview,
   recordAgentToolUsage,
   updateAgentIdentity,
+  updateAgentRuntime,
 };
