@@ -12,6 +12,9 @@ const MAX_MEMORY_NOTES = 24;
 const MAX_TOOL_USAGE_ENTRIES = 40;
 const MAX_ACTIVITY_ENTRIES = 240;
 const MAX_RELATIONSHIP_NOTES = 24;
+const MAX_REVIEW_ENTRIES = 80;
+const MAX_HARNESS_RUNS = 50;
+const MAX_HARNESS_CASES = 40;
 
 const SHARED_AGENT_TOOLS = Object.freeze([
   { name: 'agentProfiles.list', kind: 'read', description: 'List agent profiles with summary fields and references.', params: '{}' },
@@ -115,6 +118,23 @@ function normalizeKey(text) {
   return safeText(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 100);
 }
 
+function normalizeAgentId(value) {
+  return normalizeKey(value).slice(0, 72);
+}
+
+function labelAgentId(agentId = '') {
+  const label = safeText(agentId)
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+  return label || 'Custom Agent';
+}
+
+function makeEntryId(prefix) {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function buildMemoryKey(agentId, kind, content) {
   return `${agentId}:${kind}:${normalizeKey(content)}`;
 }
@@ -157,6 +177,18 @@ function pruneActivity(entries) {
   return [...(entries || [])]
     .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
     .slice(0, MAX_ACTIVITY_ENTRIES);
+}
+
+function pruneReviewEntries(entries) {
+  return [...(entries || [])]
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, MAX_REVIEW_ENTRIES);
+}
+
+function pruneHarnessRuns(entries) {
+  return [...(entries || [])]
+    .sort((a, b) => new Date(b.completedAt || b.createdAt || 0).getTime() - new Date(a.completedAt || a.createdAt || 0).getTime())
+    .slice(0, MAX_HARNESS_RUNS);
 }
 
 function mergeRelationshipNotes(existing = [], incoming = []) {
@@ -249,15 +281,52 @@ function summarizeReciprocity(agentId, otherAgentId, docsById) {
   };
 }
 
+function buildCustomAgentProfile(agentId, overrides = {}) {
+  const sanitized = sanitizeProfileUpdate(overrides);
+  const displayName = safeText(overrides.displayName) || labelAgentId(agentId);
+  return {
+    agentId,
+    displayName,
+    roleTitle: sanitized.roleTitle || displayName,
+    headline: sanitized.headline || 'Custom operational agent registered for review before workflow assignment.',
+    tone: sanitized.tone || 'Clear, practical, and review-aware.',
+    quirks: Array.isArray(sanitized.quirks) ? sanitized.quirks : [],
+    conversationalStyle: sanitized.conversationalStyle || 'Concise, operational, and explicit about uncertainty.',
+    boundaries: sanitized.boundaries || 'Requires human review before irreversible workflow or workspace actions.',
+    initiativeLevel: sanitized.initiativeLevel || 'medium',
+    socialStyle: sanitized.socialStyle || 'Participates when the workflow explicitly calls on this role.',
+    communityStyle: sanitized.communityStyle || 'Coordinates with adjacent agents through reviewable handoffs.',
+    selfImprovementStyle: sanitized.selfImprovementStyle || 'Improves through review approvals, harness runs, and operator feedback.',
+    soul: sanitized.soul || 'A custom agent profile waiting for production hardening and real workflow evidence.',
+    routingBias: sanitized.routingBias || 'custom-agent',
+    avatarUrl: sanitized.avatarUrl || '',
+    avatarEmoji: sanitized.avatarEmoji || '',
+    avatarPrompt: sanitized.avatarPrompt || '',
+    avatarSource: sanitized.avatarSource || '',
+  };
+}
+
+function resolveAgentProfile(agentId, doc = null) {
+  const overrides = clone(doc?.profile || {});
+  if (DEFAULT_PROFILES[agentId]) {
+    return mergeAgentProfile(agentId, overrides);
+  }
+  if (doc || Object.keys(overrides || {}).length > 0) {
+    return buildCustomAgentProfile(agentId, overrides);
+  }
+  return null;
+}
+
 function buildRelationshipMap(agentId, relationshipNotes = [], historyEntries = [], docsById = null) {
   const relevantNotes = Array.isArray(relationshipNotes) ? relationshipNotes : [];
   const byOtherAgent = new Map();
 
   for (const note of relevantNotes) {
-    if (!note?.otherAgentId || !DEFAULT_PROFILES[note.otherAgentId]) continue;
+    const otherProfile = resolveAgentProfile(note?.otherAgentId, docsById?.get(note?.otherAgentId));
+    if (!note?.otherAgentId || !otherProfile) continue;
     const bucket = byOtherAgent.get(note.otherAgentId) || {
       otherAgentId: note.otherAgentId,
-      otherDisplayName: DEFAULT_PROFILES[note.otherAgentId]?.displayName || note.otherAgentId,
+      otherDisplayName: otherProfile.displayName || note.otherAgentId,
       confidence: 0,
       strongestStrength: 'emerging',
       totalSignals: 0,
@@ -361,6 +430,11 @@ async function getIdentityDoc(agentId) {
   return AgentIdentity.findOne({ agentId });
 }
 
+async function canMutateIdentity(agentId) {
+  if (DEFAULT_PROFILES[agentId]) return true;
+  return Boolean(await getIdentityDoc(agentId));
+}
+
 async function ensureIdentity(agentId) {
   let doc = await getIdentityDoc(agentId);
   if (doc) return doc;
@@ -395,13 +469,24 @@ async function updateIdentityWithRetry(agentId, mutate, maxAttempts = 3) {
 }
 
 function buildMergedIdentity(agentId, doc = null, docsById = null) {
-  const overrides = clone(doc?.profile || {});
-  const profile = mergeAgentProfile(agentId, overrides);
+  const profile = resolveAgentProfile(agentId, doc);
   if (!profile) return null;
   return {
     agentId,
-    promptId: Object.entries(AGENT_PROMPT_MAP).find(([, mappedAgentId]) => mappedAgentId === agentId)?.[0] || null,
+    promptId:
+      safeText(doc?.custom?.promptId)
+      || Object.entries(AGENT_PROMPT_MAP).find(([, mappedAgentId]) => mappedAgentId === agentId)?.[0]
+      || null,
     profile,
+    custom: {
+      isCustom: Boolean(doc?.custom?.isCustom || !DEFAULT_PROFILES[agentId]),
+      source: safeText(doc?.custom?.source),
+      sourceLabel: safeText(doc?.custom?.sourceLabel),
+      registryStatus: safeText(doc?.custom?.registryStatus) || (DEFAULT_PROFILES[agentId] ? 'built-in' : 'draft'),
+      createdBy: safeText(doc?.custom?.createdBy),
+      importedAt: doc?.custom?.importedAt || null,
+      metadata: clone(doc?.custom?.metadata || {}),
+    },
     memory: {
       notes: clone(doc?.memory?.notes || []),
       lastLearnedAt: doc?.memory?.lastLearnedAt || null,
@@ -423,6 +508,14 @@ function buildMergedIdentity(agentId, doc = null, docsById = null) {
         docsById
       ),
     },
+    reviews: {
+      entries: clone(doc?.reviews?.entries || []),
+      lastApprovedAt: doc?.reviews?.lastApprovedAt || null,
+    },
+    harness: {
+      runs: clone(doc?.harness?.runs || []),
+      lastRunAt: doc?.harness?.lastRunAt || null,
+    },
     history: {
       entries: clone(doc?.history?.entries || []),
     },
@@ -432,21 +525,26 @@ function buildMergedIdentity(agentId, doc = null, docsById = null) {
 }
 
 async function listAgentIdentities() {
-  const docs = await AgentIdentity.find({
-    agentId: { $in: Object.keys(DEFAULT_PROFILES) },
-  }).lean();
+  const docs = await AgentIdentity.find({}).lean();
   const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
-  return Object.keys(DEFAULT_PROFILES).map((agentId) => buildMergedIdentity(agentId, byId.get(agentId), byId));
+  const defaultIds = Object.keys(DEFAULT_PROFILES);
+  const customIds = docs
+    .map((doc) => doc.agentId)
+    .filter((agentId) => agentId && !DEFAULT_PROFILES[agentId])
+    .sort((a, b) => a.localeCompare(b));
+  return [...defaultIds, ...customIds]
+    .map((agentId) => buildMergedIdentity(agentId, byId.get(agentId), byId))
+    .filter(Boolean);
 }
 
 async function getAgentIdentity(agentId) {
-  if (!DEFAULT_PROFILES[agentId]) return null;
-  const docs = await AgentIdentity.find({
-    agentId: { $in: Object.keys(DEFAULT_PROFILES) },
-  }).lean();
+  const normalizedAgentId = safeText(agentId);
+  if (!normalizedAgentId) return null;
+  const docs = await AgentIdentity.find({}).lean();
   const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
-  const doc = byId.get(agentId) || null;
-  return buildMergedIdentity(agentId, doc, byId);
+  const doc = byId.get(normalizedAgentId) || null;
+  if (!DEFAULT_PROFILES[normalizedAgentId] && !doc) return null;
+  return buildMergedIdentity(normalizedAgentId, doc, byId);
 }
 
 function sanitizeProfileUpdate(input = {}) {
@@ -488,8 +586,9 @@ function buildProfileSummary(profile) {
 }
 
 async function updateAgentIdentity(agentId, profileUpdate, { actor = 'user', summary = '' } = {}) {
-  if (!DEFAULT_PROFILES[agentId]) return null;
-  const doc = await ensureIdentity(agentId);
+  const existingDoc = await getIdentityDoc(agentId);
+  if (!DEFAULT_PROFILES[agentId] && !existingDoc) return null;
+  const doc = existingDoc || await ensureIdentity(agentId);
   const previousProfile = doc.profile?.toObject ? doc.profile.toObject() : { ...(doc.profile || {}) };
   const sanitizedUpdate = sanitizeProfileUpdate(profileUpdate);
   doc.profile = {
@@ -857,7 +956,7 @@ function buildCommunityProfilesContext(currentAgentId, identities = [], activeAg
 }
 
 async function appendAgentHistory(agentId, entry) {
-  if (!DEFAULT_PROFILES[agentId] || !entry?.summary) return null;
+  if (!entry?.summary || !(await canMutateIdentity(agentId))) return null;
   await updateIdentityWithRetry(agentId, async (doc) => {
     doc.history.entries = pruneHistory([
       {
@@ -950,7 +1049,7 @@ function safeDetail(value) {
 }
 
 async function recordAgentActivity(agentId, entry, options = {}) {
-  if (!DEFAULT_PROFILES[agentId]) return null;
+  if (!(await canMutateIdentity(agentId))) return null;
   if (!entry?.summary) return null;
   const createdAt = entry.createdAt ? new Date(entry.createdAt) : new Date();
   await updateIdentityWithRetry(agentId, async (doc) => {
@@ -1004,7 +1103,7 @@ function flattenToolResults(actionGroups = []) {
 }
 
 async function recordAgentToolUsage(agentId, actionGroups, { surface = 'rooms', roomId = null } = {}) {
-  if (!DEFAULT_PROFILES[agentId]) return null;
+  if (!(await canMutateIdentity(agentId))) return null;
   const usageEntries = flattenToolResults(actionGroups).map((entry) => ({
     ...entry,
     surface,
@@ -1051,6 +1150,306 @@ async function recordAgentToolUsage(agentId, actionGroups, { surface = 'rooms', 
   return getAgentIdentity(agentId);
 }
 
+function serviceError(code, status, message) {
+  const err = new Error(message);
+  err.code = code;
+  err.status = status;
+  return err;
+}
+
+function normalizeReviewStatus(value) {
+  const status = safeText(value).toLowerCase();
+  if (['approved', 'approve', 'pass', 'passed'].includes(status)) return 'approved';
+  if (['rejected', 'reject', 'failed', 'fail'].includes(status)) return 'rejected';
+  if (['needs-follow-up', 'needs_follow_up', 'follow-up', 'followup', 'warning', 'warn'].includes(status)) {
+    return 'needs-follow-up';
+  }
+  return 'approved';
+}
+
+function normalizeHarnessStatus(value) {
+  const status = safeText(value).toLowerCase();
+  if (['passed', 'pass', 'approved', 'ok', 'success'].includes(status)) return 'pass';
+  if (['failed', 'fail', 'rejected', 'error'].includes(status)) return 'fail';
+  if (['warning', 'warn', 'needs-follow-up', 'needs_follow_up'].includes(status)) return 'warn';
+  return '';
+}
+
+function deriveHarnessStatus(cases = []) {
+  if (cases.some((item) => item.status === 'fail')) return 'fail';
+  if (cases.some((item) => item.status === 'warn')) return 'warn';
+  return 'pass';
+}
+
+function sanitizeMetadata(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function normalizeHarnessCase(input, index) {
+  const name = safeText(input?.name || input?.title || input?.label) || `Harness case ${index + 1}`;
+  return {
+    caseId: safeText(input?.caseId || input?.id) || normalizeKey(name) || `case-${index + 1}`,
+    name: compact(name, 120),
+    status: normalizeHarnessStatus(input?.status) || 'pass',
+    expected: compact(input?.expected, 240),
+    actual: compact(input?.actual, 240),
+    detail: compact(input?.detail || input?.summary || input?.message, 300),
+  };
+}
+
+function buildReviewSummary(surface, status, summary) {
+  if (safeText(summary)) return compact(summary, 220);
+  if (status === 'approved') return `Approved ${surface} for current agent profile.`;
+  if (status === 'rejected') return `Rejected ${surface}; follow-up is required before use.`;
+  return `Marked ${surface} as needing follow-up.`;
+}
+
+async function recordAgentReview(agentId, review = {}, { actor = 'user' } = {}) {
+  if (!(await canMutateIdentity(agentId))) return null;
+  const surface = safeText(review.surface) || 'overall';
+  const status = normalizeReviewStatus(review.status);
+  const createdAt = review.createdAt ? new Date(review.createdAt) : new Date();
+  const entry = {
+    reviewId: safeText(review.reviewId) || makeEntryId('review'),
+    surface,
+    status,
+    summary: buildReviewSummary(surface, status, review.summary),
+    actor: safeText(review.actor) || actor,
+    versionRef: safeText(review.versionRef),
+    metadata: sanitizeMetadata(review.metadata),
+    createdAt,
+  };
+
+  await updateIdentityWithRetry(agentId, async (doc) => {
+    doc.reviews = doc.reviews || {};
+    doc.reviews.entries = pruneReviewEntries([
+      entry,
+      ...(doc.reviews?.entries || []),
+    ]);
+    if (status === 'approved') {
+      doc.reviews.lastApprovedAt = createdAt;
+    }
+    doc.history.entries = pruneHistory([
+      {
+        type: `review-${status}`,
+        summary: entry.summary,
+        actor: entry.actor,
+        metadata: {
+          surface,
+          reviewId: entry.reviewId,
+          versionRef: entry.versionRef,
+        },
+        createdAt,
+      },
+      ...(doc.history?.entries || []),
+    ]);
+    doc.activity = doc.activity || {};
+    doc.activity.entries = pruneActivity([
+      {
+        type: 'review',
+        phase: surface,
+        surface: 'agent-profiles',
+        summary: entry.summary,
+        detail: `Review status: ${status}`,
+        status,
+        metadata: { reviewId: entry.reviewId, versionRef: entry.versionRef },
+        createdAt,
+      },
+      ...(doc.activity?.entries || []),
+    ]);
+  });
+
+  return getAgentIdentity(agentId);
+}
+
+async function recordAgentHarnessRun(agentId, run = {}, { actor = 'user' } = {}) {
+  if (!(await canMutateIdentity(agentId))) return null;
+  const cases = Array.isArray(run.cases)
+    ? run.cases.slice(0, MAX_HARNESS_CASES).map(normalizeHarnessCase)
+    : [];
+  const completedAt = run.completedAt ? new Date(run.completedAt) : new Date();
+  const status = normalizeHarnessStatus(run.status) || deriveHarnessStatus(cases);
+  const entry = {
+    runId: safeText(run.runId) || makeEntryId('harness'),
+    status,
+    summary: compact(run.summary, 220) || `Recorded ${status} harness run for ${agentId}.`,
+    actor: safeText(run.actor) || actor,
+    source: safeText(run.source) || 'manual',
+    cases,
+    metadata: sanitizeMetadata(run.metadata),
+    startedAt: run.startedAt ? new Date(run.startedAt) : null,
+    completedAt,
+    createdAt: new Date(),
+  };
+
+  await updateIdentityWithRetry(agentId, async (doc) => {
+    doc.harness = doc.harness || {};
+    doc.harness.runs = pruneHarnessRuns([
+      entry,
+      ...(doc.harness?.runs || []),
+    ]);
+    doc.harness.lastRunAt = completedAt;
+    doc.history.entries = pruneHistory([
+      {
+        type: 'harness-run',
+        summary: entry.summary,
+        actor: entry.actor,
+        metadata: {
+          runId: entry.runId,
+          status,
+          source: entry.source,
+          caseCount: cases.length,
+        },
+        createdAt: completedAt,
+      },
+      ...(doc.history?.entries || []),
+    ]);
+    doc.activity = doc.activity || {};
+    doc.activity.entries = pruneActivity([
+      {
+        type: 'harness',
+        phase: entry.source,
+        surface: 'agent-profiles',
+        summary: entry.summary,
+        detail: cases.map((item) => `${item.name}: ${item.status}`).join('\n'),
+        status,
+        metadata: { runId: entry.runId, caseCount: cases.length },
+        createdAt: completedAt,
+      },
+      ...(doc.activity?.entries || []),
+    ]);
+  });
+
+  return getAgentIdentity(agentId);
+}
+
+function sanitizeRegistryProfile(input = {}, agentId) {
+  const profile = sanitizeProfileUpdate(input);
+  profile.displayName = safeText(profile.displayName) || labelAgentId(agentId);
+  profile.roleTitle = safeText(profile.roleTitle) || profile.displayName;
+  profile.headline = safeText(profile.headline) || 'Custom operational agent registered for workflow review.';
+  return profile;
+}
+
+async function createAgentIdentity(payload = {}, { actor = 'user' } = {}) {
+  const profileInput = {
+    ...(payload.profile || {}),
+    displayName: payload.displayName ?? payload.profile?.displayName,
+    roleTitle: payload.roleTitle ?? payload.profile?.roleTitle,
+    headline: payload.headline ?? payload.profile?.headline,
+  };
+  const agentId = normalizeAgentId(payload.agentId || payload.id || profileInput.displayName);
+  if (!agentId) {
+    throw serviceError('INVALID_AGENT_ID', 400, 'A stable agentId is required.');
+  }
+  if (DEFAULT_PROFILES[agentId] || await getIdentityDoc(agentId)) {
+    throw serviceError('DUPLICATE_AGENT_ID', 409, `Agent identity "${agentId}" already exists.`);
+  }
+
+  const promptId = safeText(payload.promptId);
+  const doc = new AgentIdentity({
+    agentId,
+    profile: sanitizeRegistryProfile(profileInput, agentId),
+    custom: {
+      isCustom: true,
+      source: safeText(payload.source) || 'manual',
+      sourceLabel: safeText(payload.sourceLabel) || 'Created in Agent Mission Control',
+      registryStatus: safeText(payload.registryStatus) || 'draft',
+      createdBy: actor,
+      importedAt: null,
+      promptId: promptId && getAgentPromptDefinition(promptId) ? promptId : '',
+      metadata: sanitizeMetadata(payload.metadata),
+    },
+    history: {
+      entries: [{
+        type: 'registry-create',
+        summary: compact(payload.summary, 180) || 'Created custom agent registry entry.',
+        actor,
+        metadata: { source: safeText(payload.source) || 'manual' },
+        createdAt: new Date(),
+      }],
+    },
+  });
+  await doc.save();
+  return getAgentIdentity(agentId);
+}
+
+function normalizeRegistryImportItems(payload = {}) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.agents)) return payload.agents;
+  if (payload.agent && typeof payload.agent === 'object') return [payload.agent];
+  if (payload.agentId || payload.id || payload.profile) return [payload];
+  return [];
+}
+
+async function importAgentIdentities(payload = {}, { actor = 'user' } = {}) {
+  const items = normalizeRegistryImportItems(payload);
+  if (items.length === 0) {
+    throw serviceError('INVALID_IMPORT', 400, 'Import payload must include at least one agent.');
+  }
+
+  const imported = [];
+  const failed = [];
+  for (const item of items) {
+    const profileInput = item.profile || item;
+    const agentId = normalizeAgentId(item.agentId || item.id || profileInput.displayName || profileInput.roleTitle);
+    if (!agentId) {
+      failed.push({ error: 'Missing stable agentId', item });
+      continue;
+    }
+    try {
+      const doc = await updateIdentityWithRetry(agentId, async (identityDoc) => {
+        const previousProfile = identityDoc.profile?.toObject
+          ? identityDoc.profile.toObject()
+          : { ...(identityDoc.profile || {}) };
+        identityDoc.profile = {
+          ...previousProfile,
+          ...sanitizeRegistryProfile(profileInput, agentId),
+        };
+        if (!DEFAULT_PROFILES[agentId]) {
+          identityDoc.custom = {
+            ...(identityDoc.custom?.toObject ? identityDoc.custom.toObject() : identityDoc.custom || {}),
+            isCustom: true,
+            source: safeText(item.source || payload.source) || 'import',
+            sourceLabel: safeText(item.sourceLabel || payload.sourceLabel) || 'Imported registry payload',
+            registryStatus: safeText(item.registryStatus || payload.registryStatus) || 'imported',
+            createdBy: safeText(identityDoc.custom?.createdBy) || actor,
+            importedAt: new Date(),
+            promptId: safeText(item.promptId) && getAgentPromptDefinition(item.promptId) ? safeText(item.promptId) : safeText(identityDoc.custom?.promptId),
+            metadata: {
+              ...sanitizeMetadata(identityDoc.custom?.metadata),
+              ...sanitizeMetadata(payload.metadata),
+              ...sanitizeMetadata(item.metadata),
+            },
+          };
+        }
+        identityDoc.history.entries = pruneHistory([
+          {
+            type: 'registry-import',
+            summary: compact(item.summary || payload.summary, 180) || 'Imported agent registry entry.',
+            actor,
+            metadata: {
+              source: safeText(item.source || payload.source) || 'import',
+              custom: !DEFAULT_PROFILES[agentId],
+            },
+            createdAt: new Date(),
+          },
+          ...(identityDoc.history?.entries || []),
+        ]);
+      });
+      imported.push(await getAgentIdentity(doc.agentId));
+    } catch (err) {
+      failed.push({ agentId, error: err.message || 'Import failed' });
+    }
+  }
+
+  if (imported.length === 0) {
+    throw serviceError('INVALID_IMPORT', 400, failed[0]?.error || 'No agents were imported.');
+  }
+
+  return { imported, failed };
+}
+
 function getAgentIdForPrompt(promptId) {
   return AGENT_PROMPT_MAP[promptId] || null;
 }
@@ -1062,13 +1461,17 @@ module.exports = {
   buildCommunityProfilesContext,
   buildIdentityMemoryContext,
   buildRelationshipCoordinationContext,
+  createAgentIdentity,
   getAgentIdForPrompt,
   getAgentIdentity,
   getIdentityDoc,
+  importAgentIdentities,
   learnFromInteraction,
   listAgentIdentities,
   recordAgentNudge,
   recordAgentActivity,
+  recordAgentHarnessRun,
+  recordAgentReview,
   recordAgentToolUsage,
   updateAgentIdentity,
 };

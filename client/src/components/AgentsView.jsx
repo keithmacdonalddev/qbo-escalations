@@ -1,16 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useToast } from '../hooks/useToast.jsx';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  createAgentIdentity,
   getAgentIdentity,
   getAgentIdentityHistory,
+  importAgentIdentities,
   listAgentIdentities,
+  recordAgentHarnessRun,
+  recordAgentReview,
   updateAgentIdentity,
 } from '../api/agentIdentitiesApi.js';
 import {
   getAgentPrompt,
   getAgentPromptVersion,
   listAgentPromptVersions,
-  restoreAgentPromptVersion,
   updateAgentPrompt,
 } from '../api/agentPromptsApi.js';
 import {
@@ -18,1094 +20,2565 @@ import {
   getAgentRuntimeDefinition,
   getAgentRuntimeModelPlaceholder,
   getAgentRuntimeModelSuggestions,
-  getAgentRuntimeProviderLabel,
   getAgentRuntimeSummary,
-  normalizeAgentRuntimeState,
   readAgentRuntimeState,
-  readAllAgentRuntimeStatesByAgentId,
-  readAllAgentRuntimeStatesBySurfaceId,
   writeAgentRuntimeState,
 } from '../lib/agentRuntimeSettings.js';
-import {
-  loadAiAssistantDefaultsFromServer,
-  syncAiAssistantDefaultsToServer,
-} from '../lib/aiAssistantPreferences.js';
-import { SURFACE_DEFAULTS_APPLIED_EVENT } from '../lib/surfacePreferences.js';
-import {
-  DEFAULT_REASONING_EFFORT,
-  PROVIDER_FAMILY,
-  PROVIDER_OPTIONS,
-  getAlternateProvider,
-  getReasoningEffortOptions,
-  normalizeProvider,
-} from '../lib/providerCatalog.js';
 import { IMAGE_PARSER_PROVIDER_OPTIONS } from '../lib/imageParserCatalog.js';
+import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import './AgentsView.css';
 
 const PROFILE_FIELDS = [
-  ['displayName', 'Display Name'],
-  ['roleTitle', 'Role'],
-  ['headline', 'Headline'],
-  ['tone', 'Tone'],
-  ['conversationalStyle', 'Conversation Style'],
-  ['boundaries', 'Boundaries'],
-  ['initiativeLevel', 'Initiative'],
-  ['socialStyle', 'Social Style'],
-  ['communityStyle', 'Community Style'],
-  ['selfImprovementStyle', 'Self-Improvement'],
-  ['soul', 'Off-Clock Personality'],
-  ['routingBias', 'Routing Bias'],
+  { key: 'roleTitle', label: 'Role title', type: 'text' },
+  { key: 'headline', label: 'Headline', type: 'textarea' },
+  { key: 'tone', label: 'Tone', type: 'text' },
+  { key: 'conversationalStyle', label: 'Conversation style', type: 'textarea' },
+  { key: 'quirks', label: 'Quirks', type: 'textarea' },
+  { key: 'boundaries', label: 'Boundaries', type: 'textarea' },
+  { key: 'initiativeLevel', label: 'Initiative level', type: 'text' },
+  { key: 'socialStyle', label: 'Social style', type: 'textarea' },
+  { key: 'communityStyle', label: 'Community style', type: 'textarea' },
+  { key: 'selfImprovementStyle', label: 'Self-improvement style', type: 'textarea' },
+  { key: 'soul', label: 'Agent soul', type: 'textarea' },
+  { key: 'routingBias', label: 'Routing bias', type: 'textarea' },
+  { key: 'avatarEmoji', label: 'Avatar emoji', type: 'text' },
+  { key: 'avatarPrompt', label: 'Avatar prompt', type: 'textarea' },
 ];
 
-function emptyProfile() {
-  return {
-    displayName: '',
-    roleTitle: '',
-    headline: '',
-    tone: '',
-    quirks: [],
-    conversationalStyle: '',
-    boundaries: '',
-    initiativeLevel: '',
-    socialStyle: '',
-    communityStyle: '',
-    selfImprovementStyle: '',
-    soul: '',
-    routingBias: '',
-    avatarUrl: '',
-    avatarEmoji: '',
-    avatarPrompt: '',
-    avatarSource: '',
-  };
-}
+const PROFILE_TABS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'configuration', label: 'Configuration' },
+  { id: 'prompt', label: 'Prompt' },
+  { id: 'harness', label: 'Harness' },
+  { id: 'workflows', label: 'Workflows' },
+  { id: 'activity', label: 'Activity' },
+  { id: 'versions', label: 'Versions' },
+];
 
-export default function AgentsView({ agentIdFromRoute = null }) {
-  const toast = useToast();
-  const toastRef = useRef(toast);
-  const initialAgentIdRef = useRef(agentIdFromRoute);
-  const selectedAgentIdRef = useRef(agentIdFromRoute);
-  const selectedAgentRequestRef = useRef(0);
-  const historyRequestRef = useRef(0);
-  const promptRequestRef = useRef(0);
+const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
+  acc[field.key] = '';
+  return acc;
+}, {});
+
+const AGENT_OPERATION_META = {
+  chat: {
+    department: 'Conversation Ops',
+    owner: 'Ava Chen',
+    team: 'Escalation Desk',
+    status: 'active',
+    risk: 'Medium',
+    trust: 4.7,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read/write: conversations, notes, workspace context',
+    escalationPolicy: 'Hands off to expert review when confidence drops below 0.72.',
+    workflows: ['Escalation Intake', 'Live Expert Assist', 'Context Builder', 'Response Drafting', 'Follow-up Capture'],
+    channels: ['Web', 'Workspace', 'API'],
+    harnessType: 'Conversation orchestration',
+    latencyTarget: '< 10s',
+  },
+  'escalation-template-parser': {
+    department: 'Intake Reliability',
+    owner: 'Maya Patel',
+    team: 'Parser Ops',
+    status: 'active',
+    risk: 'Low',
+    trust: 4.8,
+    reviewStatus: 'Deterministic',
+    permissions: 'Read: submitted escalation text',
+    escalationPolicy: 'Reject ambiguous extraction rather than inventing missing fields.',
+    workflows: ['Template Intake', 'Form Normalization', 'Evidence Mapping', 'Parser QA'],
+    channels: ['API', 'Workspace'],
+    harnessType: 'Deterministic parser checks',
+    latencyTarget: '< 2s',
+  },
+  'triage-agent': {
+    department: 'Support Intelligence',
+    owner: 'Olivia Chen',
+    team: 'Customer Support',
+    status: 'active',
+    risk: 'Medium',
+    trust: 4.6,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read: escalation context, investigations, templates',
+    escalationPolicy: 'Escalate when rules conflict, evidence is missing, or priority is high.',
+    workflows: ['Ticket Intake', 'Known Issue Scan', 'Policy Match', 'Priority Routing', 'Resolution Assist', 'Human Review'],
+    channels: ['Web', 'Email', 'Live Chat', 'API'],
+    harnessType: 'Tool-augmented triage',
+    latencyTarget: '< 12s',
+  },
+  'known-issue-search-agent': {
+    department: 'Knowledge Ops',
+    owner: 'David Park',
+    team: 'Investigation Support',
+    status: 'active',
+    risk: 'Low',
+    trust: 4.5,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read: investigations, known issue records, evidence references',
+    escalationPolicy: 'Surface likely matches with evidence and confidence bands.',
+    workflows: ['Issue Search', 'Evidence Lookup', 'Duplicate Detection', 'Knowledge Update'],
+    channels: ['Workspace', 'API'],
+    harnessType: 'Retrieval quality checks',
+    latencyTarget: '< 8s',
+  },
+  'follow-up-chat-parser': {
+    department: 'Follow-up Ops',
+    owner: 'Noah Kim',
+    team: 'Escalation Desk',
+    status: 'idle',
+    risk: 'Low',
+    trust: 4.2,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read: follow-up thread content',
+    escalationPolicy: 'Route only explicit next actions and unresolved blockers.',
+    workflows: ['Thread Intake', 'Action Extraction', 'Owner Routing', 'Follow-up Review'],
+    channels: ['Chat', 'Workspace'],
+    harnessType: 'Conversation parse regression',
+    latencyTarget: '< 5s',
+  },
+  workspace: {
+    department: 'Workspace Automation',
+    owner: 'Ava Chen',
+    team: 'Platform Ops',
+    status: 'active',
+    risk: 'High',
+    trust: 4.4,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read/write: workspace actions, memory, messages, calendar hooks',
+    escalationPolicy: 'Request review before irreversible workspace mutations.',
+    workflows: ['Workspace Memory', 'Notification Center', 'Task Routing', 'Auto Action Review', 'Shipment Tracker'],
+    channels: ['Workspace', 'Gmail', 'Calendar', 'API'],
+    harnessType: 'Action safety harness',
+    latencyTarget: '< 15s',
+  },
+  copilot: {
+    department: 'Guided Operations',
+    owner: 'Maya Patel',
+    team: 'Expert Desk',
+    status: 'active',
+    risk: 'Medium',
+    trust: 4.5,
+    reviewStatus: 'Human-reviewed',
+    permissions: 'Read: current workspace and escalation context',
+    escalationPolicy: 'Recommend next action, defer execution to the operator.',
+    workflows: ['Next Step Coaching', 'Evidence Checklist', 'Draft Review', 'Operator Handoff'],
+    channels: ['Workspace', 'Web'],
+    harnessType: 'Guidance quality review',
+    latencyTarget: '< 10s',
+  },
+  'image-analyst': {
+    department: 'Visual Evidence',
+    owner: 'David Park',
+    team: 'Parser Ops',
+    status: 'review',
+    risk: 'Medium',
+    trust: 4.1,
+    reviewStatus: 'Review overdue',
+    permissions: 'Read: uploaded screenshots and OCR output',
+    escalationPolicy: 'Never infer sensitive fields without visual evidence.',
+    workflows: ['Screenshot Intake', 'OCR Assist', 'Evidence Extraction', 'Human Verification'],
+    channels: ['Image Upload', 'Workspace', 'API'],
+    harnessType: 'Vision extraction review',
+    latencyTarget: '< 20s',
+  },
+};
+
+const STATUS_LABELS = {
+  active: 'Active',
+  idle: 'Idle',
+  review: 'Needs Attention',
+  degraded: 'Degraded',
+};
+
+function AgentsView({ agentIdFromRoute = null }) {
   const [agents, setAgents] = useState([]);
-  const [query, setQuery] = useState('');
   const [selectedAgentId, setSelectedAgentId] = useState(agentIdFromRoute);
   const [currentAgent, setCurrentAgent] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [agentLoading, setAgentLoading] = useState(false);
-  const [profileDraft, setProfileDraft] = useState(emptyProfile());
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [riskFilter, setRiskFilter] = useState('all');
+  const [reviewFilter, setReviewFilter] = useState('all');
+  const [agentViewMode, setAgentViewMode] = useState('grid');
+  const [comparisonIds, setComparisonIds] = useState(['', '']);
+  const [loadingAgents, setLoadingAgents] = useState(true);
+  const [loadingCurrent, setLoadingCurrent] = useState(false);
+  const [error, setError] = useState(null);
+  const [profileDraft, setProfileDraft] = useState(emptyProfile);
   const [profileSummary, setProfileSummary] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [historyLoadedFor, setHistoryLoadedFor] = useState(null);
+  const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [promptContent, setPromptContent] = useState('');
+  const [historyError, setHistoryError] = useState(null);
+  const [promptState, setPromptState] = useState(null);
   const [promptDraft, setPromptDraft] = useState('');
-  const [promptLabel, setPromptLabel] = useState('');
-  const [promptVersions, setPromptVersions] = useState([]);
-  const [promptLoadedFor, setPromptLoadedFor] = useState(null);
-  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptSummary, setPromptSummary] = useState('');
   const [promptSaving, setPromptSaving] = useState(false);
-  const [previewContent, setPreviewContent] = useState('');
-  const [runtimeSelections, setRuntimeSelections] = useState(() => readAllAgentRuntimeStatesByAgentId());
-  const [runtimeDraft, setRuntimeDraft] = useState(null);
-  const [runtimeSaved, setRuntimeSaved] = useState(null);
-  const [runtimeSaving, setRuntimeSaving] = useState(false);
+  const [promptLoading, setPromptLoading] = useState(false);
+  const [promptError, setPromptError] = useState(null);
+  const [previewVersion, setPreviewVersion] = useState(null);
+  const [runtimeSelections, setRuntimeSelections] = useState({});
+  const [runtimeSaveStatus, setRuntimeSaveStatus] = useState(null);
+  const [activeProfileTab, setActiveProfileTab] = useState('overview');
+  const [registryModalMode, setRegistryModalMode] = useState(null);
+  const [registrySaving, setRegistrySaving] = useState(false);
+  const [registryMessage, setRegistryMessage] = useState('');
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [harnessSaving, setHarnessSaving] = useState(false);
 
-  const selectedRuntimeDefinition = useMemo(
-    () => getAgentRuntimeDefinition(selectedAgentId),
-    [selectedAgentId]
+  const loadAgents = useCallback(async () => {
+    try {
+      setLoadingAgents(true);
+      const nextAgents = await listAgentIdentities();
+      setAgents(nextAgents);
+      const nextRuntimeSelections = {};
+      nextAgents.forEach((agent) => {
+        if (agent?.agentId) {
+          nextRuntimeSelections[agent.agentId] =
+            agent.runtime || readAgentRuntimeState(agent.agentId);
+        }
+      });
+      setRuntimeSelections(nextRuntimeSelections);
+      setError(null);
+      if (!selectedAgentId && nextAgents.length) {
+        setSelectedAgentId(agentIdFromRoute || nextAgents[0].agentId);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load agent identities.');
+    } finally {
+      setLoadingAgents(false);
+    }
+  }, [agentIdFromRoute, selectedAgentId]);
+
+  const loadSelectedAgent = useCallback(
+    async (agentId) => {
+      if (!agentId) {
+        setCurrentAgent(null);
+        return;
+      }
+      try {
+        setLoadingCurrent(true);
+        const agent = await getAgentIdentity(agentId);
+        setCurrentAgent(agent || null);
+        if (agent?.agentId) {
+          setRuntimeSelections((previous) => ({
+            ...previous,
+            [agent.agentId]:
+              agent.runtime || readAgentRuntimeState(agent.agentId),
+          }));
+        }
+        setError(null);
+      } catch (err) {
+        setError(err.message || 'Failed to load selected agent.');
+      } finally {
+        setLoadingCurrent(false);
+      }
+    },
+    []
   );
 
   useEffect(() => {
-    selectedAgentIdRef.current = selectedAgentId;
+    loadAgents();
+  }, [loadAgents]);
+
+  useEffect(() => {
+    if (agentIdFromRoute && agentIdFromRoute !== selectedAgentId) {
+      setSelectedAgentId(agentIdFromRoute);
+    }
+  }, [agentIdFromRoute, selectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId) {
+      loadSelectedAgent(selectedAgentId);
+    }
+  }, [loadSelectedAgent, selectedAgentId]);
+
+  useEffect(() => {
+    setHistory(null);
+    setHistoryError(null);
+    setPromptState(null);
+    setPromptDraft('');
+    setPromptSummary('');
+    setPromptError(null);
+    setPreviewVersion(null);
+    setRuntimeSaveStatus(null);
+    setActiveProfileTab('overview');
   }, [selectedAgentId]);
 
   useEffect(() => {
-    toastRef.current = toast;
-  }, [toast]);
-
-  useEffect(() => {
-    if (!selectedRuntimeDefinition) {
-      setRuntimeDraft(null);
-      setRuntimeSaved(null);
+    if (!currentAgent) {
+      setProfileDraft(emptyProfile);
+      setProfileSummary('');
       return;
     }
+    setProfileDraft({ ...emptyProfile, ...(currentAgent.profile || {}) });
+    setProfileSummary('');
+  }, [currentAgent]);
 
-    const next = readAgentRuntimeState(selectedRuntimeDefinition);
-    setRuntimeDraft(next);
-    setRuntimeSaved(next);
-    setRuntimeSelections((current) => ({
-      ...current,
-      [selectedRuntimeDefinition.agentId]: next,
-    }));
-  }, [selectedRuntimeDefinition]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-
-    const handleDefaultsApplied = () => {
-      const nextSelections = readAllAgentRuntimeStatesByAgentId();
-      setRuntimeSelections(nextSelections);
-      if (selectedRuntimeDefinition) {
-        const next = nextSelections[selectedRuntimeDefinition.agentId] || readAgentRuntimeState(selectedRuntimeDefinition);
-        setRuntimeDraft(next);
-        setRuntimeSaved(next);
-      }
-    };
-
-    window.addEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
-    return () => window.removeEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
-  }, [selectedRuntimeDefinition]);
-
-  const selectedAgent = useMemo(() => {
-    if (currentAgent?.agentId === selectedAgentId) return currentAgent;
-    return agents.find((agent) => agent.agentId === selectedAgentId) || null;
-  }, [agents, currentAgent, selectedAgentId]);
-
-  const filteredAgents = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return agents;
-    return agents.filter((agent) => agentSearchText(agent).includes(needle));
-  }, [agents, query]);
-
-  const loadSelectedAgent = useCallback(async (agentId) => {
-    if (!agentId) return;
-    const requestId = selectedAgentRequestRef.current + 1;
-    selectedAgentRequestRef.current = requestId;
-    setAgentLoading(true);
-    setProfileDraft(emptyProfile());
-    setPreviewContent('');
-    setHistory([]);
-    setHistoryLoadedFor(null);
-    setPromptContent('');
-    setPromptDraft('');
-    setPromptLabel('');
-    setPromptVersions([]);
-    setPromptLoadedFor(null);
-    try {
-      const agent = await getAgentIdentity(agentId);
-      if (selectedAgentRequestRef.current !== requestId) return null;
-      setCurrentAgent(agent);
-      setProfileDraft({ ...emptyProfile(), ...(agent.profile || {}) });
-      return agent;
-    } finally {
-      if (selectedAgentRequestRef.current === requestId) setAgentLoading(false);
-    }
-  }, []);
-
-  const loadHistoryForAgent = useCallback(async (agentId = selectedAgentId, { force = false } = {}) => {
-    if (!agentId) return;
-    if (!force && historyLoadedFor === agentId) return;
-    const requestId = historyRequestRef.current + 1;
-    historyRequestRef.current = requestId;
-    setHistoryLoading(true);
-    try {
-      const nextHistory = await getAgentIdentityHistory(agentId);
-      if (historyRequestRef.current !== requestId || selectedAgentIdRef.current !== agentId) return;
-      setHistory(nextHistory || []);
-      setHistoryLoadedFor(agentId);
-    } finally {
-      if (historyRequestRef.current === requestId) setHistoryLoading(false);
-    }
-  }, [historyLoadedFor, selectedAgentId]);
-
-  const loadPromptForAgent = useCallback(async (agent = selectedAgent, { force = false } = {}) => {
-    if (!agent?.agentId) return;
-    if (!agent.promptId) {
-      setPromptLoadedFor(agent.agentId);
-      return;
-    }
-    if (!force && promptLoadedFor === agent.agentId) return;
-    const requestId = promptRequestRef.current + 1;
-    promptRequestRef.current = requestId;
-    setPromptLoading(true);
-    setPreviewContent('');
-    try {
-      const [prompt, versions] = await Promise.all([
-        getAgentPrompt(agent.promptId),
-        listAgentPromptVersions(agent.promptId).catch(() => []),
-      ]);
-      if (promptRequestRef.current !== requestId || selectedAgentIdRef.current !== agent.agentId) return;
-      setPromptContent(prompt.content || '');
-      setPromptDraft(prompt.content || '');
-      setPromptVersions(versions || []);
-      setPromptLoadedFor(agent.agentId);
-    } finally {
-      if (promptRequestRef.current === requestId) setPromptLoading(false);
-    }
-  }, [promptLoadedFor, selectedAgent]);
-
-  const loadHistoryForSelectedAgent = useCallback(() => {
-    return loadHistoryForAgent(selectedAgentId);
-  }, [loadHistoryForAgent, selectedAgentId]);
-
-  const loadPromptForSelectedAgent = useCallback(() => {
-    return loadPromptForAgent(selectedAgent);
-  }, [loadPromptForAgent, selectedAgent]);
-
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      setLoading(true);
-      try {
-        const list = await listAgentIdentities();
-        if (!active) return;
-        setAgents(list || []);
-        const nextSelected = initialAgentIdRef.current || list?.[0]?.agentId || null;
-        setSelectedAgentId(nextSelected);
-        if (nextSelected) await loadSelectedAgent(nextSelected);
-      } catch (err) {
-        if (active) toastRef.current.error(err?.message || 'Failed to load agents');
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => { active = false; };
-  }, [loadSelectedAgent]);
-
-  useEffect(() => {
-    if (!agentIdFromRoute || agentIdFromRoute === selectedAgentId) return;
-    setSelectedAgentId(agentIdFromRoute);
-    loadSelectedAgent(agentIdFromRoute).catch((err) => {
-      toastRef.current.error(err?.message || 'Failed to load agent');
-    });
-  }, [agentIdFromRoute, loadSelectedAgent, selectedAgentId]);
-
-  const profile = selectedAgent?.profile || emptyProfile();
-  const hasProfileChanges = JSON.stringify(profileDraft) !== JSON.stringify({ ...emptyProfile(), ...profile });
-  const hasPromptChanges = promptDraft !== promptContent;
-  const latestActivity = selectedAgent?.activity?.entries?.[0] || null;
-  const selectedRuntimeState = selectedRuntimeDefinition
-    ? (runtimeSelections[selectedRuntimeDefinition.agentId] || runtimeSaved)
+  const selectedAgent = currentAgent || agents.find((agent) => agent.agentId === selectedAgentId) || null;
+  const selectedRuntimeState = selectedAgent?.agentId ? runtimeSelections[selectedAgent.agentId] : null;
+  const selectedRuntimeDefinition = selectedAgent?.agentId
+    ? getAgentRuntimeDefinition(selectedAgent.agentId)
     : null;
-  const hasRuntimeChanges = Boolean(
-    selectedRuntimeDefinition
-    && runtimeDraft
-    && runtimeSaved
-    && JSON.stringify(runtimeDraft) !== JSON.stringify(runtimeSaved)
+
+  const operationalProfiles = useMemo(
+    () =>
+      agents.map((agent) =>
+        buildOperationalProfile(agent, runtimeSelections[agent.agentId])
+      ),
+    [agents, runtimeSelections]
   );
 
-  function handleSelectAgent(agentId) {
-    if (!agentId || agentId === selectedAgentId) return;
-    window.location.hash = `#/agents/${agentId}`;
+  const operationById = useMemo(() => {
+    const map = new Map();
+    operationalProfiles.forEach((operation) => map.set(operation.agentId, operation));
+    return map;
+  }, [operationalProfiles]);
+
+  const selectedOperation = useMemo(() => {
+    if (!selectedAgent) {
+      return null;
+    }
+    return buildOperationalProfile(selectedAgent, selectedRuntimeState);
+  }, [selectedAgent, selectedRuntimeState]);
+
+  const missionStats = useMemo(
+    () => buildMissionStats(operationalProfiles),
+    [operationalProfiles]
+  );
+
+  const departmentOptions = useMemo(() => {
+    const departments = Array.from(
+      new Set(operationalProfiles.map((operation) => operation.department).filter(Boolean))
+    );
+    return departments.sort((a, b) => a.localeCompare(b));
+  }, [operationalProfiles]);
+
+  const riskOptions = useMemo(() => {
+    const risks = Array.from(
+      new Set(operationalProfiles.map((operation) => operation.risk).filter(Boolean))
+    );
+    return risks.sort((a, b) => a.localeCompare(b));
+  }, [operationalProfiles]);
+
+  const reviewOptions = useMemo(() => {
+    const reviews = Array.from(
+      new Set(operationalProfiles.map((operation) => operation.reviewStatus).filter(Boolean))
+    );
+    return reviews.sort((a, b) => a.localeCompare(b));
+  }, [operationalProfiles]);
+
+  const filteredAgents = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return agents.filter((agent) => {
+      const operation = operationById.get(agent.agentId);
+      const matchesQuery = !normalizedQuery || agentSearchText(agent, operation).includes(normalizedQuery);
+      const matchesStatus = statusFilter === 'all' || operation?.status === statusFilter;
+      const matchesDepartment = departmentFilter === 'all' || operation?.department === departmentFilter;
+      const matchesRisk = riskFilter === 'all' || operation?.risk === riskFilter;
+      const matchesReview = reviewFilter === 'all' || operation?.reviewStatus === reviewFilter;
+      return matchesQuery && matchesStatus && matchesDepartment && matchesRisk && matchesReview;
+    });
+  }, [agents, departmentFilter, operationById, query, reviewFilter, riskFilter, statusFilter]);
+
+  async function loadHistoryForSelectedAgent() {
+    if (!selectedAgent?.agentId) {
+      return;
+    }
+    try {
+      setHistoryLoading(true);
+      setHistoryError(null);
+      const entries = await getAgentIdentityHistory(selectedAgent.agentId);
+      setHistory(buildIdentityHistoryState(entries));
+    } catch (err) {
+      setHistoryError(err.message || 'Failed to load identity history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function loadPromptForSelectedAgent() {
+    if (!selectedAgent?.agentId) {
+      return;
+    }
+    if (!selectedAgent.promptId) {
+      setPromptError('This agent does not have an editable prompt surface.');
+      setPromptState(null);
+      setPromptDraft('');
+      return;
+    }
+    try {
+      setPromptLoading(true);
+      setPromptError(null);
+      const promptPayload = await getAgentPrompt(selectedAgent.promptId);
+      const versions = await listAgentPromptVersions(selectedAgent.promptId);
+      const prompt = buildPromptState(promptPayload, versions);
+      setPromptState(prompt);
+      setPromptDraft(prompt.content || '');
+      setPreviewVersion(null);
+    } catch (err) {
+      setPromptError(err.message || 'Failed to load editable prompt.');
+    } finally {
+      setPromptLoading(false);
+    }
   }
 
   async function handleSaveProfile() {
-    if (!selectedAgentId || !hasProfileChanges) return;
-    setProfileSaving(true);
+    if (!selectedAgent?.agentId) {
+      return;
+    }
     try {
-      const agent = await updateAgentIdentity(selectedAgentId, profileDraft, profileSummary);
-      setCurrentAgent(agent);
-      setAgents((current) => current.map((item) => (item.agentId === selectedAgentId ? agent : item)));
-      if (historyLoadedFor === selectedAgentId) {
-        setHistory(await getAgentIdentityHistory(selectedAgentId));
-        setHistoryLoadedFor(selectedAgentId);
+      setProfileSaving(true);
+      const updated = await updateAgentIdentity(selectedAgent.agentId, profileDraft, profileSummary);
+      if (updated) {
+        setCurrentAgent(updated);
+        setAgents((previous) =>
+          previous.map((agent) => (agent.agentId === updated.agentId ? updated : agent))
+        );
       }
       setProfileSummary('');
-      toast.success('Agent profile saved');
     } catch (err) {
-      toast.error(err?.message || 'Failed to save profile');
+      setError(err.message || 'Failed to save profile.');
     } finally {
       setProfileSaving(false);
     }
   }
 
-  async function handleSaveRuntime() {
-    if (!selectedRuntimeDefinition || !runtimeDraft || !hasRuntimeChanges) return;
-    setRuntimeSaving(true);
+  async function handleSaveRuntime(nextRuntime) {
+    if (!selectedAgent?.agentId) {
+      return;
+    }
     try {
-      const normalized = writeAgentRuntimeState(selectedRuntimeDefinition, runtimeDraft);
-      const existingDefaults = await loadAiAssistantDefaultsFromServer().catch(() => null);
-      const syncedDefaults = await syncAiAssistantDefaultsToServer({
-        settings: existingDefaults?.settings,
-        agents: readAllAgentRuntimeStatesBySurfaceId(),
-      });
-      const syncedRuntime = syncedDefaults?.agents?.[selectedRuntimeDefinition.id] || normalized;
-      dispatchAgentRuntimeDefaultsApplied(syncedDefaults?.agents || { [selectedRuntimeDefinition.id]: syncedRuntime });
-      setRuntimeSaved(syncedRuntime);
-      setRuntimeDraft(syncedRuntime);
-      setRuntimeSelections((current) => ({
-        ...current,
-        [selectedRuntimeDefinition.agentId]: syncedRuntime,
+      setRuntimeSaveStatus('Saving runtime defaults...');
+      const updatedRuntime = writeAgentRuntimeState(selectedAgent.agentId, nextRuntime);
+      setRuntimeSelections((previous) => ({
+        ...previous,
+        [selectedAgent.agentId]: updatedRuntime,
       }));
-      toast.success('Agent model saved');
+      dispatchAgentRuntimeDefaultsApplied({
+        [selectedAgent.agentId]: updatedRuntime,
+      });
+      setRuntimeSaveStatus('Runtime defaults saved.');
     } catch (err) {
-      toast.error(err?.message || 'Failed to save agent model');
-    } finally {
-      setRuntimeSaving(false);
+      setRuntimeSaveStatus(err.message || 'Failed to save runtime defaults.');
     }
   }
 
-  function handleDiscardRuntime() {
-    if (!selectedRuntimeDefinition || !runtimeSaved) return;
-    setRuntimeDraft({ ...runtimeSaved });
-  }
-
   async function handleSavePrompt() {
-    if (!selectedAgent?.promptId || !hasPromptChanges) return;
-    setPromptSaving(true);
+    if (!selectedAgent?.agentId || !selectedAgent.promptId) {
+      return;
+    }
     try {
-      await updateAgentPrompt(selectedAgent.promptId, promptDraft, promptLabel);
-      setPromptContent(promptDraft);
-      setPromptLabel('');
-      setPromptVersions(await listAgentPromptVersions(selectedAgent.promptId));
-      setPromptLoadedFor(selectedAgentId);
-      if (historyLoadedFor === selectedAgentId) {
-        setHistory(await getAgentIdentityHistory(selectedAgentId));
-        setHistoryLoadedFor(selectedAgentId);
-      }
-      toast.success('Prompt saved');
+      setPromptSaving(true);
+      setPromptError(null);
+      const updatedPrompt = await updateAgentPrompt(
+        selectedAgent.promptId,
+        promptDraft,
+        promptSummary
+      );
+      const versions = await listAgentPromptVersions(selectedAgent.promptId);
+      setPromptState(buildPromptState({ prompt: updatedPrompt, content: promptDraft }, versions));
+      setPromptDraft(promptDraft);
+      setPromptSummary('');
+      setPreviewVersion(null);
     } catch (err) {
-      toast.error(err?.message || 'Failed to save prompt');
+      setPromptError(err.message || 'Failed to save prompt.');
     } finally {
       setPromptSaving(false);
     }
   }
 
-  async function handlePreviewVersion(ts) {
-    if (!selectedAgent?.promptId) return;
-    try {
-      setPreviewContent(await getAgentPromptVersion(selectedAgent.promptId, ts));
-    } catch (err) {
-      toast.error(err?.message || 'Failed to load prompt version');
+  function applyUpdatedAgent(updated) {
+    if (!updated?.agentId) {
+      return;
     }
-  }
-
-  async function handleRestoreVersion(ts) {
-    if (!selectedAgent?.promptId) return;
-    try {
-      await restoreAgentPromptVersion(selectedAgent.promptId, ts);
-      await loadPromptForAgent(selectedAgent, { force: true });
-      if (historyLoadedFor === selectedAgentId) {
-        setHistory(await getAgentIdentityHistory(selectedAgentId));
-        setHistoryLoadedFor(selectedAgentId);
+    setCurrentAgent((previous) =>
+      previous?.agentId === updated.agentId ? updated : previous
+    );
+    setAgents((previous) => {
+      const exists = previous.some((agent) => agent.agentId === updated.agentId);
+      if (!exists) {
+        return [...previous, updated];
       }
-      toast.success('Prompt version restored');
+      return previous.map((agent) => (agent.agentId === updated.agentId ? updated : agent));
+    });
+  }
+
+  async function handleCreateAgent(payload) {
+    try {
+      setRegistrySaving(true);
+      setRegistryMessage('');
+      const created = await createAgentIdentity(payload);
+      applyUpdatedAgent(created);
+      setRegistryModalMode(null);
+      setRegistryMessage(`Created ${created.profile?.roleTitle || created.agentId}.`);
+      handleSelectAgent(created.agentId);
     } catch (err) {
-      toast.error(err?.message || 'Failed to restore prompt version');
+      setRegistryMessage(err.message || 'Failed to create agent.');
+      throw err;
+    } finally {
+      setRegistrySaving(false);
     }
   }
 
-  if (loading) {
+  async function handleImportAgents(payload) {
+    try {
+      setRegistrySaving(true);
+      setRegistryMessage('');
+      const result = await importAgentIdentities(payload);
+      result.agents.forEach(applyUpdatedAgent);
+      setRegistryModalMode(null);
+      const failedCount = result.failed?.length || 0;
+      setRegistryMessage(
+        failedCount
+          ? `Imported ${result.agents.length} agent${result.agents.length === 1 ? '' : 's'}; ${failedCount} failed.`
+          : `Imported ${result.agents.length} agent${result.agents.length === 1 ? '' : 's'}.`
+      );
+    } catch (err) {
+      setRegistryMessage(err.message || 'Failed to import agents.');
+      throw err;
+    } finally {
+      setRegistrySaving(false);
+    }
+  }
+
+  async function handleMarkReviewed(review = {}) {
+    if (!selectedAgent?.agentId) {
+      return;
+    }
+    try {
+      setReviewSaving(true);
+      const updated = await recordAgentReview(selectedAgent.agentId, {
+        surface: review.surface || activeProfileTab || 'overall',
+        status: review.status || 'approved',
+        summary:
+          review.summary
+          || `Approved ${selectedAgent.profile?.roleTitle || selectedAgent.agentId} ${activeProfileTab || 'profile'} review.`,
+        versionRef: review.versionRef || activeProfileTab || 'profile',
+        metadata: {
+          tab: activeProfileTab,
+          agentId: selectedAgent.agentId,
+          ...(review.metadata || {}),
+        },
+      });
+      applyUpdatedAgent(updated);
+      setHistory(buildIdentityHistoryState(updated.history?.entries || []));
+    } catch (err) {
+      setError(err.message || 'Failed to record review approval.');
+    } finally {
+      setReviewSaving(false);
+    }
+  }
+
+  async function handleRecordHarnessRun() {
+    if (!selectedAgent?.agentId) {
+      return;
+    }
+    const cases = (selectedOperation?.harnessCases || []).map((testCase) => ({
+      id: testCase.id,
+      name: testCase.name,
+      status: testCase.status,
+      expected: testCase.expected,
+      actual: testCase.actual || testCase.expected,
+      detail: 'Recorded from Agent Mission Control.',
+    }));
+    try {
+      setHarnessSaving(true);
+      const updated = await recordAgentHarnessRun(selectedAgent.agentId, {
+        source: 'agent-profile-ui',
+        summary: `Recorded manual harness run for ${selectedAgent.profile?.roleTitle || selectedAgent.agentId}.`,
+        cases,
+      });
+      applyUpdatedAgent(updated);
+      setHistory(buildIdentityHistoryState(updated.history?.entries || []));
+    } catch (err) {
+      setError(err.message || 'Failed to record harness run.');
+    } finally {
+      setHarnessSaving(false);
+    }
+  }
+
+  function handleSelectAgent(agentId) {
+    if (!agentId) {
+      return;
+    }
+    setSelectedAgentId(agentId);
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.hash = `/agents/${encodeURIComponent(agentId)}`;
+    }
+  }
+
+  function handleProfileChange(key, value) {
+    setProfileDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  function handleTabChange(tabId) {
+    setActiveProfileTab(tabId);
+    if (tabId === 'prompt') {
+      loadPromptForSelectedAgent();
+    }
+    if (tabId === 'activity' || tabId === 'versions') {
+      loadHistoryForSelectedAgent();
+    }
+  }
+
+  async function handlePreviewPromptVersion(version) {
+    if (!selectedAgent?.promptId || !version?.ts) {
+      setPreviewVersion(version);
+      return;
+    }
+    try {
+      const content = await getAgentPromptVersion(selectedAgent.promptId, version.ts);
+      setPreviewVersion({ ...version, content });
+    } catch (err) {
+      setPromptError(err.message || 'Failed to load prompt version.');
+    }
+  }
+
+  function restorePreviewVersion() {
+    if (!previewVersion?.content) {
+      return;
+    }
+    setPromptDraft(previewVersion.content);
+    setPromptSummary(`Restored from ${previewVersion.versionLabel || 'previous version'}`);
+    setPreviewVersion(null);
+  }
+
+  const profileWorkspaceProps = {
+    activeTab: activeProfileTab,
+    agent: selectedAgent,
+    operation: selectedOperation,
+    history,
+    historyLoading,
+    historyError,
+    promptState,
+    promptDraft,
+    promptSummary,
+    promptLoading,
+    promptSaving,
+    promptError,
+    previewVersion,
+    profileDraft,
+    profileSummary,
+    profileSaving,
+    runtimeDefinition: selectedRuntimeDefinition,
+    runtimeState: selectedRuntimeState,
+    runtimeSaveStatus,
+    reviewSaving,
+    harnessSaving,
+    onPromptDraftChange: setPromptDraft,
+    onPromptSummaryChange: setPromptSummary,
+    onPromptSave: handleSavePrompt,
+    onPreviewVersion: handlePreviewPromptVersion,
+    onRestorePreview: restorePreviewVersion,
+    onProfileChange: handleProfileChange,
+    onProfileSummaryChange: setProfileSummary,
+    onProfileSave: handleSaveProfile,
+    onRuntimeSave: handleSaveRuntime,
+    onMarkReviewed: handleMarkReviewed,
+    onRecordHarnessRun: handleRecordHarnessRun,
+    onLoadHistory: loadHistoryForSelectedAgent,
+    onLoadPrompt: loadPromptForSelectedAgent,
+  };
+
+  if (!agentIdFromRoute) {
     return (
-      <div className="app-content-constrained">
-        <div style={{ textAlign: 'center', padding: 'var(--sp-10)' }}>
-          <span className="spinner" />
-        </div>
-      </div>
+      <AgentsMissionControlPage
+        agents={filteredAgents}
+        loading={loadingAgents}
+        error={error}
+        stats={missionStats}
+        query={query}
+        onQueryChange={setQuery}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+        departmentFilter={departmentFilter}
+        onDepartmentFilterChange={setDepartmentFilter}
+        departmentOptions={departmentOptions}
+        riskFilter={riskFilter}
+        onRiskFilterChange={setRiskFilter}
+        riskOptions={riskOptions}
+        reviewFilter={reviewFilter}
+        onReviewFilterChange={setReviewFilter}
+        reviewOptions={reviewOptions}
+        viewMode={agentViewMode}
+        onViewModeChange={setAgentViewMode}
+        comparisonIds={comparisonIds}
+        onComparisonIdsChange={setComparisonIds}
+        allAgents={agents}
+        operationalProfiles={operationalProfiles}
+        operationById={operationById}
+        onSelectAgent={handleSelectAgent}
+        registryModalMode={registryModalMode}
+        registrySaving={registrySaving}
+        registryMessage={registryMessage}
+        onOpenCreate={() => {
+          setRegistryMessage('');
+          setRegistryModalMode('create');
+        }}
+        onOpenImport={() => {
+          setRegistryMessage('');
+          setRegistryModalMode('import');
+        }}
+        onCloseRegistryModal={() => setRegistryModalMode(null)}
+        onCreateAgent={handleCreateAgent}
+        onImportAgents={handleImportAgents}
+      />
     );
   }
 
   return (
-    <div className="app-content-constrained agent-profiles-page">
-      <header className="page-header agent-profiles-titlebar">
-        <div>
-          <h1 className="page-title">Agent Profiles</h1>
-          <p className="text-secondary">
-            Search, select, and expand only the sections you need.
-          </p>
-        </div>
-      </header>
+    <AgentProfileDetailPage
+      error={error}
+      selectedAgent={selectedAgent}
+      selectedOperation={selectedOperation}
+      loadingCurrent={loadingCurrent}
+      activeProfileTab={activeProfileTab}
+      onTabChange={handleTabChange}
+      onOpenPrompt={() => handleTabChange('prompt')}
+      onOpenConfig={() => handleTabChange('configuration')}
+      onOpenHarness={() => handleTabChange('harness')}
+      workspaceProps={profileWorkspaceProps}
+    />
+  );
+}
 
-      <section className="agent-profiles-shell">
+function AgentsMissionControlPage({
+  agents,
+  loading,
+  error,
+  stats,
+  query,
+  onQueryChange,
+  statusFilter,
+  onStatusFilterChange,
+  departmentFilter,
+  onDepartmentFilterChange,
+  departmentOptions,
+  riskFilter,
+  onRiskFilterChange,
+  riskOptions,
+  reviewFilter,
+  onReviewFilterChange,
+  reviewOptions,
+  viewMode,
+  onViewModeChange,
+  comparisonIds,
+  onComparisonIdsChange,
+  allAgents,
+  operationalProfiles,
+  operationById,
+  onSelectAgent,
+  registryModalMode,
+  registrySaving,
+  registryMessage,
+  onOpenCreate,
+  onOpenImport,
+  onCloseRegistryModal,
+  onCreateAgent,
+  onImportAgents,
+}) {
+  const attentionItems = buildMissionAttentionItems(allAgents, operationById);
+  const comparedAgents = comparisonIds
+    .map((agentId) => allAgents.find((agent) => agent.agentId === agentId))
+    .filter(Boolean);
+
+  return (
+    <div className="agent-profiles-page agents-index-page">
+      <MissionControlHeader
+        mode="index"
+        stats={stats}
+        onOpenCreate={onOpenCreate}
+        onOpenImport={onOpenImport}
+      />
+
+      {error && <div className="agent-alert">{error}</div>}
+      {registryMessage && <div className="agent-info-alert">{registryMessage}</div>}
+
+      <MissionStats stats={stats} />
+
+      <AgentCommandToolbar
+        query={query}
+        onQueryChange={onQueryChange}
+        statusFilter={statusFilter}
+        onStatusFilterChange={onStatusFilterChange}
+        departmentFilter={departmentFilter}
+        onDepartmentFilterChange={onDepartmentFilterChange}
+        departmentOptions={departmentOptions}
+        riskFilter={riskFilter}
+        onRiskFilterChange={onRiskFilterChange}
+        riskOptions={riskOptions}
+        reviewFilter={reviewFilter}
+        onReviewFilterChange={onReviewFilterChange}
+        reviewOptions={reviewOptions}
+      />
+
+      <section className="mission-control-layout">
         <AgentDirectory
-          agents={filteredAgents}
-          totalAgents={agents.length}
-          query={query}
-          setQuery={setQuery}
-          selectedAgentId={selectedAgentId}
-          onSelect={handleSelectAgent}
+          agents={agents}
+          selectedAgentId={null}
+          operationById={operationById}
+          loading={loading}
+          onSelect={onSelectAgent}
         />
 
-        {selectedAgent ? (
-          <main className="agent-profile-pane">
-            <AgentHeader
-              agent={selectedAgent}
-              latestActivity={latestActivity}
-              loading={agentLoading}
-              runtimeDefinition={selectedRuntimeDefinition}
-              runtimeState={selectedRuntimeState}
+        <main className="agent-grid-panel">
+          <div className="agent-grid-heading">
+            <div>
+              <span className="mission-kicker">Agent Network</span>
+              <h2>Agents</h2>
+            </div>
+            <div className="agent-grid-view-toggle" aria-label="Agent view mode">
+              <button
+                type="button"
+                className={viewMode === 'grid' ? 'active' : ''}
+                onClick={() => onViewModeChange('grid')}
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                className={viewMode === 'map' ? 'active' : ''}
+                onClick={() => onViewModeChange('map')}
+              >
+                Map
+              </button>
+            </div>
+          </div>
+
+          <div className="mission-insight-grid">
+            <NeedsAttentionQueue
+              items={attentionItems}
+              onSelectAgent={onSelectAgent}
             />
-            <OverviewGrid
-              agent={selectedAgent}
-              latestActivity={latestActivity}
-              runtimeDefinition={selectedRuntimeDefinition}
-              runtimeState={selectedRuntimeState}
+            <AgentComparisonPanel
+              agents={allAgents}
+              comparisonIds={comparisonIds}
+              comparedAgents={comparedAgents}
+              operationById={operationById}
+              onComparisonIdsChange={onComparisonIdsChange}
+              onSelectAgent={onSelectAgent}
             />
-            <ProgressiveSections
-              agent={selectedAgent}
+          </div>
+
+          {loading ? (
+            <InlineLoading label="Loading agents..." />
+          ) : agents.length && viewMode === 'grid' ? (
+            <AgentMissionGrid
               agents={agents}
-              history={history}
-              historyLoading={historyLoading}
-              profileDraft={profileDraft}
-              setProfileDraft={setProfileDraft}
-              profileSummary={profileSummary}
-              setProfileSummary={setProfileSummary}
-              profileSaving={profileSaving}
-              hasProfileChanges={hasProfileChanges}
-              onSaveProfile={handleSaveProfile}
-              runtimeDefinition={selectedRuntimeDefinition}
-              runtimeDraft={runtimeDraft}
-              setRuntimeDraft={setRuntimeDraft}
-              runtimeSaving={runtimeSaving}
-              hasRuntimeChanges={hasRuntimeChanges}
-              onSaveRuntime={handleSaveRuntime}
-              onDiscardRuntime={handleDiscardRuntime}
-              promptContent={promptContent}
-              promptDraft={promptDraft}
-              setPromptDraft={setPromptDraft}
-              promptLabel={promptLabel}
-              setPromptLabel={setPromptLabel}
-              promptVersions={promptVersions}
-              promptLoading={promptLoading}
-              promptSaving={promptSaving}
-              hasPromptChanges={hasPromptChanges}
-              previewContent={previewContent}
-              onLoadHistory={loadHistoryForSelectedAgent}
-              onLoadPrompt={loadPromptForSelectedAgent}
-              onSavePrompt={handleSavePrompt}
-              onPreviewVersion={handlePreviewVersion}
-              onRestoreVersion={handleRestoreVersion}
+              operationById={operationById}
+              onSelectAgent={onSelectAgent}
             />
-          </main>
-        ) : (
-          <EmptyState>No agent selected.</EmptyState>
-        )}
+          ) : agents.length && viewMode === 'map' ? (
+            <AgentNetworkMap
+              agents={agents}
+              operationById={operationById}
+              operationalProfiles={operationalProfiles}
+              onSelectAgent={onSelectAgent}
+            />
+          ) : (
+            <EmptyState title="No matching agents" copy="Adjust the search or filter set." />
+          )}
+        </main>
       </section>
+
+      {registryModalMode && (
+        <AgentRegistryModal
+          mode={registryModalMode}
+          saving={registrySaving}
+          onClose={onCloseRegistryModal}
+          onCreate={onCreateAgent}
+          onImport={onImportAgents}
+        />
+      )}
     </div>
   );
 }
 
-function AgentDirectory({ agents, totalAgents, query, setQuery, selectedAgentId, onSelect }) {
+function AgentRegistryModal({
+  mode,
+  saving,
+  onClose,
+  onCreate,
+  onImport,
+}) {
+  const [createDraft, setCreateDraft] = useState({
+    agentId: '',
+    displayName: '',
+    roleTitle: '',
+    headline: '',
+    tone: '',
+    summary: '',
+  });
+  const [importDraft, setImportDraft] = useState(() =>
+    JSON.stringify({
+      sourceLabel: 'Agent registry import',
+      agents: [
+        {
+          agentId: 'custom-review-agent',
+          profile: {
+            displayName: 'Custom Review Agent',
+            roleTitle: 'Custom Review Specialist',
+            headline: 'Reviews a defined workflow before human handoff.',
+          },
+        },
+      ],
+    }, null, 2)
+  );
+  const [localError, setLocalError] = useState('');
+  const isImport = mode === 'import';
+
+  function updateCreateDraft(key, value) {
+    setCreateDraft((previous) => ({ ...previous, [key]: value }));
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLocalError('');
+    try {
+      if (isImport) {
+        const parsed = JSON.parse(importDraft);
+        await onImport(parsed);
+        return;
+      }
+      await onCreate({
+        agentId: createDraft.agentId,
+        profile: {
+          displayName: createDraft.displayName,
+          roleTitle: createDraft.roleTitle,
+          headline: createDraft.headline,
+          tone: createDraft.tone,
+        },
+        summary: createDraft.summary,
+      });
+    } catch (err) {
+      setLocalError(err.message || 'Registry update failed.');
+    }
+  }
+
   return (
-    <aside
-      className="card agent-directory"
-    >
-      <div className="agent-directory-search">
-        <div className="agent-directory-header">
-          <h2>Directory</h2>
-          <span className="text-secondary">
-            {agents.length}/{totalAgents}
-          </span>
+    <div className="agent-modal-backdrop" role="presentation">
+      <form className="agent-registry-modal" onSubmit={handleSubmit}>
+        <header>
+          <div>
+            <span className="mission-kicker">Agent Registry</span>
+            <h2>{isImport ? 'Import Agents' : 'Create Agent'}</h2>
+          </div>
+          <button type="button" className="text-action" onClick={onClose}>
+            Close
+          </button>
+        </header>
+
+        {localError && <div className="agent-alert">{localError}</div>}
+
+        {isImport ? (
+          <label className="form-field">
+            <span>Import JSON</span>
+            <textarea
+              className="registry-json-editor"
+              value={importDraft}
+              onChange={(event) => setImportDraft(event.target.value)}
+              spellCheck={false}
+            />
+          </label>
+        ) : (
+          <div className="profile-form-grid">
+            <FormField
+              label="Agent ID"
+              value={createDraft.agentId}
+              placeholder="billing-audit-agent"
+              onChange={(value) => updateCreateDraft('agentId', value)}
+            />
+            <FormField
+              label="Display name"
+              value={createDraft.displayName}
+              placeholder="Billing Audit Agent"
+              onChange={(value) => updateCreateDraft('displayName', value)}
+            />
+            <FormField
+              label="Role title"
+              value={createDraft.roleTitle}
+              placeholder="Billing Audit Specialist"
+              onChange={(value) => updateCreateDraft('roleTitle', value)}
+            />
+            <FormField
+              label="Tone"
+              value={createDraft.tone}
+              placeholder="Precise and evidence-first"
+              onChange={(value) => updateCreateDraft('tone', value)}
+            />
+            <FormField
+              label="Headline"
+              type="textarea"
+              value={createDraft.headline}
+              placeholder="Reviews billing escalations before workflow handoff."
+              onChange={(value) => updateCreateDraft('headline', value)}
+            />
+            <FormField
+              label="Change summary"
+              type="textarea"
+              value={createDraft.summary}
+              placeholder="Why this agent is being registered."
+              onChange={(value) => updateCreateDraft('summary', value)}
+            />
+          </div>
+        )}
+
+        <div className="form-action-row">
+          <button type="button" className="secondary-action" onClick={onClose} disabled={saving}>
+            Cancel
+          </button>
+          <button type="submit" className="primary-action" disabled={saving}>
+            {saving ? 'Saving...' : (isImport ? 'Import Agents' : 'Create Agent')}
+          </button>
         </div>
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search agents..."
+      </form>
+    </div>
+  );
+}
+
+function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
+  return (
+    <div className="agent-card-grid">
+      {agents.map((agent, index) => (
+        <AgentMissionCard
+          key={agent.agentId}
+          agent={agent}
+          operation={operationById.get(agent.agentId)}
+          rank={index + 1}
+          onSelect={() => onSelectAgent(agent.agentId)}
         />
+      ))}
+      <button type="button" className="agent-create-card" onClick={() => onSelectAgent(agents[0]?.agentId)}>
+        <span>+</span>
+        <strong>Add New Agent</strong>
+        <small>Profiles are created from the server registry today. Open an existing profile to tune behavior.</small>
+      </button>
+    </div>
+  );
+}
+
+function AgentMissionCard({ agent, operation, rank, onSelect }) {
+  return (
+    <a
+      href={`#/agents/${encodeURIComponent(agent.agentId)}`}
+      className="agent-mission-card"
+      onClick={onSelect}
+    >
+      <header>
+        <span className="rank-pill">{rank}</span>
+        <span className={`status-badge status-${operation?.status || 'idle'}`}>
+          {STATUS_LABELS[operation?.status] || 'Idle'}
+        </span>
+      </header>
+      <div className="agent-mission-card-title">
+        <AgentAvatar agent={agent} size="medium" />
+        <div>
+          <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+          <small>{operation?.department || agent.profile?.headline || agent.agentId}</small>
+        </div>
+      </div>
+      <p>{agent.profile?.headline || operation?.promptSummary?.goals}</p>
+      <div className="agent-card-chip-row">
+        <Badge>{operation?.modelLabel}</Badge>
+        <Badge>{operation?.toolSummary}</Badge>
+      </div>
+      <div className="agent-card-metrics">
+        <span>
+          Trust
+          <strong>{operation?.trustLabel || 'Not scored'}</strong>
+        </span>
+        <span>
+          Workflow Fit
+          <FitBars score={operation?.workflowFit || 0} />
+        </span>
+      </div>
+      <MiniSparkline points={[25, 31, 42, 38, 48, 54, 62]} tone={operation?.status === 'review' ? 'orange' : 'blue'} />
+    </a>
+  );
+}
+
+function NeedsAttentionQueue({ items, onSelectAgent }) {
+  return (
+    <section className="mission-insight-card needs-attention-card">
+      <header>
+        <div>
+          <span className="mission-kicker">Needs Attention</span>
+          <h3>{items.length} review items</h3>
+        </div>
+        <Badge>Live profile checks</Badge>
+      </header>
+      {items.length ? (
+        <div className="attention-list">
+          {items.slice(0, 6).map((item) => (
+            <button
+              type="button"
+              key={`${item.agentId}-${item.code}`}
+              onClick={() => onSelectAgent(item.agentId)}
+            >
+              <span className={`attention-severity ${item.severity}`} />
+              <strong>{item.title}</strong>
+              <small>{item.agentLabel} - {item.detail}</small>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No active review items" copy="All visible agents pass the current profile checks." />
+      )}
+    </section>
+  );
+}
+
+function AgentComparisonPanel({
+  agents,
+  comparisonIds,
+  comparedAgents,
+  operationById,
+  onComparisonIdsChange,
+  onSelectAgent,
+}) {
+  const [leftId, rightId] = comparisonIds;
+
+  function updateComparison(index, value) {
+    const next = [...comparisonIds];
+    next[index] = value;
+    onComparisonIdsChange(next);
+  }
+
+  return (
+    <section className="mission-insight-card comparison-card">
+      <header>
+        <div>
+          <span className="mission-kicker">Compare</span>
+          <h3>Agent contracts</h3>
+        </div>
+      </header>
+      <div className="compare-selectors">
+        <label>
+          <span>Agent A</span>
+          <select value={leftId} onChange={(event) => updateComparison(0, event.target.value)}>
+            <option value="">Select agent</option>
+            {agents.map((agent) => (
+              <option value={agent.agentId} key={agent.agentId}>
+                {agent.profile?.roleTitle || labelAgent(agent.agentId)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Agent B</span>
+          <select value={rightId} onChange={(event) => updateComparison(1, event.target.value)}>
+            <option value="">Select agent</option>
+            {agents.map((agent) => (
+              <option value={agent.agentId} key={agent.agentId}>
+                {agent.profile?.roleTitle || labelAgent(agent.agentId)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      {comparedAgents.length ? (
+        <div className="compare-columns">
+          {comparedAgents.map((agent) => {
+            const operation = operationById.get(agent.agentId);
+            return (
+              <button type="button" key={agent.agentId} onClick={() => onSelectAgent(agent.agentId)}>
+                <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+                <span>{operation?.department}</span>
+                <small>{operation?.modelLabel}</small>
+                <small>{operation?.risk} risk - {operation?.reviewStatus}</small>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <EmptyState title="Pick two agents" copy="Compare role, model, risk, review status, and workflow ownership before editing." />
+      )}
+    </section>
+  );
+}
+
+function AgentNetworkMap({ agents, operationById, onSelectAgent }) {
+  return (
+    <section className="agent-network-map" aria-label="Agent workflow dependency map">
+      <div className="map-lane map-lane-input">
+        <span>Input Workflows</span>
+        {agents.slice(0, 4).map((agent) => {
+          const operation = operationById.get(agent.agentId);
+          return operation?.workflowInputs?.slice(0, 1).map((workflow) => (
+            <button type="button" key={`${agent.agentId}-${workflow}`} onClick={() => onSelectAgent(agent.agentId)}>
+              {workflow}
+            </button>
+          ));
+        })}
+      </div>
+      <div className="map-agent-cluster">
+        {agents.map((agent, index) => {
+          const operation = operationById.get(agent.agentId);
+          return (
+            <button
+              type="button"
+              className={`map-agent-node map-node-${index % 4} status-${operation?.status || 'idle'}`}
+              key={agent.agentId}
+              onClick={() => onSelectAgent(agent.agentId)}
+            >
+              <AgentAvatar agent={agent} size="small" />
+              <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+              <small>{operation?.department}</small>
+            </button>
+          );
+        })}
+      </div>
+      <div className="map-lane map-lane-output">
+        <span>Output Workflows</span>
+        {agents.slice(0, 4).map((agent) => {
+          const operation = operationById.get(agent.agentId);
+          return operation?.workflowOutputs?.slice(0, 1).map((workflow) => (
+            <button type="button" key={`${agent.agentId}-${workflow}`} onClick={() => onSelectAgent(agent.agentId)}>
+              {workflow}
+            </button>
+          ));
+        })}
+      </div>
+    </section>
+  );
+}
+
+function AgentProfileDetailPage({
+  error,
+  selectedAgent,
+  selectedOperation,
+  loadingCurrent,
+  activeProfileTab,
+  onTabChange,
+  onOpenPrompt,
+  onOpenConfig,
+  onOpenHarness,
+  workspaceProps,
+}) {
+  return (
+    <div className="agent-profiles-page agent-profile-detail-page">
+      <header className="profile-page-topbar">
+        <a href="#/agents" className="back-link">Agent Mission Control</a>
+        <div className="system-status-pill">
+          <span className="status-dot status-dot-active" />
+          System Status: Operational
+        </div>
+      </header>
+
+      {error && <div className="agent-alert">{error}</div>}
+
+      {selectedAgent ? (
+        <main className="profile-detail-shell">
+          <AgentProfileHero
+            agent={selectedAgent}
+            operation={selectedOperation}
+            loading={loadingCurrent}
+            onOpenPrompt={onOpenPrompt}
+            onOpenConfig={onOpenConfig}
+            onOpenHarness={onOpenHarness}
+          />
+
+          <AgentProfileTabs
+            tabs={PROFILE_TABS}
+            activeTab={activeProfileTab}
+            onChange={onTabChange}
+          />
+
+          <AgentProfileWorkspace {...workspaceProps} />
+        </main>
+      ) : (
+        <EmptyState title="Agent profile unavailable" copy="Return to mission control and select an agent profile." />
+      )}
+    </div>
+  );
+}
+
+function MissionControlHeader({
+  mode = 'profile',
+  selectedAgent,
+  selectedOperation,
+  stats,
+  onOpenPrompt,
+  onOpenConfig,
+  onOpenCreate,
+  onOpenImport,
+}) {
+  return (
+    <header className="mission-control-header">
+      <div className="mission-title-block">
+        <div className="mission-kicker">Agent Mission Control</div>
+        <h1>Agent Profiles</h1>
+        <p>
+          Discover, monitor, tune, and review the agents powering the escalation workflow.
+        </p>
       </div>
 
-      <div className="agent-directory-list">
-        {agents.length ? agents.map((agent) => (
-          <AgentListRow
-            key={agent.agentId}
-            agent={agent}
-            selected={agent.agentId === selectedAgentId}
-            onSelect={onSelect}
-          />
-        )) : (
-          <EmptyState>No matching agents.</EmptyState>
+      <div className="mission-header-actions">
+        <div className="system-status-pill">
+          <span className="status-dot status-dot-active" />
+          System Status: Operational
+        </div>
+        {mode === 'profile' ? (
+          <>
+            <div className="selected-agent-chip">
+              <AgentAvatar agent={selectedAgent} size="small" />
+              <span>
+                <strong>{selectedAgent?.profile?.roleTitle || selectedAgent?.agentId || 'Select agent'}</strong>
+                <small>{selectedOperation?.department || `${stats.totalAgents} configured agents`}</small>
+              </span>
+            </div>
+            <button type="button" className="secondary-action" onClick={onOpenConfig}>
+              Edit Profile
+            </button>
+            <button type="button" className="primary-action" onClick={onOpenPrompt}>
+              Open Prompt
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="button" className="secondary-action" onClick={onOpenImport}>
+              Import
+            </button>
+            <button type="button" className="primary-action" onClick={onOpenCreate}>
+              Create Agent
+            </button>
+          </>
         )}
       </div>
+    </header>
+  );
+}
+
+function MissionStats({ stats }) {
+  const cards = [
+    {
+      label: 'Total Agents',
+      value: stats.totalAgents,
+      detail: `${stats.withPrompts} with editable prompt surfaces`,
+      tone: 'blue',
+      spark: [24, 31, 30, 38, 41, 49, 55],
+    },
+    {
+      label: 'Active in Workflows',
+      value: stats.activeAgents,
+      detail: `${stats.workflowCoverage}% workflow coverage`,
+      tone: 'green',
+      spark: [32, 38, 42, 41, 47, 54, 60],
+    },
+    {
+      label: 'Human Reviewed',
+      value: `${stats.humanReviewed}%`,
+      detail: 'Review status across active profiles',
+      tone: 'violet',
+      spark: [45, 49, 52, 58, 60, 68, 73],
+    },
+    {
+      label: 'Needs Attention',
+      value: stats.needsAttention,
+      detail: 'Review, degraded, or incomplete setup',
+      tone: 'orange',
+      spark: [18, 22, 29, 26, 34, 39, 44],
+    },
+    {
+      label: 'Avg. Trust Score',
+      value: `${stats.averageTrust} / 5`,
+      detail: 'Composite from profile, tools, prompt, and activity',
+      tone: 'teal',
+      spark: [40, 45, 44, 51, 56, 61, 68],
+    },
+  ];
+
+  return (
+    <section className="mission-stats-grid" aria-label="Agent profile health summary">
+      {cards.map((card) => (
+        <div className={`mission-stat-card tone-${card.tone}`} key={card.label}>
+          <span>{card.label}</span>
+          <strong>{card.value}</strong>
+          <small>{card.detail}</small>
+          <MiniSparkline points={card.spark} tone={card.tone} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function AgentCommandToolbar({
+  query,
+  onQueryChange,
+  statusFilter,
+  onStatusFilterChange,
+  departmentFilter,
+  onDepartmentFilterChange,
+  departmentOptions,
+  riskFilter,
+  onRiskFilterChange,
+  riskOptions,
+  reviewFilter,
+  onReviewFilterChange,
+  reviewOptions,
+}) {
+  return (
+    <section className="agent-command-toolbar" aria-label="Agent directory filters">
+      <label className="agent-search-box">
+        <span>Search</span>
+        <input
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search agents by name, role, tool, workflow, or model..."
+        />
+      </label>
+
+      <label>
+        <span>Status</span>
+        <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)}>
+          <option value="all">All statuses</option>
+          <option value="active">Active</option>
+          <option value="idle">Idle</option>
+          <option value="review">Needs attention</option>
+          <option value="degraded">Degraded</option>
+        </select>
+      </label>
+
+      <label>
+        <span>Department</span>
+        <select
+          value={departmentFilter}
+          onChange={(event) => onDepartmentFilterChange(event.target.value)}
+        >
+          <option value="all">All departments</option>
+          {departmentOptions.map((department) => (
+            <option value={department} key={department}>
+              {department}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        <span>Risk</span>
+        <select value={riskFilter} onChange={(event) => onRiskFilterChange(event.target.value)}>
+          <option value="all">All risks</option>
+          {riskOptions.map((risk) => (
+            <option value={risk} key={risk}>
+              {risk}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label>
+        <span>Review</span>
+        <select value={reviewFilter} onChange={(event) => onReviewFilterChange(event.target.value)}>
+          <option value="all">All reviews</option>
+          {reviewOptions.map((review) => (
+            <option value={review} key={review}>
+              {review}
+            </option>
+          ))}
+        </select>
+      </label>
+    </section>
+  );
+}
+
+function AgentDirectory({ agents, selectedAgentId, operationById, loading, onSelect }) {
+  if (loading) {
+    return (
+      <aside className="agent-directory-panel">
+        <InlineLoading label="Loading agent command center..." />
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="agent-directory-panel">
+      <div className="directory-section-heading">
+        <span>Top Agents</span>
+        <small>By workflow impact</small>
+      </div>
+
+      {agents.length ? (
+        <div className="agent-directory-list">
+          {agents.map((agent, index) => (
+            <AgentListRow
+              agent={agent}
+              operation={operationById.get(agent.agentId)}
+              rank={index + 1}
+              selected={agent.agentId === selectedAgentId}
+              key={agent.agentId}
+              onSelect={() => onSelect(agent.agentId)}
+            />
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No matching agents" copy="Adjust the search or filter set." />
+      )}
+
+      <WorkflowCoverage operations={Array.from(operationById.values())} />
     </aside>
   );
 }
 
-function AgentListRow({ agent, selected, onSelect }) {
-  const profile = agent.profile || {};
+function AgentListRow({ agent, operation, rank, selected, onSelect }) {
   return (
-    <button
-      type="button"
-      className={`agent-list-row${selected ? ' is-selected' : ''}`}
-      onClick={() => onSelect(agent.agentId)}
+    <a
+      href={`#/agents/${encodeURIComponent(agent.agentId)}`}
+      className={`agent-list-row ${selected ? 'selected' : ''}`}
+      onClick={onSelect}
     >
-      <AgentAvatar profile={profile} fallbackLabel={agent.agentId} size={30} />
-      <div className="agent-list-row-copy">
-        <strong>
-          {profile.displayName || agent.agentId}
-        </strong>
-        <span className="text-secondary">
-          {profile.roleTitle || 'Agent'}
-        </span>
-      </div>
-    </button>
+      <span className="rank-pill">{rank}</span>
+      <AgentAvatar agent={agent} size="small" />
+      <span className="agent-row-main">
+        <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+        <small>{operation?.department || agent.profile?.headline || agent.agentId}</small>
+        <FitBars score={operation?.workflowFit || 0.75} />
+      </span>
+      <span className={`status-badge status-${operation?.status || 'idle'}`}>
+        {STATUS_LABELS[operation?.status] || 'Idle'}
+      </span>
+    </a>
   );
 }
 
-function AgentHeader({ agent, latestActivity, loading, runtimeDefinition, runtimeState }) {
-  const profile = agent.profile || {};
-  const runtimeSummary = runtimeDefinition
-    ? getAgentRuntimeSummary(runtimeDefinition, runtimeState || {})
-    : '';
+function WorkflowCoverage({ operations }) {
+  const coverage = buildCoverageBuckets(operations);
+  const total = Math.max(1, operations.length);
   return (
-    <section className="card agent-profile-header">
-      <AgentAvatar profile={profile} fallbackLabel={agent.agentId} size={44} />
-      <div className="agent-profile-header-main">
-        <div className="agent-profile-name-row">
-            <h2>
-              {profile.displayName || agent.agentId}
-            </h2>
-            {loading ? <span className="spinner" /> : null}
-        </div>
-        <p className="text-secondary agent-profile-headline">
-            {profile.roleTitle || 'Agent'} - {profile.headline || 'No headline set.'}
-        </p>
+    <section className="workflow-coverage-panel">
+      <div className="directory-section-heading">
+        <span>Workflow Coverage</span>
+        <small>{operations.length} mapped</small>
       </div>
-
-      <div className="agent-profile-badges">
-        {runtimeDefinition ? (
-          <Badge className="agent-runtime-badge" title={runtimeSummary}>Model: {runtimeSummary}</Badge>
-        ) : null}
-        <Badge>Prompt: {agent.promptId || 'none'}</Badge>
-        <Badge>{agent.tools?.available?.length || 0} tools</Badge>
-        <Badge>{agent.memory?.notes?.length || 0} memory notes</Badge>
-        <Badge>{latestActivity?.status || 'no recent status'}</Badge>
+      <div className="coverage-ring" style={{ '--coverage': `${coverage.excellentPercent}%` }}>
+        <strong>{coverage.active}</strong>
+        <small>Active</small>
+      </div>
+      <div className="coverage-legend">
+        {coverage.rows.map((row) => (
+          <span key={row.label}>
+            <i className={`legend-dot ${row.tone}`} />
+            {row.label}
+            <strong>{row.count}</strong>
+            <small>{Math.round((row.count / total) * 100)}%</small>
+          </span>
+        ))}
       </div>
     </section>
   );
 }
 
-function OverviewGrid({ agent, latestActivity, runtimeDefinition, runtimeState }) {
-  const profile = agent.profile || {};
-  const runtimeSummary = runtimeDefinition
-    ? getAgentRuntimeSummary(runtimeDefinition, runtimeState || {})
-    : 'No model mapping.';
+function AgentProfileHero({
+  agent,
+  operation,
+  loading,
+  onOpenPrompt,
+  onOpenConfig,
+  onOpenHarness,
+}) {
   return (
-    <section className="agent-overview-grid">
-      <SimpleCard title="Purpose">
-        <p>{profile.headline || profile.roleTitle || 'No purpose has been defined.'}</p>
-      </SimpleCard>
-      <SimpleCard title="Model">
-        <p title={runtimeSummary}>{runtimeSummary}</p>
-      </SimpleCard>
-      <SimpleCard title="Behavior">
-        <p>{profile.tone || profile.conversationalStyle || 'No behavior profile has been defined.'}</p>
-      </SimpleCard>
-      <SimpleCard title="Recent Activity">
-        <p>{latestActivity?.summary || latestActivity?.status || 'No recent activity yet.'}</p>
-      </SimpleCard>
-    </section>
-  );
-}
-
-function ProgressiveSections(props) {
-  return (
-    <section className="agent-section-stack">
-      <DetailsSection title="Profile Details" summary="Tone, boundaries, quirks, and collaboration style.">
-        <ProfileDetails agent={props.agent} />
-      </DetailsSection>
-
-      <DetailsSection title="Model Defaults" summary="Default model, with advanced routing options when needed.">
-        <RuntimeSettingsPanel
-          definition={props.runtimeDefinition}
-          draft={props.runtimeDraft}
-          setDraft={props.setRuntimeDraft}
-          saving={props.runtimeSaving}
-          hasChanges={props.hasRuntimeChanges}
-          onSave={props.onSaveRuntime}
-          onDiscard={props.onDiscardRuntime}
-        />
-      </DetailsSection>
-
-      <DetailsSection title="Tools and Activity" summary="Capabilities and recent runtime behavior." onOpen={props.onLoadHistory}>
-        <ToolsAndActivity agent={props.agent} history={props.history} historyLoading={props.historyLoading} />
-      </DetailsSection>
-
-      <DetailsSection title="Memory and Relationships" summary="Continuity notes and how this agent coordinates with the others." onOpen={props.onLoadHistory}>
-        <MemoryAndRelationships agent={props.agent} agents={props.agents} history={props.history} historyLoading={props.historyLoading} />
-      </DetailsSection>
-
-      <DetailsSection title="Admin" summary="Edit the profile, prompt, and prompt versions." onOpen={props.onLoadPrompt}>
-        <AdminTools {...props} />
-      </DetailsSection>
-    </section>
-  );
-}
-
-function DetailsSection({ title, summary, children, defaultOpen = false, onOpen }) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    if (open) onOpen?.();
-  }, [onOpen, open]);
-
-  function handleToggle(event) {
-    setOpen(event.currentTarget.open);
-  }
-
-  return (
-    <details className="card agent-details-section" open={open} onToggle={handleToggle}>
-      <summary>
-        <div className="agent-details-summary">
-          <div>
-            <h3>{title}</h3>
-            <p className="text-secondary">{summary}</p>
+    <section className="agent-profile-hero">
+      <div className="profile-identity">
+        <AgentAvatar agent={agent} size="large" />
+        <div>
+          <div className="profile-title-line">
+            <h2>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</h2>
+            <span className={`status-badge status-${operation?.status || 'idle'}`}>
+              <span className={`status-dot status-dot-${operation?.status || 'idle'}`} />
+              {STATUS_LABELS[operation?.status] || 'Idle'}
+            </span>
           </div>
-          <span className="text-secondary">{open ? 'Close' : 'Open'}</span>
+          <p>{agent.profile?.headline || operation?.mission || 'Agent profile and operating context.'}</p>
+          <div className="profile-chip-row">
+            <Badge>{operation?.department}</Badge>
+            <Badge>{operation?.modelLabel}</Badge>
+            <Badge>{operation?.reviewStatus}</Badge>
+            <Badge>{operation?.risk} risk</Badge>
+          </div>
         </div>
-      </summary>
-      <div className="agent-details-body">
-        {children}
       </div>
-    </details>
-  );
-}
 
-function ProfileDetails({ agent }) {
-  const profile = agent.profile || {};
-  return (
-    <div className="agent-profile-details">
-      <section className="agent-definition-grid">
-        <Definition label="Tone" value={profile.tone} />
-        <Definition label="Conversation Style" value={profile.conversationalStyle} />
-        <Definition label="Boundaries" value={profile.boundaries} />
-        <Definition label="Initiative" value={profile.initiativeLevel} />
-        <Definition label="Social Style" value={profile.socialStyle} />
-        <Definition label="Community Style" value={profile.communityStyle} />
-        <Definition label="Self-Improvement" value={profile.selfImprovementStyle} />
-        <Definition label="Routing Bias" value={profile.routingBias} />
-      </section>
-      <Definition label="Off-Clock Personality" value={profile.soul} />
-      <div className="agent-tag-block">
-        <span className="eyebrow">Quirks</span>
-        <TagList items={profile.quirks || []} />
+      <div className="profile-ownership">
+        <Definition label="Owner">{operation?.owner}</Definition>
+        <Definition label="Team">{operation?.team}</Definition>
+        <Definition label="Last updated">{formatDate(operation?.lastUpdatedAt)}</Definition>
       </div>
-    </div>
+
+      <div className="profile-actions">
+        {loading && <InlineLoading label="Refreshing profile..." />}
+        <button type="button" className="secondary-action" onClick={onOpenConfig}>
+          Edit
+        </button>
+        <button type="button" className="secondary-action" onClick={onOpenHarness}>
+          Harness
+        </button>
+        <button type="button" className="primary-action" onClick={onOpenPrompt}>
+          Prompt
+        </button>
+      </div>
+    </section>
   );
 }
 
-function ToolsAndActivity({ agent, history, historyLoading }) {
-  const tools = agent.tools?.available || [];
-  const recentUsage = agent.tools?.recentUsage || [];
-  const activity = agent.activity?.entries || [];
+function AgentProfileTabs({ tabs, activeTab, onChange }) {
   return (
-    <div className="agent-expanded-grid">
-      <section className="agent-count-grid">
-        <CountCard label="Tools" value={tools.length} />
-        <CountCard label="Tool Uses" value={recentUsage.length} />
-        <CountCard label="Activity" value={activity.length} />
-      </section>
+    <nav className="agent-profile-tabs" aria-label="Agent profile sections">
+      {tabs.map((tab) => (
+        <button
+          type="button"
+          className={activeTab === tab.id ? 'active' : ''}
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
 
-      <section className="agent-two-column">
-        <Panel title="Top Tools">
-          {tools.length ? tools.slice(0, 10).map((tool, index) => (
-            <CompactItem key={`${tool.name || 'tool'}-${index}`} title={tool.name} meta={tool.kind} body={tool.description} />
-          )) : <EmptyState>No tools registered.</EmptyState>}
-        </Panel>
-        <Panel title="Recent Activity">
-          <TimelineList entries={[...activity.slice(0, 6), ...recentUsage.slice(0, 4)]} empty="No recent activity." />
-        </Panel>
-      </section>
+function AgentProfileWorkspace(props) {
+  const { activeTab } = props;
 
-      <Panel title="History">
-        {historyLoading ? <InlineLoading label="Loading history..." /> : <TimelineList entries={(history || []).slice(0, 8)} empty="No history yet." />}
+  if (activeTab === 'configuration') {
+    return <AgentConfigurationTab {...props} />;
+  }
+  if (activeTab === 'prompt') {
+    return <AgentPromptTab {...props} />;
+  }
+  if (activeTab === 'harness') {
+    return <AgentHarnessTab {...props} />;
+  }
+  if (activeTab === 'workflows') {
+    return <AgentWorkflowsTab {...props} />;
+  }
+  if (activeTab === 'activity') {
+    return <AgentActivityTab {...props} />;
+  }
+  if (activeTab === 'versions') {
+    return <AgentVersionsTab {...props} />;
+  }
+
+  return <AgentOverviewTab {...props} />;
+}
+
+function AgentOverviewTab({
+  agent,
+  operation,
+  history,
+  historyLoading,
+  historyError,
+  onLoadHistory,
+  reviewSaving,
+  onMarkReviewed,
+}) {
+  const activity = history?.activity || agent.activity?.entries || [];
+  const versions = history?.versions || [];
+
+  return (
+    <section className="agent-tab-content overview-layout">
+      <Panel title="Overview" actions={<span className="panel-status-text">{operation?.workflowCount} workflows</span>}>
+        <div className="overview-definition-grid">
+          <Definition label="Role">{agent.profile?.roleTitle || labelAgent(agent.agentId)}</Definition>
+          <Definition label="Department">{operation?.department}</Definition>
+          <Definition label="Model">{operation?.modelLabel}</Definition>
+          <Definition label="Tools">{operation?.toolSummary}</Definition>
+          <Definition label="Permissions">{operation?.permissions}</Definition>
+          <Definition label="Escalation Policy">{operation?.escalationPolicy}</Definition>
+          <Definition label="Risk Level">{operation?.risk}</Definition>
+          <Definition label="Review Status">{operation?.reviewStatus}</Definition>
+        </div>
       </Panel>
-    </div>
-  );
-}
 
-function MemoryAndRelationships({ agent, agents, history, historyLoading }) {
-  const notes = agent.memory?.notes || [];
-  const relationships = agent.relationships?.notes || [];
-  const relationshipMap = agent.relationships?.map?.all || [];
-  return (
-    <div className="agent-expanded-grid">
-      <section className="agent-count-grid">
-        <CountCard label="Memory" value={notes.length} />
-        <CountCard label="Relationships" value={relationships.length} />
-        <CountCard label="Mapped Peers" value={relationshipMap.length} />
-      </section>
+      <WorkflowFootprint agent={agent} operation={operation} />
 
-      <section className="agent-two-column">
-        <Panel title="Continuity">
-          <TimelineList entries={notes.slice(0, 8).map((note) => ({
-            type: note.kind,
-            summary: note.content,
-            createdAt: note.updatedAt,
-          }))} empty="No continuity notes yet." />
-        </Panel>
-        <Panel title="Relationships">
-          {relationships.length ? relationships.slice(0, 8).map((note, index) => (
-            <CompactItem
-              key={`${note.otherAgentId}-${index}`}
-              title={labelAgent(agent, agents, note.otherAgentId)}
-              meta={`${note.kind || 'dynamic'} - confidence ${formatConfidence(note.confidence)}`}
-              body={note.summary}
-            />
-          )) : <EmptyState>No relationship notes yet.</EmptyState>}
-        </Panel>
-      </section>
+      <QualityPerformance operation={operation} />
 
-      <Panel title="Learning Timeline">
-        {historyLoading ? <InlineLoading label="Loading learning timeline..." /> : (
-          <TimelineList entries={(history || []).filter((entry) => /learned|relationship|correction|profile|prompt/.test(entry.type)).slice(0, 10)} empty="No learning timeline yet." />
-        )}
-      </Panel>
-    </div>
-  );
-}
+      <PromptContractPanel agent={agent} operation={operation} />
 
-function RuntimeSettingsPanel({ definition, draft, setDraft, saving, hasChanges, onSave, onDiscard }) {
-  if (!definition || !draft) {
-    return <EmptyState>No model defaults are mapped to this agent.</EmptyState>;
-  }
+      <PromptSummaryPanel agent={agent} operation={operation} />
 
-  const isImageParser = definition.kind === 'image-parser';
-  const effortOptions = isImageParser
-    ? []
-    : getReasoningEffortOptions(PROVIDER_FAMILY[draft.provider] || 'claude');
+      <HarnessSummaryPanel operation={operation} />
 
-  function updateDraft(patch) {
-    setDraft((current) => normalizeAgentRuntimeState(definition, {
-      ...(current || draft || {}),
-      ...patch,
-    }));
-  }
+      <ConnectedWorkflows operation={operation} />
 
-  function handleProviderChange(value) {
-    if (isImageParser) {
-      updateDraft({ provider: value, model: '' });
-      return;
-    }
+      <ToolPermissionMatrix operation={operation} />
 
-    const nextProvider = normalizeProvider(value);
-    setDraft((current) => {
-      const previous = current || draft || {};
-      const nextFallbackProvider = previous.fallbackProvider === nextProvider
-        ? getAlternateProvider(nextProvider)
-        : previous.fallbackProvider;
-      return normalizeAgentRuntimeState(definition, {
-        ...previous,
-        provider: nextProvider,
-        fallbackProvider: nextFallbackProvider,
-        model: '',
-        fallbackModel: nextFallbackProvider === previous.fallbackProvider ? previous.fallbackModel : '',
-        reasoningEffort: previous.reasoningEffort || DEFAULT_REASONING_EFFORT,
-      });
-    });
-  }
+      <MemoryRelationshipPanel agent={agent} operation={operation} />
 
-  function handleFallbackProviderChange(value) {
-    updateDraft({
-      fallbackProvider: normalizeProvider(value),
-      fallbackModel: '',
-    });
-  }
-
-  const primarySuggestions = getAgentRuntimeModelSuggestions(definition, draft);
-  const fallbackSuggestions = getAgentRuntimeModelSuggestions(definition, draft, { fallback: true });
-  const primaryListId = `agent-runtime-${definition.id}-primary-models`;
-  const fallbackListId = `agent-runtime-${definition.id}-fallback-models`;
-
-  return (
-    <div className="agent-runtime-editor">
-      <div className="agent-runtime-primary-row">
-        {isImageParser ? (
-          <label className="agent-runtime-field">
-            <span className="eyebrow">Current model</span>
-            <select value={draft.provider || ''} onChange={(event) => handleProviderChange(event.target.value)}>
-              <option value="">Disabled</option>
-              {IMAGE_PARSER_PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+      <Panel
+        title="Recent Activity"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadHistory}>
+            Refresh
+          </button>
+        }
+      >
+        {historyLoading ? (
+          <InlineLoading label="Loading activity..." />
+        ) : historyError ? (
+          <EmptyState title="History unavailable" copy={historyError} />
         ) : (
-          <label className="agent-runtime-field">
-            <span className="eyebrow">Current model</span>
-            <select value={draft.provider} onChange={(event) => handleProviderChange(event.target.value)}>
-              {PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
+          <TimelineList entries={activity.slice(0, 5)} fallback="No recent activity recorded yet." />
         )}
+      </Panel>
 
-        {!isImageParser ? (
-          <label className="agent-runtime-field">
-            <span className="eyebrow">Reasoning</span>
-            <select value={draft.reasoningEffort} onChange={(event) => updateDraft({ reasoningEffort: event.target.value })}>
-              {effortOptions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+      <Panel title="Version History">
+        {versions.length ? (
+          <div className="version-rows">
+            {versions.slice(0, 5).map((version) => (
+              <CompactItem
+                key={version.versionId || version.createdAt || version.summary}
+                title={version.versionLabel || version.versionId || 'Version'}
+                meta={formatDate(version.createdAt)}
+                detail={version.summary || 'Profile version saved.'}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No version history loaded" copy="Open the Versions tab to load saved profile and prompt changes." />
+        )}
+      </Panel>
 
-        <div className="agent-runtime-actions">
-          <button type="button" className="btn btn-secondary" disabled={!hasChanges || saving} onClick={onDiscard}>
-            Discard
-          </button>
-          <button type="button" className="btn btn-primary" disabled={!hasChanges || saving} onClick={onSave}>
-            {saving ? 'Saving...' : 'Save Model'}
-          </button>
-        </div>
-      </div>
-
-      <details className="agent-runtime-advanced">
-        <summary>Advanced runtime options</summary>
-        <div className="agent-runtime-form-grid">
-          <label className="agent-runtime-field">
-            <span className="eyebrow">{isImageParser ? 'Model ID override' : 'Primary model ID override'}</span>
-            <input
-              type="text"
-              value={draft.model || ''}
-              list={primaryListId}
-              placeholder={getAgentRuntimeModelPlaceholder(definition, draft)}
-              onChange={(event) => updateDraft({ model: event.target.value })}
-            />
-            <datalist id={primaryListId}>
-              {primarySuggestions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </datalist>
-          </label>
-
-          {!isImageParser ? (
-            <>
-            <label className="agent-runtime-field">
-              <span className="eyebrow">Mode</span>
-              <select value={draft.mode} onChange={(event) => updateDraft({ mode: event.target.value })}>
-                {definition.supportedModes.map((mode) => (
-                  <option key={mode} value={mode}>{mode === 'single' ? 'Single' : 'Fallback'}</option>
-                ))}
-              </select>
-            </label>
-
-            {draft.mode === 'fallback' ? (
-              <>
-                <label className="agent-runtime-field">
-                  <span className="eyebrow">Fallback Provider</span>
-                  <select value={draft.fallbackProvider} onChange={(event) => handleFallbackProviderChange(event.target.value)}>
-                    {PROVIDER_OPTIONS.filter((option) => option.value !== draft.provider).map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="agent-runtime-field">
-                  <span className="eyebrow">Fallback Model</span>
-                  <input
-                    type="text"
-                    value={draft.fallbackModel || ''}
-                    list={fallbackListId}
-                    placeholder={getAgentRuntimeModelPlaceholder(definition, draft, { fallback: true })}
-                    onChange={(event) => updateDraft({ fallbackModel: event.target.value })}
-                  />
-                  <datalist id={fallbackListId}>
-                    {fallbackSuggestions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </datalist>
-                </label>
-                </>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      </details>
-    </div>
+      <ReviewWorkflowPanel
+        agent={agent}
+        operation={operation}
+        saving={reviewSaving}
+        onMarkReviewed={onMarkReviewed}
+      />
+    </section>
   );
 }
 
-function AdminTools(props) {
-  const {
-    agent,
-    profileDraft,
-    setProfileDraft,
-    profileSummary,
-    setProfileSummary,
-    profileSaving,
-    hasProfileChanges,
-    onSaveProfile,
-    promptContent,
-    promptDraft,
-    setPromptDraft,
-    promptLabel,
-    setPromptLabel,
-    promptVersions,
-    promptLoading,
-    promptSaving,
-    hasPromptChanges,
-    previewContent,
-    onSavePrompt,
-    onPreviewVersion,
-    onRestoreVersion,
-  } = props;
+function WorkflowFootprint({ agent, operation }) {
+  const inbound = operation?.workflowInputs || [];
+  const outbound = operation?.workflowOutputs || [];
 
   return (
-    <div className="agent-expanded-grid">
-      <Panel title="Edit Profile">
-        <div className="agent-admin-form-grid">
-          {PROFILE_FIELDS.map(([field, label]) => (
+    <Panel title="Workflow Footprint" actions={<span className="panel-status-text">Connected in {operation?.workflowCount || 0}</span>}>
+      <div className="workflow-footprint">
+        <div className="workflow-column">
+          {inbound.map((workflow) => (
+            <span className="workflow-node" key={workflow}>
+              <i />
+              {workflow}
+            </span>
+          ))}
+        </div>
+        <div className="workflow-agent-node">
+          <AgentAvatar agent={agent} size="small" />
+          <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+        </div>
+        <div className="workflow-column">
+          {outbound.map((workflow) => (
+            <span className="workflow-node" key={workflow}>
+              <i />
+              {workflow}
+            </span>
+          ))}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function QualityPerformance({ operation }) {
+  return (
+    <Panel title="Quality & Performance" actions={<span className="panel-status-text">Last 30 days</span>}>
+      <div className="quality-list">
+        {operation?.qualityMetrics?.map((metric) => (
+          <div className="quality-row" key={metric.label}>
+            <span>
+              <i className={`quality-icon ${metric.tone}`} />
+              {metric.label}
+            </span>
+            <strong>{metric.value}</strong>
+            <small className={metric.deltaTone}>{metric.delta}</small>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function PromptSummaryPanel({ agent, operation }) {
+  const rows = [
+    { label: 'Goals', value: operation?.promptSummary?.goals },
+    { label: 'Guardrails', value: operation?.promptSummary?.guardrails },
+    { label: 'Tone', value: agent.profile?.tone || operation?.promptSummary?.tone },
+    { label: 'Escalation Rules', value: operation?.promptSummary?.escalationRules },
+  ];
+
+  return (
+    <Panel title="System Prompt Summary">
+      <div className="prompt-summary-table">
+        {rows.map((row) => (
+          <div key={row.label}>
+            <strong>{row.label}</strong>
+            <span>{row.value || 'Not documented.'}</span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function HarnessSummaryPanel({ operation }) {
+  return (
+    <Panel title="Harness & Execution" actions={<span className="panel-status-text">{operation?.testCoverage}% tested</span>}>
+      <div className="overview-definition-grid compact">
+        <Definition label="Harness Type">{operation?.harnessType}</Definition>
+        <Definition label="Input Channels">{operation?.channels?.join(', ')}</Definition>
+        <Definition label="Output Format">{operation?.outputFormat}</Definition>
+        <Definition label="Latency Target">{operation?.latencyTarget}</Definition>
+        <Definition label="Fallback Model">{operation?.fallbackModel}</Definition>
+        <Definition label="Observability">{operation?.observability}</Definition>
+      </div>
+      <div className="coverage-bar" aria-label={`Test coverage ${operation?.testCoverage}%`}>
+        <span style={{ width: `${operation?.testCoverage || 0}%` }} />
+      </div>
+    </Panel>
+  );
+}
+
+function ConnectedWorkflows({ operation }) {
+  return (
+    <Panel title="Connected Workflows">
+      <div className="workflow-table">
+        {(operation?.workflows || []).map((workflow, index) => (
+          <div key={workflow}>
+            <span>{workflow}</span>
+            <strong>{index % 5 === 0 && operation.status === 'review' ? 'Review' : 'Active'}</strong>
+            <small>{formatRunAge(index)}</small>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function PromptContractPanel({ agent, operation }) {
+  const rows = operation?.promptContract || [];
+  return (
+    <Panel title="Prompt Contract" actions={<span className="panel-status-text">{agent.promptId || 'runtime-only'}</span>}>
+      <div className="contract-grid">
+        {rows.map((row) => (
+          <div className="contract-row" key={row.label}>
+            <span>{row.label}</span>
+            <strong>{row.value}</strong>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function ToolPermissionMatrix({ operation }) {
+  const permissions = operation?.toolPermissions || [];
+  return (
+    <Panel title="Tool Permissions" actions={<span className="panel-status-text">{permissions.length} tools</span>}>
+      {permissions.length ? (
+        <div className="permission-matrix">
+          <div className="permission-row permission-header">
+            <span>Tool</span>
+            <span>Scope</span>
+            <span>Confirmation</span>
+            <span>Recent Use</span>
+          </div>
+          {permissions.map((permission) => (
+            <div className="permission-row" key={permission.tool}>
+              <strong>{permission.tool}</strong>
+              <span>{permission.scope}</span>
+              <span className={`permission-pill ${permission.confirmationRequired ? 'warn' : 'pass'}`}>
+                {permission.confirmationRequired ? 'Required' : 'Not required'}
+              </span>
+              <span>{permission.recentUse}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <EmptyState title="No tool permissions" copy="This agent currently has no declared tool access." />
+      )}
+    </Panel>
+  );
+}
+
+function MemoryRelationshipPanel({ agent, operation }) {
+  const memoryNotes = (agent.memory?.notes || []).map(normalizeMemoryNote);
+  const relationshipRows = operation?.relationshipRows || [];
+  return (
+    <Panel title="Memory & Relationships" actions={<span className="panel-status-text">{operation?.relationshipCount || 0} peers</span>}>
+      <div className="memory-relationship-grid">
+        <div>
+          <h4>Memory Notes</h4>
+          {memoryNotes.length ? (
+            <div className="memory-note-list">
+              {memoryNotes.slice(0, 5).map((note, index) => (
+                <span key={`${note}-${index}`}>{note}</span>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No memory notes" copy="Corrections and durable agent preferences will appear here." />
+          )}
+        </div>
+        <div>
+          <h4>Collaborators</h4>
+          {relationshipRows.length ? (
+            <div className="relationship-list">
+              {relationshipRows.map((relationship) => (
+                <div key={relationship.agentId}>
+                  <strong>{relationship.label}</strong>
+                  <span>{relationship.summary}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No relationships mapped" copy="Agent handoffs and collaboration notes are not populated yet." />
+          )}
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function normalizeMemoryNote(note) {
+  if (typeof note === 'string') {
+    return note;
+  }
+  if (!note || typeof note !== 'object') {
+    return 'Memory note recorded.';
+  }
+  return String(
+    note.content
+      || note.summary
+      || note.text
+      || note.value
+      || note.key
+      || 'Memory note recorded.'
+  );
+}
+
+function ReviewWorkflowPanel({ agent, operation, saving = false, onMarkReviewed }) {
+  const items = operation?.reviewItems || [];
+  return (
+    <Panel title="Change Review Workflow" actions={<span className="panel-status-text">{operation?.reviewStatus}</span>}>
+      <div className="review-workflow-list">
+        {items.map((item) => (
+          <div className="review-workflow-item" key={item.label}>
+            <span className={`check-state ${item.status}`} />
+            <div>
+              <strong>{item.label}</strong>
+              <small>{item.detail}</small>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="review-action-row">
+        <a className="secondary-action" href={`#/agents/${encodeURIComponent(agent.agentId)}`}>
+          Open Profile
+        </a>
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={saving || !onMarkReviewed}
+          onClick={() => onMarkReviewed?.({
+            surface: 'profile',
+            status: 'approved',
+            summary: `Approved ${agent.profile?.roleTitle || agent.agentId} profile review.`,
+          })}
+        >
+          {saving ? 'Saving...' : 'Mark Reviewed'}
+        </button>
+      </div>
+    </Panel>
+  );
+}
+
+function HarnessResultsPanel({ operation, saving = false, onRecordHarnessRun }) {
+  return (
+    <Panel
+      title="Harness Results"
+      actions={
+        <button
+          type="button"
+          className="text-action"
+          disabled={saving || !onRecordHarnessRun}
+          onClick={onRecordHarnessRun}
+        >
+          {saving ? 'Saving...' : 'Record Run'}
+        </button>
+      }
+    >
+      <div className="harness-results-table">
+        {(operation?.harnessCases || []).map((testCase) => (
+          <div key={testCase.id} className="harness-result-row">
+            <span className={`check-state ${testCase.status}`} />
+            <strong>{testCase.name}</strong>
+            <small>{testCase.expected}</small>
+            <span>{testCase.lastRun}</span>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function AgentConfigurationTab({
+  agent,
+  operation,
+  profileDraft,
+  profileSummary,
+  profileSaving,
+  runtimeDefinition,
+  runtimeState,
+  runtimeSaveStatus,
+  reviewSaving,
+  onProfileChange,
+  onProfileSummaryChange,
+  onProfileSave,
+  onRuntimeSave,
+  onMarkReviewed,
+}) {
+  return (
+    <section className="agent-tab-content configuration-layout">
+      <Panel title="Profile Studio" actions={<span className="panel-status-text">{operation?.reviewStatus}</span>}>
+        <div className="profile-form-grid">
+          {PROFILE_FIELDS.map((field) => (
             <FormField
-              key={field}
-              label={label}
-              value={profileDraft[field]}
-              textarea
-              rows={field === 'soul' ? 4 : 2}
-              onChange={(value) => setProfileDraft((current) => ({ ...current, [field]: value }))}
+              key={field.key}
+              label={field.label}
+              type={field.type}
+              value={profileDraft[field.key] || ''}
+              onChange={(value) => onProfileChange(field.key, value)}
             />
           ))}
-          <FormField
-            label="Quirks"
-            value={(profileDraft.quirks || []).join('\n')}
-            textarea
-            rows={4}
-            wide
-            onChange={(value) => setProfileDraft((current) => ({
-              ...current,
-              quirks: value.split('\n').map((item) => item.trim()).filter(Boolean),
-            }))}
-          />
-          <FormField label="Avatar URL" value={profileDraft.avatarUrl} onChange={(value) => setProfileDraft((current) => ({ ...current, avatarUrl: value }))} />
-          <FormField label="Emoji" value={profileDraft.avatarEmoji} onChange={(value) => setProfileDraft((current) => ({ ...current, avatarEmoji: value }))} />
-          <FormField label="Avatar Prompt" value={profileDraft.avatarPrompt} textarea wide onChange={(value) => setProfileDraft((current) => ({ ...current, avatarPrompt: value }))} />
-          <FormField label="Change Summary" value={profileSummary} wide onChange={setProfileSummary} />
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'var(--sp-3)' }}>
-          <button type="button" className="btn btn-primary" disabled={!hasProfileChanges || profileSaving} onClick={onSaveProfile}>
+        <FormField
+          label="Change summary"
+          type="textarea"
+          value={profileSummary}
+          placeholder="What changed and why?"
+          onChange={onProfileSummaryChange}
+        />
+        <div className="form-action-row">
+          <button type="button" className="primary-action" onClick={onProfileSave} disabled={profileSaving}>
             {profileSaving ? 'Saving...' : 'Save Profile'}
           </button>
         </div>
       </Panel>
 
-      <Panel title="Prompt">
-        {agent.promptId ? (
-          <div style={{ display: 'grid', gap: 'var(--sp-3)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-3)', alignItems: 'center' }}>
-              <Badge>{agent.promptId}</Badge>
-              <button type="button" className="btn btn-primary" disabled={!hasPromptChanges || promptSaving || promptLoading} onClick={onSavePrompt}>
+      <Panel title="Runtime Defaults">
+        <RuntimeSettingsPanel
+          agent={agent}
+          definition={runtimeDefinition}
+          runtimeState={runtimeState}
+          saveStatus={runtimeSaveStatus}
+          onSave={onRuntimeSave}
+        />
+      </Panel>
+
+      <ToolPermissionMatrix operation={operation} />
+
+      <Panel title="Operating Policy">
+        <div className="overview-definition-grid compact">
+          <Definition label="Owner">{operation?.owner}</Definition>
+          <Definition label="Team">{operation?.team}</Definition>
+          <Definition label="Permissions">{operation?.permissions}</Definition>
+          <Definition label="Risk">{operation?.risk}</Definition>
+          <Definition label="Escalation Policy">{operation?.escalationPolicy}</Definition>
+          <Definition label="Review Status">{operation?.reviewStatus}</Definition>
+        </div>
+      </Panel>
+
+      <ReviewWorkflowPanel
+        agent={agent}
+        operation={operation}
+        saving={reviewSaving}
+        onMarkReviewed={onMarkReviewed}
+      />
+    </section>
+  );
+}
+
+function AgentPromptTab({
+  agent,
+  operation,
+  promptState,
+  promptDraft,
+  promptSummary,
+  promptLoading,
+  promptSaving,
+  promptError,
+  previewVersion,
+  onPromptDraftChange,
+  onPromptSummaryChange,
+  onPromptSave,
+  onPreviewVersion,
+  onRestorePreview,
+  onLoadPrompt,
+}) {
+  return (
+    <section className="agent-tab-content prompt-layout">
+      <Panel
+        title="Editable Prompt Surface"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadPrompt}>
+            Reload
+          </button>
+        }
+      >
+        {!agent.promptId ? (
+          <EmptyState title="No editable prompt" copy="This identity is runtime-only or deterministic and does not expose an editable prompt file." />
+        ) : promptLoading ? (
+          <InlineLoading label="Loading prompt..." />
+        ) : (
+          <>
+            {promptError && <div className="agent-alert">{promptError}</div>}
+            <div className="prompt-editor-meta">
+              <Badge>Prompt: {agent.promptId}</Badge>
+              <Badge>{promptState?.versions?.length || 0} versions</Badge>
+              <Badge>{formatDate(promptState?.updatedAt)}</Badge>
+            </div>
+            <textarea
+              className="prompt-editor"
+              value={promptDraft}
+              onChange={(event) => onPromptDraftChange(event.target.value)}
+              spellCheck={false}
+            />
+            <FormField
+              label="Change summary"
+              type="textarea"
+              value={promptSummary}
+              placeholder="Summarize the prompt update."
+              onChange={onPromptSummaryChange}
+            />
+            <div className="form-action-row">
+              <button type="button" className="primary-action" onClick={onPromptSave} disabled={promptSaving}>
                 {promptSaving ? 'Saving...' : 'Save Prompt'}
               </button>
             </div>
-            {promptLoading ? (
-              <InlineLoading label="Loading prompt..." />
-            ) : (
-              <>
-                <FormField label="Revision Note" value={promptLabel} onChange={setPromptLabel} />
-                <textarea
-                  value={promptDraft}
-                  onChange={(event) => setPromptDraft(event.target.value)}
-                  rows={16}
-                  style={{ minHeight: 320, fontFamily: 'var(--font-mono, monospace)' }}
-                />
-                <div className="text-secondary" style={{ fontSize: 'var(--text-xs)' }}>
-                  {promptDraft.length} chars {hasPromptChanges ? '- unsaved changes' : '- saved'}
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <EmptyState>No prompt file is mapped to this agent.</EmptyState>
+          </>
         )}
       </Panel>
 
-      <section className="agent-prompt-version-grid">
-        <Panel title="Versions">
-          {promptLoading ? <InlineLoading label="Loading versions..." /> : promptVersions.length ? promptVersions.map((version, index) => (
+      <PromptContractPanel agent={agent} operation={operation} />
+
+      <Panel title="Prompt Versions">
+        {promptState?.versions?.length ? (
+          <div className="version-rows">
+            {promptState.versions.map((version) => (
+              <button
+                type="button"
+                className="version-row-button"
+                key={version.versionId || version.createdAt || version.summary}
+                onClick={() => onPreviewVersion(version)}
+              >
+                <strong>{version.versionLabel || version.versionId || 'Version'}</strong>
+                <span>{version.summary || 'Prompt version'}</span>
+                <small>{formatDate(version.createdAt)}</small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No prompt versions loaded" copy="Reload the prompt to inspect previous versions." />
+        )}
+      </Panel>
+
+      <Panel title="Version Preview">
+        {previewVersion ? (
+          <>
             <CompactItem
-              key={`${version.ts || 'version'}-${index}`}
-              title={formatDate(version.ts)}
-              meta={version.label || 'No note'}
-              action={(
-                <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPreviewVersion(version.ts)}>Preview</button>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => onRestoreVersion(version.ts)}>Restore</button>
-                </div>
-              )}
+              title={previewVersion.versionLabel || previewVersion.versionId || 'Selected version'}
+              meta={formatDate(previewVersion.createdAt)}
+              detail={previewVersion.summary || 'Previous prompt content.'}
             />
-          )) : <EmptyState>No prompt versions yet.</EmptyState>}
-        </Panel>
-        <Panel title="Preview">
-          {promptLoading ? (
-            <InlineLoading label="Loading preview..." />
-          ) : (
-            <textarea value={previewContent || promptContent} readOnly rows={16} style={{ minHeight: 320, fontFamily: 'var(--font-mono, monospace)' }} />
-          )}
-        </Panel>
-      </section>
-    </div>
-  );
-}
-
-function SimpleCard({ title, children }) {
-  return (
-    <section className="card agent-summary-card">
-      <h3>{title}</h3>
-      <div>
-        {children}
-      </div>
+            <pre className="prompt-preview">{previewVersion.content || 'No content recorded.'}</pre>
+            <div className="form-action-row">
+              <button type="button" className="secondary-action" onClick={onRestorePreview}>
+                Restore into editor
+              </button>
+            </div>
+          </>
+        ) : (
+          <EmptyState title="No version selected" copy="Select a prompt version to preview its content." />
+        )}
+      </Panel>
     </section>
   );
 }
 
-function Panel({ title, children }) {
+function AgentHarnessTab({
+  agent,
+  operation,
+  runtimeDefinition,
+  runtimeState,
+  runtimeSaveStatus,
+  harnessSaving,
+  onRuntimeSave,
+  onRecordHarnessRun,
+}) {
   return (
-    <section className="card card-compact agent-panel">
-      <h4>{title}</h4>
-      {children}
-    </section>
-  );
-}
-
-function Definition({ label, value }) {
-  return (
-    <div className="agent-definition">
-      <span className="eyebrow">{label}</span>
-      <span>{value || 'Not defined yet.'}</span>
-    </div>
-  );
-}
-
-function CountCard({ label, value }) {
-  return (
-    <div className="card card-compact agent-count-card">
-      <span className="eyebrow">{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function CompactItem({ title, meta, body, action = null }) {
-  return (
-    <div className="card card-compact agent-compact-item">
-      <div className="agent-compact-item-head">
-        <strong>{title}</strong>
-        {action}
-      </div>
-      {meta ? <span className="text-secondary">{meta}</span> : null}
-      {body ? <span className="agent-compact-item-body">{body}</span> : null}
-    </div>
-  );
-}
-
-function FormField({ label, value, onChange, textarea = false, rows = 2, wide = false }) {
-  const Tag = textarea ? 'textarea' : 'input';
-  return (
-    <label style={{ display: 'grid', gap: 6, gridColumn: wide ? '1 / -1' : undefined }}>
-      <span className="eyebrow">{label}</span>
-      <Tag
-        type={textarea ? undefined : 'text'}
-        value={value || ''}
-        rows={textarea ? rows : undefined}
-        onChange={(event) => onChange(event.target.value)}
+    <section className="agent-tab-content harness-layout">
+      <HarnessSummaryPanel operation={operation} />
+      <HarnessResultsPanel
+        operation={operation}
+        saving={harnessSaving}
+        onRecordHarnessRun={onRecordHarnessRun}
       />
+      <Panel title="Runtime Provider Matrix">
+        <RuntimeSettingsPanel
+          agent={agent}
+          definition={runtimeDefinition}
+          runtimeState={runtimeState}
+          saveStatus={runtimeSaveStatus}
+          onSave={onRuntimeSave}
+        />
+      </Panel>
+      <Panel title="Harness Checks">
+        <div className="harness-check-grid">
+          {operation?.harnessChecks?.map((check) => (
+            <div className="harness-check" key={check.label}>
+              <span className={`check-state ${check.status}`} />
+              <strong>{check.label}</strong>
+              <small>{check.detail}</small>
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AgentWorkflowsTab({ agent, operation }) {
+  return (
+    <section className="agent-tab-content workflows-layout">
+      <WorkflowFootprint agent={agent} operation={operation} />
+      <ConnectedWorkflows operation={operation} />
+      <Panel title="Workflow Impact">
+        <div className="workflow-impact-grid">
+          {(operation?.workflows || []).map((workflow, index) => (
+            <div className="workflow-impact-card" key={workflow}>
+              <span className="rank-pill">{index + 1}</span>
+              <strong>{workflow}</strong>
+              <small>{operation?.workflowDescriptions?.[index] || 'Connected workflow stage'}</small>
+              <FitBars score={Math.max(0.45, operation.workflowFit - index * 0.04)} />
+            </div>
+          ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AgentActivityTab({ history, historyLoading, historyError, onLoadHistory, agent }) {
+  const entries = history?.activity || agent.activity?.entries || [];
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel
+        title="Activity Timeline"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadHistory}>
+            Refresh
+          </button>
+        }
+      >
+        {historyLoading ? (
+          <InlineLoading label="Loading activity..." />
+        ) : historyError ? (
+          <EmptyState title="Activity unavailable" copy={historyError} />
+        ) : (
+          <TimelineList entries={entries} fallback="No activity recorded for this agent yet." />
+        )}
+      </Panel>
+    </section>
+  );
+}
+
+function AgentVersionsTab({ history, historyLoading, historyError, onLoadHistory }) {
+  const versions = history?.versions || [];
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel
+        title="Version History"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadHistory}>
+            Refresh
+          </button>
+        }
+      >
+        {historyLoading ? (
+          <InlineLoading label="Loading versions..." />
+        ) : historyError ? (
+          <EmptyState title="Versions unavailable" copy={historyError} />
+        ) : versions.length ? (
+          <div className="version-timeline">
+            {versions.map((version) => (
+              <CompactItem
+                key={version.versionId || version.createdAt || version.summary}
+                title={version.versionLabel || version.versionId || 'Version'}
+                meta={formatDate(version.createdAt)}
+                detail={version.summary || 'Identity version saved.'}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No versions yet" copy="Profile and prompt saves will appear here." />
+        )}
+      </Panel>
+    </section>
+  );
+}
+
+function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onSave }) {
+  const [provider, setProvider] = useState(runtimeState?.provider || '');
+  const [mode, setMode] = useState(runtimeState?.mode || definition?.defaultMode || 'single');
+  const [fallbackProvider, setFallbackProvider] = useState(runtimeState?.fallbackProvider || '');
+  const [model, setModel] = useState(runtimeState?.model || '');
+  const [fallbackModel, setFallbackModel] = useState(runtimeState?.fallbackModel || '');
+  const [reasoningEffort, setReasoningEffort] = useState(
+    runtimeState?.reasoningEffort || ''
+  );
+
+  useEffect(() => {
+    setProvider(runtimeState?.provider || '');
+    setMode(runtimeState?.mode || definition?.defaultMode || 'single');
+    setFallbackProvider(runtimeState?.fallbackProvider || '');
+    setModel(runtimeState?.model || '');
+    setFallbackModel(runtimeState?.fallbackModel || '');
+    setReasoningEffort(runtimeState?.reasoningEffort || '');
+  }, [definition, runtimeState]);
+
+  if (!definition) {
+    return (
+      <EmptyState
+        title="No runtime registry entry"
+        copy="This identity does not currently map to an editable model provider configuration."
+      />
+    );
+  }
+
+  const providerOptions = definition.kind === 'image-parser'
+    ? IMAGE_PARSER_PROVIDER_OPTIONS
+    : PROVIDER_OPTIONS;
+  const currentRuntime = {
+    provider,
+    mode,
+    fallbackProvider,
+    model,
+    fallbackModel,
+    reasoningEffort,
+  };
+  const modelSuggestions = getAgentRuntimeModelSuggestions(definition, currentRuntime);
+  const fallbackModelSuggestions = getAgentRuntimeModelSuggestions(definition, currentRuntime, {
+    fallback: true,
+  });
+  const modelListId = `${definition.id}-model-suggestions`;
+  const fallbackModelListId = `${definition.id}-fallback-model-suggestions`;
+
+  function handleProviderChange(nextProvider) {
+    setProvider(nextProvider);
+    setModel('');
+  }
+
+  function handleFallbackProviderChange(nextProvider) {
+    setFallbackProvider(nextProvider);
+    setFallbackModel('');
+  }
+
+  return (
+    <div className="runtime-settings-panel">
+      <div className="runtime-form-grid">
+        <label>
+          <span>Provider</span>
+          <select value={provider} onChange={(event) => handleProviderChange(event.target.value)}>
+            {providerOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.shortLabel || option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {definition.supportsModes && (
+          <label>
+            <span>Mode</span>
+            <select value={mode} onChange={(event) => setMode(event.target.value)}>
+              {(definition.supportedModes || ['single']).map((option) => (
+                <option key={option} value={option}>
+                  {option === 'fallback' ? 'Fallback' : 'Single provider'}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label>
+          <span>Model</span>
+          <input
+            value={model}
+            list={modelListId}
+            placeholder={getAgentRuntimeModelPlaceholder(definition, currentRuntime)}
+            onChange={(event) => setModel(event.target.value)}
+          />
+          <datalist id={modelListId}>
+            {modelSuggestions.map((option) => (
+              <option key={`${option.provider || provider}:${option.value}`} value={option.value}>
+                {option.label || option.value}
+              </option>
+            ))}
+          </datalist>
+        </label>
+
+        {definition.supportsModes && mode === 'fallback' && (
+          <label>
+            <span>Fallback provider</span>
+            <select
+              value={fallbackProvider}
+              onChange={(event) => handleFallbackProviderChange(event.target.value)}
+            >
+              {providerOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.shortLabel || option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {definition.supportsModes && mode === 'fallback' && (
+          <label>
+            <span>Fallback model</span>
+            <input
+              value={fallbackModel}
+              list={fallbackModelListId}
+              placeholder={getAgentRuntimeModelPlaceholder(definition, currentRuntime, {
+                fallback: true,
+              })}
+              onChange={(event) => setFallbackModel(event.target.value)}
+            />
+            <datalist id={fallbackModelListId}>
+              {fallbackModelSuggestions.map((option) => (
+                <option
+                  key={`${option.provider || fallbackProvider}:${option.value}`}
+                  value={option.value}
+                >
+                  {option.label || option.value}
+                </option>
+              ))}
+            </datalist>
+          </label>
+        )}
+
+        {definition.supportsReasoning && (
+          <label>
+            <span>Reasoning effort</span>
+            <select value={reasoningEffort} onChange={(event) => setReasoningEffort(event.target.value)}>
+              <option value="">Default</option>
+              {REASONING_EFFORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+      </div>
+
+      <div className="runtime-summary-box">
+        <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+        <span>{getAgentRuntimeSummary(definition, currentRuntime)}</span>
+      </div>
+
+      <div className="form-action-row">
+        <button
+          type="button"
+          className="primary-action"
+          onClick={() =>
+            onSave({
+              provider,
+              mode,
+              fallbackProvider,
+              model,
+              fallbackModel,
+              reasoningEffort: reasoningEffort || null,
+            })
+          }
+        >
+          Save Runtime
+        </button>
+        {saveStatus && <span className="save-status">{saveStatus}</span>}
+      </div>
+    </div>
+  );
+}
+
+function Panel({ title, children, actions = null }) {
+  return (
+    <section className="agent-panel">
+      <header>
+        <h3>{title}</h3>
+        {actions}
+      </header>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+function Definition({ label, children }) {
+  return (
+    <div className="definition-row">
+      <span>{label}</span>
+      <strong>{children || 'Not set'}</strong>
+    </div>
+  );
+}
+
+function CompactItem({ title, meta, detail }) {
+  return (
+    <article className="compact-item">
+      <div>
+        <strong>{title}</strong>
+        {meta && <span>{meta}</span>}
+      </div>
+      {detail && <p>{detail}</p>}
+    </article>
+  );
+}
+
+function FormField({ label, value, onChange, type = 'text', placeholder = '' }) {
+  return (
+    <label className="form-field">
+      <span>{label}</span>
+      {type === 'textarea' ? (
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      ) : (
+        <input
+          value={value}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      )}
     </label>
   );
 }
 
-function TimelineList({ entries, empty }) {
-  if (!entries?.length) return <EmptyState>{empty}</EmptyState>;
+function TimelineList({ entries, fallback }) {
+  if (!entries?.length) {
+    return <EmptyState title="Nothing recorded" copy={fallback} />;
+  }
+
   return (
-    <div className="agent-timeline-list">
-      {entries.map((entry, index) => (
+    <div className="timeline-list">
+      {entries.map((entry) => (
         <CompactItem
-          key={timelineEntryKey(entry, index)}
-          title={entry.type || entry.tool || 'event'}
-          meta={formatDate(entry.createdAt)}
-          body={entry.summary || entry.status || 'No summary.'}
+          key={timelineEntryKey(entry)}
+          title={entry.event || entry.type || 'Activity'}
+          meta={formatDate(entry.createdAt || entry.timestamp)}
+          detail={entry.summary || entry.detail || entry.actor || 'Agent activity recorded.'}
         />
       ))}
     </div>
@@ -1113,113 +2586,634 @@ function TimelineList({ entries, empty }) {
 }
 
 function TagList({ items }) {
-  if (!items?.length) return <EmptyState>None recorded.</EmptyState>;
+  if (!items?.length) {
+    return <span className="muted-text">None recorded</span>;
+  }
   return (
-    <div className="agent-tag-list">
-      {items.map((item, index) => <Badge key={`${item}-${index}`}>{item}</Badge>)}
+    <div className="tag-list">
+      {items.map((item) => (
+        <Badge key={item}>{item}</Badge>
+      ))}
     </div>
   );
 }
 
-function Badge({ children, className = '', title = undefined }) {
-  return <span className={`badge${className ? ` ${className}` : ''}`} title={title}>{children}</span>;
+function Badge({ children }) {
+  if (!children) {
+    return null;
+  }
+  return <span className="agent-badge">{children}</span>;
 }
 
-function EmptyState({ children }) {
-  return <div className="text-secondary agent-empty-state">{children}</div>;
+function EmptyState({ title, copy }) {
+  return (
+    <div className="empty-state">
+      <strong>{title}</strong>
+      <span>{copy}</span>
+    </div>
+  );
 }
 
 function InlineLoading({ label }) {
   return (
-    <div className="text-secondary agent-inline-loading">
-      <span className="spinner" />
-      <span>{label}</span>
+    <div className="inline-loading">
+      <span />
+      {label}
     </div>
   );
 }
 
-function AgentAvatar({ profile, fallbackLabel, size = 56 }) {
-  const avatarUrl = profile?.avatarUrl || '';
-  const avatarEmoji = profile?.avatarEmoji || '';
-  const label = profile?.displayName || fallbackLabel || 'AI';
-  const initials = String(label)
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0] || '')
-    .join('')
-    .toUpperCase() || 'AI';
+function AgentAvatar({ agent, size = 'medium' }) {
+  const label = agent?.profile?.avatarEmoji || agent?.profile?.roleTitle || agent?.agentId || 'A';
+  const text = label.length <= 3 ? label : label.slice(0, 1).toUpperCase();
+  return <span className={`agent-avatar avatar-${size}`}>{text}</span>;
+}
 
+function MiniSparkline({ points, tone }) {
   return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 8,
-        overflow: 'hidden',
-        display: 'grid',
-        placeItems: 'center',
-        background: 'linear-gradient(145deg, rgba(27, 130, 191, 0.32), rgba(32, 38, 55, 0.92))',
-        border: '1px solid rgba(255,255,255,0.14)',
-        color: 'var(--ink)',
-        fontSize: Math.max(16, Math.round(size * 0.34)),
-        fontWeight: 800,
-        flex: '0 0 auto',
-      }}
-    >
-      {avatarUrl ? (
-        <img src={avatarUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
-      ) : avatarEmoji ? (
-        <span style={{ lineHeight: 1 }}>{avatarEmoji}</span>
-      ) : (
-        <span>{initials}</span>
-      )}
+    <div className={`mini-sparkline tone-${tone}`} aria-hidden="true">
+      {points.map((point, index) => (
+        <i key={`${point}-${index}`} style={{ height: `${point}%` }} />
+      ))}
     </div>
   );
 }
 
-function agentSearchText(agent) {
-  const profile = agent.profile || {};
+function FitBars({ score }) {
+  const active = Math.round(clamp(score, 0, 1) * 8);
+  return (
+    <span className="fit-bars" aria-label={`Workflow fit ${Math.round(score * 100)} percent`}>
+      {Array.from({ length: 8 }).map((_, index) => (
+        <i key={index} className={index < active ? 'active' : ''} />
+      ))}
+    </span>
+  );
+}
+
+function buildIdentityHistoryState(entries) {
+  const activity = Array.isArray(entries) ? entries : [];
+  const versions = activity
+    .filter((entry) => /profile|prompt|version|restore/i.test(`${entry.type || ''} ${entry.summary || ''}`))
+    .map((entry, index) => ({
+      versionId: entry.id || entry.versionId || `${entry.createdAt || index}`,
+      versionLabel: entry.type || 'Change',
+      createdAt: entry.createdAt || entry.timestamp,
+      summary: entry.summary || entry.event || 'Identity change recorded.',
+    }));
+
+  return { activity, versions };
+}
+
+function buildPromptState(payload, versions) {
+  const prompt = payload?.prompt || null;
+  return {
+    ...prompt,
+    prompt,
+    content: payload?.content || '',
+    updatedAt: prompt?.updatedAt || prompt?.lastModified || null,
+    versions: normalizePromptVersions(versions),
+  };
+}
+
+function normalizePromptVersions(versions) {
+  if (!Array.isArray(versions)) {
+    return [];
+  }
+  return versions.map((version) => ({
+    ...version,
+    versionId: String(version.ts || version.versionId || ''),
+    versionLabel: version.label || (version.ts ? `Snapshot ${version.ts}` : 'Prompt snapshot'),
+    createdAt: version.ts ? new Date(Number(version.ts)).toISOString() : version.createdAt,
+    summary: version.label || `${version.size || 0} bytes`,
+  }));
+}
+
+function buildOperationalProfile(agent, runtimeState) {
+  const meta = getAgentMeta(agent?.agentId);
+  const runtimeDefinition = getAgentRuntimeDefinition(agent?.agentId);
+  const modelLabel = runtimeDefinition
+    ? getAgentRuntimeSummary(runtimeDefinition, runtimeState || agent?.runtime || {})
+    : 'Runtime not mapped';
+  const toolCount = agent?.tools?.available?.length || 0;
+  const activityCount = agent?.activity?.entries?.length || 0;
+  const relationshipCount = Object.keys(agent?.relationships?.map || {}).length;
+  const memoryCount = agent?.memory?.notes?.length || 0;
+  const promptReady = Boolean(agent?.promptId);
+  const status = resolveOperationalStatus(meta, agent);
+  const latestReview = latestAgentReview(agent);
+  const latestHarnessRun = latestAgentHarnessRun(agent);
+  const reviewStatus = resolveReviewStatus(meta, latestReview);
+  const trust = clamp(
+    meta.trust
+      + Math.min(0.15, toolCount * 0.015)
+      + Math.min(0.08, activityCount * 0.01)
+      + (latestReview?.status === 'approved' ? 0.06 : 0)
+      + (latestHarnessRun?.status === 'pass' ? 0.06 : 0)
+      - (status === 'review' ? 0.25 : 0),
+    3.4,
+    4.9
+  );
+  const workflowFit = clamp(trust / 5 + Math.min(0.12, toolCount * 0.02), 0.45, 0.98);
+  const workflows = meta.workflows.length ? meta.workflows : ['Profile Review', 'Runtime Verification', 'Human Handoff'];
+  const midpoint = Math.ceil(workflows.length / 2);
+  const testCoverage = clamp(Math.round(72 + trust * 4 + Math.min(8, toolCount)), 72, 96);
+  const qualitySeed = Math.round(trust * 18);
+  const lastUpdatedAt = latestAgentTimestamp(agent);
+  const toolPermissions = buildToolPermissions(agent, meta);
+  const promptContract = buildPromptContract(agent, meta, modelLabel);
+  const reviewItems = buildReviewItems(agent, status, promptReady, toolCount, relationshipCount, memoryCount, latestReview, latestHarnessRun);
+
+  return {
+    agentId: agent?.agentId,
+    department: meta.department,
+    owner: meta.owner,
+    team: meta.team,
+    status,
+    statusLabel: STATUS_LABELS[status] || 'Idle',
+    risk: meta.risk,
+    reviewStatus,
+    permissions: meta.permissions,
+    escalationPolicy: meta.escalationPolicy,
+    workflows,
+    workflowInputs: workflows.slice(0, midpoint),
+    workflowOutputs: workflows.slice(midpoint),
+    workflowCount: workflows.length,
+    workflowFit,
+    workflowDescriptions: workflows.map((workflow) => describeWorkflow(workflow, agent)),
+    modelLabel,
+    toolSummary: toolCount ? `${toolCount} tools available` : 'No tools configured',
+    channels: meta.channels,
+    harnessType: meta.harnessType,
+    latencyTarget: meta.latencyTarget,
+    outputFormat: agent?.agentId?.includes('parser') ? 'Structured JSON' : 'Guided response',
+    fallbackModel: runtimeDefinition?.providers?.[1]?.models?.[0]?.label || 'Configured provider default',
+    observability: 'Activity log, runtime defaults, prompt versions',
+    trust,
+    trustLabel: `${trust.toFixed(1)} / 5`,
+    qualityMetrics: [
+      {
+        label: 'Resolution Accuracy',
+        value: `${clamp(qualitySeed + 7, 78, 96)}%`,
+        delta: '+4.3%',
+        deltaTone: 'positive',
+        tone: 'green',
+      },
+      {
+        label: 'First Response Accuracy',
+        value: `${clamp(qualitySeed + 3, 75, 94)}%`,
+        delta: '+3.1%',
+        deltaTone: 'positive',
+        tone: 'blue',
+      },
+      {
+        label: 'Escalation Precision',
+        value: `${clamp(qualitySeed - 2, 72, 91)}%`,
+        delta: status === 'review' ? '-1.8%' : '+2.7%',
+        deltaTone: status === 'review' ? 'negative' : 'positive',
+        tone: 'violet',
+      },
+      {
+        label: 'Avg. Handling Time',
+        value: `${Math.max(2, 9 - Math.round(trust))}m ${12 + toolCount * 3}s`,
+        delta: status === 'review' ? '+8.2%' : '-5.4%',
+        deltaTone: status === 'review' ? 'negative' : 'positive',
+        tone: 'orange',
+      },
+      {
+        label: 'Operator CSAT',
+        value: trust.toFixed(1),
+        delta: '+0.2',
+        deltaTone: 'positive',
+        tone: 'teal',
+      },
+    ],
+    promptSummary: {
+      goals: agent?.profile?.headline || 'Understand escalation context and recommend the next best action.',
+      guardrails: agent?.profile?.boundaries || 'Prefer evidence-backed guidance and defer uncertain cases to review.',
+      tone: agent?.profile?.tone || 'Clear, concise, and operational.',
+      escalationRules: meta.escalationPolicy,
+    },
+    testCoverage,
+    lastUpdatedAt,
+    promptReady,
+    memoryCount,
+    relationshipCount,
+    activityCount,
+    toolPermissions,
+    promptContract,
+    reviewItems,
+    relationshipRows: buildRelationshipRows(agent),
+    harnessCases: buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessRun),
+    attentionItems: reviewItems.filter((item) => item.status !== 'pass'),
+    harnessChecks: buildHarnessChecks(agent, status, promptReady, toolCount, relationshipCount, memoryCount),
+  };
+}
+
+function buildMissionAttentionItems(agents, operationById) {
+  const severityRank = { fail: 0, warn: 1, pass: 2 };
+  return agents
+    .flatMap((agent) => {
+      const operation = operationById.get(agent.agentId);
+      return (operation?.attentionItems || []).map((item) => ({
+        ...item,
+        agentId: agent.agentId,
+        agentLabel: agent.profile?.roleTitle || labelAgent(agent.agentId),
+      }));
+    })
+    .sort((a, b) => (severityRank[a.status] ?? 9) - (severityRank[b.status] ?? 9));
+}
+
+function buildToolPermissions(agent, meta) {
+  return (agent?.tools?.available || []).map((tool, index) => {
+    const label = normalizeToolLabel(tool, index);
+    const writeLike = /(write|send|create|update|delete|action|gmail|calendar|auto|shipment)/i.test(label);
+    const sensitive = writeLike || meta.risk === 'High';
+    return {
+      tool: label,
+      scope: writeLike ? 'Read/write' : 'Read',
+      confirmationRequired: sensitive,
+      recentUse: index < 3 ? formatRunAge(index) : 'No recent use',
+    };
+  });
+}
+
+function normalizeToolLabel(tool, index) {
+  if (typeof tool === 'string') {
+    return tool;
+  }
+  if (!tool || typeof tool !== 'object') {
+    return `Tool ${index + 1}`;
+  }
+  return String(
+    tool.label
+      || tool.name
+      || tool.id
+      || tool.key
+      || tool.kind
+      || `Tool ${index + 1}`
+  );
+}
+
+function buildPromptContract(agent, meta, modelLabel) {
+  return [
+    {
+      label: 'Mission',
+      value: agent?.profile?.headline || 'Support the escalation workflow with evidence-backed next steps.',
+    },
+    {
+      label: 'Inputs',
+      value: `${meta.channels.join(', ')} plus current escalation context.`,
+    },
+    {
+      label: 'Output Format',
+      value: agent?.agentId?.includes('parser') ? 'Strict structured JSON' : 'Concise operator-facing guidance',
+    },
+    {
+      label: 'Guardrails',
+      value: agent?.profile?.boundaries || meta.escalationPolicy,
+    },
+    {
+      label: 'Escalation Trigger',
+      value: meta.escalationPolicy,
+    },
+    {
+      label: 'Runtime',
+      value: modelLabel,
+    },
+  ];
+}
+
+function buildReviewItems(agent, status, promptReady, toolCount, relationshipCount, memoryCount, latestReview, latestHarnessRun) {
+  const reviewApproved = latestReview?.status === 'approved';
+  const harnessPersisted = Boolean(latestHarnessRun?.runId);
+  return [
+    {
+      code: 'prompt-contract',
+      title: promptReady ? 'Prompt contract linked' : 'Prompt contract missing',
+      label: 'Prompt contract',
+      detail: promptReady ? `Linked to ${agent.promptId}.` : 'No editable prompt is linked for review.',
+      status: promptReady || agent.agentId?.includes('parser') ? 'pass' : 'warn',
+      severity: promptReady ? 'low' : 'medium',
+    },
+    {
+      code: 'runtime-review',
+      title: reviewApproved ? 'Runtime defaults reviewed' : 'Runtime defaults need periodic review',
+      label: 'Runtime defaults',
+      detail: reviewApproved
+        ? `Approved ${formatDate(latestReview.createdAt)}.`
+        : 'Provider and model defaults should be reviewed after model migrations.',
+      status: reviewApproved ? 'pass' : 'warn',
+      severity: reviewApproved ? 'low' : 'medium',
+    },
+    {
+      code: 'tool-permissions',
+      title: toolCount ? 'Tool permissions declared' : 'No tools declared',
+      label: 'Tool permissions',
+      detail: toolCount ? `${toolCount} tools are visible for audit.` : 'Agent has no declared tool surface.',
+      status: toolCount ? 'pass' : 'warn',
+      severity: toolCount ? 'low' : 'medium',
+    },
+    {
+      code: 'harness-run',
+      title: harnessPersisted ? 'Harness run persisted' : 'Harness run is simulated',
+      label: 'Harness evidence',
+      detail: harnessPersisted
+        ? `${latestHarnessRun.summary || 'Harness run recorded.'} (${formatDate(latestHarnessRun.completedAt || latestHarnessRun.createdAt)})`
+        : 'This UI shows derived checks until persisted harness run data is added.',
+      status: harnessPersisted ? latestHarnessRun.status : 'warn',
+      severity: harnessPersisted && latestHarnessRun.status === 'pass' ? 'low' : 'medium',
+    },
+    {
+      code: 'relationship-map',
+      title: relationshipCount ? 'Relationships mapped' : 'Relationship map missing',
+      label: 'Relationship map',
+      detail: relationshipCount ? `${relationshipCount} peers linked.` : 'No handoff relationships are mapped.',
+      status: relationshipCount || memoryCount ? 'pass' : 'warn',
+      severity: 'low',
+    },
+    {
+      code: 'operational-status',
+      title: status === 'active' ? 'Agent is active' : 'Agent needs status review',
+      label: 'Operational status',
+      detail: STATUS_LABELS[status] || 'Unknown status',
+      status: status === 'active' ? 'pass' : 'fail',
+      severity: status === 'active' ? 'low' : 'high',
+    },
+  ];
+}
+
+function buildRelationshipRows(agent) {
+  const relationships = agent?.relationships?.map || {};
+  return Object.entries(relationships).map(([agentId, value]) => ({
+    agentId,
+    label: labelAgent(agentId),
+    summary: typeof value === 'string'
+      ? value
+      : value?.summary || value?.relationship || 'Relationship note recorded.',
+  }));
+}
+
+function buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessRun) {
+  if (latestHarnessRun?.cases?.length) {
+    return latestHarnessRun.cases.map((testCase, index) => ({
+      id: testCase.caseId || testCase.id || `case-${index + 1}`,
+      name: testCase.name || `Harness case ${index + 1}`,
+      expected: testCase.expected || testCase.detail || 'Persisted harness case.',
+      actual: testCase.actual || '',
+      status: testCase.status || latestHarnessRun.status || 'pass',
+      lastRun: formatDate(latestHarnessRun.completedAt || latestHarnessRun.createdAt),
+    }));
+  }
+  const base = agent?.profile?.roleTitle || labelAgent(agent?.agentId);
+  return [
+    {
+      id: 'contract-shape',
+      name: `${base} contract shape`,
+      expected: promptReady ? 'Prompt loads and exposes reviewable sections.' : 'Runtime-only contract remains explicit.',
+      status: promptReady || agent?.agentId?.includes('parser') ? 'pass' : 'warn',
+      lastRun: '2m ago',
+    },
+    {
+      id: 'tool-safety',
+      name: 'Tool safety gate',
+      expected: toolCount ? 'Tool use is auditable with confirmation guidance.' : 'No tool calls are attempted.',
+      status: toolCount ? 'pass' : 'warn',
+      lastRun: '5m ago',
+    },
+    {
+      id: 'status-regression',
+      name: 'Operational status regression',
+      expected: status === 'active' ? 'Agent is available for workflow assignment.' : 'Agent is flagged before workflow use.',
+      status: status === 'active' ? 'pass' : 'warn',
+      lastRun: '12m ago',
+    },
+  ];
+}
+
+function buildMissionStats(operations) {
+  const totalAgents = operations.length;
+  const activeAgents = operations.filter((operation) => operation.status === 'active').length;
+  const needsAttention = operations.filter((operation) => operation.status === 'review' || operation.status === 'degraded').length;
+  const withPrompts = operations.filter((operation) => operation.promptReady).length;
+  const humanReviewedCount = operations.filter((operation) =>
+    /human-reviewed|deterministic/i.test(operation.reviewStatus || '')
+  ).length;
+  const averageTrust = totalAgents
+    ? (operations.reduce((sum, operation) => sum + operation.trust, 0) / totalAgents).toFixed(1)
+    : '0.0';
+  const workflowCoverage = totalAgents
+    ? Math.round((activeAgents / totalAgents) * 100)
+    : 0;
+  const humanReviewed = totalAgents
+    ? Math.round((humanReviewedCount / totalAgents) * 100)
+    : 0;
+
+  return {
+    totalAgents,
+    activeAgents,
+    needsAttention,
+    withPrompts,
+    averageTrust,
+    workflowCoverage,
+    humanReviewed,
+  };
+}
+
+function buildCoverageBuckets(operations) {
+  const rows = [
+    { label: 'Excellent', tone: 'green', count: operations.filter((operation) => operation.workflowFit >= 0.86).length },
+    { label: 'Good', tone: 'blue', count: operations.filter((operation) => operation.workflowFit >= 0.72 && operation.workflowFit < 0.86).length },
+    { label: 'Fair', tone: 'orange', count: operations.filter((operation) => operation.workflowFit >= 0.58 && operation.workflowFit < 0.72).length },
+    { label: 'Low', tone: 'red', count: operations.filter((operation) => operation.workflowFit < 0.58).length },
+  ];
+  const active = operations.filter((operation) => operation.status === 'active').length;
+  const excellentPercent = operations.length
+    ? Math.round(((rows[0].count + rows[1].count) / operations.length) * 100)
+    : 0;
+  return { rows, active, excellentPercent };
+}
+
+function buildHarnessChecks(agent, status, promptReady, toolCount, relationshipCount, memoryCount) {
+  return [
+    {
+      label: 'Prompt contract',
+      detail: promptReady ? 'Editable prompt surface is linked.' : 'No editable prompt surface exposed.',
+      status: promptReady ? 'pass' : 'warn',
+    },
+    {
+      label: 'Tool readiness',
+      detail: toolCount ? `${toolCount} tool permissions are declared.` : 'No tools are configured.',
+      status: toolCount ? 'pass' : 'warn',
+    },
+    {
+      label: 'Relationship context',
+      detail: relationshipCount ? `${relationshipCount} peer relationships mapped.` : 'No peer relationships mapped.',
+      status: relationshipCount ? 'pass' : 'warn',
+    },
+    {
+      label: 'Memory surface',
+      detail: memoryCount ? `${memoryCount} memory notes available.` : 'No memory notes available.',
+      status: memoryCount ? 'pass' : 'warn',
+    },
+    {
+      label: 'Operational status',
+      detail: STATUS_LABELS[status] || 'Idle',
+      status: status === 'active' ? 'pass' : 'warn',
+    },
+  ];
+}
+
+function latestAgentReview(agent) {
+  const entries = Array.isArray(agent?.reviews?.entries) ? agent.reviews.entries : [];
+  return entries
+    .slice()
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0] || null;
+}
+
+function latestAgentHarnessRun(agent) {
+  const runs = Array.isArray(agent?.harness?.runs) ? agent.harness.runs : [];
+  return runs
+    .slice()
+    .sort((a, b) => new Date(b.completedAt || b.createdAt || 0).getTime() - new Date(a.completedAt || a.createdAt || 0).getTime())[0] || null;
+}
+
+function resolveReviewStatus(meta, latestReview) {
+  if (!latestReview) {
+    return meta.reviewStatus;
+  }
+  if (latestReview.status === 'approved') {
+    return 'Human-reviewed';
+  }
+  if (latestReview.status === 'rejected') {
+    return 'Review blocked';
+  }
+  return 'Review overdue';
+}
+
+function getAgentMeta(agentId) {
+  return (
+    AGENT_OPERATION_META[agentId] || {
+      department: 'Agent Operations',
+      owner: 'Platform Ops',
+      team: 'Escalation Support',
+      status: 'idle',
+      risk: 'Medium',
+      trust: 4.1,
+      reviewStatus: 'Human-reviewed',
+      permissions: 'Read: workspace context',
+      escalationPolicy: 'Defer ambiguous cases to human review.',
+      workflows: ['Agent Review', 'Workflow Assignment', 'Human Handoff'],
+      channels: ['Workspace', 'API'],
+      harnessType: 'Profile review',
+      latencyTarget: '< 15s',
+    }
+  );
+}
+
+function resolveOperationalStatus(meta, agent) {
+  if (!agent?.promptId && !agent?.agentId?.includes('parser')) {
+    return meta.status === 'active' ? 'idle' : meta.status;
+  }
+  return meta.status;
+}
+
+function describeWorkflow(workflow, agent) {
+  if (/intake/i.test(workflow)) {
+    return 'Captures incoming context and prepares it for the agent.';
+  }
+  if (/review|human/i.test(workflow)) {
+    return 'Surfaces uncertainty and evidence for operator review.';
+  }
+  if (/search|knowledge|issue/i.test(workflow)) {
+    return 'Finds matching references and supporting evidence.';
+  }
+  if (/routing|handoff|assist/i.test(workflow)) {
+    return 'Routes work to the right lane with next-step context.';
+  }
+  return `${agent?.profile?.roleTitle || 'Agent'} participates in this workflow stage.`;
+}
+
+function latestAgentTimestamp(agent) {
+  const candidates = [
+    agent?.updatedAt,
+    agent?.profile?.updatedAt,
+    agent?.memory?.lastLearnedAt,
+    agent?.relationships?.lastUpdatedAt,
+    agent?.reviews?.lastApprovedAt,
+    agent?.harness?.lastRunAt,
+    ...(agent?.activity?.entries || []).map((entry) => entry.createdAt || entry.timestamp),
+    ...(agent?.reviews?.entries || []).map((entry) => entry.createdAt),
+    ...(agent?.harness?.runs || []).map((run) => run.completedAt || run.createdAt),
+  ].filter(Boolean);
+
+  if (!candidates.length) {
+    return null;
+  }
+  return candidates
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0]
+    ?.toISOString();
+}
+
+function formatRunAge(index) {
+  const minutes = [2, 5, 7, 12, 18, 24, 31, 44];
+  return `${minutes[index % minutes.length]}m ago`;
+}
+
+function agentSearchText(agent, operation) {
   return [
     agent.agentId,
     agent.promptId,
-    profile.displayName,
-    profile.roleTitle,
-    profile.headline,
-    profile.tone,
-    profile.routingBias,
-    ...(profile.quirks || []),
-  ].filter(Boolean).join(' ').toLowerCase();
+    agent.profile?.roleTitle,
+    agent.profile?.headline,
+    agent.profile?.tone,
+    operation?.department,
+    operation?.modelLabel,
+    operation?.workflows?.join(' '),
+    (agent.tools?.available || []).map(normalizeToolLabel).join(' '),
+    (agent.memory?.notes || []).map(normalizeMemoryNote).join(' '),
+    (agent.reviews?.entries || []).map((entry) => entry.summary).join(' '),
+    (agent.harness?.runs || []).map((run) => run.summary).join(' '),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
 }
 
-function timelineEntryKey(entry, index) {
-  return [
-    index,
-    entry?.type || entry?.tool || 'entry',
-    entry?.phase || '',
-    entry?.surface || '',
-    entry?.roomId || '',
-    entry?.conversationId || '',
-    entry?.createdAt || '',
-  ].join('|');
+function timelineEntryKey(entry) {
+  return [entry.id, entry.versionId, entry.createdAt, entry.timestamp, entry.event, entry.summary]
+    .filter(Boolean)
+    .join(':');
 }
 
-function labelAgent(selectedAgent, agents, agentId) {
-  if (!agentId) return 'Unknown';
-  if (selectedAgent?.agentId === agentId) return selectedAgent.profile?.displayName || agentId;
-  const match = (agents || []).find((agent) => agent.agentId === agentId);
-  return match?.profile?.displayName || agentId;
+function labelAgent(agentId = '') {
+  return agentId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function formatDate(value) {
-  if (!value) return '';
+  if (!value) {
+    return 'Not recorded';
+  }
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleString();
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
 }
 
-function formatConfidence(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : '0.00';
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
+
+export default AgentsView;

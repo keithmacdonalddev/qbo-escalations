@@ -59,6 +59,39 @@ const relationshipNoteSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: Date.now },
 }, { _id: false });
 
+const reviewEntrySchema = new mongoose.Schema({
+  reviewId: { type: String, required: true },
+  surface: { type: String, default: 'overall' },
+  status: { type: String, default: 'approved' },
+  summary: { type: String, required: true },
+  actor: { type: String, default: 'user' },
+  versionRef: { type: String, default: '' },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const harnessCaseSchema = new mongoose.Schema({
+  caseId: { type: String, required: true },
+  name: { type: String, required: true },
+  status: { type: String, default: 'pass' },
+  expected: { type: String, default: '' },
+  actual: { type: String, default: '' },
+  detail: { type: String, default: '' },
+}, { _id: false });
+
+const harnessRunSchema = new mongoose.Schema({
+  runId: { type: String, required: true },
+  status: { type: String, default: 'pass' },
+  summary: { type: String, required: true },
+  actor: { type: String, default: 'user' },
+  source: { type: String, default: 'manual' },
+  cases: { type: [harnessCaseSchema], default: [] },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  startedAt: { type: Date, default: null },
+  completedAt: { type: Date, default: Date.now },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
 const agentIdentitySchema = new mongoose.Schema({
   agentId: { type: String, required: true, unique: true },
   profile: {
@@ -93,6 +126,24 @@ const agentIdentitySchema = new mongoose.Schema({
   relationships: {
     notes: { type: [relationshipNoteSchema], default: [] },
     lastUpdatedAt: { type: Date, default: null },
+  },
+  reviews: {
+    entries: { type: [reviewEntrySchema], default: [] },
+    lastApprovedAt: { type: Date, default: null },
+  },
+  harness: {
+    runs: { type: [harnessRunSchema], default: [] },
+    lastRunAt: { type: Date, default: null },
+  },
+  custom: {
+    isCustom: { type: Boolean, default: false },
+    source: { type: String, default: '' },
+    sourceLabel: { type: String, default: '' },
+    registryStatus: { type: String, default: '' },
+    createdBy: { type: String, default: '' },
+    importedAt: { type: Date, default: null },
+    promptId: { type: String, default: '' },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   history: {
     entries: { type: [historyEntrySchema], default: [] },
