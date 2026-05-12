@@ -32,6 +32,12 @@ function objectIdString(value) {
   }
 }
 
+function sameObjectId(left, right) {
+  const leftId = objectIdString(left);
+  const rightId = objectIdString(right);
+  return Boolean(leftId && rightId && leftId === rightId);
+}
+
 function firstNonEmpty(values, fallback = '') {
   if (!Array.isArray(values)) return fallback;
   for (const value of values) {
@@ -58,6 +64,12 @@ function getEscalationLabel(escalation) {
   return 'This escalation';
 }
 
+function getConversationLabel(conversation) {
+  const title = compactText(conversation && conversation.title, 80);
+  if (title) return `conversation ${title}`;
+  return 'This conversation';
+}
+
 function missingResolutionFingerprint(escalation) {
   const id = objectIdString(escalation && escalation._id);
   return id ? `missing-resolution:${id}` : '';
@@ -71,6 +83,16 @@ function staleOpenFingerprint(escalation) {
 function parseReviewFingerprint(escalation) {
   const id = objectIdString(escalation && escalation._id);
   return id ? `parse-review:${id}` : '';
+}
+
+function missingEscalationLinkFingerprint(escalation) {
+  const id = objectIdString(escalation && escalation._id);
+  return id ? `missing-link:escalation:${id}` : '';
+}
+
+function missingConversationLinkFingerprint(conversation) {
+  const id = objectIdString(conversation && conversation._id);
+  return id ? `missing-link:conversation:${id}` : '';
 }
 
 function knowledgeReviewFingerprint(knowledge, escalation) {
@@ -178,6 +200,56 @@ function buildParseReviewAttentionItem(escalation) {
       usedRegexFallback: Boolean(parseMeta.usedRegexFallback),
       validationScore: finiteNumberOrNull(parseMeta.validationScore),
       validationConfidence: safeString(parseMeta.validationConfidence, ''),
+    },
+  };
+}
+
+function buildEscalationMissingLinkAttentionItem(escalation, conversation = null) {
+  const fingerprint = missingEscalationLinkFingerprint(escalation);
+  if (!fingerprint || !escalation || !escalation.conversationId) return null;
+
+  const expectedConversationId = objectIdString(escalation.conversationId);
+  const actualBacklinkId = objectIdString(conversation && conversation.escalationId);
+  if (conversation && sameObjectId(actualBacklinkId, escalation._id)) return null;
+
+  const missingConversation = !conversation;
+  return {
+    kind: 'missing-link',
+    severity: missingConversation ? 'critical' : 'warning',
+    fingerprint,
+    title: missingConversation ? 'Linked conversation is missing' : 'Escalation link mismatch',
+    summary: missingConversation
+      ? `${getEscalationLabel(escalation)} points to a conversation that no longer exists.`
+      : `${getEscalationLabel(escalation)} points to conversation ${expectedConversationId}, but that conversation points to ${actualBacklinkId || 'no escalation'}.`,
+    signals: [missingConversation ? 'missing_conversation' : 'conversation_backlink_mismatch'],
+    metadata: {
+      expectedConversationId,
+      actualEscalationId: actualBacklinkId,
+    },
+  };
+}
+
+function buildConversationMissingLinkAttentionItem(conversation, escalation = null) {
+  const fingerprint = missingConversationLinkFingerprint(conversation);
+  if (!fingerprint || !conversation || !conversation.escalationId) return null;
+
+  const expectedEscalationId = objectIdString(conversation.escalationId);
+  const actualConversationId = objectIdString(escalation && escalation.conversationId);
+  if (escalation && sameObjectId(actualConversationId, conversation._id)) return null;
+
+  const missingEscalation = !escalation;
+  return {
+    kind: 'missing-link',
+    severity: missingEscalation ? 'critical' : 'warning',
+    fingerprint,
+    title: missingEscalation ? 'Linked escalation is missing' : 'Conversation link mismatch',
+    summary: missingEscalation
+      ? `${getConversationLabel(conversation)} points to an escalation that no longer exists.`
+      : `${getConversationLabel(conversation)} points to escalation ${expectedEscalationId}, but that escalation points to ${actualConversationId || 'no conversation'}.`,
+    signals: [missingEscalation ? 'missing_escalation' : 'escalation_backlink_mismatch'],
+    metadata: {
+      expectedEscalationId,
+      actualConversationId,
     },
   };
 }
@@ -521,6 +593,118 @@ async function syncParserTriageAttentionItems({ limit = 100 } = {}) {
   return { opened, closed, scanned: flaggedEscalations.length };
 }
 
+async function openMissingLinkAttentionItem(payload, { escalation = null, conversation = null } = {}) {
+  if (!payload) return null;
+  const existing = await EscalationAttentionItem.findOne({ fingerprint: payload.fingerprint }).lean();
+  if (existing && existing.status !== 'open') {
+    return null;
+  }
+
+  return EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint: payload.fingerprint },
+    {
+      $setOnInsert: {
+        kind: payload.kind,
+        fingerprint: payload.fingerprint,
+        occurrenceCount: 1,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        sourceType: escalation ? 'escalation' : 'conversation',
+        sourceEscalationId: escalation && escalation._id ? escalation._id : null,
+        sourceConversationId: (
+          (conversation && conversation._id)
+          || (escalation && escalation.conversationId)
+          || null
+        ),
+        sourceLabel: escalation ? getEscalationLabel(escalation) : getConversationLabel(conversation),
+        severity: payload.severity,
+        title: payload.title,
+        summary: payload.summary,
+        candidates: [],
+        signals: payload.signals,
+        candidateCount: 0,
+        metadata: payload.metadata,
+        lastDetectedAt: new Date(),
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+}
+
+async function closeResolvedMissingLinkAttentionItems() {
+  const Escalation = require('../models/Escalation');
+  const Conversation = require('../models/Conversation');
+  const openItems = await EscalationAttentionItem.find({ kind: 'missing-link', status: 'open' })
+    .populate('sourceEscalationId')
+    .populate('sourceConversationId')
+    .limit(200);
+
+  let closed = 0;
+  for (const item of openItems) {
+    const fingerprint = safeString(item.fingerprint, '');
+    let stillBroken = null;
+    if (fingerprint.startsWith('missing-link:escalation:')) {
+      if (item.sourceEscalationId) {
+        const currentConversation = item.sourceEscalationId.conversationId
+          ? await Conversation.findById(item.sourceEscalationId.conversationId)
+          : null;
+        stillBroken = buildEscalationMissingLinkAttentionItem(item.sourceEscalationId, currentConversation);
+      }
+    } else if (fingerprint.startsWith('missing-link:conversation:')) {
+      if (item.sourceConversationId) {
+        const currentEscalation = item.sourceConversationId.escalationId
+          ? await Escalation.findById(item.sourceConversationId.escalationId)
+          : null;
+        stillBroken = buildConversationMissingLinkAttentionItem(item.sourceConversationId, currentEscalation);
+      }
+    }
+    if (stillBroken) continue;
+    item.status = 'resolved';
+    item.resolutionNote = 'Escalation and conversation links are no longer broken.';
+    item.resolvedAt = new Date();
+    await item.save();
+    closed += 1;
+  }
+  return closed;
+}
+
+async function syncMissingLinkAttentionItems({ limit = 100 } = {}) {
+  const Escalation = require('../models/Escalation');
+  const Conversation = require('../models/Conversation');
+  const cappedLimit = Math.max(1, Math.min(Number(limit) || 100, 500));
+  const linkedEscalations = await Escalation.find({ conversationId: { $ne: null } })
+    .sort({ updatedAt: -1 })
+    .limit(cappedLimit);
+  const linkedConversations = await Conversation.find({ escalationId: { $ne: null } })
+    .sort({ updatedAt: -1 })
+    .limit(cappedLimit);
+
+  let opened = 0;
+  for (const escalation of linkedEscalations) {
+    const conversation = await Conversation.findById(escalation.conversationId);
+    const payload = buildEscalationMissingLinkAttentionItem(escalation, conversation);
+    const item = await openMissingLinkAttentionItem(payload, { escalation, conversation });
+    if (item) opened += 1;
+  }
+
+  for (const conversation of linkedConversations) {
+    const escalation = await Escalation.findById(conversation.escalationId);
+    const payload = buildConversationMissingLinkAttentionItem(conversation, escalation);
+    const item = await openMissingLinkAttentionItem(payload, { escalation: null, conversation });
+    if (item) opened += 1;
+  }
+
+  const closed = await closeResolvedMissingLinkAttentionItems();
+  return {
+    opened,
+    closed,
+    scannedEscalations: linkedEscalations.length,
+    scannedConversations: linkedConversations.length,
+  };
+}
+
 async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
   const fingerprint = knowledgeReviewFingerprint(knowledge, escalation);
   if (!fingerprint) return { action: 'skipped', item: null };
@@ -588,6 +772,7 @@ module.exports = {
   buildParseReviewAttentionItem,
   buildStaleOpenAttentionItem,
   hasResolutionExplanation,
+  syncMissingLinkAttentionItems,
   syncParserTriageAttentionItems,
   syncStaleEscalationAttentionItems,
   syncKnowledgeReviewAttentionItem,

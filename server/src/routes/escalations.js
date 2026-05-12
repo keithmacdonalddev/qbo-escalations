@@ -15,6 +15,7 @@ const {
 } = require('../lib/escalation-dedup');
 const {
   syncKnowledgeReviewAttentionItem,
+  syncMissingLinkAttentionItems,
   syncParserTriageAttentionItems,
   syncResolutionDisciplineAttentionItem,
   syncStaleEscalationAttentionItems,
@@ -808,6 +809,7 @@ router.get('/attention-items', async (req, res) => {
     ? {
       stale: await syncStaleEscalationAttentionItems(),
       parserTriage: await syncParserTriageAttentionItems(),
+      missingLinks: await syncMissingLinkAttentionItems(),
     }
     : null;
 
@@ -829,6 +831,7 @@ router.get('/attention-items', async (req, res) => {
       .skip(offset)
       .limit(limit)
       .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+      .populate('sourceConversationId', 'title updatedAt messageCount lastMessagePreview escalationId')
       .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
       .lean(),
     EscalationAttentionItem.countDocuments(filter),
@@ -869,6 +872,7 @@ router.patch('/attention-items/:itemId', async (req, res) => {
     { returnDocument: 'after', runValidators: true }
   )
     .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+    .populate('sourceConversationId', 'title updatedAt messageCount lastMessagePreview escalationId')
     .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt');
 
   if (!item) {

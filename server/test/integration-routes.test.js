@@ -573,6 +573,89 @@ await t.test('attention refresh opens and closes parser triage review items', as
   assert.equal(item.status, 'resolved');
 });
 
+await t.test('attention refresh opens and closes missing link review items', async () => {
+  const conversation = await Conversation.create({
+    title: 'Broken backlink conversation',
+    messages: [{ role: 'user', content: 'Need help with a linked escalation', timestamp: new Date() }],
+    provider: 'claude',
+  });
+  const escalation = await Escalation.create({
+    category: 'technical',
+    caseNumber: 'CS-2026-LINK-001',
+    attemptingTo: 'Review a linked case',
+    actualOutcome: 'Conversation backlink is missing',
+    conversationId: conversation._id,
+  });
+
+  let listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.missingLinks.scannedEscalations, 1);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.items[0].kind, 'missing-link');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, escalation._id.toString());
+  assert.ok(listed.body.items[0].signals.includes('conversation_backlink_mismatch'));
+
+  let item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalation._id,
+    kind: 'missing-link',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Escalation link mismatch');
+
+  await Conversation.findByIdAndUpdate(conversation._id, { escalationId: escalation._id });
+
+  listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.missingLinks.closed, 1);
+  assert.equal(listed.body.total, 0);
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalation._id,
+    kind: 'missing-link',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+
+  const escalationOnly = await Escalation.create({
+    category: 'technical',
+    caseNumber: 'CS-2026-LINK-002',
+    attemptingTo: 'Review a conversation-owned link',
+    actualOutcome: 'Escalation backlink is missing',
+  });
+  const conversationOnly = await Conversation.create({
+    title: 'Conversation-owned broken link',
+    messages: [{ role: 'user', content: 'This conversation points at an escalation', timestamp: new Date() }],
+    provider: 'claude',
+    escalationId: escalationOnly._id,
+  });
+
+  listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.total, 1);
+
+  item = await EscalationAttentionItem.findOne({
+    sourceConversationId: conversationOnly._id,
+    kind: 'missing-link',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.sourceType, 'conversation');
+  assert.equal(item.title, 'Conversation link mismatch');
+  assert.ok(item.signals.includes('escalation_backlink_mismatch'));
+
+  await Escalation.findByIdAndUpdate(escalationOnly._id, { conversationId: conversationOnly._id });
+
+  listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.total, 0);
+
+  item = await EscalationAttentionItem.findOne({
+    sourceConversationId: conversationOnly._id,
+    kind: 'missing-link',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+});
+
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
   const conversation = await Conversation.create({
     title: 'Duplicate link guard',

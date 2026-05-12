@@ -54,9 +54,10 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 2 first implementation: duplicate warnings now create durable `EscalationAttentionItem` records and the Escalation Dashboard has an Attention tab with open/handled/separate/dismissed review states.
 - Item 3 durable warning behavior: duplicate warnings remain non-blocking but can now be handled, dismissed, or marked as intentional separate escalations from the dashboard.
 - Item 5 first implementation: `resolved` or `escalated-further` escalations without `resolution` or `resolutionNotes` now create durable `missing-resolution` attention items; adding an explanation auto-closes the item.
-- Item 2 remaining gap: the attention queue now covers duplicate warnings, missing finalization notes, stale open cases, parser/triage review issues, agent governance failures, and knowledge-review discipline; missing links still need a review-item producer.
+- Item 2 remaining gap: the attention queue now covers duplicate warnings, missing finalization notes, stale open cases, parser/triage review issues, missing escalation/conversation links, agent governance failures, and knowledge-review discipline. The next gap is prioritization and bulk workflow actions, not basic producer coverage.
 - Item 2 stale-case implementation: loading the attention queue with refresh now scans for `open` cases stale for 14 days and `in-progress` cases stale for 7 days, creating `stale-open` review items and closing them once the source case is no longer stale.
 - Item 2 parser/triage implementation: attention refresh now scans parse metadata for validation issues, low confidence, regex fallback, provider fallback, or failed parser attempts and creates `parse-review` items until the parse metadata is corrected or the item is manually handled.
+- Item 2 missing-link implementation: attention refresh now checks bidirectional escalation/conversation links and creates `missing-link` items for missing records or backlink mismatches until the link contract is repaired.
 - Item 6 first implementation: generated or edited knowledge drafts now create durable `knowledge-review` attention items; approval, publish, or a rejected draft with reviewer notes closes the item.
 
 ## 1. Canonical Intake Reliability

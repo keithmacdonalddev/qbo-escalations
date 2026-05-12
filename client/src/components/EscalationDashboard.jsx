@@ -619,6 +619,7 @@ function formatAttentionDate(value) {
 
 function AttentionItemRow({ item, busy, onStatusChange }) {
   const sourceId = getEscalationRefId(item.sourceEscalationId);
+  const sourceConversationId = getEscalationRefId(item.sourceConversationId);
   const sourceAgentId = item.sourceType === 'agent' && item.metadata?.agentId
     ? String(item.metadata.agentId)
     : '';
@@ -627,11 +628,10 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
   const candidateId = primaryCandidate ? getEscalationRefId(primaryCandidate.escalationId) : '';
   const isOpen = item.status === 'open';
   const isDuplicate = item.kind === 'possible-duplicate';
-  const handledNote = isDuplicate
-    ? 'Duplicate warning handled.'
-    : sourceAgentId
-      ? 'Agent attention item handled.'
-      : 'Workflow review item handled.';
+  let handledNote = 'Workflow review item handled.';
+  if (isDuplicate) handledNote = 'Duplicate warning handled.';
+  else if (sourceAgentId) handledNote = 'Agent attention item handled.';
+  else if (item.kind === 'missing-link') handledNote = 'Link review item handled.';
 
   return (
     <div className="attention-item">
@@ -669,6 +669,15 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
             onClick={() => { window.location.hash = `#/agents/${encodeURIComponent(sourceAgentId)}`; }}
           >
             Review Agent
+          </button>
+        )}
+        {sourceConversationId && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => { window.location.hash = `#/chat/${encodeURIComponent(sourceConversationId)}`; }}
+          >
+            Open Chat
           </button>
         )}
         {candidateId && (
