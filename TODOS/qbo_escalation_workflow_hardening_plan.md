@@ -27,10 +27,10 @@ We are reviewing the hardening areas one by one before implementation.
 | Area | Status | Current Direction |
 | --- | --- | --- |
 | 1. Canonical intake reliability | In discussion | Keep the parser agent narrow; the app/server owns the evidence envelope around its output. |
-| 2. Case lifecycle consistency | First attention surface implemented | Use a durable attention queue for workflow items that need a user decision; next broaden beyond duplicate warnings. |
+| 2. Case lifecycle consistency | First attention producers implemented | Use a durable attention queue for workflow items that need a user decision; it now covers duplicate warnings and missing finalization notes. |
 | 3. Duplicate and retry safety | Durable warnings implemented | Reuse existing conversation-linked escalations on retries/re-parses; warn and create review items when different conversations or screenshot uploads look like the same real-world issue. |
 | 4. Known issue / INV confidence boundaries | Initial known issue search implemented | Treat INV matches as candidates unless evidence or human review confirms them. |
-| 5. Resolution discipline | Not yet discussed in detail | Do not allow resolved cases with no resolution summary or reason. |
+| 5. Resolution discipline | First attention producer implemented | Resolved or escalated-further cases without an explanation now create review items; decide later whether the UI should hard-block. |
 | 6. Knowledge candidate safety | Not yet discussed in detail | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
 | 7. Evidence ledger | Not yet discussed in detail | Add a thin event trail around the existing workflow. |
 | 8. Ontology vertical slice | Future planning | Build only after the workflow hardening plan is clear. |
@@ -53,7 +53,8 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 3 second implementation: new escalation creation now returns possible-duplicate warning metadata when another escalation from a different conversation or intake path shares strong signals such as case number, COID, screenshot hash, category, symptom text, and a recent time window.
 - Item 2 first implementation: duplicate warnings now create durable `EscalationAttentionItem` records and the Escalation Dashboard has an Attention tab with open/handled/separate/dismissed review states.
 - Item 3 durable warning behavior: duplicate warnings remain non-blocking but can now be handled, dismissed, or marked as intentional separate escalations from the dashboard.
-- Item 2 remaining gap: the attention queue only covers duplicate warnings so far; stale open cases, missing links, unresolved parser/triage issues, and resolution discipline still need review-item producers.
+- Item 5 first implementation: `resolved` or `escalated-further` escalations without `resolution` or `resolutionNotes` now create durable `missing-resolution` attention items; adding an explanation auto-closes the item.
+- Item 2 remaining gap: the attention queue now covers duplicate warnings and missing finalization notes; stale open cases, missing links, unresolved parser/triage issues, and knowledge-review discipline still need review-item producers.
 
 ## 1. Canonical Intake Reliability
 
@@ -162,8 +163,9 @@ Possible attention items:
 The first attention-center surface is intentionally narrow:
 
 - possible duplicate escalations become durable attention items
+- resolved or escalated-further escalations missing an explanation become durable attention items
 - items can be filtered by open, handled, separate, and dismissed
-- the dashboard links back to the source escalation and the strongest duplicate candidate
+- the dashboard links back to the source escalation and, for duplicates, the strongest duplicate candidate
 - closing an item records the chosen review state instead of deleting the evidence
 
 This gives the workflow a real review queue without requiring the full lifecycle model yet.
@@ -298,6 +300,14 @@ A resolved escalation should have a resolution summary, resolution reason, or eq
 Knowledge extraction needs the fix, not just the symptom.
 
 Without a resolution summary, the app can learn what happened but not what to do next time.
+
+### Current Implementation
+
+- `PATCH /api/escalations/:id` and `POST /api/escalations/:id/transition` now sync a `missing-resolution` attention item.
+- `resolved` without `resolution` or `resolutionNotes` opens a "Missing resolution notes" item.
+- `escalated-further` without `resolution` or `resolutionNotes` opens a "Missing escalation reason" item.
+- Adding a resolution explanation later auto-closes the attention item.
+- This is currently review-queue behavior, not a hard block.
 
 ### Open Questions
 

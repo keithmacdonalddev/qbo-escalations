@@ -255,6 +255,111 @@ await t.test('from-conversation warns but allows likely duplicates from differen
   assert.equal(afterClose.body.counts.split, 1);
 });
 
+await t.test('status update opens missing-resolution attention item and closes it when notes are added', async () => {
+  const created = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'technical',
+      coid: '445566',
+      caseNumber: 'CS-2026-RES-001',
+      attemptingTo: 'Restore bank feed sync',
+      actualOutcome: 'Sync fails without a clear fix',
+    });
+  assert.equal(created.status, 201);
+  const escalationId = created.body.escalation._id;
+
+  const resolved = await agent
+    .patch(`/api/escalations/${escalationId}`)
+    .send({ status: 'resolved' });
+  assert.equal(resolved.status, 200);
+  assert.equal(resolved.body.resolutionDiscipline.action, 'opened');
+  assert.equal(resolved.body.resolutionDiscipline.item.kind, 'missing-resolution');
+
+  let item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'missing-resolution',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Missing resolution notes');
+  assert.ok(item.signals.includes('missing_resolution_notes'));
+
+  const listed = await agent.get('/api/escalations/attention-items?status=open');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.items[0].kind, 'missing-resolution');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, escalationId);
+
+  const updated = await agent
+    .patch(`/api/escalations/${escalationId}`)
+    .send({ resolutionNotes: 'Customer confirmed bank feed sync recovered after reconnecting the account.' });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.resolutionDiscipline.action, 'closed');
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'missing-resolution',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+  assert.ok(item.resolvedAt);
+
+  const afterClose = await agent.get('/api/escalations/attention-items?status=open');
+  assert.equal(afterClose.status, 200);
+  assert.equal(afterClose.body.total, 0);
+  assert.equal(afterClose.body.counts.resolved, 1);
+});
+
+await t.test('transition to resolved with a reason does not create missing-resolution attention item', async () => {
+  const created = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'payroll',
+      caseNumber: 'CS-2026-RES-002',
+      attemptingTo: 'Submit payroll',
+      actualOutcome: 'Payroll submit was blocked',
+    });
+  assert.equal(created.status, 201);
+
+  const transitioned = await agent
+    .post(`/api/escalations/${created.body.escalation._id}/transition`)
+    .send({ status: 'resolved', resolution: 'Payroll submitted after company tax settings were refreshed.' });
+  assert.equal(transitioned.status, 200);
+  assert.equal(transitioned.body.resolutionDiscipline.action, 'none');
+
+  const count = await EscalationAttentionItem.countDocuments({
+    sourceEscalationId: created.body.escalation._id,
+    kind: 'missing-resolution',
+  });
+  assert.equal(count, 0);
+});
+
+await t.test('transition to escalated-further without a reason creates missing-resolution attention item', async () => {
+  const created = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'billing',
+      coid: '778899',
+      attemptingTo: 'Correct subscription billing',
+      actualOutcome: 'Billing correction needs specialist review',
+    });
+  assert.equal(created.status, 201);
+
+  const transitioned = await agent
+    .post(`/api/escalations/${created.body.escalation._id}/transition`)
+    .send({ status: 'escalated-further' });
+  assert.equal(transitioned.status, 200);
+  assert.equal(transitioned.body.resolutionDiscipline.action, 'opened');
+
+  const item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: created.body.escalation._id,
+    kind: 'missing-resolution',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Missing escalation reason');
+  assert.ok(item.signals.includes('missing_escalation_reason'));
+});
+
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
   const conversation = await Conversation.create({
     title: 'Duplicate link guard',

@@ -623,6 +623,7 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
   const primaryCandidate = candidates[0] || null;
   const candidateId = primaryCandidate ? getEscalationRefId(primaryCandidate.escalationId) : '';
   const isOpen = item.status === 'open';
+  const isDuplicate = item.kind === 'possible-duplicate';
 
   return (
     <div className="attention-item">
@@ -668,18 +669,24 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
               type="button"
               className="btn btn-secondary btn-sm"
               disabled={busy}
-              onClick={() => onStatusChange(item._id, 'resolved', 'Duplicate warning handled.')}
+              onClick={() => onStatusChange(
+                item._id,
+                'resolved',
+                isDuplicate ? 'Duplicate warning handled.' : 'Workflow review item handled.'
+              )}
             >
               Handled
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              disabled={busy}
-              onClick={() => onStatusChange(item._id, 'split', 'Confirmed as separate escalation.')}
-            >
-              Separate
-            </button>
+            {isDuplicate && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={busy}
+                onClick={() => onStatusChange(item._id, 'split', 'Confirmed as separate escalation.')}
+              >
+                Separate
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-ghost btn-sm"

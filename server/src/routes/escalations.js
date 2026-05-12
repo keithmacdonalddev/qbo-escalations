@@ -13,6 +13,7 @@ const {
   linkEscalationToConversation,
   workflowErrorResponse,
 } = require('../lib/escalation-dedup');
+const { syncResolutionDisciplineAttentionItem } = require('../lib/escalation-attention');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { parseEscalationText, looksLikeEscalation } = require('../lib/escalation-parser');
@@ -958,7 +959,17 @@ router.patch('/:id', async (req, res) => {
   if (!escalation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
   }
-  res.json({ ok: true, escalation: escalation.toObject() });
+
+  let resolutionDiscipline = null;
+  if (
+    Object.prototype.hasOwnProperty.call(updates, 'status')
+    || Object.prototype.hasOwnProperty.call(updates, 'resolution')
+    || Object.prototype.hasOwnProperty.call(updates, 'resolutionNotes')
+  ) {
+    resolutionDiscipline = await syncResolutionDisciplineAttentionItem(escalation);
+  }
+
+  res.json({ ok: true, escalation: escalation.toObject(), resolutionDiscipline });
 });
 
 // GET /api/escalations/similar -- Find past escalations with similar category/symptoms
@@ -1275,7 +1286,9 @@ router.post('/:id/transition', async (req, res) => {
   const update = { status };
   if (status === 'resolved') {
     update.resolvedAt = new Date();
-    if (resolution) update.resolution = resolution;
+  }
+  if ((status === 'resolved' || status === 'escalated-further') && resolution) {
+    update.resolution = resolution;
   }
 
   const escalation = await Escalation.findByIdAndUpdate(
@@ -1287,6 +1300,8 @@ router.post('/:id/transition', async (req, res) => {
   if (!escalation) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
   }
+
+  const resolutionDiscipline = await syncResolutionDisciplineAttentionItem(escalation);
 
   // When resolving or escalating further, check whether a knowledge draft already exists.
   // This tells the client whether to auto-generate one.
@@ -1303,6 +1318,7 @@ router.post('/:id/transition', async (req, res) => {
     ok: true,
     escalation: escalation.toObject(),
     knowledgeEligible: (status === 'resolved' || status === 'escalated-further') && !knowledgeExists,
+    resolutionDiscipline,
   });
 });
 
