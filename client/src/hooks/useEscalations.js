@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  bulkUpdateAttentionItems,
   deleteEscalation,
   listAttentionItems,
   listEscalations,
@@ -44,13 +45,30 @@ export const ATTENTION_STATUS_LABELS = {
   dismissed: 'Dismissed',
   split: 'Separate',
 };
+export const ATTENTION_KIND_LABELS = {
+  all: 'All Types',
+  'possible-duplicate': 'Possible Duplicate',
+  'missing-resolution': 'Missing Resolution',
+  'knowledge-review': 'Knowledge Review',
+  'stale-open': 'Stale Case',
+  'parse-review': 'Parser Review',
+  'missing-link': 'Broken Link',
+  'agent-review': 'Agent Review',
+  'agent-harness': 'Agent Harness',
+};
+export const ATTENTION_SORT_LABELS = {
+  priority: 'Priority',
+  '-updatedAt': 'Recently Updated',
+  '-lastDetectedAt': 'Recently Detected',
+  createdAt: 'Oldest Created',
+};
 
-export default function useEscalations() {
+export default function useEscalations({ initialTab = 'escalations' } = {}) {
   const toast = useToast();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
-  const [activeTab, setActiveTab] = useState('escalations');
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [escalations, setEscalations] = useState([]);
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
@@ -71,10 +89,15 @@ export default function useEscalations() {
   const [attentionItems, setAttentionItems] = useState([]);
   const [attentionTotal, setAttentionTotal] = useState(0);
   const [attentionCounts, setAttentionCounts] = useState({ open: 0, resolved: 0, dismissed: 0, split: 0 });
+  const [attentionKindCounts, setAttentionKindCounts] = useState({});
+  const [attentionSeverityCounts, setAttentionSeverityCounts] = useState({ critical: 0, warning: 0, info: 0 });
   const [attentionStatusFilter, setAttentionStatusFilter] = useState('open');
+  const [attentionKindFilter, setAttentionKindFilter] = useState('all');
+  const [attentionSort, setAttentionSort] = useState('priority');
   const [attentionLoading, setAttentionLoading] = useState(false);
   const [attentionError, setAttentionError] = useState(null);
   const [attentionUpdatingId, setAttentionUpdatingId] = useState('');
+  const [attentionSelectedIds, setAttentionSelectedIds] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
@@ -144,33 +167,78 @@ export default function useEscalations() {
     try {
       const data = await listAttentionItems({
         status: attentionStatusFilter || 'open',
+        kind: attentionKindFilter === 'all' ? undefined : attentionKindFilter,
+        sort: attentionSort,
         refresh: true,
       });
       setAttentionItems(data.items);
       setAttentionTotal(data.total);
       setAttentionCounts(data.counts);
+      setAttentionKindCounts(data.kindCounts || {});
+      setAttentionSeverityCounts(data.severityCounts || { critical: 0, warning: 0, info: 0 });
       setAttentionError(null);
     } catch (err) {
       setAttentionError(err?.message || 'Failed to load attention items');
     }
     setAttentionLoading(false);
-  }, [attentionStatusFilter]);
+  }, [attentionKindFilter, attentionSort, attentionStatusFilter]);
 
   useEffect(() => {
     if (activeTab === 'attention') loadAttentionQueue();
   }, [activeTab, loadAttentionQueue]);
+
+  useEffect(() => {
+    const visible = new Set(attentionItems.map((item) => item._id));
+    setAttentionSelectedIds((previous) => previous.filter((id) => visible.has(id)));
+  }, [attentionItems]);
+
+  const toggleAttentionSelection = useCallback((id) => {
+    if (!id) return;
+    setAttentionSelectedIds((previous) => (
+      previous.includes(id)
+        ? previous.filter((value) => value !== id)
+        : [...previous, id]
+    ));
+  }, []);
+
+  const setAllVisibleAttentionSelected = useCallback((selected) => {
+    if (!selected) {
+      setAttentionSelectedIds([]);
+      return;
+    }
+    setAttentionSelectedIds(attentionItems.map((item) => item._id).filter(Boolean));
+  }, [attentionItems]);
+
+  const clearAttentionSelection = useCallback(() => {
+    setAttentionSelectedIds([]);
+  }, []);
 
   const handleAttentionStatusChange = useCallback(async (id, status, resolutionNote = '') => {
     if (!id || attentionUpdatingId) return;
     setAttentionUpdatingId(id);
     try {
       await updateAttentionItem(id, { status, resolutionNote });
+      setAttentionSelectedIds((previous) => previous.filter((value) => value !== id));
       await loadAttentionQueue();
     } catch (err) {
       toastRef.current.error(err?.message || 'Failed to update attention item');
     }
     setAttentionUpdatingId('');
   }, [attentionUpdatingId, loadAttentionQueue]);
+
+  const handleBulkAttentionStatusChange = useCallback(async (status, resolutionNote = '') => {
+    if (!attentionSelectedIds.length || attentionUpdatingId) return;
+    setAttentionUpdatingId('bulk');
+    try {
+      const result = await bulkUpdateAttentionItems(attentionSelectedIds, { status, resolutionNote });
+      toastRef.current.success(`Updated ${result.modified || result.matched || attentionSelectedIds.length} attention item${attentionSelectedIds.length === 1 ? '' : 's'}.`);
+      setAttentionSelectedIds([]);
+      await loadAttentionQueue();
+    } catch (err) {
+      toastRef.current.error(err?.message || 'Failed to update selected attention items');
+    }
+    setAttentionUpdatingId('');
+  }, [attentionSelectedIds, attentionUpdatingId, loadAttentionQueue]);
 
   const handleStatusChange = useCallback(async (id, newStatus) => {
     tel(TEL.USER_ACTION, `Changed escalation status to ${newStatus}`, { escalationId: id, newStatus });
@@ -243,13 +311,24 @@ export default function useEscalations() {
     attentionItems,
     attentionTotal,
     attentionCounts,
+    attentionKindCounts,
+    attentionSeverityCounts,
     attentionStatusFilter,
     setAttentionStatusFilter,
+    attentionKindFilter,
+    setAttentionKindFilter,
+    attentionSort,
+    setAttentionSort,
     attentionLoading,
     attentionError,
     attentionTotalAll,
     attentionUpdatingId,
+    attentionSelectedIds,
+    toggleAttentionSelection,
+    setAllVisibleAttentionSelected,
+    clearAttentionSelection,
     handleAttentionStatusChange,
+    handleBulkAttentionStatusChange,
     requestDelete,
     deleteTarget,
     confirmDelete,

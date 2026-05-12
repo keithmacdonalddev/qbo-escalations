@@ -71,6 +71,8 @@ const KNOWLEDGE_REUSABLE_OUTCOMES = new Set([
   'unsafe-to-reuse',
 ]);
 const ELIGIBLE_KNOWLEDGE_STATUSES = new Set(['resolved', 'escalated-further']);
+const ATTENTION_SEVERITY_WEIGHT = { critical: 3, warning: 2, info: 1 };
+const ATTENTION_STATUS_WEIGHT = { open: 1, split: 2, resolved: 3, dismissed: 4 };
 
 if (!fs.existsSync(ESCALATION_UPLOADS_DIR)) {
   fs.mkdirSync(ESCALATION_UPLOADS_DIR, { recursive: true });
@@ -148,6 +150,74 @@ function normalizeCandidateConfidence(value, fallback = 0.6) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(0, Math.min(1, num));
+}
+
+function resolveAttentionSort(value) {
+  const sort = safeString(value, 'priority').trim();
+  if (!sort || sort === 'priority') return 'priority';
+  return sort;
+}
+
+function attentionDateMs(value) {
+  if (!value) return 0;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function compareAttentionPriority(left, right) {
+  const leftStatus = ATTENTION_STATUS_WEIGHT[left.status] || 99;
+  const rightStatus = ATTENTION_STATUS_WEIGHT[right.status] || 99;
+  if (leftStatus !== rightStatus) return leftStatus - rightStatus;
+
+  const leftSeverity = ATTENTION_SEVERITY_WEIGHT[left.severity] || 0;
+  const rightSeverity = ATTENTION_SEVERITY_WEIGHT[right.severity] || 0;
+  if (leftSeverity !== rightSeverity) return rightSeverity - leftSeverity;
+
+  const leftDetected = attentionDateMs(left.lastDetectedAt || left.updatedAt || left.createdAt);
+  const rightDetected = attentionDateMs(right.lastDetectedAt || right.updatedAt || right.createdAt);
+  return rightDetected - leftDetected;
+}
+
+function normalizeAttentionItemIds(value) {
+  const raw = Array.isArray(value) ? value : [];
+  const ids = [];
+  const seen = new Set();
+  for (const item of raw) {
+    const id = safeString(item, '').trim();
+    if (!isValidObjectId(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+    if (ids.length >= 200) break;
+  }
+  return ids;
+}
+
+async function listAttentionItemsPage(filter, { sort, offset, limit }) {
+  if (sort !== 'priority') {
+    return EscalationAttentionItem.find(filter)
+      .sort(sort)
+      .skip(offset)
+      .limit(limit)
+      .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+      .populate('sourceConversationId', 'title updatedAt messageCount lastMessagePreview escalationId')
+      .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+      .lean();
+  }
+
+  const sorted = await EscalationAttentionItem.find(filter)
+    .select('_id status severity lastDetectedAt updatedAt createdAt')
+    .lean();
+  sorted.sort(compareAttentionPriority);
+  const pageIds = sorted.slice(offset, offset + limit).map((item) => item._id);
+  if (!pageIds.length) return [];
+
+  const populated = await EscalationAttentionItem.find({ _id: { $in: pageIds } })
+    .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+    .populate('sourceConversationId', 'title updatedAt messageCount lastMessagePreview escalationId')
+    .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
+    .lean();
+  const byId = new Map(populated.map((item) => [String(item._id), item]));
+  return pageIds.map((id) => byId.get(String(id))).filter(Boolean);
 }
 
 async function loadConversationSnapshot(conversationId) {
@@ -802,7 +872,8 @@ router.get('/knowledge-candidates', async (req, res) => {
 router.get('/attention-items', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
-  const sort = req.query.sort || '-updatedAt';
+  const sort = resolveAttentionSort(req.query.sort || 'priority');
+  const validKinds = new Set(EscalationAttentionItem.ATTENTION_KINDS || []);
   const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
   const shouldRefresh = ['1', 'true', 'yes'].includes(safeString(req.query.refresh, '').trim().toLowerCase());
   const refresh = shouldRefresh
@@ -823,17 +894,16 @@ router.get('/attention-items', async (req, res) => {
     }
     filter.status = status;
   }
-  if (req.query.kind) filter.kind = safeString(req.query.kind).trim();
+  const kind = safeString(req.query.kind, '').trim();
+  if (kind && kind !== 'all') {
+    if (!validKinds.has(kind)) {
+      return res.status(400).json({ ok: false, code: 'INVALID_KIND', error: 'Invalid attention item kind' });
+    }
+    filter.kind = kind;
+  }
 
   const [items, total] = await Promise.all([
-    EscalationAttentionItem.find(filter)
-      .sort(sort)
-      .skip(offset)
-      .limit(limit)
-      .populate('sourceEscalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
-      .populate('sourceConversationId', 'title updatedAt messageCount lastMessagePreview escalationId')
-      .populate('candidates.escalationId', 'coid caseNumber category status attemptingTo actualOutcome conversationId createdAt')
-      .lean(),
+    listAttentionItemsPage(filter, { sort, offset, limit }),
     EscalationAttentionItem.countDocuments(filter),
   ]);
 
@@ -845,7 +915,57 @@ router.get('/attention-items', async (req, res) => {
     if (item._id in counts) counts[item._id] = item.count;
   }
 
-  res.json({ ok: true, items, total, counts, refresh });
+  const [kindCountsRaw, severityCountsRaw] = await Promise.all([
+    EscalationAttentionItem.aggregate([
+      { $match: status === 'all' ? {} : { status: filter.status || 'open' } },
+      { $group: { _id: '$kind', count: { $sum: 1 } } },
+    ]),
+    EscalationAttentionItem.aggregate([
+      { $match: filter },
+      { $group: { _id: '$severity', count: { $sum: 1 } } },
+    ]),
+  ]);
+  const kindCounts = {};
+  for (const item of kindCountsRaw) {
+    if (item._id) kindCounts[item._id] = item.count;
+  }
+  const severityCounts = { critical: 0, warning: 0, info: 0 };
+  for (const item of severityCountsRaw) {
+    if (item._id in severityCounts) severityCounts[item._id] = item.count;
+  }
+
+  res.json({ ok: true, items, total, counts, kindCounts, severityCounts, sort, refresh });
+});
+
+// PATCH /api/escalations/attention-items/bulk -- Resolve/dismiss multiple review items
+router.patch('/attention-items/bulk', async (req, res) => {
+  const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
+  const nextStatus = safeString(req.body && req.body.status, '').trim();
+  if (!validStatuses.has(nextStatus)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_STATUS', error: 'Invalid attention item status' });
+  }
+
+  const ids = normalizeAttentionItemIds(req.body && req.body.ids);
+  if (!ids.length) {
+    return res.status(400).json({ ok: false, code: 'NO_ITEMS_SELECTED', error: 'Select at least one valid attention item' });
+  }
+
+  const update = {
+    status: nextStatus,
+    resolutionNote: compactText(req.body && req.body.resolutionNote, 500),
+    resolvedAt: nextStatus === 'open' ? null : new Date(),
+  };
+  const result = await EscalationAttentionItem.updateMany(
+    { _id: { $in: ids } },
+    { $set: update },
+    { runValidators: true }
+  );
+  res.json({
+    ok: true,
+    matched: result.matchedCount || 0,
+    modified: result.modifiedCount || 0,
+    status: nextStatus,
+  });
 });
 
 // PATCH /api/escalations/attention-items/:itemId -- Resolve or dismiss a review item

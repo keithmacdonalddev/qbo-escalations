@@ -58,6 +58,7 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 2 stale-case implementation: loading the attention queue with refresh now scans for `open` cases stale for 14 days and `in-progress` cases stale for 7 days, creating `stale-open` review items and closing them once the source case is no longer stale.
 - Item 2 parser/triage implementation: attention refresh now scans parse metadata for validation issues, low confidence, regex fallback, provider fallback, or failed parser attempts and creates `parse-review` items until the parse metadata is corrected or the item is manually handled.
 - Item 2 missing-link implementation: attention refresh now checks bidirectional escalation/conversation links and creates `missing-link` items for missing records or backlink mismatches until the link contract is repaired.
+- Item 2 operations implementation: `#/attention` is now a first-class attention-center route with priority sorting, kind filters, severity counts, direct source navigation, visible selection, and bulk handle/dismiss/reopen actions backed by a bulk attention API.
 - Item 6 first implementation: generated or edited knowledge drafts now create durable `knowledge-review` attention items; approval, publish, or a rejected draft with reviewer notes closes the item.
 
 ## 1. Canonical Intake Reliability

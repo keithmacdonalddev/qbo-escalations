@@ -4,6 +4,8 @@ import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import EscalationCard from './EscalationCard.jsx';
 import useEscalations, {
+  ATTENTION_KIND_LABELS,
+  ATTENTION_SORT_LABELS,
   ATTENTION_STATUS_LABELS,
   ESCALATION_CATEGORIES,
   ESCALATION_STATUSES,
@@ -13,7 +15,19 @@ import useEscalations, {
 } from '../hooks/useEscalations.js';
 import './EscalationDashboard.css';
 
-export default function EscalationDashboard() {
+const ATTENTION_KIND_ORDER = [
+  'all',
+  'parse-review',
+  'missing-link',
+  'missing-resolution',
+  'stale-open',
+  'knowledge-review',
+  'agent-review',
+  'agent-harness',
+  'possible-duplicate',
+];
+
+export default function EscalationDashboard({ initialTab = 'escalations' }) {
   const {
     activeTab,
     setActiveTab,
@@ -41,20 +55,31 @@ export default function EscalationDashboard() {
     attentionItems,
     attentionTotal,
     attentionCounts,
+    attentionKindCounts,
+    attentionSeverityCounts,
     attentionStatusFilter,
     setAttentionStatusFilter,
+    attentionKindFilter,
+    setAttentionKindFilter,
+    attentionSort,
+    setAttentionSort,
     attentionLoading,
     attentionError,
     attentionTotalAll,
     attentionUpdatingId,
+    attentionSelectedIds,
+    toggleAttentionSelection,
+    setAllVisibleAttentionSelected,
+    clearAttentionSelection,
     handleAttentionStatusChange,
+    handleBulkAttentionStatusChange,
     requestDelete,
     deleteTarget,
     confirmDelete,
     cancelDelete,
     handleStatusChange,
     refresh,
-  } = useEscalations();
+  } = useEscalations({ initialTab });
 
   const [gaps, setGaps] = useState(null);
   const [gapsOpen, setGapsOpen] = useState(false);
@@ -69,7 +94,7 @@ export default function EscalationDashboard() {
   return (
     <div className="app-content-constrained">
       <div className="page-header">
-        <h1 className="page-title">Escalation Dashboard</h1>
+        <h1 className="page-title">{initialTab === 'attention' ? 'Attention Center' : 'Escalation Dashboard'}</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
           {activeTab === 'escalations'
             ? 'All parsed escalations — filter, search, and track resolution status.'
@@ -390,21 +415,59 @@ export default function EscalationDashboard() {
             ))}
           </div>
 
-          <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
-            <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
-              <select
-                value={attentionStatusFilter}
-                onChange={(e) => setAttentionStatusFilter(e.target.value)}
-                aria-label="Filter by attention status"
-                style={{ width: 'auto', minWidth: 150 }}
-              >
-                <option value="open">Open</option>
-                <option value="all">All Items</option>
-                <option value="resolved">Handled</option>
-                <option value="split">Separate</option>
-                <option value="dismissed">Dismissed</option>
-              </select>
-              <span className="text-secondary" style={{ fontSize: 'var(--text-xs)', alignSelf: 'center' }}>
+          <div className="attention-ops-panel">
+            <div className="attention-ops-row">
+              <div className="attention-filter-group" aria-label="Filter attention items by type">
+                {ATTENTION_KIND_ORDER.map(kind => {
+                  const count = kind === 'all'
+                    ? Object.values(attentionKindCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)
+                    : (attentionKindCounts?.[kind] || 0);
+                  return (
+                    <button
+                      type="button"
+                      key={kind}
+                      className={`attention-kind-chip${attentionKindFilter === kind ? ' is-active' : ''}`}
+                      onClick={() => setAttentionKindFilter(kind)}
+                    >
+                      <span>{ATTENTION_KIND_LABELS[kind] || kind}</span>
+                      <strong>{count}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="attention-ops-row attention-ops-row-secondary">
+              <div className="attention-select-group">
+                <select
+                  value={attentionStatusFilter}
+                  onChange={(e) => setAttentionStatusFilter(e.target.value)}
+                  aria-label="Filter by attention status"
+                >
+                  <option value="open">Open</option>
+                  <option value="all">All Items</option>
+                  <option value="resolved">Handled</option>
+                  <option value="split">Separate</option>
+                  <option value="dismissed">Dismissed</option>
+                </select>
+                <select
+                  value={attentionSort}
+                  onChange={(e) => setAttentionSort(e.target.value)}
+                  aria-label="Sort attention items"
+                >
+                  {Object.entries(ATTENTION_SORT_LABELS).map(([value, label]) => (
+                    <option value={value} key={value}>{label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="attention-severity-summary" aria-label="Attention severity summary">
+                <span className="attention-severity-count critical">{attentionSeverityCounts.critical || 0} critical</span>
+                <span className="attention-severity-count warning">{attentionSeverityCounts.warning || 0} warning</span>
+                <span className="attention-severity-count info">{attentionSeverityCounts.info || 0} info</span>
+              </div>
+
+              <span className="text-secondary attention-result-count">
                 {attentionTotal} item{attentionTotal !== 1 ? 's' : ''}
               </span>
             </div>
@@ -425,16 +488,29 @@ export default function EscalationDashboard() {
                 </div>
               </div>
             ) : (
-              <div className="attention-list">
-                {attentionItems.map(item => (
-                  <AttentionItemRow
-                    key={item._id}
-                    item={item}
-                    busy={attentionUpdatingId === item._id}
-                    onStatusChange={handleAttentionStatusChange}
-                  />
-                ))}
-              </div>
+              <>
+                <AttentionBulkToolbar
+                  itemCount={attentionItems.length}
+                  selectedCount={attentionSelectedIds.length}
+                  allSelected={attentionItems.length > 0 && attentionSelectedIds.length === attentionItems.length}
+                  busy={attentionUpdatingId === 'bulk'}
+                  onSelectAll={setAllVisibleAttentionSelected}
+                  onClear={clearAttentionSelection}
+                  onBulkStatusChange={handleBulkAttentionStatusChange}
+                />
+                <div className="attention-list">
+                  {attentionItems.map(item => (
+                    <AttentionItemRow
+                      key={item._id}
+                      item={item}
+                      selected={attentionSelectedIds.includes(item._id)}
+                      busy={attentionUpdatingId === item._id}
+                      onToggleSelection={toggleAttentionSelection}
+                      onStatusChange={handleAttentionStatusChange}
+                    />
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </>
@@ -617,7 +693,71 @@ function formatAttentionDate(value) {
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function AttentionItemRow({ item, busy, onStatusChange }) {
+function AttentionBulkToolbar({
+  itemCount,
+  selectedCount,
+  allSelected,
+  busy,
+  onSelectAll,
+  onClear,
+  onBulkStatusChange,
+}) {
+  const hasSelection = selectedCount > 0;
+  return (
+    <div className="attention-bulk-toolbar">
+      <label className="attention-select-visible">
+        <input
+          type="checkbox"
+          checked={allSelected}
+          disabled={!itemCount || busy}
+          onChange={(event) => onSelectAll(event.target.checked)}
+        />
+        <span>{allSelected ? 'All visible selected' : 'Select visible'}</span>
+      </label>
+      <span className="attention-bulk-count">
+        {selectedCount} selected
+      </span>
+      <div className="attention-bulk-actions">
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={!hasSelection || busy}
+          onClick={() => onBulkStatusChange('resolved', 'Bulk handled from attention center.')}
+        >
+          Handle Selected
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!hasSelection || busy}
+          onClick={() => onBulkStatusChange('dismissed', 'Bulk dismissed from attention center.')}
+        >
+          Dismiss Selected
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!hasSelection || busy}
+          onClick={() => onBulkStatusChange('open', '')}
+        >
+          Reopen Selected
+        </button>
+        {hasSelection && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={busy}
+            onClick={onClear}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AttentionItemRow({ item, selected, busy, onToggleSelection, onStatusChange }) {
   const sourceId = getEscalationRefId(item.sourceEscalationId);
   const sourceConversationId = getEscalationRefId(item.sourceConversationId);
   const sourceAgentId = item.sourceType === 'agent' && item.metadata?.agentId
@@ -635,6 +775,13 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
 
   return (
     <div className="attention-item">
+      <label className="attention-row-select" aria-label={`Select ${item.title || 'attention item'}`}>
+        <input
+          type="checkbox"
+          checked={Boolean(selected)}
+          onChange={() => onToggleSelection(item._id)}
+        />
+      </label>
       <div className="attention-item-main">
         <div className="attention-item-header">
           <span className={`attention-severity attention-severity-${item.severity || 'info'}`}>

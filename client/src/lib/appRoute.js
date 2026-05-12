@@ -38,6 +38,7 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
     return { view: 'escalation-detail', escalationId: path.slice(13) };
   }
   if (path === '/dashboard' || path === '/escalations') return { view: 'dashboard' };
+  if (path === '/attention') return { view: 'attention' };
   if (path === '/playbook') return { view: 'playbook' };
   if (path === '/agents') return { view: 'agents', agentId: null };
   if (path.startsWith('/agents/')) return { view: 'agents', agentId: path.slice('/agents/'.length) };
@@ -91,6 +92,10 @@ function getSidebarCurrentRoute(route) {
 
   if (route.view === 'agents') {
     return route.agentId ? `#/agents/${route.agentId}` : '#/agents';
+  }
+
+  if (route.view === 'attention') {
+    return '#/attention';
   }
 
   return `#/${route.view || 'chat'}`;

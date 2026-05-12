@@ -164,13 +164,21 @@ export async function listKnowledgeCandidates({ reviewStatus, category, reusable
 }
 
 /** List workflow attention items for review */
-export async function listAttentionItems({ status = 'open', kind, refresh = false, sort = '-updatedAt', limit = 50, offset = 0 } = {}) {
+export async function listAttentionItems({ status = 'open', kind, refresh = false, sort = 'priority', limit = 50, offset = 0 } = {}) {
   const params = new URLSearchParams({ status, limit, offset, sort });
   if (kind) params.set('kind', kind);
   if (refresh) params.set('refresh', '1');
 
   const data = await apiFetchJson(`${BASE}/attention-items?${params}`, {}, 'Failed to list attention items');
-  return { items: data.items, total: data.total, counts: data.counts, refresh: data.refresh || null };
+  return {
+    items: data.items,
+    total: data.total,
+    counts: data.counts,
+    kindCounts: data.kindCounts || {},
+    severityCounts: data.severityCounts || {},
+    sort: data.sort || sort,
+    refresh: data.refresh || null,
+  };
 }
 
 /** Update a workflow attention item review state */
@@ -181,6 +189,15 @@ export async function updateAttentionItem(id, { status, resolutionNote = '' } = 
     body: JSON.stringify({ status, resolutionNote }),
   }, 'Failed to update attention item');
   return data.item;
+}
+
+/** Update multiple workflow attention items at once */
+export async function bulkUpdateAttentionItems(ids, { status, resolutionNote = '' } = {}) {
+  return apiFetchJson(`${BASE}/attention-items/bulk`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids, status, resolutionNote }),
+  }, 'Failed to update attention items');
 }
 
 /** Fetch knowledge gap analysis for playbook coverage */

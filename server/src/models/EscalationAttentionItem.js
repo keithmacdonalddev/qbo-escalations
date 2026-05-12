@@ -96,4 +96,6 @@ escalationAttentionItemSchema.index({ sourceEscalationId: 1, status: 1 });
 escalationAttentionItemSchema.index({ 'candidates.escalationId': 1, status: 1 });
 
 module.exports = mongoose.model('EscalationAttentionItem', escalationAttentionItemSchema);
+module.exports.ATTENTION_KINDS = ATTENTION_KINDS;
 module.exports.ATTENTION_STATUSES = ATTENTION_STATUSES;
+module.exports.ATTENTION_SEVERITIES = ATTENTION_SEVERITIES;

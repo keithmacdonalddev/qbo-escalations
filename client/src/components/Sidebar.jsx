@@ -17,6 +17,7 @@ const POLL_ACTIVE_WINDOW_MS = 60_000;
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
+  { hash: '#/attention', label: 'Attention', short: 'Attn', icon: IconBell },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
@@ -696,6 +697,15 @@ function IconDashboard({ size = 16 }) {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function IconBell({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 01-3.46 0" />
     </svg>
   );
 }

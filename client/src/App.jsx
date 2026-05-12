@@ -150,6 +150,14 @@ function App() {
           </motion.div>
           </Profiler>
         );
+      case 'attention':
+        return (
+          <Profiler id="Attention" onRender={flame.onRender}>
+          <motion.div key="attention" {...motionProps}>
+            <EscalationDashboard initialTab="attention" />
+          </motion.div>
+          </Profiler>
+        );
       case 'escalation-detail':
         return (
           <motion.div key="escalation-detail" {...motionProps} style={{ height: '100%' }}>

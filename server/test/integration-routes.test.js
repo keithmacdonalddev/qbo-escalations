@@ -656,6 +656,77 @@ await t.test('attention refresh opens and closes missing link review items', asy
   assert.equal(item.status, 'resolved');
 });
 
+await t.test('attention queue supports kind filters, priority sorting, and bulk updates', async () => {
+  const oldInfo = await EscalationAttentionItem.create({
+    kind: 'knowledge-review',
+    severity: 'info',
+    fingerprint: 'queue-ops-info',
+    title: 'Info item',
+    summary: 'Lowest priority review item.',
+    lastDetectedAt: new Date(Date.now() - 60_000),
+  });
+  const warning = await EscalationAttentionItem.create({
+    kind: 'missing-link',
+    severity: 'warning',
+    fingerprint: 'queue-ops-warning',
+    title: 'Warning item',
+    summary: 'Medium priority review item.',
+    lastDetectedAt: new Date(Date.now() - 120_000),
+  });
+  const critical = await EscalationAttentionItem.create({
+    kind: 'parse-review',
+    severity: 'critical',
+    fingerprint: 'queue-ops-critical',
+    title: 'Critical item',
+    summary: 'Highest priority review item.',
+    lastDetectedAt: new Date(Date.now() - 180_000),
+  });
+
+  const prioritized = await agent.get('/api/escalations/attention-items?status=open&sort=priority');
+  assert.equal(prioritized.status, 200);
+  assert.equal(prioritized.body.total, 3);
+  assert.deepEqual(
+    prioritized.body.items.map((item) => item.fingerprint),
+    ['queue-ops-critical', 'queue-ops-warning', 'queue-ops-info']
+  );
+  assert.equal(prioritized.body.kindCounts['parse-review'], 1);
+  assert.equal(prioritized.body.kindCounts['missing-link'], 1);
+  assert.equal(prioritized.body.kindCounts['knowledge-review'], 1);
+  assert.equal(prioritized.body.severityCounts.critical, 1);
+  assert.equal(prioritized.body.severityCounts.warning, 1);
+  assert.equal(prioritized.body.severityCounts.info, 1);
+
+  const parseOnly = await agent.get('/api/escalations/attention-items?status=open&kind=parse-review&sort=priority');
+  assert.equal(parseOnly.status, 200);
+  assert.equal(parseOnly.body.total, 1);
+  assert.equal(parseOnly.body.items[0].fingerprint, 'queue-ops-critical');
+
+  const invalidKind = await agent.get('/api/escalations/attention-items?status=open&kind=not-real');
+  assert.equal(invalidKind.status, 400);
+  assert.equal(invalidKind.body.code, 'INVALID_KIND');
+
+  const bulk = await agent
+    .patch('/api/escalations/attention-items/bulk')
+    .send({
+      ids: [critical._id.toString(), warning._id.toString(), 'not-an-id'],
+      status: 'dismissed',
+      resolutionNote: 'Bulk dismissed in queue operations test.',
+    });
+  assert.equal(bulk.status, 200);
+  assert.equal(bulk.body.matched, 2);
+
+  const dismissed = await agent.get('/api/escalations/attention-items?status=dismissed&sort=priority');
+  assert.equal(dismissed.status, 200);
+  assert.equal(dismissed.body.total, 2);
+  assert.deepEqual(
+    dismissed.body.items.map((item) => item.fingerprint).sort(),
+    ['queue-ops-critical', 'queue-ops-warning']
+  );
+
+  const stillOpen = await EscalationAttentionItem.findById(oldInfo._id).lean();
+  assert.equal(stillOpen.status, 'open');
+});
+
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
   const conversation = await Conversation.create({
     title: 'Duplicate link guard',
