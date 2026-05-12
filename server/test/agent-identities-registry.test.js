@@ -2,11 +2,22 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const request = require('supertest');
 
 const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const AgentIdentity = require('../src/models/AgentIdentity');
+const {
+  AGENT_PROMPT_VERSIONS_ROOT,
+  CUSTOM_AGENT_PROMPTS_ROOT,
+} = require('../src/lib/agent-prompt-store');
+
+function cleanupCustomPrompt(agentId) {
+  fs.rmSync(path.join(CUSTOM_AGENT_PROMPTS_ROOT, `${agentId}.md`), { force: true });
+  fs.rmSync(path.join(AGENT_PROMPT_VERSIONS_ROOT, `custom-${agentId}`), { recursive: true, force: true });
+}
 
 test('agent identity registry persists custom agents, reviews, and harness runs', async (t) => {
   await connect();
@@ -15,6 +26,8 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
 
   t.after(async () => {
     await AgentIdentity.deleteMany({});
+    cleanupCustomPrompt('billing-audit-agent');
+    cleanupCustomPrompt('refund-routing-agent');
     await disconnect();
   });
 
@@ -34,9 +47,26 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
 
   assert.equal(createRes.body.ok, true);
   assert.equal(createRes.body.agent.agentId, 'billing-audit-agent');
+  assert.equal(createRes.body.agent.promptId, 'custom-billing-audit-agent');
   assert.equal(createRes.body.agent.custom.isCustom, true);
   assert.equal(createRes.body.agent.profile.roleTitle, 'Billing Audit Specialist');
   assert.equal(createRes.body.agent.history.entries[0].type, 'registry-create');
+
+  const promptRes = await agent.get('/api/agent-prompts/custom-billing-audit-agent').expect(200);
+  assert.equal(promptRes.body.ok, true);
+  assert.match(promptRes.body.content, /Billing Audit Specialist/);
+
+  const editedPrompt = `${promptRes.body.content}\n## Test Note\nPersist custom prompt edits.\n`;
+  await agent
+    .put('/api/agent-prompts/custom-billing-audit-agent')
+    .send({
+      content: editedPrompt,
+      label: 'Custom prompt test edit',
+    })
+    .expect(200);
+
+  const editedPromptRes = await agent.get('/api/agent-prompts/custom-billing-audit-agent').expect(200);
+  assert.match(editedPromptRes.body.content, /Persist custom prompt edits/);
 
   await agent
     .post('/api/agent-identities')
@@ -109,6 +139,7 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.equal(importRes.body.ok, true);
   assert.equal(importRes.body.agents.length, 1);
   assert.equal(importRes.body.agents[0].agentId, 'refund-routing-agent');
+  assert.equal(importRes.body.agents[0].promptId, 'custom-refund-routing-agent');
   assert.equal(importRes.body.agents[0].custom.registryStatus, 'imported');
 
   const listRes = await agent.get('/api/agent-identities').expect(200);

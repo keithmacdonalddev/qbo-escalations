@@ -1,7 +1,11 @@
 'use strict';
 
 const AgentIdentity = require('../models/AgentIdentity');
-const { getAgentPromptDefinition } = require('../lib/agent-prompt-store');
+const {
+  ensureCustomAgentPrompt,
+  getAgentIdForCustomPromptId,
+  getAgentPromptDefinition,
+} = require('../lib/agent-prompt-store');
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { normalizeModelOverride } = require('./chat-orchestrator');
 const {
@@ -1445,6 +1449,21 @@ function sanitizeRegistryProfile(input = {}, agentId) {
   return profile;
 }
 
+function resolveRegistryPromptId(agentId, payload = {}, profile = {}) {
+  const requestedPromptId = safeText(payload.promptId);
+  if (requestedPromptId && getAgentPromptDefinition(requestedPromptId)) {
+    return requestedPromptId;
+  }
+  if (DEFAULT_PROFILES[agentId]) {
+    return requestedPromptId && getAgentPromptDefinition(requestedPromptId) ? requestedPromptId : '';
+  }
+  const definition = ensureCustomAgentPrompt(agentId, {
+    profile,
+    content: typeof payload.promptContent === 'string' ? payload.promptContent : undefined,
+  });
+  return definition.id;
+}
+
 async function createAgentIdentity(payload = {}, { actor = 'user' } = {}) {
   const profileInput = {
     ...(payload.profile || {}),
@@ -1460,10 +1479,11 @@ async function createAgentIdentity(payload = {}, { actor = 'user' } = {}) {
     throw serviceError('DUPLICATE_AGENT_ID', 409, `Agent identity "${agentId}" already exists.`);
   }
 
-  const promptId = safeText(payload.promptId);
+  const profile = sanitizeRegistryProfile(profileInput, agentId);
+  const promptId = resolveRegistryPromptId(agentId, payload, profile);
   const doc = new AgentIdentity({
     agentId,
-    profile: sanitizeRegistryProfile(profileInput, agentId),
+    profile,
     custom: {
       isCustom: true,
       source: safeText(payload.source) || 'manual',
@@ -1471,7 +1491,7 @@ async function createAgentIdentity(payload = {}, { actor = 'user' } = {}) {
       registryStatus: safeText(payload.registryStatus) || 'draft',
       createdBy: actor,
       importedAt: null,
-      promptId: promptId && getAgentPromptDefinition(promptId) ? promptId : '',
+      promptId,
       metadata: sanitizeMetadata(payload.metadata),
     },
     history: {
@@ -1516,11 +1536,15 @@ async function importAgentIdentities(payload = {}, { actor = 'user' } = {}) {
         const previousProfile = identityDoc.profile?.toObject
           ? identityDoc.profile.toObject()
           : { ...(identityDoc.profile || {}) };
-        identityDoc.profile = {
+        const nextProfile = {
           ...previousProfile,
           ...sanitizeRegistryProfile(profileInput, agentId),
         };
+        identityDoc.profile = {
+          ...nextProfile,
+        };
         if (!DEFAULT_PROFILES[agentId]) {
+          const promptId = resolveRegistryPromptId(agentId, item, nextProfile);
           identityDoc.custom = {
             ...(identityDoc.custom?.toObject ? identityDoc.custom.toObject() : identityDoc.custom || {}),
             isCustom: true,
@@ -1529,7 +1553,7 @@ async function importAgentIdentities(payload = {}, { actor = 'user' } = {}) {
             registryStatus: safeText(item.registryStatus || payload.registryStatus) || 'imported',
             createdBy: safeText(identityDoc.custom?.createdBy) || actor,
             importedAt: new Date(),
-            promptId: safeText(item.promptId) && getAgentPromptDefinition(item.promptId) ? safeText(item.promptId) : safeText(identityDoc.custom?.promptId),
+            promptId: promptId || safeText(identityDoc.custom?.promptId),
             metadata: {
               ...sanitizeMetadata(identityDoc.custom?.metadata),
               ...sanitizeMetadata(payload.metadata),
@@ -1565,7 +1589,7 @@ async function importAgentIdentities(payload = {}, { actor = 'user' } = {}) {
 }
 
 function getAgentIdForPrompt(promptId) {
-  return AGENT_PROMPT_MAP[promptId] || null;
+  return AGENT_PROMPT_MAP[promptId] || getAgentIdForCustomPromptId(promptId) || null;
 }
 
 module.exports = {

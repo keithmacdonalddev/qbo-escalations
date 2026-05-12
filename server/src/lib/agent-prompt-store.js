@@ -6,7 +6,9 @@ const { reloadPlaybook } = require('./playbook-loader');
 
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 const AGENT_PROMPTS_ROOT = path.join(PROJECT_ROOT, 'prompts', 'agents');
+const CUSTOM_AGENT_PROMPTS_ROOT = path.join(AGENT_PROMPTS_ROOT, 'custom');
 const AGENT_PROMPT_VERSIONS_ROOT = path.join(PROJECT_ROOT, 'prompts', 'versions', 'agents');
+const CUSTOM_AGENT_PROMPT_PREFIX = 'custom-';
 
 const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
@@ -140,11 +142,71 @@ const promptDefinitionById = new Map(
 
 function ensurePromptDirectories() {
   fs.mkdirSync(AGENT_PROMPTS_ROOT, { recursive: true });
+  fs.mkdirSync(CUSTOM_AGENT_PROMPTS_ROOT, { recursive: true });
   fs.mkdirSync(AGENT_PROMPT_VERSIONS_ROOT, { recursive: true });
 }
 
+function normalizeCustomAgentId(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 72);
+}
+
+function getCustomPromptId(agentId) {
+  const normalizedAgentId = normalizeCustomAgentId(agentId);
+  return normalizedAgentId ? `${CUSTOM_AGENT_PROMPT_PREFIX}${normalizedAgentId}` : '';
+}
+
+function isCustomPromptId(id) {
+  return String(id || '').startsWith(CUSTOM_AGENT_PROMPT_PREFIX);
+}
+
+function getAgentIdForCustomPromptId(id) {
+  if (!isCustomPromptId(id)) return null;
+  return normalizeCustomAgentId(String(id).slice(CUSTOM_AGENT_PROMPT_PREFIX.length)) || null;
+}
+
+function getCustomPromptFilePath(id) {
+  const agentId = getAgentIdForCustomPromptId(id);
+  if (!agentId) return null;
+  return path.join(CUSTOM_AGENT_PROMPTS_ROOT, `${agentId}.md`);
+}
+
+function buildCustomPromptDefinition(id) {
+  const agentId = getAgentIdForCustomPromptId(id);
+  const filePath = getCustomPromptFilePath(id);
+  if (!agentId || !filePath || !fs.existsSync(filePath)) return null;
+  return {
+    id,
+    order: 500,
+    name: agentId
+      .split('-')
+      .filter(Boolean)
+      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+      .join(' '),
+    promptType: 'system',
+    usedBy: `Custom agent ${agentId}`,
+    description: 'Custom agent prompt registered from Agent Mission Control.',
+    filePath,
+    custom: true,
+  };
+}
+
+function listCustomPromptDefinitions() {
+  ensurePromptDirectories();
+  if (!fs.existsSync(CUSTOM_AGENT_PROMPTS_ROOT)) return [];
+  return fs.readdirSync(CUSTOM_AGENT_PROMPTS_ROOT)
+    .filter((fileName) => /^[a-z0-9][a-z0-9-]*\.md$/.test(fileName))
+    .map((fileName) => buildCustomPromptDefinition(getCustomPromptId(fileName.replace(/\.md$/, ''))))
+    .filter(Boolean);
+}
+
 function getAgentPromptDefinition(id) {
-  const definition = promptDefinitionById.get(String(id || '').trim());
+  const promptId = String(id || '').trim();
+  const definition = promptDefinitionById.get(promptId) || buildCustomPromptDefinition(promptId);
   if (!definition) return null;
   return definition;
 }
@@ -170,13 +232,17 @@ function toPromptMetadata(definition) {
     description: definition.description,
     size,
     modified,
+    custom: Boolean(definition.custom),
   };
 }
 
 function listAgentPromptDefinitions(options = {}) {
   ensurePromptDirectories();
   const includeInternal = options && options.includeInternal === true;
-  return AGENT_PROMPT_DEFINITIONS
+  return [
+    ...AGENT_PROMPT_DEFINITIONS,
+    ...listCustomPromptDefinitions(),
+  ]
     .filter((definition) => includeInternal || definition.visible !== false)
     .map(toPromptMetadata)
     .sort((a, b) => a.order - b.order);
@@ -224,10 +290,58 @@ function getAgentPromptVersionsDir(id) {
   return path.join(AGENT_PROMPT_VERSIONS_ROOT, definition.id);
 }
 
+function createDefaultCustomAgentPrompt({ agentId, displayName, roleTitle, headline, tone, boundaries }) {
+  const label = roleTitle || displayName || agentId;
+  return [
+    `# ${label}`,
+    '',
+    `You are ${displayName || label}, a custom agent registered in Agent Mission Control.`,
+    '',
+    '## Mission',
+    headline || 'Support the assigned escalation workflow with evidence-backed, reviewable guidance.',
+    '',
+    '## Operating Style',
+    tone || 'Clear, practical, and explicit about uncertainty.',
+    '',
+    '## Guardrails',
+    boundaries || 'Do not take irreversible action without human review. Surface assumptions, missing evidence, and handoff needs.',
+    '',
+    '## Output',
+    'Return concise operator-facing guidance, include evidence when available, and call out when a human review is required.',
+    '',
+  ].join('\n');
+}
+
+function ensureCustomAgentPrompt(agentId, options = {}) {
+  const promptId = getCustomPromptId(agentId);
+  if (!promptId) {
+    const err = new Error('Custom agent prompt requires a stable agentId');
+    err.code = 'INVALID_AGENT_ID';
+    throw err;
+  }
+
+  ensurePromptDirectories();
+  const filePath = getCustomPromptFilePath(promptId);
+  if (!fs.existsSync(filePath)) {
+    fs.writeFileSync(
+      filePath,
+      typeof options.content === 'string'
+        ? options.content
+        : createDefaultCustomAgentPrompt({ agentId, ...(options.profile || {}) }),
+      'utf-8'
+    );
+  }
+  return getAgentPromptDefinition(promptId);
+}
+
 module.exports = {
   AGENT_PROMPT_DEFINITIONS,
   AGENT_PROMPTS_ROOT,
   AGENT_PROMPT_VERSIONS_ROOT,
+  CUSTOM_AGENT_PROMPTS_ROOT,
+  CUSTOM_AGENT_PROMPT_PREFIX,
+  ensureCustomAgentPrompt,
+  getAgentIdForCustomPromptId,
   getAgentPromptDefinition,
   getAgentPromptVersionsDir,
   getRenderedAgentPrompt,
