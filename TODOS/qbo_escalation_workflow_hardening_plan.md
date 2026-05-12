@@ -31,7 +31,7 @@ We are reviewing the hardening areas one by one before implementation.
 | 3. Duplicate and retry safety | Durable warnings implemented | Reuse existing conversation-linked escalations on retries/re-parses; warn and create review items when different conversations or screenshot uploads look like the same real-world issue. |
 | 4. Known issue / INV confidence boundaries | Initial known issue search implemented | Treat INV matches as candidates unless evidence or human review confirms them. |
 | 5. Resolution discipline | First attention producer implemented | Resolved or escalated-further cases without an explanation now create review items; decide later whether the UI should hard-block. |
-| 6. Knowledge candidate safety | Not yet discussed in detail | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
+| 6. Knowledge candidate safety | First attention producer implemented | Keep drafts reviewable, evidence-backed, and explicitly labeled for reuse safety. |
 | 7. Evidence ledger | Not yet discussed in detail | Add a thin event trail around the existing workflow. |
 | 8. Ontology vertical slice | Future planning | Build only after the workflow hardening plan is clear. |
 
@@ -54,7 +54,8 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 2 first implementation: duplicate warnings now create durable `EscalationAttentionItem` records and the Escalation Dashboard has an Attention tab with open/handled/separate/dismissed review states.
 - Item 3 durable warning behavior: duplicate warnings remain non-blocking but can now be handled, dismissed, or marked as intentional separate escalations from the dashboard.
 - Item 5 first implementation: `resolved` or `escalated-further` escalations without `resolution` or `resolutionNotes` now create durable `missing-resolution` attention items; adding an explanation auto-closes the item.
-- Item 2 remaining gap: the attention queue now covers duplicate warnings and missing finalization notes; stale open cases, missing links, unresolved parser/triage issues, and knowledge-review discipline still need review-item producers.
+- Item 2 remaining gap: the attention queue now covers duplicate warnings, missing finalization notes, agent governance failures, and knowledge-review discipline; stale open cases, missing links, and unresolved parser/triage issues still need review-item producers.
+- Item 6 first implementation: generated or edited knowledge drafts now create durable `knowledge-review` attention items; approval, publish, or a rejected draft with reviewer notes closes the item.
 
 ## 1. Canonical Intake Reliability
 

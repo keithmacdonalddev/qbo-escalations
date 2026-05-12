@@ -7,6 +7,7 @@ const { createApp } = require('../src/app');
 const Conversation = require('../src/models/Conversation');
 const Escalation = require('../src/models/Escalation');
 const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
+const KnowledgeCandidate = require('../src/models/KnowledgeCandidate');
 const Template = require('../src/models/Template');
 const ParallelCandidateTurn = require('../src/models/ParallelCandidateTurn');
 const claude = require('../src/services/claude');
@@ -103,6 +104,7 @@ t.beforeEach(async () => {
     Conversation.deleteMany({}),
     Escalation.deleteMany({}),
     EscalationAttentionItem.deleteMany({}),
+    KnowledgeCandidate.deleteMany({}),
     Template.deleteMany({}),
     ParallelCandidateTurn.deleteMany({}),
   ]);
@@ -358,6 +360,99 @@ await t.test('transition to escalated-further without a reason creates missing-r
   assert.equal(item.status, 'open');
   assert.equal(item.title, 'Missing escalation reason');
   assert.ok(item.signals.includes('missing_escalation_reason'));
+});
+
+await t.test('knowledge draft opens review attention item and closes after review', async () => {
+  const created = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'bank-feeds',
+      caseNumber: 'CS-2026-KNOW-001',
+      attemptingTo: 'Reconnect a bank feed',
+      actualOutcome: 'Transactions did not download',
+    });
+  assert.equal(created.status, 201);
+  const escalationId = created.body.escalation._id;
+
+  const resolved = await agent
+    .patch(`/api/escalations/${escalationId}`)
+    .send({
+      status: 'resolved',
+      resolution: 'Reconnected the bank feed and confirmed new transactions downloaded.',
+    });
+  assert.equal(resolved.status, 200);
+  assert.equal(resolved.body.resolutionDiscipline.action, 'none');
+
+  const generated = await agent
+    .post(`/api/escalations/${escalationId}/knowledge/generate`)
+    .send({});
+  assert.equal(generated.status, 200);
+  assert.equal(generated.body.knowledge.reviewStatus, 'draft');
+  assert.equal(generated.body.knowledgeReview.action, 'opened');
+
+  let item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'knowledge-review',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Knowledge draft needs review');
+  assert.equal(item.sourceLabel, 'case CS-2026-KNOW-001');
+  assert.ok(item.signals.includes('knowledge_draft_review'));
+  assert.equal(item.metadata.reviewStatus, 'draft');
+
+  const listed = await agent.get('/api/escalations/attention-items?status=open');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.items[0].kind, 'knowledge-review');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, escalationId);
+
+  const approved = await agent
+    .patch(`/api/escalations/${escalationId}/knowledge`)
+    .send({
+      reviewStatus: 'approved',
+      reviewNotes: 'Reviewed and safe to reuse.',
+    });
+  assert.equal(approved.status, 200);
+  assert.equal(approved.body.knowledgeReview.action, 'closed');
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'knowledge-review',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+
+  const rejected = await agent
+    .patch(`/api/escalations/${escalationId}/knowledge`)
+    .send({
+      reviewStatus: 'rejected',
+      reviewNotes: '',
+    });
+  assert.equal(rejected.status, 200);
+  assert.equal(rejected.body.knowledgeReview.action, 'opened');
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'knowledge-review',
+  }).lean();
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Rejected knowledge needs notes');
+  assert.ok(item.signals.includes('knowledge_rejected_without_notes'));
+
+  const rejectedWithNotes = await agent
+    .patch(`/api/escalations/${escalationId}/knowledge`)
+    .send({
+      reviewStatus: 'rejected',
+      reviewNotes: 'Too customer-specific to reuse.',
+    });
+  assert.equal(rejectedWithNotes.status, 200);
+  assert.equal(rejectedWithNotes.body.knowledgeReview.action, 'closed');
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'knowledge-review',
+  }).lean();
+  assert.equal(item.status, 'resolved');
 });
 
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {

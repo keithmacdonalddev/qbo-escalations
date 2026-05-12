@@ -13,7 +13,10 @@ const {
   linkEscalationToConversation,
   workflowErrorResponse,
 } = require('../lib/escalation-dedup');
-const { syncResolutionDisciplineAttentionItem } = require('../lib/escalation-attention');
+const {
+  syncKnowledgeReviewAttentionItem,
+  syncResolutionDisciplineAttentionItem,
+} = require('../lib/escalation-attention');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { parseEscalationText, looksLikeEscalation } = require('../lib/escalation-parser');
@@ -1065,10 +1068,18 @@ router.post('/:id/knowledge/generate', async (req, res) => {
 
   const existing = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
   if (existing && existing.reviewStatus === 'published' && !force) {
-    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, published: true });
+    const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
+    return res.json({
+      ok: true,
+      knowledge: existing.toObject(),
+      generated: false,
+      published: true,
+      knowledgeReview,
+    });
   }
   if (existing && !force) {
-    return res.json({ ok: true, knowledge: existing.toObject(), generated: false });
+    const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
+    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, knowledgeReview });
   }
 
   const draftData = await buildKnowledgeDraftData(escalation, force ? existing : null);
@@ -1103,8 +1114,9 @@ router.post('/:id/knowledge/generate', async (req, res) => {
   knowledge.set(draftData);
   if (!knowledge.reviewStatus) knowledge.reviewStatus = 'draft';
   await knowledge.save();
+  const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
 
-  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched });
+  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview });
 });
 
 // PATCH /api/escalations/:id/knowledge -- Update the reviewed knowledge draft
@@ -1134,7 +1146,8 @@ router.patch('/:id/knowledge', async (req, res) => {
     const updates = sanitizeKnowledgeCandidateUpdates(req.body);
     knowledge.set(updates);
     await knowledge.save();
-    return res.json({ ok: true, knowledge: knowledge.toObject() });
+    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
+    return res.json({ ok: true, knowledge: knowledge.toObject(), knowledgeReview });
   } catch (err) {
     const code = err && err.code ? err.code : 'INVALID_KNOWLEDGE_UPDATE';
     const status = code.startsWith('INVALID_') ? 400 : 500;
@@ -1184,12 +1197,14 @@ router.post('/:id/knowledge/publish', async (req, res) => {
     knowledge.publishedMarker = publish.marker;
     knowledge.publishedSectionTitle = publish.sectionTitle;
     await knowledge.save();
+    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
 
     return res.json({
       ok: true,
       knowledge: knowledge.toObject(),
       publish,
       published: true,
+      knowledgeReview,
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_PUBLISH_FAILED';
@@ -1234,11 +1249,13 @@ router.post('/:id/knowledge/unpublish', async (req, res) => {
     knowledge.publishedMarker = null;
     knowledge.publishedSectionTitle = null;
     await knowledge.save();
+    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
 
     return res.json({
       ok: true,
       knowledge: knowledge.toObject(),
       unpublish: result,
+      knowledgeReview,
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_UNPUBLISH_FAILED';

@@ -61,6 +61,15 @@ function missingResolutionFingerprint(escalation) {
   return id ? `missing-resolution:${id}` : '';
 }
 
+function knowledgeReviewFingerprint(knowledge, escalation) {
+  const id = objectIdString(
+    knowledge && knowledge.escalationId
+      ? knowledge.escalationId
+      : escalation && escalation._id
+  );
+  return id ? `knowledge-review:${id}` : '';
+}
+
 function buildMissingResolutionAttentionItem(escalation) {
   const status = safeString(escalation && escalation.status, '').trim();
   const fingerprint = missingResolutionFingerprint(escalation);
@@ -79,6 +88,64 @@ function buildMissingResolutionAttentionItem(escalation) {
       ? `${label} was escalated further without a reason or next escalation path.`
       : `${label} was marked resolved without a resolution summary or reason.`,
     signals: [isEscalatedFurther ? 'missing_escalation_reason' : 'missing_resolution_notes'],
+  };
+}
+
+function getMissingKnowledgeFields(knowledge) {
+  const missing = [];
+  if (!compactText(knowledge && knowledge.summary)) missing.push('summary');
+  if (!compactText(knowledge && knowledge.symptom)) missing.push('symptom');
+  if (
+    !compactText(knowledge && knowledge.exactFix)
+    && !compactText(knowledge && knowledge.escalationPath)
+  ) {
+    missing.push('fix_or_escalation_path');
+  }
+  return missing;
+}
+
+function buildKnowledgeReviewAttentionItem(knowledge, escalation) {
+  const fingerprint = knowledgeReviewFingerprint(knowledge, escalation);
+  if (!fingerprint) return null;
+
+  const reviewStatus = safeString(knowledge && knowledge.reviewStatus, 'draft').trim() || 'draft';
+  if (reviewStatus === 'approved' || reviewStatus === 'published') return null;
+  if (reviewStatus === 'rejected' && compactText(knowledge && knowledge.reviewNotes)) return null;
+  if (reviewStatus !== 'draft' && reviewStatus !== 'rejected') return null;
+
+  const label = getEscalationLabel(escalation || (knowledge && knowledge.sourceSnapshot) || {});
+  if (reviewStatus === 'rejected') {
+    return {
+      kind: 'knowledge-review',
+      severity: 'warning',
+      fingerprint,
+      title: 'Rejected knowledge needs notes',
+      summary: `${label} has a rejected knowledge draft without reviewer notes explaining why it should not be reused.`,
+      signals: ['knowledge_rejected_without_notes'],
+      metadata: {
+        reviewStatus,
+        missingFields: ['reviewNotes'],
+      },
+    };
+  }
+
+  const missingFields = getMissingKnowledgeFields(knowledge);
+  return {
+    kind: 'knowledge-review',
+    severity: missingFields.length ? 'warning' : 'info',
+    fingerprint,
+    title: 'Knowledge draft needs review',
+    summary: missingFields.length
+      ? `${label} has a knowledge draft waiting for review; missing ${missingFields.join(', ')}.`
+      : `${label} has a knowledge draft waiting for human review before reuse.`,
+    signals: [
+      'knowledge_draft_review',
+      ...missingFields.map((field) => `missing_${field}`),
+    ],
+    metadata: {
+      reviewStatus,
+      missingFields,
+    },
   };
 }
 
@@ -144,8 +211,71 @@ async function syncResolutionDisciplineAttentionItem(escalation) {
   return { action: 'opened', item: attentionItemSummary(item) };
 }
 
+async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
+  const fingerprint = knowledgeReviewFingerprint(knowledge, escalation);
+  if (!fingerprint) return { action: 'skipped', item: null };
+
+  const payload = buildKnowledgeReviewAttentionItem(knowledge, escalation);
+  if (!payload) {
+    const item = await EscalationAttentionItem.findOneAndUpdate(
+      { fingerprint, kind: 'knowledge-review', status: { $ne: 'resolved' } },
+      {
+        $set: {
+          status: 'resolved',
+          resolutionNote: 'Knowledge review state no longer requires attention.',
+          resolvedAt: new Date(),
+        },
+      },
+      { returnDocument: 'after', runValidators: true }
+    );
+    return { action: item ? 'closed' : 'none', item: attentionItemSummary(item) };
+  }
+
+  const knowledgeId = objectIdString(knowledge && knowledge._id);
+  const item = await EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint },
+    {
+      $setOnInsert: {
+        kind: payload.kind,
+        sourceEscalationId: escalation && escalation._id ? escalation._id : knowledge && knowledge.escalationId,
+        sourceType: 'escalation',
+        fingerprint,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        sourceConversationId: (
+          (knowledge && knowledge.conversationId)
+          || (escalation && escalation.conversationId)
+          || null
+        ),
+        sourceLabel: getEscalationLabel(escalation || (knowledge && knowledge.sourceSnapshot) || {}),
+        severity: payload.severity,
+        title: payload.title,
+        summary: payload.summary,
+        candidates: [],
+        signals: payload.signals,
+        candidateCount: 0,
+        metadata: {
+          knowledgeId,
+          publishTarget: knowledge && knowledge.publishTarget,
+          reusableOutcome: knowledge && knowledge.reusableOutcome,
+          ...payload.metadata,
+        },
+        lastDetectedAt: new Date(),
+      },
+      $inc: { occurrenceCount: 1 },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  return { action: 'opened', item: attentionItemSummary(item) };
+}
+
 module.exports = {
   buildMissingResolutionAttentionItem,
+  buildKnowledgeReviewAttentionItem,
   hasResolutionExplanation,
+  syncKnowledgeReviewAttentionItem,
   syncResolutionDisciplineAttentionItem,
 };

@@ -1,6 +1,12 @@
 const mongoose = require('mongoose');
 
-const ATTENTION_KINDS = ['possible-duplicate', 'missing-resolution', 'agent-review', 'agent-harness'];
+const ATTENTION_KINDS = [
+  'possible-duplicate',
+  'missing-resolution',
+  'knowledge-review',
+  'agent-review',
+  'agent-harness',
+];
 const ATTENTION_STATUSES = ['open', 'resolved', 'dismissed', 'split'];
 const ATTENTION_SEVERITIES = ['info', 'warning', 'critical'];
 
