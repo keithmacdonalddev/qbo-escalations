@@ -8,6 +8,7 @@ const request = require('supertest');
 
 const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
+const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
 const AgentIdentity = require('../src/models/AgentIdentity');
 const {
   AGENT_PROMPT_VERSIONS_ROOT,
@@ -23,9 +24,11 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   await connect();
   const agent = request(createApp());
   await AgentIdentity.deleteMany({});
+  await EscalationAttentionItem.deleteMany({});
 
   t.after(async () => {
     await AgentIdentity.deleteMany({});
+    await EscalationAttentionItem.deleteMany({});
     cleanupCustomPrompt('billing-audit-agent');
     cleanupCustomPrompt('refund-routing-agent');
     await disconnect();
@@ -89,6 +92,39 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.equal(reviewRes.body.agent.reviews.entries[0].surface, 'profile');
   assert.ok(reviewRes.body.agent.reviews.lastApprovedAt);
 
+  await agent
+    .post('/api/agent-identities/billing-audit-agent/reviews')
+    .send({
+      surface: 'runtime',
+      status: 'rejected',
+      summary: 'Runtime review rejected until model defaults are set.',
+    })
+    .expect(201);
+
+  let reviewAttention = await EscalationAttentionItem.findOne({
+    kind: 'agent-review',
+    fingerprint: 'agent-review:billing-audit-agent:runtime',
+  }).lean();
+  assert.equal(reviewAttention.status, 'open');
+  assert.equal(reviewAttention.severity, 'critical');
+  assert.equal(reviewAttention.sourceType, 'agent');
+  assert.equal(reviewAttention.sourceLabel, 'Billing Audit Specialist');
+
+  await agent
+    .post('/api/agent-identities/billing-audit-agent/reviews')
+    .send({
+      surface: 'runtime',
+      status: 'approved',
+      summary: 'Runtime review approved after defaults were set.',
+    })
+    .expect(201);
+
+  reviewAttention = await EscalationAttentionItem.findOne({
+    kind: 'agent-review',
+    fingerprint: 'agent-review:billing-audit-agent:runtime',
+  }).lean();
+  assert.equal(reviewAttention.status, 'resolved');
+
   const harnessRes = await agent
     .post('/api/agent-identities/billing-audit-agent/harness-runs')
     .send({
@@ -118,6 +154,14 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.equal(harnessRes.body.agent.harness.runs[0].status, 'warn');
   assert.equal(harnessRes.body.agent.harness.runs[0].cases[0].status, 'pass');
   assert.equal(harnessRes.body.agent.harness.runs[0].cases[1].status, 'warn');
+
+  let harnessAttention = await EscalationAttentionItem.findOne({
+    kind: 'agent-harness',
+    fingerprint: 'agent-harness:billing-audit-agent',
+  }).lean();
+  assert.equal(harnessAttention.status, 'open');
+  assert.equal(harnessAttention.severity, 'warning');
+  assert.equal(harnessAttention.metadata.runId, harnessRes.body.agent.harness.runs[0].runId);
 
   const importRes = await agent
     .post('/api/agent-identities/import')
@@ -149,10 +193,31 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.ok(ids.includes('refund-routing-agent'));
 
   const reviewsRes = await agent.get('/api/agent-identities/billing-audit-agent/reviews').expect(200);
-  assert.equal(reviewsRes.body.reviews.length, 1);
+  assert.equal(reviewsRes.body.reviews.length, 3);
 
   const harnessRunsRes = await agent.get('/api/agent-identities/billing-audit-agent/harness-runs').expect(200);
   assert.equal(harnessRunsRes.body.runs.length, 1);
+
+  await agent
+    .post('/api/agent-identities/billing-audit-agent/harness-runs')
+    .send({
+      status: 'passed',
+      summary: 'Follow-up harness run passed.',
+      cases: [
+        {
+          id: 'contract-shape',
+          name: 'Contract shape',
+          status: 'passed',
+        },
+      ],
+    })
+    .expect(201);
+
+  harnessAttention = await EscalationAttentionItem.findOne({
+    kind: 'agent-harness',
+    fingerprint: 'agent-harness:billing-audit-agent',
+  }).lean();
+  assert.equal(harnessAttention.status, 'resolved');
 
   const runtimeRes = await agent
     .patch('/api/agent-identities/triage-agent/runtime')

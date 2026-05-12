@@ -637,7 +637,7 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
         </div>
         <div className="attention-summary">{item.summary || 'Review this workflow item.'}</div>
         <div className="attention-meta">
-          <span>Source: {getEscalationLabel(item.sourceEscalationId)}</span>
+          <span>Source: {item.sourceLabel || getEscalationLabel(item.sourceEscalationId)}</span>
           {primaryCandidate && (
             <span>Candidate: {getEscalationLabel(primaryCandidate.escalationId)} ({primaryCandidate.score || 0})</span>
           )}

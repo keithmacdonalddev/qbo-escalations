@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const ATTENTION_KINDS = ['possible-duplicate', 'missing-resolution'];
+const ATTENTION_KINDS = ['possible-duplicate', 'missing-resolution', 'agent-review', 'agent-harness'];
 const ATTENTION_STATUSES = ['open', 'resolved', 'dismissed', 'split'];
 const ATTENTION_SEVERITIES = ['info', 'warning', 'critical'];
 
@@ -58,9 +58,11 @@ const escalationAttentionItemSchema = new mongoose.Schema({
   sourceEscalationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Escalation',
-    required: true,
+    default: null,
     index: true,
   },
+  sourceType: { type: String, default: 'escalation' },
+  sourceLabel: { type: String, default: '' },
   sourceConversationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Conversation',
@@ -70,6 +72,7 @@ const escalationAttentionItemSchema = new mongoose.Schema({
   candidates: { type: [attentionCandidateSchema], default: [] },
   signals: { type: [String], default: [] },
   candidateCount: { type: Number, default: 0 },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   resolutionNote: { type: String, default: '' },
   resolvedAt: { type: Date, default: null },
   lastDetectedAt: { type: Date, default: Date.now },

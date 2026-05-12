@@ -1,6 +1,7 @@
 'use strict';
 
 const AgentIdentity = require('../models/AgentIdentity');
+const EscalationAttentionItem = require('../models/EscalationAttentionItem');
 const {
   ensureCustomAgentPrompt,
   getAgentIdForCustomPromptId,
@@ -1322,6 +1323,116 @@ function buildReviewSummary(surface, status, summary) {
   return `Marked ${surface} as needing follow-up.`;
 }
 
+function getAgentAttentionLabel(agentId, doc) {
+  const profile = resolveAgentProfile(agentId, doc);
+  return profile?.roleTitle || profile?.displayName || labelAgentId(agentId);
+}
+
+async function closeAgentAttentionItem({ kind, fingerprint, resolutionNote }) {
+  if (!fingerprint) return null;
+  return EscalationAttentionItem.findOneAndUpdate(
+    { kind, fingerprint, status: 'open' },
+    {
+      $set: {
+        status: 'resolved',
+        resolutionNote: compact(resolutionNote, 500),
+        resolvedAt: new Date(),
+      },
+    },
+    { returnDocument: 'after', runValidators: true }
+  );
+}
+
+async function openAgentAttentionItem({ kind, fingerprint, severity, title, summary, agentId, sourceLabel, signals, metadata }) {
+  if (!fingerprint) return null;
+  return EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint },
+    {
+      $setOnInsert: {
+        kind,
+        fingerprint,
+        sourceType: 'agent',
+        sourceEscalationId: null,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        severity,
+        title,
+        summary: compact(summary, 500),
+        sourceLabel,
+        candidates: [],
+        candidateCount: 0,
+        signals: Array.isArray(signals) ? signals.filter(Boolean).slice(0, 12) : [],
+        metadata: {
+          agentId,
+          ...(metadata || {}),
+        },
+        lastDetectedAt: new Date(),
+      },
+      $inc: { occurrenceCount: 1 },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+}
+
+async function syncAgentReviewAttentionItem(agentId, doc, entry) {
+  const surface = safeText(entry?.surface) || 'overall';
+  const fingerprint = `agent-review:${agentId}:${surface}`;
+  if (entry.status === 'approved') {
+    return closeAgentAttentionItem({
+      kind: 'agent-review',
+      fingerprint,
+      resolutionNote: `Approved ${surface} review.`,
+    });
+  }
+  const label = getAgentAttentionLabel(agentId, doc);
+  return openAgentAttentionItem({
+    kind: 'agent-review',
+    fingerprint,
+    severity: entry.status === 'rejected' ? 'critical' : 'warning',
+    title: entry.status === 'rejected' ? 'Agent review rejected' : 'Agent review needs follow-up',
+    summary: entry.summary,
+    agentId,
+    sourceLabel: label,
+    signals: [`agent_review_${entry.status.replace(/-/g, '_')}`, `surface_${surface.replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`],
+    metadata: {
+      reviewId: entry.reviewId,
+      surface,
+      status: entry.status,
+      versionRef: entry.versionRef,
+    },
+  });
+}
+
+async function syncAgentHarnessAttentionItem(agentId, doc, entry) {
+  const fingerprint = `agent-harness:${agentId}`;
+  if (entry.status === 'pass') {
+    return closeAgentAttentionItem({
+      kind: 'agent-harness',
+      fingerprint,
+      resolutionNote: 'Latest harness run passed.',
+    });
+  }
+  const label = getAgentAttentionLabel(agentId, doc);
+  return openAgentAttentionItem({
+    kind: 'agent-harness',
+    fingerprint,
+    severity: entry.status === 'fail' ? 'critical' : 'warning',
+    title: entry.status === 'fail' ? 'Agent harness failed' : 'Agent harness warning',
+    summary: entry.summary,
+    agentId,
+    sourceLabel: label,
+    signals: [`agent_harness_${entry.status}`, `harness_cases_${entry.cases.length}`],
+    metadata: {
+      runId: entry.runId,
+      status: entry.status,
+      source: entry.source,
+      caseCount: entry.cases.length,
+    },
+  });
+}
+
 async function recordAgentReview(agentId, review = {}, { actor = 'user' } = {}) {
   if (!(await canMutateIdentity(agentId))) return null;
   const surface = safeText(review.surface) || 'overall';
@@ -1338,16 +1449,16 @@ async function recordAgentReview(agentId, review = {}, { actor = 'user' } = {}) 
     createdAt,
   };
 
-  await updateIdentityWithRetry(agentId, async (doc) => {
-    doc.reviews = doc.reviews || {};
-    doc.reviews.entries = pruneReviewEntries([
+  const doc = await updateIdentityWithRetry(agentId, async (identityDoc) => {
+    identityDoc.reviews = identityDoc.reviews || {};
+    identityDoc.reviews.entries = pruneReviewEntries([
       entry,
-      ...(doc.reviews?.entries || []),
+      ...(identityDoc.reviews?.entries || []),
     ]);
     if (status === 'approved') {
-      doc.reviews.lastApprovedAt = createdAt;
+      identityDoc.reviews.lastApprovedAt = createdAt;
     }
-    doc.history.entries = pruneHistory([
+    identityDoc.history.entries = pruneHistory([
       {
         type: `review-${status}`,
         summary: entry.summary,
@@ -1359,10 +1470,10 @@ async function recordAgentReview(agentId, review = {}, { actor = 'user' } = {}) 
         },
         createdAt,
       },
-      ...(doc.history?.entries || []),
+      ...(identityDoc.history?.entries || []),
     ]);
-    doc.activity = doc.activity || {};
-    doc.activity.entries = pruneActivity([
+    identityDoc.activity = identityDoc.activity || {};
+    identityDoc.activity.entries = pruneActivity([
       {
         type: 'review',
         phase: surface,
@@ -1373,9 +1484,10 @@ async function recordAgentReview(agentId, review = {}, { actor = 'user' } = {}) 
         metadata: { reviewId: entry.reviewId, versionRef: entry.versionRef },
         createdAt,
       },
-      ...(doc.activity?.entries || []),
+      ...(identityDoc.activity?.entries || []),
     ]);
   });
+  await syncAgentReviewAttentionItem(agentId, doc, entry);
 
   return getAgentIdentity(agentId);
 }
@@ -1400,14 +1512,14 @@ async function recordAgentHarnessRun(agentId, run = {}, { actor = 'user' } = {})
     createdAt: new Date(),
   };
 
-  await updateIdentityWithRetry(agentId, async (doc) => {
-    doc.harness = doc.harness || {};
-    doc.harness.runs = pruneHarnessRuns([
+  const doc = await updateIdentityWithRetry(agentId, async (identityDoc) => {
+    identityDoc.harness = identityDoc.harness || {};
+    identityDoc.harness.runs = pruneHarnessRuns([
       entry,
-      ...(doc.harness?.runs || []),
+      ...(identityDoc.harness?.runs || []),
     ]);
-    doc.harness.lastRunAt = completedAt;
-    doc.history.entries = pruneHistory([
+    identityDoc.harness.lastRunAt = completedAt;
+    identityDoc.history.entries = pruneHistory([
       {
         type: 'harness-run',
         summary: entry.summary,
@@ -1420,10 +1532,10 @@ async function recordAgentHarnessRun(agentId, run = {}, { actor = 'user' } = {})
         },
         createdAt: completedAt,
       },
-      ...(doc.history?.entries || []),
+      ...(identityDoc.history?.entries || []),
     ]);
-    doc.activity = doc.activity || {};
-    doc.activity.entries = pruneActivity([
+    identityDoc.activity = identityDoc.activity || {};
+    identityDoc.activity.entries = pruneActivity([
       {
         type: 'harness',
         phase: entry.source,
@@ -1434,9 +1546,10 @@ async function recordAgentHarnessRun(agentId, run = {}, { actor = 'user' } = {})
         metadata: { runId: entry.runId, caseCount: cases.length },
         createdAt: completedAt,
       },
-      ...(doc.activity?.entries || []),
+      ...(identityDoc.activity?.entries || []),
     ]);
   });
+  await syncAgentHarnessAttentionItem(agentId, doc, entry);
 
   return getAgentIdentity(agentId);
 }
