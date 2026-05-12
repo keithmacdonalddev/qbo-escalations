@@ -619,11 +619,19 @@ function formatAttentionDate(value) {
 
 function AttentionItemRow({ item, busy, onStatusChange }) {
   const sourceId = getEscalationRefId(item.sourceEscalationId);
+  const sourceAgentId = item.sourceType === 'agent' && item.metadata?.agentId
+    ? String(item.metadata.agentId)
+    : '';
   const candidates = Array.isArray(item.candidates) ? item.candidates : [];
   const primaryCandidate = candidates[0] || null;
   const candidateId = primaryCandidate ? getEscalationRefId(primaryCandidate.escalationId) : '';
   const isOpen = item.status === 'open';
   const isDuplicate = item.kind === 'possible-duplicate';
+  const handledNote = isDuplicate
+    ? 'Duplicate warning handled.'
+    : sourceAgentId
+      ? 'Agent attention item handled.'
+      : 'Workflow review item handled.';
 
   return (
     <div className="attention-item">
@@ -654,6 +662,15 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
             Review
           </button>
         )}
+        {sourceAgentId && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => { window.location.hash = `#/agents/${encodeURIComponent(sourceAgentId)}`; }}
+          >
+            Review Agent
+          </button>
+        )}
         {candidateId && (
           <button
             type="button"
@@ -672,7 +689,7 @@ function AttentionItemRow({ item, busy, onStatusChange }) {
               onClick={() => onStatusChange(
                 item._id,
                 'resolved',
-                isDuplicate ? 'Duplicate warning handled.' : 'Workflow review item handled.'
+                handledNote
               )}
             >
               Handled
