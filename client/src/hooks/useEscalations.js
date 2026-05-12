@@ -144,6 +144,7 @@ export default function useEscalations() {
     try {
       const data = await listAttentionItems({
         status: attentionStatusFilter || 'open',
+        refresh: true,
       });
       setAttentionItems(data.items);
       setAttentionTotal(data.total);

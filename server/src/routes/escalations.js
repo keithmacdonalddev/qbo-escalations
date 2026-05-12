@@ -16,6 +16,7 @@ const {
 const {
   syncKnowledgeReviewAttentionItem,
   syncResolutionDisciplineAttentionItem,
+  syncStaleEscalationAttentionItems,
 } = require('../lib/escalation-attention');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -801,6 +802,10 @@ router.get('/attention-items', async (req, res) => {
   const offset = parseInt(req.query.offset) || 0;
   const sort = req.query.sort || '-updatedAt';
   const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
+  const shouldRefresh = ['1', 'true', 'yes'].includes(safeString(req.query.refresh, '').trim().toLowerCase());
+  const refresh = shouldRefresh
+    ? await syncStaleEscalationAttentionItems()
+    : null;
 
   const status = safeString(req.query.status, 'open').trim();
   const filter = {};
@@ -833,7 +838,7 @@ router.get('/attention-items', async (req, res) => {
     if (item._id in counts) counts[item._id] = item.count;
   }
 
-  res.json({ ok: true, items, total, counts });
+  res.json({ ok: true, items, total, counts, refresh });
 });
 
 // PATCH /api/escalations/attention-items/:itemId -- Resolve or dismiss a review item

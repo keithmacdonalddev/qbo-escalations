@@ -455,6 +455,58 @@ await t.test('knowledge draft opens review attention item and closes after revie
   assert.equal(item.status, 'resolved');
 });
 
+await t.test('attention refresh opens and closes stale open case items', async () => {
+  const created = await agent
+    .post('/api/escalations')
+    .send({
+      category: 'technical',
+      caseNumber: 'CS-2026-STALE-001',
+      attemptingTo: 'Fix recurring sync error',
+      actualOutcome: 'Case was left open',
+    });
+  assert.equal(created.status, 201);
+  const escalationId = created.body.escalation._id;
+  const staleDate = new Date(Date.now() - 20 * 86_400_000);
+  await Escalation.findByIdAndUpdate(
+    escalationId,
+    { updatedAt: staleDate, createdAt: staleDate },
+    { timestamps: false }
+  );
+
+  let listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.scanned, 1);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.items[0].kind, 'stale-open');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, escalationId);
+  assert.ok(listed.body.items[0].signals.includes('stale_case'));
+
+  let item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'stale-open',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Open case is stale');
+
+  await Escalation.findByIdAndUpdate(
+    escalationId,
+    { status: 'resolved', resolution: 'Closed after customer confirmed the sync recovered.' },
+    { timestamps: false }
+  );
+
+  listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.closed, 1);
+  assert.equal(listed.body.total, 0);
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalationId,
+    kind: 'stale-open',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+});
+
 await t.test('link route rejects accidental duplicate conversation links unless forced', async () => {
   const conversation = await Conversation.create({
     title: 'Duplicate link guard',

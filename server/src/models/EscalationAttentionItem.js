@@ -4,6 +4,7 @@ const ATTENTION_KINDS = [
   'possible-duplicate',
   'missing-resolution',
   'knowledge-review',
+  'stale-open',
   'agent-review',
   'agent-harness',
 ];

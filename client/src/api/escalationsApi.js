@@ -164,12 +164,13 @@ export async function listKnowledgeCandidates({ reviewStatus, category, reusable
 }
 
 /** List workflow attention items for review */
-export async function listAttentionItems({ status = 'open', kind, sort = '-updatedAt', limit = 50, offset = 0 } = {}) {
+export async function listAttentionItems({ status = 'open', kind, refresh = false, sort = '-updatedAt', limit = 50, offset = 0 } = {}) {
   const params = new URLSearchParams({ status, limit, offset, sort });
   if (kind) params.set('kind', kind);
+  if (refresh) params.set('refresh', '1');
 
   const data = await apiFetchJson(`${BASE}/attention-items?${params}`, {}, 'Failed to list attention items');
-  return { items: data.items, total: data.total, counts: data.counts };
+  return { items: data.items, total: data.total, counts: data.counts, refresh: data.refresh || null };
 }
 
 /** Update a workflow attention item review state */

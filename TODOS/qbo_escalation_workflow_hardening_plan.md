@@ -54,7 +54,8 @@ We are reviewing the hardening areas one by one before implementation.
 - Item 2 first implementation: duplicate warnings now create durable `EscalationAttentionItem` records and the Escalation Dashboard has an Attention tab with open/handled/separate/dismissed review states.
 - Item 3 durable warning behavior: duplicate warnings remain non-blocking but can now be handled, dismissed, or marked as intentional separate escalations from the dashboard.
 - Item 5 first implementation: `resolved` or `escalated-further` escalations without `resolution` or `resolutionNotes` now create durable `missing-resolution` attention items; adding an explanation auto-closes the item.
-- Item 2 remaining gap: the attention queue now covers duplicate warnings, missing finalization notes, agent governance failures, and knowledge-review discipline; stale open cases, missing links, and unresolved parser/triage issues still need review-item producers.
+- Item 2 remaining gap: the attention queue now covers duplicate warnings, missing finalization notes, stale open cases, agent governance failures, and knowledge-review discipline; missing links and unresolved parser/triage issues still need review-item producers.
+- Item 2 stale-case implementation: loading the attention queue with refresh now scans for `open` cases stale for 14 days and `in-progress` cases stale for 7 days, creating `stale-open` review items and closing them once the source case is no longer stale.
 - Item 6 first implementation: generated or edited knowledge drafts now create durable `knowledge-review` attention items; approval, publish, or a rejected draft with reviewer notes closes the item.
 
 ## 1. Canonical Intake Reliability

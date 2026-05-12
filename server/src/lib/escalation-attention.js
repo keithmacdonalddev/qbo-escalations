@@ -1,6 +1,8 @@
 const EscalationAttentionItem = require('../models/EscalationAttentionItem');
 
 const RESOLUTION_DISCIPLINE_STATUSES = new Set(['resolved', 'escalated-further']);
+const STALE_OPEN_DAYS = 14;
+const STALE_IN_PROGRESS_DAYS = 7;
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -61,6 +63,11 @@ function missingResolutionFingerprint(escalation) {
   return id ? `missing-resolution:${id}` : '';
 }
 
+function staleOpenFingerprint(escalation) {
+  const id = objectIdString(escalation && escalation._id);
+  return id ? `stale-open:${id}` : '';
+}
+
 function knowledgeReviewFingerprint(knowledge, escalation) {
   const id = objectIdString(
     knowledge && knowledge.escalationId
@@ -88,6 +95,62 @@ function buildMissingResolutionAttentionItem(escalation) {
       ? `${label} was escalated further without a reason or next escalation path.`
       : `${label} was marked resolved without a resolution summary or reason.`,
     signals: [isEscalatedFurther ? 'missing_escalation_reason' : 'missing_resolution_notes'],
+  };
+}
+
+function getEscalationUpdatedAt(escalation) {
+  const updated = escalation && (escalation.updatedAt || escalation.createdAt);
+  const date = updated ? new Date(updated) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function daysSince(date, now = new Date()) {
+  if (!date) return 0;
+  const elapsedMs = now.getTime() - date.getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return 0;
+  return Math.floor(elapsedMs / 86_400_000);
+}
+
+function getStaleThresholdDays(status) {
+  if (status === 'in-progress') return STALE_IN_PROGRESS_DAYS;
+  if (status === 'open') return STALE_OPEN_DAYS;
+  return null;
+}
+
+function isEscalationStale(escalation, now = new Date()) {
+  const status = safeString(escalation && escalation.status, '').trim();
+  const thresholdDays = getStaleThresholdDays(status);
+  if (!thresholdDays) return false;
+  const updatedAt = getEscalationUpdatedAt(escalation);
+  return Boolean(updatedAt && daysSince(updatedAt, now) >= thresholdDays);
+}
+
+function buildStaleOpenAttentionItem(escalation, now = new Date()) {
+  const fingerprint = staleOpenFingerprint(escalation);
+  if (!fingerprint || !isEscalationStale(escalation, now)) return null;
+
+  const status = safeString(escalation && escalation.status, '').trim();
+  const thresholdDays = getStaleThresholdDays(status);
+  const updatedAt = getEscalationUpdatedAt(escalation);
+  const staleDays = daysSince(updatedAt, now);
+  const label = getEscalationLabel(escalation);
+  return {
+    kind: 'stale-open',
+    severity: staleDays >= thresholdDays * 2 ? 'critical' : 'warning',
+    fingerprint,
+    title: status === 'in-progress' ? 'In-progress case is stale' : 'Open case is stale',
+    summary: `${label} has been ${status} for ${staleDays} days without a workflow update.`,
+    signals: [
+      'stale_case',
+      `status_${status.replace(/[^a-z0-9]+/gi, '_')}`,
+      `stale_${staleDays}_days`,
+    ],
+    metadata: {
+      status,
+      staleDays,
+      thresholdDays,
+      lastWorkflowUpdateAt: updatedAt,
+    },
   };
 }
 
@@ -211,6 +274,84 @@ async function syncResolutionDisciplineAttentionItem(escalation) {
   return { action: 'opened', item: attentionItemSummary(item) };
 }
 
+async function openStaleEscalationAttentionItem(escalation, now = new Date()) {
+  const payload = buildStaleOpenAttentionItem(escalation, now);
+  if (!payload) return null;
+
+  const existing = await EscalationAttentionItem.findOne({ fingerprint: payload.fingerprint }).lean();
+  if (existing && existing.status !== 'open') {
+    return null;
+  }
+
+  return EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint: payload.fingerprint },
+    {
+      $setOnInsert: {
+        kind: payload.kind,
+        sourceEscalationId: escalation._id,
+        sourceType: 'escalation',
+        fingerprint: payload.fingerprint,
+        occurrenceCount: 1,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        sourceConversationId: escalation.conversationId || null,
+        sourceLabel: getEscalationLabel(escalation),
+        severity: payload.severity,
+        title: payload.title,
+        summary: payload.summary,
+        candidates: [],
+        signals: payload.signals,
+        candidateCount: 0,
+        metadata: payload.metadata,
+        lastDetectedAt: now,
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+}
+
+async function closeResolvedStaleEscalationAttentionItems(now = new Date()) {
+  const openItems = await EscalationAttentionItem.find({ kind: 'stale-open', status: 'open' })
+    .populate('sourceEscalationId')
+    .limit(200);
+
+  let closed = 0;
+  for (const item of openItems) {
+    if (isEscalationStale(item.sourceEscalationId, now)) continue;
+    item.status = 'resolved';
+    item.resolutionNote = 'Escalation is no longer stale or no longer open.';
+    item.resolvedAt = now;
+    await item.save();
+    closed += 1;
+  }
+  return closed;
+}
+
+async function syncStaleEscalationAttentionItems({ now = new Date(), limit = 100 } = {}) {
+  const Escalation = require('../models/Escalation');
+  const openCutoff = new Date(now.getTime() - STALE_OPEN_DAYS * 86_400_000);
+  const inProgressCutoff = new Date(now.getTime() - STALE_IN_PROGRESS_DAYS * 86_400_000);
+  const staleEscalations = await Escalation.find({
+    $or: [
+      { status: 'open', updatedAt: { $lte: openCutoff } },
+      { status: 'in-progress', updatedAt: { $lte: inProgressCutoff } },
+    ],
+  })
+    .sort({ updatedAt: 1 })
+    .limit(Math.max(1, Math.min(Number(limit) || 100, 500)));
+
+  let opened = 0;
+  for (const escalation of staleEscalations) {
+    const item = await openStaleEscalationAttentionItem(escalation, now);
+    if (item) opened += 1;
+  }
+
+  const closed = await closeResolvedStaleEscalationAttentionItems(now);
+  return { opened, closed, scanned: staleEscalations.length };
+}
+
 async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
   const fingerprint = knowledgeReviewFingerprint(knowledge, escalation);
   if (!fingerprint) return { action: 'skipped', item: null };
@@ -275,7 +416,9 @@ async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
 module.exports = {
   buildMissingResolutionAttentionItem,
   buildKnowledgeReviewAttentionItem,
+  buildStaleOpenAttentionItem,
   hasResolutionExplanation,
+  syncStaleEscalationAttentionItems,
   syncKnowledgeReviewAttentionItem,
   syncResolutionDisciplineAttentionItem,
 };
