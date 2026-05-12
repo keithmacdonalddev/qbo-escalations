@@ -15,6 +15,7 @@ const {
 } = require('../lib/escalation-dedup');
 const {
   syncKnowledgeReviewAttentionItem,
+  syncParserTriageAttentionItems,
   syncResolutionDisciplineAttentionItem,
   syncStaleEscalationAttentionItems,
 } = require('../lib/escalation-attention');
@@ -804,7 +805,10 @@ router.get('/attention-items', async (req, res) => {
   const validStatuses = new Set(EscalationAttentionItem.ATTENTION_STATUSES || []);
   const shouldRefresh = ['1', 'true', 'yes'].includes(safeString(req.query.refresh, '').trim().toLowerCase());
   const refresh = shouldRefresh
-    ? await syncStaleEscalationAttentionItems()
+    ? {
+      stale: await syncStaleEscalationAttentionItems(),
+      parserTriage: await syncParserTriageAttentionItems(),
+    }
     : null;
 
   const status = safeString(req.query.status, 'open').trim();

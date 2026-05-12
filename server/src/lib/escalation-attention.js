@@ -68,6 +68,11 @@ function staleOpenFingerprint(escalation) {
   return id ? `stale-open:${id}` : '';
 }
 
+function parseReviewFingerprint(escalation) {
+  const id = objectIdString(escalation && escalation._id);
+  return id ? `parse-review:${id}` : '';
+}
+
 function knowledgeReviewFingerprint(knowledge, escalation) {
   const id = objectIdString(
     knowledge && knowledge.escalationId
@@ -95,6 +100,85 @@ function buildMissingResolutionAttentionItem(escalation) {
       ? `${label} was escalated further without a reason or next escalation path.`
       : `${label} was marked resolved without a resolution summary or reason.`,
     signals: [isEscalatedFurther ? 'missing_escalation_reason' : 'missing_resolution_notes'],
+  };
+}
+
+function normalizeIssueList(value, maxItems = 12) {
+  if (!Array.isArray(value)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const issue of value) {
+    const text = compactText(issue, 120);
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function finiteNumberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getParseReviewSignals(escalation) {
+  const parseMeta = escalation && escalation.parseMeta && typeof escalation.parseMeta === 'object'
+    ? escalation.parseMeta
+    : {};
+  const signals = [];
+  const issues = normalizeIssueList(parseMeta.validationIssues);
+  if (issues.length) signals.push(...issues);
+  if (parseMeta.usedRegexFallback) signals.push('regex_fallback_used');
+  if (parseMeta.fallbackUsed) signals.push('provider_fallback_used');
+  if (safeString(parseMeta.validationConfidence, '').trim() === 'low') signals.push('low_parse_confidence');
+  const validationScore = finiteNumberOrNull(parseMeta.validationScore);
+  if (validationScore !== null && validationScore < 0.55) {
+    signals.push('low_parse_score');
+  }
+  const attempts = Array.isArray(parseMeta.attempts) ? parseMeta.attempts : [];
+  if (attempts.some((attempt) => safeString(attempt && attempt.status, '').trim() === 'error')) {
+    signals.push('parse_attempt_failed');
+  }
+  return normalizeIssueList(signals, 16);
+}
+
+function buildParseReviewAttentionItem(escalation) {
+  const fingerprint = parseReviewFingerprint(escalation);
+  if (!fingerprint) return null;
+
+  const signals = getParseReviewSignals(escalation);
+  if (!signals.length) return null;
+
+  const parseMeta = escalation && escalation.parseMeta && typeof escalation.parseMeta === 'object'
+    ? escalation.parseMeta
+    : {};
+  const label = getEscalationLabel(escalation);
+  const criticalSignals = new Set([
+    'missing_attemptingTo',
+    'missing_actualOutcome',
+    'regex_fallback_used',
+    'low_parse_confidence',
+    'low_parse_score',
+  ]);
+  const severity = signals.some((signal) => criticalSignals.has(signal)) ? 'critical' : 'warning';
+  return {
+    kind: 'parse-review',
+    severity,
+    fingerprint,
+    title: 'Parser output needs review',
+    summary: `${label} was created with parser or triage uncertainty: ${signals.slice(0, 4).join(', ')}.`,
+    signals,
+    metadata: {
+      providerUsed: safeString(parseMeta.providerUsed, ''),
+      fallbackUsed: Boolean(parseMeta.fallbackUsed),
+      usedRegexFallback: Boolean(parseMeta.usedRegexFallback),
+      validationScore: finiteNumberOrNull(parseMeta.validationScore),
+      validationConfidence: safeString(parseMeta.validationConfidence, ''),
+    },
   };
 }
 
@@ -352,6 +436,91 @@ async function syncStaleEscalationAttentionItems({ now = new Date(), limit = 100
   return { opened, closed, scanned: staleEscalations.length };
 }
 
+async function openParseReviewAttentionItem(escalation) {
+  const payload = buildParseReviewAttentionItem(escalation);
+  if (!payload) return null;
+
+  const existing = await EscalationAttentionItem.findOne({ fingerprint: payload.fingerprint }).lean();
+  if (existing && existing.status !== 'open') {
+    return null;
+  }
+
+  return EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint: payload.fingerprint },
+    {
+      $setOnInsert: {
+        kind: payload.kind,
+        sourceEscalationId: escalation._id,
+        sourceType: 'escalation',
+        fingerprint: payload.fingerprint,
+        occurrenceCount: 1,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        sourceConversationId: escalation.conversationId || null,
+        sourceLabel: getEscalationLabel(escalation),
+        severity: payload.severity,
+        title: payload.title,
+        summary: payload.summary,
+        candidates: [],
+        signals: payload.signals,
+        candidateCount: 0,
+        metadata: payload.metadata,
+        lastDetectedAt: new Date(),
+      },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+}
+
+async function closeResolvedParseReviewAttentionItems() {
+  const openItems = await EscalationAttentionItem.find({ kind: 'parse-review', status: 'open' })
+    .populate('sourceEscalationId')
+    .limit(200);
+
+  let closed = 0;
+  for (const item of openItems) {
+    if (buildParseReviewAttentionItem(item.sourceEscalationId)) continue;
+    item.status = 'resolved';
+    item.resolutionNote = 'Parser metadata no longer requires review.';
+    item.resolvedAt = new Date();
+    await item.save();
+    closed += 1;
+  }
+  return closed;
+}
+
+async function syncParserTriageAttentionItems({ limit = 100 } = {}) {
+  const Escalation = require('../models/Escalation');
+  const flaggedEscalations = await Escalation.find({
+    $or: [
+      { 'parseMeta.usedRegexFallback': true },
+      { 'parseMeta.fallbackUsed': true },
+      { 'parseMeta.validationConfidence': 'low' },
+      {
+        $and: [
+          { 'parseMeta.validationScore': { $type: 'number' } },
+          { 'parseMeta.validationScore': { $lt: 0.55 } },
+        ],
+      },
+      { 'parseMeta.validationIssues.0': { $exists: true } },
+      { 'parseMeta.attempts.status': 'error' },
+    ],
+  })
+    .sort({ updatedAt: -1 })
+    .limit(Math.max(1, Math.min(Number(limit) || 100, 500)));
+
+  let opened = 0;
+  for (const escalation of flaggedEscalations) {
+    const item = await openParseReviewAttentionItem(escalation);
+    if (item) opened += 1;
+  }
+
+  const closed = await closeResolvedParseReviewAttentionItems();
+  return { opened, closed, scanned: flaggedEscalations.length };
+}
+
 async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
   const fingerprint = knowledgeReviewFingerprint(knowledge, escalation);
   if (!fingerprint) return { action: 'skipped', item: null };
@@ -416,8 +585,10 @@ async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
 module.exports = {
   buildMissingResolutionAttentionItem,
   buildKnowledgeReviewAttentionItem,
+  buildParseReviewAttentionItem,
   buildStaleOpenAttentionItem,
   hasResolutionExplanation,
+  syncParserTriageAttentionItems,
   syncStaleEscalationAttentionItems,
   syncKnowledgeReviewAttentionItem,
   syncResolutionDisciplineAttentionItem,

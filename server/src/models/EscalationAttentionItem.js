@@ -5,6 +5,7 @@ const ATTENTION_KINDS = [
   'missing-resolution',
   'knowledge-review',
   'stale-open',
+  'parse-review',
   'agent-review',
   'agent-harness',
 ];

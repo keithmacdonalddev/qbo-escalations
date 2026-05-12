@@ -475,7 +475,7 @@ await t.test('attention refresh opens and closes stale open case items', async (
 
   let listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
   assert.equal(listed.status, 200);
-  assert.equal(listed.body.refresh.scanned, 1);
+  assert.equal(listed.body.refresh.stale.scanned, 1);
   assert.equal(listed.body.total, 1);
   assert.equal(listed.body.items[0].kind, 'stale-open');
   assert.equal(listed.body.items[0].sourceEscalationId._id, escalationId);
@@ -497,12 +497,78 @@ await t.test('attention refresh opens and closes stale open case items', async (
 
   listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
   assert.equal(listed.status, 200);
-  assert.equal(listed.body.refresh.closed, 1);
+  assert.equal(listed.body.refresh.stale.closed, 1);
   assert.equal(listed.body.total, 0);
 
   item = await EscalationAttentionItem.findOne({
     sourceEscalationId: escalationId,
     kind: 'stale-open',
+  }).lean();
+  assert.equal(item.status, 'resolved');
+});
+
+await t.test('attention refresh opens and closes parser triage review items', async () => {
+  const escalation = await Escalation.create({
+    category: 'unknown',
+    caseNumber: 'CS-2026-PARSE-001',
+    source: 'screenshot',
+    parseMeta: {
+      mode: 'single',
+      providerUsed: 'regex',
+      validationScore: 0.32,
+      validationConfidence: 'low',
+      validationIssues: ['missing_attemptingTo', 'missing_actualOutcome'],
+      usedRegexFallback: true,
+      attempts: [
+        {
+          provider: 'claude',
+          status: 'error',
+          errorCode: 'TIMEOUT',
+          errorMessage: 'Parser timed out',
+        },
+      ],
+    },
+  });
+
+  let listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.parserTriage.scanned, 1);
+  assert.equal(listed.body.total, 1);
+  assert.equal(listed.body.items[0].kind, 'parse-review');
+  assert.equal(listed.body.items[0].sourceEscalationId._id, escalation._id.toString());
+  assert.equal(listed.body.items[0].severity, 'critical');
+  assert.ok(listed.body.items[0].signals.includes('missing_attemptingTo'));
+  assert.ok(listed.body.items[0].signals.includes('regex_fallback_used'));
+
+  let item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalation._id,
+    kind: 'parse-review',
+  }).lean();
+  assert.ok(item);
+  assert.equal(item.status, 'open');
+  assert.equal(item.title, 'Parser output needs review');
+
+  await Escalation.findByIdAndUpdate(escalation._id, {
+    parseMeta: {
+      mode: 'single',
+      providerUsed: 'claude',
+      validationScore: 0.92,
+      validationConfidence: 'high',
+      validationIssues: [],
+      usedRegexFallback: false,
+      fallbackUsed: false,
+      attempts: [],
+    },
+  });
+
+  listed = await agent.get('/api/escalations/attention-items?status=open&refresh=1');
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.refresh.parserTriage.closed, 1);
+  assert.equal(listed.body.total, 0);
+
+  item = await EscalationAttentionItem.findOne({
+    sourceEscalationId: escalation._id,
+    kind: 'parse-review',
   }).lean();
   assert.equal(item.status, 'resolved');
 });
