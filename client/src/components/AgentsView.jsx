@@ -201,7 +201,6 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [riskFilter, setRiskFilter] = useState('all');
   const [reviewFilter, setReviewFilter] = useState('all');
   const [agentViewMode, setAgentViewMode] = useState('grid');
-  const [comparisonIds, setComparisonIds] = useState(['', '']);
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [loadingCurrent, setLoadingCurrent] = useState(false);
   const [error, setError] = useState(null);
@@ -711,9 +710,6 @@ function AgentsView({ agentIdFromRoute = null }) {
         reviewOptions={reviewOptions}
         viewMode={agentViewMode}
         onViewModeChange={setAgentViewMode}
-        comparisonIds={comparisonIds}
-        onComparisonIdsChange={setComparisonIds}
-        allAgents={agents}
         operationalProfiles={operationalProfiles}
         operationById={operationById}
         onSelectAgent={handleSelectAgent}
@@ -771,9 +767,6 @@ function AgentsMissionControlPage({
   reviewOptions,
   viewMode,
   onViewModeChange,
-  comparisonIds,
-  onComparisonIdsChange,
-  allAgents,
   operationalProfiles,
   operationById,
   onSelectAgent,
@@ -786,11 +779,6 @@ function AgentsMissionControlPage({
   onCreateAgent,
   onImportAgents,
 }) {
-  const attentionItems = buildMissionAttentionItems(allAgents, operationById);
-  const comparedAgents = comparisonIds
-    .map((agentId) => allAgents.find((agent) => agent.agentId === agentId))
-    .filter(Boolean);
-
   return (
     <div className="agent-profiles-page agents-index-page">
       <MissionControlHeader
@@ -822,19 +810,12 @@ function AgentsMissionControlPage({
       />
 
       <section className="mission-control-layout">
-        <AgentDirectory
-          agents={agents}
-          selectedAgentId={null}
-          operationById={operationById}
-          loading={loading}
-          onSelect={onSelectAgent}
-        />
-
         <main className="agent-grid-panel">
           <div className="agent-grid-heading">
             <div>
               <span className="mission-kicker">Agent Network</span>
               <h2>Agents</h2>
+              <span className="agent-grid-count">{agents.length} visible</span>
             </div>
             <div className="agent-grid-view-toggle" aria-label="Agent view mode">
               <button
@@ -842,7 +823,7 @@ function AgentsMissionControlPage({
                 className={viewMode === 'grid' ? 'active' : ''}
                 onClick={() => onViewModeChange('grid')}
               >
-                Grid
+                List
               </button>
               <button
                 type="button"
@@ -854,21 +835,6 @@ function AgentsMissionControlPage({
             </div>
           </div>
 
-          <div className="mission-insight-grid">
-            <NeedsAttentionQueue
-              items={attentionItems}
-              onSelectAgent={onSelectAgent}
-            />
-            <AgentComparisonPanel
-              agents={allAgents}
-              comparisonIds={comparisonIds}
-              comparedAgents={comparedAgents}
-              operationById={operationById}
-              onComparisonIdsChange={onComparisonIdsChange}
-              onSelectAgent={onSelectAgent}
-            />
-          </div>
-
           {loading ? (
             <InlineLoading label="Loading agents..." />
           ) : agents.length && viewMode === 'grid' ? (
@@ -876,6 +842,7 @@ function AgentsMissionControlPage({
               agents={agents}
               operationById={operationById}
               onSelectAgent={onSelectAgent}
+              onOpenCreate={onOpenCreate}
             />
           ) : agents.length && viewMode === 'map' ? (
             <AgentNetworkMap
@@ -1045,7 +1012,13 @@ function AgentRegistryModal({
   );
 }
 
-function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
+function AgentMissionGrid({ agents, operationById, onSelectAgent, onOpenCreate }) {
+  function handleOpenCreate(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    onOpenCreate?.();
+  }
+
   return (
     <div className="agent-card-grid">
       {agents.map((agent, index) => (
@@ -1057,10 +1030,10 @@ function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
           onSelect={() => onSelectAgent(agent.agentId)}
         />
       ))}
-      <button type="button" className="agent-create-card" onClick={() => onSelectAgent(agents[0]?.agentId)}>
+      <button type="button" className="agent-create-card" onClick={handleOpenCreate}>
         <span>+</span>
         <strong>Add New Agent</strong>
-        <small>Profiles are created from the server registry today. Open an existing profile to tune behavior.</small>
+        <small>Register a new profile with a role, prompt surface, and review trail.</small>
       </button>
     </div>
   );
@@ -1076,6 +1049,7 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
       <header>
         <span className="rank-pill">{rank}</span>
         <span className={`status-badge status-${operation?.status || 'idle'}`}>
+          <span className={`status-dot status-dot-${operation?.status || 'idle'}`} />
           {STATUS_LABELS[operation?.status] || 'Idle'}
         </span>
       </header>
@@ -1103,106 +1077,6 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
       </div>
       <MiniSparkline points={[25, 31, 42, 38, 48, 54, 62]} tone={operation?.status === 'review' ? 'orange' : 'blue'} />
     </a>
-  );
-}
-
-function NeedsAttentionQueue({ items, onSelectAgent }) {
-  return (
-    <section className="mission-insight-card needs-attention-card">
-      <header>
-        <div>
-          <span className="mission-kicker">Needs Attention</span>
-          <h3>{items.length} review items</h3>
-        </div>
-        <Badge>Live profile checks</Badge>
-      </header>
-      {items.length ? (
-        <div className="attention-list">
-          {items.slice(0, 6).map((item) => (
-            <button
-              type="button"
-              key={`${item.agentId}-${item.code}`}
-              onClick={() => onSelectAgent(item.agentId)}
-            >
-              <span className={`attention-severity ${item.severity}`} />
-              <strong>{item.title}</strong>
-              <small>{item.agentLabel} - {item.detail}</small>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <EmptyState title="No active review items" copy="All visible agents pass the current profile checks." />
-      )}
-    </section>
-  );
-}
-
-function AgentComparisonPanel({
-  agents,
-  comparisonIds,
-  comparedAgents,
-  operationById,
-  onComparisonIdsChange,
-  onSelectAgent,
-}) {
-  const [leftId, rightId] = comparisonIds;
-
-  function updateComparison(index, value) {
-    const next = [...comparisonIds];
-    next[index] = value;
-    onComparisonIdsChange(next);
-  }
-
-  return (
-    <section className="mission-insight-card comparison-card">
-      <header>
-        <div>
-          <span className="mission-kicker">Compare</span>
-          <h3>Agent contracts</h3>
-        </div>
-      </header>
-      <div className="compare-selectors">
-        <label>
-          <span>Agent A</span>
-          <select value={leftId} onChange={(event) => updateComparison(0, event.target.value)}>
-            <option value="">Select agent</option>
-            {agents.map((agent) => (
-              <option value={agent.agentId} key={agent.agentId}>
-                {agent.profile?.roleTitle || labelAgent(agent.agentId)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>Agent B</span>
-          <select value={rightId} onChange={(event) => updateComparison(1, event.target.value)}>
-            <option value="">Select agent</option>
-            {agents.map((agent) => (
-              <option value={agent.agentId} key={agent.agentId}>
-                {agent.profile?.roleTitle || labelAgent(agent.agentId)}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      {comparedAgents.length ? (
-        <div className="compare-columns">
-          {comparedAgents.map((agent) => {
-            const operation = operationById.get(agent.agentId);
-            return (
-              <button type="button" key={agent.agentId} onClick={() => onSelectAgent(agent.agentId)}>
-                <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
-                <span>{operation?.department}</span>
-                <small>{operation?.modelLabel}</small>
-                <small>{operation?.risk} risk - {operation?.reviewStatus}</small>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState title="Pick two agents" copy="Compare role, model, risk, review status, and workflow ownership before editing." />
-      )}
-    </section>
   );
 }
 
@@ -1490,92 +1364,6 @@ function AgentCommandToolbar({
   );
 }
 
-function AgentDirectory({ agents, selectedAgentId, operationById, loading, onSelect }) {
-  if (loading) {
-    return (
-      <aside className="agent-directory-panel">
-        <InlineLoading label="Loading agent command center..." />
-      </aside>
-    );
-  }
-
-  return (
-    <aside className="agent-directory-panel">
-      <div className="directory-section-heading">
-        <span>Top Agents</span>
-        <small>By workflow impact</small>
-      </div>
-
-      {agents.length ? (
-        <div className="agent-directory-list">
-          {agents.map((agent, index) => (
-            <AgentListRow
-              agent={agent}
-              operation={operationById.get(agent.agentId)}
-              rank={index + 1}
-              selected={agent.agentId === selectedAgentId}
-              key={agent.agentId}
-              onSelect={() => onSelect(agent.agentId)}
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState title="No matching agents" copy="Adjust the search or filter set." />
-      )}
-
-      <WorkflowCoverage operations={Array.from(operationById.values())} />
-    </aside>
-  );
-}
-
-function AgentListRow({ agent, operation, rank, selected, onSelect }) {
-  return (
-    <a
-      href={`#/agents/${encodeURIComponent(agent.agentId)}`}
-      className={`agent-list-row ${selected ? 'selected' : ''}`}
-      onClick={onSelect}
-    >
-      <span className="rank-pill">{rank}</span>
-      <AgentAvatar agent={agent} size="small" />
-      <span className="agent-row-main">
-        <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
-        <small>{operation?.department || agent.profile?.headline || agent.agentId}</small>
-        <FitBars score={operation?.workflowFit || 0.75} />
-      </span>
-      <span className={`status-badge status-${operation?.status || 'idle'}`}>
-        {STATUS_LABELS[operation?.status] || 'Idle'}
-      </span>
-    </a>
-  );
-}
-
-function WorkflowCoverage({ operations }) {
-  const coverage = buildCoverageBuckets(operations);
-  const total = Math.max(1, operations.length);
-  return (
-    <section className="workflow-coverage-panel">
-      <div className="directory-section-heading">
-        <span>Workflow Coverage</span>
-        <small>{operations.length} mapped</small>
-      </div>
-      <div className="coverage-ring" style={{ '--coverage': `${coverage.excellentPercent}%` }}>
-        <strong>{coverage.active}</strong>
-        <small>Active</small>
-      </div>
-      <div className="coverage-legend">
-        {coverage.rows.map((row) => (
-          <span key={row.label}>
-            <i className={`legend-dot ${row.tone}`} />
-            {row.label}
-            <strong>{row.count}</strong>
-            <small>{Math.round((row.count / total) * 100)}%</small>
-          </span>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function AgentProfileHero({
   agent,
   operation,
@@ -1673,16 +1461,9 @@ function AgentProfileWorkspace(props) {
 function AgentOverviewTab({
   agent,
   operation,
-  history,
-  historyLoading,
-  historyError,
-  onLoadHistory,
   reviewSaving,
   onMarkReviewed,
 }) {
-  const activity = history?.activity || agent.activity?.entries || [];
-  const versions = history?.versions || [];
-
   return (
     <section className="agent-tab-content overview-layout">
       <Panel title="Overview" actions={<span className="panel-status-text">{operation?.workflowCount} workflows</span>}>
@@ -1704,49 +1485,7 @@ function AgentOverviewTab({
 
       <PromptContractPanel agent={agent} operation={operation} />
 
-      <PromptSummaryPanel agent={agent} operation={operation} />
-
       <HarnessSummaryPanel operation={operation} />
-
-      <ConnectedWorkflows operation={operation} />
-
-      <ToolPermissionMatrix operation={operation} />
-
-      <MemoryRelationshipPanel agent={agent} operation={operation} />
-
-      <Panel
-        title="Recent Activity"
-        actions={
-          <button type="button" className="text-action" onClick={onLoadHistory}>
-            Refresh
-          </button>
-        }
-      >
-        {historyLoading ? (
-          <InlineLoading label="Loading activity..." />
-        ) : historyError ? (
-          <EmptyState title="History unavailable" copy={historyError} />
-        ) : (
-          <TimelineList entries={activity.slice(0, 5)} fallback="No recent activity recorded yet." />
-        )}
-      </Panel>
-
-      <Panel title="Version History">
-        {versions.length ? (
-          <div className="version-rows">
-            {versions.slice(0, 5).map((version) => (
-              <CompactItem
-                key={version.versionId || version.createdAt || version.summary}
-                title={version.versionLabel || version.versionId || 'Version'}
-                meta={formatDate(version.createdAt)}
-                detail={version.summary || 'Profile version saved.'}
-              />
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="No version history loaded" copy="Open the Versions tab to load saved profile and prompt changes." />
-        )}
-      </Panel>
 
       <ReviewWorkflowPanel
         agent={agent}
@@ -1802,28 +1541,6 @@ function QualityPerformance({ operation }) {
             </span>
             <strong>{metric.value}</strong>
             <small className={metric.deltaTone}>{metric.delta}</small>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
-function PromptSummaryPanel({ agent, operation }) {
-  const rows = [
-    { label: 'Goals', value: operation?.promptSummary?.goals },
-    { label: 'Guardrails', value: operation?.promptSummary?.guardrails },
-    { label: 'Tone', value: agent.profile?.tone || operation?.promptSummary?.tone },
-    { label: 'Escalation Rules', value: operation?.promptSummary?.escalationRules },
-  ];
-
-  return (
-    <Panel title="System Prompt Summary">
-      <div className="prompt-summary-table">
-        {rows.map((row) => (
-          <div key={row.label}>
-            <strong>{row.label}</strong>
-            <span>{row.value || 'Not documented.'}</span>
           </div>
         ))}
       </div>
@@ -1911,44 +1628,6 @@ function ToolPermissionMatrix({ operation }) {
   );
 }
 
-function MemoryRelationshipPanel({ agent, operation }) {
-  const memoryNotes = (agent.memory?.notes || []).map(normalizeMemoryNote);
-  const relationshipRows = operation?.relationshipRows || [];
-  return (
-    <Panel title="Memory & Relationships" actions={<span className="panel-status-text">{operation?.relationshipCount || 0} peers</span>}>
-      <div className="memory-relationship-grid">
-        <div>
-          <h4>Memory Notes</h4>
-          {memoryNotes.length ? (
-            <div className="memory-note-list">
-              {memoryNotes.slice(0, 5).map((note, index) => (
-                <span key={`${note}-${index}`}>{note}</span>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="No memory notes" copy="Corrections and durable agent preferences will appear here." />
-          )}
-        </div>
-        <div>
-          <h4>Collaborators</h4>
-          {relationshipRows.length ? (
-            <div className="relationship-list">
-              {relationshipRows.map((relationship) => (
-                <div key={relationship.agentId}>
-                  <strong>{relationship.label}</strong>
-                  <span>{relationship.summary}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="No relationships mapped" copy="Agent handoffs and collaboration notes are not populated yet." />
-          )}
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
 function normalizeMemoryNote(note) {
   if (typeof note === 'string') {
     return note;
@@ -1982,9 +1661,6 @@ function ReviewWorkflowPanel({ agent, operation, saving = false, onMarkReviewed 
         ))}
       </div>
       <div className="review-action-row">
-        <a className="secondary-action" href={`#/agents/${encodeURIComponent(agent.agentId)}`}>
-          Open Profile
-        </a>
         <button
           type="button"
           className="secondary-action"
@@ -2810,25 +2486,9 @@ function buildOperationalProfile(agent, runtimeState) {
     toolPermissions,
     promptContract,
     reviewItems,
-    relationshipRows: buildRelationshipRows(agent),
     harnessCases: buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessRun),
-    attentionItems: reviewItems.filter((item) => item.status !== 'pass'),
     harnessChecks: buildHarnessChecks(agent, status, promptReady, toolCount, relationshipCount, memoryCount),
   };
-}
-
-function buildMissionAttentionItems(agents, operationById) {
-  const severityRank = { fail: 0, warn: 1, pass: 2 };
-  return agents
-    .flatMap((agent) => {
-      const operation = operationById.get(agent.agentId);
-      return (operation?.attentionItems || []).map((item) => ({
-        ...item,
-        agentId: agent.agentId,
-        agentLabel: agent.profile?.roleTitle || labelAgent(agent.agentId),
-      }));
-    })
-    .sort((a, b) => (severityRank[a.status] ?? 9) - (severityRank[b.status] ?? 9));
 }
 
 function buildToolPermissions(agent, meta) {
@@ -2950,17 +2610,6 @@ function buildReviewItems(agent, status, promptReady, toolCount, relationshipCou
   ];
 }
 
-function buildRelationshipRows(agent) {
-  const relationships = agent?.relationships?.map || {};
-  return Object.entries(relationships).map(([agentId, value]) => ({
-    agentId,
-    label: labelAgent(agentId),
-    summary: typeof value === 'string'
-      ? value
-      : value?.summary || value?.relationship || 'Relationship note recorded.',
-  }));
-}
-
 function buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessRun) {
   if (latestHarnessRun?.cases?.length) {
     return latestHarnessRun.cases.map((testCase, index) => ({
@@ -3025,20 +2674,6 @@ function buildMissionStats(operations) {
     workflowCoverage,
     humanReviewed,
   };
-}
-
-function buildCoverageBuckets(operations) {
-  const rows = [
-    { label: 'Excellent', tone: 'green', count: operations.filter((operation) => operation.workflowFit >= 0.86).length },
-    { label: 'Good', tone: 'blue', count: operations.filter((operation) => operation.workflowFit >= 0.72 && operation.workflowFit < 0.86).length },
-    { label: 'Fair', tone: 'orange', count: operations.filter((operation) => operation.workflowFit >= 0.58 && operation.workflowFit < 0.72).length },
-    { label: 'Low', tone: 'red', count: operations.filter((operation) => operation.workflowFit < 0.58).length },
-  ];
-  const active = operations.filter((operation) => operation.status === 'active').length;
-  const excellentPercent = operations.length
-    ? Math.round(((rows[0].count + rows[1].count) / operations.length) * 100)
-    : 0;
-  return { rows, active, excellentPercent };
 }
 
 function buildHarnessChecks(agent, status, promptReady, toolCount, relationshipCount, memoryCount) {

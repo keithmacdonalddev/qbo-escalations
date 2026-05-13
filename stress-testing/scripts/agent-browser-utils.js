@@ -71,6 +71,7 @@ function resolveAgentBrowserBin() {
 
   const candidates = [];
   if (process.env.APPDATA) {
+    candidates.push(path.join(process.env.APPDATA, 'npm', 'agent-browser.cmd'));
     candidates.push(path.join(
       process.env.APPDATA,
       'npm',

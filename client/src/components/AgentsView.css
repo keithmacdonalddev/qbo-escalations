@@ -624,143 +624,6 @@
   padding: 16px;
 }
 
-.mission-insight-grid {
-  display: grid;
-  grid-template-columns: minmax(280px, 0.95fr) minmax(320px, 1.05fr);
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.mission-insight-card {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--agent-line);
-  border-radius: 8px;
-  background: rgba(8, 17, 30, 0.72);
-}
-
-.mission-insight-card > header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: start;
-  margin-bottom: 12px;
-}
-
-.mission-insight-card h3 {
-  margin: 4px 0 0;
-  color: var(--agent-text);
-  font-size: 1rem;
-  letter-spacing: 0;
-}
-
-.attention-list {
-  display: grid;
-  gap: 8px;
-}
-
-.attention-list button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 10px;
-  align-items: center;
-  width: 100%;
-  padding: 10px;
-  border: 1px solid var(--agent-line);
-  border-radius: 8px;
-  background: rgba(12, 23, 38, 0.82);
-  color: var(--agent-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.attention-list button:hover {
-  border-color: rgba(255, 159, 67, 0.55);
-}
-
-.attention-list strong,
-.attention-list small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attention-list small {
-  grid-column: 2;
-  color: var(--agent-muted);
-}
-
-.attention-severity {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--agent-orange);
-}
-
-.attention-severity.high {
-  background: var(--agent-red);
-  box-shadow: 0 0 0 4px rgba(255, 90, 101, 0.14);
-}
-
-.attention-severity.medium {
-  background: var(--agent-orange);
-  box-shadow: 0 0 0 4px rgba(255, 159, 67, 0.14);
-}
-
-.attention-severity.low {
-  background: var(--agent-blue);
-}
-
-.compare-selectors {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.compare-selectors label {
-  display: grid;
-  gap: 6px;
-  color: var(--agent-muted);
-  font-size: 0.76rem;
-  font-weight: 850;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.compare-selectors select {
-  min-height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--agent-line);
-  border-radius: 8px;
-  background: rgba(8, 17, 30, 0.9);
-  color: var(--agent-text);
-  font-weight: 700;
-}
-
-.compare-columns {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.compare-columns button {
-  display: grid;
-  gap: 4px;
-  padding: 10px;
-  border: 1px solid var(--agent-line);
-  border-radius: 8px;
-  background: rgba(12, 23, 38, 0.82);
-  color: var(--agent-text);
-  text-align: left;
-  cursor: pointer;
-}
-
-.compare-columns span,
-.compare-columns small {
-  color: var(--agent-muted);
-}
-
 .agent-network-map {
   display: grid;
   grid-template-columns: minmax(150px, 0.7fr) minmax(320px, 1.6fr) minmax(150px, 0.7fr);
@@ -1165,7 +1028,7 @@
 }
 
 .overview-layout > .agent-panel:nth-child(4),
-.overview-layout > .agent-panel:nth-child(7) {
+.overview-layout > .agent-panel:nth-child(6) {
   grid-column: span 2;
 }
 
@@ -1365,13 +1228,6 @@
   background: rgba(49, 208, 198, 0.22);
 }
 
-.prompt-summary-table {
-  display: grid;
-  border: 1px solid var(--agent-line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-
 .contract-grid,
 .permission-matrix,
 .review-workflow-list,
@@ -1444,43 +1300,6 @@
   color: #ffd29e;
 }
 
-.memory-relationship-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.memory-relationship-grid h4 {
-  margin: 0 0 8px;
-  color: var(--agent-text);
-  font-size: 0.9rem;
-}
-
-.memory-note-list,
-.relationship-list {
-  display: grid;
-  gap: 8px;
-}
-
-.memory-note-list span,
-.relationship-list div {
-  padding: 10px;
-  border: 1px solid rgba(151, 171, 205, 0.16);
-  border-radius: 8px;
-  background: rgba(8, 17, 30, 0.58);
-  color: #dce8ff;
-  line-height: 1.4;
-}
-
-.relationship-list div {
-  display: grid;
-  gap: 4px;
-}
-
-.relationship-list span {
-  color: var(--agent-muted);
-}
-
 .review-workflow-item,
 .harness-result-row {
   display: grid;
@@ -1513,34 +1332,8 @@
   margin-top: 12px;
 }
 
-.review-action-row a {
-  text-decoration: none;
-}
-
 .harness-result-row {
   grid-template-columns: auto minmax(130px, 1fr) minmax(180px, 1.4fr) 80px;
-}
-
-.prompt-summary-table div {
-  display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px;
-  border-bottom: 1px solid var(--agent-line);
-}
-
-.prompt-summary-table div:last-child {
-  border-bottom: 0;
-}
-
-.prompt-summary-table strong {
-  color: #d9e7ff;
-  font-size: 0.83rem;
-}
-
-.prompt-summary-table span {
-  color: #b8c9e4;
-  line-height: 1.45;
 }
 
 .coverage-bar {
@@ -1861,9 +1654,7 @@
     grid-template-columns: repeat(2, minmax(240px, 1fr));
   }
 
-  .mission-insight-grid,
-  .agent-network-map,
-  .memory-relationship-grid {
+  .agent-network-map {
     grid-template-columns: 1fr;
   }
 
@@ -1879,7 +1670,6 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .agent-profile-hero,
   .overview-layout,
   .configuration-layout,
   .prompt-layout,
@@ -1888,8 +1678,20 @@
     grid-template-columns: 1fr;
   }
 
+  .agent-profile-hero {
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 260px);
+    align-items: start;
+    gap: 16px;
+    padding: 18px;
+  }
+
+  .profile-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
   .overview-layout > .agent-panel:nth-child(4),
-  .overview-layout > .agent-panel:nth-child(7),
+  .overview-layout > .agent-panel:nth-child(6),
   .configuration-layout > .agent-panel:first-child,
   .prompt-layout > .agent-panel:first-child,
   .workflows-layout > .agent-panel:first-child {
@@ -1940,6 +1742,340 @@
   }
 }
 
+.agents-index-page {
+  min-height: calc(100vh - 56px);
+  padding: 12px 14px;
+  background:
+    linear-gradient(180deg, rgba(47, 133, 255, 0.045), transparent 190px),
+    var(--agent-bg);
+}
+
+.agents-index-page .mission-control-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.agents-index-page .mission-title-block {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 10px;
+}
+
+.agents-index-page .mission-title-block h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.05;
+}
+
+.agents-index-page .mission-title-block p {
+  display: none;
+}
+
+.agents-index-page .mission-kicker {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+}
+
+.agents-index-page .mission-header-actions {
+  align-items: center;
+  gap: 8px;
+}
+
+.agents-index-page .system-status-pill {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.agents-index-page .secondary-action,
+.agents-index-page .primary-action {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 0.82rem;
+}
+
+.agents-index-page .primary-action {
+  box-shadow: none;
+}
+
+.agents-index-page .mission-stats-grid {
+  grid-template-columns: repeat(5, minmax(108px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.agents-index-page .mission-stat-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 52px;
+  padding: 8px 10px;
+  background: rgba(10, 22, 38, 0.86);
+  box-shadow: none;
+}
+
+.agents-index-page .mission-stat-card span {
+  overflow: hidden;
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-index-page .mission-stat-card strong {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.agents-index-page .mission-stat-card small {
+  grid-column: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-index-page .mission-stat-card .mini-sparkline {
+  display: none;
+}
+
+.agents-index-page .agent-command-toolbar {
+  grid-template-columns: minmax(240px, 1fr) repeat(4, minmax(112px, 0.36fr));
+  gap: 6px;
+  margin-bottom: 8px;
+  align-items: end;
+}
+
+.agents-index-page .agent-command-toolbar label {
+  gap: 4px;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+
+.agents-index-page .agent-command-toolbar input,
+.agents-index-page .agent-command-toolbar select {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+}
+
+.agents-index-page .mission-control-layout {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.agents-index-page .agent-grid-panel {
+  background: rgba(8, 17, 30, 0.82);
+  box-shadow: none;
+}
+
+.agents-index-page .rank-pill {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+}
+
+.agents-index-page .avatar-small {
+  width: 28px;
+  height: 28px;
+  font-size: 0.78rem;
+}
+
+.agents-index-page .avatar-medium {
+  width: 34px;
+  height: 34px;
+  font-size: 0.86rem;
+}
+
+.agents-index-page .status-badge {
+  gap: 4px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 0.65rem;
+}
+
+.agents-index-page .status-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.agents-index-page .fit-bars {
+  width: 66px;
+  margin-top: 3px;
+}
+
+.agents-index-page .fit-bars i {
+  height: 8px;
+  border-radius: 2px;
+}
+
+.agents-index-page .agent-grid-panel {
+  padding: 10px;
+}
+
+.agents-index-page .agent-grid-heading {
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.agents-index-page .agent-grid-heading > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.agents-index-page .agent-grid-heading h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.agents-index-page .agent-grid-count {
+  color: var(--agent-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.agents-index-page .agent-grid-view-toggle {
+  gap: 3px;
+  padding: 3px;
+  border-radius: 7px;
+}
+
+.agents-index-page .agent-grid-view-toggle button {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 5px;
+  font-size: 0.78rem;
+}
+
+.agents-index-page .agent-card-grid {
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.agents-index-page .agent-mission-card,
+.agents-index-page .agent-create-card {
+  min-height: 56px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: rgba(11, 23, 39, 0.9);
+}
+
+.agents-index-page .agent-mission-card {
+  grid-template-columns: 72px minmax(150px, 1.1fr) minmax(0, 2fr) minmax(130px, 0.95fr) minmax(132px, 0.95fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.agents-index-page .agent-mission-card header {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.agents-index-page .agent-mission-card-title {
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.agents-index-page .agent-mission-card-title strong {
+  font-size: 0.88rem;
+}
+
+.agents-index-page .agent-mission-card-title small {
+  font-size: 0.72rem;
+}
+
+.agents-index-page .agent-mission-card p {
+  display: -webkit-box;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #aebed5;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.agents-index-page .agent-card-chip-row {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.agents-index-page .agent-badge {
+  min-height: 20px;
+  max-width: 100%;
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: 6px;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agents-index-page .agent-card-metrics {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agents-index-page .agent-card-metrics span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.agents-index-page .agent-card-metrics strong {
+  font-size: 0.8rem;
+}
+
+.agents-index-page .agent-mission-card > .mini-sparkline {
+  display: none;
+}
+
+.agents-index-page .agent-create-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.agents-index-page .agent-create-card span {
+  width: 30px;
+  height: 30px;
+  font-size: 1.1rem;
+}
+
+.agents-index-page .agent-create-card strong {
+  font-size: 0.86rem;
+}
+
+.agents-index-page .agent-create-card small {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .agent-profiles-page {
     padding: 16px;
@@ -1957,12 +2093,8 @@
   .agent-command-toolbar,
   .agent-directory-list,
   .agent-card-grid,
-  .mission-insight-grid,
   .agent-network-map,
   .map-agent-cluster,
-  .compare-selectors,
-  .compare-columns,
-  .memory-relationship-grid,
   .profile-form-grid,
   .runtime-form-grid,
   .harness-check-grid,
@@ -1976,10 +2108,28 @@
     grid-template-columns: 1fr;
   }
 
+  .agent-profile-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-actions {
+    grid-column: auto;
+    justify-content: flex-start;
+  }
+
   .agent-grid-heading,
   .profile-page-topbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .agents-index-page .agent-mission-card {
+    grid-template-columns: 1fr;
+  }
+
+  .agents-index-page .agent-card-metrics {
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .profile-form-grid .form-field:nth-child(n) {
@@ -1997,8 +2147,263 @@
     font-size: 1.5rem;
   }
 
-  .prompt-summary-table div,
   .overview-definition-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Site density parity for agent profile routes. */
+.agent-profile-detail-page {
+  min-height: calc(100vh - 40px);
+  padding: 12px;
+}
+
+.agent-profile-detail-page .profile-page-topbar {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-profile-detail-page .agent-profile-hero {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 220px) auto;
+  gap: 12px;
+  padding: 14px;
+  box-shadow: none;
+}
+
+.agent-profile-detail-page .profile-identity {
+  gap: 12px;
+}
+
+.agent-profile-detail-page .profile-title-line {
+  gap: 6px;
+}
+
+.agent-profile-detail-page .profile-title-line h2 {
+  font-size: clamp(1.2rem, 1.55vw, 1.55rem);
+}
+
+.agent-profile-detail-page .profile-identity p {
+  margin-top: 5px;
+  font-size: 0.82rem;
+  line-height: 1.38;
+}
+
+.agent-profile-detail-page .profile-chip-row,
+.agent-profile-detail-page .prompt-editor-meta,
+.agent-profile-detail-page .tag-list {
+  gap: 5px;
+}
+
+.agent-profile-detail-page .profile-actions {
+  gap: 6px;
+}
+
+.agent-profile-detail-page .system-status-pill,
+.agent-profile-detail-page .selected-agent-chip,
+.agent-profile-detail-page .secondary-action,
+.agent-profile-detail-page .primary-action,
+.agent-profile-detail-page .text-action {
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 0.76rem;
+}
+
+.agent-profile-detail-page .agent-profile-tabs {
+  gap: 2px;
+  margin: 8px 0;
+}
+
+.agent-profile-detail-page .agent-profile-tabs button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+}
+
+.agent-profile-detail-page .profile-detail-shell,
+.agent-profile-detail-page .agent-tab-content,
+.agent-profile-detail-page .contract-grid,
+.agent-profile-detail-page .permission-matrix,
+.agent-profile-detail-page .review-workflow-list,
+.agent-profile-detail-page .harness-results-table,
+.agent-profile-detail-page .profile-form-grid,
+.agent-profile-detail-page .runtime-form-grid,
+.agent-profile-detail-page .harness-check-grid,
+.agent-profile-detail-page .workflow-impact-grid {
+  gap: 8px;
+}
+
+.agent-profile-detail-page .agent-panel {
+  padding: 12px;
+  box-shadow: none;
+}
+
+.agent-profile-detail-page .agent-panel > header {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.agent-profile-detail-page .agent-panel h3 {
+  font-size: 0.9rem;
+}
+
+.agent-profile-detail-page .overview-layout {
+  grid-template-columns: minmax(230px, 1fr) minmax(280px, 1.1fr) minmax(230px, 0.9fr);
+}
+
+.agent-profile-detail-page .contract-row,
+.agent-profile-detail-page .permission-row,
+.agent-profile-detail-page .review-workflow-item,
+.agent-profile-detail-page .harness-result-row {
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.agent-profile-detail-page .contract-row {
+  grid-template-columns: 118px minmax(0, 1fr);
+}
+
+.agent-profile-detail-page .review-action-row {
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.agent-profile-detail-page .avatar-large {
+  width: 60px;
+  height: 60px;
+  font-size: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .agent-profile-detail-page {
+    padding: 8px;
+  }
+
+  .agent-profile-detail-page .agent-profile-hero,
+  .agent-profile-detail-page .overview-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-profile-detail-page .profile-actions {
+    justify-content: flex-start;
+  }
+}
+
+/* Site-wide UI audit follow-up: compact profile route with global dock open. */
+.agent-profile-detail-page {
+  padding: 10px;
+}
+
+.agent-profile-detail-page .agent-profile-hero {
+  grid-template-columns: minmax(0, 1.25fr) minmax(150px, 180px) auto;
+  gap: 10px;
+  padding: 10px 12px;
+}
+
+.agent-profile-detail-page .profile-identity {
+  gap: 10px;
+}
+
+.agent-profile-detail-page .avatar-large {
+  width: 48px;
+  height: 48px;
+  font-size: 1rem;
+}
+
+.agent-profile-detail-page .profile-title-line h2 {
+  font-size: 1.35rem;
+}
+
+.agent-profile-detail-page .profile-identity p {
+  max-width: 680px;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.agent-profile-detail-page .profile-chip-row {
+  margin-top: 7px;
+}
+
+.agent-profile-detail-page .agent-badge {
+  min-height: 21px;
+  padding: 0 7px;
+  font-size: 0.68rem;
+}
+
+.agent-profile-detail-page .profile-ownership {
+  gap: 5px;
+  font-size: 0.78rem;
+}
+
+.agent-profile-detail-page .profile-actions {
+  gap: 5px;
+}
+
+.agent-profile-detail-page .agent-profile-tabs {
+  min-height: 34px;
+  margin: 6px 0;
+}
+
+.agent-profile-detail-page .agent-profile-tabs button {
+  min-height: 30px;
+  padding: 0 9px;
+}
+
+.agent-profile-detail-page .overview-layout {
+  grid-template-columns: minmax(190px, 0.9fr) minmax(250px, 1.15fr) minmax(210px, 0.85fr);
+  gap: 8px;
+}
+
+.agent-profile-detail-page .agent-panel {
+  padding: 10px;
+}
+
+.agent-profile-detail-page .agent-panel > header {
+  margin-bottom: 7px;
+}
+
+.agent-profile-detail-page .overview-definition-grid {
+  gap: 8px;
+}
+
+.agent-profile-detail-page .definition-row {
+  gap: 2px;
+}
+
+.agent-profile-detail-page .definition-row span {
+  font-size: 0.68rem;
+}
+
+.agent-profile-detail-page .definition-row strong {
+  font-size: 0.8rem;
+  line-height: 1.28;
+}
+
+.agent-profile-detail-page .workflow-footprint {
+  gap: 8px;
+}
+
+.agent-profile-detail-page .workflow-column {
+  gap: 6px;
+}
+
+.agent-profile-detail-page .workflow-node {
+  min-height: 34px;
+  padding: 6px 8px;
+  font-size: 0.76rem;
+}
+
+.agent-profile-detail-page .workflow-agent-node {
+  min-height: 92px;
+  padding: 10px;
+}
+
+.agent-profile-detail-page .quality-row,
+.agent-profile-detail-page .contract-row,
+.agent-profile-detail-page .permission-row,
+.agent-profile-detail-page .review-workflow-item,
+.agent-profile-detail-page .harness-result-row {
+  padding: 7px;
 }

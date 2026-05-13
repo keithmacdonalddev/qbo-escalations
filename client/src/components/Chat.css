@@ -1206,6 +1206,18 @@ body:has(.compose-card.is-case-workflow:focus-within) .compact-pane {
   border-color: rgba(10, 132, 255, 0.22);
 }
 
+.case-workflow-run-chip.is-generation-agent {
+  color: #20c997;
+  border-color: rgba(32, 201, 151, 0.24);
+  background: rgba(32, 201, 151, 0.07);
+}
+
+.case-workflow-run-chip.is-generation-server {
+  color: #93c5fd;
+  border-color: rgba(147, 197, 253, 0.24);
+  background: rgba(147, 197, 253, 0.07);
+}
+
 .case-workflow-run-chip.is-warning {
   color: #f0b232;
   border-color: rgba(240, 178, 50, 0.30);
@@ -4418,6 +4430,220 @@ body:has(.compose-card.is-case-workflow:focus-within) .compact-pane {
   display: inline-block;
   vertical-align: middle;
   margin-right: var(--sp-1);
+}
+
+/* --------------------------------------------------------------------------
+   Site-wide UI audit: command workflow density.
+   Keeps the case workflow operational inside the shared shell instead of
+   behaving like a tall demo card.
+   -------------------------------------------------------------------------- */
+
+body:has(.case-workflow-surface) .chat-messages {
+  gap: 8px !important;
+  padding: 8px 10px 74px !important;
+}
+
+body:has(.case-workflow-surface) .chat-bubble,
+body:has(.case-workflow-surface) .chat-bubble-assistant {
+  max-width: 100% !important;
+}
+
+.case-workflow-shell {
+  grid-template-rows: auto auto minmax(0, 1fr) auto !important;
+  gap: 8px !important;
+  height: min(548px, calc(100vh - 210px)) !important;
+  min-height: 360px !important;
+  padding: 12px !important;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+}
+
+.case-workflow-shell::before {
+  opacity: 0.1 !important;
+}
+
+.case-workflow-header {
+  align-items: center !important;
+  gap: 10px !important;
+}
+
+.case-workflow-eyebrow,
+.case-panel-kicker {
+  font-size: 9px !important;
+  letter-spacing: 0.07em !important;
+}
+
+.case-workflow-header h2 {
+  font-size: 21px !important;
+}
+
+.case-workflow-header p {
+  font-size: 11px !important;
+}
+
+.case-workflow-live {
+  min-height: 28px !important;
+  max-width: 118px !important;
+  padding: 5px 8px !important;
+  font-size: 10px !important;
+}
+
+.case-agent-rail {
+  gap: 7px !important;
+}
+
+.case-agent-node {
+  grid-template-columns: 24px minmax(0, 1fr) !important;
+  column-gap: 7px !important;
+  min-height: 56px !important;
+  padding: 7px 8px !important;
+}
+
+.case-agent-index {
+  width: 24px !important;
+  height: 24px !important;
+  font-size: 10px !important;
+}
+
+.case-agent-core strong {
+  font-size: 11px !important;
+}
+
+.case-agent-core small,
+.case-agent-status {
+  font-size: 9px !important;
+}
+
+.case-command-grid {
+  grid-template-columns: minmax(196px, 0.66fr) minmax(330px, 1.38fr) minmax(226px, 0.82fr) !important;
+  gap: 8px !important;
+  padding-right: 0 !important;
+}
+
+.case-command-grid.has-no-known-issue {
+  grid-template-columns: minmax(210px, 0.55fr) minmax(360px, 1fr) !important;
+}
+
+.case-source-panel,
+.case-decision-panel,
+.case-intel-panel {
+  gap: 8px !important;
+  padding: 9px !important;
+  border-radius: 7px !important;
+}
+
+.case-panel-head,
+.case-decision-head {
+  gap: 8px !important;
+}
+
+.case-panel-head strong {
+  font-size: 12px !important;
+}
+
+.case-source-template {
+  max-height: 160px !important;
+  min-height: 84px !important;
+  padding: 8px !important;
+  font-size: 10px !important;
+  line-height: 1.32 !important;
+}
+
+.case-source-actions {
+  gap: 6px !important;
+}
+
+.case-source-actions button {
+  min-height: 27px !important;
+  font-size: 10px !important;
+}
+
+.case-decision-verdict {
+  gap: 4px !important;
+  padding-bottom: 8px !important;
+}
+
+.case-decision-verdict strong {
+  font-size: 27px !important;
+}
+
+.case-decision-read {
+  font-size: 13px !important;
+  line-height: 1.34 !important;
+}
+
+.case-action-block,
+.case-workflow-warning,
+.case-signal,
+.case-intel-verdict,
+.case-match-row,
+.case-evidence-drawer {
+  padding: 8px !important;
+  border-radius: 7px !important;
+}
+
+.case-action-block strong,
+.case-intel-verdict strong {
+  font-size: 12px !important;
+  line-height: 1.34 !important;
+}
+
+.case-signal-grid {
+  gap: 7px !important;
+}
+
+.case-signal {
+  min-height: 64px !important;
+  gap: 4px !important;
+}
+
+.case-signal p,
+.case-intel-verdict p,
+.case-match-row strong,
+.case-mini-list small,
+.case-workflow-warning span {
+  font-size: 11px !important;
+  line-height: 1.32 !important;
+}
+
+.case-intel-body {
+  gap: 7px !important;
+}
+
+.case-analyst-strip {
+  min-height: 34px !important;
+  gap: 7px !important;
+  padding: 7px 9px !important;
+  font-size: 11px !important;
+}
+
+.case-analyst-strip small {
+  font-size: 10px !important;
+}
+
+.case-analyst-guidance {
+  gap: 7px !important;
+  margin-top: 0 !important;
+  padding: 10px 12px !important;
+}
+
+.case-analyst-guidance-content {
+  max-width: none !important;
+  font-size: 12.5px !important;
+  line-height: 1.42 !important;
+}
+
+.case-analyst-guidance-content h1,
+.case-analyst-guidance-content h2,
+.case-analyst-guidance-content h3 {
+  margin: 8px 0 4px !important;
+  font-size: 13px !important;
+}
+
+.compose-card.is-case-workflow {
+  min-height: 58px !important;
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
 }
 
 /* Snap Decision grid */

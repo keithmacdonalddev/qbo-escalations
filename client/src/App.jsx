@@ -93,6 +93,7 @@ function App() {
     globalDockTab,
     setGlobalDockTab,
     dockDefaultTab,
+    dockShellMode,
     dockViewContext,
     dockCloseHandler,
     showGlobalDock,
@@ -268,7 +269,7 @@ function App() {
     <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
     <WorkspaceMonitorProvider enabled={workspaceMonitorEnabled}>
-    <div className={`app${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
+    <div className={`app app-dock-mode-${dockShellMode}${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
       <a href="#main-content" className="skip-nav-link">Skip to main content</a>
       {/* Health banner — always visible at the very top */}
       <HealthBanner requests={waterfall.requests} slowThreshold={waterfall.slowThreshold} />
@@ -354,7 +355,11 @@ function App() {
             </button>
           )}
           {showGlobalDock && (
-            <aside className={`gmail-agent-dock-wrapper app-global-dock-wrapper${dockOverlayOpen ? ' dock-overlay-open' : ''}`} aria-label="Agent dock">
+            <aside
+              className={`gmail-agent-dock-wrapper app-global-dock-wrapper app-global-dock-wrapper--${dockShellMode}${dockOverlayOpen ? ' dock-overlay-open' : ''}`}
+              data-dock-mode={dockShellMode}
+              aria-label="Agent dock"
+            >
               <AgentDock
                 chat={chat}
                 activeTab={globalDockTab}

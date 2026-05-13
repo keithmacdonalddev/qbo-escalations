@@ -38,7 +38,7 @@ export default function TemplateLibrary() {
   } = useTemplates();
 
   return (
-    <div className="app-content-constrained">
+    <div className="app-content-constrained template-library-page">
       <div className="page-header">
         <h1 className="page-title">Response Templates</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
@@ -56,7 +56,7 @@ export default function TemplateLibrary() {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-6)' }}>
+      <div className="template-filter-strip" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-6)' }}>
         {CATEGORY_FILTER_OPTIONS.map((cat) => (
           <button
             key={cat}
@@ -69,14 +69,14 @@ export default function TemplateLibrary() {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: isFormOpen ? '1fr 420px' : '1fr', gap: 'var(--sp-5)' }}>
-        <div>
+      <div className={`template-library-layout${isFormOpen ? ' has-form' : ''}`} style={{ display: 'grid', gridTemplateColumns: isFormOpen ? '1fr 420px' : '1fr', gap: 'var(--sp-5)' }}>
+        <div className="template-library-results">
           {loading ? (
             <div style={{ textAlign: 'center', padding: 'var(--sp-10)' }}>
               <span className="spinner" />
             </div>
           ) : templates.length === 0 ? (
-            <div className="card">
+            <div className="card template-empty-card">
               <div className="empty-state">
                 <div className="empty-state-title">No Templates Found</div>
                 <div className="empty-state-desc">
@@ -87,7 +87,7 @@ export default function TemplateLibrary() {
               </div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--sp-5)' }}>
+            <div className="template-card-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 'var(--sp-5)' }}>
               {templates.map((tmpl) => (
                 <TemplateCard
                   key={tmpl._id}
@@ -104,7 +104,7 @@ export default function TemplateLibrary() {
         </div>
 
         {isFormOpen && (
-          <div className="card" style={{ position: 'sticky', top: 'var(--sp-6)', alignSelf: 'start' }}>
+          <div className="card template-form-card" style={{ position: 'sticky', top: 'var(--sp-6)', alignSelf: 'start' }}>
             <h2 style={{ margin: 0, marginBottom: 'var(--sp-3)', fontSize: 'var(--text-md)', fontWeight: 700 }}>
               {editingTemplate ? 'Edit Template' : 'Create Template'}
             </h2>

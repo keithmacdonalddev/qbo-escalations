@@ -57,6 +57,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
     attentionCounts,
     attentionKindCounts,
     attentionSeverityCounts,
+    attentionRefreshMeta,
     attentionStatusFilter,
     setAttentionStatusFilter,
     attentionKindFilter,
@@ -90,6 +91,22 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
       .then(d => setGaps(d))
       .catch(() => setGaps(null));
   }, [gapsDays]);
+
+  const attentionMission = buildAttentionMissionStats({
+    counts: attentionCounts,
+    severityCounts: attentionSeverityCounts,
+    kindCounts: attentionKindCounts,
+    items: attentionItems,
+  });
+  const attentionWorkflowRows = buildAttentionWorkflowRows(attentionKindCounts, attentionRefreshMeta);
+  const recentAttentionItems = attentionItems.slice(0, 5);
+
+  function focusAttentionKind(kind, status = 'open') {
+    setActiveTab('attention');
+    setAttentionStatusFilter(status);
+    setAttentionKindFilter(kind);
+    setAttentionSort('priority');
+  }
 
   return (
     <div className="app-content-constrained">
@@ -401,117 +418,135 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
             </div>
           )}
 
-          <div className="attention-status-grid">
-            {['open', 'resolved', 'split', 'dismissed'].map(status => (
-              <button
-                key={status}
-                type="button"
-                onClick={() => setAttentionStatusFilter(attentionStatusFilter === status ? 'all' : status)}
-                className={`attention-status-tile${attentionStatusFilter === status ? ' is-active' : ''}`}
-              >
-                <span className="attention-status-value">{attentionCounts[status] || 0}</span>
-                <span className="attention-status-label">{ATTENTION_STATUS_LABELS[status]}</span>
-              </button>
-            ))}
-          </div>
+          <AttentionMissionStrip
+            stats={attentionMission}
+            onFocusKind={focusAttentionKind}
+            onRefresh={refresh}
+          />
 
-          <div className="attention-ops-panel">
-            <div className="attention-ops-row">
-              <div className="attention-filter-group" aria-label="Filter attention items by type">
-                {ATTENTION_KIND_ORDER.map(kind => {
-                  const count = kind === 'all'
-                    ? Object.values(attentionKindCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)
-                    : (attentionKindCounts?.[kind] || 0);
-                  return (
-                    <button
-                      type="button"
-                      key={kind}
-                      className={`attention-kind-chip${attentionKindFilter === kind ? ' is-active' : ''}`}
-                      onClick={() => setAttentionKindFilter(kind)}
+          <div className="attention-command-layout">
+            <div className="attention-command-main">
+              <div className="attention-status-grid">
+                {['open', 'resolved', 'split', 'dismissed'].map(status => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => setAttentionStatusFilter(attentionStatusFilter === status ? 'all' : status)}
+                    className={`attention-status-tile${attentionStatusFilter === status ? ' is-active' : ''}`}
+                  >
+                    <span className="attention-status-value">{attentionCounts[status] || 0}</span>
+                    <span className="attention-status-label">{ATTENTION_STATUS_LABELS[status]}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="attention-ops-panel">
+                <div className="attention-ops-row">
+                  <div className="attention-filter-group" aria-label="Filter attention items by type">
+                    {ATTENTION_KIND_ORDER.map(kind => {
+                      const count = kind === 'all'
+                        ? Object.values(attentionKindCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0)
+                        : (attentionKindCounts?.[kind] || 0);
+                      return (
+                        <button
+                          type="button"
+                          key={kind}
+                          className={`attention-kind-chip${attentionKindFilter === kind ? ' is-active' : ''}`}
+                          onClick={() => setAttentionKindFilter(kind)}
+                        >
+                          <span>{ATTENTION_KIND_LABELS[kind] || kind}</span>
+                          <strong>{count}</strong>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="attention-ops-row attention-ops-row-secondary">
+                  <div className="attention-select-group">
+                    <select
+                      value={attentionStatusFilter}
+                      onChange={(e) => setAttentionStatusFilter(e.target.value)}
+                      aria-label="Filter by attention status"
                     >
-                      <span>{ATTENTION_KIND_LABELS[kind] || kind}</span>
-                      <strong>{count}</strong>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                      <option value="open">Open</option>
+                      <option value="all">All Items</option>
+                      <option value="resolved">Handled</option>
+                      <option value="split">Separate</option>
+                      <option value="dismissed">Dismissed</option>
+                    </select>
+                    <select
+                      value={attentionSort}
+                      onChange={(e) => setAttentionSort(e.target.value)}
+                      aria-label="Sort attention items"
+                    >
+                      {Object.entries(ATTENTION_SORT_LABELS).map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                    </select>
+                  </div>
 
-            <div className="attention-ops-row attention-ops-row-secondary">
-              <div className="attention-select-group">
-                <select
-                  value={attentionStatusFilter}
-                  onChange={(e) => setAttentionStatusFilter(e.target.value)}
-                  aria-label="Filter by attention status"
-                >
-                  <option value="open">Open</option>
-                  <option value="all">All Items</option>
-                  <option value="resolved">Handled</option>
-                  <option value="split">Separate</option>
-                  <option value="dismissed">Dismissed</option>
-                </select>
-                <select
-                  value={attentionSort}
-                  onChange={(e) => setAttentionSort(e.target.value)}
-                  aria-label="Sort attention items"
-                >
-                  {Object.entries(ATTENTION_SORT_LABELS).map(([value, label]) => (
-                    <option value={value} key={value}>{label}</option>
-                  ))}
-                </select>
-              </div>
+                  <div className="attention-severity-summary" aria-label="Attention severity summary">
+                    <span className="attention-severity-count critical">{attentionSeverityCounts.critical || 0} critical</span>
+                    <span className="attention-severity-count warning">{attentionSeverityCounts.warning || 0} warning</span>
+                    <span className="attention-severity-count info">{attentionSeverityCounts.info || 0} info</span>
+                  </div>
 
-              <div className="attention-severity-summary" aria-label="Attention severity summary">
-                <span className="attention-severity-count critical">{attentionSeverityCounts.critical || 0} critical</span>
-                <span className="attention-severity-count warning">{attentionSeverityCounts.warning || 0} warning</span>
-                <span className="attention-severity-count info">{attentionSeverityCounts.info || 0} info</span>
-              </div>
-
-              <span className="text-secondary attention-result-count">
-                {attentionTotal} item{attentionTotal !== 1 ? 's' : ''}
-              </span>
-            </div>
-          </div>
-
-          <div className="card attention-list-card">
-            {attentionLoading ? (
-              <div style={{ padding: 'var(--sp-8)', textAlign: 'center' }}>
-                <span className="spinner" />
-              </div>
-            ) : attentionItems.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-state-title">No Attention Items</div>
-                <div className="empty-state-desc">
-                  {attentionStatusFilter === 'open'
-                    ? 'Open review items appear here when the workflow finds something that needs a decision.'
-                    : 'No items match this status filter.'}
+                  <span className="text-secondary attention-result-count">
+                    {attentionTotal} item{attentionTotal !== 1 ? 's' : ''}
+                  </span>
                 </div>
               </div>
-            ) : (
-              <>
-                <AttentionBulkToolbar
-                  itemCount={attentionItems.length}
-                  selectedCount={attentionSelectedIds.length}
-                  allSelected={attentionItems.length > 0 && attentionSelectedIds.length === attentionItems.length}
-                  busy={attentionUpdatingId === 'bulk'}
-                  onSelectAll={setAllVisibleAttentionSelected}
-                  onClear={clearAttentionSelection}
-                  onBulkStatusChange={handleBulkAttentionStatusChange}
-                />
-                <div className="attention-list">
-                  {attentionItems.map(item => (
-                    <AttentionItemRow
-                      key={item._id}
-                      item={item}
-                      selected={attentionSelectedIds.includes(item._id)}
-                      busy={attentionUpdatingId === item._id}
-                      onToggleSelection={toggleAttentionSelection}
-                      onStatusChange={handleAttentionStatusChange}
+
+              <div className="card attention-list-card">
+                {attentionLoading ? (
+                  <div style={{ padding: 'var(--sp-8)', textAlign: 'center' }}>
+                    <span className="spinner" />
+                  </div>
+                ) : attentionItems.length === 0 ? (
+                  <div className="empty-state">
+                    <div className="empty-state-title">No Attention Items</div>
+                    <div className="empty-state-desc">
+                      {attentionStatusFilter === 'open'
+                        ? 'Open review items appear here when the workflow finds something that needs a decision.'
+                        : 'No items match this status filter.'}
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <AttentionBulkToolbar
+                      itemCount={attentionItems.length}
+                      selectedCount={attentionSelectedIds.length}
+                      allSelected={attentionItems.length > 0 && attentionSelectedIds.length === attentionItems.length}
+                      busy={attentionUpdatingId === 'bulk'}
+                      onSelectAll={setAllVisibleAttentionSelected}
+                      onClear={clearAttentionSelection}
+                      onBulkStatusChange={handleBulkAttentionStatusChange}
                     />
-                  ))}
-                </div>
-              </>
-            )}
+                    <div className="attention-list">
+                      {attentionItems.map(item => (
+                        <AttentionItemRow
+                          key={item._id}
+                          item={item}
+                          selected={attentionSelectedIds.includes(item._id)}
+                          busy={attentionUpdatingId === item._id}
+                          onToggleSelection={toggleAttentionSelection}
+                          onStatusChange={handleAttentionStatusChange}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <AttentionCommandRail
+              mission={attentionMission}
+              workflows={attentionWorkflowRows}
+              recentItems={recentAttentionItems}
+              onFocusKind={focusAttentionKind}
+              onRefresh={refresh}
+            />
           </div>
         </>
       )}
@@ -691,6 +726,190 @@ function formatSignals(signals = []) {
 function formatAttentionDate(value) {
   if (!value) return '';
   return new Date(value).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function getAttentionDateMs(value) {
+  if (!value) return 0;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function formatAttentionAge(value) {
+  const ms = getAttentionDateMs(value);
+  if (!ms) return '--';
+  const elapsed = Math.max(0, Date.now() - ms);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 60) return `${Math.max(1, minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function buildAttentionMissionStats({ counts = {}, severityCounts = {}, kindCounts = {}, items = [] } = {}) {
+  const open = Number(counts.open || 0);
+  const handled = Number(counts.resolved || 0) + Number(counts.split || 0) + Number(counts.dismissed || 0);
+  const total = open + handled;
+  const critical = Number(severityCounts.critical || 0);
+  const warning = Number(severityCounts.warning || 0);
+  const activeProducers = Object.entries(kindCounts || {}).filter(([, count]) => Number(count || 0) > 0).length;
+  const oldest = items.reduce((candidate, item) => {
+    const itemTime = getAttentionDateMs(item.lastDetectedAt || item.updatedAt || item.createdAt);
+    if (!itemTime) return candidate;
+    if (!candidate || itemTime < candidate) return itemTime;
+    return candidate;
+  }, 0);
+  const handledRate = total ? Math.round((handled / total) * 100) : 100;
+  const status = critical > 0 ? 'Needs review' : open > 0 ? 'Monitoring' : 'Operational';
+  return {
+    status,
+    open,
+    critical,
+    warning,
+    handledRate,
+    activeProducers,
+    oldestAge: oldest ? formatAttentionAge(oldest) : '--',
+  };
+}
+
+function buildAttentionWorkflowRows(kindCounts = {}, refreshMeta = null) {
+  return [
+    { kind: 'parse-review', label: 'Parser Review', detail: 'Parse confidence and fallback checks', count: kindCounts['parse-review'] || 0, scanned: refreshMeta?.parserTriage?.scanned || 0 },
+    { kind: 'missing-link', label: 'Link Integrity', detail: 'Escalation and conversation backlinks', count: kindCounts['missing-link'] || 0, scanned: (refreshMeta?.missingLinks?.scannedEscalations || 0) + (refreshMeta?.missingLinks?.scannedConversations || 0) },
+    { kind: 'missing-resolution', label: 'Resolution Discipline', detail: 'Final notes and escalation reasons', count: kindCounts['missing-resolution'] || 0, scanned: 0 },
+    { kind: 'stale-open', label: 'Stale Case Scanner', detail: 'Open and in-progress aging checks', count: kindCounts['stale-open'] || 0, scanned: refreshMeta?.stale?.scanned || 0 },
+    { kind: 'knowledge-review', label: 'Knowledge Review', detail: 'Reusable draft approval guard', count: kindCounts['knowledge-review'] || 0, scanned: 0 },
+    { kind: 'agent-review', label: 'Agent Review', detail: 'Profile approval and follow-up checks', count: kindCounts['agent-review'] || 0, scanned: 0 },
+    { kind: 'agent-harness', label: 'Agent Harness', detail: 'Harness warning and failure checks', count: kindCounts['agent-harness'] || 0, scanned: 0 },
+    { kind: 'possible-duplicate', label: 'Duplicate Safety', detail: 'Likely duplicate case detection', count: kindCounts['possible-duplicate'] || 0, scanned: 0 },
+  ];
+}
+
+function AttentionMissionStrip({ stats, onFocusKind, onRefresh }) {
+  return (
+    <div className="attention-mission-strip">
+      <div className="attention-mission-status">
+        <span className={`attention-engine-dot${stats.critical > 0 ? ' is-critical' : stats.open > 0 ? ' is-warning' : ''}`} />
+        <div>
+          <span>Workflow Engine</span>
+          <strong>{stats.status}</strong>
+        </div>
+      </div>
+      <MissionMetric label="Open Items" value={stats.open} />
+      <MissionMetric label="Critical" value={stats.critical} tone={stats.critical > 0 ? 'critical' : ''} />
+      <MissionMetric label="Active Producers" value={stats.activeProducers} />
+      <MissionMetric label="Oldest Visible" value={stats.oldestAge} />
+      <MissionMetric label="Handled Rate" value={`${stats.handledRate}%`} />
+      <div className="attention-mission-actions">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFocusKind('parse-review')}>
+          Parser
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFocusKind('missing-link')}>
+          Links
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRefresh}>
+          Rescan
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function MissionMetric({ label, value, tone = '' }) {
+  return (
+    <div className={`attention-mission-metric${tone ? ` tone-${tone}` : ''}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function AttentionCommandRail({ mission, workflows, recentItems, onFocusKind, onRefresh }) {
+  const scanCount = workflows.reduce((sum, workflow) => sum + Number(workflow.scanned || 0), 0);
+  return (
+    <aside className="attention-command-rail">
+      <section className="attention-rail-section">
+        <div className="attention-rail-heading">
+          <span>Active Workflows</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onRefresh}>Scan</button>
+        </div>
+        <div className="attention-workflow-list">
+          {workflows.map((workflow) => (
+            <button
+              type="button"
+              key={workflow.kind}
+              className={`attention-workflow-row${workflow.count > 0 ? ' has-items' : ''}`}
+              onClick={() => onFocusKind(workflow.kind)}
+            >
+              <span>
+                <strong>{workflow.label}</strong>
+                <small>{workflow.detail}</small>
+              </span>
+              <em>{workflow.count > 0 ? workflow.count : 'OK'}</em>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="attention-rail-section">
+        <div className="attention-rail-heading">
+          <span>System Health</span>
+          <strong>{mission.status}</strong>
+        </div>
+        <div className="attention-health-meter">
+          <span style={{ width: `${Math.max(4, Math.min(100, mission.handledRate))}%` }} />
+        </div>
+        <div className="attention-health-grid">
+          <span>{mission.warning} warning</span>
+          <span>{scanCount} scanned</span>
+          <span>{mission.oldestAge} oldest</span>
+        </div>
+      </section>
+
+      <section className="attention-rail-section">
+        <div className="attention-rail-heading">
+          <span>Queue Focus</span>
+        </div>
+        <div className="attention-focus-grid">
+          <button type="button" onClick={() => onFocusKind('all')}>All Open</button>
+          <button type="button" onClick={() => onFocusKind('missing-resolution')}>Resolution</button>
+          <button type="button" onClick={() => onFocusKind('knowledge-review')}>Knowledge</button>
+          <button type="button" onClick={() => onFocusKind('agent-review')}>Agents</button>
+        </div>
+      </section>
+
+      <section className="attention-rail-section">
+        <div className="attention-rail-heading">
+          <span>Recent Outputs</span>
+        </div>
+        <div className="attention-recent-list">
+          {recentItems.length ? recentItems.map((item) => (
+            <button
+              type="button"
+              key={item._id}
+              onClick={() => onFocusKind(item.kind || 'all', item.status || 'open')}
+            >
+              <strong>{item.title || ATTENTION_KIND_LABELS[item.kind] || 'Attention item'}</strong>
+              <small>{ATTENTION_KIND_LABELS[item.kind] || item.kind || 'Workflow item'} - {formatAttentionAge(item.updatedAt || item.createdAt)}</small>
+            </button>
+          )) : (
+            <span className="attention-rail-empty">No visible outputs</span>
+          )}
+        </div>
+      </section>
+
+      <section className="attention-rail-section">
+        <div className="attention-rail-heading">
+          <span>Resources</span>
+        </div>
+        <div className="attention-resource-links">
+          <a href="#/dashboard">Dashboard</a>
+          <a href="#/agents">Agents</a>
+          <a href="#/playbook">Playbook</a>
+          <a href="#/usage?tab=traces">Traces</a>
+        </div>
+      </section>
+    </aside>
+  );
 }
 
 function AttentionBulkToolbar({

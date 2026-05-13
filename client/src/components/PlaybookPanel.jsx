@@ -50,7 +50,7 @@ export default function PlaybookPanel({
   onDeleteCategoryRequest,
 }) {
   return (
-    <div className="card" style={{ minHeight: 440 }}>
+    <div className="card playbook-panel-card" style={{ minHeight: 440 }}>
       {contentLoading ? (
         <div style={{ textAlign: 'center', padding: 'var(--sp-10)' }}>
           <span className="spinner" />
@@ -180,7 +180,7 @@ function PlaybookEmptyState() {
   ];
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 'var(--sp-10)' }}>
+    <div className="playbook-empty-state" style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 'var(--sp-10)' }}>
       <div style={{ maxWidth: 480 }}>
         <h2 style={{ fontSize: 'var(--text-lg)', fontWeight: 600, color: 'var(--ink)', marginBottom: 'var(--sp-4)', marginTop: 0 }}>
           Get Started with the Playbook

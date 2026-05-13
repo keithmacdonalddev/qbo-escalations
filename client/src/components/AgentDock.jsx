@@ -407,32 +407,28 @@ function CompactConversationPane({
             </div>
           </form>
         </div>
-      ) : (
+      ) : isStreaming ? (
         <div className="compact-pane-compose-area compact-pane-compose-area--monitor">
           <div className="compact-pane-monitor-footer">
-            {badge ? <span className="compact-pane-badge">{badge}</span> : <span />}
-            {isStreaming ? (
-              <button
-                type="button"
-                className="compact-pane-compose-send compact-pane-compose-send--stop"
-                onClick={onAbort}
-                aria-label="Stop generation"
-              >
-                <StopSquareIcon />
-              </button>
-            ) : (
-              <span className="compact-pane-monitor-hint">Compose in the main chat</span>
-            )}
+            <span className="compact-pane-monitor-hint">Main chat request running</span>
+            <button
+              type="button"
+              className="compact-pane-compose-send compact-pane-compose-send--stop"
+              onClick={onAbort}
+              aria-label="Stop generation"
+            >
+              <StopSquareIcon />
+            </button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
 
 const DOCK_MIN = 280;
-const DOCK_MAX = 500;
-const DOCK_DEFAULT = 380;
+const DOCK_MAX = 360;
+const DOCK_DEFAULT = 304;
 const DOCK_WIDTH_KEY = 'agent-dock-width';
 
 function clampWidth(w) {

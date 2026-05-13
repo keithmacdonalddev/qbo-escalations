@@ -144,6 +144,290 @@
 }
 
 /* ----- Attention Queue ----- */
+.attention-mission-strip {
+  display: grid;
+  grid-template-columns: minmax(190px, 1.4fr) repeat(5, minmax(105px, 1fr)) minmax(180px, auto);
+  gap: var(--sp-3);
+  align-items: stretch;
+  margin-bottom: var(--sp-5);
+  padding: var(--sp-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-raised) 92%, white), var(--bg-raised));
+}
+
+.attention-mission-status,
+.attention-mission-metric,
+.attention-mission-actions {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+}
+
+.attention-mission-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3);
+}
+
+.attention-mission-status span,
+.attention-mission-metric span,
+.attention-rail-heading span {
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.attention-mission-status strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-primary);
+  font-size: var(--text-md);
+}
+
+.attention-engine-dot {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--success, #22c55e);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success, #22c55e) 14%, transparent);
+}
+
+.attention-engine-dot.is-warning {
+  background: var(--warning, #eab308);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning, #eab308) 18%, transparent);
+}
+
+.attention-engine-dot.is-critical {
+  background: var(--danger, #ef4444);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger, #ef4444) 16%, transparent);
+}
+
+.attention-mission-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: var(--sp-3);
+}
+
+.attention-mission-metric strong {
+  color: var(--ink-primary);
+  font-size: var(--text-lg);
+  line-height: 1.1;
+}
+
+.attention-mission-metric.tone-critical strong {
+  color: var(--danger, #ef4444);
+}
+
+.attention-mission-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.attention-command-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: var(--sp-5);
+  align-items: start;
+}
+
+.attention-command-main {
+  min-width: 0;
+}
+
+.attention-command-rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  position: sticky;
+  top: var(--sp-5);
+}
+
+.attention-rail-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-raised);
+}
+
+.attention-rail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.attention-rail-heading strong {
+  color: var(--ink-primary);
+  font-size: var(--text-xs);
+}
+
+.attention-workflow-list,
+.attention-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.attention-workflow-row,
+.attention-recent-list button {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+
+.attention-workflow-row:hover,
+.attention-workflow-row.has-items,
+.attention-recent-list button:hover {
+  border-color: var(--accent);
+}
+
+.attention-workflow-row span,
+.attention-recent-list button {
+  min-width: 0;
+}
+
+.attention-workflow-row strong,
+.attention-recent-list strong {
+  display: block;
+  overflow: hidden;
+  color: var(--ink-primary);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attention-workflow-row small,
+.attention-recent-list small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attention-workflow-row em {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 3px var(--sp-2);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+  color: var(--ink-primary);
+  font-size: var(--text-xs);
+  font-style: normal;
+  font-weight: 700;
+  text-align: center;
+}
+
+.attention-recent-list button {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+}
+
+.attention-workflow-row.has-items em {
+  background: color-mix(in srgb, var(--warning, #eab308) 18%, var(--bg-raised));
+  color: color-mix(in srgb, var(--warning, #eab308) 88%, var(--ink));
+}
+
+.attention-health-meter {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-sunken);
+}
+
+.attention-health-meter span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--success, #22c55e));
+}
+
+.attention-health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-2);
+}
+
+.attention-health-grid span {
+  min-width: 0;
+  padding: var(--sp-2);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.attention-focus-grid,
+.attention-resource-links {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.attention-focus-grid button,
+.attention-resource-links a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+
+.attention-focus-grid button {
+  cursor: pointer;
+}
+
+.attention-focus-grid button:hover,
+.attention-resource-links a:hover {
+  border-color: var(--accent);
+  color: var(--ink-primary);
+}
+
+.attention-rail-empty {
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+}
+
 .attention-status-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
@@ -409,7 +693,46 @@
   min-width: 330px;
 }
 
+@media (max-width: 1180px) {
+  .attention-mission-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .attention-mission-status,
+  .attention-mission-actions {
+    grid-column: span 3;
+  }
+
+  .attention-mission-actions {
+    justify-content: flex-start;
+  }
+
+  .attention-command-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .attention-command-rail {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 860px) {
+  .attention-mission-strip,
+  .attention-command-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .attention-mission-status,
+  .attention-mission-actions {
+    grid-column: auto;
+  }
+
+  .attention-status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .attention-item {
     grid-template-columns: 24px 1fr;
     align-items: stretch;

@@ -53,7 +53,7 @@ export default function Analytics() {
   const maxTrendCount = trends.length > 0 ? Math.max(...trends.map((t) => t.count)) : 1;
 
   return (
-    <div className="app-content-constrained">
+    <div className="app-content-constrained analytics-page">
       <div className="page-header">
         <h1 className="page-title">Analytics</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
@@ -68,7 +68,7 @@ export default function Analytics() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
+      <div className="analytics-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
         <AnalyticsStatCard label="Total Escalations" value={summary?.total ?? '--'} />
         <AnalyticsStatCard label="Resolution Rate" value={summary?.total > 0 ? `${Math.round((summary.resolved / summary.total) * 100)}%` : '--'} />
         <AnalyticsStatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
@@ -77,8 +77,8 @@ export default function Analytics() {
         <AnalyticsStatCard label="Resolved Today" value={today?.resolved ?? '--'} />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 'var(--sp-6)' }}>
-        <div className="card">
+      <div className="analytics-panel-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: 'var(--sp-6)' }}>
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>By Category</h2>
           {categories.length === 0 ? (
             <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data yet</div>
@@ -106,7 +106,7 @@ export default function Analytics() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>Status Flow</h2>
           {statusFlow?.total ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
@@ -130,7 +130,7 @@ export default function Analytics() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>Daily Trends</h2>
           {trends.length === 0 ? (
             <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No trend data yet</div>
@@ -154,7 +154,7 @@ export default function Analytics() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>Resolution Time by Category</h2>
           {resolutionTimes.length === 0 ? (
             <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No resolved data yet</div>
@@ -182,7 +182,7 @@ export default function Analytics() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>Top Escalating Agents</h2>
           {agents.length === 0 ? (
             <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data yet</div>
@@ -206,7 +206,7 @@ export default function Analytics() {
           )}
         </div>
 
-        <div className="card">
+        <div className="card analytics-panel-card">
           <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-5)' }}>Recurring Issues</h2>
           {recurring.length === 0 ? (
             <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No recurring patterns detected yet</div>
@@ -254,7 +254,7 @@ export default function Analytics() {
               ))}
             </div>
             {/* Detailed breakdown table */}
-            <div className="card" style={{ padding: 'var(--sp-5)' }}>
+            <div className="card analytics-panel-card" style={{ padding: 'var(--sp-5)' }}>
               <h3 style={{ fontSize: 'var(--text-base)', fontWeight: 600, marginBottom: 'var(--sp-4)' }}>
                 Detailed Breakdown
               </h3>

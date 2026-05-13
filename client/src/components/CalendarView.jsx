@@ -83,7 +83,7 @@ function timeAgo(d) {
   return `${Math.floor(mins / 60)}h ago`;
 }
 
-const HOUR_HEIGHT = 60;
+const HOUR_HEIGHT = 52;
 const DAY_START_HOUR = 0;
 const DAY_END_HOUR = 24;
 const VIEW_START_HOUR = 7;
@@ -121,7 +121,7 @@ const S = {
   // Root — Vercel-inspired radical simplicity
   root: { display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: 'var(--bg)', color: 'var(--ink)', fontFamily: 'var(--font-sans)' },
   // Header — Glassmorphism + Stripe gradient accents
-  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 56px 10px 20px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', background: '#161A22', gap: 12, flexWrap: 'wrap', flexShrink: 0, zIndex: 10, position: 'relative' },
+  header: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 42px 8px 14px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', background: '#161A22', gap: 8, flexWrap: 'wrap', flexShrink: 0, zIndex: 10, position: 'relative' },
   headerLeft: { display: 'flex', alignItems: 'center', gap: 8 },
   headerCenter: { display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 auto', justifyContent: 'center', minWidth: 200 },
   headerRight: { display: 'flex', alignItems: 'center', gap: 6 },
@@ -136,16 +136,16 @@ const S = {
   eventCountBadge: { fontSize: '10px', fontWeight: 700, color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 10%, transparent)', padding: '3px 10px', borderRadius: 'var(--radius-pill)', whiteSpace: 'nowrap', border: '1px solid color-mix(in srgb, var(--accent) 15%, transparent)', letterSpacing: '0.02em' },
   body: { display: 'flex', flex: 1, overflow: 'hidden' },
   // Sidebar — GitHub dark-dimmed + Discord stepped depth
-  sidebar: { width: 240, borderRight: '1px solid color-mix(in srgb, var(--line-subtle) 50%, transparent)', background: 'color-mix(in srgb, var(--bg-raised) 95%, var(--bg-sunken))', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 },
+  sidebar: { width: 218, borderRight: '1px solid color-mix(in srgb, var(--line-subtle) 50%, transparent)', background: 'color-mix(in srgb, var(--bg-raised) 95%, var(--bg-sunken))', display: 'flex', flexDirection: 'column', overflow: 'hidden', flexShrink: 0 },
   // Sidebar sections — Discord-style stepped depth levels
-  sidebarSection: { padding: '14px 16px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: 'color-mix(in srgb, var(--bg) 3%, transparent)' },
-  sidebarSectionLast: { padding: '14px 16px', flex: 1, overflow: 'auto', background: 'color-mix(in srgb, var(--bg-sunken) 15%, transparent)' },
-  sidebarTitle: { fontSize: '10px', fontWeight: 700, color: 'var(--ink-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10, opacity: 0.7 },
+  sidebarSection: { padding: '10px 12px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: 'color-mix(in srgb, var(--bg) 3%, transparent)' },
+  sidebarSectionLast: { padding: '10px 12px', flex: 1, overflow: 'auto', background: 'color-mix(in srgb, var(--bg-sunken) 15%, transparent)' },
+  sidebarTitle: { fontSize: '10px', fontWeight: 700, color: 'var(--ink-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 7, opacity: 0.7 },
   // My Day — Asana coral warmth
-  myDaySection: { padding: '18px 16px 14px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: 'linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, var(--bg-raised)), color-mix(in srgb, var(--accent) 2%, var(--bg-raised)))', position: 'relative', overflow: 'hidden' },
+  myDaySection: { padding: '12px 12px 10px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: 'linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, var(--bg-raised)), color-mix(in srgb, var(--accent) 2%, var(--bg-raised)))', position: 'relative', overflow: 'hidden' },
   myDayLabel: { fontSize: '10px', fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.1em', opacity: 0.9 },
-  myDayDate: { fontSize: '22px', fontWeight: 800, color: 'var(--ink)', marginTop: 3, lineHeight: 1.15, letterSpacing: '-0.03em' },
-  myDayMeta: { fontSize: '11px', color: 'var(--ink-tertiary)', marginTop: 6, lineHeight: 1.4 },
+  myDayDate: { fontSize: '17px', fontWeight: 800, color: 'var(--ink)', marginTop: 2, lineHeight: 1.15, letterSpacing: 0 },
+  myDayMeta: { fontSize: '10px', color: 'var(--ink-tertiary)', marginTop: 4, lineHeight: 1.35 },
   // Mini Calendar — Premium feel, Figma canvas
   miniCalGrid: { display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, textAlign: 'center', fontSize: '11px', padding: '2px 0' },
   miniCalDayHeader: { color: 'var(--ink-tertiary)', fontSize: '9px', fontWeight: 700, padding: '4px 0', letterSpacing: '0.05em', opacity: 0.6 },
@@ -162,11 +162,11 @@ const S = {
   // Main area — Figma neutral canvas
   mainArea: { flex: 1, overflow: 'auto', position: 'relative', background: 'var(--bg)' },
   // Day column headers — Linear precision
-  dayColHeader: (isToday) => ({ textAlign: 'center', padding: '10px 4px 8px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', borderLeft: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: isToday ? 'color-mix(in srgb, var(--accent) 5%, var(--bg-raised))' : 'var(--bg-raised)', position: 'sticky', top: 0, zIndex: 3, transition: 'background 0.2s' }),
-  dayColHeaderNum: (isToday) => ({ fontSize: 'var(--text-lg)', fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--ink)', lineHeight: 1.1, width: isToday ? 30 : 'auto', height: isToday ? 30 : 'auto', display: isToday ? 'flex' : 'block', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: isToday ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent', margin: isToday ? '0 auto' : 0, letterSpacing: '-0.02em' }),
+  dayColHeader: (isToday) => ({ textAlign: 'center', padding: '7px 4px 6px', borderBottom: '1px solid color-mix(in srgb, var(--line-subtle) 60%, transparent)', borderLeft: '1px solid color-mix(in srgb, var(--line-subtle) 40%, transparent)', background: isToday ? 'color-mix(in srgb, var(--accent) 5%, var(--bg-raised))' : 'var(--bg-raised)', position: 'sticky', top: 0, zIndex: 3, transition: 'background 0.2s' }),
+  dayColHeaderNum: (isToday) => ({ fontSize: '16px', fontWeight: isToday ? 800 : 600, color: isToday ? 'var(--accent)' : 'var(--ink)', lineHeight: 1.1, width: isToday ? 26 : 'auto', height: isToday ? 26 : 'auto', display: isToday ? 'flex' : 'block', alignItems: 'center', justifyContent: 'center', borderRadius: '50%', background: isToday ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent', margin: isToday ? '0 auto' : 0, letterSpacing: 0 }),
   dayColHeaderDay: (isToday) => ({ fontSize: '10px', fontWeight: 700, color: isToday ? 'var(--accent)' : 'var(--ink-tertiary)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2, opacity: isToday ? 1 : 0.6 }),
   // Time gutter — GitHub-style subdued
-  timeGutter: { width: 58, flexShrink: 0, position: 'relative', borderRight: '1px solid color-mix(in srgb, var(--line-subtle) 50%, transparent)', background: 'color-mix(in srgb, var(--bg-raised) 50%, var(--bg))' },
+  timeGutter: { width: 48, flexShrink: 0, position: 'relative', borderRight: '1px solid color-mix(in srgb, var(--line-subtle) 50%, transparent)', background: 'color-mix(in srgb, var(--bg-raised) 50%, var(--bg))' },
   timeLabel: (top) => ({ position: 'absolute', top: top - 7, right: 10, fontSize: '10px', color: 'var(--ink-tertiary)', whiteSpace: 'nowrap', fontWeight: 500, fontVariantNumeric: 'tabular-nums', opacity: 0.65, letterSpacing: '-0.01em' }),
   // Grid lines — Linear-inspired ultra-subtle
   hourLine: (top) => ({ position: 'absolute', top, left: 0, right: 0, borderTop: '1px solid color-mix(in srgb, var(--line-subtle) 50%, transparent)', pointerEvents: 'none' }),
@@ -1133,8 +1133,8 @@ export default function CalendarView({ chat = null, agentDock = null, isActive =
   const td = new Date();
 
   return (
-    <div style={S.root}>
-      <div style={S.header}>
+    <div className="calendar-view" style={S.root}>
+      <div className="calendar-header" style={S.header}>
         <div style={S.headerLeft}>
           <button className={isOnToday ? '' : 'cal-today-pulse'} style={S.todayBtn} onClick={goToday}>Today</button>
           <button className="cal-nav-btn" style={S.navBtn} onClick={() => navigate(-1)} title="Previous (Left arrow)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg></button>
@@ -1190,7 +1190,7 @@ export default function CalendarView({ chat = null, agentDock = null, isActive =
       <div className="calendar-body-with-agent" style={{ flex: 1, overflow: 'hidden' }}>
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, overflow: 'hidden' }}>
           <div style={S.body}>
-            <div style={S.sidebar}>
+            <div className="calendar-sidebar" style={S.sidebar}>
               <motion.div style={S.myDaySection} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
                 <div style={S.myDayLabel}>{DAY_NAMES_FULL[td.getDay()]}</div>
                 <div style={S.myDayDate}>{MONTH_NAMES[td.getMonth()]} {td.getDate()}</div>
@@ -1211,7 +1211,7 @@ export default function CalendarView({ chat = null, agentDock = null, isActive =
               </div>
               {lastSync && <div style={S.syncBar}><span className="cal-sync-check" style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 4px rgba(16,185,129,0.4)' }} /><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--ink-tertiary)" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" /></svg><span style={{ opacity: 0.7 }}>Synced {timeAgo(lastSync)}</span></div>}
             </div>
-            <div style={S.mainArea}>
+            <div className="calendar-main-area" style={S.mainArea}>
               <AnimatePresence mode="wait">
                 {(view === 'week' || view === 'day') && <motion.div key={`wd-${view}-${focusDate.getTime()}`} initial={{ opacity: 0, x: navDir * 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: navDir * -30 }} transition={{ duration: 0.22, ease: [0.4,0,0.2,1] }} style={{ display: 'flex', flex: 1, flexDirection: 'column', height: '100%' }}><WeekDayView days={visibleDays} events={events} calendarColors={calendarColors} enabledCalendars={enabledCalendars} onEventClick={handleEventClick} onSlotClick={handleSlotClick} focusDate={focusDate} onEventDrop={handleEventDrop} isActive={isActive} /></motion.div>}
                 {view === 'month' && <motion.div key={`mo-${focusDate.getMonth()}-${focusDate.getFullYear()}`} initial={{ opacity: 0, x: navDir * 30 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: navDir * -30 }} transition={{ duration: 0.22, ease: [0.4,0,0.2,1] }} style={{ display: 'flex', flex: 1, flexDirection: 'column', height: '100%' }}><MonthView focusDate={focusDate} events={events} calendarColors={calendarColors} enabledCalendars={enabledCalendars} onEventClick={handleEventClick} onDayClick={handleMonthDayClick} /></motion.div>}

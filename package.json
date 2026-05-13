@@ -12,6 +12,7 @@
     "test": "npm run test:server && npm run test:stress-harness",
     "test:server": "npm --prefix server test",
     "test:stress-harness": "node --test stress-testing/scripts/test/*.test.js",
+    "test:ui-density": "node stress-testing/scripts/ui-density-canary.js",
     "test:image-parser": "node --test server/test/image-parser*.test.js",
     "stress:slices": "node stress-testing/scripts/run-slices.js"
   },

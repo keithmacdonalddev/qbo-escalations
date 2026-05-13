@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getDefaultDockTabForRoute } from '../lib/appRoute.js';
+import { getDefaultDockTabForRoute, getDockModeForRoute } from '../lib/appRoute.js';
 
 const DEFAULT_WORKSPACE_DOCK_CONTEXT = {
   view: 'workspace',
@@ -62,6 +62,11 @@ export default function useDockShellState({
   }, []);
 
   const dockDefaultTab = getDefaultDockTabForRoute(routeView);
+  const dockShellMode = getDockModeForRoute({
+    view: routeView,
+    workspaceView: routeWorkspaceView,
+    escalationId: routeEscalationId,
+  });
   const dockViewContext = useMemo(() => {
     if (routeView === 'workspace') {
       const routeSubview = routeWorkspaceView || 'overview';
@@ -101,6 +106,7 @@ export default function useDockShellState({
     setRouteDockOpen,
     updateDockContext,
     dockDefaultTab,
+    dockShellMode,
     dockViewContext,
     dockCloseHandler,
     showGlobalDock,

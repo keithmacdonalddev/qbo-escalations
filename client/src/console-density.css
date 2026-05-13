@@ -1,0 +1,133 @@
+/* Shared operational-console density layer.
+   Keep route-specific cleanup in component CSS; put reusable size/rhythm rules here. */
+
+:root {
+  --console-dock-width-chat: 320px;
+  --console-dock-width-workspace: 304px;
+  --console-dock-width-standard: 296px;
+  --console-dock-width-dense: 280px;
+  --console-gap: 8px;
+  --console-panel-radius: 7px;
+  --console-control-height: 28px;
+  --console-card-padding: 10px;
+}
+
+.app-global-dock-wrapper.app-global-dock-wrapper--chat {
+  width: var(--console-dock-width-chat) !important;
+  max-width: var(--console-dock-width-chat) !important;
+  flex-basis: var(--console-dock-width-chat) !important;
+}
+
+.app-global-dock-wrapper.app-global-dock-wrapper--workspace {
+  width: var(--console-dock-width-workspace) !important;
+  max-width: var(--console-dock-width-workspace) !important;
+  flex-basis: var(--console-dock-width-workspace) !important;
+}
+
+.app-global-dock-wrapper.app-global-dock-wrapper--standard {
+  width: var(--console-dock-width-standard) !important;
+  max-width: var(--console-dock-width-standard) !important;
+  flex-basis: var(--console-dock-width-standard) !important;
+}
+
+.app-global-dock-wrapper.app-global-dock-wrapper--dense {
+  width: var(--console-dock-width-dense) !important;
+  max-width: var(--console-dock-width-dense) !important;
+  flex-basis: var(--console-dock-width-dense) !important;
+}
+
+.app-dock-mode-dense .agent-dock-tabs,
+.app-dock-mode-standard .agent-dock-tabs {
+  min-height: 32px !important;
+  padding: 4px 5px !important;
+}
+
+.app-dock-mode-dense .agent-dock-tab,
+.app-dock-mode-standard .agent-dock-tab {
+  min-height: 24px !important;
+  padding: 4px 6px !important;
+  font-size: 10.5px !important;
+}
+
+.app-dock-mode-dense .compact-pane-messages,
+.app-dock-mode-standard .compact-pane-messages {
+  padding: 8px 10px 6px !important;
+}
+
+.app-dock-mode-dense .compact-pane-messages-inner,
+.app-dock-mode-standard .compact-pane-messages-inner {
+  gap: 8px !important;
+}
+
+.app-content-constrained .page-header,
+.console-page-header {
+  min-height: 30px !important;
+  margin-bottom: var(--console-gap) !important;
+  padding-bottom: var(--console-gap) !important;
+}
+
+.app-content-constrained .page-title,
+.console-page-title {
+  font-size: 21px !important;
+  line-height: 1.14 !important;
+  letter-spacing: 0 !important;
+}
+
+.console-panel,
+.app-content-constrained .usage-chart-card,
+.app-content-constrained .analytics-panel-card,
+.app-content-constrained .template-empty-card,
+.app-content-constrained .template-form-card,
+.app-content-constrained .playbook-panel-card {
+  border-radius: var(--console-panel-radius) !important;
+  padding: var(--console-card-padding) !important;
+  box-shadow: none !important;
+}
+
+.console-stat-grid,
+.app-content-constrained .usage-stat-grid,
+.app-content-constrained .analytics-stat-grid,
+.inv-stats-grid {
+  gap: var(--console-gap) !important;
+}
+
+.console-control,
+.app-content-constrained button,
+.app-content-constrained input,
+.app-content-constrained select,
+.app-content-constrained textarea {
+  min-height: var(--console-control-height);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="tab"]:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.9) !important;
+  outline-offset: 2px !important;
+}
+
+@media (max-width: 1200px) {
+  .app-global-dock-wrapper.app-global-dock-wrapper--chat,
+  .app-global-dock-wrapper.app-global-dock-wrapper--workspace,
+  .app-global-dock-wrapper.app-global-dock-wrapper--standard,
+  .app-global-dock-wrapper.app-global-dock-wrapper--dense {
+    width: 288px !important;
+    max-width: 288px !important;
+    flex-basis: 288px !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .app-global-dock-wrapper.app-global-dock-wrapper--chat,
+  .app-global-dock-wrapper.app-global-dock-wrapper--workspace,
+  .app-global-dock-wrapper.app-global-dock-wrapper--standard,
+  .app-global-dock-wrapper.app-global-dock-wrapper--dense {
+    width: 100% !important;
+    max-width: 100% !important;
+    flex-basis: auto !important;
+  }
+}

@@ -223,7 +223,7 @@ export default function UsageDashboard({
   }, [traceRouteState]);
 
   return (
-    <div className="app-content-constrained">
+    <div className="app-content-constrained usage-dashboard-page">
       <div className="page-header">
         <h1 className="page-title">Usage Monitor</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
@@ -294,7 +294,7 @@ export default function UsageDashboard({
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))', gap: 'var(--sp-4)', marginBottom: 'var(--sp-8)' }}>
+          <div className="usage-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(145px, 1fr))', gap: 'var(--sp-4)', marginBottom: 'var(--sp-8)' }}>
             <StatCard label="Total Tokens" value={formatTokens(totalTokens)} />
             <StatCard label="Total Cost" value={formatCost(totalCost)} />
             <StatCard label="Avg Cost / Req" value={avgCost != null ? formatCostPrecise(avgCost) : '--'} />
@@ -305,8 +305,8 @@ export default function UsageDashboard({
             <StatCard label="Fully Costed" value={`${usageCompleteCoverage}%`} accent />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(400px, 100%), 1fr))', gap: 'var(--sp-6)', marginBottom: 'var(--sp-8)' }}>
-            <div className="card">
+          <div className="usage-chart-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(400px, 100%), 1fr))', gap: 'var(--sp-6)', marginBottom: 'var(--sp-8)' }}>
+            <div className="card usage-chart-card">
               <h2 className="usage-card-title">Cost Trends (Daily)</h2>
               {trends.length === 0 ? (
                 <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No trend data</div>
@@ -330,7 +330,7 @@ export default function UsageDashboard({
               )}
             </div>
 
-            <div className="card">
+            <div className="card usage-chart-card">
               <h2 className="usage-card-title">Provider Comparison</h2>
               {providers.length === 0 ? (
                 <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data</div>
@@ -364,7 +364,7 @@ export default function UsageDashboard({
               )}
             </div>
 
-            <div className="card">
+            <div className="card usage-chart-card">
               <h2 className="usage-card-title">Service Breakdown</h2>
               {services.length === 0 ? (
                 <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data</div>
@@ -383,7 +383,7 @@ export default function UsageDashboard({
               )}
             </div>
 
-            <div className="card">
+            <div className="card usage-chart-card">
               <h2 className="usage-card-title">Model Distribution</h2>
               {models.length === 0 ? (
                 <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data</div>
@@ -402,7 +402,7 @@ export default function UsageDashboard({
               )}
             </div>
 
-            <div className="card" style={{ gridColumn: '1 / -1' }}>
+            <div className="card usage-chart-card" style={{ gridColumn: '1 / -1' }}>
               <h2 className="usage-card-title">Category Cost</h2>
               {categories.length === 0 ? (
                 <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No data</div>
@@ -437,7 +437,7 @@ export default function UsageDashboard({
             </div>
           </div>
 
-          <div className="card" style={{ marginBottom: 'var(--sp-8)' }}>
+          <div className="card usage-chart-card usage-recent-card" style={{ marginBottom: 'var(--sp-8)' }}>
             <h2 className="usage-card-title">Recent Requests</h2>
             {recent.length === 0 ? (
               <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>No requests in this period</div>
@@ -515,7 +515,7 @@ export default function UsageDashboard({
 
 function StatCard({ label, value, accent }) {
   return (
-    <div className="stat-card">
+    <div className="stat-card usage-stat-card">
       <div className="stat-card-value" style={accent ? { color: 'var(--accent)' } : undefined}>{value}</div>
       <div className="stat-card-label">{label}</div>
     </div>

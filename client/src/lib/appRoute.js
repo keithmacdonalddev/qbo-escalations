@@ -3,6 +3,27 @@ function getDefaultDockTabForRoute(view) {
   return 'chat';
 }
 
+function getDockModeForRoute(route = {}) {
+  const view = route?.view || 'chat';
+  if (view === 'chat') return 'chat';
+  if (view === 'workspace') return 'workspace';
+  if (view === 'settings') return 'hidden';
+
+  const denseViews = new Set([
+    'agents',
+    'analytics',
+    'attention',
+    'dashboard',
+    'gallery',
+    'investigations',
+    'playbook',
+    'templates',
+    'usage',
+  ]);
+
+  return denseViews.has(view) ? 'dense' : 'standard';
+}
+
 function normalizeWorkspaceView(rawView) {
   switch (String(rawView || '').toLowerCase()) {
     case '':
@@ -103,6 +124,7 @@ function getSidebarCurrentRoute(route) {
 
 export {
   getDefaultDockTabForRoute,
+  getDockModeForRoute,
   getSidebarCurrentRoute,
   normalizeWorkspaceView,
   parseHashRoute,

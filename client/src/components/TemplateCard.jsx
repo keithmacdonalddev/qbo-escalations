@@ -12,7 +12,7 @@ export default function TemplateCard({
   const usageCount = template.usageCount || 0;
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+    <div className="card template-card" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--sp-3)' }}>
         <div>
           <div style={{ fontWeight: 600, fontSize: 'var(--text-md)', marginBottom: 'var(--sp-1)' }}>
@@ -31,7 +31,7 @@ export default function TemplateCard({
         </button>
       </div>
 
-      <div style={{
+      <div className="template-card-body" style={{
         fontSize: 'var(--text-sm)',
         color: 'var(--ink-secondary)',
         whiteSpace: 'pre-wrap',

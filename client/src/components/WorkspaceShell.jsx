@@ -16,7 +16,7 @@ function workspaceHashForSubview(subview) {
 
 function WorkspacePlaceholder({ title, body, ctaLabel, ctaHash }) {
   return (
-    <div style={{
+    <div className="workspace-placeholder" style={{
       display: 'flex',
       flexDirection: 'column',
       justifyContent: 'center',
@@ -35,14 +35,15 @@ function WorkspacePlaceholder({ title, body, ctaLabel, ctaHash }) {
       }}>
         Workspace
       </div>
-      <h2 style={{ margin: 0, fontSize: '28px', lineHeight: 1.1, letterSpacing: '-0.03em' }}>
+      <h2 className="workspace-placeholder-title" style={{ margin: 0, fontSize: '28px', lineHeight: 1.1, letterSpacing: '-0.03em' }}>
         {title}
       </h2>
-      <p style={{ margin: 0, maxWidth: 560, color: 'var(--ink-secondary)', lineHeight: 1.6 }}>
+      <p className="workspace-placeholder-body" style={{ margin: 0, maxWidth: 560, color: 'var(--ink-secondary)', lineHeight: 1.6 }}>
         {body}
       </p>
       {ctaHash ? (
         <a
+          className="workspace-placeholder-action"
           href={ctaHash}
           style={{
             display: 'inline-flex',
@@ -89,7 +90,7 @@ function WorkspaceOverview() {
   ];
 
   return (
-    <div style={{
+    <div className="workspace-overview" style={{
       display: 'flex',
       flexDirection: 'column',
       gap: 24,
@@ -98,7 +99,7 @@ function WorkspaceOverview() {
       overflow: 'auto',
       background: 'linear-gradient(180deg, color-mix(in srgb, var(--bg-raised) 82%, var(--bg)), var(--bg))',
     }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="workspace-overview-header" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{
           fontSize: '12px',
           fontWeight: 700,
@@ -108,17 +109,17 @@ function WorkspaceOverview() {
         }}>
           Workspace
         </div>
-        <h1 style={{ margin: 0, fontSize: '34px', lineHeight: 1.05, letterSpacing: '-0.04em' }}>
+        <h1 className="workspace-overview-title" style={{ margin: 0, fontSize: '34px', lineHeight: 1.05, letterSpacing: '-0.04em' }}>
           One place for inbox, calendar, tasks, and projects.
         </h1>
-        <p style={{ margin: 0, maxWidth: 720, color: 'var(--ink-secondary)', lineHeight: 1.65 }}>
+        <p className="workspace-overview-copy" style={{ margin: 0, maxWidth: 720, color: 'var(--ink-secondary)', lineHeight: 1.65 }}>
           Use this area as the shared control center. The workspace agent, shared monitor stream,
           and future surfaces all hang off this shell instead of each feature opening its own
           duplicate background connections.
         </p>
       </div>
 
-      <div style={{
+      <div className="workspace-overview-grid" style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: 16,
@@ -126,6 +127,7 @@ function WorkspaceOverview() {
         {cards.map((card) => (
           <a
             key={card.title}
+            className="workspace-overview-card"
             href={card.hash}
             style={{
               display: 'flex',
@@ -141,13 +143,13 @@ function WorkspaceOverview() {
               boxShadow: '0 8px 30px rgba(0, 0, 0, 0.08)',
             }}
           >
-            <div style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '-0.02em' }}>
+            <div className="workspace-overview-card-title" style={{ fontSize: '20px', fontWeight: 700, letterSpacing: '-0.02em' }}>
               {card.title}
             </div>
-            <div style={{ color: 'var(--ink-secondary)', lineHeight: 1.6 }}>
+            <div className="workspace-overview-card-copy" style={{ color: 'var(--ink-secondary)', lineHeight: 1.6 }}>
               {card.desc}
             </div>
-            <div style={{ marginTop: 'auto', fontSize: '12px', fontWeight: 700, color: 'var(--accent)' }}>
+            <div className="workspace-overview-card-action" style={{ marginTop: 'auto', fontSize: '12px', fontWeight: 700, color: 'var(--accent)' }}>
               Open {card.title}
             </div>
           </a>
@@ -169,8 +171,8 @@ export default function WorkspaceShell({ chat = null, subview = 'overview', agen
   }, [agentDock, workspaceContext, subview]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
-      <div style={{
+    <div className="workspace-shell" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
+      <div className="workspace-shell-tabs" style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -184,6 +186,7 @@ export default function WorkspaceShell({ chat = null, subview = 'overview', agen
           return (
             <a
               key={tab.id}
+              className={`workspace-shell-tab${active ? ' is-active' : ''}`}
               href={workspaceHashForSubview(tab.id)}
               style={{
                 display: 'inline-flex',
@@ -210,20 +213,20 @@ export default function WorkspaceShell({ chat = null, subview = 'overview', agen
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <div style={{ display: subview === 'overview' ? 'block' : 'none', height: '100%' }}>
+      <div className="workspace-shell-content" style={{ flex: 1, minHeight: 0 }}>
+        <div className="workspace-shell-pane" style={{ display: subview === 'overview' ? 'block' : 'none', height: '100%' }}>
           <WorkspaceOverview />
         </div>
 
-        <div style={{ display: subview === 'inbox' ? 'flex' : 'none', height: '100%' }}>
+        <div className="workspace-shell-pane" style={{ display: subview === 'inbox' ? 'flex' : 'none', height: '100%' }}>
           <GmailInbox chat={chat} agentDock={agentDock} isActive={subview === 'inbox'} />
         </div>
 
-        <div style={{ display: subview === 'calendar' ? 'flex' : 'none', height: '100%' }}>
+        <div className="workspace-shell-pane" style={{ display: subview === 'calendar' ? 'flex' : 'none', height: '100%' }}>
           <CalendarView chat={chat} agentDock={agentDock} isActive={subview === 'calendar'} />
         </div>
 
-        <div style={{ display: subview === 'tasks' ? 'block' : 'none', height: '100%' }}>
+        <div className="workspace-shell-pane" style={{ display: subview === 'tasks' ? 'block' : 'none', height: '100%' }}>
           <WorkspacePlaceholder
             title="Tasks are not wired in yet."
             body="This slot is where shared task state should live once tasks are integrated. It belongs under Workspace so task status can share the same monitor, context, and agent surface as inbox and calendar."
@@ -232,7 +235,7 @@ export default function WorkspaceShell({ chat = null, subview = 'overview', agen
           />
         </div>
 
-        <div style={{ display: subview === 'projects' ? 'block' : 'none', height: '100%' }}>
+        <div className="workspace-shell-pane" style={{ display: subview === 'projects' ? 'block' : 'none', height: '100%' }}>
           <WorkspacePlaceholder
             title="Projects are staged behind the Workspace shell."
             body="This view is reserved for higher-level work planning. Keeping it inside Workspace lets future project timelines, task rollups, and inbox/calendar context stay connected instead of becoming another isolated page."

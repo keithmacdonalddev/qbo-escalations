@@ -65,7 +65,7 @@ export default function PlaybookEditor() {
   } = usePlaybook();
 
   return (
-    <div className="app-content-constrained">
+    <div className="app-content-constrained playbook-editor-page">
       <div className="page-header">
         <h1 className="page-title">Playbook</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
@@ -85,8 +85,8 @@ export default function PlaybookEditor() {
           <span className="spinner" />
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 280px) 1fr', gap: 'var(--sp-6)' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+        <div className="playbook-editor-layout" style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 280px) 1fr', gap: 'var(--sp-6)' }}>
+          <div className="playbook-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
             <Tooltip text="View edge case scenarios and handling" level="medium">
               <button className={`btn btn-sm ${viewMode === 'edge-cases' ? 'btn-primary' : 'btn-secondary'}`} onClick={loadEdgeCases} type="button">
                 Edge Cases

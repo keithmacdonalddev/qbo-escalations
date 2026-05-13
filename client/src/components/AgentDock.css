@@ -595,3 +595,45 @@
   background: rgba(255, 255, 255, 0.045);
   border-radius: 999px;
 }
+
+/* The dock tab panels must own the constrained height, otherwise the live
+   monitor feed grows under the footer instead of becoming scrollable. */
+.agent-dock-body > [role="tabpanel"] {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+}
+
+.agent-dock-body > [role="tabpanel"][hidden] {
+  display: none !important;
+}
+
+.agent-dock .compact-pane--live-monitor {
+  min-height: 0 !important;
+}
+
+.agent-dock .compact-pane--live-monitor .compact-pane-messages {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.agent-dock .compact-pane--live-monitor .compact-pane-messages-inner {
+  flex: 0 0 auto !important;
+  min-height: min-content !important;
+}
+
+.agent-dock .compact-pane--live-monitor .compact-pane-thinking {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.agent-dock .compact-pane--live-monitor .compact-pane-thinking-content {
+  overflow: visible !important;
+  max-height: none !important;
+}
