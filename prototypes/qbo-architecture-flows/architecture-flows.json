@@ -1,0 +1,1792 @@
+{
+  "meta": {
+    "appName": "QBO Escalation Assistant",
+    "artifact": "Architecture & Flows",
+    "generatedAt": "2026-05-12",
+    "source": "Created from live source inspection in C:/Projects/qbo-escalations",
+    "purpose": "Human-readable system map plus machine-readable context for future LLM feature, bugfix, and review work.",
+    "dataContract": {
+      "lanes": "Ordered high-level architecture columns used by the visualization.",
+      "nodes": "System actors, client surfaces, routes, services, stores, and external dependencies.",
+      "flows": "User-visible or operational paths through the app. Each step references node ids and code evidence."
+    }
+  },
+  "lanes": [
+    {
+      "id": "actors",
+      "label": "Actors",
+      "summary": "People or trigger sources that start work."
+    },
+    {
+      "id": "client",
+      "label": "Client Surfaces",
+      "summary": "React views, panels, hooks, and API wrappers."
+    },
+    {
+      "id": "api",
+      "label": "API Routes",
+      "summary": "Express route boundaries mounted under /api."
+    },
+    {
+      "id": "orchestration",
+      "label": "Orchestration & Agents",
+      "summary": "Model routing, parsers, agents, workspace loops, and runtime guards."
+    },
+    {
+      "id": "data",
+      "label": "Data Stores",
+      "summary": "Mongo documents, local files, prompt/playbook content, and archives."
+    },
+    {
+      "id": "services",
+      "label": "Connected Services",
+      "summary": "Provider, Gmail, Calendar, and local/remote model dependencies."
+    },
+    {
+      "id": "ops",
+      "label": "Ops & Observability",
+      "summary": "Tracing, usage, health, request visibility, and test harnesses."
+    }
+  ],
+  "legend": [
+    {
+      "type": "actor",
+      "label": "Actor",
+      "color": "#f472b6"
+    },
+    {
+      "type": "client",
+      "label": "Client",
+      "color": "#38bdf8"
+    },
+    {
+      "type": "api",
+      "label": "API route",
+      "color": "#a78bfa"
+    },
+    {
+      "type": "agent",
+      "label": "Agent/service",
+      "color": "#34d399"
+    },
+    {
+      "type": "data",
+      "label": "Data",
+      "color": "#f59e0b"
+    },
+    {
+      "type": "external",
+      "label": "External",
+      "color": "#94a3b8"
+    },
+    {
+      "type": "ops",
+      "label": "Ops",
+      "color": "#f97316"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "phone-agent",
+      "lane": "actors",
+      "type": "actor",
+      "title": "Phone agent",
+      "subtitle": "Customer waiting on live call",
+      "sourceRefs": [
+        "playbook/system-prompt.md"
+      ]
+    },
+    {
+      "id": "user",
+      "lane": "actors",
+      "type": "actor",
+      "title": "User",
+      "subtitle": "Escalation specialist / app owner",
+      "sourceRefs": [
+        "client/src/App.jsx"
+      ]
+    },
+    {
+      "id": "gmail-user",
+      "lane": "actors",
+      "type": "actor",
+      "title": "Gmail / Calendar account",
+      "subtitle": "OAuth-connected workspace data",
+      "sourceRefs": [
+        "server/src/routes/gmail.js",
+        "server/src/routes/calendar.js"
+      ]
+    },
+    {
+      "id": "dev-reviewer",
+      "lane": "actors",
+      "type": "actor",
+      "title": "Developer / reviewer",
+      "subtitle": "Uses diagnostics, traces, harnesses",
+      "sourceRefs": [
+        "stress-testing/README.md",
+        "client/src/components/RequestWaterfall.jsx"
+      ]
+    },
+    {
+      "id": "sidebar-router",
+      "lane": "client",
+      "type": "client",
+      "title": "App shell + sidebar",
+      "subtitle": "Route selection and global dock",
+      "sourceRefs": [
+        "client/src/App.jsx",
+        "client/src/components/Sidebar.jsx",
+        "client/src/lib/appRoute.js"
+      ]
+    },
+    {
+      "id": "chat-view",
+      "lane": "client",
+      "type": "client",
+      "title": "Chat view",
+      "subtitle": "Main SSE chat surface",
+      "sourceRefs": [
+        "client/src/components/Chat.jsx",
+        "client/src/hooks/useChat.js",
+        "client/src/api/chatApi.js"
+      ]
+    },
+    {
+      "id": "image-parser-popup",
+      "lane": "client",
+      "type": "client",
+      "title": "Image parser popup",
+      "subtitle": "Screenshot / webcam parse UI",
+      "sourceRefs": [
+        "client/src/components/chat/ImageParserPopup.jsx",
+        "client/src/hooks/useImageParser.js",
+        "client/src/lib/imageParserStatus.js"
+      ]
+    },
+    {
+      "id": "dashboard",
+      "lane": "client",
+      "type": "client",
+      "title": "Escalation dashboard",
+      "subtitle": "List, attention tab, detail handoff",
+      "sourceRefs": [
+        "client/src/components/EscalationDashboard.jsx",
+        "client/src/components/EscalationDetail.jsx",
+        "client/src/api/escalationsApi.js"
+      ]
+    },
+    {
+      "id": "playbook-editor",
+      "lane": "client",
+      "type": "client",
+      "title": "Playbook editor",
+      "subtitle": "Category docs, versions, full playbook",
+      "sourceRefs": [
+        "client/src/components/PlaybookEditor.jsx",
+        "client/src/api/playbookApi.js",
+        "playbook/categories"
+      ]
+    },
+    {
+      "id": "investigations-view",
+      "lane": "client",
+      "type": "client",
+      "title": "Investigations view",
+      "subtitle": "INV search and import",
+      "sourceRefs": [
+        "client/src/components/InvestigationsView.jsx",
+        "server/src/routes/investigations.js"
+      ]
+    },
+    {
+      "id": "workspace-shell",
+      "lane": "client",
+      "type": "client",
+      "title": "Workspace shell",
+      "subtitle": "Assistant, alerts, memory, shipments",
+      "sourceRefs": [
+        "client/src/components/WorkspaceShell.jsx",
+        "client/src/components/WorkspaceAgentPanel.jsx",
+        "client/src/api/roomApi.js"
+      ]
+    },
+    {
+      "id": "rooms-view",
+      "lane": "client",
+      "type": "client",
+      "title": "Rooms",
+      "subtitle": "Multi-agent shared chat",
+      "sourceRefs": [
+        "client/src/components/ChatRoom.jsx",
+        "client/src/api/roomApi.js",
+        "server/src/routes/room"
+      ]
+    },
+    {
+      "id": "agents-view",
+      "lane": "client",
+      "type": "client",
+      "title": "Agents view",
+      "subtitle": "Identities, prompts, runtime settings",
+      "sourceRefs": [
+        "client/src/components/AgentsView.jsx",
+        "client/src/api/agentIdentitiesApi.js",
+        "client/src/api/agentPromptsApi.js"
+      ]
+    },
+    {
+      "id": "gmail-calendar-ui",
+      "lane": "client",
+      "type": "client",
+      "title": "Inbox + calendar",
+      "subtitle": "Gmail inbox, labels, events",
+      "sourceRefs": [
+        "client/src/components/GmailInbox.jsx",
+        "client/src/components/CalendarView.jsx",
+        "client/src/lib/gmail/gmailApi.js"
+      ]
+    },
+    {
+      "id": "settings-usage-ui",
+      "lane": "client",
+      "type": "client",
+      "title": "Settings + usage",
+      "subtitle": "Provider strategy, cost, traces",
+      "sourceRefs": [
+        "client/src/components/Settings.jsx",
+        "client/src/components/UsageDashboard.jsx",
+        "client/src/components/TraceDashboard.jsx"
+      ]
+    },
+    {
+      "id": "request-waterfall-ui",
+      "lane": "client",
+      "type": "client",
+      "title": "Request waterfall",
+      "subtitle": "Client-side API timing overlay",
+      "sourceRefs": [
+        "client/src/api/http.js",
+        "client/src/hooks/useRequestWaterfall.js",
+        "client/src/components/RequestWaterfall.jsx"
+      ]
+    },
+    {
+      "id": "chat-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/chat",
+      "subtitle": "SSE send / retry / parallel turn routes",
+      "sourceRefs": [
+        "server/src/routes/chat/send.js",
+        "server/src/routes/chat/parallel.js",
+        "server/src/routes/chat/index.js"
+      ]
+    },
+    {
+      "id": "chat-parse-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/chat/parse-escalation",
+      "subtitle": "Chat-side parse endpoint",
+      "sourceRefs": [
+        "server/src/routes/chat/parse.js"
+      ]
+    },
+    {
+      "id": "image-parser-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/image-parser",
+      "subtitle": "Parse, status, keys, history",
+      "sourceRefs": [
+        "server/src/routes/image-parser.js"
+      ]
+    },
+    {
+      "id": "escalations-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/escalations",
+      "subtitle": "Cases, parse, links, attention, knowledge",
+      "sourceRefs": [
+        "server/src/routes/escalations.js"
+      ]
+    },
+    {
+      "id": "investigations-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/investigations",
+      "subtitle": "INV search, match, bulk import",
+      "sourceRefs": [
+        "server/src/routes/investigations.js"
+      ]
+    },
+    {
+      "id": "playbook-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/playbook",
+      "subtitle": "Category markdown and versioning",
+      "sourceRefs": [
+        "server/src/routes/playbook.js",
+        "server/src/lib/playbook-loader.js"
+      ]
+    },
+    {
+      "id": "workspace-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/workspace",
+      "subtitle": "Assistant, memory, alerts, tools",
+      "sourceRefs": [
+        "server/src/routes/workspace/index.js",
+        "server/src/routes/workspace/ai.js"
+      ]
+    },
+    {
+      "id": "rooms-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/rooms",
+      "subtitle": "Room CRUD and multi-agent SSE",
+      "sourceRefs": [
+        "server/src/routes/room/index.js",
+        "server/src/routes/room/send.js",
+        "server/src/routes/room/crud.js"
+      ]
+    },
+    {
+      "id": "agents-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/agents + identities",
+      "subtitle": "Agent sessions, profiles, prompts",
+      "sourceRefs": [
+        "server/src/routes/agents.js",
+        "server/src/routes/agent-identities.js",
+        "server/src/routes/agent-prompts.js"
+      ]
+    },
+    {
+      "id": "gmail-calendar-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/gmail + /api/calendar",
+      "subtitle": "OAuth, inbox, labels, events",
+      "sourceRefs": [
+        "server/src/routes/gmail.js",
+        "server/src/routes/calendar.js"
+      ]
+    },
+    {
+      "id": "observability-api",
+      "lane": "api",
+      "type": "api",
+      "title": "/api/traces + /api/usage",
+      "subtitle": "Run traces, model usage, health",
+      "sourceRefs": [
+        "server/src/routes/traces.js",
+        "server/src/routes/usage.js",
+        "server/src/app.js"
+      ]
+    },
+    {
+      "id": "image-parser-service",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Image parser service",
+      "subtitle": "Prompted parseImage provider wrapper",
+      "sourceRefs": [
+        "server/src/services/image-parser.js",
+        "prompts/agents/image-parser.md",
+        "prompts/agents/sdk-image-parse.md"
+      ]
+    },
+    {
+      "id": "parse-orchestrator",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Parse orchestrator",
+      "subtitle": "single / fallback / parallel provider parse",
+      "sourceRefs": [
+        "server/src/services/parse-orchestrator.js",
+        "server/src/lib/parse-validation.js",
+        "server/src/lib/escalation-parser.js"
+      ]
+    },
+    {
+      "id": "chat-request-service",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Chat request service",
+      "subtitle": "Context, guardrails, image augmentation",
+      "sourceRefs": [
+        "server/src/services/chat-request-service.js",
+        "server/src/lib/chat-context-builder.js",
+        "server/src/lib/chat-guardrails.js"
+      ]
+    },
+    {
+      "id": "chat-orchestrator",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Chat orchestrator",
+      "subtitle": "Provider routing and streamed responses",
+      "sourceRefs": [
+        "server/src/services/chat-orchestrator.js",
+        "server/src/services/providers/registry.js",
+        "server/src/services/providers/chat-provider.js"
+      ]
+    },
+    {
+      "id": "triage-agent",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Triage agent",
+      "subtitle": "Model-backed first-pass case card",
+      "sourceRefs": [
+        "server/src/services/chat-request-service.js",
+        "prompts/agents/triage-agent.md",
+        "server/src/lib/chat-triage.js"
+      ]
+    },
+    {
+      "id": "known-issue-agent",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Known Issue Search Agent",
+      "subtitle": "INV retrieval before triage",
+      "sourceRefs": [
+        "server/src/services/known-issue-search-agent.js",
+        "prompts/agents/known-issue-search-agent.md"
+      ]
+    },
+    {
+      "id": "inv-matcher",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "INV matcher",
+      "subtitle": "Deterministic investigation matching",
+      "sourceRefs": [
+        "server/src/services/inv-matcher.js",
+        "server/src/routes/investigations.js"
+      ]
+    },
+    {
+      "id": "escalation-workflow",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Escalation workflow helpers",
+      "subtitle": "Dedup, links, attention, knowledge",
+      "sourceRefs": [
+        "server/src/lib/escalation-dedup.js",
+        "server/src/lib/escalation-attention.js",
+        "server/src/lib/knowledge-promotion.js"
+      ]
+    },
+    {
+      "id": "workspace-runtime",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Workspace runtime",
+      "subtitle": "Action loop, memory, alerts, tools",
+      "sourceRefs": [
+        "server/src/services/workspace-runtime.js",
+        "server/src/services/workspace-action-loop.js",
+        "server/src/services/workspace-tools/handler-registry.js"
+      ]
+    },
+    {
+      "id": "room-orchestrator",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Room orchestrator",
+      "subtitle": "Mentions, rounds, agent routing",
+      "sourceRefs": [
+        "server/src/services/room-orchestrator.js",
+        "server/src/services/room-agent-runtime.js",
+        "server/src/services/room-agents/registry.js"
+      ]
+    },
+    {
+      "id": "agent-identity-service",
+      "lane": "orchestration",
+      "type": "agent",
+      "title": "Agent identity service",
+      "subtitle": "Profiles, memory, activity, reviews",
+      "sourceRefs": [
+        "server/src/services/agent-identity-service.js",
+        "server/src/models/AgentIdentity.js"
+      ]
+    },
+    {
+      "id": "conversation-store",
+      "lane": "data",
+      "type": "data",
+      "title": "Conversation",
+      "subtitle": "Messages, usage, forks, case intake",
+      "sourceRefs": [
+        "server/src/models/Conversation.js"
+      ]
+    },
+    {
+      "id": "parallel-turn-store",
+      "lane": "data",
+      "type": "data",
+      "title": "ParallelCandidateTurn",
+      "subtitle": "Candidate responses awaiting acceptance",
+      "sourceRefs": [
+        "server/src/models/ParallelCandidateTurn.js",
+        "server/src/routes/chat/parallel.js"
+      ]
+    },
+    {
+      "id": "escalation-store",
+      "lane": "data",
+      "type": "data",
+      "title": "Escalation",
+      "subtitle": "Canonical case record",
+      "sourceRefs": [
+        "server/src/models/Escalation.js"
+      ]
+    },
+    {
+      "id": "image-parse-store",
+      "lane": "data",
+      "type": "data",
+      "title": "ImageParseResult + archive",
+      "subtitle": "Parser result and source image history",
+      "sourceRefs": [
+        "server/src/models/ImageParseResult.js",
+        "server/src/lib/image-parser-archive.js"
+      ]
+    },
+    {
+      "id": "investigation-store",
+      "lane": "data",
+      "type": "data",
+      "title": "Investigation",
+      "subtitle": "INV subjects, symptoms, status",
+      "sourceRefs": [
+        "server/src/models/Investigation.js"
+      ]
+    },
+    {
+      "id": "attention-store",
+      "lane": "data",
+      "type": "data",
+      "title": "EscalationAttentionItem",
+      "subtitle": "Durable review queue",
+      "sourceRefs": [
+        "server/src/models/EscalationAttentionItem.js"
+      ]
+    },
+    {
+      "id": "knowledge-store",
+      "lane": "data",
+      "type": "data",
+      "title": "KnowledgeCandidate",
+      "subtitle": "Reviewed reusable learning",
+      "sourceRefs": [
+        "server/src/models/KnowledgeCandidate.js"
+      ]
+    },
+    {
+      "id": "playbook-files",
+      "lane": "data",
+      "type": "data",
+      "title": "Playbook markdown",
+      "subtitle": "System prompt, categories, templates",
+      "sourceRefs": [
+        "playbook/system-prompt.md",
+        "playbook/categories",
+        "playbook/templates"
+      ]
+    },
+    {
+      "id": "workspace-stores",
+      "lane": "data",
+      "type": "data",
+      "title": "Workspace stores",
+      "subtitle": "Memory, entities, activities, rules",
+      "sourceRefs": [
+        "server/src/models/WorkspaceMemory.js",
+        "server/src/models/WorkspaceEntity.js",
+        "server/src/models/WorkspaceActivity.js",
+        "server/src/models/WorkspaceAutoRule.js"
+      ]
+    },
+    {
+      "id": "room-store",
+      "lane": "data",
+      "type": "data",
+      "title": "ChatRoom",
+      "subtitle": "Room messages and shared memory",
+      "sourceRefs": [
+        "server/src/models/ChatRoom.js"
+      ]
+    },
+    {
+      "id": "agent-identity-store",
+      "lane": "data",
+      "type": "data",
+      "title": "AgentIdentity",
+      "subtitle": "Profiles, memory, tools, activity",
+      "sourceRefs": [
+        "server/src/models/AgentIdentity.js"
+      ]
+    },
+    {
+      "id": "gmail-auth-store",
+      "lane": "data",
+      "type": "data",
+      "title": "GmailAuth",
+      "subtitle": "Connected account credentials",
+      "sourceRefs": [
+        "server/src/models/GmailAuth.js"
+      ]
+    },
+    {
+      "id": "ai-trace-store",
+      "lane": "data",
+      "type": "data",
+      "title": "AiTrace + UsageLog",
+      "subtitle": "Trace events, attempts, cost",
+      "sourceRefs": [
+        "server/src/models/AiTrace.js",
+        "server/src/models/UsageLog.js"
+      ]
+    },
+    {
+      "id": "provider-registry",
+      "lane": "services",
+      "type": "external",
+      "title": "Provider registry",
+      "subtitle": "llm-gateway, LM Studio, cloud providers",
+      "sourceRefs": [
+        "server/src/services/providers/registry.js",
+        "shared/ai-provider-catalog.json",
+        "server/src/services/remote-api-providers.js"
+      ]
+    },
+    {
+      "id": "llm-gateway",
+      "lane": "services",
+      "type": "external",
+      "title": "llm-gateway",
+      "subtitle": "OpenAI-compatible local gateway",
+      "sourceRefs": [
+        "shared/ai-provider-catalog.json",
+        "server/src/services/remote-api-providers.js"
+      ]
+    },
+    {
+      "id": "lm-studio",
+      "lane": "services",
+      "type": "external",
+      "title": "LM Studio",
+      "subtitle": "Local model server",
+      "sourceRefs": [
+        "server/src/services/lm-studio.js",
+        "server/src/services/providers/registry.js"
+      ]
+    },
+    {
+      "id": "cloud-models",
+      "lane": "services",
+      "type": "external",
+      "title": "Cloud model APIs",
+      "subtitle": "OpenAI, Anthropic, Gemini, Kimi",
+      "sourceRefs": [
+        "server/src/services/claude.js",
+        "server/src/services/codex.js",
+        "server/src/services/remote-api-providers.js"
+      ]
+    },
+    {
+      "id": "google-services",
+      "lane": "services",
+      "type": "external",
+      "title": "Google APIs",
+      "subtitle": "Gmail and Calendar",
+      "sourceRefs": [
+        "server/src/services/gmail.js",
+        "server/src/services/calendar.js"
+      ]
+    },
+    {
+      "id": "live-call-assist-service",
+      "lane": "services",
+      "type": "external",
+      "title": "Live call assist",
+      "subtitle": "Audio capture and websocket assist",
+      "sourceRefs": [
+        "client/src/components/chat/LiveCallAssistPanel.jsx",
+        "server/src/routes/live-call-assist.js",
+        "server/src/services/live-call-assist-server.js"
+      ]
+    },
+    {
+      "id": "api-fetch",
+      "lane": "ops",
+      "type": "ops",
+      "title": "apiFetch wrapper",
+      "subtitle": "Timeouts, retry, circuit, waterfall",
+      "sourceRefs": [
+        "client/src/api/http.js",
+        "client/src/api/sse.js"
+      ]
+    },
+    {
+      "id": "ai-runtime",
+      "lane": "ops",
+      "type": "ops",
+      "title": "AI runtime",
+      "subtitle": "Active operations and runtime health",
+      "sourceRefs": [
+        "server/src/services/ai-runtime.js",
+        "server/src/services/request-runtime.js",
+        "server/src/app.js"
+      ]
+    },
+    {
+      "id": "traces-usage",
+      "lane": "ops",
+      "type": "ops",
+      "title": "Traces + usage",
+      "subtitle": "Attempts, events, cost, model stats",
+      "sourceRefs": [
+        "server/src/services/ai-traces.js",
+        "server/src/lib/usage-writer.js",
+        "server/src/routes/traces.js",
+        "server/src/routes/usage.js"
+      ]
+    },
+    {
+      "id": "health-banner",
+      "lane": "ops",
+      "type": "ops",
+      "title": "Health UI",
+      "subtitle": "Banner, toast, waterfall, flame bar",
+      "sourceRefs": [
+        "client/src/components/HealthBanner.jsx",
+        "client/src/components/HealthToast.jsx",
+        "client/src/components/FlameBar.jsx"
+      ]
+    },
+    {
+      "id": "stress-harness",
+      "lane": "ops",
+      "type": "ops",
+      "title": "Stress harness",
+      "subtitle": "Slices, baselines, canaries",
+      "sourceRefs": [
+        "stress-testing/README.md",
+        "stress-testing/slices",
+        "stress-testing/contracts"
+      ]
+    },
+    {
+      "id": "server-error-pipeline",
+      "lane": "ops",
+      "type": "ops",
+      "title": "Server error pipeline",
+      "subtitle": "Normalized errors and reporting",
+      "sourceRefs": [
+        "server/src/lib/server-error-pipeline.js",
+        "server/src/lib/api-errors.js",
+        "server/src/app.js"
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "screenshot-to-triage-chat",
+      "title": "Screenshot to triage and chat answer",
+      "intent": "Turn an uploaded escalation screenshot into parsed fields, a triage card, INV context, a streamed answer, and a linked case record.",
+      "primary": true,
+      "steps": [
+        {
+          "from": "phone-agent",
+          "to": "chat-view",
+          "label": "send escalation screenshot",
+          "detail": "The phone agent gives the user a screenshot or template content that needs immediate triage.",
+          "sourceRefs": [
+            "playbook/system-prompt.md"
+          ]
+        },
+        {
+          "from": "chat-view",
+          "to": "image-parser-popup",
+          "label": "open parser surface",
+          "detail": "The client uses the chat image parser popup rather than posting images directly to main chat.",
+          "sourceRefs": [
+            "client/src/components/chat/ImageParserPopup.jsx",
+            "server/src/routes/chat/send.js"
+          ]
+        },
+        {
+          "from": "image-parser-popup",
+          "to": "image-parser-api",
+          "label": "POST /parse",
+          "detail": "The screenshot is sent to /api/image-parser/parse with provider, model, prompt, and timeout settings.",
+          "sourceRefs": [
+            "server/src/routes/image-parser.js"
+          ]
+        },
+        {
+          "from": "image-parser-api",
+          "to": "image-parser-service",
+          "label": "parseImage()",
+          "detail": "The dedicated parser service invokes the configured image-capable provider and returns text, role, parse fields, and usage.",
+          "sourceRefs": [
+            "server/src/services/image-parser.js"
+          ]
+        },
+        {
+          "from": "image-parser-service",
+          "to": "provider-registry",
+          "label": "provider call",
+          "detail": "Provider IDs are validated against llm-gateway, LM Studio, Anthropic, OpenAI, Kimi, and Gemini options.",
+          "sourceRefs": [
+            "server/src/routes/image-parser.js",
+            "server/src/services/providers/registry.js"
+          ]
+        },
+        {
+          "from": "image-parser-api",
+          "to": "image-parse-store",
+          "label": "persist parse history",
+          "detail": "Successful and failed parses are saved as ImageParseResult records, with source images archived when available.",
+          "sourceRefs": [
+            "server/src/routes/image-parser.js",
+            "server/src/lib/image-parser-archive.js"
+          ]
+        },
+        {
+          "from": "image-parser-popup",
+          "to": "chat-api",
+          "label": "send parsed text",
+          "detail": "Main chat receives text plus parsedEscalationText metadata. The current /api/chat route rejects raw images.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "server/src/routes/chat/send.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "chat-request-service",
+          "label": "augment image turn",
+          "detail": "buildChatImageAugmentation treats provided parser text as escalation context and prepares a triage-aware system prompt.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js"
+          ]
+        },
+        {
+          "from": "chat-request-service",
+          "to": "known-issue-agent",
+          "label": "search known INVs",
+          "detail": "Known Issue Search Agent can run before triage and passes retrieval evidence into the triage prompt.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "server/src/services/known-issue-search-agent.js"
+          ]
+        },
+        {
+          "from": "known-issue-agent",
+          "to": "triage-agent",
+          "label": "triage fields",
+          "detail": "The Triage Agent returns labeled fields for agent, client, category, severity, read, action, confidence, and category check.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "prompts/agents/triage-agent.md"
+          ]
+        },
+        {
+          "from": "triage-agent",
+          "to": "inv-matcher",
+          "label": "strong match fallback",
+          "detail": "If the known issue agent did not already produce matches, deterministic INV matching checks parsed fields and text.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "server/src/services/inv-matcher.js"
+          ]
+        },
+        {
+          "from": "chat-request-service",
+          "to": "chat-orchestrator",
+          "label": "stream answer",
+          "detail": "The main chat orchestrator streams chunks, thinking, provider errors, fallback notices, status, triage_card, and inv_matches events.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/services/chat-orchestrator.js"
+          ]
+        },
+        {
+          "from": "chat-orchestrator",
+          "to": "conversation-store",
+          "label": "save turn",
+          "detail": "The user message and assistant response are persisted with provider, model, attempts, usage, thinking, and trace metadata.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/models/Conversation.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "escalation-workflow",
+          "label": "auto-link case",
+          "detail": "When valid parseFields exist, createLinkedEscalationFromConversation creates or reuses a linked Escalation.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/lib/escalation-dedup.js"
+          ]
+        },
+        {
+          "from": "escalation-workflow",
+          "to": "escalation-store",
+          "label": "canonical record",
+          "detail": "The linked case stores COID, MID, case number, customer, category, status, source, parse metadata, and screenshots.",
+          "sourceRefs": [
+            "server/src/models/Escalation.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "main-chat-text-followup",
+      "title": "Main chat text follow-up",
+      "intent": "Answer follow-up questions while preserving conversation context, provider attempts, traces, and quick actions.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "chat-view",
+          "label": "type follow-up",
+          "detail": "The user sends a text-only question or follow-up in ChatView.",
+          "sourceRefs": [
+            "client/src/components/Chat.jsx",
+            "client/src/hooks/useChat.js"
+          ]
+        },
+        {
+          "from": "chat-view",
+          "to": "api-fetch",
+          "label": "serialize + track",
+          "detail": "chatApi serializes JSON, uses apiFetch, reports local stages, and consumes SSE events.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "client/src/api/http.js",
+            "client/src/api/sse.js"
+          ]
+        },
+        {
+          "from": "api-fetch",
+          "to": "chat-api",
+          "label": "POST /api/chat",
+          "detail": "The chat route validates provider settings, conversation id, mode, model overrides, and input.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "chat-request-service",
+          "label": "prepare request",
+          "detail": "prepareChatRequest builds model context, applies provider strategy, estimates budget, and enforces guardrails.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "server/src/lib/chat-context-builder.js",
+            "server/src/lib/chat-guardrails.js"
+          ]
+        },
+        {
+          "from": "chat-request-service",
+          "to": "chat-orchestrator",
+          "label": "route provider",
+          "detail": "The orchestrator runs single, fallback, or parallel provider policies and streams output callbacks.",
+          "sourceRefs": [
+            "server/src/services/chat-orchestrator.js"
+          ]
+        },
+        {
+          "from": "chat-orchestrator",
+          "to": "provider-registry",
+          "label": "execute model",
+          "detail": "Provider registry normalizes the selected model provider and exposes model ids for traces and usage.",
+          "sourceRefs": [
+            "server/src/services/providers/registry.js",
+            "server/src/services/providers/catalog.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "conversation-store",
+          "label": "persist",
+          "detail": "The completed response is saved with usage, attempts, quick actions, and denormalized conversation metadata.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/models/Conversation.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "traces-usage",
+          "label": "trace + usage",
+          "detail": "Trace events, attempts, usage, fallback state, latency, and response stats are patched throughout the turn.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/services/ai-traces.js",
+            "server/src/lib/usage-writer.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "chat-view",
+          "label": "SSE events",
+          "detail": "Client handlers update the thread, right dock, mini widget, triage card, INV banner, and errors.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "client/src/components/Chat.jsx",
+            "client/src/components/chat/ChatThreadStack.jsx"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "parallel-provider-review",
+      "title": "Parallel provider review",
+      "intent": "Run multiple providers for the same chat turn, keep candidate responses open, and let the user accept the canonical answer.",
+      "steps": [
+        {
+          "from": "chat-view",
+          "to": "chat-api",
+          "label": "mode=parallel",
+          "detail": "The client can request parallel mode with 2-4 unique providers.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "server/src/services/chat-request-service.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "parallel-turn-store",
+          "label": "guard open turns",
+          "detail": "The server limits currently open parallel turns before accepting a new one.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/models/ParallelCandidateTurn.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "chat-orchestrator",
+          "label": "run candidates",
+          "detail": "Parallel provider results stream and are stored as candidate assistant messages.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/services/chat-orchestrator.js"
+          ]
+        },
+        {
+          "from": "chat-orchestrator",
+          "to": "parallel-turn-store",
+          "label": "save candidates",
+          "detail": "Successful provider responses are normalized into candidate records for accept, unaccept, or discard.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/routes/chat/parallel.js"
+          ]
+        },
+        {
+          "from": "chat-view",
+          "to": "chat-api",
+          "label": "accept / discard",
+          "detail": "Client calls /api/chat/parallel/:turnId/accept, /discard, or /unaccept.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "server/src/routes/chat/parallel.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "conversation-store",
+          "label": "canonical winner",
+          "detail": "Accepted content becomes the selected assistant message while candidate state remains auditable.",
+          "sourceRefs": [
+            "server/src/routes/chat/parallel.js",
+            "server/src/models/Conversation.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "manual-escalation-parse",
+      "title": "Manual or text escalation to saved case",
+      "intent": "Create an Escalation record from pasted text, image, or an existing conversation using regex or provider-backed parsing.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "dashboard",
+          "label": "create or parse case",
+          "detail": "The dashboard and detail surfaces call the escalations API for create, update, parse, and link operations.",
+          "sourceRefs": [
+            "client/src/components/EscalationDashboard.jsx",
+            "client/src/api/escalationsApi.js"
+          ]
+        },
+        {
+          "from": "dashboard",
+          "to": "escalations-api",
+          "label": "POST /parse or /quick-parse",
+          "detail": "Quick mode is regex-only; other modes use provider-backed parse orchestration.",
+          "sourceRefs": [
+            "client/src/api/escalationsApi.js",
+            "server/src/routes/escalations.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "parse-orchestrator",
+          "label": "parseWithPolicy()",
+          "detail": "Parser policy supports single, fallback, and parallel attempts, then validates normalized fields.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/services/parse-orchestrator.js",
+            "server/src/lib/parse-validation.js"
+          ]
+        },
+        {
+          "from": "parse-orchestrator",
+          "to": "provider-registry",
+          "label": "provider attempt",
+          "detail": "AI parser providers are looked up through the common registry and catalog.",
+          "sourceRefs": [
+            "server/src/services/parse-orchestrator.js",
+            "server/src/services/providers/registry.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "escalation-workflow",
+          "label": "dedupe + link",
+          "detail": "createLinkedEscalationFromConversation and duplicate safety logic prevent accidental duplicate records.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/lib/escalation-dedup.js"
+          ]
+        },
+        {
+          "from": "escalation-workflow",
+          "to": "escalation-store",
+          "label": "persist case",
+          "detail": "The case stores parsed fields, parseMeta attempts, validation confidence, source, screenshots, and status.",
+          "sourceRefs": [
+            "server/src/models/Escalation.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "traces-usage",
+          "label": "log parse trace",
+          "detail": "Parse attempts are recorded as AiTrace stages and UsageLog entries when an AI provider was used.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/services/ai-traces.js",
+            "server/src/lib/usage-writer.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolve-to-knowledge",
+      "title": "Resolution to reviewed knowledge",
+      "intent": "Turn a finalized escalation into reusable reviewed knowledge and optionally publish it into the playbook.",
+      "steps": [
+        {
+          "from": "dashboard",
+          "to": "escalations-api",
+          "label": "transition case",
+          "detail": "The client posts status transitions such as resolved or escalated-further.",
+          "sourceRefs": [
+            "client/src/api/escalationsApi.js",
+            "server/src/routes/escalations.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "escalation-store",
+          "label": "set status",
+          "detail": "Resolved cases get resolvedAt and optional resolution text.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/models/Escalation.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "escalation-workflow",
+          "label": "sync discipline",
+          "detail": "Resolution discipline and knowledge review attention items are synced around status and knowledge changes.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/lib/escalation-attention.js"
+          ]
+        },
+        {
+          "from": "dashboard",
+          "to": "escalations-api",
+          "label": "generate knowledge",
+          "detail": "The client can generate a deterministic or enriched knowledge draft from an eligible case.",
+          "sourceRefs": [
+            "client/src/api/escalationsApi.js",
+            "server/src/routes/escalations.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "knowledge-store",
+          "label": "save draft",
+          "detail": "KnowledgeCandidate captures title, symptom, root cause, exact fix, target, confidence, and source snapshot.",
+          "sourceRefs": [
+            "server/src/models/KnowledgeCandidate.js"
+          ]
+        },
+        {
+          "from": "knowledge-store",
+          "to": "playbook-api",
+          "label": "approve + publish",
+          "detail": "Approved drafts publish into category or edge-case playbook markdown through knowledge-promotion helpers.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/lib/knowledge-promotion.js",
+            "server/src/routes/playbook.js"
+          ]
+        },
+        {
+          "from": "playbook-api",
+          "to": "playbook-files",
+          "label": "write markdown",
+          "detail": "Published learning lands in repo playbook files and becomes future context for support answers.",
+          "sourceRefs": [
+            "playbook/categories",
+            "playbook/edge-cases.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "attention-center",
+      "title": "Attention center review queue",
+      "intent": "Surface workflow items that need the user's attention: duplicates, missing resolutions, stale cases, parse review, missing links, and knowledge review.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "dashboard",
+          "label": "open attention tab",
+          "detail": "The attention route renders EscalationDashboard with initialTab='attention'.",
+          "sourceRefs": [
+            "client/src/App.jsx",
+            "client/src/components/EscalationDashboard.jsx"
+          ]
+        },
+        {
+          "from": "dashboard",
+          "to": "escalations-api",
+          "label": "GET /attention-items",
+          "detail": "The client can request refresh=1 to run all sync detectors before listing items.",
+          "sourceRefs": [
+            "client/src/api/escalationsApi.js",
+            "server/src/routes/escalations.js"
+          ]
+        },
+        {
+          "from": "escalations-api",
+          "to": "escalation-workflow",
+          "label": "run detectors",
+          "detail": "The server syncs stale, parser triage, missing link, knowledge review, and resolution discipline items.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "server/src/lib/escalation-attention.js"
+          ]
+        },
+        {
+          "from": "escalation-workflow",
+          "to": "attention-store",
+          "label": "upsert items",
+          "detail": "Attention items include kind, severity, fingerprint, source links, candidates, signals, and resolution state.",
+          "sourceRefs": [
+            "server/src/models/EscalationAttentionItem.js"
+          ]
+        },
+        {
+          "from": "attention-store",
+          "to": "dashboard",
+          "label": "review list",
+          "detail": "The dashboard receives populated source escalation, source conversation, candidate, count, and severity data.",
+          "sourceRefs": [
+            "server/src/routes/escalations.js",
+            "client/src/api/escalationsApi.js"
+          ]
+        },
+        {
+          "from": "dashboard",
+          "to": "attention-store",
+          "label": "resolve / dismiss / split",
+          "detail": "Single or bulk PATCH routes update attention item status and optional resolution notes.",
+          "sourceRefs": [
+            "client/src/api/escalationsApi.js",
+            "server/src/routes/escalations.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inv-import-match",
+      "title": "INV import and escalation matching",
+      "intent": "Store known Intuit investigations and surface strong matches during screenshot triage and chat.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "investigations-view",
+          "label": "add/search INV",
+          "detail": "The investigations UI supports search, stats, single records, and bulk import routes.",
+          "sourceRefs": [
+            "client/src/components/InvestigationsView.jsx",
+            "server/src/routes/investigations.js"
+          ]
+        },
+        {
+          "from": "investigations-view",
+          "to": "investigations-api",
+          "label": "POST /bulk or /",
+          "detail": "Imported investigation records include INV number, subject, agent, team, status, symptoms, workaround, and details.",
+          "sourceRefs": [
+            "server/src/routes/investigations.js",
+            "server/src/models/Investigation.js"
+          ]
+        },
+        {
+          "from": "investigations-api",
+          "to": "investigation-store",
+          "label": "persist INV",
+          "detail": "The Investigation model indexes INV number, category, reported date, status, symptoms, and full-text fields.",
+          "sourceRefs": [
+            "server/src/models/Investigation.js"
+          ]
+        },
+        {
+          "from": "chat-request-service",
+          "to": "known-issue-agent",
+          "label": "known issue retrieval",
+          "detail": "During screenshot triage, the Known Issue Search Agent may retrieve relevant investigations before the Triage Agent responds.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "server/src/services/known-issue-search-agent.js"
+          ]
+        },
+        {
+          "from": "chat-request-service",
+          "to": "inv-matcher",
+          "label": "deterministic fallback",
+          "detail": "Strong matches are filtered by exact confidence or score >= 40 and emitted as inv_matches SSE payloads.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js"
+          ]
+        },
+        {
+          "from": "inv-matcher",
+          "to": "investigation-store",
+          "label": "increment match",
+          "detail": "Matched investigations can update match count and last matched state without blocking chat.",
+          "sourceRefs": [
+            "server/src/services/chat-request-service.js",
+            "server/src/services/inv-matcher.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "chat-view",
+          "label": "event: inv_matches",
+          "detail": "The client shows matched investigations so the user can add customers to affected-users lists.",
+          "sourceRefs": [
+            "client/src/api/chatApi.js",
+            "client/src/components/InvMatchBanner.jsx"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "workspace-assistant",
+      "title": "Workspace assistant action loop",
+      "intent": "Let the workspace assistant use context, connected-service state, memory, and tools while streaming progress back to the panel.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "workspace-shell",
+          "label": "ask workspace agent",
+          "detail": "WorkspaceShell and WorkspaceAgentPanel gather prompt, context, subview, and runtime selection.",
+          "sourceRefs": [
+            "client/src/components/WorkspaceShell.jsx",
+            "client/src/hooks/useWorkspaceAgentRuntime.js"
+          ]
+        },
+        {
+          "from": "workspace-shell",
+          "to": "workspace-api",
+          "label": "POST /ai",
+          "detail": "The workspace route rejects concurrent agent requests and streams start/status/chunk/action events.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js"
+          ]
+        },
+        {
+          "from": "workspace-api",
+          "to": "workspace-runtime",
+          "label": "session + action flow",
+          "detail": "The server creates a workspace session, builds context, and runs action-capable workspace prompts.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js",
+            "server/src/services/workspace-runtime.js",
+            "server/src/services/workspace-action-loop.js"
+          ]
+        },
+        {
+          "from": "workspace-runtime",
+          "to": "provider-registry",
+          "label": "AI pass",
+          "detail": "Workspace provider policy supports single or fallback mode and uses the same common provider machinery.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js",
+            "server/src/services/chat-orchestrator.js"
+          ]
+        },
+        {
+          "from": "workspace-runtime",
+          "to": "google-services",
+          "label": "optional tools",
+          "detail": "Workspace tools can use Gmail and Calendar context when connected, with disconnected-service guardrails in the prompt.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js",
+            "server/src/services/workspace-tools/handler-registry.js",
+            "playbook/system-prompt.md"
+          ]
+        },
+        {
+          "from": "workspace-runtime",
+          "to": "workspace-stores",
+          "label": "memory + activity",
+          "detail": "Workspace memory, entities, activity, alerts, patterns, and auto-actions are persisted under workspace models.",
+          "sourceRefs": [
+            "server/src/services/workspace-memory.js",
+            "server/src/routes/workspace/index.js",
+            "server/src/models/WorkspaceMemory.js"
+          ]
+        },
+        {
+          "from": "workspace-api",
+          "to": "workspace-shell",
+          "label": "SSE updates",
+          "detail": "The panel receives session id, phases, elapsed status ticks, actions, chunks, and completion data.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js",
+            "client/src/hooks/useWorkspaceAgentRuntime.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-agent-room",
+      "title": "Multi-agent room conversation",
+      "intent": "Coordinate multiple named agents in a shared room with mentions, memory capture, actions, realtime events, and interrupt handling.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "rooms-view",
+          "label": "send room message",
+          "detail": "The room client sends message, parsed image context, system triggers, and agent runtime selections.",
+          "sourceRefs": [
+            "client/src/components/ChatRoom.jsx",
+            "client/src/api/roomApi.js"
+          ]
+        },
+        {
+          "from": "rooms-view",
+          "to": "rooms-api",
+          "label": "POST /:id/send",
+          "detail": "The route validates room id, content, parsed image context, message length, and room existence.",
+          "sourceRefs": [
+            "server/src/routes/room/send.js"
+          ]
+        },
+        {
+          "from": "rooms-api",
+          "to": "room-store",
+          "label": "save user message",
+          "detail": "Messages include role, content, mentions, parsed image context, timestamp, and later agent response metadata.",
+          "sourceRefs": [
+            "server/src/routes/room/send.js",
+            "server/src/models/ChatRoom.js"
+          ]
+        },
+        {
+          "from": "rooms-api",
+          "to": "room-orchestrator",
+          "label": "start orchestration",
+          "detail": "The room orchestrator parses mentions, chooses active agents, runs rounds, and emits per-agent callbacks.",
+          "sourceRefs": [
+            "server/src/routes/room/send.js",
+            "server/src/services/room-orchestrator.js"
+          ]
+        },
+        {
+          "from": "room-orchestrator",
+          "to": "agent-identity-service",
+          "label": "identity + memory",
+          "detail": "Agent profiles, social context, relationships, activity, and tool usage are attached to room behavior.",
+          "sourceRefs": [
+            "server/src/services/agent-identity-service.js",
+            "server/src/services/room-agents/agent-profiles.js"
+          ]
+        },
+        {
+          "from": "room-orchestrator",
+          "to": "workspace-runtime",
+          "label": "room tools",
+          "detail": "Workspace-capable room agents can emit action groups and tool results for the shared room.",
+          "sourceRefs": [
+            "server/src/services/room-action-groups.js",
+            "server/src/services/shared-agent-tools.js"
+          ]
+        },
+        {
+          "from": "rooms-api",
+          "to": "rooms-view",
+          "label": "SSE + realtime",
+          "detail": "The route streams room_start, agent_start, chunk, thinking, actions, status, agent_done, room_done, and interrupt events.",
+          "sourceRefs": [
+            "server/src/routes/room/send.js",
+            "server/src/services/room-realtime-runtime.js",
+            "client/src/api/roomApi.js"
+          ]
+        },
+        {
+          "from": "room-orchestrator",
+          "to": "room-store",
+          "label": "persist agent turns",
+          "detail": "Agent responses, actions, iterations, usage, and shared room memory are saved back to ChatRoom.",
+          "sourceRefs": [
+            "server/src/routes/room/send.js",
+            "server/src/services/chat-room-service.js"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gmail-calendar-connected-services",
+      "title": "Gmail and calendar connected services",
+      "intent": "Connect Google accounts, read operational context, and expose email/calendar actions to the UI and assistant surfaces.",
+      "steps": [
+        {
+          "from": "gmail-user",
+          "to": "gmail-calendar-ui",
+          "label": "open connected surface",
+          "detail": "GmailInbox and CalendarView provide inbox, labels, drafts, subscriptions, and event UI.",
+          "sourceRefs": [
+            "client/src/components/GmailInbox.jsx",
+            "client/src/components/CalendarView.jsx"
+          ]
+        },
+        {
+          "from": "gmail-calendar-ui",
+          "to": "gmail-calendar-api",
+          "label": "auth + data routes",
+          "detail": "Routes cover auth status/url/callback/disconnect, accounts, messages, labels, drafts, send, and calendar events/freebusy.",
+          "sourceRefs": [
+            "server/src/routes/gmail.js",
+            "server/src/routes/calendar.js"
+          ]
+        },
+        {
+          "from": "gmail-calendar-api",
+          "to": "gmail-auth-store",
+          "label": "token state",
+          "detail": "GmailAuth stores connected accounts and selected account state used by Gmail service calls.",
+          "sourceRefs": [
+            "server/src/models/GmailAuth.js",
+            "server/src/services/gmail.js"
+          ]
+        },
+        {
+          "from": "gmail-calendar-api",
+          "to": "google-services",
+          "label": "Google API calls",
+          "detail": "The services layer performs Gmail and Calendar operations behind the route contract.",
+          "sourceRefs": [
+            "server/src/services/gmail.js",
+            "server/src/services/calendar.js"
+          ]
+        },
+        {
+          "from": "google-services",
+          "to": "workspace-runtime",
+          "label": "workspace context",
+          "detail": "Workspace prompts include connected service status and warn agents not to fabricate email or calendar facts when disconnected.",
+          "sourceRefs": [
+            "server/src/routes/workspace/ai.js",
+            "playbook/system-prompt.md"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "provider-settings-health",
+      "title": "Provider settings and health checks",
+      "intent": "Configure model providers, validate image-parser keys, and surface runtime/provider health.",
+      "steps": [
+        {
+          "from": "user",
+          "to": "settings-usage-ui",
+          "label": "edit provider strategy",
+          "detail": "Settings receives AI settings props and provider strategy controls from app shell hooks.",
+          "sourceRefs": [
+            "client/src/App.jsx",
+            "client/src/hooks/useAiSettings.js",
+            "client/src/components/Settings.jsx"
+          ]
+        },
+        {
+          "from": "settings-usage-ui",
+          "to": "image-parser-api",
+          "label": "status + keys",
+          "detail": "The image parser route exposes /status, /keys, PUT /keys, and POST /keys/test.",
+          "sourceRefs": [
+            "server/src/routes/image-parser.js"
+          ]
+        },
+        {
+          "from": "image-parser-api",
+          "to": "image-parser-service",
+          "label": "availability cache",
+          "detail": "checkProviderAvailability and validateRemoteProvider test remote key and endpoint health.",
+          "sourceRefs": [
+            "server/src/services/image-parser.js",
+            "server/src/routes/image-parser.js"
+          ]
+        },
+        {
+          "from": "image-parser-service",
+          "to": "llm-gateway",
+          "label": "/v1/provider-status",
+          "detail": "llm-gateway is treated as an OpenAI-compatible provider for validation and parse/chat requests.",
+          "sourceRefs": [
+            "server/src/services/remote-api-providers.js",
+            "shared/ai-provider-catalog.json"
+          ]
+        },
+        {
+          "from": "settings-usage-ui",
+          "to": "observability-api",
+          "label": "runtime health",
+          "detail": "/api/runtime/health and /api/health/providers report request runtime, AI runtime, provider health, uptime, and node version.",
+          "sourceRefs": [
+            "server/src/app.js",
+            "server/src/services/provider-health.js"
+          ]
+        },
+        {
+          "from": "observability-api",
+          "to": "health-banner",
+          "label": "visible health",
+          "detail": "HealthBanner, HealthToast, and waterfall components surface request and provider problems without browser DevTools.",
+          "sourceRefs": [
+            "client/src/components/HealthBanner.jsx",
+            "client/src/components/HealthToast.jsx",
+            "client/src/components/RequestWaterfall.jsx"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "observability-debug-loop",
+      "title": "Tracing, usage, and debug loop",
+      "intent": "Track every significant AI/API request from client waterfall through server traces, usage dashboards, and test harness coverage.",
+      "steps": [
+        {
+          "from": "dev-reviewer",
+          "to": "request-waterfall-ui",
+          "label": "watch client requests",
+          "detail": "apiFetch emits request lifecycle events used by the waterfall, health banner, and circuit indicators.",
+          "sourceRefs": [
+            "client/src/api/http.js",
+            "client/src/hooks/useRequestWaterfall.js"
+          ]
+        },
+        {
+          "from": "request-waterfall-ui",
+          "to": "api-fetch",
+          "label": "request events",
+          "detail": "The client wrapper handles GET dedupe, timeout, retry, budget counters, circuit state, and stream-aware request phases.",
+          "sourceRefs": [
+            "client/src/api/http.js"
+          ]
+        },
+        {
+          "from": "chat-api",
+          "to": "ai-runtime",
+          "label": "active operation",
+          "detail": "Chat, parse, and workspace routes register active AI operations and update runtime phase/chunks/events.",
+          "sourceRefs": [
+            "server/src/routes/chat/send.js",
+            "server/src/routes/escalations.js",
+            "server/src/services/ai-runtime.js"
+          ]
+        },
+        {
+          "from": "ai-runtime",
+          "to": "ai-trace-store",
+          "label": "trace record",
+          "detail": "AiTrace stores request, resolved policy, parse stages, triage stages, events, attempts, usage, and outcome.",
+          "sourceRefs": [
+            "server/src/services/ai-traces.js",
+            "server/src/models/AiTrace.js"
+          ]
+        },
+        {
+          "from": "traces-usage",
+          "to": "observability-api",
+          "label": "dashboards",
+          "detail": "Trace and usage routes expose summaries, recent runs, model trends, provider/service breakdowns, and conversation-level records.",
+          "sourceRefs": [
+            "server/src/routes/traces.js",
+            "server/src/routes/usage.js",
+            "client/src/components/UsageDashboard.jsx",
+            "client/src/components/TraceDashboard.jsx"
+          ]
+        },
+        {
+          "from": "dev-reviewer",
+          "to": "stress-harness",
+          "label": "contract slices",
+          "detail": "Stress-testing slices and baselines cover main chat, image intake, escalation domain, connected services, room orchestration, workspace assistant, client surfaces, and runtime observability.",
+          "sourceRefs": [
+            "stress-testing/baselines",
+            "stress-testing/contracts",
+            "stress-testing/slices"
+          ]
+        },
+        {
+          "from": "server-error-pipeline",
+          "to": "health-banner",
+          "label": "error visibility",
+          "detail": "Express middleware normalizes API errors and reports server exceptions to the error pipeline for visibility.",
+          "sourceRefs": [
+            "server/src/app.js",
+            "server/src/lib/server-error-pipeline.js"
+          ]
+        }
+      ]
+    }
+  ]
+}

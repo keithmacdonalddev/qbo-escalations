@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QBO Escalation Assistant - Architecture & Flows</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-copy">
+      <p class="eyebrow">QBO Escalation Assistant</p>
+      <div class="title-row">
+        <h1>Architecture & Flows</h1>
+        <span class="flow-count" id="flowCounter">Loading</span>
+      </div>
+      <p class="summary">Source-backed workflow map for the live client surfaces, routes, services, stores, providers, and operational loops.</p>
+    </div>
+    <div class="header-actions" aria-label="Architecture controls">
+      <div class="view-toggle" aria-label="View mode">
+        <button type="button" class="is-selected" data-view-mode="story">Reasoning</button>
+        <button type="button" data-view-mode="map">System map</button>
+      </div>
+      <label class="search-shell">
+        <span>Search</span>
+        <input id="searchInput" type="search" autocomplete="off" placeholder="route, agent, model, INV">
+      </label>
+      <a class="json-link" href="./architecture-flows.json">JSON</a>
+    </div>
+  </header>
+
+  <section class="flow-picker" aria-label="Workflow selector">
+    <div class="flow-picker__label">
+      <span>Workflows</span>
+      <button type="button" id="resetButton">Reset</button>
+    </div>
+    <div class="flow-list" id="flowList"></div>
+  </section>
+
+  <main class="reasoning-layout view-pane is-active" id="storyView">
+    <section class="story-board" aria-label="Selected workflow">
+      <div class="flow-summary">
+        <div>
+          <p class="section-kicker">Selected flow</p>
+          <h2 id="flowTitle">Loading architecture</h2>
+          <p id="flowIntent" class="flow-intent"></p>
+        </div>
+        <div class="flow-metrics" aria-label="Selected flow metrics">
+          <span id="stepMetric">0 steps</span>
+          <span id="nodeMetric">0 systems</span>
+          <span id="laneMetric">0 lanes</span>
+        </div>
+      </div>
+
+      <section class="flow-state-panel" aria-label="Flow status and exports">
+        <div id="flowStateGrid" class="flow-state-grid"></div>
+        <div class="export-actions" aria-label="Export selected flow">
+          <button type="button" id="exportMarkdownButton">Copy Markdown</button>
+          <button type="button" id="exportMermaidButton">Copy Mermaid</button>
+          <button type="button" id="printButton">Print / PNG</button>
+        </div>
+      </section>
+
+      <section class="failure-panel" aria-label="Failure paths">
+        <div class="failure-panel__header">
+          <p class="section-kicker">Failure paths</p>
+          <span id="failureSummary">Loading</span>
+        </div>
+        <div id="failureList" class="failure-list"></div>
+      </section>
+
+      <div class="journey-heading">
+        <p class="section-kicker">Step-by-step handoff</p>
+        <p id="journeySummary"></p>
+      </div>
+      <div id="journeyList" class="journey-list"></div>
+
+      <div class="participation" aria-label="Systems participating in this workflow">
+        <div class="participation__header">
+          <p class="section-kicker">Participating surfaces</p>
+          <span id="activePathSummary"></span>
+        </div>
+        <div id="laneBoard" class="lane-board"></div>
+      </div>
+    </section>
+
+    <aside class="context-rail" aria-label="Architecture context">
+      <section class="context-card">
+        <p class="section-kicker">Test coverage</p>
+        <div id="testCoverageList" class="test-coverage-list"></div>
+      </section>
+      <section class="context-card">
+        <p class="section-kicker">Active architecture</p>
+        <div id="architectureStack" class="architecture-stack"></div>
+      </section>
+      <section class="context-card">
+        <p class="section-kicker">Evidence</p>
+        <p id="copyStatus" class="copy-status" aria-live="polite"></p>
+        <div id="sourceWarning" class="source-warning" hidden></div>
+        <div id="evidenceList" class="evidence-list"></div>
+      </section>
+    </aside>
+  </main>
+
+  <main class="map-layout view-pane" id="mapView" hidden>
+    <section class="map-board" aria-label="System map">
+      <div class="flow-summary">
+        <div>
+          <p class="section-kicker">System map</p>
+          <h2 id="mapFlowTitle">Loading architecture</h2>
+          <p id="mapFlowIntent" class="flow-intent"></p>
+        </div>
+        <div class="flow-metrics" aria-label="Selected flow map metrics">
+          <span id="mapStepMetric">0 steps</span>
+          <span id="mapNodeMetric">0 systems</span>
+          <span id="mapLaneMetric">0 lanes</span>
+        </div>
+      </div>
+      <div id="mapLegend" class="map-legend" aria-label="Node legend"></div>
+      <div class="map-filter-bar" aria-label="System map filters">
+        <span>Map detail</span>
+        <button type="button" class="is-selected" data-map-filter="active">Active only</button>
+        <button type="button" data-map-filter="neighbors">Active + neighbors</button>
+        <button type="button" data-map-filter="full">Full system</button>
+      </div>
+      <div class="system-map-scroll" id="systemMapScroll">
+        <div class="system-map" id="systemMap">
+          <svg id="graphEdgeLayer" class="graph-edge-layer" aria-hidden="true"></svg>
+          <div id="graphLaneLayer" class="graph-lane-layer"></div>
+          <div id="graphNodeLayer" class="graph-node-layer"></div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="map-inspector" aria-label="Map detail">
+      <section class="context-card">
+        <p class="section-kicker">Step sequence</p>
+        <ol id="mapStepList" class="map-step-list"></ol>
+      </section>
+      <section class="context-card">
+        <p class="section-kicker">Active architecture</p>
+        <div id="mapArchitectureStack" class="architecture-stack"></div>
+      </section>
+      <section class="context-card">
+        <p class="section-kicker">Test coverage</p>
+        <div id="mapTestCoverageList" class="test-coverage-list"></div>
+      </section>
+      <section class="context-card">
+        <p class="section-kicker">Failure paths</p>
+        <div id="mapFailureList" class="failure-list failure-list--rail"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="./script.js"></script>
+</body>
+</html>
