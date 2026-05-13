@@ -36,6 +36,16 @@
   flex-basis: var(--console-dock-width-dense) !important;
 }
 
+.route-loading-fallback {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  color: var(--ink-tertiary);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .app-dock-mode-dense .agent-dock-tabs,
 .app-dock-mode-standard .agent-dock-tabs {
   min-height: 32px !important;

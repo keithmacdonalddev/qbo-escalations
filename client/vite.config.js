@@ -6,6 +6,18 @@ const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:4000';
 
 export default defineConfig({
   plugins: [react(), devAgentBridge()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('framer-motion')) return 'vendor-motion';
+          if (id.includes('react')) return 'vendor-react';
+          return 'vendor';
+        },
+      },
+    },
+  },
   server: {
     port: 5174,
     proxy: {

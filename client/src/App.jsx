@@ -1,24 +1,9 @@
 // @refresh reset — force full remount on HMR (many hooks, HMR can't reconcile)
-import { useState, useEffect, useCallback, useMemo, Profiler } from 'react';
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, Profiler } from 'react';
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'framer-motion';
 import { transitions, fade } from './utils/motion.js';
 import Sidebar from './components/Sidebar.jsx';
-import { ChatView } from './components/Chat.jsx';
-import EscalationDashboard from './components/EscalationDashboard.jsx';
-import PlaybookEditor from './components/PlaybookEditor.jsx';
-import AgentsView from './components/AgentsView.jsx';
-import TemplateLibrary from './components/TemplateLibrary.jsx';
-import Analytics from './components/Analytics.jsx';
-import ImageGallery from './components/ImageGallery.jsx';
-import UsageDashboard from './components/UsageDashboard.jsx';
-import WorkspaceShell from './components/WorkspaceShell.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
-import EscalationDetail from './components/EscalationDetail.jsx';
-import Settings from './components/Settings.jsx';
-import InvestigationsView from './components/InvestigationsView.jsx';
-import ChatRoom from './components/ChatRoom.jsx';
-import RightSidebar from './components/RightSidebar.jsx';
-import RequestWaterfall from './components/RequestWaterfall.jsx';
 import HealthBanner from './components/HealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
 import AgentDock from './components/AgentDock.jsx';
@@ -33,9 +18,33 @@ import { useChat } from './hooks/useChat.js';
 import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
-import FlameBar from './components/FlameBar.jsx';
 import { getSidebarCurrentRoute } from './lib/appRoute.js';
 import { tel, TEL } from './lib/devTelemetry.js';
+
+const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
+const EscalationDashboard = lazy(() => import('./components/EscalationDashboard.jsx'));
+const PlaybookEditor = lazy(() => import('./components/PlaybookEditor.jsx'));
+const AgentsView = lazy(() => import('./components/AgentsView.jsx'));
+const TemplateLibrary = lazy(() => import('./components/TemplateLibrary.jsx'));
+const Analytics = lazy(() => import('./components/Analytics.jsx'));
+const ImageGallery = lazy(() => import('./components/ImageGallery.jsx'));
+const UsageDashboard = lazy(() => import('./components/UsageDashboard.jsx'));
+const WorkspaceShell = lazy(() => import('./components/WorkspaceShell.jsx'));
+const EscalationDetail = lazy(() => import('./components/EscalationDetail.jsx'));
+const Settings = lazy(() => import('./components/Settings.jsx'));
+const InvestigationsView = lazy(() => import('./components/InvestigationsView.jsx'));
+const ChatRoom = lazy(() => import('./components/ChatRoom.jsx'));
+const FlameBar = lazy(() => import('./components/FlameBar.jsx'));
+const RequestWaterfall = lazy(() => import('./components/RequestWaterfall.jsx'));
+const RightSidebar = lazy(() => import('./components/RightSidebar.jsx'));
+
+function RouteLoadingFallback() {
+  return (
+    <div className="route-loading-fallback" role="status" aria-live="polite">
+      Loading view...
+    </div>
+  );
+}
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -275,7 +284,11 @@ function App() {
       <HealthBanner requests={waterfall.requests} slowThreshold={waterfall.slowThreshold} />
 
       {/* Render flame bar — dev only, toggleable in Settings */}
-      {devToolsEnabled && import.meta.env.DEV && flameBarEnabled && <FlameBar {...flame} />}
+      {devToolsEnabled && import.meta.env.DEV && flameBarEnabled && (
+        <Suspense fallback={null}>
+          <FlameBar {...flame} />
+        </Suspense>
+      )}
 
       {/* Mobile overlay */}
       <AnimatePresence>
@@ -320,7 +333,9 @@ function App() {
             <Profiler id="Chat" onRender={flame.onRender}>
             <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-                <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} routeView={route.view} />
+                <Suspense fallback={<RouteLoadingFallback />}>
+                  <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} routeView={route.view} />
+                </Suspense>
               </div>
             </div>
             </Profiler>
@@ -334,7 +349,9 @@ function App() {
                   {...motionProps}
                 >
                   <div className={`app-shell-view-region${isFullHeightView ? ' app-shell-view-region--managed' : ' app-shell-view-region--scroll'}`}>
-                    {renderNonChatView()}
+                    <Suspense fallback={<RouteLoadingFallback />}>
+                      {renderNonChatView()}
+                    </Suspense>
                   </div>
                 </motion.div>
               </AnimatePresence>
@@ -429,25 +446,27 @@ function App() {
             </span>
           </button>
 
-          <RightSidebar
-            id="network-waterfall-panel"
-            open={networkOpen}
-            onClose={() => setNetworkOpen(false)}
-            title="Network"
-            width={380}
-            badge={
-              <>
-                {waterfall.requests.length > 0 && (
-                  <span className="wf-count">{waterfall.requests.length}</span>
-                )}
-                {networkActiveCount > 0 && (
-                  <span className="wf-active-badge">{networkActiveCount} active</span>
-                )}
-              </>
-            }
-          >
-            <RequestWaterfall {...waterfall} defaultView={waterfallView} />
-          </RightSidebar>
+          <Suspense fallback={null}>
+            <RightSidebar
+              id="network-waterfall-panel"
+              open={networkOpen}
+              onClose={() => setNetworkOpen(false)}
+              title="Network"
+              width={380}
+              badge={
+                <>
+                  {waterfall.requests.length > 0 && (
+                    <span className="wf-count">{waterfall.requests.length}</span>
+                  )}
+                  {networkActiveCount > 0 && (
+                    <span className="wf-active-badge">{networkActiveCount} active</span>
+                  )}
+                </>
+              }
+            >
+              <RequestWaterfall {...waterfall} defaultView={waterfallView} />
+            </RightSidebar>
+          </Suspense>
         </>
       )}
     </div>
