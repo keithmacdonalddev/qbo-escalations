@@ -14,7 +14,7 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
     id: 'chat-core',
     order: 10,
-    name: 'Main Chat / QBO Assistant',
+    name: 'QBO Assistant',
     promptType: 'system',
     usedBy: 'Primary escalation assistant',
     description: 'Core system instructions for the main chat agent.',
@@ -53,7 +53,7 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
     id: 'image-parser',
     order: 30,
-    name: 'Image Parser Agent',
+    name: 'Image Parser',
     promptType: 'system',
     usedBy: 'Escalation screenshot and INV parsing',
     description: 'Primary parser prompt for screenshots and investigation lists.',
@@ -62,7 +62,7 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
     id: 'escalation-template-parser',
     order: 20,
-    name: 'Escalation Template Parser',
+    name: 'Image Parser',
     promptType: 'system',
     usedBy: 'Strict escalation template screenshot parsing',
     description: 'Canonical parser prompt for one QBO escalation template format.',
@@ -80,7 +80,7 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
     id: 'known-issue-search-agent',
     order: 22,
-    name: 'Known Issue Search Agent',
+    name: 'INV Search Agent',
     promptType: 'system',
     usedBy: 'INV investigation search before escalation triage',
     description: 'Tool-using prompt for known-issue lookup, candidate rejection, and no-match confirmation.',

@@ -7,8 +7,9 @@ import {
   DEFAULT_REASONING_EFFORT,
   getAlternateProvider,
   getProviderShortLabel,
-  normalizeProvider,
   normalizeReasoningEffort,
+  reportsReasoningActivity,
+  resolveProviderSelection,
   supportsLiveReasoning,
 } from '../lib/providerCatalog.js';
 import { normalizeSurfaceModel, writeStoredPreference } from '../lib/surfacePreferences.js';
@@ -28,26 +29,26 @@ function buildInitialWorkspaceSession() {
   let initialReasoningEffort = DEFAULT_REASONING_EFFORT;
 
   try {
-    initialProvider = normalizeProvider(
+    const primarySelection = resolveProviderSelection(
       window.localStorage.getItem('qbo-workspace-provider')
       || window.localStorage.getItem('qbo-chat-provider')
-      || DEFAULT_PROVIDER
-    );
-    const savedMode = window.localStorage.getItem('qbo-workspace-mode') || window.localStorage.getItem('qbo-chat-mode');
-    initialMode = savedMode === 'single' ? 'single' : 'fallback';
-    initialFallbackProvider = normalizeProvider(
-      window.localStorage.getItem('qbo-workspace-fallback-provider')
-      || window.localStorage.getItem('qbo-chat-fallback-provider')
-      || getAlternateProvider(initialProvider)
-    );
-    initialModel = normalizeSurfaceModel(
+      || DEFAULT_PROVIDER,
       window.localStorage.getItem('qbo-workspace-model')
       || window.localStorage.getItem('qbo-chat-model')
     );
-    initialFallbackModel = normalizeSurfaceModel(
+    initialProvider = primarySelection.provider;
+    const savedMode = window.localStorage.getItem('qbo-workspace-mode') || window.localStorage.getItem('qbo-chat-mode');
+    initialMode = savedMode === 'single' ? 'single' : 'fallback';
+    const fallbackSelection = resolveProviderSelection(
+      window.localStorage.getItem('qbo-workspace-fallback-provider')
+      || window.localStorage.getItem('qbo-chat-fallback-provider')
+      || getAlternateProvider(initialProvider),
       window.localStorage.getItem('qbo-workspace-fallback-model')
       || window.localStorage.getItem('qbo-chat-fallback-model')
     );
+    initialFallbackProvider = fallbackSelection.provider;
+    initialModel = normalizeSurfaceModel(primarySelection.model);
+    initialFallbackModel = normalizeSurfaceModel(fallbackSelection.model);
     initialReasoningEffort = normalizeReasoningEffort(
       window.localStorage.getItem('qbo-workspace-reasoning-effort')
       || window.localStorage.getItem('qbo-chat-reasoning-effort')
@@ -57,14 +58,16 @@ function buildInitialWorkspaceSession() {
     // Ignore storage failures and keep defaults.
   }
 
+  const resolvedFallbackProvider = initialFallbackProvider === initialProvider
+    ? getAlternateProvider(initialProvider)
+    : initialFallbackProvider;
+
   return {
     provider: initialProvider,
     mode: initialMode,
-    fallbackProvider: initialFallbackProvider === initialProvider
-      ? getAlternateProvider(initialProvider)
-      : initialFallbackProvider,
+    fallbackProvider: resolvedFallbackProvider,
     model: initialModel,
-    fallbackModel: initialFallbackModel,
+    fallbackModel: resolvedFallbackProvider === initialFallbackProvider ? initialFallbackModel : '',
     reasoningEffort: initialReasoningEffort,
     messages: [],
     input: '',
@@ -306,6 +309,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
   const reasoningPauseTimerRef = useRef(null);
   const reasoningMetaRef = useRef({
     provider: null,
+    reportsActivity: false,
     supportsThinking: true,
     lastThinkingAt: 0,
   });
@@ -329,6 +333,7 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     clearReasoningWatch();
     reasoningMetaRef.current = {
       provider: null,
+      reportsActivity: false,
       supportsThinking: true,
       lastThinkingAt: 0,
     };
@@ -422,9 +427,11 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
   const syncReasoningProvider = useCallback((providerId) => {
     const nextProvider = providerId || null;
     const supportsThinking = nextProvider ? supportsLiveReasoning(nextProvider) : true;
+    const reportsActivity = nextProvider ? reportsReasoningActivity(nextProvider) : false;
     reasoningMetaRef.current = {
       ...reasoningMetaRef.current,
       provider: nextProvider,
+      reportsActivity,
       supportsThinking,
     };
 
@@ -435,7 +442,11 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
 
     if (!supportsThinking) {
       clearReasoningWatch();
-      setReasoningNotice?.(`${getProviderShortLabel(nextProvider)} does not stream live reasoning. The response is still running.`);
+      setReasoningNotice?.(
+        reportsActivity
+          ? `${getProviderShortLabel(nextProvider)} is reasoning, but the stream does not expose a readable reasoning trace.`
+          : `${getProviderShortLabel(nextProvider)} does not stream live reasoning. The response is still running.`
+      );
       return;
     }
 

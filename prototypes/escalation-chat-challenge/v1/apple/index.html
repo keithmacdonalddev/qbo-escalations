@@ -1,0 +1,2552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lucid — Escalation Card</title>
+<style>
+/* =========================================================
+   LUCID — Liquid Glass Escalation Card
+   Apple HIG lens. The case is a physical object.
+   No chat box. No sidebar of messages. Reasoning is bonded
+   to the face that produced it. Providers are stacked
+   materials you swap with ⌘1-4.
+   ========================================================= */
+
+:root {
+  color-scheme: dark;
+
+  /* Apple semantic — dark first, this tool lives at night */
+  --bg-0: #000000;
+  --bg-1: #0a0a0c;
+  --bg-2: #1c1c1e;
+  --bg-3: #2c2c2e;
+  --bg-4: #3a3a3c;
+
+  --ink: rgba(255,255,255,0.98);
+  --ink-2: rgba(235,235,245,0.62);
+  --ink-3: rgba(235,235,245,0.32);
+  --ink-4: rgba(235,235,245,0.18);
+
+  --sep: rgba(84,84,88,0.55);
+  --sep-soft: rgba(84,84,88,0.28);
+
+  --accent: #0a84ff;
+  --accent-2: #5e9eff;
+  --accent-soft: rgba(10,132,255,0.18);
+
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --danger: #ff453a;
+  --indigo: #5e5ce6;
+  --teal: #64d2ff;
+  --pink: #ff375f;
+
+  --glass-1: rgba(28,28,30,0.55);
+  --glass-2: rgba(44,44,46,0.62);
+  --glass-3: rgba(58,58,60,0.70);
+
+  --mat-thin: blur(14px) saturate(150%);
+  --mat-reg:  blur(22px) saturate(170%);
+  --mat-thick: blur(34px) saturate(180%);
+
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --radius-xl: 32px;
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  --spring-snappy: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --spring-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+  --spring-soft:   cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  color: var(--ink);
+  background:
+    radial-gradient(1100px 700px at 18% 12%, rgba(10,132,255,0.18), transparent 60%),
+    radial-gradient(900px 700px at 88% 92%, rgba(94,92,230,0.18), transparent 60%),
+    radial-gradient(700px 500px at 55% 50%, rgba(48,209,88,0.06), transparent 70%),
+    linear-gradient(180deg, #06070a 0%, #000 100%);
+  background-attachment: fixed;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: -0.01em;
+}
+
+/* Ambient grain to keep the glass honest */
+body::before {
+  content: "";
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
+    radial-gradient(rgba(255,255,255,0.012) 1px, transparent 1px);
+  background-size: 3px 3px, 7px 7px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* =========================================================
+   APP SHELL
+   ========================================================= */
+.app {
+  position: relative;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  grid-template-rows: 56px 1fr 92px;
+  grid-template-areas:
+    "topbar topbar topbar"
+    "inbox  stage  context"
+    "inbox  dock   context";
+  gap: 16px;
+  padding: 16px 18px 18px;
+  z-index: 1;
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  grid-area: topbar;
+  display: flex; align-items: center;
+  gap: 18px;
+  padding: 0 12px 0 16px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-1);
+  backdrop-filter: var(--mat-thick);
+  -webkit-backdrop-filter: var(--mat-thick);
+  border: 1px solid var(--sep-soft);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display);
+  font-weight: 600; font-size: 15px;
+  letter-spacing: -0.02em;
+}
+.brand-mark {
+  width: 22px; height: 22px;
+  border-radius: 7px;
+  background:
+    linear-gradient(135deg, #0a84ff 0%, #5e5ce6 50%, #ff375f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.35),
+    0 0 12px rgba(94,92,230,0.45);
+  position: relative;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute; inset: 4px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.45);
+  backdrop-filter: blur(6px);
+}
+.brand small {
+  color: var(--ink-3);
+  font-weight: 400;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.case-pill {
+  display: flex; align-items: center; gap: 10px;
+  margin-left: 8px;
+  padding: 6px 12px 6px 8px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  font-size: 12.5px; color: var(--ink-2);
+}
+.case-pill .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 4px rgba(255,159,10,0.18);
+  animation: breathe 3.6s var(--spring-soft) infinite;
+}
+.case-pill b { color: var(--ink); font-weight: 600; letter-spacing: 0.01em; }
+.case-pill .meta { color: var(--ink-3); font-size: 11.5px; }
+
+.topbar .grow { flex: 1; }
+
+.kbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 180ms var(--spring-smooth);
+}
+.kbar:hover { background: var(--bg-3); color: var(--ink); }
+.kbar kbd {
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 1px 6px;
+  background: var(--bg-4);
+  border-radius: 4px;
+  color: var(--ink-2);
+  border: 1px solid var(--sep-soft);
+}
+
+.op-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ff9f0a, #ff375f);
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+/* =========================================================
+   INBOX RAIL — incoming cases as glass tiles
+   ========================================================= */
+.inbox {
+  grid-area: inbox;
+  display: flex; flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-1);
+  backdrop-filter: var(--mat-reg);
+  -webkit-backdrop-filter: var(--mat-reg);
+  border: 1px solid var(--sep-soft);
+  overflow: hidden;
+}
+.inbox-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 6px 10px;
+  border-bottom: 1px solid var(--sep-soft);
+}
+.inbox-head h3 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.inbox-count {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  border-radius: 999px;
+  font-weight: 600;
+}
+.inbox-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  padding: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-4) transparent;
+}
+.inbox-list::-webkit-scrollbar { width: 6px; }
+.inbox-list::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+.tile {
+  position: relative;
+  padding: 11px 12px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  cursor: pointer;
+  transition:
+    transform 240ms var(--spring-snappy),
+    background 220ms var(--spring-smooth),
+    border-color 220ms var(--spring-smooth);
+}
+.tile:hover {
+  background: var(--bg-3);
+  transform: translateX(2px);
+}
+.tile.active {
+  background: linear-gradient(180deg, rgba(10,132,255,0.16), rgba(10,132,255,0.06));
+  border-color: rgba(10,132,255,0.55);
+  box-shadow: 0 0 0 1px rgba(10,132,255,0.35), 0 8px 24px rgba(10,132,255,0.18);
+}
+.tile.active::before {
+  content: "";
+  position: absolute;
+  left: -12px; top: 50%;
+  width: 3px; height: 28px;
+  margin-top: -14px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  box-shadow: 0 0 8px var(--accent);
+}
+.tile-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+}
+.tile-sev {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex: none;
+}
+.tile-sev.crit { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+.tile-sev.high { background: var(--warning); box-shadow: 0 0 6px var(--warning); }
+.tile-sev.med  { background: var(--teal); }
+.tile-sev.low  { background: var(--ink-3); }
+.tile-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  letter-spacing: 0.02em;
+}
+.tile-age {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.tile-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  line-height: 1.35;
+  margin-bottom: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.tile-meta {
+  font-size: 11px;
+  color: var(--ink-3);
+  display: flex; gap: 8px; align-items: center;
+}
+.tile-meta .agent { color: var(--ink-2); }
+
+/* =========================================================
+   CENTER STAGE — the Card
+   ========================================================= */
+.stage {
+  grid-area: stage;
+  position: relative;
+  display: grid;
+  place-items: center;
+  perspective: 1800px;
+  perspective-origin: 50% 35%;
+  overflow: visible;
+}
+
+/* the playbook / inv layer that lives BEHIND the card and bleeds through */
+.bleed {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 600ms var(--spring-soft);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  padding: 6%;
+  filter: blur(0.6px);
+}
+.bleed.show { opacity: 0.5; }
+.bleed-chip {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  border: 1px dashed var(--sep);
+  border-radius: 8px;
+  padding: 6px 8px;
+  line-height: 1.4;
+  background: rgba(0,0,0,0.25);
+  align-self: start;
+}
+
+/* the card itself */
+.card-wrap {
+  position: relative;
+  width: min(640px, 92%);
+  height: min(520px, 80%);
+  transform-style: preserve-3d;
+  transition: transform 700ms var(--spring-soft);
+}
+.card-wrap.flipped {
+  transform: rotateY(180deg);
+}
+
+.face {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-xl);
+  background: var(--glass-2);
+  backdrop-filter: var(--mat-thick);
+  -webkit-backdrop-filter: var(--mat-thick);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow:
+    0 32px 80px rgba(0,0,0,0.55),
+    0 0 0 1px rgba(255,255,255,0.04),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.face.front { z-index: 2; }
+.face.back {
+  transform: rotateY(180deg);
+  background: linear-gradient(180deg, rgba(20,20,24,0.85), rgba(10,10,14,0.85));
+}
+
+/* card breathing */
+.card-wrap:not(.flipped) .face.front {
+  animation: cardBreathe 6s ease-in-out infinite;
+}
+@keyframes cardBreathe {
+  0%, 100% { box-shadow: 0 32px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04), inset 0 1px 0 rgba(255,255,255,0.06); }
+  50%      { box-shadow: 0 36px 92px rgba(10,132,255,0.18), 0 0 0 1px rgba(10,132,255,0.18), inset 0 1px 0 rgba(255,255,255,0.08); }
+}
+@keyframes breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.18); opacity: 0.85; }
+}
+
+/* attention pulse */
+.card-wrap.needs-input .face.front {
+  animation: pulseAttention 1.4s var(--spring-soft) 2;
+}
+@keyframes pulseAttention {
+  0%, 100% { box-shadow: 0 32px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04); }
+  50% { box-shadow: 0 32px 80px rgba(255,159,10,0.35), 0 0 0 2px rgba(255,159,10,0.65); }
+}
+
+/* card header on each face */
+.face-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--sep-soft);
+}
+.face-glyph {
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  display: grid; place-items: center;
+  background: var(--bg-3);
+  border: 1px solid var(--sep-soft);
+}
+.face-glyph svg { width: 16px; height: 16px; }
+.face-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.face-sub {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+}
+.face-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 22px 22px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-4) transparent;
+}
+.face-body::-webkit-scrollbar { width: 6px; }
+.face-body::-webkit-scrollbar-thumb { background: var(--bg-4); border-radius: 3px; }
+
+/* face-specific content */
+
+/* INTAKE FACE */
+.intake {
+  display: flex; flex-direction: column; gap: 14px;
+  height: 100%;
+}
+.dropzone {
+  flex: 1;
+  border: 1.5px dashed var(--sep);
+  border-radius: var(--radius-lg);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+  position: relative;
+  transition: all 300ms var(--spring-soft);
+  background:
+    radial-gradient(380px 220px at 50% 40%, rgba(10,132,255,0.10), transparent 70%);
+}
+.dropzone:hover {
+  border-color: var(--accent);
+  background:
+    radial-gradient(380px 220px at 50% 40%, rgba(10,132,255,0.20), transparent 70%);
+}
+.dropzone .ring {
+  width: 64px; height: 64px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  display: grid; place-items: center;
+  position: relative;
+}
+.dropzone .ring::after {
+  content: "";
+  position: absolute; inset: -8px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  opacity: 0.4;
+  animation: ringPulse 2.4s var(--spring-soft) infinite;
+}
+@keyframes ringPulse {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.4); opacity: 0; }
+}
+.dropzone svg { color: var(--accent); }
+.dropzone p { margin: 0; color: var(--ink); font-size: 14px; font-weight: 500; }
+.dropzone small { color: var(--ink-3); font-size: 12px; }
+
+.intake-routes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.route-btn {
+  border: 1px solid var(--sep-soft);
+  background: var(--bg-2);
+  color: var(--ink);
+  padding: 12px 8px 10px;
+  border-radius: var(--radius-md);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  cursor: pointer;
+  font-size: 11.5px;
+  transition: all 180ms var(--spring-smooth);
+}
+.route-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--accent);
+}
+.route-btn svg { width: 18px; height: 18px; opacity: 0.85; }
+.route-btn .label { color: var(--ink-2); }
+.route-btn .hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg-3);
+}
+
+/* PARSED FACE */
+.parsing {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.parse-screenshot {
+  position: relative;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--sep-soft);
+  background: #1a1d22;
+  overflow: hidden;
+  height: 160px;
+}
+.parse-screenshot::before {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg, #2d3138 0%, #1a1d22 100%);
+}
+.qbo-mock {
+  position: absolute; inset: 0;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #cdd5e0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.qbo-mock .qbo-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #2a2f37;
+  margin-bottom: 4px;
+  font-size: 9.5px;
+  color: #8a93a3;
+}
+.qbo-mock .qbo-bar .qbo-logo {
+  width: 14px; height: 14px;
+  background: #2ca01c;
+  border-radius: 3px;
+  display: grid; place-items: center;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+}
+.qbo-mock .err {
+  color: #ff6b6b;
+  background: rgba(255,107,107,0.10);
+  border-left: 2px solid #ff6b6b;
+  padding: 4px 6px;
+  margin-top: 6px;
+  border-radius: 2px;
+}
+.scan-beam {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 80px;
+  left: -80px;
+  background:
+    linear-gradient(90deg, transparent, rgba(10,132,255,0.45), transparent);
+  pointer-events: none;
+}
+.scan-beam.run {
+  animation: scan 1.6s var(--spring-smooth) infinite;
+}
+@keyframes scan {
+  0%   { left: -80px; }
+  100% { left: 100%; }
+}
+
+.parse-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.field {
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: all 360ms var(--spring-soft);
+}
+.field.in { opacity: 1; transform: none; }
+.field .k {
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+.field .v {
+  font-size: 13px;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  letter-spacing: -0.01em;
+}
+.field.full { grid-column: 1 / -1; }
+.field .conf {
+  display: inline-block;
+  font-size: 9.5px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(48,209,88,0.18);
+  color: #6be97e;
+  font-family: var(--font);
+  vertical-align: middle;
+}
+.field .conf.warn { background: rgba(255,159,10,0.18); color: var(--warning); }
+
+/* TRIAGE FACE */
+.triage {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.severity-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.sev-chip {
+  padding: 12px 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--sep-soft);
+  background: var(--bg-2);
+  cursor: pointer;
+  transition: all 220ms var(--spring-snappy);
+  text-align: center;
+}
+.sev-chip:hover { background: var(--bg-3); transform: translateY(-1px); }
+.sev-chip.sel {
+  background: linear-gradient(180deg, rgba(255,69,58,0.20), rgba(255,69,58,0.06));
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), 0 8px 18px rgba(255,69,58,0.18);
+}
+.sev-chip.sev2.sel {
+  background: linear-gradient(180deg, rgba(255,159,10,0.22), rgba(255,159,10,0.06));
+  border-color: var(--warning);
+  box-shadow: 0 0 0 1px var(--warning), 0 8px 18px rgba(255,159,10,0.18);
+}
+.sev-chip.sev3.sel {
+  background: linear-gradient(180deg, rgba(100,210,255,0.20), rgba(100,210,255,0.06));
+  border-color: var(--teal);
+  box-shadow: 0 0 0 1px var(--teal);
+}
+.sev-chip.sev4.sel {
+  background: linear-gradient(180deg, rgba(48,209,88,0.18), rgba(48,209,88,0.04));
+  border-color: var(--success);
+}
+.sev-chip .lvl {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+}
+.sev-chip .lbl {
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+.triage-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.t-card {
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.t-card .label {
+  font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-3); margin-bottom: 6px;
+}
+.t-card .value {
+  font-size: 14px; color: var(--ink); font-weight: 500;
+}
+.t-card.full { grid-column: 1 / -1; }
+.t-card .pill {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  margin-right: 6px; margin-top: 4px;
+}
+
+.missing {
+  background: linear-gradient(180deg, rgba(255,159,10,0.10), rgba(255,159,10,0.02));
+  border: 1px solid rgba(255,159,10,0.42);
+  border-radius: var(--radius-md);
+  padding: 11px 14px;
+  display: flex; align-items: flex-start; gap: 10px;
+}
+.missing .icon {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(255,159,10,0.22);
+  display: grid; place-items: center;
+  color: var(--warning); flex: none;
+  font-weight: 700; font-size: 13px;
+}
+.missing .body { flex: 1; font-size: 12.5px; color: var(--ink); line-height: 1.5; }
+.missing .body b { color: var(--warning); }
+.missing .ask-btn {
+  background: var(--warning);
+  color: #1a1100;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 160ms;
+}
+.missing .ask-btn:hover { filter: brightness(1.08); }
+
+/* INV FACE */
+.inv {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.inv-search {
+  display: flex; gap: 8px; align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.inv-search svg { color: var(--ink-3); }
+.inv-search input {
+  flex: 1; background: none; border: none; outline: none;
+  color: var(--ink); font-size: 13.5px; font-family: var(--font);
+}
+.inv-search input::placeholder { color: var(--ink-3); }
+.inv-search .scanning {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-2);
+}
+.inv-search .scanning .blip {
+  display: inline-block; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--accent);
+  margin-right: 6px;
+  animation: blip 0.8s var(--spring-soft) infinite alternate;
+}
+@keyframes blip {
+  0% { opacity: 0.3; transform: scale(0.85); }
+  100% { opacity: 1; transform: scale(1.2); box-shadow: 0 0 8px var(--accent); }
+}
+
+.inv-results { display: flex; flex-direction: column; gap: 8px; }
+.inv-row {
+  display: flex; gap: 12px; align-items: center;
+  padding: 11px 13px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  cursor: pointer;
+  transition: all 220ms var(--spring-smooth);
+  opacity: 0;
+  transform: translateY(6px);
+}
+.inv-row.in { opacity: 1; transform: none; }
+.inv-row:hover { background: var(--bg-3); }
+.inv-row.match {
+  background: linear-gradient(180deg, rgba(48,209,88,0.16), rgba(48,209,88,0.04));
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px rgba(48,209,88,0.45);
+}
+.inv-row .inv-id {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 110px;
+}
+.inv-row .inv-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink);
+}
+.inv-row .inv-title small {
+  display: block;
+  color: var(--ink-3);
+  font-size: 11px;
+  margin-top: 2px;
+}
+.inv-row .inv-conf {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+.inv-row .conf-bar {
+  width: 50px; height: 4px;
+  background: var(--bg-4);
+  border-radius: 2px; overflow: hidden;
+}
+.inv-row .conf-bar i {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--warning), var(--success));
+  border-radius: 2px;
+  transition: width 800ms var(--spring-soft);
+}
+
+.create-new {
+  margin-top: 4px;
+  padding: 10px 13px;
+  border: 1px dashed var(--sep);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-align: center;
+  cursor: pointer;
+  transition: all 200ms;
+}
+.create-new:hover {
+  border-color: var(--accent);
+  color: var(--accent-2);
+  background: rgba(10,132,255,0.06);
+}
+
+/* DRAFT FACE */
+.draft {
+  display: flex; flex-direction: column; gap: 12px;
+  height: 100%;
+}
+.draft-to {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: 10px;
+  font-size: 12.5px;
+}
+.draft-to .lab { color: var(--ink-3); font-size: 11px; }
+.draft-to .who {
+  color: var(--ink);
+}
+.draft-to .who b { font-weight: 600; }
+.draft-to .ext {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+.draft-body {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  overflow-y: auto;
+  white-space: pre-wrap;
+  position: relative;
+  min-height: 220px;
+}
+.draft-body .cursor {
+  display: inline-block;
+  width: 7px; height: 16px;
+  background: var(--accent);
+  vertical-align: -2px;
+  margin-left: 2px;
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret { 50% { opacity: 0; } }
+
+.draft-body .src {
+  background: rgba(10,132,255,0.10);
+  border-bottom: 1px dashed var(--accent);
+  cursor: help;
+  padding: 0 2px;
+  border-radius: 2px;
+  transition: background 160ms;
+}
+.draft-body .src:hover {
+  background: rgba(10,132,255,0.22);
+}
+
+.draft-actions {
+  display: flex; gap: 8px; align-items: center;
+}
+.draft-actions .send {
+  background: linear-gradient(180deg, #1a8cff 0%, #0a6ed8 100%);
+  color: #fff;
+  border: none;
+  padding: 9px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 4px 14px rgba(10,132,255,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+  transition: transform 160ms var(--spring-snappy), filter 160ms;
+}
+.draft-actions .send:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.draft-actions .send kbd {
+  font-family: var(--font);
+  background: rgba(0,0,0,0.25);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.draft-actions .ghost {
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink-2);
+  padding: 9px 14px;
+  font-size: 13px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.draft-actions .ghost:hover { background: var(--bg-3); color: var(--ink); }
+.draft-actions .right { margin-left: auto; display: flex; gap: 8px; }
+
+/* BACK FACE — REASONING */
+.reasoning-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 18px 22px 12px;
+  border-bottom: 1px solid var(--sep-soft);
+}
+.reasoning-head .rg {
+  width: 30px; height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--indigo), var(--accent));
+  display: grid; place-items: center;
+  box-shadow: 0 0 14px rgba(94,92,230,0.45);
+}
+.reasoning-head .rg svg { color: #fff; }
+.reasoning-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+.reasoning-head .face-name {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--accent-2);
+  padding: 2px 8px;
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+.reasoning-head .save {
+  margin-left: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink-2);
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.reasoning-head .save:hover { background: var(--bg-4); color: var(--ink); }
+.reasoning-head .save.saved {
+  background: rgba(48,209,88,0.18); color: #6be97e;
+  border-color: rgba(48,209,88,0.45);
+}
+
+.reasoning-body {
+  flex: 1; overflow-y: auto;
+  padding: 18px 22px 22px;
+}
+.thought {
+  display: flex; gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--sep-soft);
+  opacity: 0; transform: translateY(8px);
+  animation: thoughtIn 420ms var(--spring-soft) forwards;
+}
+.thought:nth-child(1) { animation-delay: 80ms; }
+.thought:nth-child(2) { animation-delay: 220ms; }
+.thought:nth-child(3) { animation-delay: 360ms; }
+.thought:nth-child(4) { animation-delay: 500ms; }
+.thought:nth-child(5) { animation-delay: 640ms; }
+.thought:nth-child(6) { animation-delay: 780ms; }
+@keyframes thoughtIn {
+  to { opacity: 1; transform: none; }
+}
+.thought .num {
+  width: 22px; height: 22px;
+  border-radius: 7px;
+  background: var(--bg-3);
+  border: 1px solid var(--sep-soft);
+  display: grid; place-items: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  flex: none;
+}
+.thought .body {
+  flex: 1; font-size: 13px; line-height: 1.55; color: var(--ink-2);
+}
+.thought .body b { color: var(--ink); font-weight: 500; }
+.thought .ref {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  margin-left: 4px;
+  background: var(--accent-soft);
+  color: var(--accent-2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.reasoning-foot {
+  padding: 12px 22px;
+  border-top: 1px solid var(--sep-soft);
+  font-size: 11.5px;
+  color: var(--ink-3);
+  display: flex; gap: 14px; align-items: center;
+}
+.reasoning-foot .by {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.reasoning-foot .prov-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #ff9f0a;
+  box-shadow: 0 0 6px #ff9f0a;
+}
+
+/* =========================================================
+   DOCK — face nav + flip + provider stack
+   ========================================================= */
+.dock {
+  grid-area: dock;
+  display: flex; align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-1);
+  backdrop-filter: var(--mat-thick);
+  -webkit-backdrop-filter: var(--mat-thick);
+  border: 1px solid var(--sep-soft);
+}
+.face-nav {
+  display: flex; gap: 6px;
+  padding: 4px;
+  background: var(--bg-2);
+  border-radius: 999px;
+  border: 1px solid var(--sep-soft);
+}
+.face-dot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+  color: var(--ink-3);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 220ms var(--spring-snappy);
+  position: relative;
+}
+.face-dot:hover { color: var(--ink-2); }
+.face-dot.active {
+  background: var(--bg-4);
+  color: var(--ink);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.face-dot.done {
+  color: var(--success);
+}
+.face-dot .n {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  background: var(--bg-3);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.face-dot.active .n { background: var(--bg-2); color: var(--ink-2); }
+.face-dot.done .check {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--success);
+  display: grid; place-items: center;
+  font-size: 9px;
+  color: #003111;
+  font-weight: 800;
+}
+
+.dock-grow { flex: 1; }
+
+.flip-btn {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 200ms var(--spring-smooth);
+}
+.flip-btn:hover { background: var(--bg-3); border-color: var(--accent); }
+.flip-btn svg { color: var(--accent-2); }
+.flip-btn kbd {
+  font-family: var(--font);
+  background: var(--bg-4);
+  color: var(--ink-2);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* PROVIDER STACK */
+.providers {
+  display: flex; gap: 4px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: 14px;
+  position: relative;
+}
+.prov {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 11px 7px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--ink-3);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 240ms var(--spring-snappy);
+  position: relative;
+}
+.prov:hover { color: var(--ink); background: var(--bg-3); }
+.prov.active {
+  background: var(--bg-4);
+  color: var(--ink);
+  border-color: var(--sep);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+.prov-glyph {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  display: grid; place-items: center;
+  font-size: 10px; font-weight: 700;
+  color: #fff;
+}
+.prov-glyph.claude { background: linear-gradient(135deg, #ff9f0a, #ff6a4a); }
+.prov-glyph.gpt    { background: linear-gradient(135deg, #10a37f, #0d8567); }
+.prov-glyph.gemini { background: linear-gradient(135deg, #4285f4, #1a73e8); }
+.prov-glyph.kimi   { background: linear-gradient(135deg, #5e5ce6, #af52de); }
+.prov .hint {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-3);
+  padding: 1px 5px;
+  background: var(--bg-3);
+  border-radius: 4px;
+}
+.prov.active .hint { background: rgba(0,0,0,0.3); }
+
+/* =========================================================
+   CONTEXT PANEL — right rail
+   ========================================================= */
+.context {
+  grid-area: context;
+  display: flex; flex-direction: column;
+  gap: 12px;
+  padding: 14px 14px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--glass-1);
+  backdrop-filter: var(--mat-reg);
+  -webkit-backdrop-filter: var(--mat-reg);
+  border: 1px solid var(--sep-soft);
+  overflow: hidden;
+}
+.ctx-section {
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.ctx-section h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.timeline {
+  display: flex; flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 7px; top: 4px; bottom: 4px;
+  width: 1px;
+  background: var(--sep-soft);
+}
+.tl-event {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 6px 0;
+  position: relative;
+}
+.tl-event .dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--bg-3);
+  border: 2px solid var(--bg-2);
+  flex: none;
+  margin-top: 1px;
+  z-index: 1;
+  position: relative;
+}
+.tl-event.done .dot { background: var(--success); }
+.tl-event.active .dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(10,132,255,0.25);
+}
+.tl-event .info {
+  font-size: 12px; color: var(--ink-2); line-height: 1.3;
+}
+.tl-event .info b { color: var(--ink); font-weight: 500; }
+.tl-event .time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-left: auto;
+}
+
+.confidence-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px;
+}
+.confidence-bar .meter {
+  flex: 1; height: 6px;
+  background: var(--bg-3);
+  border-radius: 3px; overflow: hidden;
+}
+.confidence-bar .meter i {
+  display: block; height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--warning), var(--success));
+  border-radius: 3px;
+  transition: width 800ms var(--spring-soft);
+}
+.confidence-bar .val {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+  min-width: 36px; text-align: right;
+}
+
+.notebook {
+  flex: 1; overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.notebook h4 {
+  margin: 0 0 10px;
+  font-size: 11px; font-weight: 600;
+  color: var(--ink-3);
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.note {
+  background: rgba(255,212,0,0.06);
+  border-left: 2px solid var(--warning);
+  padding: 8px 10px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--ink);
+  line-height: 1.45;
+}
+.note .stamp {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.note.saved-reasoning {
+  background: rgba(94,92,230,0.10);
+  border-left-color: var(--indigo);
+}
+.note.saved-reasoning .stamp { color: var(--indigo); }
+
+/* =========================================================
+   PROVIDER COMPARE OVERLAY
+   ========================================================= */
+.compare-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 100;
+  opacity: 0;
+  transition: opacity 280ms var(--spring-smooth);
+}
+.compare-overlay.open {
+  display: flex; opacity: 1;
+}
+.compare-card {
+  width: min(1080px, 92%);
+  max-height: 86vh;
+  background: var(--glass-2);
+  backdrop-filter: var(--mat-thick);
+  -webkit-backdrop-filter: var(--mat-thick);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-xl);
+  padding: 22px;
+  display: flex; flex-direction: column; gap: 14px;
+  transform: scale(0.96);
+  transition: transform 320ms var(--spring-snappy);
+}
+.compare-overlay.open .compare-card { transform: none; }
+.compare-card header {
+  display: flex; align-items: center; gap: 12px;
+}
+.compare-card header h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px; font-weight: 600;
+}
+.compare-card header .sub {
+  font-size: 12px; color: var(--ink-3);
+}
+.compare-card header .close {
+  margin-left: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink-2);
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  cursor: pointer;
+  font-size: 16px;
+}
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  overflow: hidden; flex: 1;
+}
+.compare-col {
+  background: var(--bg-2);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex; flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.compare-col header {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--sep-soft);
+}
+.compare-col header .prov-glyph { width: 20px; height: 20px; font-size: 11px; }
+.compare-col header h3 {
+  margin: 0;
+  font-size: 13px; font-weight: 600;
+}
+.compare-col header .conf {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-3);
+  color: var(--ink-2);
+}
+.compare-col .resp {
+  font-size: 12px; line-height: 1.5; color: var(--ink);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.compare-col .stats {
+  display: flex; gap: 10px;
+  font-size: 10px; color: var(--ink-3);
+  padding-top: 8px;
+  border-top: 1px solid var(--sep-soft);
+}
+.compare-col .pick {
+  background: var(--bg-3);
+  border: 1px solid var(--sep-soft);
+  color: var(--ink);
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.compare-col .pick:hover { background: var(--accent); border-color: var(--accent); }
+
+/* =========================================================
+   CMD-K
+   ========================================================= */
+.cmdk {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(20px);
+  display: none;
+  align-items: flex-start; justify-content: center;
+  padding-top: 18vh;
+  z-index: 200;
+}
+.cmdk.open { display: flex; }
+.cmdk-panel {
+  width: min(620px, 92%);
+  background: var(--glass-3);
+  backdrop-filter: var(--mat-thick);
+  border: 1px solid var(--sep-soft);
+  border-radius: var(--radius-lg);
+  padding: 8px;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.6);
+}
+.cmdk-panel input {
+  width: 100%;
+  background: none; border: none; outline: none;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-size: 15px;
+  font-family: var(--font);
+}
+.cmdk-panel input::placeholder { color: var(--ink-3); }
+.cmdk-list {
+  border-top: 1px solid var(--sep-soft);
+  padding: 6px 4px;
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cmdk-item:hover, .cmdk-item.sel { background: var(--accent-soft); color: var(--ink); }
+.cmdk-item .hint {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+
+/* =========================================================
+   TOAST
+   ========================================================= */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--glass-3);
+  backdrop-filter: var(--mat-thick);
+  border: 1px solid var(--sep-soft);
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--ink);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 300;
+  display: flex; align-items: center; gap: 8px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.6);
+  transition: all 380ms var(--spring-snappy);
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast svg { color: var(--success); }
+
+/* =========================================================
+   RESPONSIVE
+   ========================================================= */
+@media (max-width: 1180px) {
+  .app {
+    grid-template-columns: 240px 1fr 280px;
+  }
+}
+@media (max-width: 980px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "topbar"
+      "stage"
+      "dock";
+  }
+  .inbox, .context { display: none; }
+}
+
+/* prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01s !important;
+    transition-duration: 120ms !important;
+  }
+  .card-wrap:not(.flipped) .face.front { animation: none; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ====== TOP BAR ====== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>Lucid <small>ESC-0421</small></div>
+    </div>
+    <div class="case-pill" id="casePill">
+      <span class="dot"></span>
+      <b id="casePillId">CASE-2419</b>
+      <span class="meta" id="casePillMeta">payroll · screenshot · 00:42 ago</span>
+    </div>
+    <div class="grow"></div>
+    <button class="kbar" id="cmdkOpen">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+      Jump to anything
+      <kbd>⌘K</kbd>
+    </button>
+    <button class="kbar" id="compareBtn" title="Compare providers">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="18" rx="1"/><rect x="14" y="3" width="7" height="18" rx="1"/></svg>
+      Compare 4 minds
+      <kbd>⌘D</kbd>
+    </button>
+    <div class="op-avatar" title="Maya Chen — L3 specialist">MC</div>
+  </header>
+
+  <!-- ====== INBOX RAIL ====== -->
+  <aside class="inbox">
+    <div class="inbox-head">
+      <h3>Incoming</h3>
+      <span class="inbox-count" id="inboxCount">7</span>
+    </div>
+    <div class="inbox-list" id="inboxList"></div>
+  </aside>
+
+  <!-- ====== CENTER STAGE: THE CARD ====== -->
+  <main class="stage">
+    <div class="bleed" id="bleed"></div>
+
+    <div class="card-wrap" id="cardWrap">
+
+      <!-- FRONT FACE: shows the active stage -->
+      <section class="face front" id="frontFace">
+        <!-- injected by JS -->
+      </section>
+
+      <!-- BACK FACE: reasoning bonded to the active face -->
+      <section class="face back" id="backFace">
+        <div class="reasoning-head">
+          <div class="rg">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636-.707.707M21 12h-1M4 12H3m3.343-5.657-.707-.707m2.828 9.9a5 5 0 1 1 7.072 0l-.548.547A3.374 3.374 0 0 0 14 18.469V19a2 2 0 1 1-4 0v-.531c0-.895-.356-1.754-.988-2.386z"/></svg>
+          </div>
+          <h3>Reasoning</h3>
+          <span class="face-name" id="reasoningFaceName">for: Triage</span>
+          <button class="save" id="saveReasoning">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+            Save with case
+            <kbd style="font-family:var(--font);font-size:10px;padding:1px 5px;background:var(--bg-4);border-radius:3px;color:var(--ink-2);">⌘S</kbd>
+          </button>
+        </div>
+        <div class="reasoning-body" id="reasoningBody">
+          <!-- injected -->
+        </div>
+        <div class="reasoning-foot">
+          <span class="by"><span class="prov-dot" id="provDot"></span> by <b id="provName" style="color:var(--ink);font-weight:500;">Claude 3.7 Sonnet</b></span>
+          <span>•</span>
+          <span id="reasoningTime">generated 12s ago</span>
+          <span>•</span>
+          <span>184 tokens of context</span>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ====== DOCK: face nav + flip + provider stack ====== -->
+  <footer class="dock">
+    <div class="face-nav" id="faceNav">
+      <button class="face-dot active" data-face="0"><span class="n">1</span> Intake</button>
+      <button class="face-dot" data-face="1"><span class="n">2</span> Parsed</button>
+      <button class="face-dot" data-face="2"><span class="n">3</span> Triage</button>
+      <button class="face-dot" data-face="3"><span class="n">4</span> INV</button>
+      <button class="face-dot" data-face="4"><span class="n">5</span> Draft</button>
+    </div>
+
+    <div class="dock-grow"></div>
+
+    <button class="flip-btn" id="flipBtn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>
+      Reasoning
+      <kbd>R</kbd>
+    </button>
+
+    <div class="providers" id="providers">
+      <button class="prov active" data-prov="claude">
+        <span class="prov-glyph claude">C</span>
+        Claude
+        <span class="hint">⌘1</span>
+      </button>
+      <button class="prov" data-prov="gpt">
+        <span class="prov-glyph gpt">G</span>
+        GPT
+        <span class="hint">⌘2</span>
+      </button>
+      <button class="prov" data-prov="gemini">
+        <span class="prov-glyph gemini">◆</span>
+        Gemini
+        <span class="hint">⌘3</span>
+      </button>
+      <button class="prov" data-prov="kimi">
+        <span class="prov-glyph kimi">K</span>
+        Kimi
+        <span class="hint">⌘4</span>
+      </button>
+    </div>
+  </footer>
+
+  <!-- ====== CONTEXT RAIL ====== -->
+  <aside class="context">
+    <div class="ctx-section">
+      <h4>Case timeline</h4>
+      <div class="timeline" id="timeline"></div>
+    </div>
+    <div class="ctx-section">
+      <h4>Confidence</h4>
+      <div class="confidence-bar">
+        <div class="meter"><i id="confBar"></i></div>
+        <div class="val" id="confVal">—</div>
+      </div>
+    </div>
+    <div class="notebook" id="notebook">
+      <h4>Case notebook</h4>
+      <div class="note">
+        <span class="stamp">phone agent · 00:00</span>
+        Caller reports payroll won't run. They tried twice in last 30 minutes. Says they're getting an error but couldn't read the code.
+      </div>
+      <div class="note" id="screenshotNote" style="display:none;">
+        <span class="stamp">screenshot captured · 00:42</span>
+        Webcam capture from phone agent: QBO payroll → Run payroll screen showing PS077 error.
+      </div>
+      <div id="savedReasonings"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ====== COMPARE OVERLAY ====== -->
+<div class="compare-overlay" id="compareOverlay">
+  <div class="compare-card">
+    <header>
+      <h2>Four minds, same task</h2>
+      <div class="sub">Drafting response · CASE-2419 · pick one to use</div>
+      <button class="close" id="compareClose">×</button>
+    </header>
+    <div class="compare-grid" id="compareGrid"></div>
+  </div>
+</div>
+
+<!-- ====== CMD-K ====== -->
+<div class="cmdk" id="cmdk">
+  <div class="cmdk-panel">
+    <input id="cmdkInput" placeholder="Jump to face, case, or INV…" />
+    <div class="cmdk-list" id="cmdkList"></div>
+  </div>
+</div>
+
+<!-- ====== TOAST ====== -->
+<div class="toast" id="toast">
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>
+  <span id="toastMsg">Saved.</span>
+</div>
+
+<script>
+/* =========================================================
+   STATE
+   ========================================================= */
+const FACES = ["intake", "parsed", "triage", "inv", "draft"];
+const FACE_LABELS = ["Intake", "Parsed", "Triage", "INV", "Draft"];
+
+const state = {
+  face: 0,
+  flipped: false,
+  provider: "claude",
+  parserDone: false,
+  triageChosen: null,
+  invMatched: null,
+  draftReady: false,
+  bleedFor: null,
+  reasoningSaved: {}, // by face index
+  done: [false,false,false,false,false],
+  confidence: 0
+};
+
+const PROVIDERS = {
+  claude: { name: "Claude 3.7 Sonnet", color: "#ff9f0a", glyph: "C", cls: "claude" },
+  gpt:    { name: "GPT-5",              color: "#10a37f", glyph: "G", cls: "gpt" },
+  gemini: { name: "Gemini 2.5 Pro",     color: "#4285f4", glyph: "◆", cls: "gemini" },
+  kimi:   { name: "Kimi K2",            color: "#5e5ce6", glyph: "K", cls: "kimi" }
+};
+
+/* Realistic mock data */
+const INBOX = [
+  { id: "CASE-2419", sev: "high", title: "Payroll PS077 — can't run payroll, error after submit", agent: "Riley P.", age: "00:42", active: true },
+  { id: "CASE-2418", sev: "med",  title: "Bank feed disconnect — Wells Fargo, reauth loop", agent: "Tomás G.", age: "03:11" },
+  { id: "CASE-2417", sev: "crit", title: "1099 vendor mapping wiped after file rebuild", agent: "Priya N.", age: "05:48" },
+  { id: "CASE-2416", sev: "low",  title: "User asking how to inactivate a duplicate customer", agent: "Marcus L.", age: "08:02" },
+  { id: "CASE-2415", sev: "high", title: "Sales tax filing shows $0 due — actual is $3,418.92", agent: "Riley P.", age: "11:30" },
+  { id: "CASE-2414", sev: "med",  title: "Reconcile difference — bank balance off by $0.47 every month", agent: "Jamie W.", age: "14:15" },
+  { id: "CASE-2413", sev: "crit", title: "Customer locked out — 2FA SMS not arriving (3rd report today)", agent: "Tomás G.", age: "18:51" }
+];
+
+const INV_RESULTS = [
+  { id: "INV-094217", title: "PS077 after Run Payroll click — bank verification reset", note: "63 occurrences · last hit 4h ago · pattern: bank.verification.expired", conf: 92 },
+  { id: "INV-088904", title: "PS077 intermittent — payment method timeout", note: "12 occurrences · pattern: payment.gateway.timeout", conf: 47 },
+  { id: "INV-076351", title: "PS077 only on Chase-routed accounts (legacy)", note: "4 occurrences · last hit 11d ago", conf: 18 }
+];
+
+const TIMELINE = [
+  { label: "Case opened by phone agent", time: "00:00", state: "done" },
+  { label: "Screenshot captured (webcam)", time: "00:42", state: "done" },
+  { label: "Parser extracted error + screen context", time: "00:51", state: "done" },
+  { label: "Triage classified · Sev 2 · Payroll", time: "01:07", state: "active" },
+  { label: "INV match pending operator confirm", time: "—", state: "pending" },
+  { label: "Draft response", time: "—", state: "pending" }
+];
+
+const PARSED_FIELDS = [
+  { k: "Error code", v: "PS077", conf: 99 },
+  { k: "Screen", v: "Payroll → Run", conf: 96 },
+  { k: "Action attempted", v: "Click 'Submit payroll'", conf: 91 },
+  { k: "Repeat count", v: "2 attempts in 30m", conf: 88, warn: false },
+  { k: "Bank account", v: "Wells Fargo ••3819", conf: 84, warn: true },
+  { k: "Last successful run", v: "2026-05-09 (7 days ago)", conf: 79, warn: true },
+  { k: "Verbatim error", v: '"Something went wrong (PS077). Please try again." — modal, red banner.', conf: 97, full: true }
+];
+
+const REASONING = {
+  0: [
+    { body: "<b>Intake check:</b> phone agent attached a webcam capture (1080×1920, portrait). Image quality: legible. Source: <span class='ref'>capture/agent-riley-p</span>" },
+    { body: "<b>Caller report:</b> 'payroll won't run, tried twice, got an error code but didn't write it down.' Three unknowns: which payroll, what code, what step. Screenshot resolves all three." },
+    { body: "<b>Decision:</b> proceed to parse. No need to ask phone agent for more info — screenshot is sufficient." }
+  ],
+  1: [
+    { body: "<b>OCR pass:</b> 11 text regions extracted, 7 mapped to known QBO surface elements via <span class='ref'>playbook/qbo-screen-atlas</span>" },
+    { body: "<b>Error code recognition:</b> 'PS077' matched against known error registry (97 entries). Confidence 99% — exact glyph match." },
+    { body: "<b>Screen identification:</b> top-left logo + nav structure → Payroll. Body shows employee list with checkboxes → Run Payroll subview. Confidence 96%." },
+    { body: "<b>Ambiguity flagged:</b> bank account shown is Wells Fargo (visible: ••3819) — but this might be the funding account, not the debit account. <span class='ref'>missing-info</span>" }
+  ],
+  2: [
+    { body: "<b>Severity reasoning:</b> Sev 2 (High) because (a) blocks payroll run, which has a 24-hour funding window, and (b) customer has already attempted twice — frustration risk. Not Sev 1 (Critical) because not multi-tenant and not data loss." },
+    { body: "<b>Category:</b> Payroll → Funding/Verification subcategory. Cross-checked against <span class='ref'>playbook/payroll-error-routing</span>" },
+    { body: "<b>Missing info request:</b> need confirmation that ••3819 is the <i>debit</i> account. Phone agent can ask in one question. Don't proceed to INV match without this — wrong account routing changes the INV candidate set." },
+    { body: "<b>Next step:</b> ping phone agent with one targeted question, then auto-advance to INV." }
+  ],
+  3: [
+    { body: "<b>Search vector:</b> error=PS077, surface=payroll.run, sub=funding, recency=24h. Three candidates surfaced from <span class='ref'>inv-store</span>." },
+    { body: "<b>Top match — INV-094217 at 92%:</b> exact error code, exact surface, pattern 'bank.verification.expired' fires when an account hasn't been used in 7+ days. Our case: last run 7 days ago. <i>This is the one.</i>" },
+    { body: "<b>Why not INV-088904 (47%):</b> that one's a gateway timeout — symptom looks the same to the customer but the QBO log signature is different. Operator can override if log access becomes available." },
+    { body: "<b>Why not INV-076351 (18%):</b> Chase-only legacy pattern, customer is on Wells Fargo." }
+  ],
+  4: [
+    { body: "<b>Template selected:</b> <span class='ref'>templates/payroll-bank-reverify</span> — 4 steps, ~2 minutes for customer." },
+    { body: "<b>Personalization:</b> referenced exact bank/account from parsed fields. Mentioned 'two attempts' so customer feels heard. Did not mention error code by name — adds noise without aiding resolution." },
+    { body: "<b>Tone:</b> calm, instructional, no apology theatre. Customer is frustrated; competence reads as care." },
+    { body: "<b>What's NOT included:</b> no link to status page (no incident), no escalation offer (single-customer issue), no upsell. Each omission was a decision." }
+  ]
+};
+
+const COMPARE_RESPONSES = {
+  claude: {
+    conf: 92,
+    text: "Hi Riley — this is PS077, which fires when QBO's stored bank verification has lapsed (typically 7+ days idle). The fix is a 60-second reverification:\n\n1. Settings → Payroll Settings → Bank Accounts\n2. Tap the Wells Fargo account ••3819 → Reverify\n3. QBO will send two small test deposits (under $1 each, usually within 2 hours)\n4. Once deposits arrive, enter them in Payroll Settings → Verify Deposits\n\nThen rerun payroll. Customer's pay date is unaffected as long as this is done by 5pm PT today.\n\nINV-094217 attached.",
+    stats: { tok: 312, ms: 1840 }
+  },
+  gpt: {
+    conf: 89,
+    text: "Hi Riley,\n\nThe PS077 error indicates a bank verification reset. Please have the customer:\n\n• Navigate to Settings → Payroll Settings → Bank Accounts\n• Select the Wells Fargo account ending 3819\n• Click 'Reverify'\n• Wait for the two micro-deposits (under $1 each) — typically 1-2 business hours\n• Enter the exact amounts under Verify Deposits\n• Retry the payroll run\n\nThe customer's funding window is still open if completed today. Linked: INV-094217.",
+    stats: { tok: 287, ms: 2110 }
+  },
+  gemini: {
+    conf: 84,
+    text: "Riley, you can have the customer resolve this themselves in under 5 minutes:\n\nStep 1: Settings (gear icon) → Payroll Settings → Bank Accounts\nStep 2: Select Wells Fargo ••3819, choose Reverify\nStep 3: Two test deposits will arrive in 1–2 hours\nStep 4: Enter amounts in Verify Deposits\nStep 5: Rerun payroll\n\nThis is a known pattern (INV-094217). If reverification fails, escalate back to us with the bank rejection screenshot.",
+    stats: { tok: 254, ms: 1410 }
+  },
+  kimi: {
+    conf: 81,
+    text: "Hey Riley,\n\nPS077 = bank verification expired. Walk customer through:\n\n1. Settings > Payroll Settings > Bank Accounts\n2. Click Wells Fargo ••3819, then 'Reverify'\n3. Two test deposits arrive in ~2hrs\n4. Enter them under Verify Deposits\n5. Retry payroll run\n\nSee INV-094217 for the full pattern.\n\nLet me know if the bank rejects the reverification request — that's a different escalation path.",
+    stats: { tok: 219, ms: 1190 }
+  }
+};
+
+/* =========================================================
+   RENDER: front face
+   ========================================================= */
+const front = document.getElementById("frontFace");
+
+function renderFace(idx) {
+  if (idx === 0) {
+    front.innerHTML = `
+      <div class="face-head">
+        <div class="face-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m21 15-5-5L5 21"/></svg>
+        </div>
+        <div class="face-title">Intake</div>
+        <div class="face-sub">drop · paste · webcam · capture</div>
+      </div>
+      <div class="face-body">
+        <div class="intake">
+          <div class="dropzone" id="dropzone">
+            <div class="ring">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+            </div>
+            <p>Drop a screenshot, paste from clipboard, or capture from webcam</p>
+            <small>Or wait — phone agents push captures here directly</small>
+          </div>
+          <div class="intake-routes">
+            <button class="route-btn" id="routeFile">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="label">File</span>
+              <span class="hint">⌘O</span>
+            </button>
+            <button class="route-btn" id="routePaste">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <span class="label">Paste</span>
+              <span class="hint">⌘V</span>
+            </button>
+            <button class="route-btn" id="routeWebcam">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              <span class="label">Webcam</span>
+              <span class="hint">⌘W</span>
+            </button>
+            <button class="route-btn" id="routeCapture">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M3 16V8a2 2 0 0 1 2-2h2l2-3h6l2 3h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+              <span class="label">Capture</span>
+              <span class="hint">⌘⇧4</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    wireIntake();
+  }
+
+  else if (idx === 1) {
+    front.innerHTML = `
+      <div class="face-head">
+        <div class="face-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2z"/><path d="M9 13h6"/><path d="M9 17h3"/></svg>
+        </div>
+        <div class="face-title">Parsed</div>
+        <div class="face-sub">7 fields · 84% avg confidence</div>
+      </div>
+      <div class="face-body">
+        <div class="parsing">
+          <div class="parse-screenshot">
+            <div class="qbo-mock">
+              <div class="qbo-bar"><span class="qbo-logo">Q</span> Payroll · Run · Wells Fargo ••3819 · Pay date May 16</div>
+              <div>Maya Chen          Salary · biweekly      $4,615.38</div>
+              <div>Aiden Brooks       Hourly · 80h           $1,840.00</div>
+              <div>Sofia Reyes        Salary · biweekly      $4,038.46</div>
+              <div>Devon Patel        Hourly · 72h           $1,512.00</div>
+              <div>Total              4 employees            $12,005.84</div>
+              <div class="err">⚠ Something went wrong (PS077). Please try again.</div>
+            </div>
+            <div class="scan-beam" id="scanBeam"></div>
+          </div>
+          <div class="parse-fields" id="parseFields"></div>
+        </div>
+      </div>
+    `;
+    runParse();
+  }
+
+  else if (idx === 2) {
+    const sev = state.triageChosen || 2;
+    front.innerHTML = `
+      <div class="face-head">
+        <div class="face-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 2"/></svg>
+        </div>
+        <div class="face-title">Triage</div>
+        <div class="face-sub">payroll · funding · 1 missing</div>
+      </div>
+      <div class="face-body">
+        <div class="triage">
+          <div class="severity-row" id="severityRow">
+            <button class="sev-chip sev1" data-sev="1"><div class="lvl">S1</div><div class="lbl">Critical</div></button>
+            <button class="sev-chip sev2 ${sev===2?'sel':''}" data-sev="2"><div class="lvl">S2</div><div class="lbl">High</div></button>
+            <button class="sev-chip sev3" data-sev="3"><div class="lvl">S3</div><div class="lbl">Medium</div></button>
+            <button class="sev-chip sev4" data-sev="4"><div class="lvl">S4</div><div class="lbl">Low</div></button>
+          </div>
+          <div class="triage-grid">
+            <div class="t-card">
+              <div class="label">Category</div>
+              <div class="value">Payroll</div>
+              <div><span class="pill">funding</span><span class="pill">bank-verification</span></div>
+            </div>
+            <div class="t-card">
+              <div class="label">Next step</div>
+              <div class="value">Match against INV</div>
+            </div>
+            <div class="t-card full">
+              <div class="label">One-line summary</div>
+              <div class="value">Customer can't run payroll — PS077 fires after Submit; pattern matches expired bank verification on idle account (last run 7 days ago).</div>
+            </div>
+          </div>
+          <div class="missing">
+            <div class="icon">?</div>
+            <div class="body">
+              <b>Missing info</b> — the screenshot shows Wells Fargo ••3819 as the funding account. Confirm with phone agent that this is the <b>debit account</b> being used, not just displayed. Wrong account changes the INV match.
+            </div>
+            <button class="ask-btn" id="askBtn">Ask Riley P.</button>
+          </div>
+        </div>
+      </div>
+    `;
+    wireTriage();
+  }
+
+  else if (idx === 3) {
+    front.innerHTML = `
+      <div class="face-head">
+        <div class="face-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <div class="face-title">INV match</div>
+        <div class="face-sub">3 candidates · top 92%</div>
+      </div>
+      <div class="face-body">
+        <div class="inv">
+          <div class="inv-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            <input value="error=PS077 surface=payroll.run sub=funding recency=24h" readonly />
+            <div class="scanning"><span class="blip"></span><span id="scanText">scanning 2,184 INV records</span></div>
+          </div>
+          <div class="inv-results" id="invResults"></div>
+          <div class="create-new">+ Create new INV (no match)</div>
+        </div>
+      </div>
+    `;
+    runInvSearch();
+  }
+
+  else if (idx === 4) {
+    const r = COMPARE_RESPONSES[state.provider];
+    front.innerHTML = `
+      <div class="face-head">
+        <div class="face-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m3 11 18-8-8 18-2-8z"/></svg>
+        </div>
+        <div class="face-title">Draft response</div>
+        <div class="face-sub">to phone agent · using INV-094217</div>
+      </div>
+      <div class="face-body">
+        <div class="draft">
+          <div class="draft-to">
+            <span class="lab">To</span>
+            <span class="who"><b>Riley P.</b> · phone agent · re: CASE-2419</span>
+            <span class="ext">delivers in-app + Slack DM</span>
+          </div>
+          <div class="draft-body" id="draftBody"></div>
+          <div class="draft-actions">
+            <button class="send" id="sendBtn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m22 2-7 20-4-9-9-4z"/></svg>
+              Send to Riley
+              <kbd>⌘↵</kbd>
+            </button>
+            <button class="ghost" id="rerunBtn">Re-run with different provider</button>
+            <div class="right">
+              <button class="ghost" id="editBtn">Edit</button>
+              <button class="ghost" id="copyBtn">Copy</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    typeDraft(r.text);
+    wireDraft();
+  }
+
+  renderReasoning();
+  highlightFaceNav();
+  updateBleed();
+  updateConfidence();
+  // sync top bar
+  document.getElementById("casePillMeta").textContent =
+    `payroll · ${FACE_LABELS[idx].toLowerCase()} · 00:42 ago`;
+}
+
+/* =========================================================
+   REASONING (back face)
+   ========================================================= */
+function renderReasoning() {
+  const body = document.getElementById("reasoningBody");
+  const items = REASONING[state.face] || [];
+  body.innerHTML = items.map((t,i) => `
+    <div class="thought">
+      <div class="num">${i+1}</div>
+      <div class="body">${t.body}</div>
+    </div>
+  `).join("");
+  document.getElementById("reasoningFaceName").textContent = "for: " + FACE_LABELS[state.face];
+  const p = PROVIDERS[state.provider];
+  document.getElementById("provDot").style.background = p.color;
+  document.getElementById("provDot").style.boxShadow = `0 0 6px ${p.color}`;
+  document.getElementById("provName").textContent = p.name;
+  const saveBtn = document.getElementById("saveReasoning");
+  if (state.reasoningSaved[state.face]) {
+    saveBtn.classList.add("saved");
+    saveBtn.firstElementChild.outerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6 9 17l-5-5"/></svg>`;
+    saveBtn.childNodes[2].textContent = ' Saved with case ';
+  }
+}
+
+/* =========================================================
+   INBOX
+   ========================================================= */
+function renderInbox() {
+  const list = document.getElementById("inboxList");
+  list.innerHTML = INBOX.map((c,i) => `
+    <div class="tile ${c.active?'active':''}" data-id="${c.id}">
+      <div class="tile-row">
+        <span class="tile-sev ${c.sev}"></span>
+        <span class="tile-id">${c.id}</span>
+        <span class="tile-age">${c.age}</span>
+      </div>
+      <div class="tile-title">${c.title}</div>
+      <div class="tile-meta"><span class="agent">${c.agent}</span> · ${c.sev.toUpperCase()}</div>
+    </div>
+  `).join("");
+  list.querySelectorAll(".tile").forEach(el => {
+    el.addEventListener("click", () => {
+      list.querySelectorAll(".tile").forEach(t => t.classList.remove("active"));
+      el.classList.add("active");
+      const id = el.dataset.id;
+      document.getElementById("casePillId").textContent = id;
+      toast(`Loaded ${id} into card`);
+    });
+  });
+}
+
+/* =========================================================
+   TIMELINE
+   ========================================================= */
+function renderTimeline() {
+  const tl = document.getElementById("timeline");
+  tl.innerHTML = TIMELINE.map(e => `
+    <div class="tl-event ${e.state}">
+      <div class="dot"></div>
+      <div class="info"><b>${e.label}</b></div>
+      <div class="time">${e.time}</div>
+    </div>
+  `).join("");
+}
+
+/* =========================================================
+   INTAKE
+   ========================================================= */
+function wireIntake() {
+  const drop = document.getElementById("dropzone");
+  const advance = () => {
+    document.getElementById("screenshotNote").style.display = "block";
+    toast("Screenshot received — parsing");
+    setTimeout(() => goFace(1), 360);
+  };
+  drop.addEventListener("click", advance);
+  ["routeFile","routePaste","routeCapture"].forEach(id => {
+    document.getElementById(id).addEventListener("click", e => {
+      e.stopPropagation();
+      advance();
+    });
+  });
+  document.getElementById("routeWebcam").addEventListener("click", e => {
+    e.stopPropagation();
+    toast("Webcam activated — capturing from agent's device");
+    setTimeout(advance, 600);
+  });
+}
+
+/* =========================================================
+   PARSE animation
+   ========================================================= */
+function runParse() {
+  const beam = document.getElementById("scanBeam");
+  if (beam) beam.classList.add("run");
+  const grid = document.getElementById("parseFields");
+  if (!grid) return;
+  grid.innerHTML = PARSED_FIELDS.map(f => `
+    <div class="field ${f.full?'full':''}">
+      <div class="k">${f.k}</div>
+      <div class="v">${f.v}<span class="conf ${f.warn?'warn':''}">${f.conf}%</span></div>
+    </div>
+  `).join("");
+  const fields = grid.querySelectorAll(".field");
+  fields.forEach((f, i) => {
+    setTimeout(() => f.classList.add("in"), 240 + i * 140);
+  });
+  setTimeout(() => {
+    if (beam) beam.classList.remove("run");
+    state.parserDone = true;
+    state.done[1] = true;
+    state.confidence = 84;
+    updateConfidence();
+    highlightFaceNav();
+  }, 240 + fields.length * 140 + 400);
+}
+
+/* =========================================================
+   TRIAGE wiring
+   ========================================================= */
+function wireTriage() {
+  state.triageChosen = state.triageChosen || 2;
+  document.querySelectorAll(".sev-chip").forEach(c => {
+    c.addEventListener("click", () => {
+      document.querySelectorAll(".sev-chip").forEach(x => x.classList.remove("sel"));
+      c.classList.add("sel");
+      state.triageChosen = +c.dataset.sev;
+      state.done[2] = true;
+      state.confidence = 88;
+      updateConfidence();
+      highlightFaceNav();
+    });
+  });
+  document.getElementById("askBtn").addEventListener("click", () => {
+    toast("Sent to Riley P. — awaiting reply");
+  });
+}
+
+/* =========================================================
+   INV SEARCH
+   ========================================================= */
+function runInvSearch() {
+  const wrap = document.getElementById("invResults");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  setTimeout(() => {
+    document.getElementById("scanText").textContent = `matched ${INV_RESULTS.length} candidates`;
+    INV_RESULTS.forEach((r, i) => {
+      const row = document.createElement("div");
+      row.className = "inv-row";
+      if (i === 0) row.classList.add("match");
+      row.innerHTML = `
+        <div class="inv-id">${r.id}</div>
+        <div class="inv-title">${r.title}<small>${r.note}</small></div>
+        <div class="inv-conf">
+          <div class="conf-bar"><i style="width:0%"></i></div>
+          <span>${r.conf}%</span>
+        </div>
+      `;
+      wrap.appendChild(row);
+      setTimeout(() => {
+        row.classList.add("in");
+        row.querySelector(".conf-bar i").style.width = r.conf + "%";
+      }, 80 + i * 220);
+      row.addEventListener("click", () => {
+        wrap.querySelectorAll(".inv-row").forEach(x => x.classList.remove("match"));
+        row.classList.add("match");
+        state.invMatched = r.id;
+        state.done[3] = true;
+        state.confidence = Math.max(state.confidence, r.conf);
+        updateConfidence();
+        highlightFaceNav();
+        toast(`Linked ${r.id} to case`);
+      });
+    });
+    state.invMatched = INV_RESULTS[0].id;
+    state.done[3] = true;
+    state.confidence = Math.max(state.confidence, 92);
+    updateConfidence();
+    highlightFaceNav();
+  }, 600);
+}
+
+/* =========================================================
+   DRAFT typewriter
+   ========================================================= */
+let typeTimer = null;
+function typeDraft(text) {
+  const el = document.getElementById("draftBody");
+  if (!el) return;
+  clearInterval(typeTimer);
+  el.innerHTML = "";
+  let i = 0;
+  // mark sources in final pass
+  const finalize = () => {
+    let html = text;
+    // wrap source citations in <span class="src">
+    html = html.replace(/PS077/g, '<span class="src" title="from parsed field: Error code">PS077</span>');
+    html = html.replace(/Wells Fargo account ••3819/g, '<span class="src" title="from parsed field: Bank account">Wells Fargo account ••3819</span>');
+    html = html.replace(/INV-094217/g, '<span class="src" title="from INV match — 92% confidence">INV-094217</span>');
+    html = html.replace(/7\+ days idle/g, '<span class="src" title="from parsed field: Last successful run">7+ days idle</span>');
+    el.innerHTML = html;
+    state.draftReady = true;
+    state.done[4] = true;
+    state.confidence = 92;
+    updateConfidence();
+    highlightFaceNav();
+  };
+  const tick = () => {
+    if (i >= text.length) {
+      clearInterval(typeTimer);
+      finalize();
+      return;
+    }
+    el.textContent = text.slice(0, i+1);
+    el.innerHTML = el.innerHTML + '<span class="cursor"></span>';
+    i += Math.max(2, Math.floor(Math.random() * 4));
+  };
+  typeTimer = setInterval(tick, 16);
+}
+
+function wireDraft() {
+  document.getElementById("sendBtn").addEventListener("click", () => {
+    toast("Sent to Riley P. — Slack + in-app");
+  });
+  document.getElementById("rerunBtn").addEventListener("click", openCompare);
+  document.getElementById("editBtn").addEventListener("click", () => {
+    toast("Editing — type to override");
+  });
+  document.getElementById("copyBtn").addEventListener("click", () => {
+    toast("Copied to clipboard");
+  });
+}
+
+/* =========================================================
+   PROVIDER SWAP
+   ========================================================= */
+function setProvider(key) {
+  if (!PROVIDERS[key]) return;
+  state.provider = key;
+  document.querySelectorAll(".prov").forEach(p => p.classList.toggle("active", p.dataset.prov === key));
+  // re-derive draft if on draft face
+  if (state.face === 4) {
+    const el = document.getElementById("draftBody");
+    el.style.transition = "opacity 220ms";
+    el.style.opacity = "0.2";
+    setTimeout(() => {
+      el.style.opacity = "1";
+      typeDraft(COMPARE_RESPONSES[key].text);
+    }, 240);
+  }
+  renderReasoning();
+  toast(`Swapped to ${PROVIDERS[key].name}`);
+}
+
+/* =========================================================
+   FACE NAV
+   ========================================================= */
+function goFace(idx) {
+  if (idx < 0 || idx >= FACES.length) return;
+  if (state.flipped) flipCard(false);
+  state.face = idx;
+  renderFace(idx);
+}
+function highlightFaceNav() {
+  document.querySelectorAll(".face-dot").forEach((d, i) => {
+    d.classList.toggle("active", i === state.face);
+    d.classList.toggle("done", !!state.done[i] && i !== state.face);
+    // inject checkmark if done
+    const check = d.querySelector(".check");
+    if (state.done[i] && i !== state.face && !check) {
+      const c = document.createElement("span");
+      c.className = "check"; c.textContent = "✓";
+      d.appendChild(c);
+    } else if ((!state.done[i] || i === state.face) && check) {
+      check.remove();
+    }
+  });
+}
+
+/* =========================================================
+   FLIP
+   ========================================================= */
+function flipCard(force) {
+  const wrap = document.getElementById("cardWrap");
+  state.flipped = force === undefined ? !state.flipped : !!force;
+  wrap.classList.toggle("flipped", state.flipped);
+}
+
+/* =========================================================
+   BLEED (vibrancy bleed-through)
+   ========================================================= */
+function updateBleed() {
+  const bleed = document.getElementById("bleed");
+  bleed.innerHTML = "";
+  if (state.face === 2) {
+    // playbook bleed
+    bleed.classList.add("show");
+    const bits = [
+      "playbook/payroll-error-routing.md",
+      "PS077 → bank.verification.expired",
+      "Sev 2: blocks payroll within 24h funding window",
+      "if account idle >7d → reverify",
+      "templates/payroll-bank-reverify",
+      "do not escalate to bank team unless reverify fails"
+    ];
+    bits.forEach(b => {
+      const c = document.createElement("div"); c.className = "bleed-chip"; c.textContent = b; bleed.appendChild(c);
+    });
+  } else if (state.face === 3) {
+    bleed.classList.add("show");
+    const bits = [
+      "INV-094217 · 63 occurrences",
+      "INV-088904 · 12 occurrences",
+      "INV-076351 · 4 occurrences (Chase)",
+      "pattern: bank.verification.expired",
+      "search · 2,184 INV records · idx-ps077",
+      "auto-link on >85% match"
+    ];
+    bits.forEach(b => {
+      const c = document.createElement("div"); c.className = "bleed-chip"; c.textContent = b; bleed.appendChild(c);
+    });
+  } else {
+    bleed.classList.remove("show");
+  }
+}
+
+/* =========================================================
+   CONFIDENCE
+   ========================================================= */
+function updateConfidence() {
+  const v = state.confidence;
+  document.getElementById("confBar").style.width = v + "%";
+  document.getElementById("confVal").textContent = v ? v + "%" : "—";
+}
+
+/* =========================================================
+   TOAST
+   ========================================================= */
+let toastTimer = null;
+function toast(msg) {
+  const t = document.getElementById("toast");
+  document.getElementById("toastMsg").textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+/* =========================================================
+   SAVE REASONING
+   ========================================================= */
+function saveReasoning() {
+  state.reasoningSaved[state.face] = true;
+  renderReasoning();
+  const nb = document.getElementById("savedReasonings");
+  const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const note = document.createElement("div");
+  note.className = "note saved-reasoning";
+  note.innerHTML = `<span class="stamp">reasoning saved · ${FACE_LABELS[state.face]} · ${stamp}</span>
+    Bonded ${REASONING[state.face].length} thoughts from ${PROVIDERS[state.provider].name} to face <b>${FACE_LABELS[state.face]}</b>. Replayable.`;
+  nb.appendChild(note);
+  toast("Reasoning saved with case · auditable forever");
+}
+
+/* =========================================================
+   COMPARE OVERLAY
+   ========================================================= */
+function openCompare() {
+  const grid = document.getElementById("compareGrid");
+  grid.innerHTML = Object.entries(COMPARE_RESPONSES).map(([k, r]) => {
+    const p = PROVIDERS[k];
+    return `
+      <div class="compare-col">
+        <header>
+          <span class="prov-glyph ${p.cls}">${p.glyph}</span>
+          <h3>${p.name}</h3>
+          <span class="conf">${r.conf}%</span>
+        </header>
+        <div class="resp">${r.text.replace(/\n/g,'<br>')}</div>
+        <div class="stats"><span>${r.stats.tok} tokens</span><span>${r.stats.ms}ms</span></div>
+        <button class="pick" data-prov="${k}">Use this draft</button>
+      </div>
+    `;
+  }).join("");
+  grid.querySelectorAll(".pick").forEach(b => {
+    b.addEventListener("click", () => {
+      setProvider(b.dataset.prov);
+      closeCompare();
+    });
+  });
+  document.getElementById("compareOverlay").classList.add("open");
+}
+function closeCompare() {
+  document.getElementById("compareOverlay").classList.remove("open");
+}
+
+/* =========================================================
+   CMD-K
+   ========================================================= */
+const CMD_ITEMS = [
+  { label: "Face: Intake",   hint: "1", fn: () => goFace(0) },
+  { label: "Face: Parsed",   hint: "2", fn: () => goFace(1) },
+  { label: "Face: Triage",   hint: "3", fn: () => goFace(2) },
+  { label: "Face: INV match",hint: "4", fn: () => goFace(3) },
+  { label: "Face: Draft",    hint: "5", fn: () => goFace(4) },
+  { label: "Flip — show reasoning", hint: "R", fn: () => flipCard() },
+  { label: "Compare 4 providers",   hint: "⌘D", fn: openCompare },
+  { label: "Use Claude",   hint: "⌘1", fn: () => setProvider("claude") },
+  { label: "Use GPT",      hint: "⌘2", fn: () => setProvider("gpt") },
+  { label: "Use Gemini",   hint: "⌘3", fn: () => setProvider("gemini") },
+  { label: "Use Kimi",     hint: "⌘4", fn: () => setProvider("kimi") },
+  { label: "Save reasoning with case", hint: "⌘S", fn: saveReasoning },
+  { label: "Open CASE-2418 — Wells Fargo bank feed", hint: "↵", fn: () => { document.querySelector('[data-id=CASE-2418]')?.click(); } }
+];
+function openCmdK() {
+  document.getElementById("cmdk").classList.add("open");
+  document.getElementById("cmdkInput").value = "";
+  document.getElementById("cmdkInput").focus();
+  renderCmdList("");
+}
+function closeCmdK() {
+  document.getElementById("cmdk").classList.remove("open");
+}
+function renderCmdList(q) {
+  const filtered = CMD_ITEMS.filter(c => c.label.toLowerCase().includes(q.toLowerCase()));
+  document.getElementById("cmdkList").innerHTML = filtered.map((c, i) => `
+    <div class="cmdk-item ${i===0?'sel':''}" data-idx="${CMD_ITEMS.indexOf(c)}">
+      ${c.label}
+      <span class="hint">${c.hint}</span>
+    </div>
+  `).join("");
+  document.querySelectorAll(".cmdk-item").forEach(el => {
+    el.addEventListener("click", () => {
+      CMD_ITEMS[+el.dataset.idx].fn();
+      closeCmdK();
+    });
+  });
+}
+
+/* =========================================================
+   KEYBOARD
+   ========================================================= */
+window.addEventListener("keydown", e => {
+  const isMeta = e.metaKey || e.ctrlKey;
+  if (isMeta && e.key.toLowerCase() === "k") { e.preventDefault(); openCmdK(); return; }
+  if (isMeta && e.key.toLowerCase() === "d") { e.preventDefault(); openCompare(); return; }
+  if (isMeta && e.key === "1") { e.preventDefault(); setProvider("claude"); return; }
+  if (isMeta && e.key === "2") { e.preventDefault(); setProvider("gpt"); return; }
+  if (isMeta && e.key === "3") { e.preventDefault(); setProvider("gemini"); return; }
+  if (isMeta && e.key === "4") { e.preventDefault(); setProvider("kimi"); return; }
+  if (isMeta && e.key.toLowerCase() === "s") { e.preventDefault(); saveReasoning(); return; }
+  if (isMeta && e.key === "Enter" && state.face === 4) { e.preventDefault(); toast("Sent to Riley P."); return; }
+  if (e.key === "Escape") {
+    closeCmdK();
+    document.getElementById("compareOverlay").classList.remove("open");
+    if (state.flipped) flipCard(false);
+    return;
+  }
+  if (document.getElementById("cmdk").classList.contains("open")) return;
+  if (e.key.toLowerCase() === "r") { flipCard(); return; }
+  if (e.key === "ArrowRight") { goFace(Math.min(state.face+1, FACES.length-1)); return; }
+  if (e.key === "ArrowLeft")  { goFace(Math.max(state.face-1, 0)); return; }
+  if (/^[1-5]$/.test(e.key) && !isMeta) { goFace(+e.key - 1); return; }
+});
+
+document.getElementById("cmdkInput")?.addEventListener("input", e => renderCmdList(e.target.value));
+
+/* =========================================================
+   WIRING
+   ========================================================= */
+document.getElementById("flipBtn").addEventListener("click", () => flipCard());
+document.getElementById("saveReasoning").addEventListener("click", saveReasoning);
+document.getElementById("compareBtn").addEventListener("click", openCompare);
+document.getElementById("compareClose").addEventListener("click", closeCompare);
+document.getElementById("cmdkOpen").addEventListener("click", openCmdK);
+document.getElementById("compareOverlay").addEventListener("click", e => {
+  if (e.target.id === "compareOverlay") closeCompare();
+});
+document.querySelectorAll(".face-dot").forEach(d => {
+  d.addEventListener("click", () => goFace(+d.dataset.face));
+});
+document.querySelectorAll(".prov").forEach(p => {
+  p.addEventListener("click", () => setProvider(p.dataset.prov));
+});
+
+/* =========================================================
+   BOOT
+   ========================================================= */
+renderInbox();
+renderTimeline();
+renderFace(0);
+
+/* gentle attention pulse after 1.4s — the card is asking for input */
+setTimeout(() => {
+  document.getElementById("cardWrap").classList.add("needs-input");
+  setTimeout(() => document.getElementById("cardWrap").classList.remove("needs-input"), 3200);
+}, 1400);
+</script>
+
+<!--
+Inspiration:
+- Apple Human Interface Guidelines — Liquid Glass (WWDC25), vibrancy materials,
+  spring physics, content-over-chrome, semantic dark mode.
+- First-principles: the case is a physical object with faces, not a chat stream.
+  Reasoning is the BACK of the face that produced it, never detached.
+  Providers are stacked glass materials swapped in place (⌘1-4), not a dropdown.
+-->
+</body>
+</html>

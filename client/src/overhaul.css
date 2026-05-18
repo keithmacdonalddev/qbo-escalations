@@ -1694,6 +1694,24 @@ code, pre {
   cursor: pointer !important;
 }
 
+.provider-chip:disabled,
+.provider-chip.is-disabled,
+.provider-popover-option:disabled,
+.provider-popover-option.is-disabled,
+.workspace-agent-provider-choice:disabled,
+.workspace-agent-provider-choice.is-disabled,
+.assistant-model-card:disabled,
+.assistant-model-card.is-disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(0.35) !important;
+}
+
+.provider-chip:disabled:hover,
+.provider-chip.is-disabled:hover {
+  cursor: not-allowed !important;
+}
+
 .provider-chip.is-open {
   background: rgba(10, 132, 255, 0.15) !important;
   border-color: rgba(10, 132, 255, 0.3) !important;

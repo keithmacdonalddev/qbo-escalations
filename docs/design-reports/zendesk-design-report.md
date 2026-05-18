@@ -1,172 +1,64 @@
-# Zendesk Garden Design System -- Application to QBO Escalation Tool
+# designer-zendesk — V4 design report
 
-**Report Date:** 2026-03-19
-**Company:** Zendesk (Garden Design System, v9)
-**Relevance:** HIGHEST -- Both Zendesk and this QBO tool serve support agents who spend 8+ hours daily resolving customer issues. Zendesk is the industry standard for support-agent tooling.
+**Output:** `prototypes/escalation-chat-challenge/v4/zendesk/index.html`
+**Forced angle:** SINGLE FOCAL POINT — only one element is at full size and active at any moment.
 
----
+## The angle, structurally
 
-## 1. Executive Summary
+V3 lost because nine entries all crowded four edges of the screen. V4 rule: at any given instant the operator's eye should land on exactly one rectangle. The workflow itself is a focus-shift: intake → parsed → triage → analyst. Each stage *replaces* the previous focal region rather than stacking beside it.
 
-Zendesk Garden is the most directly relevant design system for the QBO escalation tool because both products serve the identical user persona: a support specialist who spends an entire workday triaging, diagnosing, and resolving customer issues through a multi-panel interface with chat, email, knowledge base, and ticket management.
+The hard constraint from directive B (triage stays accessible during chat) is solved by the **glance-strip** — a calm, peripheral pill at the bottom carrying case id, customer, INV, and triage verdict. Always there, never loud (55% opacity). Hover lifts it to 100%. Click on it during chat swaps focal to triage for ~2.4s, then auto-returns to chat. The operator never loses triage; they just don't have to fight it for attention.
 
-Garden core insight is that support-agent UX is fundamentally different from consumer UX. Agents need calm professionalism over visual excitement, information density without clutter, trust-signaling color (green/teal = things are under control), context always one glance away, and keyboard-first workflows that reduce time-per-ticket by 20-40%.
+## Two features (strict ceiling)
 
----
+1. **Focal-shift staging.** A single `.focal` panel is centered in the stage. Other focals exist in the DOM but carry `data-hidden="true"` (opacity 0, position absolute, no pointer events). Transitions are 320ms ease with a 6px translateY rise. The result: the page literally cannot show two things at once.
+2. **Glance-strip.** A bottom-centered pill that aggregates the four facts that matter at any moment (case, customer, INV, triage verdict). Peripheral by default. Acts as the persistent triage access during chat, satisfying directive B without competing for attention.
 
-## 2. Zendesk Design Philosophy
+The third feature I would have added — a side-by-side "evidence" panel during chat — was killed. The glance-strip + the analyst's quoted facts in the chat body cover the same job.
 
-### 2.1 The Garden Metaphor
-Composable primitives (buttons, inputs, tags, wells, panes, drawers) assembled per workflow. Not pixel-perfect prescriptions.
+## Regions and which user goal each serves
 
-### 2.2 Support-Agent-First Design
-Neutral backgrounds (#F8F9F9). Blue (#1F73B7) for interactivity only. Status colors sparingly. Dense panel-based layouts.
+| Region | Goal | Visible when |
+|--------|------|--------------|
+| Focal: intake | (1) see what's wrong → seed the case | intake stage |
+| Focal: parsed | (1) see what's wrong → confirm we read the screenshot right | parsed stage |
+| Focal: triage | (2) confirm or doubt the AI | triage stage (and brief peek-back during chat) |
+| Focal: chat | (3) get the answer, (4) use the answer | chat stage |
+| Compose tray | (3) get answer, (4) use answer (Copy on the answer bubble) | only during chat |
+| Glance strip | (1) + (2) peripheral, always-available | from parsed stage onward |
+| Top bar | passive case identity | always (28px, mute text) |
 
-### 2.3 Calm Professionalism
-No gradients, animations, or illustrations in workspace. Calm competence. Aligns with QBO Warm Authority -- different temperature, same intent.
+Nothing else is in the DOM. No status spine, no parser progress bar, no confidence meter, no "agent identity wall," no pipeline visualizer. V3 anti-patterns were addressed by deletion, not redesign.
 
-### 2.4 Kale Brand Identity
-Kale (#17494D): deep muted teal-green. Dark sidebar anchor, light content.
+## Self-check against the prompt
 
----
+1. Could a normal person use this with zero explanation? **Yes** — one rectangle at a time, with a single primary action button.
+2. Could the operator close their eyes and not feel like they missed something? **Yes** — glance strip carries the only state worth tracking; everything else is paused.
+3. Two unique features or fewer? **Yes** — focal-shift staging + glance-strip.
+4. Does the angle structurally shape the design? **Yes** — the entire layout is "one focal rectangle"; remove that and the design collapses.
+5. Anything visible that doesn't serve the four goals? **No** — top bar is 28px identity only; everything else has a goal mapping above.
+6. Quiet at all times? **Yes** — warm paper background, 1px hairlines, one accent color, motion is restrained (≤320ms).
+7. Main analyst the only loud thing when speaking? **Yes** — the answer is the only colored block (left accent bar, light blue tint). Their first message is plain ink; the answer-for-the-phone-agent bubble is the one place color is used.
 
-## 3. Key Design Patterns
+## Notable design choices
 
-### 3.1 Three-Column Agent Workspace
-Left Sidebar (nav), Center (conversation + composer), Right Context Panel (customer info, knowledge, apps). Center is sacred. Context panel toggleable, resizable, persistent width.
+- **Answer bubble has the Copy button inline.** Goal 4 ("use the answer") is one click away from the only colored block on the page. The button label changes to "Copied" with an OK-green color, then resets after 1.6s.
+- **Doubt path is calm.** "Doesn't fit" does not pop a modal. It quietly shrinks the verdict line and brings in the analyst in override mode. The operator stays on the rails.
+- **The analyst is a who.** "Maren · payroll specialist" — named, role-tagged, addressed in the second person ("Ask Maren a follow-up…"). The chat reads as a conversation, not a system response.
+- **Webcam, sample, and click-to-upload share the same focal.** Intake offers three paths in one calm region, never escalating to a multi-tab UI.
+- **Color discipline.** One accent (`#2d6cdf`) for the analyst, one warm (`#c87a3b`) for the triage verdict highlight, one success green (`#3a8a5a`) for the Copy confirmation and the live dot. Mute everywhere else.
+- **No scroll.** `html, body { overflow: hidden }`; only the chat stream scrolls internally.
 
-### 3.2 Customer Context Sidebar (THE #1 PATTERN)
-All in single resizable panel: User (contact/history), Knowledge (search/link/quote articles), Side Conversations (parallel threads), Related Tickets (similar/merge), Apps (integrations), Record Preview, Tasks.
+## What I deliberately did *not* do
 
-**QBO parallel:** AgentDock is #1 adoption target. Surface playbook, escalation history, INV cases alongside chat.
+- No confidence percentage on the triage. It's noise. The verdict is either right or wrong, and "doubt" is a one-click escape.
+- No "AI is thinking" spinner spine. The page just transitions calmly between stages.
+- No multi-pane comparison during chat. The glance strip handles all peripheral needs.
+- No agent roster bar. Maren is named in the chat, role-tagged. That is enough identity.
+- No keyboard shortcut overlay, no command palette, no settings affordance.
 
-### 3.3 Contextual Workspaces
-Dynamic reconfiguration per ticket: conditions, forms, macros, apps, layouts, knowledge filters. Recommendation over restriction.
+## Files
 
-**QBO parallel:** INV vs. general questions trigger different tools. Fixes wrong-workflow friction.
-
-### 3.4 Macro System
-Searchable list, keyboard shortcut, contextual filtering. **QBO:** Surface templates inline via /template shortcut.
-
-### 3.5 Knowledge Panel
-Search, link, quote articles, flag outdated, filter by brand/language. **QBO:** Playbook search alongside chat eliminates switching.
-
-### 3.6 Custom Layouts and CSAT
-Drag-drop layout builder. CSAT per-ticket/agent/team, binary good/bad.
-
----
-
-## 4. Color System
-
-### 4.1 Palette
-Blue (#1F73B7) = interactive. Red (#CC3340) = danger. Green (#037F52/#228F67) = success. Grey (12 shades #293239-#F8F9F9) = neutral. Kale (#17494D/#03363D) = brand.
-
-### 4.2 Elevation
-Recessed (wells) < Default (page bg) < Subtle (alerts) < Raised (modals).
-
-### 4.3 Priority Thermal Gradient
-Urgent=Red, High=Orange (#ED961C), Normal=Blue, Low=Grey.
-
-### 4.4 QBO Comparison
-QBO ember accent more distinctive. QBO muted gold warning better for long shifts. QBO warm backgrounds reduce fatigue. Consider blue as secondary link color only.
-
----
-
-## 5. Typography and Spacing
-
-### 5.1 Typography
-Zendesk: system fonts, 14px, 20px line-height, semibold 600. QBO: Inter (better consistency), 14.5px, 22.5px line-height (more generous = better), bold 700 (consider 600 for headings).
-
-### 5.2 Spacing
-Garden base-4 (4-32px). QBO finer granularity (4-36px with 6/14/28 steps). No changes needed.
-
-### 5.3 Border Radius
-Garden conservative (2/4/8). QBO softer (4/8/12/16). Keep QBO values.
-
----
-
-## 6. Motion and Interaction
-Standard=0.25s, Quick=0.1s. No springs. Use 0.1s for high-freq actions. Focus: double-ring excellent in both. Disabled: Garden specific colors (#848F99) better than QBO opacity.
-
----
-
-## 7. Accessibility
-Principles: keyboard-reachable, all state readable, no ARIA > bad ARIA. QBO gaps: modal focus trapping, ARIA live regions, keyboard shortcuts docs, color-only status labels.
-
----
-
-## 8. Component Library
-60+ components. QBO gaps: Combobox, Accordion, Stepper, Progress, Breadcrumbs, Avatar.
-
----
-
-## 9. Application to QBO App
-
-### 9.1 CRITICAL: Context Panel Alongside Chat
-Transform AgentDock into context panel: Playbook Search, Escalation History, INV Cases, Templates, AI Chat tabs. Eliminates #1 workflow friction (5-10s per switch). MEDIUM effort.
-
-### 9.2 HIGH: Inline Template System
-/template shortcut in chat: searchable, filtered by category, preview, one-keystroke insert. 30-50% faster common responses. MEDIUM effort.
-
-### 9.3 HIGH: Adaptive Interface by Input Type
-INV-123456 = INV panel + known-issues. Screenshots = error-matching. payroll/bank-feeds = pre-filter playbook. General = default. Fixes wrong-workflow. HIGH effort.
-
-### 9.4 MEDIUM: Priority Colors, Panel Persistence, Quote-to-Chat
-Consistent thermal gradient. localStorage panel widths. Playbook quote insertion.
-
-### 9.5 LOW: Combobox, Stepper, Avatars
-Searchable dropdowns, resolution flow, chat message indicators.
-
----
-
-## 10. What NOT to Copy
-
-1. **Cool color temperature** -- QBO warmth reduces fatigue
-2. **Conservative radius** (2/4/8) -- QBO 8/12/16 is modern
-3. **Blue primary accent** -- Keep ember, blue for links only
-4. **Dark sidebar** -- Clashes with warm content
-5. **System fonts** -- Inter is better
-6. **60+ components** -- Single-user, adopt specific patterns
-7. **Flat buttons** -- QBO gradient buttons have better depth
-
----
-
-## 11. Implementation Priority
-
-| Priority | Item | Impact | Effort |
-|----------|------|--------|--------|
-| **P0** | Context panel alongside chat | Eliminates #1 friction | Medium |
-| **P1** | Inline template system | 30-50% faster | Medium |
-| **P1** | Adaptive interface by input | Fixes workflow | High |
-| **P2** | Panel width persistence | Friction removal | Low |
-| **P2** | Quote-to-chat playbook | Faster lookup | Low-Med |
-| **P2** | Specific disabled colors | Accessibility | Low |
-| **P3** | ARIA live regions | Accessibility | Low |
-| **P3** | Modal focus trapping | Accessibility | Low |
-| **P3** | Searchable combobox | Better UX | Low |
-| **P4** | Resolution stepper | Clarity | Low |
-| **P4** | Chat avatars | Scanability | Low |
-
----
-
-## 12. Sources
-
-- [Garden Home](https://garden.zendesk.com/)
-- [Design Overview](https://garden.zendesk.com/design/)
-- [Color Tokens](https://garden.zendesk.com/design/color/)
-- [Palette Tokens](https://garden.zendesk.com/design/palette/)
-- [Components](https://garden.zendesk.com/components/)
-- [Typography](https://garden.zendesk.com/components/typography/)
-- [Theme Object](https://garden.zendesk.com/components/theme-object/)
-- [Designing with Garden](https://developer.zendesk.com/documentation/apps/app-design-guidelines/using-zendesk-garden/)
-- [About Agent Workspace](https://support.zendesk.com/hc/en-us/articles/4408821259930)
-- [Optimizing Workspace](https://support.zendesk.com/hc/en-us/articles/4408824058138)
-- [Contextual Workspaces](https://support.zendesk.com/hc/en-us/articles/4408833498906)
-- [Custom Layouts](https://support.zendesk.com/hc/en-us/articles/5447837546138)
-- [Context Panel](https://support.zendesk.com/hc/en-us/articles/4408836526362)
-- [Workspace Best Practices](https://support.zendesk.com/hc/en-us/articles/4408828930202)
-- [Zendesk Accessibility](https://www.zendesk.com/company/agreements-and-terms/accessibility/)
-- [Accessibility in Garden](https://www.slideshare.net/slideshow/accessibility-in-the-zendesk-garden-design-system/113809633)
-- [Zendesk Garden GitHub](https://github.com/zendeskgarden)
-- [React Components](https://github.com/zendeskgarden/react-components)
-- [Garden on designsystems.surf](https://designsystems.surf/design-systems/zendesk)
+- `C:/Projects/qbo-escalations/prototypes/escalation-chat-challenge/v4/zendesk/index.html` — the entry
+- `C:/Projects/qbo-escalations/docs/design-reports/zendesk-design-report.md` — this report
+- `C:/Projects/qbo-escalations/prototypes/escalation-chat-challenge/v4/ARENA.md` — posted angle summary

@@ -1,0 +1,2161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Conduit — QBO Escalation Command Surface</title>
+<style>
+  /* ============================================================
+     CONDUIT — Linear-inspired command surface for QBO escalations
+     A keyboard-first, single-canvas workflow. No chat box.
+     Every decision is one keystroke deep.
+     ============================================================ */
+
+  :root {
+    /* Linear dark-first surfaces */
+    --bg-base:        #0a0a0b;
+    --bg-rail:        #101012;
+    --bg-card:        #15151a;
+    --bg-elev:        #1b1b22;
+    --bg-hover:       #1f1f28;
+    --line:           #1f1f28;
+    --line-strong:    #2a2a35;
+    --line-soft:      #16161c;
+
+    --tx-primary:     #eeeeee;
+    --tx-secondary:   #8a8a8e;
+    --tx-muted:       #5a5a60;
+    --tx-faint:       #3a3a40;
+
+    --accent:         #5e6ad2;
+    --accent-soft:    rgba(94, 106, 210, 0.14);
+    --accent-line:    rgba(94, 106, 210, 0.32);
+
+    --ok:             #4ade80;
+    --warn:           #f59e0b;
+    --err:            #ef4444;
+    --info:           #5e6ad2;
+
+    /* providers — identity, not text */
+    --p-claude:       #cc7a4d;
+    --p-gpt:          #10a37f;
+    --p-gemini:       #4285f4;
+    --p-kimi:         #a855f7;
+
+    /* severity */
+    --sev-low:        #6b7280;
+    --sev-med:        #f59e0b;
+    --sev-high:       #ef4444;
+    --sev-crit:       #ec4899;
+
+    --r-1: 4px;
+    --r-2: 6px;
+    --r-3: 8px;
+    --r-4: 10px;
+
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 24px;
+    --sp-6: 32px;
+
+    --ease: cubic-bezier(0.2, 0, 0, 1);
+    --d-fast: 100ms;
+    --d: 150ms;
+    --d-slow: 220ms;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    background: var(--bg-base);
+    color: var(--tx-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+    letter-spacing: -0.01em;
+  }
+  button { font-family: inherit; font-size: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  kbd {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px; padding: 0 5px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    color: var(--tx-secondary);
+    font-family: 'SF Mono', ui-monospace, 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    line-height: 1;
+  }
+  .mono { font-family: 'SF Mono', ui-monospace, 'JetBrains Mono', monospace; }
+
+  /* ============================================================
+     APP SHELL — 4-zone grid
+     ============================================================ */
+  .app {
+    display: grid;
+    grid-template-columns: 280px 1fr 340px;
+    grid-template-rows: 40px 1fr 56px;
+    grid-template-areas:
+      "topbar topbar topbar"
+      "rail   canvas stack"
+      "cmd    cmd    cmd";
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ============================================================
+     TOPBAR — case identity, status pips, provider ring
+     ============================================================ */
+  .topbar {
+    grid-area: topbar;
+    display: flex;
+    align-items: center;
+    padding: 0 var(--sp-4);
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-base);
+    gap: var(--sp-3);
+    -webkit-app-region: drag;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600; font-size: 12.5px;
+    color: var(--tx-primary);
+    letter-spacing: -0.02em;
+  }
+  .brand-mark {
+    width: 16px; height: 16px;
+    background: var(--accent);
+    border-radius: 4px;
+    position: relative;
+  }
+  .brand-mark::after {
+    content: ''; position: absolute; inset: 4px;
+    border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+    transform: rotate(-45deg) translate(1px, -1px); border-radius: 1px;
+  }
+  .topbar-divider {
+    width: 1px; height: 18px; background: var(--line);
+  }
+  .case-id { display: flex; align-items: center; gap: 8px; }
+  .case-id .id { color: var(--tx-secondary); font-size: 11.5px; }
+  .case-id .id strong { color: var(--tx-primary); font-weight: 500; }
+
+  .pip {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 22px; padding: 0 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    color: var(--tx-secondary);
+    font-size: 11.5px;
+    transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+    cursor: pointer;
+  }
+  .pip:hover { background: var(--bg-hover); }
+  .pip .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .pip .key {
+    margin-left: 4px;
+    color: var(--tx-faint);
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+  }
+  .pip[data-sev="low"]  .dot { background: var(--sev-low); }
+  .pip[data-sev="med"]  .dot { background: var(--sev-med); }
+  .pip[data-sev="high"] .dot { background: var(--sev-high); }
+  .pip[data-sev="crit"] .dot { background: var(--sev-crit); animation: pulse 1.6s infinite var(--ease); }
+
+  .pip.live { color: var(--tx-primary); border-color: var(--line-strong); background: var(--bg-elev); }
+  .pip.live[data-sev="high"] { border-color: rgba(239,68,68,0.32); background: rgba(239,68,68,0.08); }
+  .pip.live[data-sev="crit"] { border-color: rgba(236,72,153,0.32); background: rgba(236,72,153,0.08); }
+  .pip.live[data-sev="med"]  { border-color: rgba(245,158,11,0.32); background: rgba(245,158,11,0.08); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+  }
+
+  .topbar-spacer { flex: 1; }
+
+  /* Provider ring — identity, not text */
+  .providers { display: flex; align-items: center; gap: 6px; }
+  .prov {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--bg-card);
+    border: 1.5px solid var(--line);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 600;
+    color: var(--tx-secondary);
+    cursor: pointer;
+    transition: transform var(--d) var(--ease), border-color var(--d) var(--ease);
+  }
+  .prov:hover { transform: translateY(-1px); }
+  .prov.active { color: #fff; }
+  .prov[data-p="claude"].active { border-color: var(--p-claude); box-shadow: 0 0 0 1px var(--p-claude); background: rgba(204,122,77,0.16); }
+  .prov[data-p="gpt"].active    { border-color: var(--p-gpt);    box-shadow: 0 0 0 1px var(--p-gpt);    background: rgba(16,163,127,0.16); }
+  .prov[data-p="gemini"].active { border-color: var(--p-gemini); box-shadow: 0 0 0 1px var(--p-gemini); background: rgba(66,133,244,0.16); }
+  .prov[data-p="kimi"].active   { border-color: var(--p-kimi);   box-shadow: 0 0 0 1px var(--p-kimi);   background: rgba(168,85,247,0.16); }
+
+  .topbar-op {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--tx-secondary); font-size: 11.5px;
+  }
+  .op-avatar {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: linear-gradient(135deg, #5e6ad2, #a855f7);
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 10.5px; font-weight: 600;
+  }
+
+  /* ============================================================
+     LEFT RAIL — Reasoning Stream
+     ============================================================ */
+  .rail {
+    grid-area: rail;
+    background: var(--bg-rail);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .rail-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .rail-title {
+    font-size: 11px; color: var(--tx-secondary);
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .rail-title .live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 8px var(--ok);
+    animation: pulse 1.4s infinite var(--ease);
+  }
+  .rail-actions { display: flex; gap: 4px; }
+  .rail-icon-btn {
+    width: 22px; height: 22px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: var(--r-1);
+    color: var(--tx-secondary);
+    transition: background var(--d-fast) var(--ease);
+  }
+  .rail-icon-btn:hover { background: var(--bg-hover); color: var(--tx-primary); }
+
+  .rail-stream {
+    flex: 1; overflow-y: auto;
+    padding: var(--sp-2) 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .rail-stream::-webkit-scrollbar { width: 8px; }
+  .rail-stream::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+  .rail-stream::-webkit-scrollbar-track { background: transparent; }
+
+  .thought {
+    position: relative;
+    padding: 8px var(--sp-4) 8px 32px;
+    border-left: 2px solid transparent;
+    color: var(--tx-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+    cursor: pointer;
+    transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+  }
+  .thought::before {
+    content: ''; position: absolute;
+    left: 14px; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--tx-faint);
+    box-shadow: 0 0 0 3px var(--bg-rail);
+  }
+  .thought::after {
+    content: ''; position: absolute;
+    left: 16px; top: 22px; bottom: -8px;
+    width: 2px;
+    background: var(--line);
+  }
+  .thought:last-child::after { display: none; }
+  .thought:hover { background: var(--bg-card); }
+  .thought.pinned { border-left-color: var(--accent); background: var(--accent-soft); }
+  .thought.pinned::before { background: var(--accent); }
+  .thought[data-prov="claude"]::before { background: var(--p-claude); }
+  .thought[data-prov="gpt"]::before    { background: var(--p-gpt); }
+  .thought[data-prov="gemini"]::before { background: var(--p-gemini); }
+  .thought[data-prov="kimi"]::before   { background: var(--p-kimi); }
+
+  .thought-head {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--tx-muted);
+    font-size: 10.5px;
+    margin-bottom: 2px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .thought-head .ts { font-family: 'SF Mono', monospace; }
+  .thought-head .tag {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    color: var(--tx-secondary);
+    text-transform: none; letter-spacing: 0;
+    font-size: 10px;
+  }
+  .thought-body { color: var(--tx-secondary); }
+  .thought-body .em { color: var(--tx-primary); }
+  .thought-pin {
+    position: absolute;
+    right: 8px; top: 8px;
+    opacity: 0;
+    transition: opacity var(--d-fast) var(--ease);
+    color: var(--tx-muted);
+    font-size: 10px;
+    padding: 2px 5px;
+    border-radius: 3px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+  }
+  .thought:hover .thought-pin { opacity: 1; }
+  .thought.pinned .thought-pin { opacity: 1; color: var(--accent); border-color: var(--accent-line); }
+
+  .rail-footer {
+    padding: 10px var(--sp-4);
+    border-top: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .rail-footer .pinned-count { color: var(--tx-secondary); }
+
+  /* ============================================================
+     CANVAS — case body
+     ============================================================ */
+  .canvas {
+    grid-area: canvas;
+    overflow-y: auto;
+    background: var(--bg-base);
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .canvas::-webkit-scrollbar { width: 10px; }
+  .canvas::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+
+  .canvas-inner {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: var(--sp-5) var(--sp-5) var(--sp-6);
+  }
+
+  .case-title {
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: -0.025em;
+    line-height: 1.25;
+    margin: 0 0 var(--sp-2);
+  }
+  .case-sub {
+    color: var(--tx-secondary);
+    font-size: 12.5px;
+    margin: 0 0 var(--sp-5);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .case-sub .sep { color: var(--tx-faint); }
+  .case-sub .agent-name {
+    color: var(--tx-primary);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .case-sub .agent-avatar {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #ef4444);
+    color: #fff;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 9.5px; font-weight: 600;
+  }
+
+  /* phone agent context (free text) */
+  .agent-context {
+    padding: var(--sp-3) var(--sp-4);
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--warn);
+    border-radius: var(--r-3);
+    color: var(--tx-primary);
+    font-size: 12.5px;
+    line-height: 1.55;
+    margin-bottom: var(--sp-4);
+  }
+  .agent-context .label {
+    color: var(--tx-muted);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  /* Screenshot — the case body */
+  .shot-wrap {
+    position: relative;
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    overflow: hidden;
+    background: #fff;
+    margin-bottom: var(--sp-4);
+  }
+  .shot-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-elev);
+    border-bottom: 1px solid var(--line);
+  }
+  .shot-bar .src {
+    color: var(--tx-secondary); font-size: 11px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .shot-bar .src-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .shot-bar .spacer { flex: 1; }
+  .shot-tools { display: flex; gap: 4px; }
+  .shot-tool {
+    height: 22px; padding: 0 8px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    color: var(--tx-secondary);
+    font-size: 11px;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background var(--d-fast) var(--ease);
+  }
+  .shot-tool:hover { background: var(--bg-hover); color: var(--tx-primary); }
+  .shot-tool.warn { color: var(--warn); border-color: rgba(245,158,11,0.32); }
+
+  .shot {
+    position: relative;
+    background: #f6f6f4;
+    min-height: 360px;
+    overflow: hidden;
+  }
+  /* mocked QBO screenshot — Bank Feed error */
+  .qbo-mock {
+    padding: 18px 22px;
+    color: #1f2937;
+    font-family: 'Inter', -apple-system, sans-serif;
+  }
+  .qbo-head {
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 12px; border-bottom: 1px solid #e5e7eb;
+    margin-bottom: 14px;
+  }
+  .qbo-logo {
+    width: 26px; height: 26px; border-radius: 6px;
+    background: #2ca01c; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .qbo-bread { color: #6b7280; font-size: 12.5px; }
+  .qbo-bread strong { color: #111827; }
+  .qbo-banner {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    padding: 12px 14px;
+    display: flex; gap: 12px; align-items: flex-start;
+    margin-bottom: 14px;
+  }
+  .qbo-banner .icon {
+    width: 20px; height: 20px; border-radius: 50%;
+    background: #dc2626; color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; flex-shrink: 0;
+  }
+  .qbo-banner .body { color: #991b1b; font-size: 12.5px; line-height: 1.5; }
+  .qbo-banner .body strong { color: #7f1d1d; }
+  .qbo-banner .body .code { font-family: 'SF Mono', monospace; font-size: 11.5px; }
+  .qbo-row {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 16px; margin-bottom: 12px;
+  }
+  .qbo-field {
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .qbo-field .lbl { font-size: 10.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+  .qbo-field .val { font-size: 13px; color: #111827; font-weight: 500; }
+  .qbo-actions { display: flex; gap: 8px; }
+  .qbo-btn {
+    height: 30px; padding: 0 14px;
+    border-radius: 6px;
+    font-size: 12px; font-weight: 500;
+    background: #2ca01c; color: #fff; border: 0;
+  }
+  .qbo-btn.ghost { background: #fff; color: #374151; border: 1px solid #d1d5db; }
+
+  /* Parser chips — materialize on top of screenshot */
+  .parse-chip {
+    position: absolute;
+    background: var(--bg-elev);
+    border: 1px solid var(--accent-line);
+    border-radius: var(--r-2);
+    padding: 4px 8px;
+    color: var(--tx-primary);
+    font-size: 11px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 220ms var(--ease), transform 220ms var(--ease);
+    pointer-events: none;
+    display: flex; align-items: center; gap: 6px;
+    z-index: 2;
+  }
+  .parse-chip.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .parse-chip .ck {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--accent);
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 8px;
+  }
+  .parse-chip .ck::after { content: ''; width: 4px; height: 2px; border-left: 1.5px solid #fff; border-bottom: 1.5px solid #fff; transform: rotate(-45deg) translate(0, -1px); }
+  .parse-chip .lbl { color: var(--tx-secondary); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .parse-chip .val { color: var(--tx-primary); font-family: 'SF Mono', monospace; font-size: 11px; }
+
+  /* Parsed result block */
+  .parsed {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    background: var(--bg-card);
+    margin-bottom: var(--sp-4);
+    overflow: hidden;
+  }
+  .parsed-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .parsed-head .title {
+    color: var(--tx-secondary);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .parsed-head .prov-credit {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .parsed-head .prov-credit .ring {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1.5px solid var(--p-claude);
+    background: rgba(204,122,77,0.16);
+  }
+  .parsed-grid {
+    display: grid; grid-template-columns: 110px 1fr;
+    border-top: 0;
+  }
+  .parsed-row {
+    display: contents;
+  }
+  .parsed-row .k {
+    padding: 8px var(--sp-4);
+    color: var(--tx-muted);
+    font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+    border-top: 1px solid var(--line-soft);
+  }
+  .parsed-row .v {
+    padding: 8px var(--sp-4);
+    color: var(--tx-primary);
+    border-top: 1px solid var(--line-soft);
+    font-size: 12.5px;
+  }
+  .parsed-row:first-child .k,
+  .parsed-row:first-child .v { border-top: 0; }
+  .v .code-bit {
+    font-family: 'SF Mono', monospace;
+    background: var(--bg-elev);
+    padding: 1px 5px;
+    border-radius: 3px;
+    border: 1px solid var(--line);
+    font-size: 11.5px;
+  }
+  .v .ent {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 7px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: 4px;
+    color: var(--tx-primary);
+    font-size: 11.5px;
+  }
+  .v .ent::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+  /* INV match block */
+  .inv-block {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    background: var(--bg-card);
+    margin-bottom: var(--sp-4);
+    overflow: hidden;
+  }
+  .inv-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .inv-list { padding: 4px; }
+  .inv-row {
+    display: grid; grid-template-columns: 22px 88px 1fr 60px 80px;
+    gap: 10px; align-items: center;
+    padding: 8px 10px;
+    border-radius: var(--r-2);
+    transition: background var(--d-fast) var(--ease);
+    cursor: pointer;
+  }
+  .inv-row:hover { background: var(--bg-hover); }
+  .inv-row.selected { background: var(--accent-soft); border: 1px solid var(--accent-line); padding: 7px 9px; }
+  .inv-row.matched { background: rgba(74,222,128,0.06); }
+  .inv-status {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--tx-muted);
+    position: relative;
+  }
+  .inv-status[data-s="open"]      { border-color: var(--warn); }
+  .inv-status[data-s="open"]::after { content:''; position:absolute; inset:2px; border-radius:50%; background:var(--warn); clip-path: inset(0 50% 0 0); }
+  .inv-status[data-s="active"]    { border-color: var(--info); background: var(--info); }
+  .inv-status[data-s="resolved"]  { border-color: var(--ok); background: var(--ok); }
+  .inv-status[data-s="resolved"]::after { content:''; position:absolute; inset:3px; border-left:1.5px solid #000; border-bottom:1.5px solid #000; transform:rotate(-45deg) translate(0,-1px); }
+  .inv-id { font-family: 'SF Mono', monospace; color: var(--tx-primary); font-size: 12px; font-weight: 500; }
+  .inv-title { color: var(--tx-secondary); font-size: 12.5px; }
+  .inv-title .hl { color: var(--accent); background: var(--accent-soft); padding: 0 2px; border-radius: 2px; }
+  .inv-score { font-family: 'SF Mono', monospace; font-size: 11px; color: var(--tx-muted); text-align: right; }
+  .inv-score.high { color: var(--ok); }
+  .inv-score.med  { color: var(--warn); }
+  .inv-age { font-size: 11px; color: var(--tx-muted); text-align: right; }
+  .inv-actions {
+    display: flex; justify-content: space-between;
+    padding: 8px var(--sp-4);
+    border-top: 1px solid var(--line);
+  }
+  .inv-action-hint { color: var(--tx-muted); font-size: 11px; }
+  .inv-action-hint kbd { margin-right: 3px; }
+
+  /* Draft block */
+  .draft-block {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    background: var(--bg-card);
+    margin-bottom: var(--sp-4);
+    overflow: hidden;
+  }
+  .draft-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .draft-tmpl-row {
+    display: flex; gap: 4px;
+    padding: 8px var(--sp-4);
+    border-bottom: 1px solid var(--line-soft);
+    overflow-x: auto;
+  }
+  .draft-tmpl {
+    height: 24px; padding: 0 10px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    color: var(--tx-secondary);
+    font-size: 11.5px;
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background var(--d-fast) var(--ease), color var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+  }
+  .draft-tmpl:hover { background: var(--bg-hover); color: var(--tx-primary); }
+  .draft-tmpl.active {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--tx-primary);
+  }
+  .draft-tmpl .k {
+    font-family: 'SF Mono', monospace;
+    color: var(--tx-faint); font-size: 10px;
+  }
+  .draft-body {
+    padding: var(--sp-4);
+    color: var(--tx-primary);
+    font-size: 13px; line-height: 1.55;
+    min-height: 140px;
+    white-space: pre-wrap;
+  }
+  .draft-body .tok { animation: tokIn 280ms var(--ease) both; }
+  @keyframes tokIn {
+    from { opacity: 0; filter: blur(2px); }
+    to   { opacity: 1; filter: blur(0); }
+  }
+  .draft-body .var {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    border-radius: 3px;
+    padding: 1px 5px;
+    color: var(--tx-primary);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .draft-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px var(--sp-4);
+    border-top: 1px solid var(--line);
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .draft-foot .ship-btn {
+    height: 26px; padding: 0 12px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: var(--r-2);
+    font-size: 11.5px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 8px;
+    transition: background var(--d-fast) var(--ease);
+  }
+  .draft-foot .ship-btn:hover { background: #6e7adf; }
+  .draft-foot .ship-btn kbd {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.9);
+  }
+
+  /* ============================================================
+     RIGHT STACK — action queue / decisions
+     ============================================================ */
+  .stack {
+    grid-area: stack;
+    background: var(--bg-rail);
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .stack-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid var(--line);
+  }
+  .stack-title {
+    font-size: 11px; color: var(--tx-secondary);
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 500;
+  }
+  .stack-progress {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .stack-progress .bar {
+    width: 60px; height: 3px;
+    background: var(--line);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .stack-progress .fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width var(--d-slow) var(--ease);
+  }
+
+  .stack-list {
+    flex: 1; overflow-y: auto;
+    padding: var(--sp-3);
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .stack-list::-webkit-scrollbar { width: 8px; }
+  .stack-list::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 4px; }
+
+  .step {
+    padding: 10px 12px;
+    border-radius: var(--r-2);
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    margin-bottom: 6px;
+    transition: background var(--d-fast) var(--ease), border-color var(--d-fast) var(--ease);
+    cursor: pointer;
+    position: relative;
+  }
+  .step:hover { background: var(--bg-hover); }
+  .step.done { opacity: 0.65; }
+  .step.active {
+    border-color: var(--accent-line);
+    background: var(--accent-soft);
+  }
+  .step-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 2px;
+  }
+  .step-icon {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 1.5px solid var(--tx-muted);
+    flex-shrink: 0;
+    position: relative;
+  }
+  .step.done .step-icon {
+    background: var(--ok); border-color: var(--ok);
+  }
+  .step.done .step-icon::after {
+    content:''; position:absolute; inset:3px;
+    border-left:1.5px solid #000; border-bottom:1.5px solid #000;
+    transform:rotate(-45deg) translate(0,-1px);
+  }
+  .step.active .step-icon {
+    border-color: var(--accent);
+    background: var(--accent);
+    animation: ringPulse 1.6s infinite var(--ease);
+  }
+  .step.active .step-icon::after {
+    content:''; position:absolute; inset:4px; border-radius:50%; background:#fff;
+  }
+  @keyframes ringPulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(94,106,210,0.4); }
+    70%     { box-shadow: 0 0 0 6px rgba(94,106,210,0); }
+  }
+  .step-name {
+    color: var(--tx-primary);
+    font-size: 12.5px;
+    font-weight: 500;
+    flex: 1;
+  }
+  .step-key {
+    color: var(--tx-faint);
+    font-family: 'SF Mono', monospace;
+    font-size: 10px;
+  }
+  .step-detail {
+    color: var(--tx-secondary);
+    font-size: 11.5px;
+    padding-left: 22px;
+  }
+  .step-detail .v {
+    color: var(--tx-primary);
+    font-family: 'SF Mono', monospace;
+    font-size: 11px;
+  }
+
+  /* Missing-info widget */
+  .gap-card {
+    margin-top: var(--sp-3);
+    padding: 10px 12px;
+    border-radius: var(--r-2);
+    background: rgba(245,158,11,0.06);
+    border: 1px solid rgba(245,158,11,0.32);
+  }
+  .gap-card .gap-head {
+    color: var(--warn);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: 500;
+    margin-bottom: 6px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .gap-card .gap-q {
+    color: var(--tx-primary); font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .gap-card .gap-actions { display: flex; gap: 4px; }
+  .gap-card .gap-btn {
+    height: 22px; padding: 0 8px;
+    border-radius: 4px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    color: var(--tx-secondary);
+    font-size: 11px;
+    transition: background var(--d-fast) var(--ease);
+  }
+  .gap-card .gap-btn:hover { background: var(--bg-hover); color: var(--tx-primary); }
+  .gap-card .gap-btn.primary { background: var(--warn); color: #1a1300; border-color: var(--warn); font-weight: 500; }
+
+  .stack-footer {
+    padding: 10px var(--sp-4);
+    border-top: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--tx-muted); font-size: 11px;
+  }
+
+  /* ============================================================
+     COMMAND BAR (bottom) — always present, fuzzy verbs
+     ============================================================ */
+  .cmd {
+    grid-area: cmd;
+    border-top: 1px solid var(--line);
+    background: var(--bg-rail);
+    display: flex; align-items: center; gap: var(--sp-3);
+    padding: 0 var(--sp-4);
+  }
+  .cmd-prompt {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--tx-muted); font-family: 'SF Mono', monospace;
+    font-size: 12px;
+  }
+  .cmd-prompt .caret { color: var(--accent); font-size: 14px; }
+  .cmd-input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--tx-primary);
+    font-family: 'SF Mono', monospace;
+    font-size: 12.5px;
+    padding: 0;
+    height: 40px;
+  }
+  .cmd-input::placeholder { color: var(--tx-faint); }
+  .cmd-hints {
+    display: flex; align-items: center; gap: 6px;
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .cmd-hint {
+    padding: 3px 7px;
+    border-radius: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    color: var(--tx-secondary);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background var(--d-fast) var(--ease);
+  }
+  .cmd-hint:hover { background: var(--bg-hover); color: var(--tx-primary); }
+  .cmd-key { color: var(--tx-faint); font-family: 'SF Mono', monospace; font-size: 10.5px; margin-left: 4px; }
+
+  /* ============================================================
+     COMMAND PALETTE (Cmd+K full overlay)
+     ============================================================ */
+  .palette-back {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    backdrop-filter: blur(4px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--d) var(--ease);
+    z-index: 50;
+  }
+  .palette-back.open { opacity: 1; pointer-events: auto; }
+  .palette {
+    position: fixed;
+    top: 110px; left: 50%;
+    transform: translateX(-50%) scale(0.98);
+    width: 620px; max-width: 92vw;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--d) var(--ease), transform var(--d) var(--ease);
+    z-index: 51;
+    overflow: hidden;
+  }
+  .palette.open { opacity: 1; pointer-events: auto; transform: translateX(-50%) scale(1); }
+  .palette-input-wrap {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .palette-input-wrap .gt { color: var(--accent); font-family: 'SF Mono', monospace; }
+  .palette-input {
+    flex: 1; background: transparent; border: 0; outline: 0;
+    color: var(--tx-primary);
+    font-family: 'SF Mono', monospace; font-size: 14px;
+  }
+  .palette-input::placeholder { color: var(--tx-muted); }
+  .palette-results { max-height: 320px; overflow-y: auto; padding: 6px 0; }
+  .palette-section {
+    padding: 6px 16px 4px;
+    color: var(--tx-muted);
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .palette-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 16px;
+    color: var(--tx-secondary);
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+  .palette-item.selected { background: var(--accent-soft); color: var(--tx-primary); }
+  .palette-item .ico {
+    width: 18px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    color: var(--tx-secondary);
+    font-size: 11px;
+  }
+  .palette-item .name { flex: 1; }
+  .palette-item .desc { color: var(--tx-muted); font-size: 11px; }
+  .palette-item .shortcut { display: flex; gap: 3px; }
+  .palette-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px;
+    border-top: 1px solid var(--line);
+    color: var(--tx-muted); font-size: 11px;
+  }
+  .palette-foot .legend { display: flex; gap: 12px; }
+  .palette-foot .legend span { display: inline-flex; align-items: center; gap: 5px; }
+
+  /* ============================================================
+     INTAKE (initial state)
+     ============================================================ */
+  .intake-back {
+    position: fixed; inset: 0;
+    background: var(--bg-base);
+    z-index: 40;
+    display: flex; flex-direction: column;
+    transition: opacity var(--d-slow) var(--ease);
+  }
+  .intake-back.hidden { opacity: 0; pointer-events: none; }
+
+  .intake-top {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 12px;
+  }
+  .intake-body {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px 20px;
+  }
+  .intake-card {
+    width: 100%; max-width: 720px;
+    text-align: center;
+  }
+  .intake-eyebrow {
+    color: var(--tx-muted);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 12px;
+  }
+  .intake-title {
+    font-size: 28px; font-weight: 600;
+    letter-spacing: -0.03em;
+    margin: 0 0 8px;
+  }
+  .intake-sub {
+    color: var(--tx-secondary); font-size: 13.5px;
+    margin: 0 0 32px;
+  }
+
+  .intake-drop {
+    border: 1.5px dashed var(--line-strong);
+    border-radius: 12px;
+    padding: 40px 24px;
+    transition: border-color var(--d) var(--ease), background var(--d) var(--ease);
+    cursor: pointer;
+  }
+  .intake-drop:hover, .intake-drop.over {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .intake-icon {
+    width: 56px; height: 56px;
+    margin: 0 auto 16px;
+    border-radius: 14px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--tx-secondary); font-size: 24px;
+  }
+  .intake-drop-text {
+    color: var(--tx-primary); font-size: 14px;
+    margin-bottom: 4px;
+  }
+  .intake-drop-hint {
+    color: var(--tx-muted); font-size: 12px;
+  }
+
+  .intake-methods {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 24px;
+  }
+  .intake-method {
+    padding: 14px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    background: var(--bg-card);
+    color: var(--tx-secondary);
+    font-size: 12px;
+    text-align: center;
+    cursor: pointer;
+    transition: background var(--d) var(--ease), border-color var(--d) var(--ease);
+  }
+  .intake-method:hover { background: var(--bg-hover); border-color: var(--line-strong); color: var(--tx-primary); }
+  .intake-method .m-icon {
+    width: 24px; height: 24px;
+    margin: 0 auto 6px;
+    color: var(--accent);
+  }
+  .intake-method .m-key {
+    color: var(--tx-faint);
+    font-family: 'SF Mono', monospace;
+    font-size: 10.5px;
+    margin-top: 4px;
+  }
+
+  .intake-recent {
+    margin-top: 28px;
+    text-align: left;
+  }
+  .intake-recent-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .intake-recent-title {
+    color: var(--tx-muted);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .intake-recent-list {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    overflow: hidden;
+    background: var(--bg-card);
+  }
+  .intake-recent-row {
+    display: grid; grid-template-columns: 70px 1fr 80px 70px;
+    gap: 12px;
+    padding: 10px 14px;
+    border-top: 1px solid var(--line-soft);
+    align-items: center;
+    color: var(--tx-secondary);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background var(--d-fast) var(--ease);
+  }
+  .intake-recent-row:first-child { border-top: 0; }
+  .intake-recent-row:hover { background: var(--bg-hover); }
+  .intake-recent-row .id { font-family: 'SF Mono', monospace; color: var(--tx-primary); }
+  .intake-recent-row .sub { color: var(--tx-primary); }
+  .intake-recent-row .age { color: var(--tx-muted); text-align: right; font-size: 11px; }
+  .intake-recent-row .sev { display: flex; align-items: center; gap: 6px; }
+  .intake-recent-row .sev .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+  /* Webcam modal */
+  .webcam-back {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(6px);
+    z-index: 60;
+    display: none;
+    align-items: center; justify-content: center;
+  }
+  .webcam-back.open { display: flex; }
+  .webcam {
+    width: 520px; max-width: 92vw;
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .webcam-head {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+    color: var(--tx-secondary); font-size: 12px;
+  }
+  .webcam-head .rec {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--err);
+  }
+  .webcam-head .rec::before {
+    content: ''; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--err); animation: pulse 1.4s infinite var(--ease);
+  }
+  .webcam-feed {
+    aspect-ratio: 4/3;
+    background: linear-gradient(135deg, #1a1a22 0%, #0a0a0b 100%);
+    position: relative;
+    overflow: hidden;
+  }
+  .webcam-feed::after {
+    /* simulated camera grain */
+    content: ''; position: absolute; inset: 0;
+    background-image: radial-gradient(circle at 30% 40%, rgba(94,106,210,0.08), transparent 40%),
+                      radial-gradient(circle at 70% 60%, rgba(204,122,77,0.06), transparent 40%);
+  }
+  .webcam-frame {
+    position: absolute; inset: 30px;
+    border: 1.5px dashed rgba(94,106,210,0.6);
+    border-radius: 8px;
+    pointer-events: none;
+  }
+  .webcam-frame::before, .webcam-frame::after {
+    content: ''; position: absolute;
+    width: 18px; height: 18px;
+    border: 2px solid var(--accent);
+  }
+  .webcam-frame::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+  .webcam-frame::after  { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+  .webcam-hint {
+    position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,0.7); font-size: 11.5px;
+    background: rgba(0,0,0,0.55);
+    padding: 4px 10px;
+    border-radius: 4px;
+  }
+  .webcam-tilt {
+    position: absolute; top: 12px; left: 12px;
+    color: rgba(255,255,255,0.75); font-size: 11px;
+    background: rgba(0,0,0,0.55);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .webcam-tilt.auto-fixed { color: var(--ok); }
+  .webcam-foot {
+    padding: 12px 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--line);
+  }
+  .webcam-foot .opts { display: flex; align-items: center; gap: 10px; color: var(--tx-secondary); font-size: 11.5px; }
+  .webcam-foot .opt-toggle {
+    display: inline-flex; align-items: center; gap: 5px;
+    cursor: pointer;
+  }
+  .webcam-foot .opt-toggle .sw {
+    width: 22px; height: 13px; border-radius: 10px;
+    background: var(--bg-card); border: 1px solid var(--line);
+    position: relative;
+    transition: background var(--d) var(--ease);
+  }
+  .webcam-foot .opt-toggle .sw::after {
+    content: ''; position: absolute;
+    width: 9px; height: 9px; border-radius: 50%;
+    background: var(--tx-secondary);
+    top: 1px; left: 1px;
+    transition: left var(--d) var(--ease), background var(--d) var(--ease);
+  }
+  .webcam-foot .opt-toggle.on .sw { background: var(--accent-soft); border-color: var(--accent-line); }
+  .webcam-foot .opt-toggle.on .sw::after { left: 10px; background: var(--accent); }
+  .webcam-capture {
+    height: 30px; padding: 0 14px;
+    background: var(--accent); color: #fff;
+    border-radius: var(--r-2);
+    font-weight: 500; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 8px;
+  }
+
+  /* ============================================================
+     TOAST
+     ============================================================ */
+  .toast-tray {
+    position: fixed;
+    bottom: 70px;
+    right: 20px;
+    display: flex; flex-direction: column-reverse; gap: 8px;
+    z-index: 70;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--bg-elev);
+    border: 1px solid var(--line-strong);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--tx-primary);
+    font-size: 12.5px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    display: flex; align-items: center; gap: 10px;
+    min-width: 240px; max-width: 360px;
+    pointer-events: auto;
+    animation: toastIn 240ms var(--ease) both;
+  }
+  .toast.ok   { border-left-color: var(--ok); }
+  .toast.warn { border-left-color: var(--warn); }
+  .toast.err  { border-left-color: var(--err); }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .toast .t-body { flex: 1; }
+  .toast .t-sub  { color: var(--tx-muted); font-size: 11px; margin-top: 1px; }
+  .toast .t-undo {
+    color: var(--accent); font-size: 11.5px; cursor: pointer;
+  }
+
+  /* responsive squeeze */
+  @media (max-width: 1180px) {
+    .app { grid-template-columns: 220px 1fr 290px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     INTAKE (initial state)
+============================================================ -->
+<div class="intake-back" id="intakeBack">
+  <div class="intake-top">
+    <div class="brand"><div class="brand-mark"></div>Conduit <span style="color:var(--tx-muted);font-weight:400;margin-left:6px;">— QBO Escalation Surface</span></div>
+    <div class="topbar-spacer" style="flex:1"></div>
+    <div class="topbar-op">
+      Maya Chen
+      <div class="op-avatar">MC</div>
+    </div>
+  </div>
+
+  <div class="intake-body">
+    <div class="intake-card">
+      <div class="intake-eyebrow">Tuesday · May 16 · Shift 2 of 5</div>
+      <h1 class="intake-title">Drop a case to begin.</h1>
+      <p class="intake-sub">Paste a screenshot, drag a file, or capture from camera. Parser + triage + INV match start the moment a case arrives.</p>
+
+      <div class="intake-drop" id="intakeDrop">
+        <div class="intake-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4M12 4l-5 5M12 4l5 5"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2"/></svg>
+        </div>
+        <div class="intake-drop-text">Drop a screenshot here</div>
+        <div class="intake-drop-hint">or use the methods below · <kbd>Esc</kbd> closes any modal</div>
+      </div>
+
+      <div class="intake-methods">
+        <div class="intake-method" data-method="paste" id="mPaste">
+          <div class="m-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="1" width="8" height="4" rx="1"/></svg></div>
+          <div>Paste from clipboard</div>
+          <div class="m-key"><kbd>⌘V</kbd></div>
+        </div>
+        <div class="intake-method" data-method="file" id="mFile">
+          <div class="m-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M13 2v7h7"/></svg></div>
+          <div>Pick a file</div>
+          <div class="m-key"><kbd>F</kbd></div>
+        </div>
+        <div class="intake-method" data-method="webcam" id="mWebcam">
+          <div class="m-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg></div>
+          <div>Webcam capture</div>
+          <div class="m-key"><kbd>W</kbd> · auto-derotate</div>
+        </div>
+        <div class="intake-method" data-method="forward" id="mFwd">
+          <div class="m-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8l9 6 9-6"/><rect x="3" y="6" width="18" height="14" rx="2"/></svg></div>
+          <div>Forwarded from agent</div>
+          <div class="m-key"><kbd>G</kbd> · 3 waiting</div>
+        </div>
+      </div>
+
+      <div class="intake-recent">
+        <div class="intake-recent-head">
+          <div class="intake-recent-title">Today · resolved (4)</div>
+          <div class="intake-recent-title" style="color:var(--tx-secondary)">avg handle 3m 12s</div>
+        </div>
+        <div class="intake-recent-list">
+          <div class="intake-recent-row">
+            <div class="id">ESC-9182</div>
+            <div class="sub">Payroll tax filing rejected — IL state agency mismatch</div>
+            <div class="sev"><span class="dot" style="background:var(--sev-med)"></span><span>med</span></div>
+            <div class="age">2h ago</div>
+          </div>
+          <div class="intake-recent-row">
+            <div class="id">ESC-9181</div>
+            <div class="sub">Bank feed reconnect loop — Chase business · INV-44218</div>
+            <div class="sev"><span class="dot" style="background:var(--sev-high)"></span><span>high</span></div>
+            <div class="age">2h ago</div>
+          </div>
+          <div class="intake-recent-row">
+            <div class="id">ESC-9179</div>
+            <div class="sub">1099-NEC e-file blocked — vendor TIN failed validation</div>
+            <div class="sev"><span class="dot" style="background:var(--sev-low)"></span><span>low</span></div>
+            <div class="age">3h ago</div>
+          </div>
+          <div class="intake-recent-row">
+            <div class="id">ESC-9178</div>
+            <div class="sub">Invoice payment posted twice via QuickBooks Payments</div>
+            <div class="sev"><span class="dot" style="background:var(--sev-med)"></span><span>med</span></div>
+            <div class="age">4h ago</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Webcam modal -->
+<div class="webcam-back" id="webcamBack">
+  <div class="webcam">
+    <div class="webcam-head">
+      <div>Webcam capture · facing 1080p</div>
+      <div class="rec">live</div>
+    </div>
+    <div class="webcam-feed" id="webcamFeed">
+      <div class="webcam-tilt" id="webcamTilt">tilt detected · 6.4°</div>
+      <div class="webcam-frame"></div>
+      <div class="webcam-hint">point camera at agent's phone screen · we'll auto-straighten</div>
+    </div>
+    <div class="webcam-foot">
+      <div class="opts">
+        <label class="opt-toggle on"><div class="sw"></div>Auto-derotate</label>
+        <label class="opt-toggle on"><div class="sw"></div>Glare correction</label>
+      </div>
+      <button class="webcam-capture" id="webcamCap">Capture <kbd style="background:rgba(255,255,255,0.15);border-color:rgba(255,255,255,0.2);color:rgba(255,255,255,0.9);">Space</kbd></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     MAIN APP
+============================================================ -->
+<div class="app">
+
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <div class="brand"><div class="brand-mark"></div>Conduit</div>
+    <div class="topbar-divider"></div>
+    <div class="case-id">
+      <span class="id">case <strong>ESC-9183</strong></span>
+    </div>
+    <div class="pip live" data-sev="high" id="pipSev" data-key="S">
+      <span class="dot"></span><span>high</span><span class="key">S</span>
+    </div>
+    <div class="pip live" id="pipCat" data-key="C">
+      <span class="dot" style="background:#a855f7"></span><span>bank-feeds</span><span class="key">C</span>
+    </div>
+    <div class="pip live" id="pipInv" data-key="I">
+      <span class="dot" style="background:var(--info)"></span><span class="mono">INV-44218</span><span class="key">I</span>
+    </div>
+    <div class="pip" id="pipDraft" data-key="D">
+      <span class="dot" style="background:var(--tx-muted)"></span><span>no draft</span><span class="key">D</span>
+    </div>
+
+    <div class="topbar-spacer"></div>
+
+    <div class="providers" id="providers">
+      <button class="prov active" data-p="claude" title="Claude">C</button>
+      <button class="prov" data-p="gpt" title="GPT">G</button>
+      <button class="prov" data-p="gemini" title="Gemini">∗</button>
+      <button class="prov" data-p="kimi" title="Kimi">K</button>
+    </div>
+    <div class="topbar-divider"></div>
+    <div class="topbar-op">
+      Maya · queue 7
+      <div class="op-avatar">MC</div>
+    </div>
+  </div>
+
+  <!-- LEFT RAIL : Reasoning Stream -->
+  <aside class="rail">
+    <div class="rail-header">
+      <div class="rail-title"><span class="live-dot"></span>Reasoning</div>
+      <div class="rail-actions">
+        <button class="rail-icon-btn" title="Pin all" aria-label="Pin all">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 17v5M9 8l3-3 3 3M5 11h14l-2 6H7z"/></svg>
+        </button>
+        <button class="rail-icon-btn" title="Export trail" aria-label="Export trail">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="rail-stream" id="rail"></div>
+    <div class="rail-footer">
+      <span class="pinned-count"><span id="pinCount">0</span> pinned to audit</span>
+      <span><kbd>P</kbd> pin · <kbd>⇧P</kbd> all</span>
+    </div>
+  </aside>
+
+  <!-- CENTER CANVAS -->
+  <main class="canvas">
+    <div class="canvas-inner">
+      <h1 class="case-title" id="caseTitle">Bank feed re-auth loop · Chase Business Complete Checking</h1>
+      <p class="case-sub">
+        <span class="agent-name"><span class="agent-avatar">DR</span>Devon Rhodes · Tier-1</span>
+        <span class="sep">·</span>
+        <span>received 09:42 · idle 14s</span>
+        <span class="sep">·</span>
+        <span>customer: <span style="color:var(--tx-primary)">Pacific Northwest Roofing LLC</span></span>
+      </p>
+
+      <!-- Phone agent context -->
+      <div class="agent-context">
+        <span class="label">Agent context</span>
+        Customer disconnected and reconnected Chase 3x today. Each time it pulls 5 days then errors out. Customer is on QBO Plus, US, MFA on bank side enabled. They renewed bank login this morning per Chase's email. I tried the 'Update' button — same result. Already cleared cookies in their browser.
+      </div>
+
+      <!-- Screenshot -->
+      <div class="shot-wrap">
+        <div class="shot-bar">
+          <span class="src"><span class="src-dot"></span>screenshot · pasted 09:42:08 · 1.4 MB · 1920×1014</span>
+          <span class="spacer"></span>
+          <button class="shot-tool warn" id="qualityBtn" title="Image quality">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+            slight blur · still readable
+          </button>
+          <button class="shot-tool" title="Zoom">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3M8 11h6M11 8v6"/></svg>
+            zoom
+          </button>
+        </div>
+        <div class="shot" id="shot">
+          <!-- mock QBO bank feeds screen -->
+          <div class="qbo-mock">
+            <div class="qbo-head">
+              <div class="qbo-logo">qb</div>
+              <div class="qbo-bread">Banking · <strong>Bank transactions</strong> · Chase Business Complete Checking ····3491</div>
+            </div>
+            <div class="qbo-banner">
+              <div class="icon">!</div>
+              <div class="body">
+                <div><strong>We can't update this account right now.</strong></div>
+                <div style="margin-top:4px">Your bank is asking you to sign in again to keep your data flowing. <span class="code">(Error 102 · 590-OLAS-AUTH)</span></div>
+                <div style="margin-top:6px;font-size:11.5px;color:#b91c1c">Last successful update: <strong>May 11, 2026 04:14 AM PT</strong> · 5 days ago</div>
+              </div>
+            </div>
+            <div class="qbo-row">
+              <div class="qbo-field"><div class="lbl">Account</div><div class="val">Chase Business Complete ····3491</div></div>
+              <div class="qbo-field"><div class="lbl">Status</div><div class="val" style="color:#dc2626">Needs sign-in · OLAS-AUTH</div></div>
+              <div class="qbo-field"><div class="lbl">Connection method</div><div class="val">Direct connect (Chase)</div></div>
+              <div class="qbo-field"><div class="lbl">Last 5 days pulled</div><div class="val">$48,201.14 · 27 txns (held)</div></div>
+            </div>
+            <div class="qbo-actions">
+              <button class="qbo-btn">Update sign-in</button>
+              <button class="qbo-btn ghost">Switch to manual import</button>
+            </div>
+          </div>
+
+          <!-- parser chips materialize here -->
+          <div class="parse-chip" id="chip-err"     style="top:88px; left:340px">
+            <span class="ck"></span><span class="lbl">Error</span><span class="val">102 / 590-OLAS-AUTH</span>
+          </div>
+          <div class="parse-chip" id="chip-acc"     style="top:220px; left:64px">
+            <span class="ck"></span><span class="lbl">Account</span><span class="val">Chase Biz ····3491</span>
+          </div>
+          <div class="parse-chip" id="chip-stamp"   style="top:154px; left:380px">
+            <span class="ck"></span><span class="lbl">Last sync</span><span class="val">May 11 · 5d</span>
+          </div>
+          <div class="parse-chip" id="chip-method"  style="top:286px; left:64px">
+            <span class="ck"></span><span class="lbl">Conn</span><span class="val">Direct Connect</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Parsed result -->
+      <div class="parsed">
+        <div class="parsed-head">
+          <div class="title">Parsed</div>
+          <div class="prov-credit">
+            <span class="ring"></span>extracted by Claude · 612ms · 0 retries
+          </div>
+        </div>
+        <div class="parsed-grid">
+          <div class="parsed-row"><div class="k">Error code</div><div class="v"><span class="code-bit">102</span> · <span class="code-bit">590-OLAS-AUTH</span> · re-auth required</div></div>
+          <div class="parsed-row"><div class="k">Surface</div><div class="v">Banking → Bank transactions</div></div>
+          <div class="parsed-row"><div class="k">Account</div><div class="v"><span class="ent">Chase Business Complete Checking</span><span style="color:var(--tx-muted);margin-left:6px">····3491</span></div></div>
+          <div class="parsed-row"><div class="k">Connection</div><div class="v">Direct Connect (Chase OFX) · MFA enabled bank-side</div></div>
+          <div class="parsed-row"><div class="k">Last sync</div><div class="v">May 11, 2026 04:14 PT · <span style="color:var(--warn)">5 days stale</span> · 27 txns / $48,201.14 held</div></div>
+          <div class="parsed-row"><div class="k">Tenant</div><div class="v">QBO Plus · US · Pacific Northwest Roofing LLC</div></div>
+        </div>
+      </div>
+
+      <!-- INV match -->
+      <div class="inv-block">
+        <div class="inv-head">
+          <div class="title" style="color:var(--tx-secondary);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:500">Investigation</div>
+          <div class="prov-credit" style="color:var(--tx-muted);font-size:11px;display:inline-flex;align-items:center;gap:6px">
+            <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid var(--p-gpt);background:rgba(16,163,127,0.16)"></span>matched by GPT · semantic + error-code signal
+          </div>
+        </div>
+        <div class="inv-list" id="invList">
+          <div class="inv-row matched selected" data-inv="INV-44218">
+            <div class="inv-status" data-s="active"></div>
+            <div class="inv-id">INV-44218</div>
+            <div class="inv-title"><span class="hl">Chase Direct Connect 590-OLAS-AUTH</span> loop after May 7 OAuth change</div>
+            <div class="inv-score high">94%</div>
+            <div class="inv-age">9d · 41 cases</div>
+          </div>
+          <div class="inv-row" data-inv="INV-44196">
+            <div class="inv-status" data-s="open"></div>
+            <div class="inv-id">INV-44196</div>
+            <div class="inv-title">Bank feed pulls partial then halts (multi-FI) — possibly aggregator-level</div>
+            <div class="inv-score med">61%</div>
+            <div class="inv-age">14d · 18 cases</div>
+          </div>
+          <div class="inv-row" data-inv="INV-43811">
+            <div class="inv-status" data-s="resolved"></div>
+            <div class="inv-id">INV-43811</div>
+            <div class="inv-title">Chase MFA push not delivered to QBO during re-auth (resolved Apr 22)</div>
+            <div class="inv-score med">48%</div>
+            <div class="inv-age">resolved 24d</div>
+          </div>
+        </div>
+        <div class="inv-actions">
+          <span class="inv-action-hint"><kbd>↵</kbd>link selected · <kbd>N</kbd>new INV · <kbd>J</kbd>/<kbd>K</kbd>navigate</span>
+          <span class="inv-action-hint" style="color:var(--tx-secondary)">linked → <span class="mono" style="color:var(--accent)">INV-44218</span></span>
+        </div>
+      </div>
+
+      <!-- Draft -->
+      <div class="draft-block">
+        <div class="draft-head">
+          <div class="title" style="color:var(--tx-secondary);font-size:11px;text-transform:uppercase;letter-spacing:0.06em;font-weight:500">Draft to phone agent</div>
+          <div class="prov-credit" style="color:var(--tx-muted);font-size:11px;display:inline-flex;align-items:center;gap:6px">
+            <span style="width:12px;height:12px;border-radius:50%;border:1.5px solid var(--p-claude);background:rgba(204,122,77,0.16)"></span>composed by Claude · grounded in INV-44218 + playbook bank-feeds.md
+          </div>
+        </div>
+        <div class="draft-tmpl-row" id="tmplRow">
+          <button class="draft-tmpl active" data-tmpl="resolve">resolve <span class="k">1</span></button>
+          <button class="draft-tmpl" data-tmpl="ack">acknowledge <span class="k">2</span></button>
+          <button class="draft-tmpl" data-tmpl="gather">request info <span class="k">3</span></button>
+          <button class="draft-tmpl" data-tmpl="defer">defer to INV <span class="k">4</span></button>
+          <button class="draft-tmpl" data-tmpl="custom">freeform <span class="k">5</span></button>
+        </div>
+        <div class="draft-body" id="draftBody"></div>
+        <div class="draft-foot">
+          <span>2 variables · auto-filled from parsed data · <kbd>V</kbd> review</span>
+          <button class="ship-btn" id="shipBtn">Send to Devon <kbd>⌘↵</kbd></button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- RIGHT STACK : action queue -->
+  <aside class="stack">
+    <div class="stack-header">
+      <div class="stack-title">Decision stack</div>
+      <div class="stack-progress">
+        <span id="stackPct">71%</span>
+        <div class="bar"><div class="fill" id="stackFill" style="width:71%"></div></div>
+      </div>
+    </div>
+    <div class="stack-list" id="stack">
+      <div class="step done">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">Intake</div><div class="step-key">·</div></div>
+        <div class="step-detail">paste · 09:42:08 · 1 image</div>
+      </div>
+      <div class="step done">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">Parse</div><div class="step-key">·</div></div>
+        <div class="step-detail">6 fields · <span class="v">100%</span> confidence</div>
+      </div>
+      <div class="step done">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">Triage</div><div class="step-key">S</div></div>
+        <div class="step-detail"><span class="v">high</span> · <span class="v">bank-feeds</span></div>
+      </div>
+      <div class="step done">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">INV match</div><div class="step-key">I</div></div>
+        <div class="step-detail">linked <span class="v">INV-44218</span> · 94%</div>
+      </div>
+      <div class="step active">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">Compose response</div><div class="step-key">D</div></div>
+        <div class="step-detail">template <span class="v">resolve</span> · streaming</div>
+      </div>
+      <div class="step">
+        <div class="step-head"><div class="step-icon"></div><div class="step-name">Ship to agent</div><div class="step-key">⌘↵</div></div>
+        <div class="step-detail">posts in conversation · agent gets push</div>
+      </div>
+
+      <div class="gap-card">
+        <div class="gap-head">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
+          Missing
+        </div>
+        <div class="gap-q">We don't know whether the customer is on Chrome or QBO desktop app. INV-44218 fix differs.</div>
+        <div class="gap-actions">
+          <button class="gap-btn primary" id="askBtn">Ask Devon <kbd style="background:rgba(0,0,0,0.15);border-color:rgba(0,0,0,0.2);color:#1a1300">A</kbd></button>
+          <button class="gap-btn">Assume Chrome</button>
+          <button class="gap-btn">Skip</button>
+        </div>
+      </div>
+    </div>
+    <div class="stack-footer">
+      <span>handle time <span style="color:var(--tx-secondary);" class="mono" id="ht">02:14</span></span>
+      <span>shift avg 03:12</span>
+    </div>
+  </aside>
+
+  <!-- BOTTOM COMMAND BAR -->
+  <div class="cmd">
+    <div class="cmd-prompt"><span class="caret">›</span> ESC-9183</div>
+    <input class="cmd-input" id="cmdInput" placeholder="type a verb · triage high · inv 44218 · ask @gpt about webhook timing · draft resolve · ship" />
+    <div class="cmd-hints">
+      <button class="cmd-hint" data-cmd="ship">ship<span class="cmd-key">⌘↵</span></button>
+      <button class="cmd-hint" data-cmd="palette">commands<span class="cmd-key">⌘K</span></button>
+      <button class="cmd-hint" data-cmd="help">help<span class="cmd-key">?</span></button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============================================================
+     COMMAND PALETTE
+============================================================ -->
+<div class="palette-back" id="paletteBack"></div>
+<div class="palette" id="palette" role="dialog" aria-label="Command palette">
+  <div class="palette-input-wrap">
+    <span class="gt">›</span>
+    <input class="palette-input" id="paletteInput" placeholder="Search cases, INVs, actions, providers… (try: inv 44, triage, switch claude, ship)" />
+  </div>
+  <div class="palette-results" id="paletteResults"></div>
+  <div class="palette-foot">
+    <div class="legend">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> run</span>
+      <span><kbd>Esc</kbd> close</span>
+    </div>
+    <div>Conduit · ⌘K from anywhere</div>
+  </div>
+</div>
+
+<div class="toast-tray" id="toasts"></div>
+
+<script>
+/* ============================================================
+   CONDUIT — interaction layer
+   ============================================================ */
+
+const $  = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+/* --------------------------- toast --------------------------- */
+function toast(body, opts={}) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (opts.kind || '');
+  el.innerHTML = `<div class="t-body">${body}${opts.sub ? `<div class="t-sub">${opts.sub}</div>` : ''}</div>${opts.undo ? `<span class="t-undo">undo</span>` : ''}`;
+  $('#toasts').appendChild(el);
+  setTimeout(() => {
+    el.style.transition = 'opacity 200ms ease, transform 200ms ease';
+    el.style.opacity = 0;
+    el.style.transform = 'translateY(6px)';
+    setTimeout(() => el.remove(), 220);
+  }, opts.ttl || 3200);
+}
+
+/* --------------------------- intake -------------------------- */
+const intakeBack = $('#intakeBack');
+const webcamBack = $('#webcamBack');
+
+$('#intakeDrop').addEventListener('click', () => beginCase('paste'));
+$$('.intake-method').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.method;
+  if (m === 'webcam') openWebcam();
+  else beginCase(m);
+}));
+$('#mWebcam').addEventListener('click', e => { e.stopPropagation(); openWebcam(); });
+
+// drag/drop visual
+['dragover','dragenter'].forEach(ev => $('#intakeDrop').addEventListener(ev, e => { e.preventDefault(); $('#intakeDrop').classList.add('over'); }));
+['dragleave','drop'].forEach(ev => $('#intakeDrop').addEventListener(ev, e => { e.preventDefault(); $('#intakeDrop').classList.remove('over'); if (ev==='drop') beginCase('drop'); }));
+$$('.intake-recent-row').forEach(r => r.addEventListener('click', () => beginCase('reopen')));
+
+function openWebcam() {
+  webcamBack.classList.add('open');
+  // simulate tilt correcting after 1.4s
+  const tilt = $('#webcamTilt');
+  let deg = 6.4;
+  const iv = setInterval(() => {
+    deg *= 0.7;
+    if (deg < 0.4) {
+      clearInterval(iv);
+      tilt.textContent = 'level · auto-corrected';
+      tilt.classList.add('auto-fixed');
+    } else {
+      tilt.textContent = 'tilt detected · ' + deg.toFixed(1) + '°';
+    }
+  }, 220);
+}
+$('#webcamCap').addEventListener('click', () => {
+  webcamBack.classList.remove('open');
+  beginCase('webcam');
+});
+
+function beginCase(method) {
+  // intake closes — main app reveals; parse animation runs
+  intakeBack.classList.add('hidden');
+  setTimeout(() => intakeBack.style.display = 'none', 240);
+  toast(`Case received · <strong>ESC-9183</strong>`, { sub: `via ${method} · 1 screenshot · 1.4MB`, kind: 'ok' });
+  runParse();
+}
+
+/* --------------------------- parser animation ---------------- */
+const reasonings = [
+  { t:'09:42:08', tag:'parser',  prov:'claude', html:`reading <span class="em">1920×1014</span> screenshot · OCR + DOM-style heuristics` },
+  { t:'09:42:08', tag:'parser',  prov:'claude', html:`detected QBO banking surface · breadcrumb confidence <span class="em">0.97</span>` },
+  { t:'09:42:08', tag:'parser',  prov:'claude', html:`error region isolated · text reads <span class="em">"Error 102 · 590-OLAS-AUTH"</span>` },
+  { t:'09:42:09', tag:'triage',  prov:'claude', html:`OLAS-AUTH + Direct Connect + Chase → <span class="em">bank-feeds</span> · severity <span class="em">high</span> (revenue-affecting, 27 held txns)` },
+  { t:'09:42:09', tag:'inv',     prov:'gpt',    html:`searched INV index · 3 candidates · top hit <span class="em">INV-44218</span> at 94% (error code + FI + post-May-7 cohort)` },
+  { t:'09:42:10', tag:'inv',     prov:'gpt',    html:`INV-44218 fix branches on browser: <span class="em">Chrome → silent re-auth</span>; <span class="em">desktop app → reinstall connector v4.2</span>` },
+  { t:'09:42:10', tag:'gap',     prov:'claude', html:`agent context doesn't say which client · flagging as <span class="em">missing</span> · queued in stack` },
+  { t:'09:42:11', tag:'compose', prov:'claude', html:`drafting <span class="em">resolve</span> template · grounding in INV-44218 known-fix + bank-feeds.md playbook` },
+];
+
+function addThought(r) {
+  const el = document.createElement('div');
+  el.className = 'thought';
+  el.dataset.prov = r.prov;
+  el.innerHTML = `
+    <div class="thought-head"><span class="ts">${r.t}</span><span class="tag">${r.tag}</span></div>
+    <div class="thought-body">${r.html}</div>
+    <span class="thought-pin">⌘P</span>
+  `;
+  el.addEventListener('click', () => {
+    el.classList.toggle('pinned');
+    refreshPinCount();
+  });
+  $('#rail').appendChild(el);
+  el.style.opacity = 0;
+  el.style.transform = 'translateY(4px)';
+  requestAnimationFrame(() => {
+    el.style.transition = 'opacity 200ms var(--ease), transform 200ms var(--ease)';
+    el.style.opacity = 1;
+    el.style.transform = 'translateY(0)';
+  });
+  $('#rail').scrollTop = $('#rail').scrollHeight;
+}
+function refreshPinCount() {
+  const n = $$('.thought.pinned').length;
+  $('#pinCount').textContent = n;
+}
+
+function runParse() {
+  // staggered chip materialization
+  const chips = ['chip-err','chip-acc','chip-stamp','chip-method'];
+  chips.forEach((id, i) => setTimeout(() => $('#' + id).classList.add('show'), 220 + i * 260));
+
+  // reasoning stream
+  reasonings.forEach((r, i) => setTimeout(() => addThought(r), 380 + i * 320));
+
+  // draft tokens
+  setTimeout(() => streamDraft('resolve'), 380 + reasonings.length * 320 + 100);
+}
+
+/* --------------------------- draft templates ----------------- */
+const drafts = {
+  resolve: [
+    {t:'Hi '}, {t:'Devon', cls:'em'}, {t:' — this is '}, {v:'INV-44218'}, {t:' (Chase Direct Connect 590-OLAS-AUTH loop). Confirmed match: '}, {v:'94%'}, {t:'.\n\nFix path depends on the client:\n\n'},
+    {t:'• If the customer is on '}, {t:'Chrome', cls:'em'}, {t:': have them sign out of QBO, clear cookies for '}, {t:'intuit.com', cls:'em'}, {t:', then re-link Chase using the "Update sign-in" button. The OAuth handshake will succeed silently — no MFA prompt on second attempt.\n\n'},
+    {t:'• If they are on the '}, {t:'QBO desktop app', cls:'em'}, {t:': they need connector '}, {t:'v4.2 or higher', cls:'em'}, {t:'. Anything ≤ v4.1 will keep looping. Send them to qbo.intuit.com/connector to reinstall.\n\n'},
+    {t:'The 27 held txns ($48,201.14) will replay automatically once the feed is healthy. No manual import needed.\n\n'},
+    {t:'I left the browser question on your stack — let me know and I\'ll narrow the response if needed.'}
+  ],
+  ack: [
+    {t:'Hi '}, {t:'Devon', cls:'em'}, {t:' — got it, looking now. Matched to '}, {v:'INV-44218'}, {t:' on first pass. Will come back in <2 min with a fix.'}
+  ],
+  gather: [
+    {t:'Hi '}, {t:'Devon', cls:'em'}, {t:' — before I can resolve this I need one detail: is the customer using '}, {t:'Chrome', cls:'em'}, {t:' or the '}, {t:'QBO desktop app', cls:'em'}, {t:'? The fix for INV-44218 branches on this. Reply with either word.'}
+  ],
+  defer: [
+    {t:'Hi '}, {t:'Devon', cls:'em'}, {t:' — this is a known issue: '}, {v:'INV-44218'}, {t:'. We\'re tracking it and expect a platform-side fix within 48h. For now, ask the customer to use the manual import option (CSV from Chase). I\'ve added their case to the INV so they\'ll get an auto-update when it resolves.'}
+  ],
+  custom: [
+    {t:'(freeform — start typing or run '}, {v:'/draft'}, {t:' in the command bar)'}
+  ]
+};
+
+function streamDraft(name) {
+  const body = $('#draftBody');
+  body.innerHTML = '';
+  $$('.draft-tmpl').forEach(b => b.classList.toggle('active', b.dataset.tmpl === name));
+  $('#pipDraft span:nth-of-type(2)').textContent = 'draft ' + name;
+  $('#pipDraft').classList.add('live');
+  $('#pipDraft .dot').style.background = 'var(--accent)';
+  const tokens = drafts[name] || [];
+  let i = 0;
+  function step() {
+    if (i >= tokens.length) return;
+    const t = tokens[i++];
+    const span = document.createElement('span');
+    span.className = 'tok' + (t.cls ? ' ' + t.cls : '');
+    if (t.v) { span.className += ' var'; span.textContent = t.v; }
+    else { span.textContent = t.t; }
+    body.appendChild(span);
+    setTimeout(step, 38 + Math.random() * 60);
+  }
+  step();
+}
+
+$$('.draft-tmpl').forEach(b => b.addEventListener('click', () => streamDraft(b.dataset.tmpl)));
+
+/* --------------------------- INV interactions ---------------- */
+$$('.inv-row').forEach(r => r.addEventListener('click', () => {
+  $$('.inv-row').forEach(x => x.classList.remove('selected'));
+  r.classList.add('selected');
+  const id = r.dataset.inv;
+  $('#pipInv .mono').textContent = id;
+  toast(`Linked to <span class="mono" style="color:var(--accent)">${id}</span>`, { kind:'ok' });
+}));
+
+/* --------------------------- providers ----------------------- */
+$$('.prov').forEach(p => p.addEventListener('click', () => {
+  $$('.prov').forEach(x => x.classList.remove('active'));
+  p.classList.add('active');
+  const which = p.dataset.p;
+  toast(`Active provider → <strong>${which}</strong>`, { sub:'next request will route here · prior reasoning preserved', kind:'ok' });
+  // append reasoning to rail showing provider switch + a re-run thought
+  addThought({ t: nowStamp(), tag:'switch', prov:which, html:`operator switched provider · re-running INV match for comparison` });
+  // simulate a different conclusion
+  setTimeout(() => {
+    addThought({ t: nowStamp(), tag:'inv', prov:which, html:`<span class="em">${which}</span> agrees with INV-44218 · adjusted score <span class="em">91%</span>` });
+  }, 900);
+}));
+
+function nowStamp() {
+  const d = new Date();
+  return d.toTimeString().slice(0,8);
+}
+
+/* --------------------------- topbar pip taps ----------------- */
+$('#pipSev').addEventListener('click', () => cyclePip('sev'));
+$('#pipCat').addEventListener('click', () => toast('Category cycler · type <kbd>C</kbd> then a letter (B-bank, P-payroll, T-tax, I-invoicing…)'));
+$('#pipInv').addEventListener('click', () => $('#paletteInput').focus());
+$('#pipDraft').addEventListener('click', () => streamDraft('resolve'));
+
+function cyclePip(kind) {
+  if (kind === 'sev') {
+    const order = ['low','med','high','crit'];
+    const cur = $('#pipSev').dataset.sev;
+    const next = order[(order.indexOf(cur) + 1) % order.length];
+    $('#pipSev').dataset.sev = next;
+    $('#pipSev .dot').nextElementSibling.textContent = next;
+    addThought({ t: nowStamp(), tag:'triage', prov:'claude', html:`operator overrode severity → <span class="em">${next}</span>` });
+  }
+}
+
+/* --------------------------- command palette ----------------- */
+const palette     = $('#palette');
+const paletteBack = $('#paletteBack');
+const palInput    = $('#paletteInput');
+const palResults  = $('#paletteResults');
+
+const allCommands = [
+  { sec:'Triage',  ico:'S', name:'Set severity · high',   desc:'mark this case high',   shortcut:['S','H'], fn:() => { $('#pipSev').dataset.sev='high'; $('#pipSev .dot').nextElementSibling.textContent='high'; toast('Severity → high', {kind:'warn'}); } },
+  { sec:'Triage',  ico:'S', name:'Set severity · critical', desc:'mark this case critical', shortcut:['S','C'], fn:() => { $('#pipSev').dataset.sev='crit'; $('#pipSev .dot').nextElementSibling.textContent='crit'; toast('Severity → critical', {kind:'err'}); } },
+  { sec:'Triage',  ico:'C', name:'Category · bank-feeds', desc:'bank feed / aggregator', shortcut:['C','B'], fn:() => toast('Category → bank-feeds', {kind:'ok'}) },
+  { sec:'Triage',  ico:'C', name:'Category · payroll',     desc:'payroll / taxes',         shortcut:['C','P'], fn:() => toast('Category → payroll', {kind:'ok'}) },
+  { sec:'INV',     ico:'#', name:'INV-44218',              desc:'Chase 590-OLAS-AUTH loop · linked',  fn:() => toast('Already linked to INV-44218', {kind:'ok'}) },
+  { sec:'INV',     ico:'#', name:'INV-44196',              desc:'Bank feed partial halt (multi-FI)',  fn:() => { $$('.inv-row').forEach(x=>x.classList.remove('selected')); $$('.inv-row')[1].classList.add('selected'); $('#pipInv .mono').textContent='INV-44196'; toast('Linked → INV-44196', {kind:'ok'}); } },
+  { sec:'INV',     ico:'+', name:'Create new INV',         desc:'open INV from this case',            fn:() => toast('Created <span class="mono">INV-44229</span>', { sub:'draft saved · ping investigations channel', kind:'ok' }) },
+  { sec:'Compose', ico:'D', name:'Draft · resolve',        desc:'full fix path',          shortcut:['D','1'], fn:() => streamDraft('resolve') },
+  { sec:'Compose', ico:'D', name:'Draft · acknowledge',    desc:'short ack to phone agent', shortcut:['D','2'], fn:() => streamDraft('ack') },
+  { sec:'Compose', ico:'D', name:'Draft · request info',   desc:'ask for missing detail', shortcut:['D','3'], fn:() => streamDraft('gather') },
+  { sec:'Compose', ico:'D', name:'Draft · defer to INV',   desc:'punt to platform fix',   shortcut:['D','4'], fn:() => streamDraft('defer') },
+  { sec:'Ship',    ico:'⌘', name:'Ship to Devon',          desc:'post draft to phone agent', shortcut:['⌘','↵'], fn:() => shipCase() },
+  { sec:'Provider',ico:'C', name:'Switch to Claude',       desc:'tone-balanced · code-aware', shortcut:['@','c'], fn:() => $$('.prov')[0].click() },
+  { sec:'Provider',ico:'G', name:'Switch to GPT',          desc:'broad knowledge', shortcut:['@','g'], fn:() => $$('.prov')[1].click() },
+  { sec:'Provider',ico:'∗', name:'Switch to Gemini',       desc:'multimodal lead', shortcut:['@','m'], fn:() => $$('.prov')[2].click() },
+  { sec:'Provider',ico:'K', name:'Switch to Kimi',         desc:'long-context · cheap', shortcut:['@','k'], fn:() => $$('.prov')[3].click() },
+  { sec:'Re-run',  ico:'R', name:'Re-run with all providers (compare)', desc:'side-by-side diff of conclusions', fn:() => compareProviders() },
+  { sec:'Audit',   ico:'P', name:'Pin all reasoning to audit', desc:'lock the trail for QA review', shortcut:['⇧','P'], fn:() => { $$('.thought').forEach(t=>t.classList.add('pinned')); refreshPinCount(); toast('All reasoning pinned to audit trail', {kind:'ok'}); } },
+  { sec:'Audit',   ico:'E', name:'Export reasoning trail',  desc:'JSON + PDF · attaches to case record', fn:() => toast('Trail exported · attached to ESC-9183', {kind:'ok'}) },
+  { sec:'Nav',     ico:'G', name:'Go to queue',             desc:'see all waiting cases', shortcut:['G','Q'], fn:() => toast('Queue: 7 waiting · oldest 3m', {kind:'ok'}) },
+  { sec:'Nav',     ico:'G', name:'Go to INV index',         desc:'all open investigations', shortcut:['G','I'], fn:() => toast('182 open investigations', {kind:'ok'}) },
+  { sec:'Nav',     ico:'?', name:'Show keyboard shortcuts', desc:'every action mapped', shortcut:['?'], fn:() => toast('Shortcut cheat sheet · S sev · C cat · I INV · D draft · ⌘↵ ship · @ provider', {ttl:5000}) },
+];
+
+let palSel = 0;
+let palFiltered = [];
+
+function openPalette(prefill='') {
+  paletteBack.classList.add('open');
+  palette.classList.add('open');
+  palInput.value = prefill;
+  palInput.focus();
+  filterPalette();
+}
+function closePalette() {
+  paletteBack.classList.remove('open');
+  palette.classList.remove('open');
+}
+paletteBack.addEventListener('click', closePalette);
+
+function filterPalette() {
+  const q = palInput.value.trim().toLowerCase();
+  palFiltered = !q ? allCommands.slice() : allCommands.filter(c =>
+    (c.name + ' ' + c.desc + ' ' + c.sec).toLowerCase().includes(q) ||
+    fuzzy(q, c.name.toLowerCase())
+  );
+  palSel = 0;
+  renderPalette();
+}
+function fuzzy(q, str) {
+  let i = 0;
+  for (const ch of str) {
+    if (q[i] === ch) i++;
+    if (i === q.length) return true;
+  }
+  return false;
+}
+function renderPalette() {
+  let html = '';
+  let lastSec = '';
+  palFiltered.forEach((c, i) => {
+    if (c.sec !== lastSec) {
+      html += `<div class="palette-section">${c.sec}</div>`;
+      lastSec = c.sec;
+    }
+    html += `
+      <div class="palette-item ${i===palSel?'selected':''}" data-i="${i}">
+        <div class="ico">${c.ico}</div>
+        <div class="name">${c.name}</div>
+        <div class="desc">${c.desc || ''}</div>
+        <div class="shortcut">${(c.shortcut||[]).map(k=>`<kbd>${k}</kbd>`).join('')}</div>
+      </div>`;
+  });
+  palResults.innerHTML = html || `<div class="palette-section">No matches · try fewer words</div>`;
+  $$('.palette-item', palResults).forEach(el => {
+    el.addEventListener('mouseenter', () => { palSel = +el.dataset.i; renderPalette(); });
+    el.addEventListener('click', () => { palFiltered[palSel].fn(); closePalette(); });
+  });
+  const sel = $('.palette-item.selected', palResults);
+  if (sel) sel.scrollIntoView({block:'nearest'});
+}
+palInput.addEventListener('input', filterPalette);
+
+/* --------------------------- compare providers --------------- */
+function compareProviders() {
+  toast('Comparing providers · Claude vs GPT vs Gemini vs Kimi', { sub:'see reasoning rail for split', kind:'ok' });
+  ['claude','gpt','gemini','kimi'].forEach((p, i) => {
+    setTimeout(() => {
+      const conclusions = {
+        claude: 'INV-44218 · 94% · recommends branched fix',
+        gpt:    'INV-44218 · 91% · agrees · adds 590-OLAS retry suggestion',
+        gemini: 'INV-44218 · 89% · suggests checking Chase MFA push delivery first (cf. INV-43811)',
+        kimi:   'INV-44218 · 95% · cites 3 nearly-identical cases this week',
+      };
+      addThought({ t: nowStamp(), tag:'compare', prov:p, html:`<span class="em">${p}</span> · ${conclusions[p]}` });
+    }, i * 380);
+  });
+}
+
+/* --------------------------- ship ---------------------------- */
+$('#shipBtn').addEventListener('click', shipCase);
+function shipCase() {
+  if ($('#draftBody').children.length === 0) {
+    toast('No draft to ship', { kind:'warn' });
+    return;
+  }
+  // mark final step done
+  const steps = $$('.step');
+  steps[4].classList.remove('active'); steps[4].classList.add('done');
+  steps[5].classList.add('done');
+  $('#stackPct').textContent = '100%';
+  $('#stackFill').style.width = '100%';
+  $('#pipDraft span:nth-of-type(2)').textContent = 'shipped';
+  $('#pipDraft .dot').style.background = 'var(--ok)';
+  addThought({ t: nowStamp(), tag:'ship', prov:'claude', html:`response posted to Devon · audit trail closed · case <span class="em">resolved</span>` });
+  toast('Shipped to <strong>Devon Rhodes</strong>', { sub:'handle time 02:31 · trail saved · case ESC-9183 resolved', kind:'ok', ttl:4200 });
+}
+
+/* --------------------------- ask agent ----------------------- */
+$('#askBtn').addEventListener('click', () => {
+  streamDraft('gather');
+  toast('Templated question prepared · review draft then <kbd>⌘↵</kbd> to send', {kind:'warn'});
+});
+
+/* --------------------------- bottom cmd bar ------------------ */
+$('#cmdInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    runVerb($('#cmdInput').value.trim());
+    $('#cmdInput').value = '';
+  }
+});
+$$('.cmd-hint').forEach(h => h.addEventListener('click', () => {
+  const c = h.dataset.cmd;
+  if (c === 'palette') openPalette();
+  else if (c === 'ship') shipCase();
+  else if (c === 'help') openPalette('?');
+}));
+
+function runVerb(v) {
+  if (!v) return;
+  const m = v.match(/^(\S+)\s*(.*)$/);
+  if (!m) return;
+  const verb = m[1].toLowerCase();
+  const rest = m[2].trim().toLowerCase();
+  if (verb === 'triage' || verb === 'sev') {
+    if (['low','med','high','crit'].includes(rest)) {
+      $('#pipSev').dataset.sev = rest;
+      $('#pipSev .dot').nextElementSibling.textContent = rest;
+      toast(`Severity → ${rest}`, {kind:'ok'});
+      return;
+    }
+  }
+  if (verb === 'inv') {
+    const id = 'INV-' + rest.replace(/\D/g,'');
+    if (id.length > 4) {
+      $('#pipInv .mono').textContent = id;
+      toast(`Linked to <span class="mono" style="color:var(--accent)">${id}</span>`, {kind:'ok'});
+      return;
+    }
+  }
+  if (verb === 'draft') {
+    if (drafts[rest]) { streamDraft(rest); return; }
+  }
+  if (verb === 'ship') { shipCase(); return; }
+  if (verb === 'ask') {
+    // ask @provider …
+    const pmatch = rest.match(/@(\w+)\s*(.*)/);
+    if (pmatch) {
+      const which = pmatch[1];
+      const q = pmatch[2];
+      const p = $$('.prov').find(x => x.dataset.p === which);
+      if (p) p.click();
+      addThought({ t: nowStamp(), tag:'q', prov:which, html:`operator asked <span class="em">${which}</span>: "${q}"` });
+      setTimeout(() => addThought({ t: nowStamp(), tag:'a', prov:which, html:`...streaming answer (see canvas) · grounded in INV-44218 + bank-feeds.md` }), 600);
+      return;
+    }
+  }
+  if (verb === 'pin')  { $$('.thought').forEach(t=>t.classList.add('pinned')); refreshPinCount(); toast('All pinned', {kind:'ok'}); return; }
+  if (verb === '?' || verb === 'help') { openPalette(''); return; }
+  toast(`Unknown verb: ${verb}`, { sub:'try: triage · inv · draft · ask @claude · ship · pin · ?', kind:'warn' });
+}
+
+/* --------------------------- keyboard ----------------------- */
+document.addEventListener('keydown', e => {
+  // intake shortcuts
+  if (!intakeBack.classList.contains('hidden')) {
+    if (e.key === 'w' || e.key === 'W') { openWebcam(); e.preventDefault(); return; }
+    if (e.key === 'f' || e.key === 'F') { beginCase('file'); e.preventDefault(); return; }
+    if (e.key === 'g' || e.key === 'G') { beginCase('forward'); e.preventDefault(); return; }
+    if ((e.metaKey||e.ctrlKey) && e.key.toLowerCase() === 'v') { beginCase('paste'); e.preventDefault(); return; }
+  }
+  if (webcamBack.classList.contains('open')) {
+    if (e.key === ' ') { $('#webcamCap').click(); e.preventDefault(); return; }
+    if (e.key === 'Escape') { webcamBack.classList.remove('open'); return; }
+  }
+  // global
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); palette.classList.contains('open') ? closePalette() : openPalette(); return; }
+  if (palette.classList.contains('open')) {
+    if (e.key === 'Escape') { closePalette(); return; }
+    if (e.key === 'ArrowDown') { palSel = Math.min(palFiltered.length-1, palSel+1); renderPalette(); e.preventDefault(); return; }
+    if (e.key === 'ArrowUp')   { palSel = Math.max(0, palSel-1); renderPalette(); e.preventDefault(); return; }
+    if (e.key === 'Enter')     { if (palFiltered[palSel]) { palFiltered[palSel].fn(); closePalette(); } return; }
+    return;
+  }
+  // focus cmd bar with /
+  if (e.key === '/' && document.activeElement !== $('#cmdInput')) {
+    $('#cmdInput').focus(); e.preventDefault(); return;
+  }
+  if (document.activeElement === $('#cmdInput')) return;
+  // single-key verbs
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { shipCase(); e.preventDefault(); return; }
+  if (e.key === '?') { openPalette(''); return; }
+  if (e.key === 's' || e.key === 'S') { cyclePip('sev'); return; }
+  if (e.key === 'd' || e.key === 'D') { streamDraft('resolve'); return; }
+  if (e.key === 'a' || e.key === 'A') { $('#askBtn').click(); return; }
+  if (e.key === 'p' || e.key === 'P') { if (e.shiftKey) { $$('.thought').forEach(t=>t.classList.add('pinned')); refreshPinCount(); toast('All pinned', {kind:'ok'}); } else { const last = $$('.thought').slice(-1)[0]; if (last) { last.classList.add('pinned'); refreshPinCount(); } } return; }
+  if (e.key === '1') streamDraft('resolve');
+  if (e.key === '2') streamDraft('ack');
+  if (e.key === '3') streamDraft('gather');
+  if (e.key === '4') streamDraft('defer');
+  if (e.key === '5') streamDraft('custom');
+});
+
+/* --------------------------- handle time ticker -------------- */
+let secs = 134; // 2:14
+setInterval(() => {
+  secs++;
+  const mm = String(Math.floor(secs/60)).padStart(2,'0');
+  const ss = String(secs%60).padStart(2,'0');
+  $('#ht').textContent = `${mm}:${ss}`;
+}, 1000);
+
+/* --------------------------- boot --------------------------- */
+// Auto-show intake; the user begins from there
+console.log('Conduit ready · ⌘K to start, W to webcam');
+
+</script>
+<!-- Inspiration:
+     Linear's design system (command palette as backbone, monochrome restraint, 200ms budget),
+     Superhuman's "every action keyboard-first" philosophy,
+     Raycast-style fuzzy verb commands,
+     2025 agentic-UI patterns where reasoning is surfaced as a first-class spine, not buried in a tooltip.
+-->
+</body>
+</html>

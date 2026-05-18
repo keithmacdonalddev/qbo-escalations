@@ -185,7 +185,7 @@ function resolveAgentId(value) {
       profile?.roleTitle,
       `${profile?.displayName || ''} ${profile?.roleTitle || ''}`.trim(),
       `${profile?.displayName || ''} agent`.trim(),
-      profile?.displayName === 'QBO Analyst' ? 'analyst' : '',
+      profile?.displayName === 'QBO Assistant' ? 'assistant' : '',
       profile?.displayName === 'Workspace Agent' ? 'workspace' : '',
       profile?.displayName === 'Image Analyst' ? 'image analyst' : '',
     ];

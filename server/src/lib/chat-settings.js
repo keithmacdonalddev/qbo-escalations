@@ -5,7 +5,7 @@ const KNOWLEDGE_MODES = new Set(['full-playbook', 'hybrid', 'retrieval-only']);
 const MEMORY_POLICIES = new Set(['recent-only', 'summary-recent', 'full-history']);
 const BUDGET_ACTIONS = new Set(['warn', 'fallback', 'block']);
 const PROVIDER_MODES = new Set(['single', 'fallback', 'parallel']);
-const REASONING_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 
 const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   context: Object.freeze({
@@ -37,7 +37,9 @@ const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   providerStrategy: Object.freeze({
     defaultMode: 'single',
     defaultPrimaryProvider: DEFAULT_PROVIDER_ID,
+    defaultPrimaryModel: '',
     defaultFallbackProvider: getAlternateProvider(DEFAULT_PROVIDER_ID),
+    defaultFallbackModel: '',
     reasoningEffort: 'high',
     timeoutMs: 0,
   }),
@@ -177,7 +179,13 @@ function normalizeChatRuntimeSettings(rawSettings) {
     providerStrategy: {
       defaultMode,
       defaultPrimaryProvider,
+      defaultPrimaryModel: typeof providerStrategyInput.defaultPrimaryModel === 'string'
+        ? providerStrategyInput.defaultPrimaryModel.trim()
+        : '',
       defaultFallbackProvider,
+      defaultFallbackModel: typeof providerStrategyInput.defaultFallbackModel === 'string'
+        ? providerStrategyInput.defaultFallbackModel.trim()
+        : '',
       reasoningEffort: REASONING_EFFORTS.has(providerStrategyInput.reasoningEffort)
         ? providerStrategyInput.reasoningEffort
         : DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,

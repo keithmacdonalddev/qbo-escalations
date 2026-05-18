@@ -17,6 +17,7 @@ function getDockModeForRoute(route = {}) {
     'gallery',
     'investigations',
     'playbook',
+    'sessions',
     'templates',
     'usage',
   ]);
@@ -55,6 +56,8 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   if (path === '/chat' || path === '/' || path === '') {
     return { view: 'chat', conversationId: null };
   }
+  if (path === '/sessions') return { view: 'sessions', sessionId: null };
+  if (path.startsWith('/sessions/')) return { view: 'sessions', sessionId: path.slice('/sessions/'.length) };
   if (path.startsWith('/escalations/')) {
     return { view: 'escalation-detail', escalationId: path.slice(13) };
   }
@@ -117,6 +120,10 @@ function getSidebarCurrentRoute(route) {
 
   if (route.view === 'attention') {
     return '#/attention';
+  }
+
+  if (route.view === 'sessions') {
+    return route.sessionId ? `#/sessions/${route.sessionId}` : '#/sessions';
   }
 
   return `#/${route.view || 'chat'}`;

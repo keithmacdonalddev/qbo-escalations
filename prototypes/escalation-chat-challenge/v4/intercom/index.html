@@ -1,0 +1,600 @@
+<!doctype html>
+<!--
+  DESIGNER: intercom (V4 strip-mode)
+  FORCED ANGLE: Conversation-only. The WHOLE UI is one chat stream. Every agent
+    (parser, INV search, triage, analyst) posts messages. No cards, rails, docks,
+    HUDs, side panels. One thread. One composer. Triage stays glanceable via a
+    sticky pinned message at the top of the viewport (the only structural
+    exception to pure stream flow).
+
+  TWO FEATURES (max):
+    1. PINNED TRIAGE — triage posts as a message, then auto-pins to the top of
+       the visible thread so it stays glanceable as conversation scrolls.
+       Tap to unpin, tap to re-pin. Serves goal #1 (see what's wrong) and
+       goal #2 (confirm/doubt) without a second panel.
+    2. INLINE COPY — the analyst's answer messages have a quiet copy-on-hover
+       button. Serves goal #4 (use the answer) without a separate "draft reply"
+       region.
+
+  REGIONS (every visible region must serve a user goal):
+    - Pinned triage strip      -> goal #1, #2
+    - Thread of agent messages -> goals #1, #2, #3
+    - Composer                 -> goal #3, #4 (compose the question, paste back)
+    - That is everything.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Case thread — intercom</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #fafaf9;
+    --ink: #1c1c1a;
+    --ink-soft: #6b6b66;
+    --ink-faint: #a8a8a2;
+    --line: #ececea;
+    --line-soft: #f3f3f1;
+    --accent: #1c1c1a;
+    --warn: #b85c00;
+    --ok: #2f7a3a;
+    --pin: #fff8e6;
+    --pin-line: #e7d9a8;
+    --bubble: #ffffff;
+    --me: #1c1c1a;
+    --me-ink: #ffffff;
+    --radius: 14px;
+    --shadow: 0 1px 0 rgba(0,0,0,0.03);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+    height: 100vh;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    background: #fff;
+    border-left: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+  }
+
+  /* header — minimal, exists only to anchor the case identity */
+  header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  header .case {
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.01em;
+  }
+  header .meta {
+    color: var(--ink-faint);
+    font-size: 12px;
+  }
+
+  /* pinned triage strip — sticky to the top of the thread viewport */
+  .pinned {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--pin);
+    border-bottom: 1px solid var(--pin-line);
+    padding: 12px 20px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: start;
+    transition: max-height .25s ease, padding .25s ease, opacity .25s ease;
+    max-height: 260px;
+    overflow: hidden;
+  }
+  .pinned.hidden {
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
+    border-bottom-color: transparent;
+  }
+  .pinned .label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--warn);
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .pinned .verdict {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.35;
+  }
+  .pinned .why {
+    margin-top: 4px;
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+  .pinned .pin-btn {
+    background: transparent;
+    border: 1px solid var(--pin-line);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--ink-soft);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .pinned .pin-btn:hover { background: #fff; }
+
+  /* thread */
+  .thread {
+    overflow-y: auto;
+    padding: 18px 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    scroll-behavior: smooth;
+  }
+
+  .msg {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    gap: 10px;
+    animation: fadeIn .25s ease;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: none; }
+  }
+
+  .avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #ecece8;
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.02em;
+  }
+  .avatar.parser { background: #eef3f8; color: #45607a; }
+  .avatar.inv    { background: #f0eef7; color: #5a4a85; }
+  .avatar.triage { background: #f7ebd8; color: #8a5a18; }
+  .avatar.analyst{ background: #1c1c1a; color: #fff; }
+  .avatar.you    { background: #2f7a3a; color: #fff; }
+
+  .body { min-width: 0; }
+  .name {
+    font-size: 12px;
+    color: var(--ink-soft);
+    margin-bottom: 3px;
+  }
+  .name b { color: var(--ink); font-weight: 600; }
+  .name .time { color: var(--ink-faint); margin-left: 6px; font-size: 11px; }
+
+  .bubble {
+    background: var(--bubble);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px 13px;
+    color: var(--ink);
+    box-shadow: var(--shadow);
+    position: relative;
+    word-wrap: break-word;
+  }
+  .bubble.system {
+    background: transparent;
+    border: 1px dashed var(--line);
+    color: var(--ink-soft);
+    font-size: 13px;
+  }
+  .bubble.triage-msg {
+    background: #fffaf0;
+    border-color: #ead9b0;
+  }
+  .bubble.analyst {
+    background: #1c1c1a;
+    color: #fff;
+    border-color: #1c1c1a;
+  }
+  .bubble.analyst .copy {
+    color: #d8d8d4;
+    border-color: #3a3a36;
+  }
+  .bubble.me {
+    background: var(--me);
+    color: var(--me-ink);
+    border-color: var(--me);
+  }
+  .row.me {
+    grid-template-columns: 1fr 28px;
+  }
+  .row.me .avatar { order: 2; }
+  .row.me .body { text-align: right; }
+  .row.me .bubble { display: inline-block; text-align: left; max-width: 90%; }
+
+  /* parser result list — kept extremely quiet */
+  .fields {
+    margin: 6px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px 16px;
+    font-size: 12.5px;
+    color: var(--ink-soft);
+  }
+  .fields li { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dotted var(--line); padding: 2px 0; }
+  .fields li b { color: var(--ink); font-weight: 500; }
+
+  .inv-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .inv-line .badge {
+    background: #efece7;
+    color: var(--ink-soft);
+    border-radius: 999px;
+    padding: 1px 8px;
+    font-size: 11px;
+  }
+
+  /* hover-revealed copy on analyst bubbles */
+  .copy {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    border: 1px solid var(--line);
+    background: rgba(255,255,255,0.9);
+    color: var(--ink-soft);
+    border-radius: 6px;
+    padding: 2px 7px;
+    font-size: 11px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .bubble:hover .copy { opacity: 1; }
+  .copy:active { transform: translateY(1px); }
+  .copy.ok { color: var(--ok); border-color: var(--ok); }
+
+  /* typing dots */
+  .typing {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--ink-faint);
+    font-size: 13px;
+  }
+  .typing span {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--ink-faint);
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+  .typing span:nth-child(2){ animation-delay: .15s; }
+  .typing span:nth-child(3){ animation-delay: .3s; }
+  @keyframes bounce {
+    0%, 80%, 100% { transform: translateY(0); opacity: .5; }
+    40% { transform: translateY(-3px); opacity: 1; }
+  }
+
+  /* composer */
+  .composer {
+    border-top: 1px solid var(--line);
+    padding: 12px 14px 14px;
+    background: #fff;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: end;
+  }
+  .composer textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    font: inherit;
+    color: var(--ink);
+    resize: none;
+    min-height: 44px;
+    max-height: 140px;
+    outline: none;
+    background: #fafaf9;
+  }
+  .composer textarea:focus { background: #fff; border-color: #d4d4d0; }
+  .composer button.send {
+    background: var(--ink);
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    padding: 0 16px;
+    height: 44px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 13px;
+  }
+  .composer button.send:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* uploader — initial state */
+  .upload {
+    margin: auto;
+    padding: 22px 28px;
+    border: 1px dashed var(--line);
+    border-radius: 14px;
+    text-align: center;
+    color: var(--ink-soft);
+    max-width: 380px;
+  }
+  .upload b { color: var(--ink); display: block; margin-bottom: 4px; }
+  .upload button {
+    margin-top: 12px;
+    background: var(--ink);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  /* helper for the "minimized" pinned strip */
+  .pin-mini {
+    display: none;
+  }
+  .pinned.hidden + .pin-mini {
+    display: flex;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: rgba(255,248,230,0.95);
+    backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--pin-line);
+    padding: 6px 14px;
+    font-size: 11px;
+    color: var(--warn);
+    cursor: pointer;
+    align-items: center;
+    gap: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <header>
+    <div class="case">Case #4821</div>
+    <div class="meta">opened just now · Maria K. (phone agent)</div>
+  </header>
+
+  <!-- Pinned triage strip: hidden until triage posts, then sticks -->
+  <div class="pinned hidden" id="pinned" aria-live="polite">
+    <div>
+      <div class="label">Triage · pinned</div>
+      <div class="verdict" id="pinVerdict">—</div>
+      <div class="why" id="pinWhy">—</div>
+    </div>
+    <button class="pin-btn" id="unpinBtn" title="Unpin">unpin</button>
+  </div>
+  <div class="pin-mini" id="pinMini" onclick="repin()">▲ show pinned triage</div>
+
+  <!-- Thread: one stream, everything posts here -->
+  <main class="thread" id="thread">
+    <div class="upload" id="upload">
+      <b>Drop the screenshot</b>
+      Paste, drag, or pick a QBO screenshot to open a case.
+      <br><button onclick="startDemo()">Use demo screenshot</button>
+    </div>
+  </main>
+
+  <!-- Composer: also part of the conversation, not a separate "reply panel" -->
+  <form class="composer" id="composer" onsubmit="onSend(event)" style="display:none">
+    <textarea id="input" rows="1" placeholder="Reply to the thread…" oninput="autosize(this)" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();onSend(event);}"></textarea>
+    <button class="send" id="sendBtn" type="submit">Send</button>
+  </form>
+
+</div>
+
+<script>
+  const thread = document.getElementById('thread');
+  const pinned = document.getElementById('pinned');
+  const pinMini = document.getElementById('pinMini');
+  const pinVerdict = document.getElementById('pinVerdict');
+  const pinWhy = document.getElementById('pinWhy');
+  const composer = document.getElementById('composer');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('sendBtn');
+
+  document.getElementById('unpinBtn').onclick = () => {
+    pinned.classList.add('hidden');
+  };
+  function repin() {
+    pinned.classList.remove('hidden');
+  }
+
+  function nowLabel() {
+    const d = new Date();
+    return d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+  }
+
+  function scrollEnd() {
+    requestAnimationFrame(() => { thread.scrollTop = thread.scrollHeight; });
+  }
+
+  function postMsg({who, name, html, kind='', me=false}) {
+    const row = document.createElement('div');
+    row.className = 'msg' + (me ? ' row me' : ' row');
+    row.innerHTML = `
+      <div class="avatar ${who}">${initials(name)}</div>
+      <div class="body">
+        <div class="name"><b>${name}</b><span class="time">${nowLabel()}</span></div>
+        <div class="bubble ${kind} ${me ? 'me' : ''}">${html}</div>
+      </div>`;
+    thread.appendChild(row);
+    scrollEnd();
+    return row;
+  }
+
+  function postTyping(name, who) {
+    const row = document.createElement('div');
+    row.className = 'msg row';
+    row.dataset.typing = '1';
+    row.innerHTML = `
+      <div class="avatar ${who}">${initials(name)}</div>
+      <div class="body">
+        <div class="name"><b>${name}</b><span class="time">${nowLabel()}</span></div>
+        <div class="bubble"><span class="typing"><span></span><span></span><span></span></span></div>
+      </div>`;
+    thread.appendChild(row);
+    scrollEnd();
+    return row;
+  }
+  function replaceTyping(row, html, kind='') {
+    row.querySelector('.bubble').className = 'bubble ' + kind;
+    row.querySelector('.bubble').innerHTML = html;
+    delete row.dataset.typing;
+    scrollEnd();
+  }
+
+  function initials(name) {
+    return name.split(/\s+/).map(p=>p[0]).join('').slice(0,2).toUpperCase();
+  }
+
+  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+  // ---------- demo arc ----------
+  async function startDemo() {
+    document.getElementById('upload').remove();
+    composer.style.display = 'grid';
+
+    // Operator uploads (posts an image-as-message)
+    postMsg({
+      who: 'you', name: 'You',
+      html: `<div>📎 <i>qbo-payroll-error.png</i> · uploaded</div>`,
+      me: true
+    });
+    await wait(600);
+
+    // Parser speaks
+    const pTyping = postTyping('Parser', 'parser');
+    await wait(900);
+    replaceTyping(pTyping, `
+      Parsed 9 fields from the screenshot.
+      <ul class="fields">
+        <li><span>Company</span><b>Acme Holdings LLC</b></li>
+        <li><span>Realm ID</span><b>9341 0027 7715</b></li>
+        <li><span>Product</span><b>QBO Payroll Elite</b></li>
+        <li><span>Error code</span><b>PS077</b></li>
+        <li><span>Pay date</span><b>May 17, 2026</b></li>
+        <li><span>Employees</span><b>14</b></li>
+        <li><span>Net amount</span><b>$48,221.04</b></li>
+        <li><span>Tax filing</span><b>Federal 941</b></li>
+        <li><span>Last sync</span><b>2h ago</b></li>
+      </ul>
+    `);
+
+    // INV search + triage in parallel
+    const iTyping = postTyping('INV Search', 'inv');
+    const tTyping = postTyping('Triage', 'triage');
+
+    await wait(1100);
+    replaceTyping(iTyping, `
+      <div class="inv-line">
+        Matched <b>INV-147914</b> <span class="badge">91% match</span>
+        — “PS077 on Elite, recurring weekly run.”
+      </div>`);
+
+    await wait(700);
+    const verdict = 'Payroll service held — PS077 on a recurring Elite run.';
+    const why = 'Likely tax-agency hold (state UI mismatch). Confirm Realm 9341…7715, then escalate to Payroll Tier 2.';
+    replaceTyping(tTyping, `
+      <div style="font-weight:600; margin-bottom:4px;">${verdict}</div>
+      <div style="color:var(--ink-soft); font-size:13px;">${why}</div>
+    `, 'triage-msg');
+
+    // Pin the triage
+    pinVerdict.textContent = verdict;
+    pinWhy.textContent = why;
+    pinned.classList.remove('hidden');
+
+    await wait(900);
+
+    // Main analyst joins
+    postMsg({
+      who: 'analyst', name: 'Iris (analyst)',
+      html: `Hi — I’ve got the triage. Want me to draft the response for the phone agent, or do you want to verify the realm first?`,
+      kind: 'analyst'
+    });
+    input.focus();
+  }
+
+  // ---------- operator chat ----------
+  function autosize(el){ el.style.height='auto'; el.style.height = Math.min(el.scrollHeight, 140)+'px'; }
+
+  async function onSend(e) {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+    postMsg({ who: 'you', name: 'You', html: escapeHtml(text), me: true });
+    input.value = ''; autosize(input);
+
+    const aTyping = postTyping('Iris (analyst)', 'analyst');
+    await wait(900 + Math.random()*600);
+    replaceTyping(aTyping, analystReply(text), 'analyst');
+    // analyst bubble gets a copy button
+    const lastBubble = thread.querySelectorAll('.bubble.analyst');
+    const b = lastBubble[lastBubble.length-1];
+    const btn = document.createElement('button');
+    btn.className = 'copy';
+    btn.textContent = 'copy';
+    btn.onclick = (ev) => {
+      ev.preventDefault();
+      navigator.clipboard?.writeText(b.innerText).catch(()=>{});
+      btn.textContent = 'copied';
+      btn.classList.add('ok');
+      setTimeout(()=>{ btn.textContent='copy'; btn.classList.remove('ok'); }, 1400);
+    };
+    b.appendChild(btn);
+  }
+
+  function analystReply(text) {
+    const t = text.toLowerCase();
+    if (t.includes('draft') || t.includes('reply') || t.includes('response')) {
+      return `Here’s a draft for the phone agent:<br><br>
+        “Hi Maria — the payroll run is held under error PS077. This is almost always a state UI agency mismatch on a recurring Elite schedule. Please confirm Realm ID <b>9341 0027 7715</b>, then I’ll route this to Payroll Tier 2 with the INV reference INV-147914. ETA on Tier 2 callback is 30–45 minutes.”
+        <br><br>Want me to tighten it, or send as-is?`;
+    }
+    if (t.includes('realm') || t.includes('verify') || t.includes('confirm')) {
+      return `Realm <b>9341 0027 7715</b> matches Acme Holdings LLC on Elite. Last successful payroll: May 3. The PS077 began on the May 10 cycle. We’re clear to escalate.`;
+    }
+    if (t.includes('tier 2') || t.includes('escalate')) {
+      return `Routing to Payroll Tier 2 with INV-147914 attached. They’ll respond on this thread within 30–45 min. I’ll ping you when they pick it up.`;
+    }
+    return `Got it. Based on the triage — PS077 on a recurring Elite run — the next step is to confirm the realm with Maria and then escalate to Payroll Tier 2 with INV-147914 attached. Want the draft message?`;
+  }
+
+  function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+</script>
+
+</body>
+</html>

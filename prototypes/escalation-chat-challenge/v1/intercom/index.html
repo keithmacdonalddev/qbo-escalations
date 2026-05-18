@@ -1,0 +1,1882 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>The Brief — QBO Escalation</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+/* ──────────────────────────────────────────────────────────────
+   THE BRIEF — designer-intercom
+   A case is a living document, not a chat. The parser, the triage
+   classifier, the INV matcher, the responder — they write into the
+   doc. Reasoning lives in the margin like Google Docs comments,
+   pinned to the exact span that produced it. Providers are named
+   editors whose passes can be diffed. The reply to the phone agent
+   is the last section of the doc — composed from the rest.
+   ────────────────────────────────────────────────────────────── */
+
+/* tokens — warm light, Intercom Pulse DNA but warm, not navy */
+:root {
+  --bg:        #f6f4ef;            /* warm paper */
+  --bg-rail:  #ecebe4;             /* slightly darker rail */
+  --bg-stack: #e7e4dc;
+  --paper:    #ffffff;             /* the doc */
+  --ink:      #1c1a17;             /* warm charcoal */
+  --ink-2:    #4d4945;
+  --ink-3:    #7a7570;
+  --ink-4:    #a8a39d;
+  --rule:     #e2ddd4;
+  --rule-2:   #cfc9bf;
+  --hi:       #fff8d6;             /* spotlight on a span */
+  --hi-edge:  #f3cf5a;
+  --accent:   #c76a22;             /* QBO warm ember */
+  --accent-soft: #f5e2cf;
+  --link:     #285ec5;             /* Intercom-ish blue, warmed */
+  --ok:       #2f7d4e;
+  --warn:     #b67318;
+  --crit:     #b2351e;
+  --info:     #4264a6;
+  /* provider identities — never spelled as a long string */
+  --p-claude:  #c46a30;
+  --p-gpt:     #1f7a4e;
+  --p-gemini:  #5562d0;
+  --p-kimi:    #8a3e84;
+  --shadow-1:  0 1px 0 rgba(0,0,0,.04), 0 2px 8px rgba(28,26,23,.04);
+  --shadow-2:  0 2px 4px rgba(28,26,23,.06), 0 14px 36px rgba(28,26,23,.08);
+  --shadow-3:  0 8px 32px rgba(28,26,23,.18);
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px;
+  --ease: cubic-bezier(.2,.7,.2,1);
+}
+
+* { box-sizing: border-box; }
+html, body { margin:0; padding:0; height:100%; background: var(--bg); color: var(--ink);
+  font-family: ui-sans-serif, -apple-system, "Inter", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; background: none; border: none; padding: 0; }
+input, textarea { font: inherit; color: inherit; }
+
+/* ╔═════════════ shell ═════════════╗ */
+.app {
+  display: grid;
+  grid-template-columns: 240px 1fr 360px;
+  grid-template-rows: 52px 1fr;
+  grid-template-areas:
+    "top    top     top"
+    "stack  brief   margin";
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── top bar ── */
+.top {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+  position: relative;
+  z-index: 30;
+}
+.brand {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-size: 14px;
+  display: flex; align-items: center; gap: 8px;
+}
+.brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.crumb {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  display: flex; align-items: center; gap: 8px;
+}
+.crumb b { color: var(--ink); font-weight: 600; }
+.crumb svg { width: 10px; height: 10px; color: var(--ink-4); }
+
+.sevpill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px 3px 7px; border-radius: 999px;
+  background: #fff; border: 1px solid var(--rule-2);
+  font-size: 12px; font-weight: 600; letter-spacing: 0.01em;
+  transition: all .4s var(--ease);
+}
+.sevpill .swatch { width: 8px; height: 8px; border-radius: 2px; background: var(--ink-4); transition: background .4s var(--ease); }
+.sevpill[data-sev="resolving"]      { background: #fff; color: var(--ink-3); }
+.sevpill[data-sev="resolving"] .swatch { background: var(--ink-4); animation: pulse 1.4s var(--ease) infinite; }
+.sevpill[data-sev="low"]            { background: #eef5ec; color: var(--ok); border-color: #cfe5cf; }
+.sevpill[data-sev="low"] .swatch    { background: var(--ok); }
+.sevpill[data-sev="med"]            { background: #fdf3e0; color: var(--warn); border-color: #ecd9aa; }
+.sevpill[data-sev="med"] .swatch    { background: var(--warn); }
+.sevpill[data-sev="high"]           { background: #fbe7e1; color: var(--crit); border-color: #f1c3b5; }
+.sevpill[data-sev="high"] .swatch   { background: var(--crit); }
+
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+
+.top .spacer { flex: 1; }
+.editors {
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+}
+.editor-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 999px;
+  font-size: 12px; color: var(--ink-2);
+  transition: background .2s var(--ease);
+  position: relative;
+}
+.editor-tag:hover { background: var(--bg-rail); }
+.editor-tag.active { background: var(--ink); color: #fff; }
+.editor-tag .av {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 11px; font-weight: 700;
+}
+.av-claude { background: var(--p-claude); }
+.av-gpt    { background: var(--p-gpt); }
+.av-gemini { background: var(--p-gemini); }
+.av-kimi   { background: var(--p-kimi); }
+
+.iconbtn {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--r-md);
+  color: var(--ink-2);
+  transition: background .15s var(--ease);
+}
+.iconbtn:hover { background: var(--bg-rail); color: var(--ink); }
+.iconbtn svg { width: 16px; height: 16px; }
+.cmdkbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px; padding: 2px 6px;
+  background: var(--bg-rail); border-radius: 4px; color: var(--ink-3);
+  border: 1px solid var(--rule);
+}
+.cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 7px 14px; border-radius: 999px;
+  background: var(--ink); color: #fff;
+  font-size: 13px; font-weight: 600;
+  transition: transform .15s var(--ease), background .15s var(--ease);
+}
+.cta:hover { background: #000; transform: translateY(-1px); }
+.cta:active { transform: translateY(0); }
+.cta.ghost { background: #fff; color: var(--ink); border: 1px solid var(--rule-2); }
+.cta.ghost:hover { background: var(--bg-rail); }
+.cta svg { width: 14px; height: 14px; }
+
+/* ── case stack (left rail) ── */
+.stack {
+  grid-area: stack;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.stack-head {
+  padding: 14px 14px 10px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.stack-head .label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.stack-head .count {
+  background: var(--ink); color: #fff;
+  border-radius: 999px; padding: 1px 7px;
+  font-size: 11px; font-weight: 600;
+}
+.stack-list { flex: 1; overflow-y: auto; padding: 0 8px 14px; }
+.stack-list::-webkit-scrollbar { width: 6px; }
+.stack-list::-webkit-scrollbar-thumb { background: #d8d3c9; border-radius: 3px; }
+.case-card {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: 12px 12px 11px;
+  margin-bottom: 8px;
+  position: relative;
+  cursor: pointer;
+  transition: transform .2s var(--ease), border-color .15s, box-shadow .15s;
+}
+.case-card:hover { border-color: var(--rule-2); box-shadow: var(--shadow-1); transform: translateY(-1px); }
+.case-card.active {
+  border-color: var(--ink);
+  box-shadow: 0 0 0 2px var(--ink), var(--shadow-2);
+}
+.case-card.filed { opacity: 0.5; background: transparent; }
+.case-card .row1 {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 4px;
+}
+.case-card .row1 .who { font-size: 12px; font-weight: 600; color: var(--ink); }
+.case-card .row1 .ago { font-size: 11px; color: var(--ink-3); }
+.case-card .row2 {
+  font-size: 12.5px; color: var(--ink-2);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; line-height: 1.35;
+}
+.case-card .row3 {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px;
+}
+.case-card .ticker {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10.5px; color: var(--ink-3);
+}
+.case-card .mini-sev {
+  width: 6px; height: 6px; border-radius: 50%;
+}
+.mini-low { background: var(--ok); }
+.mini-med { background: var(--warn); }
+.mini-high { background: var(--crit); }
+.mini-tri { background: var(--ink-4); animation: pulse 1.2s infinite; }
+
+.stack-section { padding: 12px 14px 6px; }
+.stack-section .label { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--ink-4); }
+
+/* ── the brief (center) ── */
+.brief {
+  grid-area: brief;
+  overflow-y: auto;
+  padding: 32px 56px 96px;
+  scroll-behavior: smooth;
+  position: relative;
+  background:
+    linear-gradient(180deg, var(--bg) 0%, var(--bg) 24px, transparent 80px),
+    var(--bg);
+}
+.brief::-webkit-scrollbar { width: 10px; }
+.brief::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 5px; }
+
+.doc {
+  max-width: 720px;
+  margin: 0 auto;
+  background: var(--paper);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-2);
+  padding: 36px 44px 56px;
+  position: relative;
+}
+.doc::before {
+  content: "";
+  position: absolute; left: 24px; right: 24px; bottom: -10px; height: 20px;
+  background: var(--paper);
+  border-radius: 0 0 var(--r-xl) var(--r-xl);
+  filter: blur(8px); opacity: .5;
+  z-index: -1;
+}
+
+/* doc header */
+.doc-h {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding-bottom: 18px; border-bottom: 1px solid var(--rule);
+  margin-bottom: 24px;
+}
+.doc-h .title { font-size: 22px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; color: var(--ink); margin-bottom: 4px; }
+.doc-h .sub  { font-size: 12.5px; color: var(--ink-3); }
+.doc-h .sub .pipe { margin: 0 8px; color: var(--ink-4); }
+.doc-h .meta { text-align: right; font-size: 11.5px; color: var(--ink-3); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.doc-h .meta .case-id { color: var(--ink); font-weight: 600; font-size: 12px; }
+
+/* sections */
+.sec { margin-bottom: 28px; }
+.sec .sec-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.sec .sec-num {
+  width: 18px; height: 18px; border-radius: 4px;
+  background: var(--bg-rail); color: var(--ink-3);
+  font-size: 10.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.sec .sec-title {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--ink-2);
+}
+.sec .sec-author {
+  margin-left: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--ink-3);
+}
+.sec .sec-author .av { width: 16px; height: 16px; font-size: 9px; }
+.sec.empty .sec-author { opacity: 0; }
+
+.sec-body { padding-left: 26px; }
+.skeleton-line {
+  height: 12px; background: linear-gradient(90deg, var(--bg-rail) 0%, var(--rule) 50%, var(--bg-rail) 100%);
+  background-size: 200% 100%;
+  border-radius: 4px; margin: 8px 0;
+  animation: shimmer 1.4s linear infinite;
+}
+.skeleton-line.s1 { width: 92%; }
+.skeleton-line.s2 { width: 70%; }
+.skeleton-line.s3 { width: 84%; }
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* intake strip */
+.intake {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 16px;
+  align-items: stretch;
+}
+.intake-drop {
+  border: 1.5px dashed var(--rule-2);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #fdfcf9, #f6f4ee);
+  padding: 18px;
+  display: flex; align-items: center; gap: 14px;
+  cursor: pointer;
+  transition: all .2s var(--ease);
+  position: relative;
+}
+.intake-drop:hover { border-color: var(--accent); background: linear-gradient(180deg, #fefcf6, #fbf4e7); }
+.intake-drop.has-shot { padding: 6px; border-style: solid; border-color: var(--rule); background: #fff; }
+.intake-icons {
+  display: flex; flex-direction: column; gap: 10px;
+  color: var(--ink-3);
+}
+.intake-icons .grp { display: flex; gap: 8px; }
+.intake-icons .grp svg { width: 18px; height: 18px; }
+.intake-text { font-size: 12.5px; color: var(--ink-2); }
+.intake-text b { color: var(--ink); }
+.intake-text .hint { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 3px; }
+
+.intake-side {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.intake-side .ibtn {
+  display: flex; align-items: center; gap: 8px;
+  background: #fff; border: 1px solid var(--rule);
+  padding: 9px 12px; border-radius: var(--r-md);
+  font-size: 12px; color: var(--ink-2);
+  transition: all .15s var(--ease);
+  text-align: left;
+  width: 100%;
+}
+.intake-side .ibtn:hover { border-color: var(--ink); color: var(--ink); }
+.intake-side .ibtn svg { width: 14px; height: 14px; color: var(--ink-3); flex-shrink: 0; }
+.intake-side .ibtn .kbd {
+  margin-left: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px; color: var(--ink-4);
+  padding: 1px 5px; border: 1px solid var(--rule); border-radius: 3px;
+}
+
+.shot {
+  width: 100%;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  position: relative;
+  background: #1d1a16;
+  aspect-ratio: 16/9;
+  display: flex; align-items: center; justify-content: center;
+}
+/* Fake QBO screenshot with SVG */
+.shot-fake { width: 100%; height: 100%; display: block; }
+.shot .badge {
+  position: absolute; top: 8px; left: 8px;
+  background: rgba(0,0,0,.7); color: #fff;
+  padding: 3px 8px; border-radius: 999px; font-size: 10.5px;
+  display: inline-flex; align-items: center; gap: 5px;
+}
+.shot .badge .live { width: 6px; height: 6px; border-radius: 50%; background: #e54848; animation: pulse 1s infinite; }
+
+/* parser */
+.parser-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.parsed {
+  background: #fdfcf9;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+}
+.parsed .k {
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+  margin-bottom: 3px;
+}
+.parsed .v { font-size: 13px; color: var(--ink); font-weight: 500; }
+.parsed .v .code {
+  font-family: ui-monospace, monospace;
+  background: var(--bg-rail); padding: 1px 5px; border-radius: 3px;
+  font-size: 12px;
+}
+
+/* spans — clickable, hover-able, comment-bondable */
+.span {
+  background: linear-gradient(180deg, transparent 60%, var(--accent-soft) 60%);
+  background-size: 100% 100%;
+  padding: 1px 1px 0;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background .2s var(--ease), box-shadow .2s var(--ease);
+  position: relative;
+}
+.span:hover {
+  background: var(--hi);
+  box-shadow: 0 0 0 1px var(--hi-edge);
+}
+.span.spotlight {
+  background: var(--hi);
+  box-shadow: 0 0 0 2px var(--hi-edge);
+  animation: spotlight 1.2s var(--ease);
+}
+.span.gpt    { background: linear-gradient(180deg, transparent 60%, rgba(31,122,78,.18) 60%); }
+.span.claude { background: linear-gradient(180deg, transparent 60%, rgba(196,106,48,.20) 60%); }
+.span.gemini { background: linear-gradient(180deg, transparent 60%, rgba(85,98,208,.18) 60%); }
+.span .author-chip {
+  position: absolute; top: -22px; left: 50%; transform: translateX(-50%) translateY(4px);
+  background: var(--ink); color: #fff;
+  font-size: 10.5px; padding: 3px 8px; border-radius: 999px;
+  display: inline-flex; align-items: center; gap: 4px;
+  white-space: nowrap;
+  opacity: 0; pointer-events: none;
+  transition: opacity .15s var(--ease), transform .15s var(--ease);
+}
+.span:hover .author-chip { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+@keyframes spotlight {
+  0%   { background: var(--accent-soft); box-shadow: 0 0 0 6px rgba(243,207,90,.5); }
+  100% { background: var(--hi); box-shadow: 0 0 0 2px var(--hi-edge); }
+}
+
+/* triage block */
+.triage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.tri-card {
+  background: #fdfcf9;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+}
+.tri-card .lbl { font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.tri-card .val { font-size: 15px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 3px 9px;
+  background: #fff; color: var(--ink-2);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s var(--ease);
+}
+.chip:hover { border-color: var(--ink); color: var(--ink); }
+.chip.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+.chip.missing { background: #fbe7e1; color: var(--crit); border-color: #f1c3b5; }
+.chip.missing::before {
+  content: "?"; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--crit); color: #fff; font-size: 10px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+.confidence {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--ink-3);
+}
+.confidence .bar {
+  width: 60px; height: 4px; background: var(--rule); border-radius: 2px;
+  overflow: hidden;
+}
+.confidence .bar > i {
+  display: block; height: 100%;
+  background: var(--ok);
+  transition: width .6s var(--ease);
+}
+
+/* INV match */
+.inv-shelf {
+  display: flex; gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 12px;
+  margin: 0 -2px;
+  scroll-snap-type: x mandatory;
+}
+.inv-shelf::-webkit-scrollbar { height: 6px; }
+.inv-shelf::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 3px; }
+
+.inv-card {
+  flex: 0 0 260px;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  scroll-snap-align: start;
+  transition: all .2s var(--ease);
+  cursor: pointer;
+}
+.inv-card:hover { border-color: var(--ink-3); box-shadow: var(--shadow-1); transform: translateY(-1px); }
+.inv-card.picked { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.inv-card.create { border-style: dashed; background: #fdfcf9; }
+.inv-card .head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.inv-card .id {
+  font-family: ui-monospace, monospace; font-size: 11.5px; font-weight: 600;
+  color: var(--ink);
+}
+.inv-card .match {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+  background: #eef5ec; color: var(--ok); font-weight: 600;
+}
+.inv-card .match.warn { background: #fdf3e0; color: var(--warn); }
+.inv-card .match.low  { background: #f3eee6; color: var(--ink-3); }
+.inv-card .summary { font-size: 12.5px; color: var(--ink-2); line-height: 1.4; }
+.inv-card .meta { display: flex; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--ink-3); }
+.inv-card .meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+/* draft section */
+.draft-wrap {
+  background: linear-gradient(180deg, #fdfcf9 0%, #faf7ef 100%);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  padding: 18px 20px 16px;
+  position: relative;
+}
+.draft-wrap.locked::after {
+  content: "";
+  position: absolute; inset: 0;
+  border-radius: var(--r-lg);
+  background: repeating-linear-gradient(45deg, transparent 0 8px, rgba(199,106,34,.04) 8px 9px);
+  pointer-events: none;
+}
+.draft-greeting { font-size: 13.5px; color: var(--ink); margin-bottom: 10px; }
+.draft-body { font-size: 13.5px; color: var(--ink); line-height: 1.55; }
+.draft-body p { margin: 0 0 10px; }
+.draft-sign { margin-top: 14px; font-size: 13px; color: var(--ink-2); }
+
+.draft-actions {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+}
+.draft-actions .spacer { flex: 1; }
+
+/* ── margin (right rail) ── */
+.margin {
+  grid-area: margin;
+  background: var(--bg);
+  border-left: 1px solid var(--rule);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.margin-tabs {
+  display: flex; padding: 10px 14px 0;
+  gap: 4px;
+  border-bottom: 1px solid var(--rule);
+}
+.mt {
+  padding: 8px 12px;
+  font-size: 12px; font-weight: 500;
+  color: var(--ink-3);
+  border-bottom: 2px solid transparent;
+  position: relative;
+  transition: color .15s, border-color .15s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.mt:hover { color: var(--ink); }
+.mt.active { color: var(--ink); border-bottom-color: var(--accent); }
+.mt .num {
+  background: var(--bg-rail); color: var(--ink-3);
+  font-size: 10.5px; padding: 1px 6px; border-radius: 999px; font-weight: 600;
+}
+.mt.active .num { background: var(--accent); color: #fff; }
+
+.margin-body { flex: 1; overflow-y: auto; padding: 12px 14px 24px; }
+.margin-body::-webkit-scrollbar { width: 6px; }
+.margin-body::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 3px; }
+
+.mpanel { display: none; }
+.mpanel.active { display: block; }
+
+/* reasoning bubbles */
+.bubble {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: all .2s var(--ease);
+  position: relative;
+}
+.bubble:hover { border-color: var(--ink-3); box-shadow: var(--shadow-1); }
+.bubble.spotlight { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.bubble .b-head {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+}
+.bubble .b-head .av { width: 18px; height: 18px; font-size: 10px; }
+.bubble .b-head .who { font-size: 11.5px; font-weight: 600; color: var(--ink); }
+.bubble .b-head .ago { font-size: 10.5px; color: var(--ink-3); margin-left: auto; }
+.bubble .b-body { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+.bubble .b-body em { color: var(--ink); font-style: normal; font-weight: 600; }
+.bubble .b-actions {
+  display: flex; gap: 4px; margin-top: 8px;
+  padding-top: 6px; border-top: 1px dashed var(--rule);
+}
+.bubble .b-actions button {
+  font-size: 10.5px; color: var(--ink-3);
+  padding: 3px 6px; border-radius: 4px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.bubble .b-actions button:hover { background: var(--bg-rail); color: var(--ink); }
+.bubble .b-actions svg { width: 11px; height: 11px; }
+.bubble .b-actions .pinned { color: var(--accent); }
+.bubble .b-source {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--link);
+  padding: 2px 7px; background: #eef2f8; border-radius: 999px;
+  margin: 2px 4px 0 0;
+}
+.bubble .b-source svg { width: 10px; height: 10px; }
+.bubble .b-anchor {
+  font-size: 10.5px; color: var(--ink-4);
+  font-family: ui-monospace, monospace;
+  margin-bottom: 4px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.bubble .b-anchor::before {
+  content: ""; width: 8px; height: 8px;
+  border-left: 2px solid var(--accent); border-bottom: 2px solid var(--accent);
+  border-radius: 0 0 0 3px;
+  display: inline-block;
+}
+
+/* providers panel */
+.provider-card {
+  background: #fff; border: 1px solid var(--rule);
+  border-radius: var(--r-md); padding: 12px;
+  margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px;
+  cursor: pointer;
+  transition: all .2s var(--ease);
+}
+.provider-card:hover { border-color: var(--ink-3); }
+.provider-card.active { border-color: var(--ink); background: linear-gradient(135deg, #fff, #fdfcf9); }
+.provider-card .av {
+  width: 36px; height: 36px; border-radius: 50%;
+  color: #fff; font-size: 14px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.provider-card .info { flex: 1; min-width: 0; }
+.provider-card .name { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 2px; }
+.provider-card .role { font-size: 11.5px; color: var(--ink-3); }
+.provider-card .stat {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 999px;
+  background: var(--bg-rail); color: var(--ink-3);
+}
+.provider-card.active .stat { background: var(--ok); color: #fff; }
+
+.compare-cta {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--ink); color: #fff;
+  padding: 10px 14px; border-radius: var(--r-md);
+  font-size: 12.5px; font-weight: 600;
+  width: 100%; justify-content: center;
+  transition: background .15s var(--ease);
+}
+.compare-cta:hover { background: #000; }
+.compare-cta svg { width: 14px; height: 14px; }
+
+/* sources panel */
+.source-card {
+  background: #fff; border: 1px solid var(--rule);
+  border-radius: var(--r-md); padding: 10px 12px;
+  margin-bottom: 8px;
+  cursor: pointer; transition: all .15s var(--ease);
+}
+.source-card:hover { border-color: var(--link); }
+.source-card .s-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+.source-card .s-head .pill {
+  font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px;
+  background: var(--bg-rail); color: var(--ink-3); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.source-card .s-head .pill.play { background: #f0e9dc; color: var(--accent); }
+.source-card .s-head .pill.inv  { background: #eef2f8; color: var(--link); }
+.source-card .s-title { font-size: 12.5px; color: var(--ink); font-weight: 500; line-height: 1.35; }
+.source-card .s-meta { font-size: 11px; color: var(--ink-3); margin-top: 3px; display: flex; gap: 10px; }
+
+/* ╔═════════ overlay: compare editors ═════════╗ */
+.scrim {
+  position: fixed; inset: 0; background: rgba(28,26,23,.32);
+  opacity: 0; pointer-events: none;
+  transition: opacity .25s var(--ease);
+  z-index: 60;
+}
+.scrim.show { opacity: 1; pointer-events: auto; }
+
+.compare-sheet {
+  position: fixed; top: 0; right: 0; bottom: 0;
+  width: 760px; max-width: 92vw;
+  background: var(--bg);
+  border-left: 1px solid var(--rule);
+  box-shadow: var(--shadow-3);
+  transform: translateX(120%);
+  transition: transform .35s var(--ease);
+  z-index: 65;
+  display: flex; flex-direction: column;
+}
+.compare-sheet.show { transform: translateX(0); }
+.compare-head {
+  padding: 16px 22px; display: flex; align-items: center; gap: 12px;
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+.compare-head .title { font-size: 14px; font-weight: 600; }
+.compare-head .spacer { flex: 1; }
+.compare-cols {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1px; background: var(--rule);
+  flex: 1; overflow: hidden;
+}
+.compare-col {
+  background: var(--paper);
+  overflow-y: auto;
+  padding: 18px 22px 28px;
+}
+.compare-col .col-head {
+  display: flex; align-items: center; gap: 10px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--rule);
+  margin-bottom: 14px;
+}
+.compare-col .col-head .av { width: 24px; height: 24px; font-size: 12px; }
+.compare-col .col-head .name { font-weight: 600; font-size: 13px; }
+.compare-col .col-head .role { font-size: 11px; color: var(--ink-3); margin-left: auto; }
+.compare-col p { font-size: 13px; line-height: 1.55; color: var(--ink); }
+.diff-ins { background: rgba(47,125,78,.14); padding: 1px 2px; border-radius: 2px; }
+.diff-del { background: rgba(178,53,30,.10); color: var(--ink-3); text-decoration: line-through; padding: 1px 2px; border-radius: 2px; }
+.diff-rep { background: rgba(38,94,197,.12); padding: 1px 2px; border-radius: 2px; }
+
+/* ╔═════════ command palette ═════════╗ */
+.cmdk {
+  position: fixed; top: 100px; left: 50%; transform: translateX(-50%) translateY(-20px);
+  width: 600px; max-width: 92vw;
+  background: var(--paper);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  z-index: 70;
+  opacity: 0; pointer-events: none;
+  transition: all .2s var(--ease);
+  border: 1px solid var(--rule);
+}
+.cmdk.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+.cmdk input {
+  width: 100%; border: none; outline: none;
+  padding: 18px 20px; font-size: 15px;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+}
+.cmdk-list { max-height: 360px; overflow-y: auto; padding: 6px; }
+.cmdk-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: var(--r-sm);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cmdk-row:hover, .cmdk-row.focused { background: var(--bg-rail); }
+.cmdk-row .icn {
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--bg-rail); color: var(--ink-2);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cmdk-row .icn svg { width: 12px; height: 12px; }
+.cmdk-row .av { width: 22px; height: 22px; font-size: 11px; border-radius: 5px; }
+.cmdk-row .body { flex: 1; }
+.cmdk-row .label { color: var(--ink); }
+.cmdk-row .desc { font-size: 11.5px; color: var(--ink-3); }
+.cmdk-row .kbd { font-family: ui-monospace, monospace; font-size: 11px; color: var(--ink-3); }
+.cmdk-section { padding: 8px 14px 4px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4); }
+
+/* ╔═════════ webcam QR sheet ═════════╗ */
+.qr-sheet {
+  position: fixed; left: 50%; top: 50%;
+  transform: translate(-50%, -45%) scale(.96);
+  width: 400px; max-width: 92vw;
+  background: var(--paper); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3);
+  padding: 22px 24px;
+  z-index: 70;
+  opacity: 0; pointer-events: none;
+  transition: all .25s var(--ease);
+}
+.qr-sheet.show { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: auto; }
+.qr-sheet h3 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.qr-sheet p { font-size: 12.5px; color: var(--ink-3); margin: 0 0 16px; }
+.qr-box {
+  width: 220px; height: 220px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  padding: 10px;
+}
+.qr-status {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 14px; padding: 10px 12px;
+  background: var(--bg-rail); border-radius: var(--r-md);
+  font-size: 12px; color: var(--ink-2);
+}
+.qr-status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); animation: pulse 1.2s infinite; }
+.qr-status.connected .dot { background: var(--ok); animation: none; }
+
+/* ╔═════════ toast ═════════╗ */
+.toast {
+  position: fixed; bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--ink); color: #fff;
+  padding: 10px 16px; border-radius: var(--r-md);
+  font-size: 13px;
+  box-shadow: var(--shadow-3);
+  opacity: 0; pointer-events: none;
+  transition: all .25s var(--ease);
+  z-index: 80;
+  display: flex; align-items: center; gap: 10px;
+}
+.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+.toast .av { width: 18px; height: 18px; font-size: 10px; }
+
+/* sec settling animation */
+.sec.materialize { animation: materialize .55s var(--ease) both; }
+@keyframes materialize {
+  0% { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.typewriter { border-right: 2px solid var(--accent); animation: caret 1s steps(2) infinite; }
+@keyframes caret { 50% { border-color: transparent; } }
+
+/* tiny utility */
+.row { display: flex; align-items: center; gap: 8px; }
+.muted { color: var(--ink-3); }
+hr.soft { border: none; border-top: 1px dashed var(--rule); margin: 16px 0; }
+
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ═══════════════════════════ TOP BAR ═══════════════════════════ -->
+  <header class="top">
+    <div class="brand"><span class="dot"></span>The Brief</div>
+    <div class="crumb">
+      <span>Inbox</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+      <b id="crumb-case">QBO Escalation · INV pending</b>
+    </div>
+    <span class="sevpill" data-sev="resolving" id="topSev"><span class="swatch"></span><span id="topSevText">Triaging…</span></span>
+
+    <div class="spacer"></div>
+
+    <button class="iconbtn" id="cmdkOpen" title="Command (⌘K)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+    </button>
+    <span class="cmdkbd">⌘K</span>
+
+    <div class="editors" title="Editors who can revise this brief">
+      <button class="editor-tag active" data-prov="claude"><span class="av av-claude">C</span>Claude</button>
+      <button class="editor-tag" data-prov="gpt"><span class="av av-gpt">G</span>GPT</button>
+      <button class="editor-tag" data-prov="gemini"><span class="av av-gemini">M</span>Gemini</button>
+      <button class="editor-tag" data-prov="kimi"><span class="av av-kimi">K</span>Kimi</button>
+    </div>
+
+    <button class="cta ghost" id="saveAudit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg>
+      Save audit trail
+    </button>
+    <button class="cta" id="sendDraft">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+      Send draft
+    </button>
+  </header>
+
+  <!-- ═══════════════════════════ CASE STACK ═══════════════════════════ -->
+  <aside class="stack">
+    <div class="stack-head">
+      <span class="label">Incoming</span>
+      <span class="count" id="incomingCount">4</span>
+    </div>
+    <div class="stack-list" id="stackList">
+
+      <div class="case-card active" data-case="active">
+        <div class="row1">
+          <span class="who">Maya R. · phone agent</span>
+          <span class="ago">just now</span>
+        </div>
+        <div class="row2">"Customer Sara at Bluebird Bakery LLC — payroll DD failed, error 350001, second time this week."</div>
+        <div class="row3">
+          <span class="mini-sev mini-tri"></span>
+          <span class="ticker">CASE-78421 · triaging</span>
+        </div>
+      </div>
+
+      <div class="case-card" data-case="q1">
+        <div class="row1">
+          <span class="who">Devon K.</span>
+          <span class="ago">2m</span>
+        </div>
+        <div class="row2">"Bank feed for Chase biz checking stuck on Updating since Tuesday."</div>
+        <div class="row3">
+          <span class="mini-sev mini-med"></span>
+          <span class="ticker">CASE-78422</span>
+        </div>
+      </div>
+
+      <div class="case-card" data-case="q2">
+        <div class="row1">
+          <span class="who">Priya S.</span>
+          <span class="ago">4m</span>
+        </div>
+        <div class="row2">"Sales tax recalc looping after the May rate update."</div>
+        <div class="row3">
+          <span class="mini-sev mini-low"></span>
+          <span class="ticker">CASE-78423</span>
+        </div>
+      </div>
+
+      <div class="case-card" data-case="q3">
+        <div class="row1">
+          <span class="who">Allen T.</span>
+          <span class="ago">7m</span>
+        </div>
+        <div class="row2">"1099 vendor mapping — contractor showing twice on the export."</div>
+        <div class="row3">
+          <span class="mini-sev mini-low"></span>
+          <span class="ticker">CASE-78424</span>
+        </div>
+      </div>
+
+      <div class="stack-section"><span class="label">Filed today · 14</span></div>
+
+      <div class="case-card filed">
+        <div class="row1"><span class="who">Joel R.</span><span class="ago">11m</span></div>
+        <div class="row2">"QBO multi-currency convert error on USD→CAD invoice."</div>
+        <div class="row3"><span class="mini-sev mini-low"></span><span class="ticker">CASE-78418 · INV-204117</span></div>
+      </div>
+      <div class="case-card filed">
+        <div class="row1"><span class="who">Ines G.</span><span class="ago">22m</span></div>
+        <div class="row2">"Receipt capture not OCR-ing on iOS app rebuild."</div>
+        <div class="row3"><span class="mini-sev mini-med"></span><span class="ticker">CASE-78415 · INV-204088</span></div>
+      </div>
+      <div class="case-card filed">
+        <div class="row1"><span class="who">Kwame O.</span><span class="ago">39m</span></div>
+        <div class="row2">"Payroll tax filing — Q1 form 941 won't submit."</div>
+        <div class="row3"><span class="mini-sev mini-high"></span><span class="ticker">CASE-78410 · INV-204061</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ═══════════════════════════ THE BRIEF (CENTER) ═══════════════════════════ -->
+  <main class="brief" id="brief">
+    <article class="doc">
+
+      <!-- doc header -->
+      <div class="doc-h">
+        <div>
+          <div class="title">Payroll direct-deposit failure, error 350001</div>
+          <div class="sub">
+            <span>Bluebird Bakery LLC</span>
+            <span class="pipe">·</span>
+            <span>QBO Online Payroll Premium</span>
+            <span class="pipe">·</span>
+            <span>Realm <span style="font-family: ui-monospace, monospace; color: var(--ink-2);">4620…78c3</span></span>
+          </div>
+        </div>
+        <div class="meta">
+          <div class="case-id">CASE-78421</div>
+          <div>opened 11:42:08</div>
+          <div>SLA 2h · 1h 47m left</div>
+        </div>
+      </div>
+
+      <!-- ═══════ SECTION 1 — Intake ═══════ -->
+      <section class="sec" id="sec-intake">
+        <div class="sec-head">
+          <span class="sec-num">01</span>
+          <span class="sec-title">Intake — screenshot &amp; agent context</span>
+          <span class="sec-author">received from Maya R.</span>
+        </div>
+        <div class="sec-body">
+          <div class="intake">
+            <div class="intake-drop has-shot" id="dropzone">
+              <div class="shot">
+                <svg class="shot-fake" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+                  <!-- mock QBO error screenshot -->
+                  <defs>
+                    <linearGradient id="qboBg" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0" stop-color="#f4f4f3"/>
+                      <stop offset="1" stop-color="#e5e7ea"/>
+                    </linearGradient>
+                  </defs>
+                  <rect width="640" height="360" fill="url(#qboBg)"/>
+                  <!-- top nav -->
+                  <rect x="0" y="0" width="640" height="44" fill="#2ca01c"/>
+                  <circle cx="22" cy="22" r="10" fill="#fff" opacity=".95"/>
+                  <text x="40" y="27" fill="#fff" font-family="Inter, sans-serif" font-size="13" font-weight="600">quickbooks</text>
+                  <rect x="320" y="13" width="180" height="18" rx="4" fill="rgba(255,255,255,.18)"/>
+                  <!-- breadcrumb -->
+                  <text x="20" y="68" fill="#393a3d" font-size="11" font-family="Inter, sans-serif">Payroll &gt; Run payroll &gt; Bluebird Bakery LLC</text>
+                  <!-- modal error -->
+                  <rect x="80" y="92" width="480" height="220" rx="6" fill="#fff" stroke="#d4d7dc"/>
+                  <rect x="80" y="92" width="480" height="44" rx="6" fill="#fbe9e7"/>
+                  <circle cx="108" cy="114" r="11" fill="#d23b27"/>
+                  <text x="103" y="119" fill="#fff" font-size="14" font-weight="700" font-family="Inter, sans-serif">!</text>
+                  <text x="130" y="119" fill="#a02516" font-size="13" font-weight="700" font-family="Inter, sans-serif">We can't process this payroll right now.</text>
+                  <text x="100" y="172" fill="#393a3d" font-size="12" font-family="Inter, sans-serif">Something went wrong on our end while submitting your direct</text>
+                  <text x="100" y="190" fill="#393a3d" font-size="12" font-family="Inter, sans-serif">deposit. Your team has not been paid yet.</text>
+                  <text x="100" y="222" fill="#6b6f76" font-size="11" font-family="ui-monospace,monospace">Reference code: 350001</text>
+                  <text x="100" y="240" fill="#6b6f76" font-size="11" font-family="ui-monospace,monospace">Realm: 4620000000004678c3</text>
+                  <text x="100" y="258" fill="#6b6f76" font-size="11" font-family="ui-monospace,monospace">Timestamp: 2026-05-16T11:38:42Z</text>
+                  <rect x="380" y="270" width="76" height="28" rx="4" fill="#fff" stroke="#8d9096"/>
+                  <text x="403" y="289" fill="#393a3d" font-size="12" font-family="Inter, sans-serif">Cancel</text>
+                  <rect x="464" y="270" width="76" height="28" rx="4" fill="#2ca01c"/>
+                  <text x="483" y="289" fill="#fff" font-size="12" font-family="Inter, sans-serif" font-weight="600">Retry</text>
+                </svg>
+                <span class="badge"><span class="live"></span>From clipboard · 11:42:11</span>
+              </div>
+            </div>
+            <div class="intake-side">
+              <button class="ibtn" id="btnPaste">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
+                Paste another <span class="kbd">⌘V</span>
+              </button>
+              <button class="ibtn" id="btnFile">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Upload file <span class="kbd">⌘O</span>
+              </button>
+              <button class="ibtn" id="btnDrag">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V6"/><path d="M5 12l7-7 7 7"/></svg>
+                Drag &amp; drop here
+              </button>
+              <button class="ibtn" id="btnWebcam">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
+                Webcam → phone QR <span class="kbd">⌘W</span>
+              </button>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; padding: 12px 14px; background: #fdfcf9; border: 1px solid var(--rule); border-radius: var(--r-md);">
+            <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px;">Phone-agent context</div>
+            <div style="font-size: 13px; color: var(--ink); line-height: 1.5;">
+              "Customer is Sara Albright at Bluebird Bakery LLC. She tried to run payroll for her 8 employees this morning, got <span class="span" data-anchor="a1" data-author="parser">error 350001</span> twice. She says it also happened Monday — she ran payroll manually that day. She needs her people paid by Friday or she's switching providers. I checked the realm health page — looks green. Account is on Payroll Premium, last successful DD was May 10."
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ SECTION 2 — Parsed Findings ═══════ -->
+      <section class="sec materialize" id="sec-parsed">
+        <div class="sec-head">
+          <span class="sec-num">02</span>
+          <span class="sec-title">Parsed findings</span>
+          <span class="sec-author"><span class="av av-claude">C</span>Claude wrote this</span>
+        </div>
+        <div class="sec-body">
+          <div class="parser-grid">
+            <div class="parsed">
+              <div class="k">Error code</div>
+              <div class="v"><span class="code">350001</span></div>
+            </div>
+            <div class="parsed">
+              <div class="k">Surface</div>
+              <div class="v">Payroll → Run payroll</div>
+            </div>
+            <div class="parsed">
+              <div class="k">Product</div>
+              <div class="v">QBO Online Payroll Premium</div>
+            </div>
+            <div class="parsed">
+              <div class="k">Realm</div>
+              <div class="v"><span class="code">4620…78c3</span></div>
+            </div>
+            <div class="parsed">
+              <div class="k">Symptom</div>
+              <div class="v"><span class="span" data-anchor="a2" data-author="claude">DD submission failed at gateway</span></div>
+            </div>
+            <div class="parsed">
+              <div class="k">Recurrence</div>
+              <div class="v"><span class="span" data-anchor="a3" data-author="claude">2 occurrences in 4 days</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ SECTION 3 — Triage ═══════ -->
+      <section class="sec materialize" id="sec-triage" style="animation-delay: .15s;">
+        <div class="sec-head">
+          <span class="sec-num">03</span>
+          <span class="sec-title">Triage</span>
+          <span class="sec-author"><span class="av av-claude">C</span>Claude · <span class="confidence" style="display:inline-flex;"><span class="bar"><i style="width: 86%;"></i></span><span>86%</span></span></span>
+        </div>
+        <div class="sec-body">
+          <div class="triage">
+            <div class="tri-card">
+              <div class="lbl">Severity</div>
+              <div class="val"><span style="width: 10px; height: 10px; background: var(--warn); border-radius: 2px;"></span>Medium · time-sensitive</div>
+              <div class="chip-row">
+                <button class="chip">Low</button>
+                <button class="chip active">Medium</button>
+                <button class="chip">High</button>
+                <button class="chip">Critical</button>
+              </div>
+            </div>
+            <div class="tri-card">
+              <div class="lbl">Category</div>
+              <div class="val">Payroll · DD gateway</div>
+              <div class="chip-row">
+                <button class="chip">Bank feed</button>
+                <button class="chip active">Payroll DD</button>
+                <button class="chip">Sales tax</button>
+                <button class="chip">Receipts</button>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top: 12px;">
+            <div class="lbl" style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px;">Missing info needed from Maya</div>
+            <div class="chip-row">
+              <button class="chip missing">Bank account last 4</button>
+              <button class="chip missing">DD funding source</button>
+              <button class="chip">Browser / device</button>
+              <button class="chip">Time of first failure</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ SECTION 4 — INV ═══════ -->
+      <section class="sec materialize" id="sec-inv" style="animation-delay: .3s;">
+        <div class="sec-head">
+          <span class="sec-num">04</span>
+          <span class="sec-title">INV match</span>
+          <span class="sec-author"><span class="av av-gemini">M</span>Gemini · searched 4,118 INVs</span>
+        </div>
+        <div class="sec-body">
+          <div class="inv-shelf" id="invShelf">
+
+            <div class="inv-card picked" data-inv="204203">
+              <div class="head"><span class="id">INV-204203</span><span class="match">96% match</span></div>
+              <div class="summary"><span class="span" data-anchor="a4" data-author="gemini">DD error 350001 cluster</span> on Payroll Premium, May 12–16. Gateway timing-window regression on rev <span class="code">pay-2026.05.10-b</span>.</div>
+              <div class="meta">
+                <span>● open</span>
+                <span>14 linked cases</span>
+                <span>owner: payroll-platform</span>
+              </div>
+            </div>
+
+            <div class="inv-card" data-inv="203947">
+              <div class="head"><span class="id">INV-203947</span><span class="match warn">71% match</span></div>
+              <div class="summary">Historical 350001 cluster from Feb 2026. Fixed in <span class="code">pay-2026.02.20</span>. May be a regression.</div>
+              <div class="meta"><span>● closed</span><span>22 linked</span><span>resolved</span></div>
+            </div>
+
+            <div class="inv-card" data-inv="203012">
+              <div class="head"><span class="id">INV-203012</span><span class="match low">38% match</span></div>
+              <div class="summary">Generic payroll-gateway timeout. Overlaps on surface, not on error code.</div>
+              <div class="meta"><span>● closed</span><span>3 linked</span></div>
+            </div>
+
+            <div class="inv-card create">
+              <div class="head"><span class="id">+ new INV</span><span class="match low" style="background: transparent; border: 1px dashed var(--rule-2);">create</span></div>
+              <div class="summary">Spin up a fresh investigation if none of the above feel right.</div>
+              <div class="meta"><span style="color: var(--ink-3);">Prefilled from this brief</span></div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════ SECTION 5 — Resolution approach ═══════ -->
+      <section class="sec materialize" id="sec-approach" style="animation-delay: .45s;">
+        <div class="sec-head">
+          <span class="sec-num">05</span>
+          <span class="sec-title">Resolution approach</span>
+          <span class="sec-author"><span class="av av-claude">C</span>Claude · drawn from playbook</span>
+        </div>
+        <div class="sec-body">
+          <p style="font-size: 13.5px; line-height: 1.55; margin: 0 0 10px;">
+            This case fits the active cluster on <span class="span" data-anchor="a4" data-author="gemini">INV-204203</span>. Per the playbook entry <em>payroll/dd-gateway-recovery</em>, the working remediation is: hold the run, re-queue from the realm payroll-engine, and confirm with the customer that <span class="span" data-anchor="a5" data-author="claude">no charge has hit their funding account</span> (the gateway rejects before debit, but customers often assume the worst).
+          </p>
+          <p style="font-size: 13.5px; line-height: 1.55; margin: 0;">
+            Because the customer threatened to switch, recommend a <span class="span" data-anchor="a6" data-author="claude">white-glove follow-up</span>: assign payroll-platform on-call to manually re-run by 3pm PT, and offer a credit per the <em>retention / payroll-disruption</em> template.
+          </p>
+        </div>
+      </section>
+
+      <!-- ═══════ SECTION 6 — Draft ═══════ -->
+      <section class="sec materialize" id="sec-draft" style="animation-delay: .6s;">
+        <div class="sec-head">
+          <span class="sec-num">06</span>
+          <span class="sec-title">Draft response to Maya</span>
+          <span class="sec-author"><span class="av av-claude">C</span>Claude · composed from §02 – §05</span>
+        </div>
+        <div class="sec-body">
+          <div class="draft-wrap">
+            <div class="draft-greeting">Hey Maya —</div>
+            <div class="draft-body">
+              <p>Good catch escalating this. Sara is hitting an active cluster (<span class="span" data-anchor="a4" data-author="gemini">INV-204203</span>) — payroll DD gateway is rejecting a slice of <em>Premium</em> realms before the debit fires, so <span class="span" data-anchor="a5" data-author="claude">no money has left her account</span>. That's the first thing to tell her.</p>
+              <p>Two asks for you before I can re-queue her run:</p>
+              <p style="margin-left: 14px; color: var(--ink-2);">
+                1. Last 4 of her DD funding account.<br>
+                2. Confirm she's using the QBO web app and not desktop sync.
+              </p>
+              <p>Once you have those, I'll have payroll-platform manually re-run by <strong>3 pm PT today</strong>. She'll be paid Friday on schedule. I'll also queue a service credit per the payroll-disruption template — feel free to mention that to her if she's anxious.</p>
+              <p>Reply here and I'll move.</p>
+            </div>
+            <div class="draft-sign">— You, via The Brief · CASE-78421</div>
+
+            <div class="draft-actions">
+              <span class="muted" style="font-size: 11.5px;">Linked to INV-204203 · audit trail attached · 3 spans cite playbook</span>
+              <span class="spacer"></span>
+              <button class="cta ghost" id="regenerate">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 10 9 10"/></svg>
+                Regenerate
+              </button>
+              <button class="cta" id="sendDraft2">Send to Maya</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </article>
+  </main>
+
+  <!-- ═══════════════════════════ MARGIN (RIGHT) ═══════════════════════════ -->
+  <aside class="margin">
+    <div class="margin-tabs">
+      <button class="mt active" data-tab="reason">Reasoning <span class="num" id="reasonCount">7</span></button>
+      <button class="mt" data-tab="sources">Sources <span class="num">5</span></button>
+      <button class="mt" data-tab="editors">Editors</button>
+      <button class="mt" data-tab="audit">Audit</button>
+    </div>
+
+    <div class="margin-body">
+
+      <!-- ── Reasoning panel ── -->
+      <div class="mpanel active" data-panel="reason">
+
+        <div class="bubble" data-anchor="a1">
+          <div class="b-anchor">§01 · "error 350001"</div>
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · parser pass</span><span class="ago">11:42:14</span></div>
+          <div class="b-body">Pulled the reference code directly off the screenshot pixels — <em>cross-checked</em> against the agent's transcription ("350001") and they agree. Routing to Payroll-DD branch with high confidence.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button class="pinned"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pinned</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg>Quiet</button>
+          </div>
+        </div>
+
+        <div class="bubble" data-anchor="a2">
+          <div class="b-anchor">§02 · "DD submission failed at gateway"</div>
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · semantic mapping</span><span class="ago">11:42:18</span></div>
+          <div class="b-body">350001 in our taxonomy is a <em>gateway-side</em> rejection — the engine never accepted the run for submission. That's distinct from <em>downstream bank reject</em> (370xxx) or <em>customer-funds insufficient</em> (340xxx). The funding account has not been debited.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin</button>
+          </div>
+          <a class="b-source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-1 1"/></svg>playbook / payroll / error-taxonomy.md#350xxx</a>
+        </div>
+
+        <div class="bubble" data-anchor="a3">
+          <div class="b-anchor">§02 · "2 occurrences in 4 days"</div>
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · timeline merge</span><span class="ago">11:42:19</span></div>
+          <div class="b-body">Agent's note mentions Monday + this morning. That's two failures inside the active INV's window (May 12–16). Bumped match weight on INV-204203 accordingly.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin</button>
+          </div>
+        </div>
+
+        <div class="bubble" data-anchor="a4">
+          <div class="b-anchor">§04 · "INV-204203"</div>
+          <div class="b-head"><span class="av av-gemini">M</span><span class="who">Gemini · INV matcher</span><span class="ago">11:42:24</span></div>
+          <div class="b-body">Top match across 4,118 active+recent INVs. Match driven by: error-code exact (350001), product exact (Payroll Premium), surface exact (Run payroll), <em>and</em> first-failure date inside the cluster window. 96% confidence; the runner-up is the closed Feb cluster.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button class="pinned"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pinned</button>
+          </div>
+          <a class="b-source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-1 1"/></svg>INV-204203 · 14 linked cases</a>
+          <a class="b-source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-1 1"/></svg>release-notes / pay-2026.05.10-b</a>
+        </div>
+
+        <div class="bubble" data-anchor="a5">
+          <div class="b-anchor">§05 · "no charge has hit their funding account"</div>
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · customer-comm guard</span><span class="ago">11:42:31</span></div>
+          <div class="b-body">Saying this proactively in the draft because the playbook flags it as the #1 source of follow-up calls on 350xxx. The customer's mental model is "payment failed" → "where's my money." Answer it before they ask.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin</button>
+          </div>
+          <a class="b-source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-1 1"/></svg>playbook / payroll / customer-reassurance.md</a>
+        </div>
+
+        <div class="bubble" data-anchor="a6">
+          <div class="b-anchor">§05 · "white-glove follow-up"</div>
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · retention rule</span><span class="ago">11:42:33</span></div>
+          <div class="b-body">The agent's note says the customer threatened to switch providers. <em>retention/payroll-disruption</em> is the playbook entry for this — credit + manual run-by deadline + named owner. Not optional given the threat language.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17l-5-5h10z"/></svg>Jump to span</button>
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin</button>
+          </div>
+          <a class="b-source"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-1 1"/></svg>playbook / retention / payroll-disruption.md</a>
+        </div>
+
+        <div class="bubble">
+          <div class="b-head"><span class="av av-claude">C</span><span class="who">Claude · severity rationale</span><span class="ago">11:42:36</span></div>
+          <div class="b-body">Held at <em>Medium</em>, not High: this is a known cluster with an established remediation path, customer impact is contained (no funds moved), and SLA window is 2h. Would bump to High if a third failure occurs in the same week.</div>
+          <div class="b-actions">
+            <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin</button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ── Sources panel ── -->
+      <div class="mpanel" data-panel="sources">
+        <div class="source-card">
+          <div class="s-head"><span class="pill play">playbook</span><span class="muted" style="font-size: 11px;">payroll / error-taxonomy.md</span></div>
+          <div class="s-title">§ 350xxx — Gateway rejection family</div>
+          <div class="s-meta"><span>last edited 4 days ago</span><span>2 hits</span></div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill play">playbook</span><span class="muted" style="font-size: 11px;">payroll / dd-gateway-recovery.md</span></div>
+          <div class="s-title">DD gateway recovery — operator runbook</div>
+          <div class="s-meta"><span>last edited 2 days ago</span><span>1 hit</span></div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill play">playbook</span><span class="muted" style="font-size: 11px;">payroll / customer-reassurance.md</span></div>
+          <div class="s-title">"No charge" reassurance language for 350/370</div>
+          <div class="s-meta"><span>last edited 9 days ago</span><span>1 hit</span></div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill play">playbook</span><span class="muted" style="font-size: 11px;">retention / payroll-disruption.md</span></div>
+          <div class="s-title">Retention path when customer threatens to leave over payroll</div>
+          <div class="s-meta"><span>last edited 6 weeks ago</span><span>1 hit</span></div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill inv">INV</span><span class="muted" style="font-size: 11px;">INV-204203</span></div>
+          <div class="s-title">DD error 350001 cluster — Payroll Premium</div>
+          <div class="s-meta"><span>opened May 12</span><span>14 linked cases</span></div>
+        </div>
+      </div>
+
+      <!-- ── Editors panel ── -->
+      <div class="mpanel" data-panel="editors">
+        <div class="provider-card active" data-prov="claude">
+          <div class="av av-claude">C</div>
+          <div class="info"><div class="name">Claude</div><div class="role">primary editor · parser, triage, draft</div></div>
+          <span class="stat">active</span>
+        </div>
+        <div class="provider-card" data-prov="gpt">
+          <div class="av av-gpt">G</div>
+          <div class="info"><div class="name">GPT</div><div class="role">strong on tone &amp; concision · ask for a pass on the draft</div></div>
+          <span class="stat">idle</span>
+        </div>
+        <div class="provider-card active" data-prov="gemini">
+          <div class="av av-gemini">M</div>
+          <div class="info"><div class="name">Gemini</div><div class="role">INV matcher · semantic search across 4,118 INVs</div></div>
+          <span class="stat">active</span>
+        </div>
+        <div class="provider-card" data-prov="kimi">
+          <div class="av av-kimi">K</div>
+          <div class="info"><div class="name">Kimi</div><div class="role">long-context · use when the screenshot has dense text</div></div>
+          <span class="stat">idle</span>
+        </div>
+
+        <button class="compare-cta" id="compareOpen">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="18" rx="2"/><rect x="13" y="3" width="8" height="18" rx="2"/></svg>
+          Compare Claude vs GPT draft
+        </button>
+
+        <hr class="soft">
+        <div style="font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-4); margin-bottom: 8px;">Auto-routing rules</div>
+        <div style="font-size: 12px; color: var(--ink-2); line-height: 1.5;">
+          Parser &amp; triage <em>always Claude</em>. INV match <em>always Gemini</em>. Drafts default to whoever has the lower wait. You can override any time.
+        </div>
+      </div>
+
+      <!-- ── Audit panel ── -->
+      <div class="mpanel" data-panel="audit">
+        <div style="font-size: 12px; color: var(--ink-2); margin-bottom: 12px;">
+          Every span in this brief is bonded to the editor that wrote it and the moment it was written. The audit trail is a signed JSON record you can attach to the case, export, or replay.
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill">11:42:14</span></div>
+          <div class="s-title">parser · Claude → §02 fields populated · model claude-sonnet-4 · sha 4f8a…</div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill">11:42:24</span></div>
+          <div class="s-title">inv-match · Gemini → INV-204203 picked · 96% · sha 6c1b…</div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill">11:42:33</span></div>
+          <div class="s-title">draft · Claude → §06 composed from §02–§05 · sha 9eaa…</div>
+        </div>
+        <div class="source-card">
+          <div class="s-head"><span class="pill">11:42:36</span></div>
+          <div class="s-title">severity-set · Medium · operator-confirmed (no override) · sha 1d20…</div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+</div>
+
+<!-- ═══════════════════════════ OVERLAYS ═══════════════════════════ -->
+
+<!-- compare editors sheet -->
+<div class="scrim" id="scrim"></div>
+<aside class="compare-sheet" id="compareSheet" aria-hidden="true">
+  <div class="compare-head">
+    <strong class="title">Compare drafts</strong>
+    <span class="muted" style="font-size: 12px;">side-by-side · differences highlighted</span>
+    <span class="spacer"></span>
+    <button class="cta ghost" id="acceptGpt">Accept GPT's pass</button>
+    <button class="iconbtn" id="compareClose">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6l-12 12"/></svg>
+    </button>
+  </div>
+  <div class="compare-cols">
+    <div class="compare-col">
+      <div class="col-head">
+        <span class="av av-claude">C</span>
+        <span class="name">Claude</span>
+        <span class="role">primary draft</span>
+      </div>
+      <p>Hey Maya —</p>
+      <p>Good catch escalating this. Sara is hitting an active cluster (INV-204203) — payroll DD gateway is <span class="diff-rep">rejecting a slice of Premium realms before the debit fires</span>, so no money has left her account. <span class="diff-del">That's the first thing to tell her.</span></p>
+      <p>Two asks for you before I can re-queue her run:</p>
+      <p style="margin-left: 14px; color: var(--ink-2);">1. Last 4 of her DD funding account.<br>2. Confirm she's using the QBO web app and not desktop sync.</p>
+      <p>Once you have those, I'll have payroll-platform manually re-run by <strong>3 pm PT today</strong>. She'll be paid Friday on schedule. <span class="diff-del">I'll also queue a service credit per the payroll-disruption template — feel free to mention that to her if she's anxious.</span></p>
+      <p>Reply here and I'll move.</p>
+    </div>
+    <div class="compare-col">
+      <div class="col-head">
+        <span class="av av-gpt">G</span>
+        <span class="name">GPT</span>
+        <span class="role">tone &amp; concision pass</span>
+      </div>
+      <p>Hey Maya —</p>
+      <p>Sara is on the active <span class="diff-rep">payroll cluster (INV-204203)</span>. Important: <span class="diff-ins">no money has left her account</span> — the gateway rejects before debit. Lead with that.</p>
+      <p>I need two things from you:</p>
+      <p style="margin-left: 14px; color: var(--ink-2);">1. Last 4 of her DD funding account.<br>2. Confirm she's on the QBO web app, not desktop sync.</p>
+      <p>Then I'll have payroll-platform manually re-run by <strong>3 pm PT today</strong> — she'll be paid Friday. <span class="diff-ins">A service credit is already queued.</span></p>
+      <p>Send those two and I'll move.</p>
+    </div>
+  </div>
+</aside>
+
+<!-- command palette -->
+<div class="cmdk" id="cmdk" aria-hidden="true">
+  <input type="text" id="cmdkInput" placeholder="Type a command — or ⌘ + letter for everything" autocomplete="off">
+  <div class="cmdk-list">
+    <div class="cmdk-section">Jump</div>
+    <div class="cmdk-row"><span class="icn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg></span><div class="body"><div class="label">Jump to §06 Draft</div><div class="desc">Scroll to the response that's composing itself</div></div><span class="kbd">G then D</span></div>
+    <div class="cmdk-row"><span class="icn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-3.5-3.5"/><circle cx="11" cy="11" r="7"/></svg></span><div class="body"><div class="label">Search INV database</div><div class="desc">Semantic search across 4,118 investigations</div></div><span class="kbd">⌘ I</span></div>
+    <div class="cmdk-section">Editors</div>
+    <div class="cmdk-row"><span class="av av-gpt">G</span><div class="body"><div class="label">Ask GPT for a tone pass on the draft</div><div class="desc">Side-by-side diff against Claude's version</div></div><span class="kbd">⌘ ⇧ G</span></div>
+    <div class="cmdk-row"><span class="av av-kimi">K</span><div class="body"><div class="label">Re-parse screenshot with Kimi (long-context)</div><div class="desc">Use when the screenshot has dense text</div></div><span class="kbd">⌘ ⇧ K</span></div>
+    <div class="cmdk-section">Case</div>
+    <div class="cmdk-row"><span class="icn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg></span><div class="body"><div class="label">File this brief &amp; pull next</div><div class="desc">Sends the draft, attaches audit trail, opens CASE-78422</div></div><span class="kbd">⌘ ⏎</span></div>
+    <div class="cmdk-row"><span class="icn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></span><div class="body"><div class="label">Open webcam → phone QR handoff</div><div class="desc">Capture the screenshot from the phone agent's phone</div></div><span class="kbd">⌘ W</span></div>
+  </div>
+</div>
+
+<!-- webcam QR sheet -->
+<div class="qr-sheet" id="qrSheet" aria-hidden="true">
+  <h3>Hand off the camera to the phone agent</h3>
+  <p>Maya scans this QR on her phone. Anything she captures lands here in this brief. No app install.</p>
+  <div class="qr-box">
+    <!-- mock QR -->
+    <svg viewBox="0 0 200 200" width="200" height="200" xmlns="http://www.w3.org/2000/svg">
+      <rect width="200" height="200" fill="#fff"/>
+      <g fill="#1c1a17">
+        <rect x="10" y="10" width="50" height="50"/>
+        <rect x="20" y="20" width="30" height="30" fill="#fff"/>
+        <rect x="28" y="28" width="14" height="14"/>
+        <rect x="140" y="10" width="50" height="50"/>
+        <rect x="150" y="20" width="30" height="30" fill="#fff"/>
+        <rect x="158" y="28" width="14" height="14"/>
+        <rect x="10" y="140" width="50" height="50"/>
+        <rect x="20" y="150" width="30" height="30" fill="#fff"/>
+        <rect x="28" y="158" width="14" height="14"/>
+        <!-- random modules -->
+        <rect x="70" y="14" width="6" height="6"/><rect x="80" y="14" width="6" height="6"/><rect x="96" y="14" width="6" height="6"/><rect x="110" y="14" width="6" height="6"/><rect x="124" y="14" width="6" height="6"/>
+        <rect x="70" y="28" width="6" height="6"/><rect x="86" y="28" width="6" height="6"/><rect x="100" y="28" width="6" height="6"/><rect x="118" y="28" width="6" height="6"/>
+        <rect x="76" y="42" width="6" height="6"/><rect x="90" y="42" width="6" height="6"/><rect x="104" y="42" width="6" height="6"/><rect x="124" y="42" width="6" height="6"/>
+        <rect x="70" y="56" width="6" height="6"/><rect x="84" y="56" width="6" height="6"/><rect x="96" y="56" width="6" height="6"/><rect x="112" y="56" width="6" height="6"/><rect x="124" y="56" width="6" height="6"/>
+        <rect x="14" y="70" width="6" height="6"/><rect x="30" y="70" width="6" height="6"/><rect x="48" y="70" width="6" height="6"/><rect x="64" y="70" width="6" height="6"/><rect x="80" y="70" width="6" height="6"/><rect x="96" y="70" width="6" height="6"/><rect x="118" y="70" width="6" height="6"/><rect x="134" y="70" width="6" height="6"/><rect x="150" y="70" width="6" height="6"/><rect x="166" y="70" width="6" height="6"/>
+        <rect x="22" y="84" width="6" height="6"/><rect x="40" y="84" width="6" height="6"/><rect x="56" y="84" width="6" height="6"/><rect x="72" y="84" width="6" height="6"/><rect x="86" y="84" width="6" height="6"/><rect x="104" y="84" width="6" height="6"/><rect x="124" y="84" width="6" height="6"/><rect x="138" y="84" width="6" height="6"/><rect x="158" y="84" width="6" height="6"/><rect x="174" y="84" width="6" height="6"/>
+        <rect x="14" y="98" width="6" height="6"/><rect x="34" y="98" width="6" height="6"/><rect x="50" y="98" width="6" height="6"/><rect x="68" y="98" width="6" height="6"/><rect x="86" y="98" width="6" height="6"/><rect x="102" y="98" width="6" height="6"/><rect x="116" y="98" width="6" height="6"/><rect x="132" y="98" width="6" height="6"/><rect x="148" y="98" width="6" height="6"/><rect x="166" y="98" width="6" height="6"/>
+        <rect x="20" y="112" width="6" height="6"/><rect x="36" y="112" width="6" height="6"/><rect x="52" y="112" width="6" height="6"/><rect x="70" y="112" width="6" height="6"/><rect x="92" y="112" width="6" height="6"/><rect x="108" y="112" width="6" height="6"/><rect x="124" y="112" width="6" height="6"/><rect x="142" y="112" width="6" height="6"/><rect x="160" y="112" width="6" height="6"/>
+        <rect x="14" y="126" width="6" height="6"/><rect x="30" y="126" width="6" height="6"/><rect x="46" y="126" width="6" height="6"/><rect x="62" y="126" width="6" height="6"/><rect x="78" y="126" width="6" height="6"/><rect x="98" y="126" width="6" height="6"/><rect x="114" y="126" width="6" height="6"/><rect x="132" y="126" width="6" height="6"/><rect x="150" y="126" width="6" height="6"/><rect x="170" y="126" width="6" height="6"/>
+        <rect x="74" y="142" width="6" height="6"/><rect x="90" y="142" width="6" height="6"/><rect x="106" y="142" width="6" height="6"/><rect x="124" y="142" width="6" height="6"/><rect x="138" y="142" width="6" height="6"/><rect x="156" y="142" width="6" height="6"/>
+        <rect x="80" y="156" width="6" height="6"/><rect x="98" y="156" width="6" height="6"/><rect x="116" y="156" width="6" height="6"/><rect x="132" y="156" width="6" height="6"/><rect x="148" y="156" width="6" height="6"/>
+        <rect x="72" y="170" width="6" height="6"/><rect x="88" y="170" width="6" height="6"/><rect x="104" y="170" width="6" height="6"/><rect x="120" y="170" width="6" height="6"/><rect x="138" y="170" width="6" height="6"/><rect x="154" y="170" width="6" height="56"/>
+        <rect x="80" y="184" width="6" height="6"/><rect x="96" y="184" width="6" height="6"/><rect x="112" y="184" width="6" height="6"/><rect x="128" y="184" width="6" height="6"/><rect x="146" y="184" width="6" height="6"/>
+      </g>
+    </svg>
+  </div>
+  <div class="qr-status" id="qrStatus">
+    <span class="dot"></span><span>Waiting for Maya's phone…</span>
+  </div>
+  <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px;">
+    <button class="cta ghost" id="qrClose">Cancel</button>
+    <button class="cta" id="qrSim">Simulate connection</button>
+  </div>
+</div>
+
+<!-- toast -->
+<div class="toast" id="toast"><span class="av av-claude">C</span><span id="toastText">Saved.</span></div>
+
+<script>
+/* ──────────────────────────────────────────────────────────────
+   Interactivity:
+   1. Span ↔ margin bubble bonding (click + hover sync)
+   2. Tab switching in margin
+   3. Compare editors sheet (open / close)
+   4. Command palette ⌘K
+   5. Webcam → phone QR handoff
+   6. Provider toggle in topbar
+   7. Severity / chip selection (live updates topbar pill)
+   8. Stack-card switching (resets the doc with new mock data)
+   9. Toast confirmations
+  10. Regenerate draft (small animation)
+  11. Save audit trail (toast + downloads JSON-ish)
+   ────────────────────────────────────────────────────────────── */
+
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+function toast(msg, av) {
+  const t = $('#toast');
+  $('#toastText').textContent = msg;
+  const avEl = t.querySelector('.av');
+  if (av) {
+    avEl.className = 'av av-' + av;
+    avEl.textContent = av[0].toUpperCase();
+    avEl.style.display = '';
+  } else {
+    avEl.style.display = 'none';
+  }
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+/* ── 1. Span ↔ bubble bonding ── */
+$$('.span').forEach(span => {
+  const anchor = span.dataset.anchor;
+  const author = span.dataset.author;
+  if (author) span.classList.add(author);
+  // attach author chip
+  const chip = document.createElement('span');
+  chip.className = 'author-chip';
+  const map = { claude: ['C','Claude'], gpt: ['G','GPT'], gemini: ['M','Gemini'], kimi: ['K','Kimi'], parser: ['C','Claude · parser'] };
+  const [initial, name] = map[author] || ['?','editor'];
+  chip.innerHTML = `<span class="av av-${author === 'parser' ? 'claude' : author}" style="width:14px;height:14px;font-size:9px;">${initial}</span> ${name}`;
+  span.appendChild(chip);
+
+  span.addEventListener('click', e => {
+    e.stopPropagation();
+    spotlight(anchor);
+  });
+});
+
+function spotlight(anchor) {
+  // switch margin to reasoning tab
+  switchTab('reason');
+  // clear
+  $$('.span.spotlight, .bubble.spotlight').forEach(el => el.classList.remove('spotlight'));
+  // light up
+  $$(`.span[data-anchor="${anchor}"]`).forEach(el => el.classList.add('spotlight'));
+  const bubble = document.querySelector(`.bubble[data-anchor="${anchor}"]`);
+  if (bubble) {
+    bubble.classList.add('spotlight');
+    bubble.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+/* clicking a bubble also spotlights the span and scrolls the doc to it */
+$$('.bubble').forEach(b => {
+  b.addEventListener('click', () => {
+    const a = b.dataset.anchor;
+    if (!a) return;
+    $$('.span.spotlight, .bubble.spotlight').forEach(el => el.classList.remove('spotlight'));
+    $$(`.span[data-anchor="${a}"]`).forEach(el => el.classList.add('spotlight'));
+    b.classList.add('spotlight');
+    const target = document.querySelector(`.span[data-anchor="${a}"]`);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+});
+
+/* pin/unpin toggle */
+$$('.bubble .b-actions button').forEach(btn => {
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const label = btn.textContent.trim().toLowerCase();
+    if (label === 'pin' || label === 'pinned') {
+      btn.classList.toggle('pinned');
+      btn.innerHTML = btn.classList.contains('pinned')
+        ? '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pinned'
+        : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4 2 7L12 16l-6.5 4 2-7L2 9h7z"/></svg>Pin';
+      toast(btn.classList.contains('pinned') ? 'Pinned to audit trail.' : 'Unpinned.');
+    }
+  });
+});
+
+/* ── 2. Margin tabs ── */
+function switchTab(name) {
+  $$('.mt').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  $$('.mpanel').forEach(p => p.classList.toggle('active', p.dataset.panel === name));
+}
+$$('.mt').forEach(t => t.addEventListener('click', () => switchTab(t.dataset.tab)));
+
+/* ── 3. Compare editors sheet ── */
+function openCompare() {
+  $('#scrim').classList.add('show');
+  $('#compareSheet').classList.add('show');
+  $('#compareSheet').setAttribute('aria-hidden', 'false');
+}
+function closeCompare() {
+  $('#scrim').classList.remove('show');
+  $('#compareSheet').classList.remove('show');
+  $('#compareSheet').setAttribute('aria-hidden', 'true');
+}
+$('#compareOpen').addEventListener('click', openCompare);
+$('#compareClose').addEventListener('click', closeCompare);
+$('#scrim').addEventListener('click', () => { closeCompare(); closeCmdk(); closeQr(); });
+$('#acceptGpt').addEventListener('click', () => { closeCompare(); toast("GPT's pass accepted. Spans re-bonded.", 'gpt'); });
+
+/* ── 4. Command palette ── */
+function openCmdk() {
+  $('#cmdk').classList.add('show');
+  $('#scrim').classList.add('show');
+  setTimeout(() => $('#cmdkInput').focus(), 60);
+}
+function closeCmdk() {
+  $('#cmdk').classList.remove('show');
+  if (!$('#compareSheet').classList.contains('show') && !$('#qrSheet').classList.contains('show')) {
+    $('#scrim').classList.remove('show');
+  }
+}
+$('#cmdkOpen').addEventListener('click', openCmdk);
+
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    $('#cmdk').classList.contains('show') ? closeCmdk() : openCmdk();
+  }
+  if (e.key === 'Escape') { closeCmdk(); closeCompare(); closeQr(); }
+  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'g') {
+    e.preventDefault(); openCompare();
+  }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'w' && !e.shiftKey) {
+    e.preventDefault(); openQr();
+  }
+});
+
+$$('.cmdk-row').forEach(r => {
+  r.addEventListener('click', () => {
+    const label = r.querySelector('.label').textContent;
+    closeCmdk();
+    if (label.includes('GPT')) { openCompare(); }
+    else if (label.includes('webcam')) { openQr(); }
+    else if (label.includes('§06')) { document.querySelector('#sec-draft').scrollIntoView({ behavior: 'smooth' }); }
+    else if (label.includes('File')) { fileAndNext(); }
+    else { toast(label, null); }
+  });
+});
+
+/* ── 5. Webcam → phone QR ── */
+function openQr() {
+  $('#qrSheet').classList.add('show');
+  $('#scrim').classList.add('show');
+  // reset status
+  $('#qrStatus').classList.remove('connected');
+  $('#qrStatus').innerHTML = '<span class="dot"></span><span>Waiting for Maya\'s phone…</span>';
+}
+function closeQr() {
+  $('#qrSheet').classList.remove('show');
+  if (!$('#compareSheet').classList.contains('show') && !$('#cmdk').classList.contains('show')) {
+    $('#scrim').classList.remove('show');
+  }
+}
+$('#btnWebcam').addEventListener('click', openQr);
+$('#qrClose').addEventListener('click', closeQr);
+$('#qrSim').addEventListener('click', () => {
+  $('#qrStatus').classList.add('connected');
+  $('#qrStatus').innerHTML = '<span class="dot"></span><span>Connected to Maya\'s iPhone · awaiting capture</span>';
+  setTimeout(() => {
+    $('#qrStatus').innerHTML = '<span class="dot"></span><span>Capture received — added to §01.</span>';
+    setTimeout(() => { closeQr(); toast('Screenshot added from Maya\'s phone.'); }, 900);
+  }, 1400);
+});
+
+/* ── 6. Provider toggle ── */
+$$('.editor-tag').forEach(b => {
+  b.addEventListener('click', () => {
+    const wasActive = b.classList.contains('active');
+    b.classList.toggle('active');
+    const prov = b.dataset.prov;
+    if (!wasActive) toast(prov[0].toUpperCase() + prov.slice(1) + ' added as an editor.', prov);
+  });
+});
+
+/* ── 7. Triage chip selection ── */
+$$('.tri-card .chip-row').forEach(row => {
+  row.addEventListener('click', e => {
+    if (e.target.tagName !== 'BUTTON') return;
+    row.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    e.target.classList.add('active');
+    // if severity row, update topbar pill
+    const isSev = ['Low','Medium','High','Critical'].includes(e.target.textContent);
+    if (isSev) {
+      const t = e.target.textContent.toLowerCase();
+      const pill = $('#topSev');
+      pill.dataset.sev = t === 'critical' ? 'high' : t;
+      $('#topSevText').textContent = e.target.textContent + ' · time-sensitive';
+    }
+  });
+});
+
+/* missing-info chips toggle */
+$$('.chip.missing').forEach(c => {
+  c.addEventListener('click', () => {
+    c.classList.remove('missing');
+    c.classList.add('active');
+    c.textContent = '✓ ' + c.textContent.replace('? ','');
+    toast('Marked received — Maya knows.');
+  });
+});
+
+/* INV card picking */
+$$('.inv-card').forEach(card => {
+  if (card.classList.contains('create')) {
+    card.addEventListener('click', () => toast('New INV scaffold prefilled from this brief.'));
+    return;
+  }
+  card.addEventListener('click', () => {
+    $$('.inv-card').forEach(c => c.classList.remove('picked'));
+    card.classList.add('picked');
+    const id = card.querySelector('.id').textContent;
+    toast('Linked to ' + id + '.');
+  });
+});
+
+/* ── 8. Stack card switching ── */
+$$('.case-card').forEach(card => {
+  if (card.classList.contains('filed')) return;
+  card.addEventListener('click', () => {
+    $$('.case-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    const who = card.querySelector('.who').textContent;
+    const ticker = card.querySelector('.ticker').textContent.split(' · ')[0];
+    $('#crumb-case').textContent = ticker + ' · ' + who;
+    // visually reset the doc by re-running materialize
+    $$('.brief .sec').forEach((s, i) => {
+      s.classList.remove('materialize');
+      void s.offsetWidth;
+      s.style.animationDelay = (i * 0.08) + 's';
+      s.classList.add('materialize');
+    });
+    $('#brief').scrollTop = 0;
+    toast('Switched to ' + ticker + '.');
+  });
+});
+
+/* ── 9. CTA actions ── */
+$('#saveAudit').addEventListener('click', () => {
+  toast('Audit trail saved · 4 spans pinned · sha bonded.');
+});
+
+function fileAndNext() {
+  toast('Sent to Maya. Filed. Pulling next.');
+  setTimeout(() => {
+    const next = document.querySelector('.case-card[data-case="q1"]');
+    if (next) next.click();
+  }, 600);
+}
+$('#sendDraft').addEventListener('click', fileAndNext);
+$('#sendDraft2').addEventListener('click', fileAndNext);
+
+$('#regenerate').addEventListener('click', () => {
+  const w = document.querySelector('.draft-wrap');
+  w.classList.add('locked');
+  const body = w.querySelector('.draft-body');
+  const orig = body.innerHTML;
+  body.innerHTML = '<p class="muted typewriter" style="display:inline-block;">Regenerating with Claude…</p>';
+  setTimeout(() => {
+    body.innerHTML = orig;
+    w.classList.remove('locked');
+    toast('Draft regenerated. Spans re-bonded.', 'claude');
+  }, 1200);
+});
+
+/* ── parser simulation: on first load, animate sec-parsed from skeleton to filled ── */
+window.addEventListener('load', () => {
+  // simulate parser running on intake → parsed section appears
+  const parsed = $('#sec-parsed');
+  parsed.style.opacity = 0.4;
+  parsed.querySelectorAll('.parsed').forEach((p, i) => {
+    p.style.transform = 'translateY(6px)';
+    p.style.opacity = 0;
+    setTimeout(() => {
+      p.style.transition = 'all .35s cubic-bezier(.2,.7,.2,1)';
+      p.style.transform = 'translateY(0)';
+      p.style.opacity = 1;
+    }, 200 + i * 90);
+  });
+  setTimeout(() => { parsed.style.opacity = 1; }, 800);
+
+  // gently scroll the brief to make sure spotlight works
+  setTimeout(() => {
+    const topSev = $('#topSev');
+    topSev.dataset.sev = 'med';
+    $('#topSevText').textContent = 'Medium · time-sensitive';
+  }, 1100);
+
+  setTimeout(() => {
+    toast('Brief assembled. Audit trail bonded to 7 spans.', 'claude');
+  }, 1700);
+});
+
+/* clicking on the doc clears any spotlight */
+$('#brief').addEventListener('click', e => {
+  if (e.target.closest('.span') || e.target.closest('.bubble')) return;
+  $$('.span.spotlight, .bubble.spotlight').forEach(el => el.classList.remove('spotlight'));
+});
+
+</script>
+
+<!-- Inspiration:
+     - Intercom Pulse (three-pane, Copilot-in-sidebar, source-citation transparency)
+     - Google Docs comments (margin reasoning bonded to spans)
+     - Notion blocks (sectioned doc with author attribution per block)
+     - Linear cmd-k (instant nav)
+     - Cursor / GitHub Copilot diff acceptance (compare editor passes)
+     - Continuity / AirDrop QR handoff (webcam → phone)
+     The whole frame: the case is a *document that writes itself*, not a chat.
+-->
+</body>
+</html>

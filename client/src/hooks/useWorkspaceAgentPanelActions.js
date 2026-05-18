@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { apiFetch, apiFetchJson } from '../api/http.js';
 import { getProviderShortLabel, PROVIDER_OPTIONS } from '../lib/providerCatalog.js';
+import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
+import useProviderKeyStatus from './useProviderKeyStatus.js';
 import { buildAlertActionPrompt } from '../lib/workspaceAlertBriefing.js';
 import {
   dispatchGmailMutations,
@@ -39,6 +41,7 @@ export default function useWorkspaceAgentPanelActions({
   logAlertInteraction,
   setShowCommandHint,
 } = {}) {
+  const { providerStatus } = useProviderKeyStatus();
   const [feedbackMap, setFeedbackMap] = useState({});
 
   const addSystemMessage = useCallback((content) => {
@@ -166,6 +169,10 @@ export default function useWorkspaceAgentPanelActions({
             (o) => o.value.toLowerCase() === arg.toLowerCase() || o.label.toLowerCase() === arg.toLowerCase()
           );
           if (match) {
+            if (isProviderMissingApiKey(match.value, providerStatus)) {
+              addSystemMessage(`${match.label} needs an API key before it can be selected.`);
+              return true;
+            }
             patchSession({ provider: match.value, model: '' });
             addSystemMessage(`Provider switched to **${match.label}** (\`${match.value}\`).`);
           } else {
@@ -217,6 +224,7 @@ export default function useWorkspaceAgentPanelActions({
     mode,
     patchSession,
     provider,
+    providerStatus,
     reasoningEffort,
     streaming,
     stopActiveWorkspaceResponse,

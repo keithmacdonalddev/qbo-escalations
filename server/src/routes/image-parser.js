@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { randomUUID } = require('node:crypto');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const {
   parseImage,
@@ -11,7 +12,9 @@ const {
   getAllStoredKeys,
   setStoredApiKey,
   validateRemoteProvider,
+  VALID_IMAGE_PARSER_PROVIDERS,
 } = require('../services/image-parser');
+const { createStageEventBus, createNoopStageEventBus } = require('../lib/stage-events');
 const ImageParseResult = require('../models/ImageParseResult');
 const {
   archiveParserImage,
@@ -21,14 +24,7 @@ const { createApiError, sendApiError } = require('../lib/api-errors');
 
 const router = express.Router();
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
-const VALID_PARSE_PROVIDERS = [
-  'llm-gateway',
-  'lm-studio',
-  'anthropic',
-  'openai',
-  'kimi',
-  'gemini',
-];
+const VALID_PARSE_PROVIDERS = VALID_IMAGE_PARSER_PROVIDERS;
 const VALID_KEY_PROVIDERS = [
   'llm-gateway',
   'anthropic',
@@ -61,7 +57,7 @@ function verboseError(...args) {
   }
 }
 
-function persistParseResult(record, sourceImage) {
+function persistParseResult(record, sourceImage, onArchived) {
   return (async () => {
     if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
       return;
@@ -71,6 +67,9 @@ function persistParseResult(record, sourceImage) {
       const archived = archiveParserImage(saved._id, sourceImage);
       if (!archived.ok) {
         verboseWarn('[image-parser-save] Source image archive failed:', archived.error);
+        if (typeof onArchived === 'function') {
+          try { onArchived({ ok: false, error: archived.error || 'archive_failed' }); } catch { /* noop */ }
+        }
         return;
       }
 
@@ -79,8 +78,21 @@ function persistParseResult(record, sourceImage) {
       saved.set('image.sourceSizeBytes', archived.sizeBytes);
       saved.set('image.sourceStoredAt', new Date());
       await saved.save();
+      if (typeof onArchived === 'function') {
+        try {
+          onArchived({
+            ok: true,
+            id: saved._id ? String(saved._id) : '',
+            sizeBytes: archived.sizeBytes || 0,
+            contentType: archived.contentType || '',
+          });
+        } catch { /* noop */ }
+      }
     } catch (err) {
       verboseError('[image-parser-save] FAILED to save:', err.message);
+      if (typeof onArchived === 'function') {
+        try { onArchived({ ok: false, error: err.message || 'save_failed' }); } catch { /* noop */ }
+      }
     }
   })();
 }
@@ -88,28 +100,103 @@ function persistParseResult(record, sourceImage) {
 // Rate limit: 10 requests per 60s for parse endpoint
 const parseRateLimit = createRateLimiter({ name: 'image-parser', limit: 10, windowMs: 60_000 });
 
+function clientWantsSse(req) {
+  const accept = String(req.headers?.accept || '').toLowerCase();
+  if (accept.includes('text/event-stream')) return true;
+  const streamQ = String(req.query?.stream || '').toLowerCase();
+  return streamQ === '1' || streamQ === 'true' || streamQ === 'yes';
+}
+
 // ---------------------------------------------------------------------------
 // POST /parse — Parse an escalation screenshot or INV list image
+//
+// Two response modes share the same code path:
+//   - default JSON: existing callers (ImageParserPanel) get { ok, text, ... }
+//   - SSE (when Accept: text/event-stream or ?stream=1): the same final result
+//     is delivered via an `event: parse_complete` frame, preceded by a live
+//     stream of `event: stage_event` frames for the parser pipeline.
 // ---------------------------------------------------------------------------
 router.post('/parse', parseRateLimit, async (req, res) => {
-  const { image, provider, model, timeoutMs, promptId, parserPromptId } = req.body || {};
+  const { image, provider, model, reasoningEffort, timeoutMs, promptId, parserPromptId } = req.body || {};
+  const streamMode = clientWantsSse(req);
+  const runId = randomUUID();
+
+  // SSE writer — set headers once, then push framed events. Falls back to a
+  // no-op writer for the JSON path so the bus call sites can stay uniform.
+  let sseOpen = false;
+  function sendSse(eventName, payload) {
+    if (!sseOpen) return;
+    try {
+      res.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch { /* client disconnected */ }
+  }
+  function openSse() {
+    if (sseOpen || res.headersSent) return;
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sseOpen = true;
+  }
+  if (streamMode) openSse();
+  const bus = streamMode
+    ? createStageEventBus({ send: sendSse, stageId: 'parser', runId })
+    : createNoopStageEventBus();
+
+  function respondJson(status, body) {
+    if (!streamMode) {
+      return res.status(status).json(body);
+    }
+    // SSE branch: send a final terminal frame and close. The HTTP status code
+    // for SSE is always 200 (already written); body.code/error signal failure.
+    try {
+      res.write(`event: parse_complete\ndata: ${JSON.stringify(body)}\n\n`);
+      res.end();
+    } catch { /* client gone */ }
+    return undefined;
+  }
+
+  bus.emit('parser.server_request_received', {
+    provider: typeof provider === 'string' ? provider : '',
+    model: typeof model === 'string' ? model : '',
+    streamMode,
+  });
 
   // Validate required fields
   if (!image) {
-    return res.status(400).json({ ok: false, code: 'MISSING_IMAGE', error: 'Image required' });
+    bus.emit('error', { code: 'MISSING_IMAGE', message: 'Image required' });
+    return respondJson(400, { ok: false, code: 'MISSING_IMAGE', error: 'Image required' });
   }
   if (!VALID_PARSE_PROVIDERS.includes(provider)) {
-    return res.status(400).json({ ok: false, code: 'INVALID_PROVIDER', error: `Provider must be one of: ${VALID_PARSE_PROVIDER_LIST}` });
+    bus.emit('error', {
+      code: 'INVALID_PROVIDER',
+      message: `Provider must be one of: ${VALID_PARSE_PROVIDER_LIST}`,
+    });
+    return respondJson(400, { ok: false, code: 'INVALID_PROVIDER', error: `Provider must be one of: ${VALID_PARSE_PROVIDER_LIST}` });
   }
+  bus.emit('parser.request_validated', {
+    provider,
+    model: model || '',
+    reasoningEffort: reasoningEffort || '',
+    imageBytes: typeof image === 'string' ? image.length : 0,
+  });
 
-  // Keep the route contract stable for the existing dashboard and tests:
-  // default to 60s, cap at 120s, and give the response timeout a 10s buffer.
+  // Default to the full parser ceiling; Codex vision runs can finish just
+  // past 60s on larger screenshots. Keep the cap at 120s and give the
+  // response timeout a 10s buffer.
   const maxTimeout = 120_000;
-  const defaultTimeout = 60_000;
+  const defaultTimeout = 120_000;
   const effectiveTimeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.min(timeoutMs, maxTimeout) : defaultTimeout;
   if (typeof req.setResponseTimeout === 'function') {
     req.setResponseTimeout(effectiveTimeout + 10_000);
   }
+  bus.emit('parser.timeout_resolved', {
+    requestedMs: Number.isFinite(timeoutMs) ? timeoutMs : null,
+    effectiveMs: effectiveTimeout,
+    maxMs: maxTimeout,
+  });
 
   const startedAt = Date.now();
   const effectivePromptId = normalizeImageParsePromptId(promptId || parserPromptId);
@@ -118,12 +205,35 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     const result = await parseImage(image, {
       provider,
       model,
+      reasoningEffort,
       timeoutMs: effectiveTimeout,
       promptId: effectivePromptId,
+      eventBus: bus,
     });
     const elapsedMs = Date.now() - startedAt;
 
+    const responseBody = {
+      ok: true,
+      ...result,
+      promptId: result.promptId || effectivePromptId,
+      meta: result.stats?.image,
+      parseFields: result.parseFields || {},
+      elapsedMs,
+    };
+    bus.emit('parser.result_built', {
+      elapsedMs,
+      providerLatencyMs: result.stats?.providerLatencyMs || 0,
+      textLength: (result.text || '').length,
+      role: result.role || '',
+      parseFieldCount: result.parseFields ? Object.keys(result.parseFields).length : 0,
+    });
+
     // Fire-and-forget save to MongoDB + on-disk image archive
+    bus.emit('parser.result_save_started', {
+      provider,
+      model: result.usage?.model || model || '',
+      role: result.role || '',
+    });
     persistParseResult({
       provider,
       model: result.usage?.model || model || '',
@@ -141,15 +251,47 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parsedText: result.text || '',
       textLength: (result.text || '').length,
       source: 'panel',
-    }, image);
+    }, image, (archived) => {
+      if (archived?.ok) {
+        bus.emit('parser.source_image_archived', {
+          id: archived.id || '',
+          sizeBytes: archived.sizeBytes || 0,
+          contentType: archived.contentType || '',
+        });
+      } else if (archived) {
+        bus.emit('parser.source_image_archived', {
+          ok: false,
+          error: archived.error || 'archive_failed',
+        });
+      }
+    });
 
-    res.json({ ok: true, ...result, promptId: result.promptId || effectivePromptId, meta: result.stats?.image, parseFields: result.parseFields || {}, elapsedMs });
+    if (streamMode) {
+      bus.emit('parser.response_sent', {
+        elapsedMs,
+        bytes: 0,
+        streamMode: true,
+      });
+      return respondJson(200, responseBody);
+    }
+
+    res.json(responseBody);
+    bus.emit('parser.response_sent', {
+      elapsedMs,
+      bytes: 0,
+      streamMode: false,
+    });
+    return undefined;
   } catch (err) {
     const elapsedMs = Date.now() - startedAt;
     const status = err.code === 'PROVIDER_UNAVAILABLE' ? 503
       : err.code === 'TIMEOUT' ? 504
       : err.code === 'PROVIDER_ERROR' ? 422
       : 422;
+    bus.emit('error', {
+      code: err.code || 'PARSE_FAILED',
+      message: err.message || 'Image parse failed',
+    });
 
     // Fire-and-forget save error to MongoDB + on-disk image archive
     persistParseResult({
@@ -161,9 +303,17 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       errorCode: err.code || 'UNKNOWN',
       errorMsg: err.message || '',
       source: 'panel',
-    }, image);
+    }, image, (archived) => {
+      if (archived?.ok) {
+        bus.emit('parser.source_image_archived', {
+          id: archived.id || '',
+          sizeBytes: archived.sizeBytes || 0,
+          contentType: archived.contentType || '',
+        });
+      }
+    });
 
-    res.status(status).json({ ok: false, code: err.code || 'PARSE_FAILED', error: err.message || 'Image parse failed' });
+    return respondJson(status, { ok: false, code: err.code || 'PARSE_FAILED', error: err.message || 'Image parse failed' });
   }
 });
 

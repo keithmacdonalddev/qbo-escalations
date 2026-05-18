@@ -1,0 +1,18 @@
+{
+  "parserText": "COID/MID: 9341 / 0027-5512\nCASE: ESC-2026-0517-TEST\nCLIENT/CONTACT: Larkspur Roasters LLC - Jordan M.\nCX IS ATTEMPTING TO: Run final payroll for a terminated California employee today.\nEXPECTED OUTCOME: Final paycheck can be created with pay date 05/17/2026.\nACTUAL OUTCOME: Payroll wizard stops at step 3 with PSE_TERM_DATE_AFTER_PERIOD.\nKB/TOOLS USED: Payroll help article, test company, incognito browser.\nTRIED TEST ACCOUNT: Yes - same error after clearing cache.\nTS STEPS: Verified employee termination date, changed payroll period, cleared cache, tried incognito, reproduced in test company.",
+  "parseFields": {
+    "coid": "9341",
+    "mid": "0027-5512",
+    "caseNumber": "ESC-2026-0517-TEST",
+    "clientContact": "Larkspur Roasters LLC - Jordan M.",
+    "agentName": "Pipeline test fixture",
+    "attemptingTo": "Run final payroll for a terminated California employee today.",
+    "expectedOutcome": "Final paycheck can be created with pay date 05/17/2026.",
+    "actualOutcome": "Payroll wizard stops at step 3 with PSE_TERM_DATE_AFTER_PERIOD.",
+    "kbToolsUsed": "Payroll help article, test company, incognito browser.",
+    "triedTestAccount": "Yes - same error after clearing cache.",
+    "tsSteps": "Verified employee termination date, changed payroll period, cleared cache, tried incognito, reproduced in test company.",
+    "category": "payroll"
+  },
+  "assistantPrompt": "This is a pipeline test. Give the operator a concise QBO escalation response from the parsed template, triage facts, and known issue search status. Mark the answer as test-only and do not claim this was saved."
+}

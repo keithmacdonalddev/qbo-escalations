@@ -20,7 +20,7 @@ const SELECTABLE_PROVIDER_IDS = Object.freeze(
   PROVIDER_CATALOG.filter((entry) => entry.selectable !== false).map((entry) => entry.id)
 );
 const DEFAULT_PROVIDER_ID = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
-const PREFERRED_CODEX_FALLBACK = 'gpt-5.5';
+const PREFERRED_CODEX_FALLBACK = 'codex';
 
 function buildProviderOption(entry) {
   return {
@@ -31,8 +31,13 @@ function buildProviderOption(entry) {
     family: entry.family,
     transport: entry.transport,
     model: entry.model || null,
+    iconPath: entry.iconPath || null,
+    iconLightPath: entry.iconLightPath || null,
+    iconSourceUrl: entry.iconSourceUrl || null,
+    iconStrategy: entry.iconStrategy || null,
     availabilityNote: entry.availabilityNote || '',
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
+    reasoningVisibility: entry.reasoningVisibility || null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
 }
@@ -94,11 +99,16 @@ function getProviderCapabilities(providerOrFamily) {
     family: getProviderFamily(providerOrFamily),
     transport: getProviderTransport(providerOrFamily),
     model: getProviderModelId(providerOrFamily),
+    iconPath: meta?.iconPath || null,
+    iconLightPath: meta?.iconLightPath || null,
+    iconSourceUrl: meta?.iconSourceUrl || null,
+    iconStrategy: meta?.iconStrategy || null,
     supportsThinking: typeof meta?.supportsThinking === 'boolean'
       ? meta.supportsThinking
       : typeof defaultMeta?.supportsThinking === 'boolean'
         ? defaultMeta.supportsThinking
         : false,
+    reasoningVisibility: meta?.reasoningVisibility || (meta?.supportsThinking ? 'stream' : 'none'),
     allowedEfforts,
     alternateProvider: getAlternateProvider(providerOrFamily),
   };
@@ -144,6 +154,10 @@ function getSupportsThinking(providerId) {
   return getProviderCapabilities(providerId).supportsThinking;
 }
 
+function getReasoningVisibility(providerId) {
+  return getProviderCapabilities(providerId).reasoningVisibility || 'none';
+}
+
 function isAllowedEffort(providerId, effort) {
   return getProviderCapabilities(providerId).allowedEfforts.includes(effort);
 }
@@ -170,5 +184,6 @@ module.exports = {
   isSelectableProvider,
   getAllowedEfforts,
   getSupportsThinking,
+  getReasoningVisibility,
   isAllowedEffort,
 };

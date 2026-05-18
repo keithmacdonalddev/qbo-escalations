@@ -8,6 +8,11 @@ import {
   PROVIDER_OPTIONS,
   getReasoningEffortOptions,
 } from '../../lib/providerCatalog.js';
+import {
+  getProviderOptionTitle,
+  isProviderMissingApiKey,
+} from '../../lib/providerKeyStatus.js';
+import useProviderKeyStatus from '../../hooks/useProviderKeyStatus.js';
 
 const MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
@@ -42,10 +47,12 @@ export default function ChatComposeControls({
   setParallelProviders,
   trailingActions = null,
 }) {
+  const { providerStatus } = useProviderKeyStatus();
   const modeLabel = MODE_OPTIONS.find((entry) => entry.value === mode)?.label || 'Single';
   const effortLabel = getReasoningEffortLabel(reasoningEffort);
   const primaryModelSuggestions = getProviderModelSuggestions(provider);
   const fallbackModelSuggestions = getProviderModelSuggestions(fallbackProvider);
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
 
   return (
     <div className="compose-top-strip">
@@ -75,24 +82,30 @@ export default function ChatComposeControls({
           {showProviderPopover && (
             <motion.div key="provider-popover" className="provider-popover" {...popover} transition={transitions.fast}>
               <div className="provider-popover-label">Provider</div>
-              {PROVIDER_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                  onClick={() => {
-                    setProvider(option.value);
-                    const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
-                    const allowed = getReasoningEffortOptions(nextFamily);
-                    if (!allowed.some((o) => o.value === reasoningEffort)) {
-                      setReasoningEffort('high');
-                    }
-                  }}
-                  type="button"
-                >
-                  <span className="check">{provider === option.value ? '\u2713' : ''}</span>
-                  {option.label}
-                </button>
-              ))}
+              {PROVIDER_OPTIONS.map((option) => {
+                const disabled = isMissingKey(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (disabled) return;
+                      setProvider(option.value);
+                      const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                      const allowed = getReasoningEffortOptions(nextFamily);
+                      if (!allowed.some((o) => o.value === reasoningEffort)) {
+                        setReasoningEffort('high');
+                      }
+                    }}
+                    title={getProviderOptionTitle(option, providerStatus)}
+                    type="button"
+                  >
+                    <span className="check">{provider === option.value ? '\u2713' : ''}</span>
+                    {option.label}
+                  </button>
+                );
+              })}
               <ModelOverrideControl
                 label="Primary Model"
                 provider={provider}
@@ -101,6 +114,7 @@ export default function ChatComposeControls({
                 listId={CHAT_PRIMARY_MODEL_LIST_ID}
                 suggestions={primaryModelSuggestions}
                 className="provider-popover-field"
+                disabled={isMissingKey(provider)}
               />
               <div className="provider-popover-divider" />
               <div className="provider-popover-label">Mode</div>
@@ -119,17 +133,25 @@ export default function ChatComposeControls({
                 <>
                   <div className="provider-popover-divider" />
                   <div className="provider-popover-label">Fallback Provider</div>
-                  {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => (
-                    <button
-                      key={option.value}
-                      className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
-                      onClick={() => { setFallbackProvider(option.value); }}
-                      type="button"
-                    >
-                      <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
-                      {option.label}
-                    </button>
-                  ))}
+                  {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
+                    const disabled = isMissingKey(option.value);
+                    return (
+                      <button
+                        key={option.value}
+                        className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          setFallbackProvider(option.value);
+                        }}
+                        title={getProviderOptionTitle(option, providerStatus)}
+                        type="button"
+                      >
+                        <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                        {option.label}
+                      </button>
+                    );
+                  })}
                   <ModelOverrideControl
                     label="Fallback Model"
                     provider={fallbackProvider}
@@ -138,6 +160,7 @@ export default function ChatComposeControls({
                     listId={CHAT_FALLBACK_MODEL_LIST_ID}
                     suggestions={fallbackModelSuggestions}
                     className="provider-popover-field"
+                    disabled={isMissingKey(fallbackProvider)}
                   />
                 </>
               )}
@@ -150,6 +173,7 @@ export default function ChatComposeControls({
                     </label>
                     {PROVIDER_OPTIONS.map((option) => {
                       const isSelected = parallelProviders.includes(option.value);
+                      const disabled = isMissingKey(option.value) && !isSelected;
                       return (
                         <button
                           key={option.value}
@@ -157,13 +181,16 @@ export default function ChatComposeControls({
                           role="switch"
                           aria-checked={isSelected}
                           aria-label={`${option.label} provider`}
-                          className={`provider-chip ${isSelected ? 'selected' : ''}`}
+                          className={`provider-chip ${isSelected ? 'selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                          disabled={disabled}
                           onClick={() => {
+                            if (disabled) return;
                             const next = isSelected
                               ? parallelProviders.filter((p) => p !== option.value)
                               : [...parallelProviders, option.value];
                             setParallelProviders(next);
                           }}
+                          title={getProviderOptionTitle(option, providerStatus)}
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
@@ -174,7 +201,7 @@ export default function ChatComposeControls({
                             border: isSelected ? '1.5px solid var(--accent)' : '1px solid var(--line)',
                             background: isSelected ? 'var(--accent-subtle)' : 'transparent',
                             color: isSelected ? 'var(--accent)' : 'var(--ink-secondary)',
-                            cursor: 'pointer',
+                            cursor: disabled ? 'not-allowed' : 'pointer',
                             fontSize: '0.8rem',
                             fontWeight: isSelected ? 600 : 400,
                             transition: 'all 0.15s ease',

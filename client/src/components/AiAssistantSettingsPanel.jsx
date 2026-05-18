@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useToast } from '../hooks/useToast.jsx';
+import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
 import { apiFetchJson } from '../api/http.js';
 import { DEFAULT_AI_SETTINGS } from '../hooks/useAiSettings.js';
 import {
@@ -25,7 +26,9 @@ import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
+  getImageParserReasoningEffortOptions,
 } from '../lib/imageParserCatalog.js';
+import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import { staggerChild, staggerContainer, transitions } from '../utils/motion.js';
 
 const AGENT_ICONS = {
@@ -295,13 +298,19 @@ function EffortArc({ effort, color }) {
 // ---------------------------------------------------------------------------
 function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
   const shouldReduceMotion = useReducedMotion();
+  const { providerStatus } = useProviderKeyStatus();
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
   const effortOptions = useMemo(
     () => getReasoningEffortOptions(PROVIDER_FAMILY[draft.provider] || 'claude'),
     [draft.provider]
   );
+  const imageParserEffortOptions = useMemo(
+    () => getImageParserReasoningEffortOptions(draft.provider),
+    [draft.provider]
+  );
 
-  const EFFORT_INTENSITY = { low: 0.04, medium: 0.12, high: 0.22, xhigh: 0.38 };
-  const EFFORT_PULSE_SPEED = { low: '4s', medium: '2.5s', high: '1.8s', xhigh: '1.1s' };
+  const EFFORT_INTENSITY = { none: 0.02, low: 0.04, medium: 0.12, high: 0.22, xhigh: 0.38 };
+  const EFFORT_PULSE_SPEED = { none: '5s', low: '4s', medium: '2.5s', high: '1.8s', xhigh: '1.1s' };
   const effortIntensity = EFFORT_INTENSITY[draft.reasoningEffort] ?? 0.12;
   const effortSpeed = EFFORT_PULSE_SPEED[draft.reasoningEffort] ?? '2.5s';
 
@@ -337,11 +346,12 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
     el.style.transition = 'transform 500ms cubic-bezier(0.32,0.72,0,1), box-shadow 300ms ease';
   };
 
-  // Image Parser: 3-zone layout with provider + model override (no mode/effort)
-  if (agent.id === 'image-parser') {
+  // Image Parser: 3-zone layout with provider, model override, and provider-specific effort.
+  if (agent.kind === 'image-parser') {
     const modelSuggestions = draft.provider
       ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((o) => o.provider === draft.provider)
       : IMAGE_PARSER_MODEL_SUGGESTIONS;
+    const imageEffort = draft.reasoningEffort || 'medium';
 
     return (
       <div
@@ -355,17 +365,17 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
           '--rot-y': '0deg',
           '--shine-x': '50%',
           '--shine-y': '50%',
-          '--effort-intensity': 0.12,
-          '--effort-speed': '2.5s',
+          '--effort-intensity': EFFORT_INTENSITY[imageEffort] ?? 0.12,
+          '--effort-speed': EFFORT_PULSE_SPEED[imageEffort] ?? '2.5s',
         }}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
       >
         {/* Zone 1: Identity */}
         <div className="agent-card-identity">
-          <div className="agent-card-icon-wrap">
-            <div className="agent-card-icon">{AGENT_ICONS[agent.id]}</div>
-            <EffortArc effort="medium" color={color} />
+            <div className="agent-card-icon-wrap">
+              <div className="agent-card-icon">{AGENT_ICONS[agent.id]}</div>
+            <EffortArc effort={imageEffort} color={color} />
           </div>
           <div className="agent-card-meta">
             <div className="agent-card-name">{agent.label}</div>
@@ -381,10 +391,21 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                 <select
                   className="agent-card-select"
                   value={draft.provider}
-                  onChange={(e) => onChange({ ...draft, provider: e.target.value })}
+                  onChange={(e) => onChange({
+                    ...draft,
+                    provider: e.target.value,
+                    model: '',
+                    reasoningEffort: '',
+                  })}
                 >
                   {IMAGE_PARSER_PROVIDERS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={isMissingKey(opt.value)}
+                    >
+                      {opt.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -398,6 +419,7 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                   placeholder={getImageParserModelPlaceholder(draft.provider)}
                   list={IMAGE_PARSER_MODEL_LIST_ID}
                   onChange={(e) => onChange({ ...draft, model: e.target.value })}
+                  disabled={isMissingKey(draft.provider)}
                 />
                 <datalist id={IMAGE_PARSER_MODEL_LIST_ID}>
                   {modelSuggestions.map((option) => (
@@ -405,6 +427,22 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                   ))}
                 </datalist>
               </div>
+
+              {imageParserEffortOptions.length > 0 && (
+                <div className="agent-card-field">
+                  <label className="agent-card-field-label">Reasoning Effort</label>
+                  <select
+                    className="agent-card-select"
+                    value={draft.reasoningEffort || ''}
+                    onChange={(e) => onChange({ ...draft, reasoningEffort: e.target.value })}
+                  >
+                    <option value="">Default</option>
+                    {imageParserEffortOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -471,7 +509,7 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
         <div className="agent-card-body">
           <div className="agent-card-models">
             <div className="agent-card-field">
-              <label className="agent-card-field-label">Model</label>
+              <label className="agent-card-field-label">Provider</label>
                 <select
                   className="agent-card-select"
                   value={draft.provider}
@@ -490,7 +528,13 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                     }}
                   >
                   {PROVIDER_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    <option
+                      key={opt.value}
+                      value={opt.value}
+                      disabled={isMissingKey(opt.value)}
+                    >
+                      {opt.label}
+                    </option>
                   ))}
               </select>
             </div>
@@ -506,7 +550,7 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                   exit={shouldReduceMotion ? {} : { opacity: 0, height: 0, overflow: 'hidden' }}
                   transition={transitions.springGentle}
                 >
-                  <label className="agent-card-field-label">Fallback Model</label>
+                  <label className="agent-card-field-label">Fallback Provider</label>
                   <select
                     className="agent-card-select"
                     value={draft.fallbackProvider}
@@ -520,7 +564,13 @@ function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
                       }}
                     >
                     {PROVIDER_OPTIONS.filter((opt) => opt.value !== draft.provider).map((opt) => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      <option
+                        key={opt.value}
+                        value={opt.value}
+                        disabled={isMissingKey(opt.value)}
+                      >
+                        {opt.label}
+                      </option>
                     ))}
                   </select>
                 </motion.div>
@@ -717,8 +767,10 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
   const handleTestAgent = useCallback(async (agent) => {
     const draftState = agentDrafts[agent.id];
     const provider = draftState?.provider || '';
-    const model = agent.id === 'image-parser' ? (draftState?.model || '') : '';
-    const reasoningEffort = agent.id === 'image-parser' ? 'medium' : (draftState?.reasoningEffort || DEFAULT_REASONING_EFFORT);
+    const model = agent.kind === 'image-parser' ? (draftState?.model || '') : '';
+    const reasoningEffort = agent.kind === 'image-parser'
+      ? (draftState?.reasoningEffort || 'medium')
+      : (draftState?.reasoningEffort || DEFAULT_REASONING_EFFORT);
     setTestResults((current) => ({
       ...current,
       [agent.id]: { status: 'testing', message: 'Running live model check...' },

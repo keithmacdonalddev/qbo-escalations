@@ -22,9 +22,11 @@ import { getSidebarCurrentRoute } from './lib/appRoute.js';
 import { tel, TEL } from './lib/devTelemetry.js';
 
 const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
+const ChatV5Container = lazy(() => import('./components/chat-v5/ChatV5Container.jsx'));
 const EscalationDashboard = lazy(() => import('./components/EscalationDashboard.jsx'));
 const PlaybookEditor = lazy(() => import('./components/PlaybookEditor.jsx'));
 const AgentsView = lazy(() => import('./components/AgentsView.jsx'));
+const SessionsView = lazy(() => import('./components/SessionsView.jsx'));
 const TemplateLibrary = lazy(() => import('./components/TemplateLibrary.jsx'));
 const Analytics = lazy(() => import('./components/Analytics.jsx'));
 const ImageGallery = lazy(() => import('./components/ImageGallery.jsx'));
@@ -46,6 +48,12 @@ function RouteLoadingFallback() {
   );
 }
 
+const AGENT_MODAL_TITLES = {
+  workspace: 'Workspace Agent',
+  chat: 'Main Chat Agent',
+  copilot: 'Global Co-pilot',
+};
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -54,7 +62,7 @@ function App() {
       return saved !== null ? saved === 'true' : true;
     } catch { return true; }
   });
-  const [dockOverlayOpen, setDockOverlayOpen] = useState(false);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [devToolsEnabled, setDevToolsEnabled] = useState(() => {
     try { return localStorage.getItem('dev-tools-enabled') === 'true'; } catch { return false; }
   });
@@ -104,10 +112,7 @@ function App() {
     dockDefaultTab,
     dockShellMode,
     dockViewContext,
-    dockCloseHandler,
-    showGlobalDock,
     workspaceAgentDock,
-    workspaceMonitorEnabled,
   } = useDockShellState({
     routeView: route.view,
     routeWorkspaceView: route.workspaceView,
@@ -135,11 +140,44 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!dockOverlayOpen) return;
-    const handler = (e) => { if (e.key === 'Escape') setDockOverlayOpen(false); };
+    if (!agentModalOpen) return;
+    const handler = (e) => { if (e.key === 'Escape') setAgentModalOpen(false); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [dockOverlayOpen]);
+  }, [agentModalOpen]);
+
+  const closeAgentModal = useCallback(() => {
+    setAgentModalOpen(false);
+  }, []);
+
+  const openAgentModal = useCallback((tabId = dockDefaultTab) => {
+    setGlobalDockTab(tabId);
+    setAgentModalOpen(true);
+  }, [dockDefaultTab, setGlobalDockTab]);
+
+  const workspaceAgentDockForShell = useMemo(() => ({
+    ...workspaceAgentDock,
+    open: agentModalOpen && globalDockTab === 'workspace',
+    setOpen: (nextValue) => {
+      const currentOpen = agentModalOpen && globalDockTab === 'workspace';
+      const resolved = typeof nextValue === 'function' ? nextValue(currentOpen) : nextValue;
+      if (resolved) {
+        openAgentModal('workspace');
+      } else if (agentModalOpen) {
+        closeAgentModal();
+      }
+    },
+    setActiveTab: setGlobalDockTab,
+  }), [
+    agentModalOpen,
+    closeAgentModal,
+    globalDockTab,
+    openAgentModal,
+    setGlobalDockTab,
+    workspaceAgentDock,
+  ]);
+
+  const agentModalTitle = AGENT_MODAL_TITLES[globalDockTab] || 'Agent Panel';
 
   const motionProps = useMemo(() => shouldReduceMotion
     ? {}
@@ -190,6 +228,14 @@ function App() {
           </motion.div>
           </Profiler>
         );
+      case 'sessions':
+        return (
+          <Profiler id="Sessions" onRender={flame.onRender}>
+          <motion.div key={`sessions-${route.sessionId || 'list'}`} {...motionProps}>
+            <SessionsView sessionId={route.sessionId || null} />
+          </motion.div>
+          </Profiler>
+        );
       case 'templates':
         return (
           <Profiler id="Templates" onRender={flame.onRender}>
@@ -230,7 +276,7 @@ function App() {
         return (
           <Profiler id="Workspace" onRender={flame.onRender}>
           <motion.div key={`workspace-${route.workspaceView || 'overview'}`} {...motionProps} style={{ height: '100%' }}>
-            <WorkspaceShell chat={chat} subview={route.workspaceView || 'overview'} agentDock={workspaceAgentDock} />
+            <WorkspaceShell chat={chat} subview={route.workspaceView || 'overview'} agentDock={workspaceAgentDockForShell} />
           </motion.div>
           </Profiler>
         );
@@ -261,7 +307,7 @@ function App() {
       default:
         return null;
     }
-  }, [route, motionProps, themeProps, aiProps, chat, workspaceAgentDock, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled, flame.onRender]);
+  }, [route, motionProps, themeProps, aiProps, chat, workspaceAgentDockForShell, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled, flame.onRender]);
 
   const isFullHeightView = route.view === 'chat' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail' || route.view === 'rooms';
   const usesEdgeToEdgeShell = isFullHeightView;
@@ -277,7 +323,7 @@ function App() {
   return (
     <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
-    <WorkspaceMonitorProvider enabled={workspaceMonitorEnabled}>
+    <WorkspaceMonitorProvider enabled>
     <div className={`app app-dock-mode-${dockShellMode}${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
       <a href="#main-content" className="skip-nav-link">Skip to main content</a>
       {/* Health banner — always visible at the very top */}
@@ -306,7 +352,6 @@ function App() {
 
       <Sidebar
         currentRoute={sidebarCurrentRoute}
-        conversationId={route.conversationId}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         collapsed={sidebarCollapsed}
@@ -320,6 +365,12 @@ function App() {
         settingsOpen={settingsOpen}
         toggleSettings={toggleSettings}
         setSidebarOpen={setSidebarOpen}
+        chat={chat}
+        aiSettings={aiProps.aiSettings}
+        setAiSettings={aiProps.setAiSettings}
+        activeAgentTab={globalDockTab}
+        agentModalOpen={agentModalOpen}
+        onOpenAgent={openAgentModal}
       />
 
       <main
@@ -334,7 +385,7 @@ function App() {
             <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <Suspense fallback={<RouteLoadingFallback />}>
-                  <ChatView conversationIdFromRoute={route.conversationId} chat={chat} aiSettings={aiProps.aiSettings} routeView={route.view} />
+                  <ChatV5Container />
                 </Suspense>
               </div>
             </div>
@@ -357,39 +408,65 @@ function App() {
               </AnimatePresence>
             )}
           </div>
-          {showGlobalDock && (
-            <button
-              className="dock-toggle-btn"
-              onClick={() => setDockOverlayOpen(o => !o)}
-              type="button"
-              aria-label={dockOverlayOpen ? 'Close agent dock' : 'Open agent dock'}
-              aria-expanded={dockOverlayOpen}
-            >
-              <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <line x1="15" y1="3" x2="15" y2="21" />
-              </svg>
-            </button>
-          )}
-          {showGlobalDock && (
-            <aside
-              className={`gmail-agent-dock-wrapper app-global-dock-wrapper app-global-dock-wrapper--${dockShellMode}${dockOverlayOpen ? ' dock-overlay-open' : ''}`}
-              data-dock-mode={dockShellMode}
-              aria-label="Agent dock"
-            >
-              <AgentDock
-                chat={chat}
-                activeTab={globalDockTab}
-                onActiveTabChange={setGlobalDockTab}
-                defaultTab={dockDefaultTab}
-                viewContext={dockViewContext}
-                onClose={dockCloseHandler}
-              />
-            </aside>
-          )}
         </div>
       </main>
       </div>{/* end .app-content-area */}
+
+      <AnimatePresence>
+        {agentModalOpen && (
+          <motion.div
+            key="agent-modal-overlay"
+            className="agent-modal-overlay"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeAgentModal();
+            }}
+            {...fade}
+            transition={transitions.fast}
+          >
+            <motion.section
+              className="agent-modal-shell"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="agent-modal-title"
+              initial={shouldReduceMotion ? false : { opacity: 0, y: 18, scale: 0.96 }}
+              animate={shouldReduceMotion ? {} : { opacity: 1, y: 0, scale: 1 }}
+              exit={shouldReduceMotion ? {} : { opacity: 0, y: 12, scale: 0.98 }}
+              transition={transitions.springSnappy}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <header className="agent-panel-header">
+                <div className="agent-panel-title-group">
+                  <span className="agent-panel-kicker">Agent Monitoring</span>
+                  <h2 id="agent-modal-title">{agentModalTitle}</h2>
+                </div>
+                <button
+                  className="agent-panel-close"
+                  type="button"
+                  onClick={closeAgentModal}
+                  aria-label="Close agent panel"
+                >
+                  <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </header>
+              <div className="agent-panel-body">
+                <AgentDock
+                  chat={chat}
+                  activeTab={globalDockTab}
+                  onActiveTabChange={setGlobalDockTab}
+                  defaultTab={dockDefaultTab}
+                  viewContext={dockViewContext}
+                  onClose={closeAgentModal}
+                  resizable={false}
+                  modalMode
+                />
+              </div>
+            </motion.section>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Floating mini widget — regular chat streaming monitor outside Chat view */}
       {route.view !== 'chat' && (

@@ -12,16 +12,16 @@ const IMAGE_PROVIDER_LABELS = {
 };
 
 const PHASE_LABELS = {
-  'parse-template': 'Template Parser',
-  'known-issue-search': 'Known Issue Search',
+  'parse-template': 'Image Parser',
+  'known-issue-search': 'INV Search Agent',
   triage: 'Triage Agent',
-  analyst: 'QBO Analyst',
+  analyst: 'QBO Assistant',
 };
 
 const PHASE_SHORT_LABELS = {
-  'parse-template': 'Parser',
-  'known-issue-search': 'Known Issue',
-  triage: 'Triage',
+  'parse-template': 'Image Parser',
+  'known-issue-search': 'INV Search',
+  triage: 'Triage Agent',
   analyst: 'Analyst',
 };
 
@@ -111,6 +111,24 @@ function hasFallback(run) {
   );
 }
 
+function getRunGeneration(run) {
+  if (!run || run.phase !== 'triage') return null;
+  const generation = run.detail?.generation && typeof run.detail.generation === 'object'
+    ? run.detail.generation
+    : {};
+  const explicitSource = safeText(generation.source).toLowerCase();
+  const legacySource = safeText(run.detail?.source || run.source).toLowerCase();
+  const source = explicitSource === 'server' || explicitSource === 'agent'
+    ? explicitSource
+    : (hasFallback(run) || legacySource === 'rule-fallback' ? 'server' : 'agent');
+  const label = safeText(generation.label) || (source === 'server' ? 'Server generated' : 'Agent generated');
+  return {
+    source,
+    label,
+    title: `${label}${formatRunMeta(run) ? ` by ${formatRunMeta(run)}` : ''}`,
+  };
+}
+
 function buildRunBadges(run) {
   if (!run) return [];
   const badges = [];
@@ -121,6 +139,15 @@ function buildRunBadges(run) {
   }
   if (durationLabel) {
     badges.push({ key: 'duration', label: durationLabel, tone: 'duration', title: `Elapsed: ${durationLabel}` });
+  }
+  const generation = getRunGeneration(run);
+  if (generation) {
+    badges.push({
+      key: 'generation',
+      label: generation.label.toLowerCase(),
+      tone: generation.source === 'server' ? 'generation-server' : 'generation-agent',
+      title: generation.title,
+    });
   }
   if (hasFallback(run)) {
     badges.push({
@@ -342,7 +369,7 @@ function SourcePanel({
   return (
     <section className="case-source-panel" aria-label="Parsed template">
       <div className="case-panel-head">
-        <span className="case-panel-kicker">Parser</span>
+        <span className="case-panel-kicker">Image Parser</span>
         <div>
           <strong>Template Evidence</strong>
           <span>Exact extracted source</span>
@@ -472,9 +499,9 @@ function KnownIssuePanel({
   const hasEvidence = searches.length > 0 || rejectedCandidates.length > 0 || validationIssues.length > 0;
 
   return (
-    <section className={`case-intel-panel is-${knownIssueTone}`} aria-label="Known Issue Search">
+    <section className={`case-intel-panel is-${knownIssueTone}`} aria-label="INV Search Agent">
       <div className="case-panel-head">
-        <span className="case-panel-kicker">Known Issue</span>
+        <span className="case-panel-kicker">INV Search Agent</span>
         <div>
           <strong>Investigation Search</strong>
           <span>Active INV signal</span>
@@ -653,9 +680,9 @@ export default function CaseIntakeTimeline({
           )}
         </div>
 
-        <section className={`case-analyst-strip is-${analystStatus}`} aria-label="QBO Analyst status">
+        <section className={`case-analyst-strip is-${analystStatus}`} aria-label="QBO Assistant status">
           <span className="case-workflow-dot" aria-hidden="true" />
-          <strong>QBO Analyst</strong>
+          <strong>QBO Assistant</strong>
           <span>{analystSummary || (analystStatus === 'running' ? 'Building guidance below.' : getRunStatusLabel(analystStatus))}</span>
           {followUpCount > 0 && (
             <small>{followUpCount} follow-up transcript{followUpCount === 1 ? '' : 's'}</small>

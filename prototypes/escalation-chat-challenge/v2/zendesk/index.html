@@ -1,0 +1,1314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Escalation workspace — case intake</title>
+<style>
+  /* ---------- tokens ---------- */
+  :root {
+    /* Garden-derived neutrals, warmed for QBO long-shift comfort */
+    --bg:          #F4F2EE;   /* page (warm parchment instead of cool grey) */
+    --surface:     #FFFFFF;
+    --surface-2:   #FAF8F4;   /* recessed wells */
+    --line:        #E6E2D9;
+    --line-strong: #D5CFC2;
+    --ink:         #1F2A2D;   /* near-kale on warm bg */
+    --ink-2:       #4A555A;
+    --ink-3:       #7A8388;
+    --ink-4:       #A8AFB3;
+
+    /* QBO warmth accents */
+    --ember:       #D9531E;   /* primary action / focus */
+    --ember-soft:  #FCEDE3;
+    --ember-ink:   #8E3411;
+    --kale:        #17494D;   /* deep brand anchor */
+    --kale-2:      #0F3438;
+
+    /* Status (Garden thermal gradient, restrained) */
+    --p1:          #B0291E;   /* P1 critical */
+    --p1-bg:       #FBE9E6;
+    --p2:          #B8590D;   /* P2 time-sensitive */
+    --p2-bg:       #FDEEDF;
+    --p3:          #2C6B8E;   /* P3 workaround exists */
+    --p3-bg:       #E4EFF6;
+    --p4:          #5A6469;   /* P4 informational */
+    --p4-bg:       #ECEDEE;
+
+    --ok:          #2A7A57;
+    --ok-bg:       #E3F1EA;
+
+    --radius-sm:   6px;
+    --radius:      10px;
+    --radius-lg:   14px;
+
+    --shadow-1:    0 1px 0 rgba(20,30,35,.04), 0 1px 2px rgba(20,30,35,.04);
+    --shadow-2:    0 4px 16px rgba(20,30,35,.06), 0 1px 2px rgba(20,30,35,.04);
+
+    --t-fast:      120ms cubic-bezier(.2,.7,.3,1);
+    --t:           220ms cubic-bezier(.2,.7,.3,1);
+    --t-slow:      420ms cubic-bezier(.2,.7,.3,1);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family: "Inter", -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 14.5px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  ::selection { background: var(--ember-soft); color: var(--ember-ink); }
+
+  /* ---------- app shell ---------- */
+  .app { display: grid;
+    grid-template-columns: 248px 1fr 320px;
+    grid-template-rows: 48px 1fr;
+    height: 100vh; min-height: 640px;
+  }
+  /* topbar */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    z-index: 5;
+  }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:600; color: var(--ink); letter-spacing: -.005em; }
+  .brand .dot { width:22px; height:22px; border-radius:6px;
+    background: linear-gradient(135deg, var(--ember) 0%, #B8400F 100%);
+    box-shadow: inset 0 -1px 0 rgba(0,0,0,.18);
+  }
+  .crumb { color: var(--ink-3); font-size: 13px; }
+  .crumb b { color: var(--ink-2); font-weight:600; }
+  .top-spacer { flex: 1; }
+  .top-meta { display:flex; align-items:center; gap: 18px; color: var(--ink-3); font-size:13px; }
+  .demo-controls { display:flex; align-items:center; gap:6px; }
+  .demo-controls button {
+    background: var(--surface-2); border:1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font-size: 12.5px; color: var(--ink-2);
+    transition: background var(--t-fast), border-color var(--t-fast);
+  }
+  .demo-controls button:hover { background: #fff; border-color: var(--line-strong); }
+  .demo-controls button.primary { background: var(--ember); color: #fff; border-color: var(--ember); }
+  .demo-controls button.primary:hover { background: #C2491A; border-color: #C2491A; }
+  .demo-controls .sep { width:1px; height: 18px; background: var(--line); margin: 0 4px; }
+
+  /* ---------- left rail: agent status ---------- */
+  .rail {
+    background: var(--surface);
+    border-right: 1px solid var(--line);
+    padding: 18px 14px 16px;
+    overflow-y: auto;
+  }
+  .rail h2 {
+    margin: 0 0 12px 4px;
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .case-meta {
+    background: var(--surface-2); border:1px solid var(--line);
+    border-radius: var(--radius); padding: 10px 12px; margin-bottom: 18px;
+  }
+  .case-meta .id { font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace; font-size:12px; color: var(--ink-2); }
+  .case-meta .src { font-size: 12.5px; color: var(--ink-3); margin-top: 2px; }
+  .case-meta .stamp { font-size: 12px; color: var(--ink-4); margin-top: 6px; display:flex; align-items:center; gap:6px; }
+  .case-meta .stamp .live { width:6px; height:6px; border-radius:50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(42,122,87,.4); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(42,122,87,.45)} 70%{box-shadow:0 0 0 8px rgba(42,122,87,0)} 100%{box-shadow:0 0 0 0 rgba(42,122,87,0)} }
+
+  .agents { display: flex; flex-direction: column; gap: 4px; }
+  .agent {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    align-items: center; gap: 10px;
+    padding: 9px 8px; border-radius: 8px;
+    transition: background var(--t-fast);
+  }
+  .agent + .agent { border-top: 1px solid transparent; }
+  .agent:hover { background: var(--surface-2); }
+  .agent .avatar {
+    width: 22px; height: 22px; border-radius: 50%;
+    display:grid; place-items:center;
+    font-size: 10.5px; font-weight: 600; color: #fff;
+    letter-spacing: .02em;
+  }
+  .agent.parser  .avatar { background: #5B8B7E; }
+  .agent.inv     .avatar { background: #6E7BA8; }
+  .agent.triage  .avatar { background: var(--kale); }
+  .agent.analyst .avatar { background: linear-gradient(135deg, var(--ember) 0%, #B8400F 100%); box-shadow: 0 0 0 2px var(--ember-soft); }
+  .agent .body { min-width: 0; }
+  .agent .name { font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.2; }
+  .agent .role { font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+  .agent .state {
+    font-size: 11px; color: var(--ink-3);
+    display:flex; align-items:center; gap:5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .agent .state .pip {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--ink-4);
+    transition: background var(--t), box-shadow var(--t);
+  }
+  .agent[data-state="idle"]    .state .pip { background: #CFD3D6; }
+  .agent[data-state="running"] .state .pip { background: var(--ember); box-shadow: 0 0 0 3px var(--ember-soft); animation: blink 1.1s infinite; }
+  .agent[data-state="done"]    .state .pip { background: var(--ok); }
+  .agent[data-state="speaking"] .state .pip { background: var(--ember); box-shadow: 0 0 0 3px var(--ember-soft); }
+  @keyframes blink { 50% { opacity: .45; } }
+
+  .agent .state .label { color: var(--ink-3); }
+  .agent[data-state="done"]    .state .label { color: var(--ok); }
+  .agent[data-state="running"] .state .label { color: var(--ember-ink); }
+
+  /* analyst row stronger */
+  .agent.analyst {
+    margin-top: 6px; padding-top: 12px; padding-bottom: 12px;
+    border-top: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(217,83,30,.045) 0%, rgba(217,83,30,0) 100%);
+  }
+  .agent.analyst .name { font-size: 13.5px; }
+  .agent.analyst .role { color: var(--ember-ink); font-weight: 500; }
+
+  .rail-foot {
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+    font-size: 11.5px; color: var(--ink-4); padding-left: 4px;
+  }
+  .rail-foot kbd {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace;
+    background: var(--surface-2); border:1px solid var(--line);
+    border-bottom-width: 2px;
+    padding: 1px 5px; border-radius: 4px; font-size: 11px; color: var(--ink-2);
+  }
+
+  /* ---------- canvas (center) ---------- */
+  .canvas {
+    overflow-y: auto;
+    background: var(--bg);
+    position: relative;
+  }
+  .canvas-inner { max-width: 760px; margin: 0 auto; padding: 28px 32px 40px; }
+
+  /* MOMENT 1 — pre-upload + intake */
+  .intake { transition: opacity var(--t-slow), transform var(--t-slow); }
+  .intake .lead { font-size: 13px; color: var(--ink-3); letter-spacing: .02em; text-transform: uppercase; font-weight: 600; }
+  .intake h1 {
+    font-size: 26px; line-height: 1.2; margin: 6px 0 6px;
+    letter-spacing: -.012em; color: var(--ink);
+    font-weight: 600;
+  }
+  .intake .sub { color: var(--ink-2); margin: 0 0 22px; font-size: 14.5px; }
+
+  .dropzone {
+    background: var(--surface);
+    border: 1.5px dashed var(--line-strong);
+    border-radius: var(--radius-lg);
+    padding: 36px 28px;
+    display: grid; place-items: center; gap: 14px;
+    text-align: center;
+    transition: border-color var(--t), background var(--t), transform var(--t-fast);
+  }
+  .dropzone.over { border-color: var(--ember); background: var(--ember-soft); }
+  .dropzone .icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--ember-soft); color: var(--ember-ink);
+    display:grid; place-items:center;
+  }
+  .dropzone .icon svg { width: 22px; height: 22px; }
+  .dropzone .title { font-size: 15px; font-weight: 600; color: var(--ink); }
+  .dropzone .helpers { font-size: 13px; color: var(--ink-3); }
+  .dropzone .actions { display:flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; justify-content: center; }
+  .dropzone .actions button {
+    background: var(--surface); border:1px solid var(--line-strong);
+    border-radius: 8px; padding: 7px 12px; font-size: 13px; color: var(--ink-2);
+    display:inline-flex; align-items:center; gap:6px;
+    transition: background var(--t-fast), border-color var(--t-fast);
+  }
+  .dropzone .actions button:hover { background: var(--surface-2); border-color: var(--ink-4); }
+  .dropzone .actions button.primary {
+    background: var(--ember); color:#fff; border-color: var(--ember);
+  }
+  .dropzone .actions button.primary:hover { background:#C2491A; border-color:#C2491A; }
+
+  /* webcam panel — solves V1 pain */
+  .webcam {
+    background: var(--surface); border:1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 16px;
+    margin-top: 14px; display:none;
+  }
+  .webcam.open { display: block; animation: rise var(--t) both; }
+  .webcam-head { display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px; }
+  .webcam-head .t { font-weight: 600; font-size: 13.5px; }
+  .webcam-head button.back { background: transparent; border:1px solid var(--line); border-radius: 6px; padding: 4px 10px; font-size: 12.5px; color: var(--ink-2); }
+  .webcam-stage {
+    aspect-ratio: 16/10;
+    background: #1F2628;
+    border-radius: 10px;
+    display:grid; place-items:center;
+    color: #B0B6B9; font-size: 13px;
+    position: relative; overflow: hidden;
+  }
+  .webcam-stage::before {
+    content: ""; position:absolute; inset: 0;
+    background: repeating-linear-gradient(45deg, rgba(255,255,255,.02) 0 8px, transparent 8px 16px);
+  }
+  .webcam-controls { display:flex; gap: 8px; margin-top: 10px; justify-content:flex-end; }
+  .webcam-controls button {
+    background: var(--surface); border:1px solid var(--line); border-radius: 6px;
+    padding: 6px 12px; font-size: 13px; color: var(--ink-2);
+  }
+  .webcam-controls button.primary { background: var(--ember); color:#fff; border-color: var(--ember); }
+
+  /* MOMENT 3 — parsed case */
+  .case { display: none; }
+  .case.show { display: block; animation: rise var(--t-slow) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+
+  .thumb {
+    display: flex; gap: 14px; align-items: center;
+    background: var(--surface); border:1px solid var(--line);
+    border-radius: var(--radius); padding: 10px 12px;
+    margin-bottom: 18px;
+  }
+  .thumb-img {
+    width: 56px; height: 56px; border-radius: 8px;
+    background: linear-gradient(135deg, #E6E2D9 0%, #D5CFC2 100%);
+    flex: 0 0 auto;
+    position: relative; overflow: hidden;
+  }
+  .thumb-img::after {
+    content: ""; position: absolute; inset: 6px;
+    border-radius: 4px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.85) 0%, rgba(255,255,255,.6) 100%);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.05);
+  }
+  .thumb-img::before {
+    content: ""; position: absolute; left: 12px; right: 12px; top: 14px; height: 4px; border-radius: 2px; background: var(--ink-4); z-index: 1; opacity: .55;
+    box-shadow: 0 7px 0 0 rgba(122,131,136,.55), 0 14px 0 0 rgba(122,131,136,.35), 0 21px 0 0 rgba(122,131,136,.25);
+  }
+  .thumb-meta { font-size: 12.5px; color: var(--ink-3); }
+  .thumb-meta b { color: var(--ink-2); font-weight: 600; display:block; font-size:13.5px; }
+  .thumb-meta .sep { color: var(--line-strong); margin: 0 6px; }
+  .thumb-actions { margin-left: auto; display:flex; gap: 6px; }
+  .thumb-actions button {
+    background: transparent; border:1px solid var(--line); border-radius: 6px;
+    padding: 5px 10px; font-size: 12.5px; color: var(--ink-2);
+  }
+
+  /* TRIAGE BANNER — the moment of understanding */
+  .triage {
+    margin-bottom: 18px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    box-shadow: var(--shadow-2);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity var(--t-slow), transform var(--t-slow), border-color var(--t);
+  }
+  .triage.in { opacity: 1; transform: translateY(0); }
+  .triage.placeholder {
+    background: var(--surface-2);
+    box-shadow: none;
+    opacity: 1; transform: none;
+    border-style: dashed;
+    border-color: var(--line);
+  }
+  .triage-bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 18px;
+    background: var(--p2-bg);
+    border-bottom: 1px solid rgba(0,0,0,.04);
+  }
+  .triage-bar .sev {
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace;
+    font-size: 12.5px; font-weight: 700; letter-spacing: .04em;
+    padding: 3px 8px; border-radius: 5px;
+    background: var(--p2); color: #fff;
+  }
+  .triage-bar .cat {
+    font-size: 12.5px; font-weight: 600; color: var(--ink-2);
+    letter-spacing: .02em; text-transform: lowercase;
+  }
+  .triage-bar .cat::before {
+    content: ""; display: inline-block; width: 6px; height: 6px; border-radius:50%;
+    background: var(--p2); margin-right: 7px; vertical-align: middle;
+  }
+  .triage-bar .conf {
+    margin-left: auto; font-size: 12px; color: var(--ink-3);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .triage-bar .conf .dots { display:inline-flex; gap: 2px; }
+  .triage-bar .conf .dots i {
+    width: 5px; height: 5px; border-radius:50%; background: var(--ink-4); display:inline-block;
+  }
+  .triage-bar .conf .dots i.on { background: var(--ok); }
+
+  .triage-body { padding: 16px 18px 18px; }
+  .triage-body .fast {
+    font-size: 17px; line-height: 1.45; color: var(--ink); letter-spacing: -.005em;
+    font-weight: 500;
+  }
+  .triage-body .next {
+    margin-top: 12px; padding: 10px 12px;
+    background: var(--ember-soft);
+    border-radius: 8px;
+    color: var(--ember-ink);
+    font-size: 13.5px; display:flex; gap:10px; align-items:flex-start;
+  }
+  .triage-body .next b { font-weight: 600; }
+  .triage-body .next .tag {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    padding: 2px 6px; border-radius: 4px;
+    background: var(--ember); color:#fff; flex: 0 0 auto;
+    margin-top: 1px;
+  }
+  .triage-body .missing {
+    margin-top: 12px;
+    display: flex; flex-wrap: wrap; gap: 6px 8px;
+    font-size: 12.5px; color: var(--ink-3);
+    align-items: center;
+  }
+  .triage-body .missing .label { color: var(--ink-3); font-weight: 500; margin-right: 4px; }
+  .triage-body .missing .chip {
+    background: var(--surface-2);
+    border:1px solid var(--line);
+    border-radius: 999px; padding: 3px 9px;
+    font-size: 12px; color: var(--ink-2);
+  }
+
+  .triage-author {
+    display:flex; align-items:center; gap: 8px;
+    padding: 8px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--surface-2);
+    font-size: 11.5px; color: var(--ink-3);
+  }
+  .triage-author .av {
+    width: 16px; height: 16px; border-radius: 50%; background: var(--kale);
+    display:grid; place-items:center; color:#fff; font-size: 9px; font-weight: 600;
+  }
+
+  /* placeholder shimmer */
+  .triage.placeholder .triage-bar { background: transparent; border-bottom-color: transparent; }
+  .triage.placeholder .ph {
+    display:flex; align-items:center; gap: 10px;
+    padding: 16px 18px; color: var(--ink-3); font-size: 13.5px;
+  }
+  .triage.placeholder .ph .spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--kale);
+    animation: spin .9s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* parsed fields */
+  .fields {
+    background: var(--surface);
+    border:1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .fields-head {
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .fields-head .t { font-size: 12px; font-weight: 600; color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; }
+  .fields-head .by { font-size: 11.5px; color: var(--ink-3); display:flex; align-items:center; gap:6px; }
+  .fields-head .by .av { width: 14px; height: 14px; border-radius:50%; background: #5B8B7E; }
+
+  .fields-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--line);
+  }
+  .field { background: var(--surface); padding: 11px 14px 12px; min-height: 56px; }
+  .field .k { font-size: 11px; color: var(--ink-3); font-weight: 500; letter-spacing: .02em; margin-bottom: 3px; text-transform: uppercase; }
+  .field .v { font-size: 13.5px; color: var(--ink); line-height: 1.45; }
+  .field .v .mono { font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace; font-size: 12.5px; color: var(--ink-2); }
+  .field.full { grid-column: 1 / -1; }
+
+  /* parsing shimmer fields */
+  .field.parsing .v { color: transparent; position: relative; min-height: 18px; }
+  .field.parsing .v::after {
+    content: ""; position: absolute; left:0; top:4px; height:11px; right:30%;
+    background: linear-gradient(90deg, #EEEAE1 0%, #F7F5EF 50%, #EEEAE1 100%);
+    background-size: 200% 100%;
+    border-radius: 3px;
+    animation: shimmer 1.4s linear infinite;
+  }
+  .field.parsing.short .v::after { right: 55%; }
+  .field.parsing.long .v::after  { right: 8%; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+  /* MOMENT 5 — analyst handoff stitched into chat */
+  .stage-chat .intake-area { display: none; }
+  .stage-chat .case { display: block; }
+
+  /* arrival ribbon — analyst meets you */
+  .arrival {
+    margin: 18px 0;
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 14px;
+    background: linear-gradient(180deg, var(--ember-soft) 0%, rgba(252,237,227,0) 100%);
+    border-radius: var(--radius-lg);
+    opacity: 0; transform: translateY(6px);
+    transition: opacity var(--t-slow), transform var(--t-slow);
+  }
+  .arrival.in { opacity: 1; transform: translateY(0); }
+  .arrival .av {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--ember) 0%, #B8400F 100%);
+    color: #fff; display:grid; place-items:center; font-weight: 600; font-size: 13px;
+    box-shadow: 0 0 0 3px #fff, 0 0 0 4px var(--ember);
+    flex: 0 0 auto;
+  }
+  .arrival .body { padding-top: 2px; }
+  .arrival .who { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .arrival .who .role { font-weight: 500; color: var(--ember-ink); margin-left: 6px; }
+  .arrival .what { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+  .arrival .chips { display:flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+  .arrival .chips .chip {
+    font-size: 11.5px; padding: 3px 8px; border-radius: 999px;
+    background: rgba(255,255,255,.7); color: var(--ink-2);
+    border: 1px solid rgba(184,64,15,.18);
+  }
+  .arrival .chips .chip svg { width: 11px; height: 11px; vertical-align: -1px; margin-right: 4px; }
+
+  /* chat */
+  .chat { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+  .msg { display:flex; gap: 10px; align-items:flex-start; }
+  .msg .av {
+    width: 28px; height: 28px; border-radius: 50%;
+    display:grid; place-items:center; color:#fff; font-size: 11px; font-weight:600;
+    flex: 0 0 auto;
+  }
+  .msg.analyst .av {
+    background: linear-gradient(135deg, var(--ember) 0%, #B8400F 100%);
+  }
+  .msg.operator .av { background: var(--kale); }
+  .msg .bubble {
+    padding: 10px 13px; border-radius: 10px;
+    background: var(--surface); border: 1px solid var(--line);
+    font-size: 14px; line-height: 1.5; max-width: 88%;
+    box-shadow: var(--shadow-1);
+  }
+  .msg.analyst .bubble { background: var(--surface); }
+  .msg.operator { flex-direction: row-reverse; }
+  .msg.operator .bubble { background: var(--kale-2); color: #F4F2EE; border-color: var(--kale-2); }
+  .msg .meta { font-size: 11px; color: var(--ink-4); margin-top: 4px; }
+  .msg.analyst .name { font-size: 12.5px; color: var(--ink-3); font-weight: 600; margin-bottom: 3px; }
+  .msg.analyst .name b { color: var(--ink-2); font-weight: 600; }
+  .msg .bubble p { margin: 0 0 6px; }
+  .msg .bubble p:last-child { margin: 0; }
+  .msg .bubble ul { margin: 6px 0 0; padding-left: 18px; }
+  .msg .bubble ul li { margin-bottom: 2px; }
+  .msg .bubble .cite {
+    display:inline-flex; align-items:center; gap: 4px;
+    font-size: 11.5px;
+    background: var(--surface-2); border:1px solid var(--line);
+    padding: 1px 6px; border-radius: 4px; color: var(--ink-2);
+    font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace;
+    text-decoration: none;
+  }
+  .typing { display:inline-flex; gap: 3px; padding: 4px 0; }
+  .typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-4); animation: dot 1.1s infinite; }
+  .typing i:nth-child(2){ animation-delay: .15s; }
+  .typing i:nth-child(3){ animation-delay: .3s; }
+  @keyframes dot { 0%,80%,100%{transform: translateY(0); opacity:.5} 40%{transform: translateY(-3px); opacity: 1} }
+
+  .composer {
+    margin-top: 16px;
+    background: var(--surface);
+    border:1px solid var(--line);
+    border-radius: var(--radius-lg);
+    padding: 10px 12px 10px;
+    box-shadow: var(--shadow-1);
+  }
+  .composer textarea {
+    width: 100%; resize: none;
+    border: 0; outline: 0; background: transparent;
+    font: inherit; color: var(--ink);
+    min-height: 40px; padding: 6px 4px;
+  }
+  .composer-foot { display:flex; align-items:center; gap: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+  .composer-foot .hint { font-size: 11.5px; color: var(--ink-4); }
+  .composer-foot .hint kbd { font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace; background: var(--surface-2); border:1px solid var(--line); border-bottom-width: 2px; padding: 0 4px; border-radius: 4px; font-size: 11px; }
+  .composer-foot .spacer { flex: 1; }
+  .composer-foot button {
+    background: var(--ember); color:#fff; border: 1px solid var(--ember);
+    border-radius: 7px; padding: 6px 12px; font-size: 13px; font-weight: 500;
+  }
+
+  /* ---------- right panel: INV + run context ---------- */
+  .ctx {
+    background: var(--surface);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+  }
+  .ctx-section { padding: 16px 16px; border-bottom: 1px solid var(--line); }
+  .ctx h3 {
+    margin: 0 0 10px;
+    font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+    color: var(--ink-3);
+    display:flex; align-items:center; gap: 8px;
+  }
+  .ctx h3 .by { color: var(--ink-4); font-weight: 500; letter-spacing: 0; text-transform: none; font-size: 11px; }
+
+  .inv-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 6px 10px;
+    padding: 10px 11px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface);
+    transition: background var(--t-fast), border-color var(--t-fast);
+    cursor: pointer;
+  }
+  .inv-row:hover { background: var(--surface-2); border-color: var(--line-strong); }
+  .inv-row + .inv-row { margin-top: 6px; }
+  .inv-row .id { font-family: "SF Mono","JetBrains Mono",ui-monospace,monospace; font-size: 12px; color: var(--ink-2); }
+  .inv-row .match { font-size: 11px; color: var(--ok); font-weight: 600; }
+  .inv-row .title { grid-column: 1 / -1; font-size: 13px; color: var(--ink); line-height: 1.35; }
+  .inv-row .meta { grid-column: 1 / -1; font-size: 11.5px; color: var(--ink-3); display:flex; gap: 10px; }
+  .inv-row .meta .dot { color: var(--line-strong); }
+
+  .inv-row.best { border-color: rgba(42,122,87,.5); background: linear-gradient(180deg, rgba(227,241,234,.45) 0%, rgba(227,241,234,0) 100%); }
+
+  .inv-skel {
+    height: 64px; border-radius: 8px;
+    background: linear-gradient(90deg, var(--surface-2) 0%, #F2EFE8 50%, var(--surface-2) 100%);
+    background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
+    border: 1px solid var(--line);
+  }
+  .inv-skel + .inv-skel { margin-top: 6px; }
+
+  .fields-mini { display:flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+  .fields-mini .row { display:flex; gap: 10px; }
+  .fields-mini .k { color: var(--ink-3); width: 84px; flex: 0 0 84px; font-size: 11.5px; }
+  .fields-mini .v { color: var(--ink-2); }
+
+  .pipe {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .pipe .step {
+    display:flex; align-items:center; gap: 8px;
+    font-size: 12.5px; color: var(--ink-3);
+  }
+  .pipe .step .b {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #DEDACD;
+    display:grid; place-items:center;
+    color: #fff; font-size: 9px;
+  }
+  .pipe .step.done .b { background: var(--ok); }
+  .pipe .step.running .b { background: var(--ember); animation: blink 1.1s infinite; }
+  .pipe .step.running { color: var(--ember-ink); }
+  .pipe .step.done { color: var(--ink-2); }
+  .pipe .step .t { font-variant-numeric: tabular-nums; margin-left: auto; font-size: 11px; color: var(--ink-4); }
+
+  /* keyboard focus */
+  :focus-visible {
+    outline: 2px solid var(--ember);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* small layouts */
+  @media (max-width: 1100px) {
+    .app { grid-template-columns: 220px 1fr 280px; }
+  }
+
+  /* ---------- light-touch reveal for fields ---------- */
+  .field { opacity: 1; transition: background var(--t); }
+  .field.parsing { background: var(--surface); }
+
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- ============ TOPBAR ============ -->
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span> Escalation workspace</div>
+    <div class="crumb">Queue <span style="color:var(--ink-4)"> / </span> <b>New case</b></div>
+    <div class="top-spacer"></div>
+    <div class="top-meta">
+      <span id="status-summary">Ready</span>
+      <div class="demo-controls" aria-label="Demo controls">
+        <button id="btn-restart" title="Restart demo">Restart</button>
+        <span class="sep"></span>
+        <button id="btn-step" class="primary">Run demo</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ============ LEFT RAIL — AGENTS ============ -->
+  <aside class="rail" aria-label="Case and agents">
+    <h2>Case</h2>
+    <div class="case-meta" id="case-meta">
+      <div class="id">ESC-2026-0518-A4</div>
+      <div class="src">Phone agent: Maya R.</div>
+      <div class="stamp"><span class="live"></span> <span id="case-stamp">opened just now</span></div>
+    </div>
+
+    <h2>Working on it</h2>
+    <div class="agents" id="agents">
+
+      <div class="agent parser" data-state="idle">
+        <div class="avatar">P</div>
+        <div class="body">
+          <div class="name">Parser</div>
+          <div class="role">reads the screenshot</div>
+        </div>
+        <div class="state"><span class="pip"></span><span class="label">Waiting</span></div>
+      </div>
+
+      <div class="agent inv" data-state="idle">
+        <div class="avatar">I</div>
+        <div class="body">
+          <div class="name">INV search</div>
+          <div class="role">finds prior cases</div>
+        </div>
+        <div class="state"><span class="pip"></span><span class="label">Waiting</span></div>
+      </div>
+
+      <div class="agent triage" data-state="idle">
+        <div class="avatar">T</div>
+        <div class="body">
+          <div class="name">Triage</div>
+          <div class="role">categorizes &amp; sizes</div>
+        </div>
+        <div class="state"><span class="pip"></span><span class="label">Waiting</span></div>
+      </div>
+
+      <div class="agent analyst" data-state="idle">
+        <div class="avatar">A</div>
+        <div class="body">
+          <div class="name">Avery Lin</div>
+          <div class="role">Senior analyst — on standby</div>
+        </div>
+        <div class="state"><span class="pip"></span><span class="label">Standby</span></div>
+      </div>
+
+    </div>
+
+    <div class="rail-foot">
+      Drop a screenshot anywhere, or press <kbd>V</kbd> to paste.
+    </div>
+  </aside>
+
+  <!-- ============ CANVAS ============ -->
+  <main class="canvas" id="canvas">
+    <div class="canvas-inner">
+
+      <!-- MOMENT 1 + 2: intake -->
+      <section class="intake intake-area" id="intake">
+        <div class="lead">New escalation</div>
+        <h1>Drop the phone agent's screenshot.</h1>
+        <p class="sub">When the parser, search and triage finish, Avery will pick it up. You'll see them work as they go.</p>
+
+        <div class="dropzone" id="dropzone" tabindex="0">
+          <div class="icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg>
+          </div>
+          <div>
+            <div class="title">Drag the screenshot here</div>
+            <div class="helpers">or paste with <span style="font-family:monospace;background:var(--surface-2);border:1px solid var(--line);padding:0 5px;border-radius:4px;font-size:11.5px">Cmd&nbsp;V</span></div>
+          </div>
+          <div class="actions">
+            <button id="btn-file">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+              Choose file
+            </button>
+            <button id="btn-webcam">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m22 8-6 4 6 4z"/></svg>
+              Use webcam
+            </button>
+            <button id="btn-simulate" class="primary">
+              Use sample screenshot
+            </button>
+          </div>
+        </div>
+
+        <div class="webcam" id="webcam" aria-hidden="true">
+          <div class="webcam-head">
+            <div class="t">Webcam capture</div>
+            <button class="back" id="btn-webcam-back">← Back to upload</button>
+          </div>
+          <div class="webcam-stage">Camera preview</div>
+          <div class="webcam-controls">
+            <button id="btn-webcam-cancel">Cancel</button>
+            <button class="primary" id="btn-webcam-shoot">Capture</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- MOMENT 3+: parsed case + triage + chat -->
+      <section class="case" id="case">
+
+        <div class="thumb">
+          <div class="thumb-img"></div>
+          <div class="thumb-meta">
+            <b>escalation-template-2026-05-16.png</b>
+            <span>1,242 × 1,876</span><span class="sep">·</span><span>328 KB</span><span class="sep">·</span><span>captured 11:42</span>
+          </div>
+          <div class="thumb-actions">
+            <button>View</button>
+            <button>Replace</button>
+          </div>
+        </div>
+
+        <!-- TRIAGE — primary signal -->
+        <div class="triage placeholder" id="triage">
+          <div class="ph">
+            <span class="spinner"></span>
+            <span>Triage is reading the parsed template…</span>
+          </div>
+        </div>
+
+        <!-- PARSED FIELDS -->
+        <div class="fields" id="fields">
+          <div class="fields-head">
+            <div class="t">Parsed template</div>
+            <div class="by"><span class="av"></span> Parser &middot; <span id="parser-meta">working…</span></div>
+          </div>
+          <div class="fields-grid" id="fields-grid">
+            <div class="field parsing" data-k="Attempting to">
+              <div class="k">Attempting to</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing short" data-k="Customer">
+              <div class="k">Customer</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing" data-k="Expected outcome">
+              <div class="k">Expected outcome</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing short" data-k="Phone agent">
+              <div class="k">Phone agent</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing long" data-k="Actual outcome">
+              <div class="k">Actual outcome</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing" data-k="Error / message">
+              <div class="k">Error / message</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing full long" data-k="Steps already tried">
+              <div class="k">Steps already tried</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing short" data-k="QBO product">
+              <div class="k">QBO product</div>
+              <div class="v"></div>
+            </div>
+            <div class="field parsing short" data-k="Subscription tier">
+              <div class="k">Subscription tier</div>
+              <div class="v"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- MOMENT 5: ANALYST ARRIVAL -->
+        <div class="arrival" id="arrival" hidden>
+          <div class="av">AL</div>
+          <div class="body">
+            <div class="who">Avery Lin <span class="role">· Senior escalation analyst</span></div>
+            <div class="what">Picked up the case. Read the template, the triage call, and the closest prior INV. Ready when you are.</div>
+            <div class="chips">
+              <span class="chip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
+                9 fields parsed
+              </span>
+              <span class="chip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
+                Triage: payroll · P2
+              </span>
+              <span class="chip">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>
+                3 prior INVs reviewed
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- MOMENT 6: CHAT -->
+        <div class="chat" id="chat"></div>
+
+        <div class="composer" id="composer" hidden>
+          <textarea placeholder="Reply to Avery…" id="reply"></textarea>
+          <div class="composer-foot">
+            <div class="hint"><kbd>↵</kbd> to send  &nbsp;·&nbsp;  <kbd>/</kbd> for templates  &nbsp;·&nbsp;  <kbd>⌘K</kbd> playbook</div>
+            <div class="spacer"></div>
+            <button>Send</button>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </main>
+
+  <!-- ============ RIGHT PANEL — INV + context ============ -->
+  <aside class="ctx" aria-label="Context">
+
+    <div class="ctx-section">
+      <h3>Pipeline <span class="by">· this run</span></h3>
+      <div class="pipe" id="pipe">
+        <div class="step" data-k="parser"><span class="b">1</span> Parse template <span class="t" data-t></span></div>
+        <div class="step" data-k="inv"><span class="b">2</span> Search prior INVs <span class="t" data-t></span></div>
+        <div class="step" data-k="triage"><span class="b">3</span> Triage &amp; size <span class="t" data-t></span></div>
+        <div class="step" data-k="analyst"><span class="b">4</span> Brief the analyst <span class="t" data-t></span></div>
+      </div>
+    </div>
+
+    <div class="ctx-section">
+      <h3>Closest prior cases <span class="by" id="inv-by">· INV search</span></h3>
+      <div id="inv-list">
+        <div class="inv-skel"></div>
+        <div class="inv-skel"></div>
+        <div class="inv-skel"></div>
+      </div>
+    </div>
+
+    <div class="ctx-section" id="customer-section">
+      <h3>Customer</h3>
+      <div class="fields-mini" id="customer-mini">
+        <div class="row"><div class="k">Company</div><div class="v" id="cm-co">—</div></div>
+        <div class="row"><div class="k">Realm</div><div class="v" id="cm-realm">—</div></div>
+        <div class="row"><div class="k">Region</div><div class="v" id="cm-region">—</div></div>
+        <div class="row"><div class="k">Plan</div><div class="v" id="cm-plan">—</div></div>
+      </div>
+    </div>
+
+  </aside>
+</div>
+
+<script>
+/* ============================================================
+   Demo: a single continuous arc.
+   Each step is a small async function; the demo runner just calls
+   them in order with realistic, observable delays.
+   ============================================================ */
+
+const $  = (s, el=document) => el.querySelector(s);
+const $$ = (s, el=document) => Array.from(el.querySelectorAll(s));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const PARSED = {
+  "Attempting to":       "Run unscheduled payroll for terminated employee in CA",
+  "Customer":            "Larkspur Roasters LLC · realm 9341 0027 5512 · San Mateo, CA",
+  "Expected outcome":    "Issue terminated employee's final paycheque dated 05/16",
+  "Phone agent":         "Maya R. (T2, badge 4419)",
+  "Actual outcome":      "Payroll wizard blocks at step 3 — \"Termination date is after pay period start\"",
+  "Error / message":     "PSE_TERM_DATE_AFTER_PERIOD (toast, no error code shown to customer)",
+  "Steps already tried": "1) Verified term date 05/14 in employee record  ·  2) Tried changing pay period to 05/10-05/16 (greyed out)  ·  3) Cleared cache, signed out / back in  ·  4) Switched browsers",
+  "QBO product":         "QuickBooks Online Payroll",
+  "Subscription tier":   "Payroll Premium"
+};
+
+const TRIAGE = {
+  category: "payroll",
+  severity: "P2",
+  fast: "Customer is mid-payroll: terminated employee's final cheque can't process because the termination date (05/14) sits after the pay period start (05/16). The wizard's own validator is right — the operator needs to override the pay period start, not the termination date.",
+  next: "Walk Maya through switching the run to an off-cycle paycheque with period 05/01–05/14. That bypasses the validator without backdating the termination.",
+  missing: ["Customer's preferred deposit method (direct / paper)", "Whether final cheque includes accrued PTO"],
+  confidence: "high"
+};
+
+const INVS = [
+  { id: "INV-147914", title: "Terminated employee final paycheque blocked — period start after term date (CA)",
+    match: "best match", meta: "resolved · 4 months ago · same root cause" , best: true },
+  { id: "INV-152038", title: "Unscheduled payroll greyed out for QBO Payroll Premium after term date change",
+    match: "82% match", meta: "resolved · 6 weeks ago" },
+  { id: "INV-149220", title: "Off-cycle paycheque flow missing for terminated employees on iOS",
+    match: "61% match", meta: "open · adjacent issue" }
+];
+
+const CHAT_TURNS = [
+  { from: "analyst", name: "Avery Lin", role: "Senior analyst",
+    text: `Hi — I've got it. <b>Larkspur Roasters'</b> final cheque is being blocked by the period-start validator, not the termination itself. <a href="#" class="cite">INV-147914</a> is the same case from January; the fix held.<br><br>Two quick choices for Maya:
+    <ul>
+      <li><b>Off-cycle paycheque</b> with period <b>05/01–05/14</b> — cleanest, what we did last time</li>
+      <li><b>Backdate the scheduled run</b> to the prior period — works, but creates a manual reconciliation later</li>
+    </ul>I'd push her toward option one. Want me to draft the DM?` },
+  { from: "operator", text: "Yes — draft it. Mention the period dates explicitly so she doesn't have to think." },
+  { from: "analyst", name: "Avery Lin", role: "Senior analyst",
+    text: `Drafting now. Also flagging two missing items so Maya can grab them on the same call:
+    <ul>
+      <li>Direct deposit vs. paper cheque preference</li>
+      <li>Whether the final cheque should include accrued PTO (CA requires it on termination)</li>
+    </ul>` }
+];
+
+/* ---------- state writers ---------- */
+
+const agents = {
+  parser:  $('.agent.parser'),
+  inv:     $('.agent.inv'),
+  triage:  $('.agent.triage'),
+  analyst: $('.agent.analyst')
+};
+const pipe = {
+  parser:  $('.pipe .step[data-k="parser"]'),
+  inv:     $('.pipe .step[data-k="inv"]'),
+  triage:  $('.pipe .step[data-k="triage"]'),
+  analyst: $('.pipe .step[data-k="analyst"]')
+};
+const labels = {
+  idle:     "Waiting",
+  running:  "Working",
+  done:     "Done",
+  speaking: "Speaking"
+};
+
+function setAgent(key, state, customLabel) {
+  const el = agents[key]; if (!el) return;
+  el.dataset.state = state;
+  el.querySelector('.state .label').textContent = customLabel || labels[state] || state;
+}
+function setPipe(key, state, t) {
+  const el = pipe[key]; if (!el) return;
+  el.classList.remove("done","running");
+  if (state) el.classList.add(state);
+  if (t != null) el.querySelector('[data-t]').textContent = t;
+}
+function setStatus(text) { $('#status-summary').textContent = text; }
+
+/* ---------- runtime moments ---------- */
+
+let demoRunning = false;
+let demoToken = 0;
+
+function reset() {
+  demoToken++;
+  $('#intake').style.display = "";
+  $('#case').classList.remove('show');
+  $('#arrival').hidden = true; $('#arrival').classList.remove('in');
+  $('#composer').hidden = true;
+  $('#chat').innerHTML = "";
+  $('#triage').className = "triage placeholder";
+  $('#triage').innerHTML = `<div class="ph"><span class="spinner"></span><span>Triage is reading the parsed template…</span></div>`;
+  $('#fields-grid').querySelectorAll('.field').forEach(f => {
+    f.classList.add('parsing');
+    f.querySelector('.v').innerHTML = "";
+  });
+  $('#inv-list').innerHTML = `<div class="inv-skel"></div><div class="inv-skel"></div><div class="inv-skel"></div>`;
+  $('#inv-by').textContent = "· INV search";
+  $('#cm-co').textContent = "—";
+  $('#cm-realm').textContent = "—";
+  $('#cm-region').textContent = "—";
+  $('#cm-plan').textContent = "—";
+  Object.keys(agents).forEach(k => setAgent(k, "idle"));
+  setAgent("analyst","idle","Standby");
+  Object.keys(pipe).forEach(k => { setPipe(k, null, ""); pipe[k].querySelector('.b').textContent = (["1","2","3","4"][["parser","inv","triage","analyst"].indexOf(k)]); });
+  setStatus("Ready");
+  $('#parser-meta').textContent = "working…";
+}
+
+async function moment_intake_to_parsed(tok) {
+  // Hide intake, reveal case
+  $('#intake').style.display = "none";
+  $('#case').classList.add('show');
+  setStatus("Parsing screenshot…");
+
+  // Parser running
+  setAgent("parser","running");
+  setPipe("parser","running","0.0s");
+  let t0 = performance.now();
+  // tick parser timer
+  const tick = setInterval(() => {
+    if (tok !== demoToken) return clearInterval(tick);
+    setPipe("parser", "running", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  }, 90);
+
+  // Fields fill progressively
+  const order = ["Customer","QBO product","Subscription tier","Phone agent","Attempting to","Expected outcome","Error / message","Actual outcome","Steps already tried"];
+  for (let i=0;i<order.length;i++) {
+    await sleep(180 + Math.random()*140);
+    if (tok !== demoToken) return;
+    const key = order[i];
+    const f = $$('#fields-grid .field').find(el => el.dataset.k === key);
+    if (!f) continue;
+    f.classList.remove('parsing','short','long');
+    f.querySelector('.v').innerHTML = formatVal(key, PARSED[key]);
+    // fill customer mini panel in passing
+    if (key === "Customer") {
+      $('#cm-co').textContent = "Larkspur Roasters LLC";
+      $('#cm-realm').innerHTML = `<span style="font-family:monospace">9341 0027 5512</span>`;
+      $('#cm-region').textContent = "San Mateo, CA";
+    }
+    if (key === "Subscription tier") {
+      $('#cm-plan').textContent = "QBO Payroll Premium";
+    }
+  }
+  clearInterval(tick);
+  if (tok !== demoToken) return;
+  setAgent("parser","done");
+  setPipe("parser","done", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  $('#parser-meta').textContent = "9 fields · " + ((performance.now()-t0)/1000).toFixed(1) + "s";
+}
+
+function formatVal(key, raw) {
+  if (key === "Customer") {
+    return raw.replace(/realm (\d[\d ]+\d)/, 'realm <span class="mono">$1</span>');
+  }
+  if (key === "Error / message") {
+    return raw.replace(/PSE_TERM_DATE_AFTER_PERIOD/, '<span class="mono">PSE_TERM_DATE_AFTER_PERIOD</span>');
+  }
+  return raw;
+}
+
+async function moment_inv_and_triage(tok) {
+  // Kick off both in parallel — triage finishes first by design.
+  const invP = runInv(tok);
+  const triP = runTriage(tok);
+  await Promise.all([invP, triP]);
+}
+
+async function runTriage(tok) {
+  setAgent("triage","running");
+  setPipe("triage","running","0.0s");
+  let t0 = performance.now();
+  const tick = setInterval(()=>{
+    if (tok !== demoToken) return clearInterval(tick);
+    setPipe("triage","running", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  },90);
+  setStatus("Triaging…");
+
+  await sleep(1100);
+  if (tok !== demoToken) return clearInterval(tick);
+  clearInterval(tick);
+  setAgent("triage","done");
+  setPipe("triage","done", ((performance.now()-t0)/1000).toFixed(1)+"s");
+
+  // PAINT TRIAGE — the moment of understanding
+  const el = $('#triage');
+  el.className = "triage";
+  el.innerHTML = `
+    <div class="triage-bar">
+      <span class="sev">P2</span>
+      <span class="cat">payroll</span>
+      <span class="conf">
+        confidence: high
+        <span class="dots"><i class="on"></i><i class="on"></i><i class="on"></i></span>
+      </span>
+    </div>
+    <div class="triage-body">
+      <div class="fast">${TRIAGE.fast}</div>
+      <div class="next">
+        <span class="tag">DO FIRST</span>
+        <div>${TRIAGE.next}</div>
+      </div>
+      <div class="missing">
+        <span class="label">Missing from the template:</span>
+        ${TRIAGE.missing.map(m=>`<span class="chip">${m}</span>`).join('')}
+      </div>
+    </div>
+    <div class="triage-author">
+      <span class="av">T</span> Triage by <b style="color:var(--ink-2);font-weight:600;margin:0 4px">Claude Sonnet 4.7</b> · 1.1s
+    </div>
+  `;
+  // little entrance
+  requestAnimationFrame(()=> el.classList.add('in'));
+  setStatus("Triaged: payroll · P2");
+}
+
+async function runInv(tok) {
+  setAgent("inv","running");
+  setPipe("inv","running","0.0s");
+  let t0 = performance.now();
+  const tick = setInterval(()=>{
+    if (tok !== demoToken) return clearInterval(tick);
+    setPipe("inv","running", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  },90);
+
+  // Slower than triage — proves triage never gates on this
+  await sleep(2300);
+  if (tok !== demoToken) return clearInterval(tick);
+  clearInterval(tick);
+  setAgent("inv","done");
+  setPipe("inv","done", ((performance.now()-t0)/1000).toFixed(1)+"s");
+
+  // PAINT INV results in the right rail — supportive context, never competing
+  const list = $('#inv-list');
+  list.innerHTML = "";
+  INVS.forEach((inv,i)=>{
+    const row = document.createElement('div');
+    row.className = "inv-row" + (inv.best ? " best" : "");
+    row.innerHTML = `
+      <div class="id">${inv.id}</div>
+      <div class="match" style="${inv.best?'':'color:var(--ink-3);font-weight:500'}">${inv.match}</div>
+      <div class="title">${inv.title}</div>
+      <div class="meta"><span>${inv.meta}</span></div>
+    `;
+    row.style.opacity = 0; row.style.transform = "translateY(4px)";
+    row.style.transition = "opacity .25s, transform .25s";
+    list.appendChild(row);
+    setTimeout(()=>{ row.style.opacity = 1; row.style.transform = "translateY(0)"; }, 60 * i);
+  });
+  $('#inv-by').textContent = "· INV search · 3 found · 2.3s";
+}
+
+async function moment_analyst_arrives(tok) {
+  setAgent("analyst","running","Reading context…");
+  setPipe("analyst","running","0.0s");
+  let t0 = performance.now();
+  const tick = setInterval(()=>{
+    if (tok !== demoToken) return clearInterval(tick);
+    setPipe("analyst","running", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  },90);
+  setStatus("Briefing Avery…");
+  await sleep(850);
+  if (tok !== demoToken) return clearInterval(tick);
+  clearInterval(tick);
+  setPipe("analyst","done", ((performance.now()-t0)/1000).toFixed(1)+"s");
+  setAgent("analyst","speaking","Here · ready");
+
+  const a = $('#arrival');
+  a.hidden = false;
+  requestAnimationFrame(()=> a.classList.add('in'));
+  setStatus("Avery is here");
+}
+
+async function moment_chat(tok) {
+  const chat = $('#chat');
+  // turn 1 — analyst (typing then message)
+  await sleep(500);
+  const typing = document.createElement('div');
+  typing.className = "msg analyst";
+  typing.innerHTML = `<div class="av">AL</div><div><div class="name"><b>Avery Lin</b> · Senior analyst · <span style="color:var(--ink-4)">just now</span></div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div></div>`;
+  chat.appendChild(typing);
+  scrollChat();
+
+  await sleep(900);
+  if (tok !== demoToken) return;
+  typing.querySelector('.bubble').innerHTML = "";
+  await streamHtml(typing.querySelector('.bubble'), CHAT_TURNS[0].text, tok);
+  $('#composer').hidden = false;
+  scrollChat();
+
+  // turn 2 — operator
+  await sleep(700);
+  if (tok !== demoToken) return;
+  const op = document.createElement('div');
+  op.className = "msg operator";
+  op.innerHTML = `<div class="av">M</div><div><div class="bubble">${CHAT_TURNS[1].text}</div></div>`;
+  chat.appendChild(op);
+  scrollChat();
+
+  // turn 3 — analyst again
+  await sleep(700);
+  if (tok !== demoToken) return;
+  const t2 = document.createElement('div');
+  t2.className = "msg analyst";
+  t2.innerHTML = `<div class="av">AL</div><div><div class="name"><b>Avery Lin</b> · Senior analyst</div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div></div>`;
+  chat.appendChild(t2);
+  scrollChat();
+  await sleep(800);
+  if (tok !== demoToken) return;
+  t2.querySelector('.bubble').innerHTML = "";
+  await streamHtml(t2.querySelector('.bubble'), CHAT_TURNS[2].text, tok);
+  scrollChat();
+
+  setStatus("In conversation with Avery");
+}
+
+function scrollChat(){
+  const c = $('#canvas');
+  c.scrollTo({ top: c.scrollHeight, behavior: "smooth" });
+}
+
+/* "Stream" HTML char-by-char, preserving tags. */
+async function streamHtml(el, html, tok) {
+  // tokenize: tags as single tokens, text per char
+  const tokens = [];
+  let i = 0;
+  while (i < html.length) {
+    if (html[i] === "<") {
+      const end = html.indexOf(">", i);
+      tokens.push(html.slice(i, end+1));
+      i = end+1;
+    } else {
+      tokens.push(html[i++]);
+    }
+  }
+  let buf = "";
+  for (const t of tokens) {
+    if (tok !== demoToken) return;
+    buf += t;
+    el.innerHTML = buf;
+    if (t.length === 1) await sleep(8);
+    else await sleep(2);
+  }
+}
+
+/* ---------- runner ---------- */
+
+async function runDemo() {
+  if (demoRunning) return;
+  demoRunning = true;
+  const tok = ++demoToken;
+  try {
+    await moment_intake_to_parsed(tok);
+    if (tok !== demoToken) return;
+    await moment_inv_and_triage(tok);
+    if (tok !== demoToken) return;
+    await moment_analyst_arrives(tok);
+    if (tok !== demoToken) return;
+    await moment_chat(tok);
+  } finally {
+    demoRunning = false;
+  }
+}
+
+/* ---------- wiring ---------- */
+
+document.addEventListener('DOMContentLoaded', () => {
+  $('#btn-step').addEventListener('click', () => {
+    reset();
+    setTimeout(runDemo, 60);
+  });
+  $('#btn-restart').addEventListener('click', () => { reset(); });
+  $('#btn-simulate').addEventListener('click', () => { reset(); setTimeout(runDemo, 60); });
+  $('#btn-file').addEventListener('click', () => { reset(); setTimeout(runDemo, 60); });
+
+  // webcam panel — proves intake handles all four entry points without confusion
+  $('#btn-webcam').addEventListener('click', () => {
+    $('#webcam').classList.add('open');
+    $('#webcam').setAttribute('aria-hidden','false');
+  });
+  $('#btn-webcam-back').addEventListener('click', () => {
+    $('#webcam').classList.remove('open');
+    $('#webcam').setAttribute('aria-hidden','true');
+  });
+  $('#btn-webcam-cancel').addEventListener('click', () => {
+    $('#webcam').classList.remove('open');
+  });
+  $('#btn-webcam-shoot').addEventListener('click', () => {
+    $('#webcam').classList.remove('open');
+    reset(); setTimeout(runDemo, 60);
+  });
+
+  // drag-and-drop on dropzone
+  const dz = $('#dropzone');
+  ['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('over'); }));
+  ['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('over'); }));
+  dz.addEventListener('drop', () => { reset(); setTimeout(runDemo, 60); });
+  dz.addEventListener('keydown', (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); reset(); setTimeout(runDemo, 60); }
+  });
+
+  // paste anywhere
+  document.addEventListener('paste', () => { reset(); setTimeout(runDemo, 60); });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === "v" && !e.metaKey && !e.ctrlKey && document.activeElement.tagName !== "TEXTAREA") {
+      reset(); setTimeout(runDemo, 60);
+    }
+  });
+});
+</script>
+
+</body>
+</html>

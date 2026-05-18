@@ -11,12 +11,15 @@ import {
   normalizeModelOverride,
   normalizeProvider,
   normalizeReasoningEffort,
+  resolveProviderSelection,
 } from './providerCatalog.js';
 import {
   DEFAULT_IMAGE_PARSER_MODELS,
   IMAGE_PARSER_MODEL_SUGGESTIONS,
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
+  normalizeImageParserReasoningEffort,
+  resolveImageParserSelection,
 } from './imageParserCatalog.js';
 import {
   SURFACE_DEFAULTS_APPLIED_EVENT,
@@ -31,7 +34,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
   {
     id: 'chat',
     agentId: 'chat',
-    label: 'Chat',
+    label: 'QBO Assistant',
     description: 'Main escalation assistant',
     color: '#0a84ff',
     storagePrefix: 'qbo-chat',
@@ -43,12 +46,12 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
   {
     id: 'escalation-template-parser',
     agentId: 'escalation-template-parser',
-    label: 'Escalation Template Parser',
+    label: 'Image Parser',
     description: 'Strict screenshot-to-canonical-template parser',
     color: '#f0b232',
     storagePrefix: 'qbo-escalation-template-parser',
     supportsModes: false,
-    supportsReasoning: false,
+    supportsReasoning: true,
     defaultMode: 'single',
     supportedModes: ['single'],
     kind: 'image-parser',
@@ -68,7 +71,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
   {
     id: 'known-issue-search-agent',
     agentId: 'known-issue-search-agent',
-    label: 'Known Issue Search',
+    label: 'INV Search Agent',
     description: 'INV lookup, candidate rejection, and no-match confirmation',
     color: '#34c759',
     storagePrefix: 'qbo-known-issue-search-agent',
@@ -85,7 +88,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     color: '#64d2ff',
     storagePrefix: 'qbo-follow-up-chat-parser',
     supportsModes: false,
-    supportsReasoning: false,
+    supportsReasoning: true,
     defaultMode: 'single',
     supportedModes: ['single'],
     kind: 'image-parser',
@@ -122,7 +125,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     color: '#f0b232',
     storagePrefix: 'qbo-image-parser',
     supportsModes: false,
-    supportsReasoning: false,
+    supportsReasoning: true,
     defaultMode: 'single',
     supportedModes: ['single'],
     kind: 'image-parser',
@@ -154,6 +157,7 @@ function storageKeysForDefinition(definition) {
     return [
       storageKey(definition.storagePrefix, 'provider'),
       storageKey(definition.storagePrefix, 'model'),
+      storageKey(definition.storagePrefix, 'reasoning-effort'),
     ];
   }
   return [
@@ -210,21 +214,29 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
   if (!definition) return {};
 
   if (isImageParser(definition)) {
+    const selection = resolveImageParserSelection(state.provider, state.model);
+    const provider = normalizeImageParserProvider(selection.provider);
     return {
-      provider: normalizeImageParserProvider(state.provider),
-      model: normalizeModelOverride(state.model),
+      provider,
+      model: normalizeModelOverride(selection.model),
+      reasoningEffort: normalizeImageParserReasoningEffort(provider, state.reasoningEffort),
     };
   }
 
-  const provider = normalizeProvider(state.provider || DEFAULT_PROVIDER);
+  const primarySelection = resolveProviderSelection(state.provider || DEFAULT_PROVIDER, state.model);
+  const provider = primarySelection.provider;
   const mode = normalizeSurfaceMode(
     state.mode || definition.defaultMode,
     definition.supportedModes,
     definition.defaultMode
   );
+  const fallbackSelection = resolveProviderSelection(
+    state.fallbackProvider || getAlternateProvider(provider),
+    state.fallbackModel
+  );
   const fallbackProvider = normalizeSurfaceFallback(
     provider,
-    state.fallbackProvider || getAlternateProvider(provider)
+    fallbackSelection.provider
   );
   const providerFamily = PROVIDER_FAMILY[provider] || 'claude';
   const reasoningEffort = normalizeReasoningEffort(
@@ -236,8 +248,10 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     provider,
     mode,
     fallbackProvider,
-    model: normalizeProviderModelOverride(provider, state.model),
-    fallbackModel: normalizeProviderModelOverride(fallbackProvider, state.fallbackModel),
+    model: normalizeProviderModelOverride(provider, primarySelection.model),
+    fallbackModel: fallbackProvider === fallbackSelection.provider
+      ? normalizeProviderModelOverride(fallbackProvider, fallbackSelection.model)
+      : '',
     reasoningEffort,
   };
 }
@@ -253,6 +267,7 @@ export function readAgentRuntimeState(definitionOrId) {
     return normalizeAgentRuntimeState(definition, {
       provider: readStoredPreference(storageKey(storagePrefix, 'provider')) || '',
       model: readStoredPreference(storageKey(storagePrefix, 'model')) || '',
+      reasoningEffort: readStoredPreference(storageKey(storagePrefix, 'reasoning-effort')) || '',
     });
   }
 
@@ -282,6 +297,7 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
   if (isImageParser(definition)) {
     writeStoredPreference(storageKey(storagePrefix, 'provider'), normalized.provider);
     writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
+    writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
     return normalized;
   }
 
@@ -396,7 +412,8 @@ export function getAgentRuntimeSummary(definitionOrId, state = {}) {
 
   if (isImageParser(definition)) {
     if (!normalized.provider) return 'Image parser disabled';
-    return `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}`;
+    const effort = normalized.reasoningEffort ? ` | effort ${normalized.reasoningEffort}` : '';
+    return `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}${effort}`;
   }
 
   const primary = getProviderModelSummary(normalized.provider, normalized.model);

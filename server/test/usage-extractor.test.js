@@ -230,12 +230,12 @@ test('extractUsageFromMessage dispatches to Codex for gpt-5.5 provider', () => {
   assert.equal(r.inputTokens, 100);
 });
 
-test('P5: extractUsageFromMessage dispatches to Codex for gpt-5-mini provider', () => {
+test('P5: extractUsageFromMessage dispatches to Codex for gpt-5.4-mini provider', () => {
   const r = extractUsageFromMessage(
-    { usage: { prompt_tokens: 200, completion_tokens: 80 }, model: 'gpt-5-mini' },
-    'gpt-5-mini'
+    { usage: { prompt_tokens: 200, completion_tokens: 80 }, model: 'gpt-5.4-mini' },
+    'gpt-5.4-mini'
   );
-  assert.ok(r, 'should not return null for gpt-5-mini');
+  assert.ok(r, 'should not return null for gpt-5.4-mini');
   assert.equal(r.inputTokens, 200);
   assert.equal(r.outputTokens, 80);
 });

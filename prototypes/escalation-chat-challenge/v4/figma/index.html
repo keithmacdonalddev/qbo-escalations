@@ -1,0 +1,807 @@
+<!doctype html>
+<!--
+  designer-figma — V4 — VOICE-FIRST
+  Forced angle (non-negotiable): hands-free + spoken IO. Operator is on a phone
+  call. Screen is a quiet captioner; the conversation is in their ear and mouth.
+  V3 had an Earshot Script Bar — V4 takes it to its conclusion: the page IS the
+  earshot.
+
+  TWO features. Period.
+    1. PUSH-TO-TALK SPINE — hold SPACE (or click) to speak. Operator confirms,
+       doubts, or asks follow-ups by voice. One key. No menus.
+    2. LIVE CAPTION STAGE — triage and analyst are spoken; words appear as
+       they're said (accessibility + glance-confirm). One voice loud at a time.
+
+  Visible regions (each justified against the 4 user goals):
+    - CAPTION STAGE (center)   → goal 1 (see what's wrong) + goal 3 (get answer)
+    - WHO'S SPEAKING (top)     → goal 1 (anchors triage vs analyst identity)
+    - PTT SPINE (bottom)       → goal 2 (confirm / doubt / ask)
+    - ANSWER STRIP (right)     → goal 4 (use the answer — one tap copy)
+    - CASE STUB (top-left)     → goal 1 (one-line "what's wrong" anchor)
+
+  Everything else V3 had (pipelines, meters, parsers, drift, evidence pins,
+  status spines) — deleted. The parser still runs; it just doesn't perform.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>voice — escalation</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:        #0b0d10;
+    --bg2:       #0f1216;
+    --ink:       #e9ecf1;
+    --ink-dim:   #8a8f99;
+    --ink-mute:  #4a4f58;
+    --hair:      #1c2026;
+    --hair-2:    #262b33;
+    --triage:    #A259FF;   /* figma purple */
+    --analyst:   #1ABCFE;   /* figma blue */
+    --operator:  #0ACF83;   /* figma green */
+    --warn:      #F24E1E;   /* figma red-orange */
+    --accent:    #FF7262;   /* figma coral */
+    --r:         14px;
+    --r-s:       9px;
+    --mono:      ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:      ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:14px/1.55 var(--sans);overflow:hidden;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  ::selection{background:#2b3038;color:#fff}
+
+  /* ---------- layout grid ---------- */
+  .app{
+    height:100vh;
+    display:grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: 56px 1fr 180px;
+    grid-template-areas:
+      "header   header"
+      "stage    answer"
+      "ptt      ptt";
+    gap:0;
+  }
+
+  /* ---------- header ---------- */
+  header.bar{
+    grid-area: header;
+    display:flex;align-items:center;gap:18px;
+    padding: 0 22px;
+    border-bottom: 1px solid var(--hair);
+    background: linear-gradient(180deg,#0c1014, #0a0d11);
+  }
+  .case{
+    display:flex;align-items:center;gap:12px;min-width:0;
+  }
+  .case .dot{
+    width:8px;height:8px;border-radius:50%;
+    background: var(--warn);
+    box-shadow:0 0 0 4px rgba(242,78,30,.12);
+  }
+  .case .id{
+    font:600 12px/1 var(--mono); letter-spacing:.04em;
+    color:var(--ink-dim);
+  }
+  .case .line{
+    color:var(--ink); font-size:13px;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:48ch;
+  }
+  .case .sep{color:var(--ink-mute); padding:0 4px}
+
+  .who-row{
+    margin-left:auto;
+    display:flex;align-items:center;gap:6px;
+  }
+  .who{
+    display:flex;align-items:center;gap:8px;
+    padding: 6px 10px; border-radius: 999px;
+    border: 1px solid transparent;
+    color: var(--ink-mute);
+    font-size: 12px;
+    transition: color .25s ease, border-color .25s ease, background .25s ease;
+  }
+  .who .pip{
+    width:7px;height:7px;border-radius:50%;
+    background: currentColor; opacity:.4;
+  }
+  .who.active{
+    color: var(--ink);
+    border-color: var(--hair-2);
+    background: #11151a;
+  }
+  .who.active .pip{ opacity:1; animation: pulse 1.2s ease-in-out infinite}
+  .who[data-who="triage"].active   { color: var(--triage) }
+  .who[data-who="analyst"].active  { color: var(--analyst) }
+  .who[data-who="operator"].active { color: var(--operator) }
+  @keyframes pulse{
+    0%,100%{ box-shadow: 0 0 0 0 currentColor; opacity:1 }
+    50%    { box-shadow: 0 0 0 5px transparent; opacity:.55 }
+  }
+
+  /* ---------- caption stage ---------- */
+  main.stage{
+    grid-area: stage;
+    position:relative;
+    display:flex;flex-direction:column;
+    justify-content:center;
+    padding: 8vh 8vw 6vh 8vw;
+    background:
+      radial-gradient(1100px 600px at 28% 20%, rgba(162,89,255,.05), transparent 60%),
+      radial-gradient(900px 600px  at 70% 80%, rgba(26,188,254,.04), transparent 60%),
+      var(--bg);
+    overflow:hidden;
+  }
+
+  /* speaker label above caption */
+  .speaker{
+    font: 600 11px/1 var(--mono);
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 22px;
+    display:flex;align-items:center;gap:10px;
+    min-height: 14px;
+  }
+  .speaker .swatch{
+    width:10px;height:10px;border-radius:3px;
+    background: var(--ink-mute);
+  }
+  .speaker[data-who="triage"]   .swatch{ background: var(--triage)  }
+  .speaker[data-who="analyst"]  .swatch{ background: var(--analyst) }
+  .speaker[data-who="operator"] .swatch{ background: var(--operator)}
+  .speaker[data-who="triage"]   { color: var(--triage)  }
+  .speaker[data-who="analyst"]  { color: var(--analyst) }
+  .speaker[data-who="operator"] { color: var(--operator)}
+
+  .caption{
+    font: 400 34px/1.35 var(--sans);
+    color: var(--ink);
+    max-width: 28ch;
+    letter-spacing:-.01em;
+    min-height: 4em;
+  }
+  .caption .w{
+    opacity:0; filter: blur(2px);
+    transition: opacity .18s ease, filter .18s ease;
+    display:inline-block;
+  }
+  .caption .w.in{ opacity:1; filter: blur(0) }
+  .caption .cursor{
+    display:inline-block;width:.5ch;height:1em;vertical-align:-.15em;
+    background: var(--ink-dim);
+    margin-left:2px;
+    animation: blink 1s steps(2,start) infinite;
+  }
+  @keyframes blink{ 50%{opacity:0} }
+
+  .caption.prev{
+    font-size: 14px; color: var(--ink-mute);
+    max-width:none; opacity:.55;
+    margin-top: 18px;
+    min-height: 0;
+  }
+  .caption.prev .w{opacity:.55}
+
+  /* idle hint */
+  .idle-hint{
+    margin-top: 22px;
+    font: 400 12px/1.4 var(--mono);
+    color: var(--ink-mute);
+  }
+  .idle-hint kbd{
+    display:inline-block;
+    padding: 1px 7px; border-radius: 5px;
+    border: 1px solid var(--hair-2);
+    color: var(--ink-dim);
+    font: 600 11px/1.4 var(--mono);
+    background:#11151a;
+    margin: 0 2px;
+  }
+
+  /* ---------- answer strip ---------- */
+  aside.answer{
+    grid-area: answer;
+    border-left: 1px solid var(--hair);
+    background: #0c0f13;
+    padding: 22px 20px;
+    display:flex; flex-direction: column; gap: 14px;
+    min-width: 0;
+  }
+  .a-head{
+    font: 600 11px/1 var(--mono);
+    letter-spacing: .18em; text-transform: uppercase;
+    color: var(--ink-mute);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .a-head .state{
+    color: var(--ink-mute);
+    transition: color .25s ease;
+  }
+  .a-head .state.ready{ color: var(--operator) }
+  .a-card{
+    border: 1px solid var(--hair-2);
+    border-radius: var(--r);
+    padding: 14px;
+    background: #0e1217;
+    color: var(--ink);
+    font-size: 13.5px; line-height:1.55;
+    flex: 1;
+    overflow:auto;
+    transition: border-color .3s ease, background .3s ease;
+    white-space: pre-wrap;
+  }
+  .a-card.empty{
+    color: var(--ink-mute);
+    font-style: italic;
+    display:flex;align-items:center;justify-content:center;
+    text-align:center;
+  }
+  .a-card.ready{
+    border-color: rgba(10,207,131,.35);
+    background: #0e1612;
+  }
+  .a-actions{
+    display:flex;gap:8px;
+  }
+  .a-actions button{
+    flex:1;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--hair-2);
+    color: var(--ink-dim);
+    background: #11151a;
+    font: 600 12px/1 var(--sans);
+    letter-spacing:.02em;
+    transition: all .2s ease;
+  }
+  .a-actions button:hover:not(:disabled){
+    color: var(--ink); border-color:#3a414c;
+  }
+  .a-actions button.primary{
+    color: #061008;
+    background: var(--operator);
+    border-color: var(--operator);
+  }
+  .a-actions button.primary:hover{ filter: brightness(1.08) }
+  .a-actions button:disabled{ opacity:.4; cursor:not-allowed }
+
+  /* ---------- PTT spine ---------- */
+  footer.ptt{
+    grid-area: ptt;
+    border-top: 1px solid var(--hair);
+    background: linear-gradient(180deg,#0a0d11, #07090c);
+    display:grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items:center;
+    padding: 0 28px;
+    gap: 24px;
+    position:relative;
+  }
+  .ptt-side{
+    display:flex;flex-direction:column;gap:8px;
+    color: var(--ink-mute); font-size:12px;
+    min-width:0;
+  }
+  .ptt-side.right{ align-items:flex-end; text-align:right }
+  .ptt-side .label{
+    font: 600 10px/1 var(--mono);
+    letter-spacing:.2em; text-transform:uppercase;
+    color: var(--ink-mute);
+  }
+  .ptt-side .val{
+    color: var(--ink-dim);
+    font-size: 13px;
+    min-height: 1.4em;
+  }
+  .ptt-side .val.live{ color: var(--operator) }
+
+  .ptt-btn{
+    position:relative;
+    width: 132px; height: 132px;
+    border-radius: 50%;
+    border: 1px solid var(--hair-2);
+    background:
+      radial-gradient(circle at 50% 40%, #1a1f27 0%, #0d1116 70%);
+    color: var(--ink);
+    display:flex;align-items:center;justify-content:center;
+    transition: transform .14s ease, border-color .25s ease, box-shadow .25s ease;
+    cursor: pointer;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+  .ptt-btn::after{
+    content:""; position:absolute; inset:-8px;
+    border-radius:50%;
+    border: 1px solid transparent;
+    transition: border-color .3s ease, transform .25s ease;
+  }
+  .ptt-btn .glyph{
+    width: 36px; height: 36px;
+    border-radius:50%;
+    background: var(--ink-mute);
+    transition: background .2s ease, transform .2s ease;
+  }
+  .ptt-btn .ring{
+    position:absolute; inset: 6px;
+    border-radius:50%;
+    pointer-events:none;
+  }
+
+  /* listening state */
+  .ptt-btn.live{
+    border-color: var(--operator);
+    box-shadow: 0 0 0 8px rgba(10,207,131,.08);
+  }
+  .ptt-btn.live .glyph{
+    background: var(--operator);
+    transform: scale(1.05);
+  }
+  .ptt-btn.live::after{
+    border-color: rgba(10,207,131,.25);
+    animation: halo 1.8s ease-out infinite;
+  }
+  @keyframes halo{
+    0%{ transform: scale(.9); opacity:.8 }
+    100%{ transform: scale(1.4); opacity:0 }
+  }
+
+  /* waveform inside button */
+  .wave{
+    position:absolute; inset:0;
+    display:flex;align-items:center;justify-content:center;
+    gap:3px; pointer-events:none;
+    opacity:0; transition: opacity .2s ease;
+  }
+  .ptt-btn.live .wave{ opacity:1 }
+  .ptt-btn.live .glyph{ opacity:0 }
+  .wave i{
+    display:block; width:3px; border-radius:2px;
+    background: var(--operator);
+    height: 6px;
+    animation: bar 900ms ease-in-out infinite;
+  }
+  .wave i:nth-child(1){ animation-delay:.00s }
+  .wave i:nth-child(2){ animation-delay:.08s }
+  .wave i:nth-child(3){ animation-delay:.16s }
+  .wave i:nth-child(4){ animation-delay:.24s }
+  .wave i:nth-child(5){ animation-delay:.32s }
+  .wave i:nth-child(6){ animation-delay:.20s }
+  .wave i:nth-child(7){ animation-delay:.10s }
+  @keyframes bar{
+    0%,100%{ height: 6px }
+    50%   { height: 32px }
+  }
+
+  .ptt-hint{
+    text-align:center; margin-top:10px;
+    font: 600 10px/1 var(--mono); letter-spacing:.22em;
+    text-transform:uppercase; color: var(--ink-mute);
+  }
+  .ptt-hint kbd{
+    display:inline-block; padding:1px 8px; border-radius:5px;
+    border:1px solid var(--hair-2); color: var(--ink-dim);
+    background:#11151a; font:600 10px/1.4 var(--mono);
+    margin: 0 4px;
+  }
+
+  .ptt-wrap{
+    display:flex;flex-direction:column;align-items:center;
+  }
+
+  /* quick voice commands */
+  .vc{
+    display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;
+  }
+  .vc span{
+    font: 600 10px/1 var(--mono);
+    color: var(--ink-mute);
+    border:1px solid var(--hair-2);
+    padding: 4px 8px; border-radius:6px;
+    background:#0d1116;
+    letter-spacing:.06em;
+  }
+  .vc span b{ color: var(--ink-dim); font-weight:600 }
+
+  /* ---------- ambient when nobody speaking ---------- */
+  .silent .speaker{ opacity:.35 }
+
+  /* tiny upload affordance — strip-mode: barely there */
+  .upload{
+    position:absolute; top:14px; right:18px;
+    display:flex;align-items:center;gap:8px;
+    font: 600 10px/1 var(--mono); letter-spacing:.18em;
+    text-transform:uppercase; color: var(--ink-mute);
+    padding: 6px 10px; border-radius:8px;
+    border:1px dashed var(--hair-2);
+    cursor:pointer;
+    transition: color .2s, border-color .2s;
+  }
+  .upload:hover{ color: var(--ink-dim); border-color: #353c46 }
+  .upload .d{
+    width:6px;height:6px;border-radius:50%;background: var(--ink-mute);
+  }
+  .upload.done .d{ background: var(--operator) }
+  .upload.done{ border-style:solid; color: var(--ink-dim) }
+
+  /* responsive */
+  @media (max-width: 980px){
+    .app{
+      grid-template-columns: 1fr;
+      grid-template-rows: 56px 1fr 160px 180px;
+      grid-template-areas:
+        "header"
+        "stage"
+        "answer"
+        "ptt";
+    }
+    aside.answer{ border-left:0; border-top:1px solid var(--hair) }
+    .caption{ font-size: 26px }
+  }
+</style>
+</head>
+<body class="silent">
+  <div class="app">
+
+    <!-- HEADER ───────────────────────────────────────────── -->
+    <header class="bar">
+      <div class="case" title="Case anchor">
+        <span class="dot" id="caseDot"></span>
+        <span class="id" id="caseId">CASE-2418 ·</span>
+        <span class="line" id="caseLine">Awaiting screenshot…</span>
+      </div>
+      <div class="who-row" aria-label="Who is speaking">
+        <div class="who" data-who="triage"><span class="pip"></span>Triage</div>
+        <div class="who" data-who="analyst"><span class="pip"></span>Analyst</div>
+        <div class="who" data-who="operator"><span class="pip"></span>You</div>
+      </div>
+    </header>
+
+    <!-- STAGE ───────────────────────────────────────────── -->
+    <main class="stage" id="stage">
+      <div class="upload" id="upload" title="Drop screenshot or click">
+        <span class="d"></span><span id="uploadLbl">drop screenshot</span>
+      </div>
+
+      <div class="speaker" id="speaker" data-who=""><span class="swatch"></span><span id="speakerName">listening for case</span></div>
+      <div class="caption" id="caption" aria-live="polite"></div>
+      <div class="caption prev" id="prev"></div>
+
+      <div class="idle-hint" id="hint">
+        Hold <kbd>Space</kbd> to speak · Say <em>"confirm"</em>, <em>"doubt"</em>, or ask a follow-up
+      </div>
+    </main>
+
+    <!-- ANSWER ───────────────────────────────────────────── -->
+    <aside class="answer">
+      <div class="a-head">
+        <span>Answer for caller</span>
+        <span class="state" id="aState">drafting…</span>
+      </div>
+      <div class="a-card empty" id="answer">
+        The analyst will compose a one-paragraph answer here. Copy it when ready.
+      </div>
+      <div class="a-actions">
+        <button id="copyBtn" disabled>Copy</button>
+        <button id="readBtn" disabled>Read aloud</button>
+        <button class="primary" id="sendBtn" disabled>Send to agent</button>
+      </div>
+    </aside>
+
+    <!-- PTT SPINE ───────────────────────────────────────────── -->
+    <footer class="ptt">
+      <div class="ptt-side">
+        <span class="label">Caller</span>
+        <span class="val" id="caller">Maria · Phone agent · 04:12 on call</span>
+      </div>
+
+      <div class="ptt-wrap">
+        <button class="ptt-btn" id="pttBtn" aria-label="Push to talk">
+          <span class="glyph"></span>
+          <span class="wave" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </span>
+          <span class="ring"></span>
+        </button>
+        <div class="ptt-hint">
+          Hold <kbd>Space</kbd> · or <kbd>Click</kbd>
+        </div>
+      </div>
+
+      <div class="ptt-side right">
+        <span class="label">Voice commands</span>
+        <div class="vc">
+          <span><b>"confirm"</b> ↵</span>
+          <span><b>"doubt"</b> ✕</span>
+          <span><b>"send"</b> →</span>
+        </div>
+      </div>
+    </footer>
+
+  </div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────
+// VOICE-FIRST PROTOTYPE — figma v4
+// Simulates an on-call operator working hands-free. Triage and analyst
+// each take a turn at being the loud one; only one voice is loud at a time.
+// ─────────────────────────────────────────────────────────────────────
+
+const el = {
+  body:        document.body,
+  speaker:     document.getElementById('speaker'),
+  speakerName: document.getElementById('speakerName'),
+  caption:     document.getElementById('caption'),
+  prev:        document.getElementById('prev'),
+  hint:        document.getElementById('hint'),
+  caseLine:    document.getElementById('caseLine'),
+  caseId:      document.getElementById('caseId'),
+  caseDot:     document.getElementById('caseDot'),
+  upload:      document.getElementById('upload'),
+  uploadLbl:   document.getElementById('uploadLbl'),
+  whoTriage:   document.querySelector('.who[data-who="triage"]'),
+  whoAnalyst:  document.querySelector('.who[data-who="analyst"]'),
+  whoOperator: document.querySelector('.who[data-who="operator"]'),
+  answer:      document.getElementById('answer'),
+  aState:      document.getElementById('aState'),
+  copyBtn:     document.getElementById('copyBtn'),
+  readBtn:     document.getElementById('readBtn'),
+  sendBtn:     document.getElementById('sendBtn'),
+  pttBtn:      document.getElementById('pttBtn'),
+  caller:      document.getElementById('caller'),
+};
+
+// turn the speaker chip in the header
+function setActiveWho(who){
+  [el.whoTriage, el.whoAnalyst, el.whoOperator].forEach(n => n.classList.remove('active'));
+  if (who === 'triage')   el.whoTriage.classList.add('active');
+  if (who === 'analyst')  el.whoAnalyst.classList.add('active');
+  if (who === 'operator') el.whoOperator.classList.add('active');
+  el.body.classList.toggle('silent', !who);
+}
+
+function setSpeaker(who, name){
+  el.speaker.dataset.who = who || '';
+  el.speakerName.textContent = name || 'silent';
+  setActiveWho(who);
+}
+
+// reveal a sentence word-by-word, then resolve
+function speakOut(text, opts = {}){
+  const wordsPerSec = opts.wps ?? 4.5;
+  return new Promise(resolve => {
+    el.caption.innerHTML = '';
+    const words = text.split(' ');
+    words.forEach((w,i) => {
+      const span = document.createElement('span');
+      span.className = 'w';
+      span.textContent = w + (i < words.length-1 ? ' ' : '');
+      el.caption.appendChild(span);
+    });
+    const cursor = document.createElement('span');
+    cursor.className = 'cursor';
+    el.caption.appendChild(cursor);
+
+    let i = 0;
+    const interval = 1000 / wordsPerSec;
+    const tick = () => {
+      const node = el.caption.querySelectorAll('.w')[i];
+      if (node) node.classList.add('in');
+      i++;
+      if (i < words.length) setTimeout(tick, interval);
+      else {
+        cursor.remove();
+        setTimeout(resolve, 350);
+      }
+    };
+    tick();
+  });
+}
+
+// move the just-spoken line down into the "previous" caption
+function demoteCaption(){
+  const txt = el.caption.textContent.trim();
+  if (!txt) return;
+  el.prev.textContent = '“' + txt + '”';
+  el.caption.innerHTML = '';
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// ─────────────────── scripted arc ───────────────────
+const arc = [
+  // step 0 — silent, awaiting upload
+  async () => {
+    setSpeaker(null, 'awaiting screenshot');
+    el.hint.innerHTML = 'Drop a screenshot up top, or just <kbd>Space</kbd> to begin.';
+  },
+
+  // step 1 — parser landed (whispered, not shouted)
+  async () => {
+    el.upload.classList.add('done');
+    el.uploadLbl.textContent = 'screenshot · QBO payroll';
+    el.caseId.textContent = 'CASE-2418 ·';
+    el.caseLine.textContent = 'Payroll · Direct deposit failed · INV-44219';
+    setSpeaker('triage', 'Triage');
+    await speakOut('Direct deposit failed for two employees on the May second run.', {wps:4.2});
+    await sleep(220);
+    demoteCaption();
+    await speakOut('Bank rejected. Reason code R-zero-three. Account closed.');
+    await sleep(280);
+  },
+
+  // step 2 — triage closes; analyst arrives
+  async () => {
+    demoteCaption();
+    setSpeaker('analyst', 'Analyst');
+    el.aState.textContent = 'drafting…';
+    await speakOut('You’re cleared to tell the caller this is on the employee’s side, not QBO.', {wps:4.4});
+    await sleep(260);
+    demoteCaption();
+    await speakOut('I can give you the exact sentence to read. Want it?');
+    await sleep(120);
+  },
+
+  // step 3 — operator speaks (PTT). Show "you" active for ~1.2s, then resolve
+  async () => {
+    setSpeaker('operator', 'You');
+    el.caption.innerHTML = '<span style="color:var(--ink-mute);font-style:italic;font-size:22px">…confirm…</span>';
+    await sleep(1100);
+    demoteCaption();
+  },
+
+  // step 4 — analyst delivers the answer (loud), answer card fills
+  async () => {
+    setSpeaker('analyst', 'Analyst');
+    const answer = 'Tell Maria: the May 2 direct deposit was rejected by the bank with code R-03 because the employee’s account is closed. She should ask the employee for a new account, then re-run payroll for just those two — no fees on the rerun.';
+    el.aState.textContent = 'composing';
+    await speakOut('Reading the answer for the caller now.', {wps:4.6});
+    await sleep(140);
+    // type the answer into the card
+    el.answer.classList.remove('empty');
+    el.answer.classList.add('ready');
+    el.answer.textContent = '';
+    for (let i = 0; i < answer.length; i++){
+      el.answer.textContent += answer[i];
+      if (i % 3 === 0) await sleep(8);
+    }
+    el.aState.textContent = 'ready';
+    el.aState.classList.add('ready');
+    [el.copyBtn, el.readBtn, el.sendBtn].forEach(b => b.disabled = false);
+    await sleep(260);
+    demoteCaption();
+    await speakOut('Ready when you are. Say "send" or hit the green button.');
+  },
+
+  // step 5 — back to quiet
+  async () => {
+    setSpeaker(null, 'idle');
+    el.hint.innerHTML = 'Hold <kbd>Space</kbd> to ask a follow-up · <kbd>Enter</kbd> to send';
+  },
+];
+
+let arcStep = 0;
+async function advance(){
+  if (arcStep >= arc.length) return;
+  const fn = arc[arcStep++];
+  await fn();
+}
+
+// kick off
+(async () => {
+  await arc[0]();
+  arcStep = 1;
+})();
+
+// ─────────────────── PTT behavior ───────────────────
+let holding = false;
+let holdTimer = null;
+function pttDown(){
+  if (holding) return;
+  holding = true;
+  el.pttBtn.classList.add('live');
+  // when the user holds while analyst/triage is talking, dim them
+  // (we keep their caption but treat operator as the new loud)
+  // After a short hold, advance the arc one step if possible.
+  holdTimer = setTimeout(() => {
+    // if we're at the "analyst asks 'want it?'" beat, treat hold as confirm
+    if (arcStep >= 1 && arcStep <= 3) advance();
+  }, 600);
+}
+function pttUp(){
+  if (!holding) return;
+  holding = false;
+  el.pttBtn.classList.remove('live');
+  clearTimeout(holdTimer);
+}
+
+el.pttBtn.addEventListener('mousedown', pttDown);
+el.pttBtn.addEventListener('mouseup',   pttUp);
+el.pttBtn.addEventListener('mouseleave',pttUp);
+el.pttBtn.addEventListener('touchstart',(e)=>{e.preventDefault();pttDown();},{passive:false});
+el.pttBtn.addEventListener('touchend',  (e)=>{e.preventDefault();pttUp();},{passive:false});
+
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !e.repeat){
+    e.preventDefault();
+    pttDown();
+  }
+  if (e.code === 'Enter' && !el.sendBtn.disabled){
+    e.preventDefault();
+    el.sendBtn.click();
+  }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'Space'){
+    e.preventDefault();
+    pttUp();
+  }
+});
+
+// ─────────────────── upload affordance ───────────────────
+el.upload.addEventListener('click', () => {
+  if (arcStep === 1) advance(); // triage speaks
+});
+['dragover','dragenter'].forEach(ev =>
+  el.upload.addEventListener(ev, e => { e.preventDefault(); el.upload.style.borderColor = 'var(--accent)'; })
+);
+['dragleave','drop'].forEach(ev =>
+  el.upload.addEventListener(ev, e => { e.preventDefault(); el.upload.style.borderColor = ''; })
+);
+el.upload.addEventListener('drop', () => { if (arcStep === 1) advance(); });
+
+// ─────────────────── answer actions ───────────────────
+el.copyBtn.addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(el.answer.textContent); } catch(e){}
+  const o = el.copyBtn.textContent;
+  el.copyBtn.textContent = 'Copied';
+  setTimeout(() => el.copyBtn.textContent = o, 1100);
+});
+el.readBtn.addEventListener('click', () => {
+  const o = el.readBtn.textContent;
+  el.readBtn.textContent = 'Reading…';
+  setTimeout(() => el.readBtn.textContent = o, 1500);
+});
+el.sendBtn.addEventListener('click', () => {
+  const o = el.sendBtn.textContent;
+  el.sendBtn.textContent = 'Sent';
+  el.sendBtn.disabled = true;
+  setTimeout(() => {
+    el.sendBtn.textContent = o;
+    el.sendBtn.disabled = false;
+    if (arcStep === 5) advance(); // go quiet
+  }, 1100);
+});
+
+// ─────────────────── auto-progress so the demo breathes ───────────────────
+// click upload to start triage; analyst & answer arrive automatically after that
+(async () => {
+  // wait for user to "upload"
+  const waitForStart = setInterval(async () => {
+    if (arcStep === 2){
+      clearInterval(waitForStart);
+      // analyst arrives after triage finishes
+      await sleep(400);
+      await advance(); // analyst speaks
+      // wait for operator hold-to-confirm. If they don't, auto after 4s.
+      await sleep(4000);
+      if (arcStep === 3){
+        // simulate confirm
+        await advance();
+      }
+      // analyst delivers answer
+      await sleep(200);
+      await advance();
+      // go quiet
+      await sleep(800);
+      await advance();
+    }
+  }, 200);
+})();
+</script>
+</body>
+</html>

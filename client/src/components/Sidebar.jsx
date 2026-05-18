@@ -1,21 +1,12 @@
 import './Sidebar.css';
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { listConversations, deleteConversation, updateConversation, exportConversation } from '../api/chatApi.js';
 import { onCircuitChange } from '../api/http.js';
-import { useToast } from '../hooks/useToast.jsx';
-import ConfirmModal from './ConfirmModal.jsx';
-import Tooltip from './Tooltip.jsx';
 import { transitions } from '../utils/motion.js';
-import { tel, TEL } from '../lib/devTelemetry.js';
-
-// Adaptive poll intervals — fast after mutations, slow when idle
-const POLL_ACTIVE_MS = 5_000;
-const POLL_IDLE_MS = 30_000;
-const POLL_ACTIVE_WINDOW_MS = 60_000;
 
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
+  { hash: '#/sessions', label: 'Sessions', short: 'Sess', icon: IconSessions },
   { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
   { hash: '#/attention', label: 'Attention', short: 'Attn', icon: IconBell },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
@@ -29,68 +20,13 @@ const NAV_ITEMS = [
   { hash: '#/rooms', label: 'Rooms', short: 'Rm', icon: IconRooms },
 ];
 
-export default function Sidebar({ currentRoute, conversationId, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {
-  const toast = useToast();
-  const [conversations, setConversations] = useState([]);
-  const [search, setSearch] = useState('');
-  const [editingId, setEditingId] = useState(null);
-  const [editTitle, setEditTitle] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState(null);
+export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {
   const [hoverExpanded, setHoverExpanded] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [forkExpanded, setForkExpanded] = useState({});
-  const [copyingConversationId, setCopyingConversationId] = useState(null);
-  const [copiedConversationId, setCopiedConversationId] = useState(null);
   const hoverTimerRef = useRef(null);
-  const copyResetTimerRef = useRef(null);
   const mouseOverRef = useRef(false);
-  const editInputRef = useRef(null);
-  const loadingRef = useRef(false);
-  const fetchGenRef = useRef(0);
-  const lastMutationRef = useRef(0);  // Start idle — no reason to fast-poll on fresh load
   const collapsibleRef = useRef(null);
   const [circuitState, setCircuitState] = useState({ status: 'closed', failures: 0 });
   const navItems = [...NAV_ITEMS, ...extraNavItems.map((item) => ({ ...item, icon: item.icon || IconTerminal }))];
-
-  // Group conversations by fork relationships.
-  // Forks whose parent is in the current list nest underneath it.
-  // Forks whose parent is NOT in the current list remain top-level
-  // (e.g. parent scrolled out of the loaded page).
-  const groupedConversations = useMemo(() => {
-    const idSet = new Set(conversations.map((c) => c._id));
-    const forkMap = new Map(); // parentId -> [children]
-
-    for (const conv of conversations) {
-      if (conv.forkedFrom && idSet.has(conv.forkedFrom)) {
-        if (!forkMap.has(conv.forkedFrom)) forkMap.set(conv.forkedFrom, []);
-        forkMap.get(conv.forkedFrom).push(conv);
-      }
-    }
-
-    // Only include top-level: either not a fork, or parent not in current list
-    const roots = conversations.filter(
-      (c) => !c.forkedFrom || !idSet.has(c.forkedFrom)
-    );
-
-    return roots.map((r) => ({
-      ...r,
-      forks: forkMap.get(r._id) || [],
-    }));
-  }, [conversations]);
-
-  // Auto-expand fork group when the active conversation is a child fork
-  useEffect(() => {
-    if (!conversationId) return;
-    const activeConv = conversations.find((c) => c._id === conversationId);
-    if (activeConv?.forkedFrom) {
-      setForkExpanded((prev) => ({ ...prev, [activeConv.forkedFrom]: true }));
-    }
-  }, [conversationId, conversations]);
-
-  const toggleForkExpand = useCallback((parentId, e) => {
-    e.stopPropagation();
-    setForkExpanded((prev) => ({ ...prev, [parentId]: !prev[parentId] }));
-  }, []);
 
   const handleMouseEnter = useCallback(() => {
     mouseOverRef.current = true;
@@ -130,140 +66,6 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
       }
     }
   }, [collapsed, hoverExpanded]);
-
-  const getPollInterval = useCallback(() => {
-    return (Date.now() - lastMutationRef.current) < POLL_ACTIVE_WINDOW_MS
-      ? POLL_ACTIVE_MS
-      : POLL_IDLE_MS;
-  }, []);
-
-  const loadConversations = useCallback(async (searchTerm = '') => {
-    // Generation counter — suppresses stale responses when search changes
-    // mid-flight so an old response never overwrites newer state.
-    const gen = ++fetchGenRef.current;
-    if (loadingRef.current) return;          // skip if prior request still pending
-    loadingRef.current = true;
-    try {
-      const list = await listConversations(50, 0, searchTerm);
-      if (gen === fetchGenRef.current) {
-        setConversations(list);
-        setInitialLoading(false);
-        tel(TEL.DATA_LOAD, `Loaded ${list.length} conversations`, { count: list.length, search: searchTerm || null });
-      }
-    } catch {
-      setInitialLoading(false);  // Clear skeleton on error too
-    } finally {
-      loadingRef.current = false;
-    }
-  }, []);
-
-  // Backpressure-safe polling with adaptive interval:
-  // - 5 s after recent mutations (delete, rename, navigation)
-  // - 30 s when idle (no mutations in the last 60 s)
-  // Next tick only schedules after prior request settles.
-  useEffect(() => {
-    let cancelled = false;
-    let tid = null;
-
-    const poll = async () => {
-      if (cancelled) return;
-      if (document.visibilityState !== 'visible') {
-        tid = setTimeout(poll, getPollInterval());
-        return;
-      }
-      await loadConversations(search);
-      if (!cancelled) tid = setTimeout(poll, getPollInterval());
-    };
-
-    loadConversations(search);                     // initial fetch
-    tid = setTimeout(poll, getPollInterval());      // first poll
-
-    return () => { cancelled = true; clearTimeout(tid); };
-  }, [loadConversations, search, getPollInterval]);
-
-  useEffect(() => {
-    if (conversationId) {
-      lastMutationRef.current = Date.now();        // speed up polling after navigation
-      loadConversations(search);
-    }
-  }, [conversationId, loadConversations, search]);
-
-  useEffect(() => {
-    if (editingId) editInputRef.current?.focus();
-  }, [editingId]);
-
-  useEffect(() => () => clearTimeout(copyResetTimerRef.current), []);
-
-  const confirmDelete = useCallback(async () => {
-    if (!deleteTarget) return;
-    tel(TEL.USER_ACTION, 'Deleted conversation', { conversationId: deleteTarget });
-    try {
-      await deleteConversation(deleteTarget);
-      setConversations(prev => prev.filter(c => c._id !== deleteTarget));
-      if (conversationId === deleteTarget) {
-        window.location.hash = '#/chat';
-      }
-    } catch {
-      toast.error('Failed to delete conversation');
-    }
-    lastMutationRef.current = Date.now();      // speed up polling after delete
-    setDeleteTarget(null);
-  }, [deleteTarget, conversationId]);
-
-  const startRename = useCallback((e, conv) => {
-    e.stopPropagation();
-    setEditingId(conv._id);
-    setEditTitle(conv.title || '');
-  }, []);
-
-  const submitRename = useCallback(async () => {
-    if (!editingId || !editTitle.trim()) {
-      setEditingId(null);
-      return;
-    }
-    try {
-      await updateConversation(editingId, { title: editTitle.trim() });
-      setConversations(prev => prev.map(c =>
-        c._id === editingId ? { ...c, title: editTitle.trim() } : c
-      ));
-    } catch {
-      toast.error('Failed to rename conversation');
-    }
-    lastMutationRef.current = Date.now();      // speed up polling after rename
-    setEditingId(null);
-  }, [editingId, editTitle]);
-
-  const handleEditKeyDown = useCallback((e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      submitRename();
-    } else if (e.key === 'Escape') {
-      setEditingId(null);
-    }
-  }, [submitRename]);
-
-  const handleCopyConversation = useCallback(async (e, conv) => {
-    e.stopPropagation();
-    if (copyingConversationId) return;
-
-    setCopyingConversationId(conv._id);
-    try {
-      const text = await exportConversation(conv._id);
-      if (!navigator.clipboard?.writeText) {
-        throw new Error('Clipboard unavailable');
-      }
-      await navigator.clipboard.writeText(text);
-      clearTimeout(copyResetTimerRef.current);
-      setCopiedConversationId(conv._id);
-      copyResetTimerRef.current = setTimeout(() => setCopiedConversationId(null), 2000);
-      tel(TEL.USER_ACTION, 'Copied conversation from sidebar', { conversationId: conv._id });
-      toast.success('Conversation copied to clipboard.');
-    } catch {
-      toast.error('Failed to copy conversation');
-    } finally {
-      setCopyingConversationId(null);
-    }
-  }, [copyingConversationId, toast]);
 
   return (
     <aside
@@ -313,6 +115,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
           const Icon = item.icon;
           const isActive = currentRoute === item.hash ||
             (item.hash === '#/chat' && currentRoute.startsWith('#/chat')) ||
+            (item.hash === '#/sessions' && currentRoute.startsWith('#/sessions')) ||
             (item.hash === '#/workspace' && currentRoute.startsWith('#/workspace')) ||
             (item.hash === '#/rooms' && currentRoute.startsWith('#/rooms')) ||
             (item.hash === '#/agents' && currentRoute.startsWith('#/agents'));
@@ -341,135 +144,7 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
         })}
       </nav>
 
-      <div className="sidebar-collapsible" ref={collapsibleRef}>
-      {/* Search */}
-      <div style={{ padding: '0 var(--sp-3)', marginTop: 'var(--sp-3)' }}>
-        <div style={{ position: 'relative' }}>
-          <svg
-            aria-hidden="true" focusable="false"
-            width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ink-tertiary)"
-            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-            style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            type="search"
-            placeholder="Search titles and content..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            aria-label="Search conversations by title and content"
-            style={{
-              fontSize: 'var(--text-xs)',
-              padding: '5px 8px 5px 26px',
-              background: 'var(--bg-sunken)',
-              border: '1px solid var(--line-subtle)',
-              borderRadius: 'var(--radius-md)',
-              width: '100%',
-              color: 'var(--ink)',
-            }}
-          />
-        </div>
-      </div>
-
-      <h2 className="sidebar-section-title">
-        {search ? `Results for "${search}"` : 'Recent Conversations'}
-      </h2>
-
-      <div className="sidebar-conversations" key={search}>
-        {!search && (
-          <Tooltip text="Start a fresh chat session" level="medium" position="right">
-            <a
-              href="#/chat"
-              className="sidebar-conv-item"
-              style={{ fontWeight: 600, color: 'var(--accent)', gap: 'var(--sp-2)' }}
-              onClick={onClose}
-            >
-              <svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              <span>New Conversation</span>
-            </a>
-          </Tooltip>
-        )}
-
-        {groupedConversations.map(conv => (
-          <div key={conv._id} className="sidebar-conv-group">
-            <ConvItem
-              conv={conv}
-              conversationId={conversationId}
-              editingId={editingId}
-              editTitle={editTitle}
-              editInputRef={editInputRef}
-              setEditTitle={setEditTitle}
-              submitRename={submitRename}
-              handleEditKeyDown={handleEditKeyDown}
-              startRename={startRename}
-              setDeleteTarget={setDeleteTarget}
-              handleCopyConversation={handleCopyConversation}
-              copyingConversationId={copyingConversationId}
-              copiedConversationId={copiedConversationId}
-              onClose={onClose}
-              forkCount={conv.forks.length}
-              forkExpanded={forkExpanded[conv._id]}
-              onToggleFork={(e) => toggleForkExpand(conv._id, e)}
-            />
-            {conv.forks.length > 0 && forkExpanded[conv._id] && (
-              <div className="fork-children">
-                {conv.forks.map(fork => (
-                  <ConvItem
-                    key={fork._id}
-                    conv={fork}
-                    conversationId={conversationId}
-                    editingId={editingId}
-                    editTitle={editTitle}
-                    editInputRef={editInputRef}
-                    setEditTitle={setEditTitle}
-                    submitRename={submitRename}
-                    handleEditKeyDown={handleEditKeyDown}
-                    startRename={startRename}
-                    setDeleteTarget={setDeleteTarget}
-                    handleCopyConversation={handleCopyConversation}
-                    copyingConversationId={copyingConversationId}
-                    copiedConversationId={copiedConversationId}
-                    onClose={onClose}
-                    isFork
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-
-        {initialLoading && conversations.length === 0 && (
-          <div className="sidebar-skeleton-list">
-            {[72, 58, 80, 65, 50].map((titleWidth, i) => (
-              <div key={i} className="sidebar-skeleton-item">
-                <div className="skeleton-pulse" style={{ height: 12, width: `${titleWidth}%`, marginBottom: 6 }} />
-                <div className="skeleton-pulse" style={{ height: 10, width: '30%' }} />
-              </div>
-            ))}
-          </div>
-        )}
-        {!initialLoading && conversations.length === 0 && (
-          <div style={{ padding: 'var(--sp-3) var(--sp-5)', fontSize: 'var(--text-xs)', color: 'var(--ink-tertiary)' }}>
-            {search ? 'No conversations match your search' : 'No conversations yet'}
-          </div>
-        )}
-      </div>
-      </div>
-
-      <ConfirmModal
-        open={deleteTarget !== null}
-        title="Delete Conversation"
-        message="This conversation and all its messages will be permanently deleted. This cannot be undone."
-        confirmLabel="Delete"
-        danger={true}
-        onConfirm={confirmDelete}
-        onCancel={() => setDeleteTarget(null)}
-      />
+      <div className="sidebar-collapsible sidebar-collapsible--empty" ref={collapsibleRef} />
 
       {circuitState.status !== 'closed' && (
         <div className="sidebar-circuit-indicator" title={
@@ -495,191 +170,6 @@ export default function Sidebar({ currentRoute, conversationId, isOpen, onClose,
   );
 }
 
-/** Format a date as relative time */
-function relativeTime(dateStr) {
-  if (!dateStr) return '';
-  const diffSec = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diffSec < 60) return 'just now';
-  if (diffSec < 3600) return Math.floor(diffSec / 60) + 'm ago';
-  if (diffSec < 86400) return Math.floor(diffSec / 3600) + 'h ago';
-  if (diffSec < 604800) return Math.floor(diffSec / 86400) + 'd ago';
-  return new Date(dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-function getConversationDisplayTitle(conversation) {
-  const normalizedTitle = typeof conversation?.title === 'string' ? conversation.title.trim() : '';
-  if (normalizedTitle) return normalizedTitle;
-
-  const preview = typeof conversation?.lastMessage?.preview === 'string'
-    ? conversation.lastMessage.preview.trim()
-    : '';
-  if (preview) return preview;
-
-  return 'Untitled conversation';
-}
-
-// --- Conversation Item Component ---
-
-function ConvItem({
-  conv, conversationId, editingId, editTitle, editInputRef, setEditTitle,
-  submitRename, handleEditKeyDown, startRename, setDeleteTarget, handleCopyConversation,
-  copyingConversationId, copiedConversationId, onClose,
-  isFork = false, forkCount = 0, forkExpanded = false, onToggleFork,
-}) {
-  const isActiveConversation = conversationId === conv._id;
-  const isCopyDisabled = Boolean(copyingConversationId);
-  const isCopying = copyingConversationId === conv._id;
-  const isCopied = copiedConversationId === conv._id;
-
-  const openOrCloseConversation = () => {
-    if (editingId) return;
-    if (isActiveConversation) {
-      tel(TEL.USER_ACTION, 'Closed active conversation from sidebar', { conversationId: conv._id });
-      window.location.hash = '#/chat';
-    } else {
-      tel(TEL.USER_ACTION, 'Selected conversation', { conversationId: conv._id });
-      window.location.hash = `#/chat/${conv._id}`;
-    }
-    onClose?.();
-  };
-
-  return (
-    <div
-      className={`sidebar-conv-item${isActiveConversation ? ' is-active' : ''}${isFork ? ' is-fork' : ''}`}
-      onClick={openOrCloseConversation}
-      role="button"
-      tabIndex={0}
-      aria-label={getConversationDisplayTitle(conv)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && !editingId) {
-          openOrCloseConversation();
-        }
-      }}
-    >
-      {editingId === conv._id ? (
-        <div className="sidebar-conv-body">
-          <input
-            ref={editInputRef}
-            type="text"
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={submitRename}
-            onKeyDown={handleEditKeyDown}
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: '100%',
-              fontSize: '12px',
-              padding: '3px 5px',
-              border: '1px solid var(--accent)',
-              borderRadius: 'var(--radius-sm)',
-              background: 'var(--bg-raised)',
-              color: 'var(--ink)',
-              minWidth: 0,
-            }}
-          />
-        </div>
-      ) : (
-        <div className="sidebar-conv-body">
-          <div className="sidebar-conv-title truncate">
-            {isFork && <span className="fork-icon" title={`Forked at message #${(conv.forkMessageIndex ?? 0) + 1}`}>&#9095; </span>}
-            {getConversationDisplayTitle(conv)}
-          </div>
-          <div className="sidebar-conv-meta">
-            <span>{relativeTime(conv.updatedAt)}</span>
-            {conv.messageCount > 0 && (
-              <span className="sidebar-conv-pill">
-                {conv.messageCount} msg{conv.messageCount !== 1 ? 's' : ''}
-              </span>
-            )}
-            {conv.escalationId && (
-              <span
-                title="Linked to escalation"
-                className="sidebar-conv-pill sidebar-conv-pill--accent"
-              >
-                ESC
-              </span>
-            )}
-            {forkCount > 0 && (
-              <span
-                className="sidebar-conv-pill fork-badge"
-                title={`${forkCount} fork${forkCount !== 1 ? 's' : ''}`}
-                onClick={onToggleFork}
-                style={{ cursor: 'pointer' }}
-              >
-                &#9095; {forkCount}
-              </span>
-            )}
-          </div>
-        </div>
-      )}
-      <div className="sidebar-conv-actions">
-        {editingId !== conv._id && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={(e) => handleCopyConversation(e, conv)}
-            title={isCopied ? 'Copied to clipboard' : (isCopying ? 'Copying conversation...' : 'Copy full conversation')}
-            aria-label={isCopied ? 'Conversation copied to clipboard' : 'Copy full conversation'}
-            type="button"
-            disabled={isCopyDisabled}
-          >
-            {isCopied ? (
-              <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            ) : (
-              <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-              </svg>
-            )}
-          </button>
-        )}
-        {editingId !== conv._id && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={(e) => startRename(e, conv)}
-            title="Rename"
-            aria-label="Rename conversation"
-            type="button"
-          >
-            <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-          </button>
-        )}
-        {forkCount > 0 && (
-          <button
-            className="btn btn-ghost btn-sm"
-            onClick={onToggleFork}
-            title={forkExpanded ? 'Collapse forks' : 'Expand forks'}
-            aria-label={forkExpanded ? 'Collapse forks' : 'Expand forks'}
-            type="button"
-          >
-            <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-              style={{ transform: forkExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }}
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        )}
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={(e) => { e.stopPropagation(); setDeleteTarget(conv._id); }}
-          title="Delete"
-          aria-label="Delete conversation"
-          type="button"
-        >
-          <svg aria-hidden="true" focusable="false" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // --- SVG Icon Components ---
 
 function IconChat({ size = 16 }) {
@@ -697,6 +187,17 @@ function IconDashboard({ size = 16 }) {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function IconSessions({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 5h18" />
+      <path d="M3 12h18" />
+      <path d="M3 19h18" />
+      <path d="M7 5v14" />
     </svg>
   );
 }

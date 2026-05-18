@@ -20,9 +20,9 @@ test('known Claude model returns correct nanos and micros', () => {
 
 test('known Codex model returns correct nanos and micros', () => {
   const r = calculateCost(1000, 500, 'gpt-5.5', 'gpt-5.5');
-  assert.equal(r.inputCostNanos, 2_500_000);
-  assert.equal(r.outputCostNanos, 5_000_000);
-  assert.equal(r.totalCostNanos, 7_500_000);
+  assert.equal(r.inputCostNanos, 5_000_000);
+  assert.equal(r.outputCostNanos, 15_000_000);
+  assert.equal(r.totalCostNanos, 20_000_000);
   assert.equal(r.rateFound, true);
 });
 
@@ -219,7 +219,7 @@ test('openai provider fallback returns rates', () => {
 
 test('all CODEX_PROVIDERS have matching fallback rates in pricing', () => {
   // Verify parity: every provider the extractor recognizes should have pricing fallback
-  const codexProviders = ['gpt-5.5', 'gpt-5-mini', 'codex', 'openai'];
+  const codexProviders = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'codex', 'openai'];
   for (const prov of codexProviders) {
     const rates = getRates('totally-unknown-model-xyz', prov);
     assert.notEqual(rates, null, `provider "${prov}" missing from PROVIDER_FALLBACKS`);

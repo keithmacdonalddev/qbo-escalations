@@ -381,6 +381,22 @@ body:has(.compose-card.is-case-workflow:focus-within) .compact-pane {
   border-color: rgba(255, 255, 255, 0.10);
 }
 
+.provider-chip:disabled,
+.provider-chip.is-disabled,
+.provider-popover-option:disabled,
+.provider-popover-option.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
+.provider-chip:disabled:hover,
+.provider-chip.is-disabled:hover,
+.provider-popover-option:disabled:hover,
+.provider-popover-option.is-disabled:hover {
+  background: transparent;
+}
+
 .provider-chip .chevron {
   font-size: 8px;
   opacity: 0.6;

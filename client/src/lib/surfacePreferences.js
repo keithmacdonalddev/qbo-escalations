@@ -4,6 +4,7 @@ import {
   getAlternateProvider,
   normalizeProvider as normalizeCatalogProvider,
   normalizeReasoningEffort,
+  resolveProviderSelection,
 } from './providerCatalog.js';
 
 export const SURFACE_DEFAULTS_APPLIED_EVENT = 'qbo-ai-defaults-applied';
@@ -123,11 +124,19 @@ export function readSurfacePreferences({
   defaultProvider = DEFAULT_PROVIDER,
   reasoningEffortFallback = DEFAULT_REASONING_EFFORT,
 } = {}) {
-  const provider = normalizeSurfaceProvider(readStoredPreference(providerKeys) || defaultProvider);
+  const primarySelection = resolveProviderSelection(
+    readStoredPreference(providerKeys) || defaultProvider,
+    readStoredPreference(modelKeys)
+  );
+  const provider = primarySelection.provider;
   const mode = normalizeSurfaceMode(readStoredPreference(modeKeys) || defaultMode, supportedModes, defaultMode);
+  const fallbackSelection = resolveProviderSelection(
+    readStoredPreference(fallbackProviderKeys) || getAlternateProvider(provider),
+    readStoredPreference(fallbackModelKeys)
+  );
   const fallbackProvider = normalizeSurfaceFallback(
     provider,
-    readStoredPreference(fallbackProviderKeys) || getAlternateProvider(provider)
+    fallbackSelection.provider
   );
   const reasoningEffort = normalizeReasoningEffort(
     readStoredPreference(reasoningEffortKeys) || reasoningEffortFallback || DEFAULT_REASONING_EFFORT
@@ -137,8 +146,8 @@ export function readSurfacePreferences({
     provider,
     mode,
     fallbackProvider,
-    model: normalizeSurfaceModel(readStoredPreference(modelKeys)),
-    fallbackModel: normalizeSurfaceModel(readStoredPreference(fallbackModelKeys)),
+    model: primarySelection.model,
+    fallbackModel: fallbackProvider === fallbackSelection.provider ? fallbackSelection.model : '',
     reasoningEffort,
   };
 }
@@ -148,11 +157,18 @@ export function readSurfaceSelection(surface, options = {}) {
     defaultProvider = DEFAULT_PROVIDER,
     reasoningEffortFallback = DEFAULT_REASONING_EFFORT,
   } = options;
-  const storedProvider = readStoredPreference(surface?.storage?.provider);
-  const provider = normalizeSurfaceProvider(storedProvider || defaultProvider);
+  const primarySelection = resolveProviderSelection(
+    readStoredPreference(surface?.storage?.provider) || defaultProvider,
+    readStoredPreference(surface?.storage?.model)
+  );
+  const provider = primarySelection.provider;
+  const fallbackSelection = resolveProviderSelection(
+    readStoredPreference(surface?.storage?.fallbackProvider) || getAlternateProvider(provider),
+    readStoredPreference(surface?.storage?.fallbackModel)
+  );
   const fallbackProvider = normalizeSurfaceFallback(
     provider,
-    readStoredPreference(surface?.storage?.fallbackProvider) || getAlternateProvider(provider)
+    fallbackSelection.provider
   );
 
   return {
@@ -165,8 +181,8 @@ export function readSurfaceSelection(surface, options = {}) {
       surface?.defaultMode,
     ),
     fallbackProvider,
-    model: normalizeSurfaceModel(readStoredPreference(surface?.storage?.model)),
-    fallbackModel: normalizeSurfaceModel(readStoredPreference(surface?.storage?.fallbackModel)),
+    model: primarySelection.model,
+    fallbackModel: fallbackProvider === fallbackSelection.provider ? fallbackSelection.model : '',
     reasoningEffort: normalizeReasoningEffort(
       readStoredPreference(surface?.storage?.reasoningEffort) || reasoningEffortFallback || DEFAULT_REASONING_EFFORT
     ),

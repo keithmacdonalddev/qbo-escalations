@@ -1,0 +1,634 @@
+<!doctype html>
+<!--
+  Designer: zendesk (V4)
+  Forced angle: SINGLE FOCAL POINT — only one element is at full size and active at any moment.
+                Everything else fades to peripheral. Focus shifts with the workflow.
+  Features (2): (1) Focal-shift staging — the page elevates exactly one region at a time
+                    (intake → parsed → triage → analyst). Non-focal regions fade to a calm
+                    glance-strip and animate in only if needed.
+                (2) Glance-strip — a dim, single-line rail that always carries triage + parsed
+                    facts in peripheral form. The operator can glance without leaving the focal
+                    region. Hover or tab brings it forward without stealing focus.
+  Regions (each justified against one of the 4 user goals):
+    - Focal stage (center)        → goals 1,2,3,4. Whatever the operator needs right now is here.
+    - Glance strip (bottom)       → goal 1 + 2. Triage + parsed facts in peripheral form, always.
+    - Compose tray (focal-chat)   → goal 3 + 4. Type, copy answer. Visible only during chat.
+  Nothing else is visible. No status spine, no pipeline, no confidence chrome.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>v4 / zendesk — single focal point</title>
+<style>
+  :root {
+    --bg: #faf9f7;
+    --ink: #1a1a1a;
+    --mute: #8a8680;
+    --rule: #ece8e1;
+    --focal: #ffffff;
+    --accent: #2d6cdf;
+    --warm: #c87a3b;
+    --ok: #3a8a5a;
+    --shadow: 0 1px 0 rgba(0,0,0,0.04), 0 24px 60px -20px rgba(20,20,20,0.18);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100vh; overflow: hidden; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .shell {
+    height: 100vh;
+    display: grid;
+    grid-template-rows: 28px 1fr 56px;
+    grid-template-columns: 1fr;
+  }
+  /* whisper-quiet top bar */
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px;
+    color: var(--mute);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--rule);
+    background: var(--bg);
+  }
+  .top .who { display: flex; gap: 16px; align-items: center; }
+  .top .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--mute);
+    display: inline-block;
+  }
+  .top .dot.live { background: var(--ok); }
+
+  /* The stage: one focal region, centered, large. */
+  .stage {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    overflow: hidden;
+  }
+  .focal {
+    width: 100%;
+    max-width: 760px;
+    min-height: 420px;
+    background: var(--focal);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    box-shadow: var(--shadow);
+    padding: 36px 40px;
+    display: flex;
+    flex-direction: column;
+    transition: opacity 320ms ease, transform 320ms ease;
+  }
+  .focal[data-hidden="true"] {
+    opacity: 0;
+    transform: translateY(6px);
+    pointer-events: none;
+    position: absolute;
+  }
+  .focal h1 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--mute);
+    font-weight: 600;
+  }
+  .focal h2 {
+    margin: 0 0 24px;
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+
+  /* INTAKE focal */
+  .intake-drop {
+    flex: 1;
+    border: 1.5px dashed var(--rule);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 14px;
+    color: var(--mute);
+    cursor: pointer;
+    transition: border-color 200ms, color 200ms, background 200ms;
+  }
+  .intake-drop:hover { border-color: var(--accent); color: var(--accent); background: #f5f8ff; }
+  .intake-drop .glyph {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+  .intake-drop .label { font-size: 14px; }
+  .intake-drop .sub { font-size: 12px; color: var(--mute); }
+  .intake-alt {
+    margin-top: 14px;
+    display: flex; gap: 10px; justify-content: center;
+    font-size: 12px; color: var(--mute);
+  }
+  .intake-alt button {
+    background: none; border: 1px solid var(--rule);
+    padding: 6px 12px; border-radius: 6px;
+    color: var(--ink); cursor: pointer;
+    font-size: 12px;
+  }
+  .intake-alt button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* PARSED focal — calm field list */
+  .parsed-list {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    row-gap: 12px;
+    column-gap: 20px;
+    align-content: start;
+    font-size: 14px;
+  }
+  .parsed-list dt { color: var(--mute); font-weight: 500; }
+  .parsed-list dd { margin: 0; color: var(--ink); }
+  .parsed-list dd .inv { font-family: ui-monospace, SFMono-Regular, monospace; }
+  .parsed-foot {
+    margin-top: 24px;
+    display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid var(--rule);
+    padding-top: 16px;
+  }
+  .parsed-foot .miss { font-size: 12px; color: var(--mute); }
+  .btn {
+    background: var(--ink); color: white;
+    border: none; padding: 9px 18px; border-radius: 6px;
+    font-size: 13px; cursor: pointer; letter-spacing: 0.01em;
+    transition: background 200ms;
+  }
+  .btn:hover { background: #000; }
+  .btn.ghost {
+    background: none; color: var(--ink);
+    border: 1px solid var(--rule);
+  }
+  .btn.ghost:hover { border-color: var(--ink); }
+
+  /* TRIAGE focal — single statement + confirm/doubt */
+  .triage-statement {
+    flex: 1;
+    display: flex; flex-direction: column; justify-content: center;
+    gap: 18px;
+  }
+  .triage-statement .verdict {
+    font-size: 26px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+  }
+  .triage-statement .verdict .em { color: var(--warm); }
+  .triage-statement .because {
+    font-size: 14px;
+    color: var(--mute);
+    max-width: 580px;
+  }
+  .triage-actions {
+    margin-top: 20px;
+    display: flex; gap: 10px;
+  }
+
+  /* CHAT focal */
+  .chat-stream {
+    flex: 1;
+    overflow-y: auto;
+    display: flex; flex-direction: column;
+    gap: 18px;
+    padding-right: 4px;
+  }
+  .chat-stream::-webkit-scrollbar { width: 6px; }
+  .chat-stream::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 3px; }
+  .turn {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    animation: rise 280ms ease both;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .turn .who {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--mute);
+  }
+  .turn.analyst .who { color: var(--accent); }
+  .turn .body {
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .turn.analyst .body { color: var(--ink); }
+  .turn.you .body { color: #555; }
+  .turn.analyst .body.answer {
+    background: #f5f8ff;
+    border-left: 2px solid var(--accent);
+    padding: 10px 14px;
+    border-radius: 0 6px 6px 0;
+    position: relative;
+  }
+  .turn.analyst .body.answer .copy {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: none; border: 1px solid var(--rule);
+    color: var(--mute); font-size: 11px;
+    padding: 3px 8px; border-radius: 4px; cursor: pointer;
+    transition: all 200ms;
+  }
+  .turn.analyst .body.answer .copy:hover { color: var(--accent); border-color: var(--accent); }
+  .turn.analyst .body.answer .copy.done { color: var(--ok); border-color: var(--ok); }
+
+  .typing { display: inline-flex; gap: 3px; padding: 4px 0; }
+  .typing span {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--mute);
+    animation: blink 1.2s infinite ease-in-out;
+  }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink {
+    0%, 80%, 100% { opacity: 0.3; }
+    40% { opacity: 1; }
+  }
+
+  /* COMPOSE tray — only during chat */
+  .compose {
+    grid-row: 3;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: var(--bg);
+    border-top: 1px solid var(--rule);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 280ms ease;
+  }
+  .compose.live { opacity: 1; pointer-events: auto; }
+  .compose input {
+    flex: 1;
+    background: var(--focal);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--ink);
+    outline: none;
+    transition: border-color 200ms;
+  }
+  .compose input:focus { border-color: var(--accent); }
+  .compose .send {
+    background: var(--ink); color: white;
+    border: none; padding: 10px 18px;
+    border-radius: 8px; cursor: pointer;
+    font-size: 13px;
+  }
+  .compose .send:disabled { background: var(--mute); cursor: not-allowed; }
+
+  /* GLANCE STRIP — peripheral rail */
+  .glance {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: 72px;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    padding: 8px 18px;
+    background: rgba(255,255,255,0.6);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--rule);
+    border-radius: 100px;
+    font-size: 12px;
+    color: var(--mute);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 320ms ease, transform 280ms ease, background 220ms, color 220ms;
+    cursor: pointer;
+    max-width: 780px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .glance.live {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+  .glance.live:hover {
+    opacity: 1;
+    background: rgba(255,255,255,0.95);
+    color: var(--ink);
+  }
+  .glance .seg {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .glance .seg .k {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+    opacity: 0.7;
+  }
+  .glance .seg .v { color: inherit; }
+  .glance .sep {
+    width: 1px; height: 14px; background: var(--rule);
+  }
+  .glance .verdict-mini { color: var(--warm); font-weight: 500; }
+
+  /* When compose is hidden, give bottom 56px back */
+  .shell[data-mode="chat"] { grid-template-rows: 28px 1fr 56px; }
+  .shell:not([data-mode="chat"]) .compose { display: none; }
+  .shell:not([data-mode="chat"]) { grid-template-rows: 28px 1fr 0; }
+
+  /* peripheral hint when glance comes online */
+  .stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(250,249,247,0.6));
+  }
+</style>
+</head>
+<body>
+<div class="shell" id="shell" data-mode="intake">
+  <div class="top">
+    <div class="who">
+      <span><span class="dot live"></span> case open</span>
+      <span id="caseId">—</span>
+    </div>
+    <div class="who">
+      <span id="stageLabel">intake</span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <!-- INTAKE -->
+    <section class="focal" id="focal-intake">
+      <h1>step 1</h1>
+      <h2>Drop the screenshot from the phone agent.</h2>
+      <div class="intake-drop" id="drop">
+        <div class="glyph">+</div>
+        <div class="label">Click or drop image</div>
+        <div class="sub">png, jpg — paste from clipboard works too</div>
+      </div>
+      <div class="intake-alt">
+        <button id="useWebcam">Use webcam</button>
+        <button id="useSample">Use sample case</button>
+      </div>
+    </section>
+
+    <!-- PARSED -->
+    <section class="focal" id="focal-parsed" data-hidden="true">
+      <h1>step 2 — parsed</h1>
+      <h2>Here's what we read from the screenshot.</h2>
+      <dl class="parsed-list" id="parsedList"></dl>
+      <div class="parsed-foot">
+        <div class="miss" id="parsedMiss">looks complete</div>
+        <button class="btn" id="toTriage">Run triage</button>
+      </div>
+    </section>
+
+    <!-- TRIAGE -->
+    <section class="focal" id="focal-triage" data-hidden="true">
+      <h1>step 3 — triage</h1>
+      <h2>The AI's read on the case.</h2>
+      <div class="triage-statement">
+        <div class="verdict" id="verdict"></div>
+        <div class="because" id="because"></div>
+      </div>
+      <div class="triage-actions">
+        <button class="btn" id="confirmTriage">Looks right — bring in analyst</button>
+        <button class="btn ghost" id="doubtTriage">Doesn't fit</button>
+      </div>
+    </section>
+
+    <!-- CHAT -->
+    <section class="focal" id="focal-chat" data-hidden="true" style="min-height: 480px; max-width: 820px;">
+      <h1>step 4 — main analyst</h1>
+      <h2 id="analystName">Maren · payroll specialist</h2>
+      <div class="chat-stream" id="chatStream"></div>
+    </section>
+  </div>
+
+  <div class="compose" id="compose">
+    <input type="text" id="composeInput" placeholder="Ask Maren a follow-up…" />
+    <button class="send" id="sendBtn">Send</button>
+  </div>
+</div>
+
+<!-- GLANCE STRIP -->
+<div class="glance" id="glance">
+  <div class="seg"><span class="k">case</span><span class="v" id="g-case">—</span></div>
+  <div class="sep"></div>
+  <div class="seg"><span class="k">customer</span><span class="v" id="g-cust">—</span></div>
+  <div class="sep"></div>
+  <div class="seg"><span class="k">inv</span><span class="v" id="g-inv">—</span></div>
+  <div class="sep"></div>
+  <div class="seg"><span class="k">triage</span><span class="v verdict-mini" id="g-verdict">—</span></div>
+</div>
+
+<script>
+(() => {
+  const shell = document.getElementById('shell');
+  const stageLabel = document.getElementById('stageLabel');
+  const caseIdEl = document.getElementById('caseId');
+  const glance = document.getElementById('glance');
+  const compose = document.getElementById('compose');
+
+  const focals = {
+    intake: document.getElementById('focal-intake'),
+    parsed: document.getElementById('focal-parsed'),
+    triage: document.getElementById('focal-triage'),
+    chat:   document.getElementById('focal-chat'),
+  };
+
+  function focus(name) {
+    Object.entries(focals).forEach(([k, el]) => {
+      el.dataset.hidden = (k === name) ? "false" : "true";
+    });
+    shell.dataset.mode = name;
+    stageLabel.textContent = name;
+  }
+
+  // sample case
+  const sample = {
+    caseId: "ESC-48172",
+    customer: "Riverstone Bakery LLC",
+    qboCompany: "riverstone-bakery",
+    inv: "INV-2041",
+    issue: "Direct deposit payroll run failed — employees not paid.",
+    runDate: "May 14, 2026",
+    employees: 7,
+    verdict: { lead: "Payroll bank-feed authorization expired.", em: "expired bank-feed auth" },
+    because: "The DD run was rejected because the company's bank connection re-auth window closed 3 days ago. Re-link and re-submit; QBO will reissue payments same-day if done before 2pm PT.",
+    analyst: "Maren · payroll specialist",
+    answer: "Have the company admin re-authorize the bank feed under Settings → Payroll → Bank account. Once re-linked, re-submit the failed payroll run from the Run History view. If done before 2pm PT, deposits land same-day; otherwise next business day. Tell the agent: 'No money was withdrawn — the run was rejected at the gateway, not refunded.'",
+  };
+
+  // INTAKE → parsed
+  function startIntake() {
+    caseIdEl.textContent = sample.caseId;
+    setTimeout(() => transitionToParsed(), 700);
+  }
+
+  document.getElementById('drop').addEventListener('click', startIntake);
+  document.getElementById('useSample').addEventListener('click', startIntake);
+  document.getElementById('useWebcam').addEventListener('click', startIntake);
+
+  function transitionToParsed() {
+    const dl = document.getElementById('parsedList');
+    dl.innerHTML = '';
+    const rows = [
+      ["customer", sample.customer],
+      ["company", sample.qboCompany],
+      ["inv", `<span class="inv">${sample.inv}</span>`],
+      ["issue", sample.issue],
+      ["run date", sample.runDate],
+      ["affected", `${sample.employees} employees`],
+    ];
+    rows.forEach(([k, v]) => {
+      const dt = document.createElement('dt'); dt.textContent = k;
+      const dd = document.createElement('dd'); dd.innerHTML = v;
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+    focus('parsed');
+    // glance comes online with intake facts (peripheral)
+    document.getElementById('g-case').textContent = sample.caseId;
+    document.getElementById('g-cust').textContent = sample.customer;
+    document.getElementById('g-inv').textContent = sample.inv;
+    glance.classList.add('live');
+  }
+
+  document.getElementById('toTriage').addEventListener('click', () => {
+    const verdict = document.getElementById('verdict');
+    verdict.innerHTML = sample.verdict.lead.replace(
+      sample.verdict.em,
+      `<span class="em">${sample.verdict.em}</span>`
+    );
+    document.getElementById('because').textContent = sample.because;
+    document.getElementById('g-verdict').textContent = sample.verdict.em;
+    focus('triage');
+  });
+
+  document.getElementById('doubtTriage').addEventListener('click', () => {
+    // calm doubt path: shrink verdict, let operator override
+    document.getElementById('verdict').innerHTML = '<span style="color:var(--mute);font-size:18px;">Override mode — describe the issue to Maren directly.</span>';
+    setTimeout(() => bringAnalyst(), 350);
+  });
+
+  document.getElementById('confirmTriage').addEventListener('click', bringAnalyst);
+
+  // CHAT
+  const chatStream = document.getElementById('chatStream');
+  const composeInput = document.getElementById('composeInput');
+  const sendBtn = document.getElementById('sendBtn');
+
+  function addTurn({ who, body, answer = false, klass = 'analyst' }) {
+    const t = document.createElement('div');
+    t.className = `turn ${klass}`;
+    const w = document.createElement('div'); w.className = 'who'; w.textContent = who;
+    const b = document.createElement('div'); b.className = 'body' + (answer ? ' answer' : '');
+    b.innerHTML = body;
+    if (answer) {
+      const copy = document.createElement('button');
+      copy.className = 'copy'; copy.textContent = 'Copy';
+      copy.addEventListener('click', () => {
+        navigator.clipboard?.writeText(b.textContent.replace('Copy', '').trim());
+        copy.textContent = 'Copied';
+        copy.classList.add('done');
+        setTimeout(() => { copy.textContent = 'Copy'; copy.classList.remove('done'); }, 1600);
+      });
+      b.appendChild(copy);
+    }
+    t.appendChild(w); t.appendChild(b);
+    chatStream.appendChild(t);
+    chatStream.scrollTop = chatStream.scrollHeight;
+    return t;
+  }
+
+  function showTyping() {
+    const t = document.createElement('div'); t.className = 'turn analyst';
+    const w = document.createElement('div'); w.className = 'who'; w.textContent = 'Maren';
+    const b = document.createElement('div'); b.className = 'body';
+    b.innerHTML = '<span class="typing"><span></span><span></span><span></span></span>';
+    t.appendChild(w); t.appendChild(b);
+    chatStream.appendChild(t);
+    chatStream.scrollTop = chatStream.scrollHeight;
+    return t;
+  }
+
+  function bringAnalyst() {
+    document.getElementById('analystName').textContent = sample.analyst;
+    chatStream.innerHTML = '';
+    focus('chat');
+    compose.classList.add('live');
+    setTimeout(() => {
+      const typing = showTyping();
+      setTimeout(() => {
+        typing.remove();
+        addTurn({ who: 'Maren', body: `I've got the case. Looking at ${sample.inv} for ${sample.customer} — the DD run failed because the bank-feed authorization expired three days ago.` });
+        setTimeout(() => {
+          const t2 = showTyping();
+          setTimeout(() => {
+            t2.remove();
+            addTurn({
+              who: 'Maren · answer for the phone agent',
+              body: sample.answer,
+              answer: true,
+            });
+          }, 1100);
+        }, 800);
+      }, 900);
+    }, 320);
+  }
+
+  function userSend() {
+    const v = composeInput.value.trim();
+    if (!v) return;
+    addTurn({ who: 'you', body: v, klass: 'you' });
+    composeInput.value = '';
+    const typing = showTyping();
+    setTimeout(() => {
+      typing.remove();
+      addTurn({
+        who: 'Maren',
+        body: 'Yes — no funds were withdrawn. The rejection happens before debit; the agent can reassure the customer of that.',
+      });
+    }, 1200);
+  }
+
+  sendBtn.addEventListener('click', userSend);
+  composeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') userSend(); });
+
+  // glance click jumps focus to triage (peripheral → focal swap)
+  glance.addEventListener('click', () => {
+    if (shell.dataset.mode === 'chat' && document.getElementById('verdict').textContent) {
+      focus('triage');
+      compose.classList.remove('live');
+      // breath, then back to chat
+      setTimeout(() => {
+        focus('chat');
+        compose.classList.add('live');
+      }, 2400);
+    }
+  });
+
+  focus('intake');
+})();
+</script>
+</body>
+</html>

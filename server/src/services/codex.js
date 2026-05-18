@@ -97,15 +97,16 @@ function formatCliFailure(code, stderr) {
  * @param {string} [opts.systemPrompt]
  * @param {string[]} [opts.images] - Base64-encoded images
  * @param {function} opts.onChunk
+ * @param {function} [opts.onThinkingChunk]
  * @param {function} opts.onDone
  * @param {function} opts.onError
  * @returns {function} cleanup
  */
-function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError }) {
   if (isProvidersStubbed()) {
     const stub = getProviderStub('codex', 'chat');
     if (!stub) throw new MissingProviderStubError('codex', 'chat');
-    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError });
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError });
   }
   const prompt = buildPrompt(messages, systemPrompt);
   const tempFiles = writeImageTempFiles(images);
@@ -131,6 +132,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
   let settled = false;
   let capturedUsage = null;
   const seenAgentTextByItem = new Map();
+  const seenReasoningTextByItem = new Map();
 
   // shell: true required on Windows where codex may be a .cmd shim.
   // User content is piped via stdin — never passed as a CLI argument.
@@ -179,6 +181,10 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
         const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
         if (usage) capturedUsage = usage;
       } catch { /* non-JSON line */ }
+      const thinking = extractThinkingFromEventLine(line, seenReasoningTextByItem);
+      if (thinking && onThinkingChunk) {
+        try { onThinkingChunk(thinking); } catch { /* ignore callback errors */ }
+      }
       const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
       if (delta) {
         fullResponse += delta;
@@ -201,6 +207,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
       if (usage) capturedUsage = usage;
     } catch { /* ignore */ }
+
+    const tailThinking = extractThinkingFromEventLine(stdoutBuffer, seenReasoningTextByItem);
+    if (tailThinking && onThinkingChunk) {
+      try { onThinkingChunk(tailThinking); } catch { /* ignore callback errors */ }
+    }
 
     const tailDelta = extractDeltaFromEventLine(stdoutBuffer, seenAgentTextByItem);
     if (tailDelta) {
@@ -678,6 +689,53 @@ function extractDeltaFromEventLine(line, seenAgentTextByItem) {
   }
   if (typeof event.text === 'string' && event.type && event.type.includes('delta')) {
     return event.text;
+  }
+
+  return '';
+}
+
+function extractThinkingFromEventLine(line, seenReasoningTextByItem) {
+  if (!line || !line.trim()) return '';
+
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return '';
+  }
+
+  const item = event.item && typeof event.item === 'object' ? event.item : null;
+  if (item && (item.type === 'reasoning' || item.type === 'agent_reasoning')) {
+    const nextText = typeof item.text === 'string'
+      ? item.text
+      : Array.isArray(item.summary)
+        ? item.summary.map((entry) => (
+          typeof entry === 'string'
+            ? entry
+            : typeof entry?.text === 'string'
+              ? entry.text
+              : ''
+        )).filter(Boolean).join('\n')
+        : '';
+    if (!nextText) return '';
+
+    const id = item.id || '__default__';
+    const prevText = seenReasoningTextByItem.get(id) || '';
+    seenReasoningTextByItem.set(id, nextText);
+    if (nextText.startsWith(prevText)) {
+      return nextText.slice(prevText.length);
+    }
+    return nextText;
+  }
+
+  if (typeof event.text === 'string' && event.type && event.type.includes('reasoning')) {
+    return event.text;
+  }
+  if (typeof event.delta === 'string' && event.type && event.type.includes('reasoning')) {
+    return event.delta;
+  }
+  if (event.delta && typeof event.delta.text === 'string' && event.type && event.type.includes('reasoning')) {
+    return event.delta.text;
   }
 
   return '';

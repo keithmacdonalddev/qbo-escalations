@@ -22,8 +22,13 @@ function buildProviderOption(entry) {
     family: entry.family,
     transport: entry.transport,
     model: entry.model || null,
+    iconPath: entry.iconPath || null,
+    iconLightPath: entry.iconLightPath || null,
+    iconSourceUrl: entry.iconSourceUrl || null,
+    iconStrategy: entry.iconStrategy || null,
     availabilityNote: entry.availabilityNote || null,
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
+    reasoningVisibility: entry.reasoningVisibility || null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
 }
@@ -36,11 +41,12 @@ export function getProviderOptions() {
 
 export const PROVIDER_OPTIONS = Object.freeze(getProviderOptions());
 
-export const PROVIDER_IDS = Object.freeze(PROVIDER_OPTIONS.map((entry) => entry.value));
-export const SELECTABLE_PROVIDER_IDS = Object.freeze([...PROVIDER_IDS]);
+export const PROVIDER_IDS = Object.freeze(PROVIDER_CATALOG.map((entry) => entry.id));
+export const SELECTABLE_PROVIDER_IDS = Object.freeze(PROVIDER_OPTIONS.map((entry) => entry.value));
 export const DEFAULT_PROVIDER = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
 export const DEFAULT_REASONING_EFFORT = 'high';
 export const REASONING_EFFORT_OPTIONS = Object.freeze([
+  { value: 'none', label: 'None' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
@@ -57,9 +63,10 @@ const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
     { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
   ]),
   openai: Object.freeze([
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-    { value: 'o3', label: 'o3' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini - high-volume parser' },
+    { value: 'gpt-5.5', label: 'GPT-5.5 - hardest screenshots' },
+    { value: 'gpt-5.4', label: 'GPT-5.4 - balanced frontier' },
+    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano - cheapest extraction' },
   ]),
   gemini: Object.freeze([
     { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
@@ -102,11 +109,16 @@ export function getProviderCapabilities(providerOrFamily) {
     family: meta?.family || 'claude',
     transport: meta?.transport || 'claude',
     model: meta?.model || null,
+    iconPath: meta?.iconPath || null,
+    iconLightPath: meta?.iconLightPath || null,
+    iconSourceUrl: meta?.iconSourceUrl || null,
+    iconStrategy: meta?.iconStrategy || null,
     supportsThinking: typeof meta?.supportsThinking === 'boolean'
       ? meta.supportsThinking
       : typeof defaultMeta?.supportsThinking === 'boolean'
         ? defaultMeta.supportsThinking
         : false,
+    reasoningVisibility: meta?.reasoningVisibility || (meta?.supportsThinking ? 'stream' : 'none'),
     allowedEfforts,
     alternateProvider: getAlternateProvider(providerOrFamily),
   };
@@ -118,6 +130,28 @@ export function getProviderModelId(provider) {
 
 export function normalizeModelOverride(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+export function isProviderModelPreset(provider) {
+  const meta = getProviderMeta(provider);
+  if (!meta) return false;
+  return meta.selectable === false && meta.transport === 'codex' && Boolean(meta.model);
+}
+
+export function resolveProviderSelection(provider, model = '') {
+  const normalizedProvider = normalizeProvider(provider);
+  const normalizedModel = normalizeModelOverride(model);
+  const meta = getProviderMeta(normalizedProvider);
+  if (meta?.transport === 'codex' && normalizedProvider !== 'codex' && getProviderMeta('codex')) {
+    return {
+      provider: 'codex',
+      model: normalizedModel || meta.model || '',
+    };
+  }
+  return {
+    provider: normalizedProvider,
+    model: normalizedModel,
+  };
 }
 
 export function getProviderDefaultModel(provider) {
@@ -193,11 +227,15 @@ export function getSupportsThinking(provider) {
   return getProviderCapabilities(provider).supportsThinking;
 }
 
+export function getReasoningVisibility(provider) {
+  return getProviderCapabilities(provider).reasoningVisibility || 'none';
+}
+
 export function isAllowedEffort(providerOrFamily, effort) {
   return getAllowedEfforts(providerOrFamily).includes(effort);
 }
 
-const PREFERRED_CODEX_FALLBACK = 'gpt-5.5';
+const PREFERRED_CODEX_FALLBACK = 'codex';
 export const PROVIDER_FAMILY = Object.freeze(
   PROVIDER_CATALOG.reduce((acc, entry) => {
     acc[entry.id] = entry.family;
@@ -212,6 +250,11 @@ export const PROVIDER_FAMILY = Object.freeze(
  */
 export function catalogSupportsThinking(providerId) {
   return getSupportsThinking(providerId);
+}
+
+export function catalogReportsReasoningActivity(providerId) {
+  const visibility = getReasoningVisibility(providerId);
+  return visibility === 'stream' || visibility === 'activity';
 }
 
 export const PROVIDER_LABELS = Object.freeze(
@@ -259,6 +302,10 @@ export function isClaudeProvider(provider) {
 
 export function supportsLiveReasoning(provider) {
   return getSupportsThinking(provider);
+}
+
+export function reportsReasoningActivity(provider) {
+  return catalogReportsReasoningActivity(provider);
 }
 
 export function normalizeReasoningEffort(value, family) {

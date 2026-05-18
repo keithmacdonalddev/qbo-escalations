@@ -178,6 +178,44 @@ test('POST /parse validation', async (t) => {
     }
   });
 
+  await t.test('passes reasoning effort through to parser service', async () => {
+    let receivedOptions = null;
+    _mockParseImage = async (_image, options) => {
+      receivedOptions = options;
+      return { text: 'ok', role: 'unknown', usage: { model: 'gpt-5.4-mini' } };
+    };
+    const res = makeRes();
+    try {
+      await handler(makeReq({
+        image: 'AAAA',
+        provider: 'openai',
+        model: 'gpt-5.4-mini',
+        reasoningEffort: 'low',
+      }), res);
+      assert.equal(res.payload.ok, true);
+      assert.equal(receivedOptions.reasoningEffort, 'low');
+      assert.equal(receivedOptions.model, 'gpt-5.4-mini');
+    } finally {
+      _mockParseImage = null;
+    }
+  });
+
+  await t.test('accepts Codex CLI catalog providers as valid image parser providers', async () => {
+    let receivedProvider = '';
+    _mockParseImage = async (_image, options) => {
+      receivedProvider = options.provider;
+      return { text: 'ok', role: 'unknown', usage: { model: 'gpt-5.4-mini' } };
+    };
+    const res = makeRes();
+    try {
+      await handler(makeReq({ image: 'AAAA', provider: 'gpt-5.4-mini' }), res);
+      assert.equal(res.payload.ok, true);
+      assert.equal(receivedProvider, 'gpt-5.4-mini');
+    } finally {
+      _mockParseImage = null;
+    }
+  });
+
   await t.test('accepts kimi as valid provider', async () => {
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const res = makeRes();
@@ -730,7 +768,7 @@ test('POST /parse timeout override', async (t) => {
     }
   });
 
-  await t.test('default timeout is 60s when timeoutMs not provided', async () => {
+  await t.test('default timeout is 120s when timeoutMs not provided', async () => {
     let capturedTimeout = null;
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const req = makeReq({ image: 'AAAA', provider: 'lm-studio' });
@@ -738,7 +776,7 @@ test('POST /parse timeout override', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      assert.equal(capturedTimeout, 70000); // 60000 + 10000
+      assert.equal(capturedTimeout, 130000); // 120000 + 10000
     } finally {
       _mockParseImage = null;
     }

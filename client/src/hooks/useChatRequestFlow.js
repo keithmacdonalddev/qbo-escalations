@@ -28,6 +28,7 @@ const RESERVED_REQUEST_KEYS = new Set([
   'agentRuntime',
   'imageParserProvider',
   'imageParserModel',
+  'imageParserReasoningEffort',
   'imageParserPromptId',
 ]);
 
@@ -38,6 +39,7 @@ function buildAgentRuntimePayload() {
     agentRuntime,
     imageParserProvider: parserRuntime.provider || undefined,
     imageParserModel: parserRuntime.model || undefined,
+    imageParserReasoningEffort: parserRuntime.reasoningEffort || undefined,
     imageParserPromptId: parserRuntime.provider ? ESCALATION_TEMPLATE_PARSER_ID : undefined,
   };
 }
@@ -283,6 +285,7 @@ export default function useChatRequestFlow({
         agentRuntime: runtimePayload.agentRuntime,
         imageParserProvider: runtimePayload.imageParserProvider,
         imageParserModel: runtimePayload.imageParserModel,
+        imageParserReasoningEffort: runtimePayload.imageParserReasoningEffort,
         imageParserPromptId: runtimePayload.imageParserPromptId,
         ...requestExtras,
       },
@@ -346,6 +349,7 @@ export default function useChatRequestFlow({
         agentRuntime: runtimePayload.agentRuntime,
         imageParserProvider: runtimePayload.imageParserProvider,
         imageParserModel: runtimePayload.imageParserModel,
+        imageParserReasoningEffort: runtimePayload.imageParserReasoningEffort,
         imageParserPromptId: runtimePayload.imageParserPromptId,
       },
       selectedSuccessTitle: 'Retry complete',

@@ -966,6 +966,35 @@ await t.test('chat and retry SSE expose per-request model overrides', async () =
   }
 });
 
+await t.test('chat SSE forwards Codex reasoning items as thinking events', async () => {
+  const previousCodexChat = codex.chat;
+  codex.chat = ({ onThinkingChunk, onChunk, onDone }) => {
+    onThinkingChunk?.('codex reasoning before final');
+    onChunk('codex final');
+    onDone('codex final');
+    return () => {};
+  };
+
+  try {
+    const res = await agent
+      .post('/api/chat')
+      .send({
+        message: 'Codex reasoning stream test',
+        provider: 'gpt-5.5',
+      });
+    assert.equal(res.status, 200);
+
+    const events = parseSseEvents(res.text);
+    const thinkingEvent = events.find((event) => event.event === 'thinking');
+    const chunkEvent = events.find((event) => event.event === 'chunk');
+    assert.ok(thinkingEvent, 'Codex thinking event should be present');
+    assert.ok(chunkEvent, 'Codex chunk event should be present');
+    assert.match(thinkingEvent.data, /codex reasoning before final/);
+  } finally {
+    codex.chat = previousCodexChat;
+  }
+});
+
 await t.test('image chat is rejected and does not create a conversation', async () => {
   const beforeCount = await Conversation.countDocuments({});
   const chatRes = await agent
@@ -1257,19 +1286,19 @@ await t.test('screenshot upload warns when another escalation already has the sa
 
 // ---------- Phase 5: New provider ID acceptance ----------
 
-await t.test('P5: chat accepts claude-sonnet-4-6 as primaryProvider', async () => {
+await t.test('P5: chat accepts claude-opus-4-7 as primaryProvider', async () => {
   const res = await agent
     .post('/api/chat')
-    .send({ message: 'P5 test', primaryProvider: 'claude-sonnet-4-6' })
+    .send({ message: 'P5 test', primaryProvider: 'claude-opus-4-7' })
     .expect(200);
 
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
 });
 
-await t.test('P5: chat accepts gpt-5-mini as primaryProvider', async () => {
+await t.test('P5: chat accepts gpt-5.4-mini as primaryProvider', async () => {
   const res = await agent
     .post('/api/chat')
-    .send({ message: 'P5 test', primaryProvider: 'gpt-5-mini' })
+    .send({ message: 'P5 test', primaryProvider: 'gpt-5.4-mini' })
     .expect(200);
 
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
@@ -1285,13 +1314,25 @@ await t.test('P5: chat rejects invalid provider ID', async () => {
   assert.equal(res.body.code, 'INVALID_PROVIDER');
 });
 
+await t.test('P5: chat rejects removed provider IDs', async () => {
+  for (const retiredProvider of ['claude-sonnet-4-6', 'gpt-5.4-pro', 'gpt-5-mini', 'gpt-5-nano']) {
+    const res = await agent
+      .post('/api/chat')
+      .send({ message: 'retired provider test', primaryProvider: retiredProvider })
+      .expect(400);
+
+    assert.equal(res.body.ok, false);
+    assert.equal(res.body.code, 'INVALID_PROVIDER');
+  }
+});
+
 await t.test('P5: chat fallback works across provider families', async () => {
   const res = await agent
     .post('/api/chat')
     .send({
       message: 'P5 fallback test',
-      primaryProvider: 'claude-sonnet-4-6',
-      fallbackProvider: 'gpt-5-mini',
+      primaryProvider: 'claude-opus-4-7',
+      fallbackProvider: 'gpt-5.4-mini',
       mode: 'fallback',
     })
     .expect(200);
@@ -1302,13 +1343,13 @@ await t.test('P5: chat fallback works across provider families', async () => {
 await t.test('P5: conversation persists new provider IDs', async () => {
   await agent
     .post('/api/chat')
-    .send({ message: 'P5 persist test', primaryProvider: 'claude-sonnet-4-6' })
+    .send({ message: 'P5 persist test', primaryProvider: 'claude-opus-4-7' })
     .expect(200);
 
   const Conversation = require('../src/models/Conversation');
   const conv = await Conversation.findOne({ title: /P5 persist test/ }).lean();
   assert.ok(conv, 'conversation should exist');
-  assert.equal(conv.provider, 'claude-sonnet-4-6');
+  assert.equal(conv.provider, 'claude-opus-4-7');
 });
 
 await t.test('P5: escalation parse accepts new provider IDs', async () => {
@@ -1316,7 +1357,7 @@ await t.test('P5: escalation parse accepts new provider IDs', async () => {
     .post('/api/escalations/parse')
     .send({
       text: 'P5 parse test',
-      provider: 'gpt-5-mini',
+      provider: 'gpt-5.4-mini',
     });
 
   assert.ok([200, 201].includes(res.status));
@@ -1327,7 +1368,7 @@ await t.test('P5: chat retry accepts new provider IDs', async () => {
   // Create a conversation first
   await agent
     .post('/api/chat')
-    .send({ message: 'P5 retry setup', primaryProvider: 'claude-sonnet-4-6' })
+    .send({ message: 'P5 retry setup', primaryProvider: 'claude-opus-4-7' })
     .expect(200);
 
   const Conversation = require('../src/models/Conversation');
@@ -1338,7 +1379,7 @@ await t.test('P5: chat retry accepts new provider IDs', async () => {
     .post('/api/chat/retry')
     .send({
       conversationId: conv._id.toString(),
-      primaryProvider: 'gpt-5-mini',
+      primaryProvider: 'gpt-5.4-mini',
     })
     .expect(200);
 
@@ -1350,7 +1391,7 @@ await t.test('P5: chat parse-escalation accepts new provider IDs', async () => {
     .post('/api/chat/parse-escalation')
     .send({
       text: 'P5 chat parse test',
-      provider: 'claude-sonnet-4-6',
+      provider: 'claude-opus-4-7',
     });
 
   assert.ok([200, 201].includes(res.status));
@@ -1452,7 +1493,7 @@ await t.test('POST /api/chat rejects parallelProviders with 5 providers', async 
     .send({
       message: 'test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6', 'gpt-5-mini', 'claude'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-7', 'gpt-5.4-mini', 'claude'],
     });
 
   assert.equal(res.status, 400);
@@ -1479,7 +1520,7 @@ await t.test('POST /api/chat rejects parallelProviders when mode is not parallel
     .send({
       message: 'test',
       mode: 'single',
-      parallelProviders: ['claude', 'gpt-5-mini'],
+      parallelProviders: ['claude', 'gpt-5.4-mini'],
     });
 
   assert.equal(res.status, 400);
@@ -1493,7 +1534,7 @@ await t.test('POST /api/chat rejects when primaryProvider not in parallelProvide
     .send({
       message: 'test',
       mode: 'parallel',
-      primaryProvider: 'gpt-5-mini',
+      primaryProvider: 'gpt-5.4-mini',
       parallelProviders: ['claude', 'gpt-5.5'],
     });
 
@@ -1509,7 +1550,7 @@ await t.test('POST /api/chat parallel mode without parallelProviders still works
       message: 'test legacy parallel',
       mode: 'parallel',
       provider: 'claude',
-      fallbackProvider: 'gpt-5-mini',
+      fallbackProvider: 'gpt-5.4-mini',
     });
 
   assert.equal(res.status, 200);
@@ -1528,7 +1569,7 @@ await t.test('parallel accept rejects provider not in requestedProviders for 3-w
     .send({
       message: 'accept reject test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'gpt-5.5', 'claude-sonnet-4-6'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-7'],
     });
   assert.equal(chatRes.status, 200);
 
@@ -1538,12 +1579,12 @@ await t.test('parallel accept rejects provider not in requestedProviders for 3-w
   const doneEvent = events.find((e) => e.event === 'done');
   const doneData = JSON.parse(doneEvent.data);
 
-  // Try to accept gpt-5-mini which was NOT in the parallelProviders
+  // Try to accept gpt-5.4-mini which was NOT in the parallelProviders
   const acceptRes = await agent
     .post(`/api/chat/parallel/${doneData.turnId}/accept`)
     .send({
       conversationId: startData.conversationId,
-      provider: 'gpt-5-mini',
+      provider: 'gpt-5.4-mini',
     });
   assert.equal(acceptRes.status, 400);
   assert.equal(acceptRes.body.code, 'INVALID_PROVIDER');
@@ -1555,7 +1596,7 @@ await t.test('POST /api/chat rejects duplicate parallelProviders', async () => {
     .send({
       message: 'test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'claude', 'gpt-5-mini'],
+      parallelProviders: ['claude', 'claude', 'gpt-5.4-mini'],
     });
 
   assert.equal(res.status, 400);

@@ -1,0 +1,453 @@
+/* Inline event-stream panel — replaces the older floating popout. Rendered
+   inside the analyst workbench body when an event-stream tab is active, so
+   no portal, no anchor positioning, no caret. Fills the available space. */
+.v5-stage-log-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #07080a;
+  color: #cfd2d6;
+  overflow: hidden;
+}
+
+/* Per-stage accent stripe along the top of the panel. */
+.v5-stage-log-panel--stage-parser { box-shadow: inset 0 2px 0 0 rgba(83, 145, 255, 0.85); }
+.v5-stage-log-panel--stage-inv { box-shadow: inset 0 2px 0 0 rgba(180, 130, 255, 0.85); }
+.v5-stage-log-panel--stage-triage { box-shadow: inset 0 2px 0 0 rgba(255, 180, 90, 0.85); }
+.v5-stage-log-panel--stage-main { box-shadow: inset 0 2px 0 0 rgba(82, 198, 138, 0.85); }
+
+.v5-stage-log-panel__sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--v5-border, var(--line));
+  background: var(--v5-panel-strong, #14171b);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  flex: 0 0 auto;
+}
+
+.v5-stage-log-panel__title.v5-stage-log-panel__title {
+  font-size: 12px;
+  font-weight: 600;
+  background: none !important;
+  background-image: none !important;
+  background-clip: initial !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: #b8bcc1 !important;
+  color: #b8bcc1 !important;
+  animation: none !important;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.v5-stage-log-panel__meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.v5-stage-log-panel__status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--v5-muted);
+}
+
+.v5-stage-log-panel__status.is-running,
+.v5-stage-log-panel__status.is-pending {
+  background: rgba(83, 145, 255, 0.16);
+  color: #79b1ff;
+}
+
+.v5-stage-log-panel__status.is-completed,
+.v5-stage-log-panel__status.is-success,
+.v5-stage-log-panel__status.is-done,
+.v5-stage-log-panel__status.is-ok {
+  background: rgba(82, 198, 138, 0.16);
+  color: #6cd9a3;
+}
+
+.v5-stage-log-panel__status.is-failed,
+.v5-stage-log-panel__status.is-error {
+  background: rgba(229, 91, 91, 0.18);
+  color: #ff7a7a;
+}
+
+.v5-stage-log-panel__source {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--v5-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.v5-stage-log-panel__counter {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #cfd2d6;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+}
+
+/* Progress bar sits directly under the sub-header — same accent colour as
+   the per-stage stripe on top of the panel. Indeterminate when no historical
+   denominator exists; otherwise fills to (live / estimate) clamped at 95%
+   until the stage actually completes. */
+.v5-stage-log-panel__progress {
+  position: relative;
+  height: 3px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.v5-stage-log-panel__progress span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: #5391ff;
+  transition: width 220ms ease-out;
+}
+
+.v5-stage-log-panel--stage-inv .v5-stage-log-panel__progress span { background: #b482ff; }
+.v5-stage-log-panel--stage-triage .v5-stage-log-panel__progress span { background: #ffb45a; }
+.v5-stage-log-panel--stage-main .v5-stage-log-panel__progress span { background: #52c68a; }
+
+.v5-stage-log-panel__progress.is-complete span {
+  background: #52c68a;
+}
+
+.v5-stage-log-panel__progress.is-failed span {
+  background: #e55b5b;
+}
+
+.v5-stage-log-panel__progress.is-indeterminate span {
+  width: 30%;
+  background: linear-gradient(90deg, rgba(83, 145, 255, 0.2), #5391ff, rgba(83, 145, 255, 0.2));
+  animation: v5-stage-log-panel-indeterminate 1.4s ease-in-out infinite;
+  transition: none;
+}
+
+@keyframes v5-stage-log-panel-indeterminate {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(120%); }
+  100% { transform: translateX(220%); }
+}
+
+/* UI-category events (popup open/close, replay-skipped) are rendered for
+   debugging but visually de-emphasised so operators can tell at a glance
+   that they don't represent agent work and aren't part of the counter. */
+.v5-stage-log-panel__line--ui {
+  opacity: 0.45;
+  font-style: italic;
+}
+
+.v5-stage-log-panel__line--ui .v5-stage-log-panel__kind::after {
+  content: ' (ui)';
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--v5-dim);
+  margin-left: 4px;
+}
+
+.v5-stage-log-panel__ui-tally {
+  font-size: 10px;
+  color: var(--v5-dim);
+  font-style: italic;
+  margin-left: 6px;
+}
+
+/* Terminal output area — flat near-black background, monospace, colored text. */
+.v5-stage-log-panel__thread {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: #0a0b0d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: #b8bcc1;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d31 transparent;
+}
+
+.v5-stage-log-panel__thread::-webkit-scrollbar { width: 8px; }
+.v5-stage-log-panel__thread::-webkit-scrollbar-thumb { background: #2a2d31; border-radius: 4px; }
+.v5-stage-log-panel__thread::-webkit-scrollbar-track { background: transparent; }
+
+.v5-stage-log-panel__line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 1px 4px;
+  border-left: 2px solid transparent;
+  margin-left: -4px;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.v5-stage-log-panel__line:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-left-color: rgba(255, 255, 255, 0.15);
+}
+
+.v5-stage-log-panel__time { flex: 0 0 auto; color: #5b6168; font-family: inherit; }
+.v5-stage-log-panel__kind { flex: 0 0 auto; font-family: inherit; font-weight: 500; }
+.v5-stage-log-panel__sep { color: #4a4e54; flex: 0 0 auto; }
+.v5-stage-log-panel__msg { flex: 1 1 auto; min-width: 0; color: inherit; font-family: inherit; }
+
+.v5-stage-log-panel__line--dim-cyan .v5-stage-log-panel__kind { color: #6494a8; }
+.v5-stage-log-panel__line--dim-cyan .v5-stage-log-panel__msg { color: #8aa4ae; }
+.v5-stage-log-panel__line--cyan .v5-stage-log-panel__kind { color: #7ec6db; }
+.v5-stage-log-panel__line--cyan .v5-stage-log-panel__msg { color: #a8c8d1; }
+.v5-stage-log-panel__line--green .v5-stage-log-panel__kind { color: #7fdaaf; }
+.v5-stage-log-panel__line--green .v5-stage-log-panel__msg { color: #aacdbb; }
+.v5-stage-log-panel__line--amber .v5-stage-log-panel__kind { color: #f2c46b; }
+.v5-stage-log-panel__line--amber .v5-stage-log-panel__msg { color: #d4b88a; }
+.v5-stage-log-panel__line--red .v5-stage-log-panel__kind { color: #ff8a8a; }
+.v5-stage-log-panel__line--red .v5-stage-log-panel__msg { color: #d49494; }
+.v5-stage-log-panel__line--dim .v5-stage-log-panel__kind { color: #7a808a; }
+.v5-stage-log-panel__line--dim .v5-stage-log-panel__msg { color: #888d96; }
+
+.v5-stage-log-panel__empty {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px 18px;
+  color: #5b6168;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+  background: #0a0b0d;
+}
+
+.v5-stage-log-panel__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  border-top: 1px solid var(--v5-border, var(--line));
+  background: var(--v5-panel-strong, #14171b);
+  color: var(--v5-dim);
+  font-size: 11px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  flex: 0 0 auto;
+}
+
+.v5-stage-log-panel__jump {
+  appearance: none;
+  border: 1px solid var(--v5-border-strong, var(--line-strong));
+  background: transparent;
+  color: var(--v5-ink);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.v5-stage-log-panel__jump:hover,
+.v5-stage-log-panel__jump:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  outline: none;
+}
+
+.v5-stage-log-panel__thinking-group {
+  display: block;
+  padding: 4px 8px;
+}
+
+.v5-stage-log-panel__thinking-group > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  user-select: none;
+}
+
+.v5-stage-log-panel__thinking-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.v5-stage-log-panel__thinking-group > summary::before {
+  content: '▸';
+  color: #6494a8;
+  font-size: 10px;
+  display: inline-block;
+  width: 10px;
+  transition: transform 120ms ease;
+}
+
+.v5-stage-log-panel__thinking-group[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.v5-stage-log-panel__thinking-body {
+  margin: 6px 0 4px 18px;
+  padding: 8px 10px;
+  background: rgba(100, 148, 168, 0.08);
+  border-left: 2px solid #6494a8;
+  border-radius: 4px;
+  color: #b8c8cf;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* Workbench header tab strip — sits between the title and actions.
+   Both selectors are duplicated to raise specificity over the legacy
+   `.v5-analyst-workbench__header div:first-child` rule in chat-v5.css that
+   used to style the old title wrapper. */
+.v5-workbench-tabs,
+.v5-analyst-workbench__header div.v5-workbench-tabs {
+  display: flex;
+  align-items: flex-end;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  padding-top: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d31 transparent;
+}
+
+.v5-workbench-tabs::-webkit-scrollbar { height: 4px; }
+.v5-workbench-tabs::-webkit-scrollbar-thumb { background: #2a2d31; border-radius: 4px; }
+.v5-workbench-tabs::-webkit-scrollbar-track { background: transparent; }
+
+.v5-workbench-tab {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  min-width: 132px;
+  padding: 0 14px;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.045);
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--v5-muted, #b8bcc1) 82%, transparent);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  position: relative;
+  margin-bottom: -1px;
+  transition:
+    color 140ms ease,
+    background 140ms ease;
+}
+
+.v5-workbench-tab:first-child {
+  border-left: 0;
+}
+
+.v5-workbench-tab::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 999px 999px 0 0;
+  background: transparent;
+  transform: scaleX(0.38);
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.v5-workbench-tab:hover {
+  color: var(--v5-ink, #e6e8eb);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.v5-workbench-tab.is-active {
+  color: var(--v5-ink, #e6e8eb);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(9, 14, 22, 0.56));
+}
+
+.v5-workbench-tab.is-active::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+/* Doubled class to win specificity against the legacy
+   `.v5-analyst-workbench__header span` selector (0,1,1) which would
+   otherwise force 10px uppercase ink color on every span in the header. */
+.v5-workbench-tab__label.v5-workbench-tab__label {
+  font: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Doubled selector to beat `.v5-analyst-workbench__header span` (0,1,1). */
+.v5-workbench-tab__close.v5-workbench-tab__close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: color-mix(in srgb, var(--v5-muted, #8a8f97) 78%, transparent);
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+  margin: 0 -5px 0 0;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
+}
+
+.v5-workbench-tab__close:hover,
+.v5-workbench-tab__close:focus-visible {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--v5-ink, #e6e8eb);
+  outline: none;
+}
+
+.v5-workbench-tab--accent-parser.is-active::after { background: rgba(83, 145, 255, 0.9); }
+.v5-workbench-tab--accent-inv.is-active::after { background: rgba(180, 130, 255, 0.9); }
+.v5-workbench-tab--accent-triage.is-active::after { background: rgba(255, 180, 90, 0.9); }
+.v5-workbench-tab--accent-main.is-active::after { background: rgba(82, 198, 138, 0.9); }

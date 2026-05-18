@@ -1,0 +1,1164 @@
+<!doctype html>
+<!--
+  ============================================================================
+  INTERCOM V3 — "THE COCKPIT"  (skeleton-first save; iterating)
+  ============================================================================
+
+  LAYOUTS CONSIDERED
+  ------------------
+  1) Vertical stack (V2 default). Rejected — exactly what lost V2.
+  2) Lateral split (left chat / right context). Rejected — triage gets buried
+     under chat scroll on the left, same disease.
+  3) Sectored quadrants (parser / triage / INV / chat). Rejected — equal weight
+     for unequal-importance things; parser doesn't deserve a quadrant after
+     commit, and quadrants don't scale to new workflows.
+  4) Focal-center "stage" with orbiting agent satellites. Considered — fun but
+     fragile; the stage gets cramped at viewport widths below 1400px.
+  5) PERSISTENT RAILS + LIVE CANVAS  ← CHOSEN
+     - Left rail  = workflow chassis (escalation today; trip-planner, INV-start,
+       email-composer tomorrow). One slot per workflow.
+     - Top strip  = parser pill cluster (collapses to 1 line post-commit) + the
+       always-on agent status dots (parser / INV / triage / analyst).
+     - Right rail = TRIAGE HUD (pinned, never scrolls, never replaced) + INV
+       result card stacked underneath. This is the "primary working surface
+       reference" the operator never loses.
+     - Center    = the conversation. The expert speaks here. Scroll lives here
+       and ONLY here, and only inside the chat transcript — nothing critical
+       leaves the viewport when this scrolls.
+     - Floating  = webcam dock (corner pip, expandable to full-bleed modal
+       with derotate/flip/timer/cancel-to-upload).
+
+  WHY THIS CHASSIS
+  ----------------
+  The rails are stable real estate that any future workflow inherits.
+  An INV-start workflow swaps the center pane and the right HUD becomes
+  "ledger context." A trip-planner swaps in itinerary. The shape doesn't move,
+  the contents do. Operator muscle memory carries.
+
+  THREE UNIQUE UNEXPECTED FEATURES (the "oh — that's clever" list)
+  ----------------------------------------------------------------
+  1) TRIAGE SPINE — the right rail isn't just a card, it's a vertical "spine"
+     that tracks confidence over the conversation. Every time the analyst
+     says something that confirms or revises triage, a tick is added to the
+     spine with a tiny diff badge ("severity P2→P1", "category confirmed").
+     Operator sees the entire reasoning history at a glance without scrolling
+     chat back.
+
+  2) HOTKEY HALO — hover any agent dot and a radial halo of single-key
+     actions appears (R=re-run, S=summarise, C=copy output, T=trust-and-pin).
+     No menu hunting. Power users fly. New users learn by hovering.
+
+  3) WEBCAM-AS-LOUPE — webcam isn't a separate page. It lives as a dockable
+     loupe in the corner. Click any field in the parsed template that looks
+     wrong and the loupe jumps to that region of the captured frame for
+     re-shoot or verify. Webcam state has explicit cancel-back-to-upload,
+     auto-derotate for portrait phone shots, grid + level, 3-2-1 timer, and
+     a "good light" meter.
+
+  4) BONUS — LIVE DRAFT TRAY: as the analyst streams, the operator sees a
+     parallel "reply draft" assembling itself in a slim tray under the chat
+     composer, with copy-to-clipboard at every paragraph break. The operator
+     never has to manually compose the response to the phone agent.
+
+  5) BONUS — TIME-TO-OPERATOR meter in the top strip: ticks up from screenshot
+     drop to "you can answer the phone now." Makes the operator's value
+     legible to themselves and to leadership.
+
+  EVERY ELEMENT JUSTIFIED (one-line each, internal)
+  -------------------------------------------------
+  - Left rail workflows  : the chassis the page promises to be.
+  - Top agent dots       : at-a-glance health of every agent without hunting.
+  - Parser pill cluster  : keeps the 9 fields one click away, but small.
+  - Right TRIAGE HUD     : the primary signal, always visible.
+  - Triage spine ticks   : history of reasoning, no chat scrollback needed.
+  - INV match card       : prior-case context next to triage.
+  - Center chat          : the expert speaking; only place scroll is allowed.
+  - Live draft tray      : turns analyst output into phone-ready response.
+  - Webcam loupe         : retake/verify any field without leaving the case.
+  - Time-to-operator     : the operator's "how fast was I" feedback loop.
+  - Hotkey halo          : zero-menu power moves on every agent.
+  ============================================================================
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Intercom V3 — Escalation Cockpit</title>
+  <style>
+    :root{
+      --bg-0:#0a0c10;
+      --bg-1:#10131a;
+      --bg-2:#161a24;
+      --bg-3:#1c2130;
+      --line:#222838;
+      --line-2:#2a3145;
+      --ink-0:#e8ecf5;
+      --ink-1:#aab2c6;
+      --ink-2:#6c7793;
+      --ink-3:#475066;
+      --brand:#6aa6ff;
+      --brand-2:#9bc4ff;
+      --good:#5fd0a6;
+      --warn:#f5c26b;
+      --bad:#ff6f8a;
+      --p1:#ff6f8a;
+      --p2:#f5a06b;
+      --p3:#f5c26b;
+      --p4:#5fd0a6;
+      --halo:rgba(106,166,255,.18);
+      --shadow:0 12px 40px rgba(0,0,0,.45);
+      --radius:14px;
+      --radius-sm:10px;
+      --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+      --sans:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;background:var(--bg-0);color:var(--ink-0);
+      font-family:var(--sans);font-size:13px;line-height:1.45;
+      overflow:hidden; /* NO PAGE SCROLL — chassis rule */
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(106,166,255,.06), transparent 60%),
+        radial-gradient(900px 500px at 110% 110%, rgba(95,208,166,.04), transparent 60%),
+        var(--bg-0);
+    }
+    button{font-family:inherit;color:inherit;background:none;border:0;cursor:pointer}
+    .app{
+      display:grid;
+      grid-template-columns: 220px 1fr 360px;
+      grid-template-rows: 52px 1fr;
+      grid-template-areas:
+        "rail   topstrip topstrip"
+        "rail   center   right";
+      height:100vh;
+      gap:0;
+    }
+    /* ---------- LEFT RAIL (workflow chassis) ---------- */
+    .rail{
+      grid-area:rail;background:var(--bg-1);border-right:1px solid var(--line);
+      display:flex;flex-direction:column;padding:14px 12px;gap:6px;
+    }
+    .rail .brand{
+      display:flex;align-items:center;gap:10px;padding:6px 8px 14px;
+    }
+    .rail .brand-mark{
+      width:28px;height:28px;border-radius:8px;
+      background:linear-gradient(135deg,#6aa6ff,#9bc4ff);
+      position:relative;box-shadow:0 6px 18px rgba(106,166,255,.25);
+    }
+    .rail .brand-mark::after{
+      content:"";position:absolute;inset:6px;border-radius:5px;
+      background:radial-gradient(circle at 30% 30%, #fff8, transparent 50%);
+    }
+    .rail .brand-name{font-weight:600;letter-spacing:.2px}
+    .rail .brand-sub{color:var(--ink-2);font-size:11px}
+
+    .rail-group-label{
+      font-size:10px;text-transform:uppercase;letter-spacing:.12em;
+      color:var(--ink-3);padding:14px 8px 6px;
+    }
+    .wf{
+      display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;
+      color:var(--ink-1);position:relative;cursor:pointer;user-select:none;
+    }
+    .wf:hover{background:var(--bg-2);color:var(--ink-0)}
+    .wf.active{
+      background:linear-gradient(180deg, rgba(106,166,255,.10), rgba(106,166,255,.04));
+      color:var(--ink-0);
+      box-shadow: inset 0 0 0 1px rgba(106,166,255,.18);
+    }
+    .wf.active::before{
+      content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;
+      background:linear-gradient(180deg,var(--brand),var(--brand-2));
+    }
+    .wf .ico{
+      width:18px;height:18px;border-radius:5px;background:var(--bg-3);
+      display:grid;place-items:center;color:var(--ink-1);font-size:11px;
+    }
+    .wf.active .ico{background:rgba(106,166,255,.18);color:var(--brand-2)}
+    .wf .label{flex:1}
+    .wf .kbd{
+      font-family:var(--mono);font-size:10px;color:var(--ink-3);
+      padding:1px 5px;border:1px solid var(--line-2);border-radius:4px;
+    }
+    .wf.stub .label{color:var(--ink-3)}
+    .wf.stub .ico{opacity:.5}
+    .wf .new{
+      font-size:9px;letter-spacing:.1em;color:var(--bg-0);background:var(--good);
+      padding:2px 5px;border-radius:4px;text-transform:uppercase;font-weight:700;
+    }
+
+    .rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:8px;border-top:1px solid var(--line)}
+    .me{
+      display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:10px;
+    }
+    .me .avatar{
+      width:28px;height:28px;border-radius:50%;
+      background:linear-gradient(135deg,#3a4b6e,#1f2a44);
+      display:grid;place-items:center;font-weight:600;color:#cfd6e6;font-size:11px;
+    }
+    .me .who{font-size:12px}
+    .me .role{color:var(--ink-3);font-size:11px}
+
+    /* ---------- TOP STRIP ---------- */
+    .topstrip{
+      grid-area:topstrip;background:var(--bg-1);border-bottom:1px solid var(--line);
+      display:flex;align-items:center;padding:0 16px;gap:14px;
+    }
+    .case-id{
+      font-family:var(--mono);font-size:11px;color:var(--ink-2);
+      padding:4px 8px;border:1px solid var(--line-2);border-radius:6px;
+    }
+    .case-id b{color:var(--ink-0);font-weight:600}
+    .parser-pills{
+      display:flex;gap:6px;align-items:center;flex:1;overflow:hidden;
+    }
+    .parser-pills .lead{
+      font-size:11px;color:var(--ink-2);margin-right:4px;
+    }
+    .ppill{
+      font-size:11px;color:var(--ink-1);background:var(--bg-2);
+      padding:4px 8px;border-radius:999px;border:1px solid var(--line);
+      white-space:nowrap;cursor:pointer;transition:all .15s;
+      display:inline-flex;align-items:center;gap:6px;
+    }
+    .ppill:hover{border-color:var(--brand);color:var(--ink-0)}
+    .ppill .k{color:var(--ink-3);font-size:10px;text-transform:uppercase;letter-spacing:.06em}
+    .ppill .v{color:var(--ink-0)}
+    .ppill.warn{border-color:rgba(245,194,107,.4)}
+    .ppill.warn .v{color:var(--warn)}
+    .parser-expand{
+      font-size:11px;color:var(--ink-2);padding:4px 8px;border-radius:6px;
+      border:1px dashed var(--line-2);
+    }
+    .parser-expand:hover{color:var(--ink-0);border-color:var(--brand)}
+
+    .agent-dots{display:flex;gap:8px;align-items:center;padding-left:14px;border-left:1px solid var(--line)}
+    .adot{
+      position:relative;display:flex;align-items:center;gap:6px;
+      padding:4px 8px;border-radius:8px;cursor:pointer;
+    }
+    .adot:hover{background:var(--bg-2)}
+    .adot .d{
+      width:8px;height:8px;border-radius:50%;background:var(--ink-3);
+      box-shadow:0 0 0 0 transparent;
+    }
+    .adot.run .d{background:var(--brand);animation:pulse 1.4s infinite}
+    .adot.done .d{background:var(--good)}
+    .adot.idle .d{background:var(--ink-3)}
+    .adot .n{font-size:11px;color:var(--ink-1)}
+    .adot.done .n{color:var(--ink-0)}
+    @keyframes pulse{
+      0%{box-shadow:0 0 0 0 rgba(106,166,255,.6)}
+      80%{box-shadow:0 0 0 8px rgba(106,166,255,0)}
+      100%{box-shadow:0 0 0 0 rgba(106,166,255,0)}
+    }
+    /* hotkey halo */
+    .halo{
+      position:absolute;top:-6px;left:50%;transform:translate(-50%,-100%);
+      display:none;background:var(--bg-3);border:1px solid var(--line-2);
+      border-radius:10px;padding:6px;gap:4px;box-shadow:var(--shadow);z-index:50;
+    }
+    .halo b{
+      display:inline-block;font-family:var(--mono);font-size:10px;
+      background:var(--bg-2);color:var(--ink-1);
+      padding:3px 6px;border-radius:4px;border:1px solid var(--line);
+    }
+    .adot:hover .halo{display:flex}
+
+    .ttro{
+      margin-left:auto;display:flex;align-items:center;gap:8px;
+      font-size:11px;color:var(--ink-2);
+      padding:4px 10px;border:1px solid var(--line-2);border-radius:8px;
+    }
+    .ttro b{font-family:var(--mono);color:var(--good)}
+
+    /* ---------- CENTER (conversation) ---------- */
+    .center{
+      grid-area:center;display:flex;flex-direction:column;min-width:0;
+      background:var(--bg-0);
+    }
+    .stage-head{
+      display:flex;align-items:center;gap:12px;padding:14px 22px 10px;
+    }
+    .analyst{
+      display:flex;align-items:center;gap:10px;
+    }
+    .analyst .face{
+      width:36px;height:36px;border-radius:50%;
+      background:
+        radial-gradient(circle at 35% 35%, #ffd5a3 0 35%, transparent 36%),
+        linear-gradient(135deg,#4a3a64,#26314d);
+      box-shadow:0 0 0 2px var(--bg-0), 0 0 0 3px var(--good);
+      position:relative;
+    }
+    .analyst .face::after{
+      content:"";position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;border-radius:50%;
+      background:var(--good);border:2px solid var(--bg-0);
+    }
+    .analyst .who{font-weight:600}
+    .analyst .role{font-size:11px;color:var(--ink-2)}
+    .stage-meta{margin-left:auto;display:flex;gap:8px;align-items:center}
+    .chip{
+      font-size:11px;color:var(--ink-1);background:var(--bg-2);
+      padding:4px 8px;border-radius:6px;border:1px solid var(--line);
+    }
+
+    .chat{
+      flex:1;overflow:auto;padding:6px 22px 16px;
+      scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;
+    }
+    .chat::-webkit-scrollbar{width:8px}
+    .chat::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:4px}
+
+    .turn{margin:14px 0;display:flex;gap:12px;align-items:flex-start;animation:fadein .35s ease}
+    @keyframes fadein{from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:none}}
+    .turn .av{
+      width:28px;height:28px;border-radius:50%;flex:none;
+      background:linear-gradient(135deg,#4a3a64,#26314d);
+      display:grid;place-items:center;font-size:11px;color:#cfd6e6;font-weight:600;
+    }
+    .turn.system .av{background:linear-gradient(135deg,#28324a,#1a2236);color:var(--ink-2)}
+    .turn .body{flex:1;min-width:0}
+    .turn .meta{font-size:11px;color:var(--ink-2);margin-bottom:4px}
+    .turn .meta b{color:var(--ink-0);font-weight:600}
+    .turn .bubble{
+      background:var(--bg-2);border:1px solid var(--line);
+      border-radius:12px;padding:10px 12px;color:var(--ink-0);
+      max-width:680px;
+    }
+    .turn.system .bubble{
+      background:transparent;border:1px dashed var(--line-2);
+      color:var(--ink-1);font-size:12px;
+    }
+    .turn .bubble code{
+      font-family:var(--mono);font-size:12px;
+      background:var(--bg-3);padding:1px 5px;border-radius:4px;color:var(--brand-2);
+    }
+    .turn.streaming .bubble::after{
+      content:"";display:inline-block;width:6px;height:14px;background:var(--brand);
+      vertical-align:-2px;margin-left:2px;animation:caret 1s steps(2) infinite;
+    }
+    @keyframes caret{50%{opacity:0}}
+
+    .composer{
+      border-top:1px solid var(--line);background:var(--bg-1);
+      padding:10px 22px 14px;display:flex;flex-direction:column;gap:8px;
+    }
+    .draft-tray{
+      background:var(--bg-2);border:1px solid var(--line);
+      border-radius:10px;padding:8px 10px;
+      display:flex;align-items:center;gap:10px;
+      font-size:12px;color:var(--ink-1);
+    }
+    .draft-tray .lab{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)}
+    .draft-tray .txt{flex:1;color:var(--ink-0);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .draft-tray button{
+      font-size:11px;color:var(--brand-2);padding:4px 8px;border-radius:6px;
+      border:1px solid var(--line-2);
+    }
+    .draft-tray button:hover{border-color:var(--brand);background:rgba(106,166,255,.06)}
+
+    .composer-row{
+      display:flex;align-items:center;gap:8px;
+      background:var(--bg-2);border:1px solid var(--line);border-radius:12px;padding:6px 8px;
+    }
+    .composer-row input{
+      flex:1;background:transparent;border:0;color:var(--ink-0);font-size:13px;outline:none;
+      padding:8px;font-family:inherit;
+    }
+    .composer-row .send{
+      background:var(--brand);color:#0a0c10;font-weight:600;
+      padding:7px 12px;border-radius:8px;font-size:12px;
+    }
+    .composer-row .iconbtn{
+      width:32px;height:32px;border-radius:8px;display:grid;place-items:center;
+      color:var(--ink-1);border:1px solid var(--line);
+    }
+    .composer-row .iconbtn:hover{color:var(--ink-0);border-color:var(--brand)}
+
+    /* ---------- RIGHT RAIL (TRIAGE HUD + INV) ---------- */
+    .right{
+      grid-area:right;background:var(--bg-1);border-left:1px solid var(--line);
+      display:flex;flex-direction:column;min-height:0;
+    }
+    .hud{
+      padding:14px 16px;border-bottom:1px solid var(--line);
+      display:flex;flex-direction:column;gap:10px;
+      background:
+        linear-gradient(180deg, rgba(106,166,255,.05), transparent 70%),
+        var(--bg-1);
+    }
+    .hud-head{display:flex;align-items:center;gap:8px}
+    .hud-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-2)}
+    .hud-by{margin-left:auto;font-size:10px;color:var(--ink-3)}
+    .hud-by b{color:var(--ink-1);font-weight:500}
+
+    .triage-row{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center}
+    .sev{
+      font-family:var(--mono);font-weight:700;font-size:13px;letter-spacing:.04em;
+      padding:6px 10px;border-radius:8px;color:#0a0c10;
+    }
+    .sev.p1{background:var(--p1)}
+    .sev.p2{background:var(--p2)}
+    .sev.p3{background:var(--p3)}
+    .sev.p4{background:var(--p4)}
+    .cat{
+      font-size:12px;color:var(--ink-0);font-weight:600;
+    }
+    .cat small{display:block;color:var(--ink-2);font-weight:400;font-size:10px;letter-spacing:.04em;text-transform:uppercase}
+    .conf{
+      font-family:var(--mono);font-size:11px;color:var(--good);
+      padding:3px 7px;border:1px solid rgba(95,208,166,.3);border-radius:6px;
+    }
+
+    .triage-line{
+      font-size:12.5px;color:var(--ink-0);
+      padding:8px 10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+    }
+    .triage-line .lab{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3);margin-bottom:2px}
+    .triage-line b{color:var(--brand-2);font-weight:600}
+
+    .missing{
+      display:flex;gap:6px;flex-wrap:wrap;
+    }
+    .miss-pill{
+      font-size:11px;color:var(--warn);background:rgba(245,194,107,.08);
+      padding:3px 8px;border-radius:999px;border:1px solid rgba(245,194,107,.25);
+    }
+
+    /* Triage SPINE — confirmation history */
+    .spine{
+      padding:12px 16px;border-bottom:1px solid var(--line);
+      display:flex;flex-direction:column;gap:6px;
+    }
+    .spine-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-2)}
+    .spine-list{display:flex;flex-direction:column;gap:4px;position:relative;padding-left:14px;}
+    .spine-list::before{
+      content:"";position:absolute;left:4px;top:6px;bottom:6px;width:2px;background:var(--line-2);border-radius:2px;
+    }
+    .tick{
+      position:relative;font-size:11.5px;color:var(--ink-1);padding:2px 0 2px 4px;
+    }
+    .tick::before{
+      content:"";position:absolute;left:-13px;top:6px;width:8px;height:8px;border-radius:50%;
+      background:var(--bg-1);border:2px solid var(--brand);
+    }
+    .tick.confirm::before{background:var(--good);border-color:var(--good)}
+    .tick.revise::before{background:var(--warn);border-color:var(--warn)}
+    .tick .diff{
+      font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-left:6px;
+    }
+
+    /* INV card */
+    .inv{
+      padding:12px 16px;display:flex;flex-direction:column;gap:8px;
+      flex:1;min-height:0;overflow:auto;
+    }
+    .inv::-webkit-scrollbar{width:6px}
+    .inv::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:3px}
+    .inv-head{display:flex;align-items:center;gap:8px}
+    .inv-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-2)}
+    .inv-count{font-size:10px;color:var(--ink-3);margin-left:auto}
+    .inv-card{
+      background:var(--bg-2);border:1px solid var(--line);border-radius:10px;
+      padding:10px;display:flex;flex-direction:column;gap:4px;cursor:pointer;
+      transition:all .15s;
+    }
+    .inv-card:hover{border-color:var(--brand)}
+    .inv-card .id{font-family:var(--mono);font-size:12px;color:var(--brand-2)}
+    .inv-card .ti{font-size:12px;color:var(--ink-0)}
+    .inv-card .me{font-size:10px;color:var(--ink-3);display:flex;gap:8px}
+    .inv-card .me b{color:var(--ink-1);font-weight:500}
+
+    /* ---------- WEBCAM LOUPE (floating PiP + modal) ---------- */
+    .loupe{
+      position:fixed;right:20px;bottom:20px;width:240px;height:180px;
+      background:#000;border:1px solid var(--line-2);border-radius:14px;overflow:hidden;
+      box-shadow:var(--shadow);z-index:60;display:flex;flex-direction:column;
+      transition:all .25s ease;
+    }
+    .loupe.hidden{display:none}
+    .loupe-head{
+      display:flex;align-items:center;gap:6px;padding:6px 8px;
+      background:rgba(0,0,0,.55);position:absolute;top:0;left:0;right:0;z-index:2;
+    }
+    .loupe-dot{width:6px;height:6px;border-radius:50%;background:var(--bad);animation:pulse 1.6s infinite}
+    .loupe-lbl{font-size:10px;color:#fff;text-transform:uppercase;letter-spacing:.1em}
+    .loupe-x{margin-left:auto;color:#fff;font-size:12px;padding:2px 6px;border-radius:4px}
+    .loupe-x:hover{background:rgba(255,255,255,.1)}
+    .loupe-body{
+      flex:1;position:relative;
+      background:
+        repeating-linear-gradient(45deg, #111 0 10px, #181818 10px 20px);
+    }
+    .loupe-frame{
+      position:absolute;inset:14% 18%;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0)),
+        #2a2f3a;
+      border-radius:4px;
+      transform:rotate(-2deg);
+    }
+    .loupe-foot{
+      position:absolute;bottom:0;left:0;right:0;padding:6px 8px;
+      background:rgba(0,0,0,.55);display:flex;gap:6px;align-items:center;
+    }
+    .loupe-foot button{
+      font-size:10px;color:#fff;padding:3px 6px;border-radius:4px;
+      background:rgba(255,255,255,.08);
+    }
+    .loupe-foot button:hover{background:rgba(255,255,255,.18)}
+    .loupe-foot .grow{flex:1}
+
+    .webcam-modal{
+      position:fixed;inset:0;background:rgba(5,7,12,.86);backdrop-filter:blur(8px);
+      z-index:100;display:none;align-items:center;justify-content:center;
+    }
+    .webcam-modal.open{display:flex;animation:fadein .25s}
+    .wc-shell{
+      width:min(960px,92vw);background:var(--bg-1);border:1px solid var(--line-2);
+      border-radius:18px;overflow:hidden;box-shadow:var(--shadow);
+      display:grid;grid-template-columns: 1fr 280px;grid-template-rows:auto 1fr auto;
+      grid-template-areas:
+        "head head"
+        "view side"
+        "foot foot";
+      max-height:90vh;
+    }
+    .wc-head{
+      grid-area:head;display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line);
+    }
+    .wc-head .t{font-weight:600}
+    .wc-head .s{font-size:11px;color:var(--ink-2)}
+    .wc-back{
+      margin-left:auto;font-size:11px;color:var(--ink-1);padding:6px 10px;
+      border-radius:8px;border:1px solid var(--line-2);
+      display:flex;align-items:center;gap:6px;
+    }
+    .wc-back:hover{color:var(--ink-0);border-color:var(--brand)}
+    .wc-close{
+      font-size:14px;padding:6px 10px;color:var(--ink-1);border-radius:8px;
+    }
+    .wc-close:hover{color:var(--ink-0);background:var(--bg-2)}
+    .wc-view{
+      grid-area:view;background:#000;position:relative;min-height:420px;
+      display:grid;place-items:center;overflow:hidden;
+    }
+    .wc-stage{
+      position:relative;width:78%;aspect-ratio:4/3;background:
+        repeating-linear-gradient(45deg,#111 0 14px,#161616 14px 28px);
+      border-radius:8px;overflow:hidden;
+      transition:transform .4s cubic-bezier(.5,.1,.2,1);
+    }
+    .wc-stage.rot-90{transform:rotate(-90deg) scale(.78)}
+    .wc-stage.rot-180{transform:rotate(180deg)}
+    .wc-stage.rot-270{transform:rotate(90deg) scale(.78)}
+    .wc-stage.flipped{transform:scaleX(-1)}
+    .wc-doc{
+      position:absolute;inset:8% 18%;background:
+        linear-gradient(180deg,#fafafa,#e9eaec);
+      border-radius:3px;box-shadow:0 10px 30px rgba(0,0,0,.5);
+      transform:rotate(-3deg);
+    }
+    .wc-doc::before,.wc-doc::after{
+      content:"";position:absolute;left:8%;right:8%;height:6px;background:#cbd0d8;border-radius:3px;
+    }
+    .wc-doc::before{top:14%}
+    .wc-doc::after{top:24%}
+    .wc-grid{
+      position:absolute;inset:0;pointer-events:none;
+      background:
+        linear-gradient(to right, rgba(255,255,255,.06) 1px, transparent 1px) 0 0/33.33% 100%,
+        linear-gradient(to bottom, rgba(255,255,255,.06) 1px, transparent 1px) 0 0/100% 33.33%;
+    }
+    .wc-level{
+      position:absolute;left:50%;top:12px;transform:translateX(-50%);
+      font-family:var(--mono);font-size:10px;color:#9bc4ff;letter-spacing:.1em;
+      padding:3px 8px;background:rgba(0,0,0,.45);border-radius:4px;
+    }
+    .wc-light{
+      position:absolute;right:12px;top:12px;font-family:var(--mono);font-size:10px;color:#5fd0a6;
+      padding:3px 8px;background:rgba(0,0,0,.45);border-radius:4px;display:flex;gap:6px;align-items:center;
+    }
+    .wc-light .bar{width:60px;height:4px;border-radius:2px;background:#222;overflow:hidden}
+    .wc-light .bar i{display:block;height:100%;width:74%;background:linear-gradient(90deg,#f5c26b,#5fd0a6)}
+
+    .wc-timer{
+      position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+      font-family:var(--mono);font-size:120px;color:#fff;text-shadow:0 4px 30px rgba(0,0,0,.6);
+      background:rgba(0,0,0,.35);
+    }
+    .wc-timer.on{display:flex}
+
+    .wc-side{
+      grid-area:side;border-left:1px solid var(--line);padding:14px;
+      display:flex;flex-direction:column;gap:10px;background:var(--bg-2);
+    }
+    .wc-side h4{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-2);font-weight:500}
+    .wc-control{display:flex;gap:6px;flex-wrap:wrap}
+    .wc-btn{
+      font-size:11px;color:var(--ink-1);padding:6px 10px;border-radius:8px;
+      border:1px solid var(--line);background:var(--bg-1);
+    }
+    .wc-btn:hover{color:var(--ink-0);border-color:var(--brand)}
+    .wc-btn.active{color:var(--brand-2);border-color:var(--brand);background:rgba(106,166,255,.08)}
+    .wc-tip{
+      font-size:11px;color:var(--ink-2);background:var(--bg-1);
+      border:1px dashed var(--line-2);border-radius:8px;padding:8px;line-height:1.5;
+    }
+
+    .wc-foot{
+      grid-area:foot;display:flex;align-items:center;gap:10px;
+      padding:14px 18px;border-top:1px solid var(--line);
+    }
+    .wc-shoot{
+      width:60px;height:60px;border-radius:50%;background:#fff;
+      border:4px solid rgba(255,255,255,.2);box-shadow:0 0 0 4px rgba(106,166,255,.3);
+      cursor:pointer;margin:0 auto;
+    }
+    .wc-shoot:hover{box-shadow:0 0 0 6px rgba(106,166,255,.45)}
+    .wc-cancel{font-size:12px;color:var(--ink-1);padding:8px 14px;border-radius:8px;border:1px solid var(--line-2)}
+    .wc-cancel:hover{color:var(--ink-0);border-color:var(--bad)}
+    .wc-use{
+      margin-left:auto;font-size:12px;color:#0a0c10;background:var(--good);
+      padding:8px 14px;border-radius:8px;font-weight:600;
+    }
+
+    /* ---------- INTAKE OVERLAY (initial) ---------- */
+    .intake{
+      position:absolute;inset:52px 360px 0 220px;
+      display:grid;place-items:center;z-index:20;
+      background:linear-gradient(180deg, rgba(10,12,16,.4), rgba(10,12,16,.7));
+      backdrop-filter:blur(6px);
+      transition:opacity .4s;
+    }
+    .intake.gone{opacity:0;pointer-events:none}
+    .intake-card{
+      width:min(560px,90%);background:var(--bg-1);border:1px solid var(--line-2);
+      border-radius:18px;padding:26px;text-align:center;box-shadow:var(--shadow);
+    }
+    .intake-card h2{margin:0 0 6px;font-weight:600;font-size:18px}
+    .intake-card p{margin:0 0 18px;color:var(--ink-2);font-size:13px}
+    .intake-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .intake-btn{
+      padding:18px;border-radius:14px;background:var(--bg-2);border:1px solid var(--line);
+      cursor:pointer;text-align:left;transition:all .15s;
+    }
+    .intake-btn:hover{border-color:var(--brand);background:rgba(106,166,255,.05)}
+    .intake-btn .ti{font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px}
+    .intake-btn .de{font-size:11px;color:var(--ink-2)}
+
+    /* ---------- utility ---------- */
+    .sr{position:absolute;left:-9999px}
+    .hidden{display:none !important}
+  </style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- ============ LEFT RAIL: WORKFLOW CHASSIS ============ -->
+  <aside class="rail">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <div class="brand-name">Intercom</div>
+        <div class="brand-sub">Escalation Cockpit</div>
+      </div>
+    </div>
+
+    <div class="rail-group-label">Workflows</div>
+
+    <div class="wf active">
+      <div class="ico">E</div>
+      <div class="label">Escalation</div>
+      <div class="kbd">1</div>
+    </div>
+    <div class="wf stub">
+      <div class="ico">I</div>
+      <div class="label">INV Start</div>
+      <div class="kbd">2</div>
+    </div>
+    <div class="wf stub">
+      <div class="ico">T</div>
+      <div class="label">Trip Planner</div>
+      <div class="kbd">3</div>
+    </div>
+    <div class="wf stub">
+      <div class="ico">M</div>
+      <div class="label">Email Composer</div>
+      <div class="kbd">4</div>
+    </div>
+    <div class="wf stub">
+      <div class="ico">+</div>
+      <div class="label">Add workflow</div>
+      <div class="new">soon</div>
+    </div>
+
+    <div class="rail-group-label">Recents</div>
+    <div class="wf"><div class="ico">·</div><div class="label" style="font-size:12px">QBO-2641 · payroll</div></div>
+    <div class="wf"><div class="ico">·</div><div class="label" style="font-size:12px">QBO-2639 · bank-feeds</div></div>
+    <div class="wf"><div class="ico">·</div><div class="label" style="font-size:12px">QBO-2637 · taxes</div></div>
+
+    <div class="rail-foot">
+      <div class="me">
+        <div class="avatar">MK</div>
+        <div>
+          <div class="who">Morgan K.</div>
+          <div class="role">Escalation Specialist</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ TOP STRIP ============ -->
+  <header class="topstrip">
+    <div class="case-id">CASE <b>QBO-2642</b></div>
+
+    <div class="parser-pills" id="parserPills">
+      <span class="lead">Parsed</span>
+      <span class="ppill"><span class="k">cat</span><span class="v">Payroll</span></span>
+      <span class="ppill"><span class="k">prod</span><span class="v">QBO Online Plus</span></span>
+      <span class="ppill"><span class="k">err</span><span class="v">PS077</span></span>
+      <span class="ppill warn"><span class="k">acct</span><span class="v">redacted</span></span>
+      <span class="ppill"><span class="k">freq</span><span class="v">recurring</span></span>
+      <span class="ppill"><span class="k">since</span><span class="v">May 12</span></span>
+      <span class="ppill"><span class="k">browser</span><span class="v">Chrome 138</span></span>
+      <span class="ppill"><span class="k">caller</span><span class="v">Jamie L.</span></span>
+      <span class="ppill"><span class="k">prio</span><span class="v">urgent</span></span>
+      <button class="parser-expand" id="parserExpand">9 fields ▾</button>
+    </div>
+
+    <div class="agent-dots">
+      <div class="adot done"><span class="d"></span><span class="n">Parser</span>
+        <div class="halo"><b>R</b><b>S</b><b>C</b></div>
+      </div>
+      <div class="adot done"><span class="d"></span><span class="n">INV</span>
+        <div class="halo"><b>R</b><b>S</b><b>C</b></div>
+      </div>
+      <div class="adot done" id="dotTriage"><span class="d"></span><span class="n">Triage</span>
+        <div class="halo"><b>R</b><b>S</b><b>T</b></div>
+      </div>
+      <div class="adot run" id="dotAnalyst"><span class="d"></span><span class="n">Analyst</span>
+        <div class="halo"><b>R</b><b>S</b><b>C</b><b>T</b></div>
+      </div>
+    </div>
+
+    <div class="ttro" title="Time to operator-ready">
+      <span>time-to-operator</span><b id="ttro">00:14</b>
+    </div>
+  </header>
+
+  <!-- ============ CENTER: CHAT ============ -->
+  <section class="center">
+    <div class="stage-head">
+      <div class="analyst">
+        <div class="face" aria-hidden="true"></div>
+        <div>
+          <div class="who">Dr. Avery Chen</div>
+          <div class="role">Senior Analyst · Payroll & Tax · on-call</div>
+        </div>
+      </div>
+      <div class="stage-meta">
+        <span class="chip">Claude · sonnet-4.7</span>
+        <span class="chip">Playbook v18</span>
+      </div>
+    </div>
+
+    <div class="chat" id="chat">
+      <!-- streamed by JS -->
+    </div>
+
+    <div class="composer">
+      <div class="draft-tray" id="draftTray">
+        <span class="lab">Live reply draft</span>
+        <span class="txt" id="draftTxt">— assembling as Avery streams —</span>
+        <button id="copyDraft">Copy</button>
+      </div>
+      <div class="composer-row">
+        <button class="iconbtn" title="Attach">+</button>
+        <button class="iconbtn" id="openWebcam" title="Open webcam">◉</button>
+        <input id="msg" placeholder="Ask Avery — or send the caller a question…" />
+        <button class="send">Send ⏎</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RIGHT RAIL: TRIAGE HUD ============ -->
+  <aside class="right">
+    <div class="hud">
+      <div class="hud-head">
+        <div class="hud-title">Triage</div>
+        <div class="hud-by">by <b>Triage agent</b> · 00:11</div>
+      </div>
+      <div class="triage-row">
+        <div class="sev p2">P2</div>
+        <div class="cat">Payroll<small>tax filing block</small></div>
+        <div class="conf">92%</div>
+      </div>
+      <div class="triage-line">
+        <div class="lab">Fast read</div>
+        QBO is rejecting Q2 payroll filing with PS077; auth token for state agency expired during EFTPS handoff. <b>Re-auth in Payroll Settings → State Tax</b> will likely clear it.
+      </div>
+      <div class="triage-line">
+        <div class="lab">Immediate next step</div>
+        Confirm caller is admin, then walk through state-tax re-auth. If still blocked after re-auth, escalate to Payroll-Eng on PagerDuty.
+      </div>
+      <div class="missing">
+        <span class="miss-pill">EIN last 4</span>
+        <span class="miss-pill">Filing state</span>
+      </div>
+    </div>
+
+    <div class="spine">
+      <div class="spine-title">Triage spine</div>
+      <div class="spine-list" id="spineList">
+        <div class="tick confirm">Severity confirmed <span class="diff">P2</span></div>
+        <div class="tick confirm">Category confirmed <span class="diff">payroll</span></div>
+      </div>
+    </div>
+
+    <div class="inv">
+      <div class="inv-head">
+        <div class="inv-title">INV matches</div>
+        <div class="inv-count">3 near · 11 historical</div>
+      </div>
+
+      <div class="inv-card">
+        <div class="id">INV-147914</div>
+        <div class="ti">PS077 — state-tax re-auth flow</div>
+        <div class="me"><b>96% match</b><span>resolved · 4d ago</span></div>
+      </div>
+      <div class="inv-card">
+        <div class="id">INV-146882</div>
+        <div class="ti">Payroll filing blocked after MFA reset</div>
+        <div class="me"><b>71% match</b><span>resolved · 11d ago</span></div>
+      </div>
+      <div class="inv-card">
+        <div class="id">INV-145119</div>
+        <div class="ti">Q1 EFTPS handoff timeout</div>
+        <div class="me"><b>64% match</b><span>workaround · 22d ago</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ INTAKE OVERLAY (initial) ============ -->
+  <div class="intake" id="intake">
+    <div class="intake-card">
+      <h2>New escalation</h2>
+      <p>Drop a screenshot from the caller, or capture one on the webcam loupe.</p>
+      <div class="intake-actions">
+        <button class="intake-btn" id="dropUpload">
+          <div class="ti">⬆ Upload screenshot</div>
+          <div class="de">Paste, drag, or click. We OCR + parse 9 fields in ~6 seconds.</div>
+        </button>
+        <button class="intake-btn" id="dropWebcam">
+          <div class="ti">◉ Open webcam loupe</div>
+          <div class="de">Phone or doc camera. Auto-derotate. Cancel back to upload any time.</div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ============ WEBCAM LOUPE (pip) ============ -->
+<div class="loupe hidden" id="loupe">
+  <div class="loupe-head">
+    <span class="loupe-dot"></span>
+    <span class="loupe-lbl">Loupe</span>
+    <button class="loupe-x" id="loupeExpand">⤢</button>
+    <button class="loupe-x" id="loupeClose">✕</button>
+  </div>
+  <div class="loupe-body">
+    <div class="loupe-frame"></div>
+  </div>
+  <div class="loupe-foot">
+    <button id="loupeReshoot">Re-shoot</button>
+    <button>Verify field</button>
+    <div class="grow"></div>
+    <button id="loupeFull">Full view</button>
+  </div>
+</div>
+
+<!-- ============ WEBCAM MODAL ============ -->
+<div class="webcam-modal" id="wcModal">
+  <div class="wc-shell">
+    <div class="wc-head">
+      <div>
+        <div class="t">Webcam capture</div>
+        <div class="s">Auto-derotate for phone shots. Cancel returns you to upload.</div>
+      </div>
+      <button class="wc-back" id="wcBack">⟵ Back to upload</button>
+      <button class="wc-close" id="wcClose">✕</button>
+    </div>
+    <div class="wc-view">
+      <div class="wc-stage" id="wcStage">
+        <div class="wc-doc"></div>
+        <div class="wc-grid"></div>
+        <div class="wc-level">LEVEL · −2°</div>
+        <div class="wc-light">LIGHT <span class="bar"><i></i></span> 74%</div>
+        <div class="wc-timer" id="wcTimer">3</div>
+      </div>
+    </div>
+    <div class="wc-side">
+      <h4>Orientation</h4>
+      <div class="wc-control">
+        <button class="wc-btn" data-rot="0">0°</button>
+        <button class="wc-btn" data-rot="90">90°</button>
+        <button class="wc-btn active" data-rot="auto">Auto</button>
+        <button class="wc-btn" data-rot="180">180°</button>
+        <button class="wc-btn" data-rot="270">270°</button>
+      </div>
+      <h4>Flip</h4>
+      <div class="wc-control">
+        <button class="wc-btn" id="wcFlip">Mirror</button>
+      </div>
+      <h4>Timer</h4>
+      <div class="wc-control">
+        <button class="wc-btn" data-tim="0">Off</button>
+        <button class="wc-btn active" data-tim="3">3s</button>
+        <button class="wc-btn" data-tim="10">10s</button>
+      </div>
+      <h4>Source</h4>
+      <div class="wc-control">
+        <button class="wc-btn active">Front cam</button>
+        <button class="wc-btn">Doc cam</button>
+        <button class="wc-btn">Phone (Continuity)</button>
+      </div>
+      <div class="wc-tip">
+        Tip — point the phone at the screenshot, hold still while the level dot
+        centers. We'll auto-rotate to portrait if your phone is sideways.
+      </div>
+    </div>
+    <div class="wc-foot">
+      <button class="wc-cancel" id="wcCancel">Cancel</button>
+      <button class="wc-shoot" id="wcShoot" title="Capture"></button>
+      <button class="wc-use" id="wcUse">Use last frame ⏎</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ============== STATE ==============
+  const state = {
+    started:false,
+    streamingTurn:null,
+    ttroStart:Date.now(),
+  };
+
+  // ============== TIME-TO-OPERATOR ==============
+  const ttroEl=document.getElementById('ttro');
+  setInterval(()=>{
+    if(!state.started){
+      const s=Math.floor((Date.now()-state.ttroStart)/1000);
+      const mm=String(Math.floor(s/60)).padStart(2,'0');
+      const ss=String(s%60).padStart(2,'0');
+      ttroEl.textContent=mm+':'+ss;
+    }
+  },500);
+
+  // ============== INTAKE ==============
+  const intake=document.getElementById('intake');
+  document.getElementById('dropUpload').addEventListener('click',()=>{
+    intake.classList.add('gone');
+    setTimeout(startConversation,400);
+  });
+  document.getElementById('dropWebcam').addEventListener('click',()=>{
+    openWebcamModal();
+  });
+
+  // ============== CHAT ==============
+  const chat=document.getElementById('chat');
+  function turn(opts){
+    const t=document.createElement('div');
+    t.className='turn '+(opts.cls||'');
+    t.innerHTML=`
+      <div class="av">${opts.av||'A'}</div>
+      <div class="body">
+        <div class="meta"><b>${opts.who}</b> · ${opts.role||''}</div>
+        <div class="bubble">${opts.text}</div>
+      </div>`;
+    chat.appendChild(t);
+    chat.scrollTop=chat.scrollHeight;
+    return t;
+  }
+  async function streamTurn(opts){
+    const t=document.createElement('div');
+    t.className='turn streaming '+(opts.cls||'');
+    t.innerHTML=`
+      <div class="av">${opts.av||'A'}</div>
+      <div class="body">
+        <div class="meta"><b>${opts.who}</b> · ${opts.role||''}</div>
+        <div class="bubble" data-b></div>
+      </div>`;
+    chat.appendChild(t);
+    const b=t.querySelector('[data-b]');
+    const words=opts.text.split(/(\s+)/);
+    for(let i=0;i<words.length;i++){
+      b.innerHTML+=words[i];
+      chat.scrollTop=chat.scrollHeight;
+      // live draft tray fills in parallel
+      if(opts.draft){
+        updateDraft(b.innerText);
+      }
+      await new Promise(r=>setTimeout(r,opts.speed||30));
+    }
+    t.classList.remove('streaming');
+    return t;
+  }
+
+  // ============== DRAFT TRAY ==============
+  const draftTxt=document.getElementById('draftTxt');
+  let draftBuf='';
+  function updateDraft(s){
+    draftBuf=s;
+    // surface phone-ready sentence (first sentence of latest analyst block)
+    const sentences=s.split(/(?<=[.?!])\s/);
+    draftTxt.textContent='“'+(sentences[sentences.length-1]||s).slice(0,140)+'”';
+  }
+  document.getElementById('copyDraft').addEventListener('click',()=>{
+    navigator.clipboard?.writeText(draftBuf||'');
+    draftTxt.textContent='Copied to clipboard — paste to the caller.';
+  });
+
+  // ============== SPINE ==============
+  const spineList=document.getElementById('spineList');
+  function addTick(label,diff,kind){
+    const d=document.createElement('div');
+    d.className='tick '+(kind||'');
+    d.innerHTML=label+(diff?` <span class="diff">${diff}</span>`:'');
+    spineList.appendChild(d);
+  }
+
+  // ============== CONVERSATION FLOW ==============
+  async function startConversation(){
+    state.started=true;
+    turn({cls:'system',av:'·',who:'Triage',role:'committed at 00:11',
+      text:'Triage committed: <code>payroll · P2 · 92%</code>. Pinned to the right rail.'});
+    turn({cls:'system',av:'·',who:'INV Search',role:'returned 3 near matches',
+      text:'Top hit <code>INV-147914</code> (96%) — same PS077 + state-tax re-auth.'});
+
+    await new Promise(r=>setTimeout(r,500));
+    turn({cls:'',av:'A',who:'Dr. Avery Chen',role:'Senior Analyst · just joined',
+      text:"Hi Morgan — I see the PS077 and the timing. I've pulled INV-147914; the resolution path there matched today's pattern. Quick check before I script the call:"});
+
+    await new Promise(r=>setTimeout(r,400));
+    await streamTurn({draft:true,cls:'',av:'A',who:'Dr. Avery Chen',role:'streaming',
+      text:"Have the caller open <code>Payroll Settings → State Tax</code>. They should see a yellow banner saying \"Re-authorize agency.\" Click it, sign in with the same admin creds they use for filing, accept the scopes, then re-submit Q2. If the banner isn't there, the token may not have fully expired — refresh the page once. I'll watch this thread; ping me the second the banner shows or doesn't.",
+      speed:18});
+
+    addTick('Confirmed PS077 root cause','token expiry','confirm');
+    addTick('Recommended re-auth path','match INV-147914','confirm');
+
+    await new Promise(r=>setTimeout(r,600));
+    turn({cls:'',av:'M',who:'Morgan K.',role:'you',
+      text:"Caller doesn't see the banner. Page refreshed."});
+
+    await new Promise(r=>setTimeout(r,400));
+    await streamTurn({draft:true,cls:'',av:'A',who:'Dr. Avery Chen',role:'streaming',
+      text:"Got it — that nudges severity up. Have them sign out of QBO entirely, clear the QBO cookies only (Chrome → Settings → Privacy → See all site data → search \"intuit\" → delete), and sign back in. The re-auth banner is gated behind a fresh session check. If it still doesn't appear after fresh sign-in, this is PS077-variant-B and we hand to Payroll-Eng. I'll prep the handoff note in parallel so you don't lose time.",
+      speed:18});
+
+    addTick('Severity revised','P2 → P2+ (watch)','revise');
+    addTick('Handoff prepared','Payroll-Eng on standby','confirm');
+
+    document.getElementById('dotAnalyst').classList.remove('run');
+    document.getElementById('dotAnalyst').classList.add('done');
+  }
+
+  // ============== PARSER EXPAND (secondary) ==============
+  document.getElementById('parserExpand').addEventListener('click',(e)=>{
+    e.currentTarget.textContent = e.currentTarget.textContent.includes('▾')
+      ? '9 fields ▴' : '9 fields ▾';
+    // toy interaction — full expand modal omitted for brevity
+  });
+
+  // ============== WEBCAM ==============
+  const loupe=document.getElementById('loupe');
+  const wcModal=document.getElementById('wcModal');
+  function openWebcamModal(){
+    wcModal.classList.add('open');
+  }
+  function closeWebcamModal(){
+    wcModal.classList.remove('open');
+  }
+  document.getElementById('openWebcam').addEventListener('click',openWebcamModal);
+  document.getElementById('wcClose').addEventListener('click',closeWebcamModal);
+  document.getElementById('wcCancel').addEventListener('click',closeWebcamModal);
+  document.getElementById('wcBack').addEventListener('click',()=>{
+    closeWebcamModal();
+    if(intake.classList.contains('gone')) return;
+  });
+  document.getElementById('wcUse').addEventListener('click',()=>{
+    closeWebcamModal();
+    loupe.classList.remove('hidden');
+    if(!state.started){
+      intake.classList.add('gone');
+      setTimeout(startConversation,400);
+    }
+  });
+  // rotation
+  const wcStage=document.getElementById('wcStage');
+  document.querySelectorAll('[data-rot]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('[data-rot]').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+      wcStage.classList.remove('rot-90','rot-180','rot-270');
+      const r=b.dataset.rot;
+      if(r==='90')wcStage.classList.add('rot-90');
+      if(r==='180')wcStage.classList.add('rot-180');
+      if(r==='270')wcStage.classList.add('rot-270');
+      // auto = no-op (already correct)
+    });
+  });
+  // flip
+  document.getElementById('wcFlip').addEventListener('click',(e)=>{
+    e.currentTarget.classList.toggle('active');
+    wcStage.classList.toggle('flipped');
+  });
+  // timer buttons
+  document.querySelectorAll('[data-tim]').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('[data-tim]').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active');
+    });
+  });
+  // shoot with timer
+  const wcTimer=document.getElementById('wcTimer');
+  document.getElementById('wcShoot').addEventListener('click',async()=>{
+    const sel=document.querySelector('[data-tim].active');
+    const n=parseInt(sel?.dataset.tim||'0',10);
+    if(n>0){
+      wcTimer.classList.add('on');
+      for(let i=n;i>0;i--){
+        wcTimer.textContent=i;
+        await new Promise(r=>setTimeout(r,800));
+      }
+      wcTimer.classList.remove('on');
+    }
+    // flash
+    wcStage.animate(
+      [{filter:'brightness(1)'},{filter:'brightness(3)'},{filter:'brightness(1)'}],
+      {duration:280}
+    );
+    setTimeout(()=>{
+      closeWebcamModal();
+      loupe.classList.remove('hidden');
+      if(!state.started){intake.classList.add('gone'); setTimeout(startConversation,400);}
+    },400);
+  });
+  // loupe controls
+  document.getElementById('loupeClose').addEventListener('click',()=>loupe.classList.add('hidden'));
+  document.getElementById('loupeFull').addEventListener('click',openWebcamModal);
+  document.getElementById('loupeExpand').addEventListener('click',openWebcamModal);
+  document.getElementById('loupeReshoot').addEventListener('click',openWebcamModal);
+
+  // ============== KEYBOARD ==============
+  document.addEventListener('keydown',(e)=>{
+    if(e.key==='Escape'){closeWebcamModal();}
+  });
+</script>
+</body>
+</html>

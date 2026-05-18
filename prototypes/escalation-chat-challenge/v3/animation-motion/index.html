@@ -1,0 +1,1817 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QBO Escalation — V3 / animation-motion (Stage + Satellites)</title>
+<!--
+================================================================================
+  V3 ENTRY — slug: animation-motion
+  Designer brief: motion as functional choreography, not decoration.
+================================================================================
+
+  (a) LAYOUT APPROACHES CONSIDERED
+  ------------------------------------------------------------------------------
+  1. Vertical stack (V2 default — REJECTED). Top-down columns force scrolling
+     and triage scrolls off. Product owner explicitly killed this in V2.
+  2. 2x2 sectored quadrants. Triage / INV / Parser / Chat each own a quadrant.
+     Considered — but chat needs more real estate than the others; equal-share
+     quadrants under-serve the analyst, who is the brains.
+  3. Lateral split (rail + canvas). Workflow rail left, canvas right with two
+     internal columns. Solid, but no place for time-travel and the analyst still
+     fights for space with INV/triage.
+  4. ** Stage + Satellites (CHOSEN) **. Center is the Stage — analyst chat +
+     active document, the operator's working surface, max real estate. Four
+     agent satellites dock to fixed perimeter slots (parser TL, triage CL,
+     INV CR, analyst is the stage). Left edge: workflow chassis rail. Bottom
+     edge: time scrubber. Top edge: case header + intake. Webcam is a polished
+     full-bleed overlay state. NOTHING SCROLLS.
+
+  (b) WHY THIS LAYOUT
+  ------------------------------------------------------------------------------
+  The operator's eye lives in the center because that's where the analyst lives.
+  Triage is permanently magnetized to center-left where the eye returns
+  hundreds of times per case — it is never out of view. INV is permanently
+  center-right, the place you glance for "have we seen this before." Parser
+  is the upstream tributary — useful, then quietly out of the way. The shape
+  scales: any future workflow can dock its own satellites into the same slots;
+  the chassis doesn't change.
+
+  (c) THREE UNIQUE UNEXPECTED FEATURES (plus a bonus)
+  ------------------------------------------------------------------------------
+  1. HANDOFF TRAILS — when one agent's output becomes another's input, an
+     animated thread carries the actual data tokens across the canvas. The
+     operator literally sees triage hand "bank-feeds / P2 / 0.88" to the
+     analyst. Replays on hover of any chat turn that cites a handoff.
+  2. CONFIDENCE HALO — a soft ring breathes around triage; the breath slows
+     as confidence rises. Calm-when-certain, restless-when-uncertain. The
+     operator feels the model's certainty without reading a digit.
+  3. CASE SCRUBBER — bottom-edge timeline of every state change. Drag back to
+     any moment (post-parse, post-triage, mid-chat) and the entire canvas
+     re-renders the case at that instant. Made for handoff, review, training.
+  4. CO-POINTER (bonus) — hover any triage field or INV row, and a soft echo
+     lights up in the chat composer pre-arming a quoted reply. Click to insert.
+================================================================================
+-->
+<style>
+  :root{
+    --bg-0:#07080b;
+    --bg-1:#0c0e13;
+    --bg-2:#11141b;
+    --bg-3:#171b24;
+    --line:#1f2533;
+    --line-2:#2a3142;
+    --ink-0:#f3f5fa;
+    --ink-1:#c6cbd9;
+    --ink-2:#8a92a5;
+    --ink-3:#5b6377;
+    --accent:#7aa2ff;        /* analyst blue */
+    --accent-2:#9b7aff;      /* triage violet */
+    --accent-3:#5ed3a3;      /* inv green */
+    --accent-4:#f0b35c;      /* parser amber */
+    --danger:#ff7a7a;
+    --warn:#f0b35c;
+    --good:#5ed3a3;
+    --shadow-soft: 0 1px 0 rgba(255,255,255,.03) inset, 0 12px 40px rgba(0,0,0,.45);
+    --radius:14px;
+    --radius-sm:10px;
+    --t-fast: 180ms cubic-bezier(.2,.7,.2,1);
+    --t-med:  320ms cubic-bezier(.2,.7,.2,1);
+    --t-slow: 620ms cubic-bezier(.2,.7,.2,1);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;width:100%;overflow:hidden}
+  body{
+    background:
+      radial-gradient(1200px 700px at 60% 10%, rgba(122,162,255,.06), transparent 60%),
+      radial-gradient(900px 600px at 15% 90%, rgba(155,122,255,.05), transparent 60%),
+      radial-gradient(900px 600px at 90% 80%, rgba(94,211,163,.04), transparent 60%),
+      var(--bg-0);
+    color:var(--ink-0);
+    font: 13.5px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    letter-spacing:.005em;
+    -webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+  /* =====================  CHASSIS  ===================== */
+  .chassis{
+    position:fixed;inset:0;
+    display:grid;
+    grid-template-columns: 64px 1fr;
+    grid-template-rows: 52px 1fr 64px;
+    grid-template-areas:
+      "rail  topbar"
+      "rail  stage"
+      "rail  scrubber";
+  }
+
+  /* workflow rail (chassis for future workflows) */
+  .rail{
+    grid-area:rail;
+    background:linear-gradient(180deg,var(--bg-1),var(--bg-0));
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;
+    padding:14px 0 10px;gap:10px;
+    z-index:5;
+  }
+  .rail .brand{
+    width:36px;height:36px;border-radius:10px;
+    background:linear-gradient(135deg,#1a2138,#0e1424);
+    border:1px solid var(--line-2);
+    display:grid;place-items:center;font-weight:700;color:var(--ink-0);
+    box-shadow:var(--shadow-soft);
+    letter-spacing:.02em;font-size:11px;
+  }
+  .rail .sep{width:24px;height:1px;background:var(--line);margin:6px 0}
+  .wflow{
+    width:44px;height:44px;border-radius:12px;
+    display:grid;place-items:center;color:var(--ink-2);
+    border:1px solid transparent;
+    transition: background var(--t-fast), color var(--t-fast), border-color var(--t-fast);
+    position:relative;
+  }
+  .wflow:hover{background:var(--bg-2);color:var(--ink-0)}
+  .wflow.active{
+    color:var(--ink-0);
+    background:linear-gradient(180deg,rgba(122,162,255,.16),rgba(122,162,255,.06));
+    border-color:rgba(122,162,255,.4);
+    box-shadow: 0 0 0 1px rgba(122,162,255,.15), 0 6px 18px rgba(122,162,255,.18);
+  }
+  .wflow.active::before{
+    content:"";position:absolute;left:-13px;top:8px;bottom:8px;width:3px;border-radius:2px;
+    background:var(--accent);
+  }
+  .wflow .wlabel{
+    position:absolute;left:54px;top:50%;transform:translateY(-50%);
+    background:var(--bg-3);border:1px solid var(--line-2);color:var(--ink-1);
+    padding:4px 8px;border-radius:6px;font-size:11.5px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:opacity var(--t-fast), transform var(--t-fast);
+    transform:translate(-4px,-50%);z-index:30;
+  }
+  .wflow:hover .wlabel{opacity:1;transform:translate(0,-50%)}
+  .wflow svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .rail .spacer{flex:1}
+  .rail .me{
+    width:36px;height:36px;border-radius:50%;
+    background:linear-gradient(135deg,#3d2a5c,#1c1330);
+    border:1px solid var(--line-2);
+    display:grid;place-items:center;color:#d8c9ff;font-weight:600;font-size:12px;
+  }
+
+  /* topbar */
+  .topbar{
+    grid-area:topbar;
+    display:flex;align-items:center;gap:14px;
+    padding:0 18px;
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(12,14,19,.96),rgba(12,14,19,.86));
+    backdrop-filter: blur(6px);
+    z-index:4;
+  }
+  .case-title{display:flex;align-items:center;gap:10px}
+  .case-title .dot{width:8px;height:8px;border-radius:50%;background:var(--good);box-shadow:0 0 0 4px rgba(94,211,163,.15)}
+  .case-title h1{font-size:13.5px;margin:0;font-weight:600;letter-spacing:.01em}
+  .case-title .sub{color:var(--ink-3);font-size:12px}
+  .topbar .spacer{flex:1}
+  .pillrow{display:flex;align-items:center;gap:8px}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:5px 10px;border-radius:999px;
+    background:var(--bg-2);border:1px solid var(--line);
+    color:var(--ink-1);font-size:11.5px;
+  }
+  .pill .swatch{width:7px;height:7px;border-radius:50%}
+  .pill.parser .swatch{background:var(--accent-4)}
+  .pill.triage .swatch{background:var(--accent-2)}
+  .pill.inv .swatch{background:var(--accent-3)}
+  .pill.analyst .swatch{background:var(--accent)}
+  .pill .agent-state{color:var(--ink-3);font-size:11px}
+
+  .iconbtn{
+    width:34px;height:34px;border-radius:10px;border:1px solid var(--line);
+    background:var(--bg-2);color:var(--ink-1);display:grid;place-items:center;
+    transition:background var(--t-fast),color var(--t-fast),border-color var(--t-fast);
+  }
+  .iconbtn:hover{background:var(--bg-3);color:var(--ink-0);border-color:var(--line-2)}
+  .iconbtn svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+
+  /* =====================  STAGE  ===================== */
+  .stage{
+    grid-area:stage;
+    position:relative;
+    display:grid;
+    grid-template-columns: 300px 1fr 320px;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      "parser stagecanvas inv"
+      "triage stagecanvas inv";
+    gap:14px;
+    padding:14px 18px 12px;
+    min-height:0;
+  }
+
+  /* parser satellite — small, top-left, collapses after triage commits */
+  .sat-parser{
+    grid-area:parser;
+    background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:12px 12px 10px;
+    display:flex;flex-direction:column;gap:8px;
+    min-height:120px;
+    transition:all var(--t-med);
+    position:relative;overflow:hidden;
+  }
+  .sat-head{display:flex;align-items:center;gap:8px}
+  .sat-head .avatar{
+    width:22px;height:22px;border-radius:7px;
+    display:grid;place-items:center;font-size:10.5px;font-weight:700;
+    background:rgba(240,179,92,.14);color:var(--accent-4);
+    border:1px solid rgba(240,179,92,.25);
+  }
+  .sat-triage .sat-head .avatar{background:rgba(155,122,255,.12);color:var(--accent-2);border-color:rgba(155,122,255,.28)}
+  .sat-inv .sat-head .avatar{background:rgba(94,211,163,.10);color:var(--accent-3);border-color:rgba(94,211,163,.28)}
+  .sat-head .who{font-size:12px;color:var(--ink-1);font-weight:600}
+  .sat-head .role{font-size:11px;color:var(--ink-3)}
+  .sat-head .stamp{margin-left:auto;font-size:11px;color:var(--ink-3)}
+
+  .parser-progress{height:4px;border-radius:99px;background:var(--bg-3);overflow:hidden}
+  .parser-progress > i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent-4),#ffd089);transition:width var(--t-med)}
+
+  .parser-fields{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .pf{
+    background:rgba(255,255,255,.015);
+    border:1px solid var(--line);
+    padding:6px 8px;border-radius:8px;
+    transition:background var(--t-fast),border-color var(--t-fast);
+    cursor:default;
+  }
+  .pf:hover{background:rgba(122,162,255,.06);border-color:rgba(122,162,255,.25)}
+  .pf .k{display:block;font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em}
+  .pf .v{display:block;color:var(--ink-0);font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pf.fresh{animation:fieldArrive .42s var(--t-fast) both}
+  @keyframes fieldArrive{
+    0%{opacity:0;transform:translateY(4px) scale(.98)}
+    100%{opacity:1;transform:none}
+  }
+
+  /* parser collapsed state (after triage commits) */
+  .sat-parser.collapsed{
+    min-height:auto;
+  }
+  .sat-parser.collapsed .parser-fields,
+  .sat-parser.collapsed .parser-progress{display:none}
+  .sat-parser.collapsed .parser-summary{display:flex}
+  .parser-summary{display:none;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px}
+  .ps-chip{
+    font-size:11px;background:rgba(240,179,92,.08);border:1px solid rgba(240,179,92,.2);
+    color:#ffd9a8;padding:3px 7px;border-radius:99px;
+  }
+  .ps-more{font-size:11px;color:var(--ink-2);cursor:pointer}
+  .ps-more:hover{color:var(--ink-0);text-decoration:underline}
+
+  /* triage satellite — center-left, ALWAYS visible */
+  .sat-triage{
+    grid-area:triage;
+    background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:12px;
+    display:flex;flex-direction:column;gap:10px;
+    position:relative;overflow:hidden;
+    min-height:0;
+  }
+  /* Confidence halo — UNIQUE FEATURE #2 */
+  .sat-triage::before{
+    content:"";position:absolute;inset:-1px;border-radius:var(--radius);
+    pointer-events:none;
+    box-shadow: 0 0 0 1px rgba(155,122,255,.0) inset;
+    transition:box-shadow var(--t-slow);
+  }
+  .sat-triage[data-state="awaiting"]::before{
+    animation: haloRestless 1.6s ease-in-out infinite;
+  }
+  .sat-triage[data-state="committed"]::before{
+    animation: haloCalm 5.4s ease-in-out infinite;
+  }
+  @keyframes haloRestless{
+    0%,100%{box-shadow: 0 0 0 1px rgba(155,122,255,.10) inset, 0 0 0 0 rgba(155,122,255,.18)}
+    50%    {box-shadow: 0 0 0 1px rgba(155,122,255,.35) inset, 0 0 32px 0 rgba(155,122,255,.25)}
+  }
+  @keyframes haloCalm{
+    0%,100%{box-shadow: 0 0 0 1px rgba(155,122,255,.18) inset, 0 0 0 0 rgba(155,122,255,.10)}
+    50%    {box-shadow: 0 0 0 1px rgba(155,122,255,.30) inset, 0 0 28px 0 rgba(155,122,255,.18)}
+  }
+
+  .triage-empty{
+    color:var(--ink-3);font-size:12px;
+    border:1px dashed var(--line-2);border-radius:10px;
+    padding:14px;text-align:center;
+    display:flex;flex-direction:column;align-items:center;gap:8px;
+  }
+  .triage-empty .spin{
+    width:18px;height:18px;border-radius:50%;
+    border:2px solid var(--line-2);border-top-color:var(--accent-2);
+    animation:spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .triage-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .tcell{
+    background:rgba(155,122,255,.05);
+    border:1px solid rgba(155,122,255,.18);
+    border-radius:10px;padding:8px 10px;
+    transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast);
+    cursor:pointer;
+  }
+  .tcell:hover{background:rgba(155,122,255,.10);border-color:rgba(155,122,255,.32)}
+  .tcell .k{display:block;font-size:10px;color:#b9a8e6;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}
+  .tcell .v{display:block;color:var(--ink-0);font-weight:600;font-size:13px}
+  .tcell.sev .v{display:inline-flex;align-items:center;gap:6px}
+  .sev-pill{
+    padding:2px 6px;border-radius:6px;font-size:11px;font-weight:700;
+    background:rgba(240,179,92,.18);color:#ffce85;border:1px solid rgba(240,179,92,.32);
+  }
+  .sev-pill.P1{background:rgba(255,122,122,.18);color:#ffb0b0;border-color:rgba(255,122,122,.38)}
+  .sev-pill.P2{background:rgba(240,179,92,.18);color:#ffce85;border-color:rgba(240,179,92,.38)}
+  .sev-pill.P3{background:rgba(122,162,255,.18);color:#b9d1ff;border-color:rgba(122,162,255,.38)}
+  .sev-pill.P4{background:rgba(94,211,163,.18);color:#a8e8cc;border-color:rgba(94,211,163,.38)}
+
+  .triage-line{
+    background:rgba(255,255,255,.02);
+    border:1px solid var(--line);
+    border-radius:10px;padding:9px 10px;
+    color:var(--ink-1);font-size:12.5px;
+    cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast);
+  }
+  .triage-line:hover{background:rgba(122,162,255,.05);border-color:rgba(122,162,255,.22)}
+  .triage-line .lk{display:block;font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+
+  .triage-foot{
+    display:flex;align-items:center;gap:8px;margin-top:auto;padding-top:6px;
+    border-top:1px dashed var(--line);
+    color:var(--ink-3);font-size:11.5px;
+  }
+  .conf-bar{flex:1;height:5px;border-radius:99px;background:var(--bg-3);overflow:hidden}
+  .conf-bar > i{display:block;height:100%;width:0;background:linear-gradient(90deg,#9b7aff,#c9b3ff);transition:width var(--t-slow)}
+  .conf-num{color:var(--ink-1);font-weight:600;font-variant-numeric:tabular-nums}
+
+  /* INV satellite — center-right, persistent */
+  .sat-inv{
+    grid-area:inv;
+    background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:12px;
+    display:flex;flex-direction:column;gap:10px;
+    min-height:0;overflow:hidden;
+  }
+  .inv-list{display:flex;flex-direction:column;gap:6px;overflow:auto;min-height:0}
+  .inv-list::-webkit-scrollbar{width:6px}
+  .inv-list::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:4px}
+  .inv-row{
+    display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;
+    background:rgba(94,211,163,.04);
+    border:1px solid rgba(94,211,163,.16);
+    border-radius:10px;padding:7px 10px;
+    cursor:pointer;transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast);
+  }
+  .inv-row:hover{background:rgba(94,211,163,.10);border-color:rgba(94,211,163,.32)}
+  .inv-row .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#bdf0d8;font-weight:600}
+  .inv-row .desc{color:var(--ink-1);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .inv-row .match{
+    font-size:10.5px;color:#a8e8cc;
+    background:rgba(94,211,163,.12);border:1px solid rgba(94,211,163,.28);
+    padding:2px 6px;border-radius:99px;font-variant-numeric:tabular-nums;
+  }
+  .inv-empty{
+    color:var(--ink-3);font-size:12px;text-align:center;padding:18px 8px;
+    border:1px dashed var(--line-2);border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;gap:8px;
+  }
+  .inv-empty .spin{
+    width:16px;height:16px;border-radius:50%;
+    border:2px solid var(--line-2);border-top-color:var(--accent-3);
+    animation:spin 1.1s linear infinite;
+  }
+
+  /* stage canvas — analyst */
+  .stagecanvas{
+    grid-area:stagecanvas;
+    position:relative;
+    background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    display:flex;flex-direction:column;
+    min-height:0;overflow:hidden;
+  }
+  .analyst-bar{
+    display:flex;align-items:center;gap:12px;
+    padding:12px 14px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(122,162,255,.06),transparent);
+  }
+  .analyst-face{
+    width:34px;height:34px;border-radius:50%;
+    background:
+      radial-gradient(circle at 35% 30%, #b9d1ff, #4f7bd6 60%, #2a4793);
+    border:1px solid rgba(122,162,255,.5);
+    box-shadow:0 0 0 3px rgba(122,162,255,.12), 0 4px 14px rgba(122,162,255,.25);
+    position:relative;flex-shrink:0;
+  }
+  .analyst-face::after{
+    content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;
+    background:var(--good);border:2px solid var(--bg-2);
+  }
+  .analyst-meta{display:flex;flex-direction:column;line-height:1.2;min-width:0}
+  .analyst-meta .name{font-weight:600;color:var(--ink-0);font-size:13.5px}
+  .analyst-meta .role{font-size:11.5px;color:var(--ink-2)}
+  .analyst-meta .role b{color:var(--ink-1);font-weight:500}
+  .typing{
+    display:inline-flex;align-items:center;gap:3px;margin-left:8px;
+    color:var(--ink-3);font-size:11.5px;opacity:0;transition:opacity var(--t-fast);
+  }
+  .typing.on{opacity:1}
+  .typing .d{width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.6;animation:typeBlink 1.1s infinite}
+  .typing .d:nth-child(2){animation-delay:.15s}
+  .typing .d:nth-child(3){animation-delay:.30s}
+  @keyframes typeBlink{0%,100%{transform:translateY(0);opacity:.4}50%{transform:translateY(-2px);opacity:1}}
+
+  .analyst-actions{margin-left:auto;display:flex;gap:6px}
+
+  .chat-scroll{flex:1;min-height:0;overflow:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+  .chat-scroll::-webkit-scrollbar{width:6px}
+  .chat-scroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:4px}
+
+  .turn{display:flex;gap:10px;max-width:88%;align-items:flex-start}
+  .turn.you{align-self:flex-end;flex-direction:row-reverse}
+  .turn .av{
+    width:26px;height:26px;border-radius:50%;flex-shrink:0;
+    display:grid;place-items:center;font-size:10.5px;font-weight:700;
+  }
+  .turn.analyst .av{
+    background:radial-gradient(circle at 35% 30%,#b9d1ff,#4f7bd6 60%,#2a4793);
+    color:#fff;border:1px solid rgba(122,162,255,.5);
+  }
+  .turn.you .av{
+    background:linear-gradient(135deg,#3d2a5c,#1c1330);
+    color:#d8c9ff;border:1px solid var(--line-2);
+  }
+  .bubble{
+    padding:9px 12px;border-radius:12px;
+    background:var(--bg-3);border:1px solid var(--line-2);
+    color:var(--ink-0);font-size:13px;line-height:1.5;
+    transition:background var(--t-fast),border-color var(--t-fast);
+  }
+  .turn.analyst .bubble{
+    background:linear-gradient(180deg,rgba(122,162,255,.08),rgba(122,162,255,.03));
+    border-color:rgba(122,162,255,.25);
+  }
+  .turn.you .bubble{
+    background:linear-gradient(180deg,rgba(155,122,255,.08),rgba(155,122,255,.03));
+    border-color:rgba(155,122,255,.25);
+  }
+  .turn.system{align-self:center;max-width:80%}
+  .turn.system .bubble{
+    background:rgba(255,255,255,.02);border:1px dashed var(--line-2);
+    color:var(--ink-2);font-size:11.5px;font-style:italic;
+    padding:6px 10px;border-radius:8px;
+  }
+
+  .turn-meta{display:flex;align-items:center;gap:6px;margin-top:4px;color:var(--ink-3);font-size:10.5px}
+  .turn-meta .src{color:var(--accent-2);cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px}
+  .turn-meta .src:hover{color:#c9b3ff}
+
+  /* citation chip in bubble */
+  .cite{
+    display:inline-flex;align-items:center;gap:5px;
+    background:rgba(94,211,163,.10);border:1px solid rgba(94,211,163,.28);
+    padding:1px 6px;border-radius:6px;font-size:11px;color:#bdf0d8;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;
+    transition:background var(--t-fast);
+  }
+  .cite:hover{background:rgba(94,211,163,.18)}
+  .cite.triage{background:rgba(155,122,255,.10);border-color:rgba(155,122,255,.28);color:#d6c5ff}
+  .cite.triage:hover{background:rgba(155,122,255,.18)}
+
+  /* composer */
+  .composer{
+    border-top:1px solid var(--line);
+    padding:10px 12px;
+    display:flex;align-items:flex-end;gap:8px;
+    background:linear-gradient(180deg,transparent,rgba(0,0,0,.18));
+  }
+  .composer .field{
+    flex:1;display:flex;flex-direction:column;gap:6px;
+    background:var(--bg-1);border:1px solid var(--line-2);border-radius:12px;
+    padding:8px 10px;
+    transition:border-color var(--t-fast),box-shadow var(--t-fast);
+  }
+  .composer .field:focus-within{border-color:rgba(122,162,255,.45);box-shadow:0 0 0 3px rgba(122,162,255,.12)}
+  .quoted{
+    display:none;background:rgba(155,122,255,.08);border:1px solid rgba(155,122,255,.28);
+    border-radius:8px;padding:5px 8px;color:#d6c5ff;font-size:11.5px;align-items:center;gap:6px;
+    animation:fieldArrive .35s var(--t-fast) both;
+  }
+  .quoted.on{display:inline-flex}
+  .quoted .x{margin-left:4px;cursor:pointer;color:var(--ink-3)}
+  .quoted .x:hover{color:var(--ink-0)}
+  .composer textarea{
+    background:transparent;border:0;outline:0;color:var(--ink-0);
+    font:inherit;resize:none;width:100%;min-height:22px;max-height:120px;
+  }
+  .composer textarea::placeholder{color:var(--ink-3)}
+  .send{
+    height:38px;padding:0 14px;border-radius:10px;
+    background:linear-gradient(180deg,#3e63d6,#2a4793);
+    color:#fff;font-weight:600;font-size:12.5px;
+    border:1px solid rgba(122,162,255,.5);
+    box-shadow:0 4px 16px rgba(122,162,255,.25);
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .send:hover{filter:brightness(1.08)}
+
+  /* =====================  HANDOFF TRAIL OVERLAY  ===================== */
+  /* UNIQUE FEATURE #1 — animated thread carrying data tokens */
+  .trail-canvas{
+    position:absolute;inset:0;pointer-events:none;z-index:6;
+    overflow:visible;
+  }
+
+  /* =====================  SCRUBBER  ===================== */
+  /* UNIQUE FEATURE #3 — case timeline scrubber */
+  .scrubber{
+    grid-area:scrubber;
+    border-top:1px solid var(--line);
+    background:linear-gradient(180deg,var(--bg-1),var(--bg-0));
+    display:flex;align-items:center;gap:14px;padding:0 18px;
+  }
+  .scrubber .label{
+    font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;
+    display:flex;align-items:center;gap:8px;
+  }
+  .scrubber .label .live{
+    width:7px;height:7px;border-radius:50%;background:var(--good);
+    animation:pulseLive 1.6s ease-in-out infinite;
+  }
+  @keyframes pulseLive{0%,100%{box-shadow:0 0 0 0 rgba(94,211,163,.6)}50%{box-shadow:0 0 0 6px rgba(94,211,163,0)}}
+
+  .scrubber .track{
+    flex:1;position:relative;height:28px;display:flex;align-items:center;
+    cursor:pointer;
+  }
+  .scrubber .track::before{
+    content:"";position:absolute;left:0;right:0;height:3px;border-radius:99px;background:var(--bg-3);
+  }
+  .scrubber .fill{
+    position:absolute;left:0;height:3px;border-radius:99px;
+    background:linear-gradient(90deg,var(--accent-4),var(--accent-2),var(--accent-3),var(--accent));
+    transition:width var(--t-fast);
+  }
+  .scrubber .nubs{position:absolute;inset:0;display:flex;align-items:center}
+  .scrub-nub{
+    position:absolute;transform:translateX(-50%);
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+    color:var(--ink-3);font-size:10px;
+  }
+  .scrub-nub .pt{
+    width:10px;height:10px;border-radius:50%;background:var(--bg-3);border:2px solid var(--line-2);
+    transition:transform var(--t-fast),background var(--t-fast),border-color var(--t-fast);
+  }
+  .scrub-nub.reached .pt{background:var(--accent-2);border-color:#c9b3ff}
+  .scrub-nub.parser.reached .pt{background:var(--accent-4);border-color:#ffd089}
+  .scrub-nub.inv.reached .pt{background:var(--accent-3);border-color:#bdf0d8}
+  .scrub-nub.analyst.reached .pt{background:var(--accent);border-color:#b9d1ff}
+  .scrub-nub.now .pt{transform:scale(1.6);box-shadow:0 0 0 4px rgba(255,255,255,.06)}
+  .scrub-nub .lab{white-space:nowrap;color:var(--ink-3)}
+  .scrub-nub.reached .lab{color:var(--ink-1)}
+
+  .scrubber .right{display:flex;align-items:center;gap:10px}
+  .scrub-time{font-variant-numeric:tabular-nums;color:var(--ink-1);font-size:12px}
+  .scrub-jump{
+    font-size:11.5px;color:var(--ink-2);background:var(--bg-2);
+    border:1px solid var(--line);padding:5px 10px;border-radius:99px;
+  }
+  .scrub-jump:hover{color:var(--ink-0);background:var(--bg-3)}
+  .scrub-jump.live{
+    color:#bdf0d8;border-color:rgba(94,211,163,.4);background:rgba(94,211,163,.08);
+  }
+
+  /* =====================  INTAKE PANEL  ===================== */
+  .intake{
+    position:absolute;inset:0;z-index:50;
+    background:radial-gradient(900px 600px at 50% 30%, rgba(122,162,255,.08), transparent 60%), rgba(7,8,11,.78);
+    backdrop-filter:blur(8px);
+    display:flex;align-items:center;justify-content:center;
+    opacity:1;transition:opacity var(--t-med);
+  }
+  .intake.hidden{opacity:0;pointer-events:none}
+  .intake-card{
+    width:min(560px,92vw);
+    background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+    border:1px solid var(--line-2);border-radius:16px;
+    padding:22px;
+    box-shadow:var(--shadow-soft);
+  }
+  .intake-card h2{font-size:16px;margin:0 0 4px;font-weight:600}
+  .intake-card .sub{color:var(--ink-2);font-size:12.5px;margin-bottom:16px}
+  .intake-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+  .intake-btn{
+    display:flex;flex-direction:column;align-items:flex-start;gap:6px;
+    padding:14px;border-radius:12px;border:1px solid var(--line-2);
+    background:rgba(255,255,255,.015);
+    transition:background var(--t-fast),border-color var(--t-fast),transform var(--t-fast);
+    text-align:left;
+  }
+  .intake-btn:hover{background:rgba(122,162,255,.06);border-color:rgba(122,162,255,.35);transform:translateY(-1px)}
+  .intake-btn .ti{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px}
+  .intake-btn .desc{color:var(--ink-2);font-size:11.5px}
+  .intake-btn svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+  .intake-or{text-align:center;color:var(--ink-3);font-size:11px;margin:6px 0}
+  .intake-paste{
+    border:1px dashed var(--line-2);border-radius:10px;padding:14px;text-align:center;color:var(--ink-3);font-size:12px;
+  }
+  .intake-paste b{color:var(--ink-1);font-weight:500}
+  .intake-demo{
+    margin-top:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+    background:rgba(94,211,163,.06);border:1px solid rgba(94,211,163,.22);
+    padding:8px 12px;border-radius:10px;font-size:12px;color:#bdf0d8;
+  }
+  .intake-demo button{
+    background:rgba(94,211,163,.18);color:#dff5ea;border:1px solid rgba(94,211,163,.4);
+    padding:5px 10px;border-radius:8px;font-weight:600;font-size:11.5px;
+  }
+  .intake-demo button:hover{background:rgba(94,211,163,.28)}
+
+  /* =====================  WEBCAM — first-class  ===================== */
+  .cam{
+    position:absolute;inset:0;z-index:60;background:#000;
+    display:flex;flex-direction:column;
+    opacity:0;pointer-events:none;transition:opacity var(--t-med);
+  }
+  .cam.on{opacity:1;pointer-events:auto}
+  .cam-top{
+    display:flex;align-items:center;gap:10px;padding:14px 18px;
+    background:linear-gradient(180deg,rgba(0,0,0,.7),transparent);
+    color:#fff;position:relative;z-index:2;
+  }
+  .cam-top .crumb{font-size:12px;color:#bcc6da;display:flex;align-items:center;gap:8px}
+  .cam-top .crumb .back{
+    display:inline-flex;align-items:center;gap:6px;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);
+    color:#fff;padding:6px 10px;border-radius:99px;font-size:12px;font-weight:500;
+  }
+  .cam-top .crumb .back:hover{background:rgba(255,255,255,.14)}
+  .cam-top .spacer{flex:1}
+  .cam-top .toggle{
+    display:inline-flex;align-items:center;gap:6px;color:#bcc6da;font-size:11.5px;
+    padding:6px 10px;border-radius:99px;border:1px solid rgba(255,255,255,.12);
+  }
+  .cam-top .toggle.on{background:rgba(94,211,163,.18);border-color:rgba(94,211,163,.4);color:#bdf0d8}
+
+  .cam-stage{
+    flex:1;position:relative;display:grid;place-items:center;overflow:hidden;
+    background:
+      radial-gradient(800px 500px at 50% 50%, #1a1f2c, #0a0a0c 70%);
+  }
+  .doc{
+    position:relative;
+    width:min(58vh,84%);
+    aspect-ratio:5/7;
+    background:linear-gradient(180deg,#f5f1e7,#ece6d4);
+    color:#22241c;
+    border-radius:10px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04);
+    padding:22px 24px;
+    transform:rotate(-14deg) scale(.94);
+    transition: transform var(--t-slow);
+    overflow:hidden;
+    font-family: ui-serif, Georgia, "Times New Roman", serif;
+  }
+  .doc.level{transform:rotate(0deg) scale(1)}
+  .doc h3{margin:0 0 6px;font-size:15px;font-weight:700;letter-spacing:.02em}
+  .doc .meta{font-size:10.5px;color:#5b5a4e;margin-bottom:14px}
+  .doc .row{display:flex;justify-content:space-between;font-size:11px;color:#33352b;border-bottom:1px dashed rgba(0,0,0,.18);padding:5px 0}
+  .doc .row b{font-weight:600}
+  .doc .err{
+    margin-top:10px;padding:8px 10px;border-radius:6px;
+    background:rgba(220,80,80,.12);border:1px solid rgba(220,80,80,.4);color:#7a1f1f;
+    font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .doc .stamp{
+    position:absolute;right:-14px;top:18px;transform:rotate(8deg);
+    border:2px solid #b15555;color:#b15555;font-weight:800;font-size:13px;
+    padding:4px 8px;border-radius:6px;letter-spacing:.08em;
+    font-family:ui-sans-serif,system-ui;
+  }
+  /* horizon line + framing guides */
+  .frame{
+    position:absolute;inset:6%;border:1px dashed rgba(255,255,255,.18);border-radius:6px;
+    pointer-events:none;
+  }
+  .frame::before,.frame::after{
+    content:"";position:absolute;left:50%;transform:translateX(-50%);
+    width:40%;height:1px;background:rgba(255,255,255,.28);
+  }
+  .frame::before{top:50%}
+  .frame::after{top:50%;height:0}
+  .horizon{
+    position:absolute;left:8%;right:8%;top:50%;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(122,162,255,.55),transparent);
+    transform-origin:50% 50%;
+    transform:rotate(-14deg);
+    transition: transform var(--t-slow), background var(--t-fast);
+    pointer-events:none;
+  }
+  .horizon.level{transform:rotate(0deg);background:linear-gradient(90deg,transparent,rgba(94,211,163,.75),transparent)}
+  .level-badge{
+    position:absolute;top:14px;left:50%;transform:translate(-50%,0);
+    background:rgba(0,0,0,.55);color:#bcc6da;font-size:11.5px;
+    padding:5px 10px;border-radius:99px;display:inline-flex;gap:6px;align-items:center;
+    border:1px solid rgba(255,255,255,.12);
+  }
+  .level-badge.locked{color:#bdf0d8;border-color:rgba(94,211,163,.4);background:rgba(94,211,163,.12)}
+
+  .cam-bottom{
+    padding:14px 18px 22px;
+    display:flex;align-items:center;justify-content:center;gap:14px;
+    background:linear-gradient(0deg,rgba(0,0,0,.7),transparent);
+    position:relative;z-index:2;
+  }
+  .cam-secondary{
+    color:#bcc6da;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);
+    padding:8px 14px;border-radius:99px;font-size:12px;
+  }
+  .cam-secondary:hover{background:rgba(255,255,255,.12)}
+  .shutter{
+    width:64px;height:64px;border-radius:50%;
+    background:#fff;border:4px solid #bcc6da;
+    box-shadow:0 0 0 4px rgba(255,255,255,.08), 0 12px 30px rgba(0,0,0,.6);
+    cursor:pointer;transition:transform var(--t-fast),box-shadow var(--t-fast);
+  }
+  .shutter:hover{transform:scale(1.04)}
+  .shutter:disabled{background:#5b6377;border-color:#3d4253;cursor:not-allowed}
+  .cam-hint{
+    position:absolute;top:-22px;left:50%;transform:translateX(-50%);
+    color:var(--ink-2);font-size:11.5px;white-space:nowrap;
+  }
+
+  /* =====================  PROVENANCE POPOVER  ===================== */
+  .popover{
+    position:fixed;z-index:80;
+    background:linear-gradient(180deg,var(--bg-3),var(--bg-2));
+    border:1px solid var(--line-2);border-radius:10px;
+    padding:10px 12px;color:var(--ink-1);font-size:12px;
+    box-shadow:var(--shadow-soft);
+    max-width:300px;opacity:0;pointer-events:none;
+    transform:translateY(4px);transition:opacity var(--t-fast),transform var(--t-fast);
+  }
+  .popover.on{opacity:1;transform:none}
+  .popover .pk{font-size:10.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+  .popover .pq{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+    background:rgba(0,0,0,.3);padding:6px 8px;border-radius:6px;color:var(--ink-0);font-size:11.5px;
+    white-space:pre-wrap;
+  }
+
+  /* =====================  AGENT-ARRIVAL ANIMATIONS  ===================== */
+  .pop-in{animation:popIn .42s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes popIn{
+    0%{opacity:0;transform:translateY(8px) scale(.985)}
+    100%{opacity:1;transform:none}
+  }
+
+  /* token glyph that flies along trails */
+  .token{
+    position:absolute;
+    background:linear-gradient(180deg,#fff,#d9e3ff);
+    color:#0a0a0c;font-weight:700;font-size:10.5px;
+    padding:2px 6px;border-radius:99px;white-space:nowrap;
+    box-shadow:0 4px 12px rgba(122,162,255,.35);
+    pointer-events:none;z-index:7;
+  }
+
+  /* responsive squeeze for narrow */
+  @media (max-width:1080px){
+    .stage{grid-template-columns:240px 1fr 260px}
+    .pillrow .pill .agent-state{display:none}
+  }
+</style>
+</head>
+<body>
+<div class="chassis" id="chassis">
+
+  <!-- ============================ RAIL ============================ -->
+  <aside class="rail" aria-label="Workflow rail">
+    <div class="brand" title="Operator Suite">OS</div>
+    <div class="sep"></div>
+    <button class="wflow active" title="Escalation triage">
+      <svg viewBox="0 0 24 24"><path d="M12 3l9 4-9 4-9-4 9-4zM3 12l9 4 9-4M3 17l9 4 9-4"/></svg>
+      <span class="wlabel">Escalation triage</span>
+    </button>
+    <button class="wflow" title="INV start (coming soon)">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <span class="wlabel">INV start - stub</span>
+    </button>
+    <button class="wflow" title="Trip planner (coming soon)">
+      <svg viewBox="0 0 24 24"><path d="M3 12h18M12 3v18M5 5l14 14M19 5L5 19"/></svg>
+      <span class="wlabel">Trip planner - stub</span>
+    </button>
+    <button class="wflow" title="Email composer (coming soon)">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
+      <span class="wlabel">Email composer - stub</span>
+    </button>
+    <div class="spacer"></div>
+    <button class="wflow" title="Settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5h0a1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      <span class="wlabel">Settings</span>
+    </button>
+    <div class="me" title="You — Operator">KM</div>
+  </aside>
+
+  <!-- ============================ TOPBAR ============================ -->
+  <header class="topbar">
+    <div class="case-title">
+      <span class="dot" id="caseDot"></span>
+      <h1 id="caseTitle">Case CASE-7831 - Awaiting intake</h1>
+      <span class="sub" id="caseSub">opened just now - phone agent: Maria L.</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="pillrow" id="agentPills">
+      <span class="pill parser"><span class="swatch"></span>Parser <span class="agent-state" id="psPill">idle</span></span>
+      <span class="pill triage"><span class="swatch"></span>Triage <span class="agent-state" id="trPill">idle</span></span>
+      <span class="pill inv"><span class="swatch"></span>INV <span class="agent-state" id="ivPill">idle</span></span>
+      <span class="pill analyst"><span class="swatch"></span>Analyst <span class="agent-state" id="anPill">offstage</span></span>
+    </div>
+    <button class="iconbtn" id="btnNewCase" title="New case">
+      <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="iconbtn" id="btnReplay" title="Replay this case from start">
+      <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+    </button>
+  </header>
+
+  <!-- ============================ STAGE ============================ -->
+  <main class="stage" id="stage">
+
+    <!-- Parser satellite -->
+    <section class="sat-parser" id="satParser" aria-label="Parser agent">
+      <div class="sat-head">
+        <div class="avatar" title="Parser - vision LLM">P</div>
+        <div>
+          <div class="who">Parser <span class="role" style="color:var(--ink-3);font-weight:400">- vision</span></div>
+        </div>
+        <div class="stamp" id="parserStamp">waiting</div>
+      </div>
+      <div class="parser-progress"><i id="parserBar"></i></div>
+      <div class="parser-fields" id="parserFields"></div>
+      <div class="parser-summary" id="parserSummary"></div>
+    </section>
+
+    <!-- Triage satellite (anchor card — confidence halo lives here) -->
+    <section class="sat-triage" id="satTriage" data-state="idle" aria-label="Triage agent - persistent">
+      <div class="sat-head">
+        <div class="avatar" title="Triage - senior LLM">T</div>
+        <div>
+          <div class="who">Triage <span class="role" style="color:var(--ink-3);font-weight:400">- senior</span></div>
+        </div>
+        <div class="stamp" id="triageStamp">waiting</div>
+      </div>
+      <div class="triage-empty" id="triageEmpty">
+        <div class="spin"></div>
+        <div>Triage will land here. It stays for the whole case.</div>
+      </div>
+      <div id="triageBody" style="display:none">
+        <div class="triage-grid">
+          <div class="tcell sev" data-prov="severity" tabindex="0">
+            <span class="k">Severity</span>
+            <span class="v"><span class="sev-pill" id="tSevPill">P2</span><span id="tSevWord">Standard</span></span>
+          </div>
+          <div class="tcell" data-prov="category" tabindex="0">
+            <span class="k">Category</span>
+            <span class="v" id="tCat">bank-feeds</span>
+          </div>
+        </div>
+        <div class="triage-line" data-prov="fast-read" tabindex="0">
+          <span class="lk">Fast read</span>
+          <span id="tFast"></span>
+        </div>
+        <div class="triage-line" data-prov="next-step" tabindex="0">
+          <span class="lk">Next step</span>
+          <span id="tNext"></span>
+        </div>
+        <div class="triage-line" data-prov="missing" tabindex="0">
+          <span class="lk">Missing info</span>
+          <span id="tMiss"></span>
+        </div>
+        <div class="triage-foot">
+          <span>Confidence</span>
+          <div class="conf-bar"><i id="confBar"></i></div>
+          <span class="conf-num" id="confNum">--</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Stage canvas — analyst -->
+    <section class="stagecanvas" id="canvas" aria-label="Analyst stage">
+      <div class="analyst-bar">
+        <div class="analyst-face" id="analystFace" style="opacity:.35"></div>
+        <div class="analyst-meta">
+          <span class="name" id="analystName">Awaiting analyst</span>
+          <span class="role">
+            <b id="analystRole">Senior escalation analyst</b>
+            <span class="typing" id="typing"><span class="d"></span><span class="d"></span><span class="d"></span></span>
+          </span>
+        </div>
+        <div class="analyst-actions">
+          <button class="iconbtn" id="btnBranch" title="Branch this thread (whatif)">
+            <svg viewBox="0 0 24 24"><path d="M6 3v9a4 4 0 0 0 4 4h6"/><circle cx="6" cy="3" r="1.6"/><circle cx="18" cy="16" r="1.6"/></svg>
+          </button>
+          <button class="iconbtn" id="btnReplayTrail" title="Replay handoff trails">
+            <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="chat-scroll" id="chat">
+        <div class="turn system"><div class="bubble">Stage is quiet. Once parser delivers fields and triage commits, the analyst joins.</div></div>
+      </div>
+
+      <div class="composer">
+        <div class="field">
+          <span class="quoted" id="quoted">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h6M5 12h6M5 17h6M14 7l5 5-5 5"/></svg>
+            <span id="quotedText"></span>
+            <span class="x" id="quotedX" title="Clear">x</span>
+          </span>
+          <textarea id="composer" rows="1" placeholder="Ask the analyst - or hover a triage field / INV row to pre-arm a quoted reply"></textarea>
+        </div>
+        <button class="send" id="btnSend">
+          Send
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <!-- handoff trail overlay (sits inside canvas so coordinates are absolute to canvas) -->
+      <svg class="trail-canvas" id="trail" xmlns="http://www.w3.org/2000/svg"></svg>
+    </section>
+
+    <!-- INV satellite -->
+    <section class="sat-inv" id="satInv" aria-label="INV search agent">
+      <div class="sat-head">
+        <div class="avatar" title="INV search - junior LLM with DB tools">I</div>
+        <div>
+          <div class="who">INV search <span class="role" style="color:var(--ink-3);font-weight:400">- junior</span></div>
+        </div>
+        <div class="stamp" id="invStamp">waiting</div>
+      </div>
+      <div class="inv-list" id="invList">
+        <div class="inv-empty">
+          <div class="spin"></div>
+          <div>Searching prior cases by signature once parser commits.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Handoff trail overlay (page-level for trails between satellites) -->
+    <svg class="trail-canvas" id="trailGlobal" xmlns="http://www.w3.org/2000/svg" style="position:fixed;inset:0;width:100vw;height:100vh;z-index:9"></svg>
+
+    <!-- Provenance popover -->
+    <div class="popover" id="popover">
+      <div class="pk" id="popK">Source</div>
+      <div class="pq" id="popQ"></div>
+    </div>
+
+  </main>
+
+  <!-- ============================ SCRUBBER ============================ -->
+  <footer class="scrubber" aria-label="Case scrubber">
+    <div class="label"><span class="live"></span>Case timeline</div>
+    <div class="track" id="track">
+      <div class="fill" id="fill" style="width:0%"></div>
+      <div class="nubs" id="nubs"></div>
+    </div>
+    <div class="right">
+      <span class="scrub-time" id="scrubTime">t = 0.0s</span>
+      <button class="scrub-jump live" id="btnJumpLive">Live</button>
+    </div>
+  </footer>
+
+  <!-- ============================ INTAKE ============================ -->
+  <div class="intake" id="intake">
+    <div class="intake-card">
+      <h2>Open a new case</h2>
+      <div class="sub">Hand off a screenshot - the parser, triage, and analyst pipeline will run automatically. You will not need to scroll.</div>
+      <div class="intake-actions">
+        <button class="intake-btn" id="btnUpload">
+          <div class="ti">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16"/></svg>
+            Upload screenshot
+          </div>
+          <div class="desc">PNG / JPG. Drag and drop or paste.</div>
+        </button>
+        <button class="intake-btn" id="btnWebcam">
+          <div class="ti">
+            <svg viewBox="0 0 24 24"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10l4-2v8l-4-2z"/></svg>
+            Use webcam
+          </div>
+          <div class="desc">Phone-friendly, auto-derotates, level-lock shutter.</div>
+        </button>
+      </div>
+      <div class="intake-or">or</div>
+      <div class="intake-paste">Paste a screenshot anywhere with <b>Ctrl/Cmd+V</b></div>
+      <div class="intake-demo">
+        <span>For this prototype, run the full mock pipeline.</span>
+        <button id="btnDemo">Run demo case</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ WEBCAM ============================ -->
+  <div class="cam" id="cam" aria-label="Webcam capture">
+    <div class="cam-top">
+      <button class="back" id="camBack" title="Cancel - back to intake">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+        Back to upload
+      </button>
+      <div class="crumb" style="margin-left:6px">Capture document - hold steady until horizon turns green</div>
+      <div class="spacer"></div>
+      <button class="toggle" id="camTorch">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2h10l-2 5h2l-7 15 2-9H8z"/></svg>
+        Torch
+      </button>
+      <button class="toggle on" id="camDerot">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v5h5"/></svg>
+        Auto-derotate
+      </button>
+      <button class="toggle on" id="camLevel">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18"/><circle cx="12" cy="12" r="2"/></svg>
+        Level-lock
+      </button>
+    </div>
+    <div class="cam-stage">
+      <div class="level-badge" id="levelBadge">Holding... tilt -14 deg</div>
+      <div class="doc" id="doc">
+        <h3>QuickBooks Online</h3>
+        <div class="meta">Bank feed - Wells Fargo Business Checking - last sync 2h ago</div>
+        <div class="row"><b>Account</b><span>...4471</span></div>
+        <div class="row"><b>Last imported</b><span>May 14, 2026</span></div>
+        <div class="row"><b>Pending</b><span>0</span></div>
+        <div class="row"><b>New</b><span>0</span></div>
+        <div class="err">Error 350: We can't update your account right now. Please try again later. (Ref BFE-350-7831)</div>
+        <div class="stamp">CONFIDENTIAL</div>
+      </div>
+      <div class="frame"></div>
+      <div class="horizon" id="horizon"></div>
+    </div>
+    <div class="cam-bottom">
+      <button class="cam-secondary" id="camBack2">Cancel</button>
+      <div style="position:relative">
+        <span class="cam-hint" id="camHint">Tap when horizon is green</span>
+        <button class="shutter" id="shutter" disabled aria-label="Capture"></button>
+      </div>
+      <button class="cam-secondary" id="camRetake">Switch camera</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ================================================================
+   QBO Escalation V3 — animation-motion
+   Stage + Satellites with handoff trails, confidence halo, scrubber.
+   ================================================================ */
+(() => {
+  // ----- mock data --------------------------------------------------
+  const MOCK = {
+    case: { id:"CASE-7831", agent:"Maria L." },
+    parser: [
+      { k:"Customer",     v:"Riverside Designs LLC", src:"Customer name header" },
+      { k:"QBO product",  v:"QuickBooks Online Plus", src:"Top-right plan label" },
+      { k:"Surface",      v:"Banking > Connected accounts", src:"Breadcrumb on screen" },
+      { k:"Error code",   v:"BFE-350", src:"Error banner: BFE-350-7831" },
+      { k:"Affected acct",v:"Wells Fargo ...4471", src:"Bank tile primary line" },
+      { k:"Symptom",      v:"Can't update account", src:"Error banner message" },
+      { k:"Last sync",    v:"~2h ago", src:"Sub-label 'last sync 2h ago'" },
+      { k:"Frequency",    v:"3rd time this week", src:"Phone agent verbal" },
+      { k:"User says",    v:"\"Tried logging out, no change\"", src:"Phone agent note" },
+    ],
+    triage: {
+      severity: "P2", severityWord:"Standard",
+      category: "bank-feeds",
+      fast: "Wells Fargo connection failing with BFE-350 after MFA refresh. Recurring 3x this week. Customer can sign into bank directly - issue is on the aggregator side.",
+      next: "Reauthenticate the Wells Fargo connection from Banking - Link Account; do NOT delete + re-add (preserves rules + history).",
+      missing: "Whether the customer recently changed their bank password; whether other connected institutions in this file are healthy.",
+      confidence: 0.88,
+      prov: {
+        severity:"Recurring impact + active workflow blocker; not a P1 outage but customer is stuck.",
+        category:"Error code family BFE-* is bank-feeds aggregator domain.",
+        "fast-read":"Combined from parser fields (BFE-350, Wells Fargo ...4471, 'can't update') + phone agent note ('3rd time this week').",
+        "next-step":"Playbook: bank-feeds/wells-fargo.md - prefers re-auth over re-add to preserve rules/history.",
+        missing:"Two unknowns that materially change recommendation - bank-side password change, aggregator-wide outage.",
+      }
+    },
+    inv: [
+      { id:"INV-147914", desc:"Wells Fargo BFE-350 after MFA, re-auth resolved", match:0.94 },
+      { id:"INV-146802", desc:"WF connection stuck 'updating' loop", match:0.81 },
+      { id:"INV-144117", desc:"BFE-350 cluster May 2025 (aggregator outage)", match:0.68 },
+      { id:"INV-141055", desc:"Chase BFE-101 - delete + readd (different family)", match:0.42 },
+    ],
+    analyst: {
+      name: "Dr. Avery Chen",
+      role: "Senior escalation analyst - banking & feeds",
+    },
+    chat: [
+      { who:"analyst", text:`I've got the triage and INV hits. <span class="cite triage" data-cite="triage:category">bank-feeds</span> + <span class="cite" data-cite="inv:INV-147914">INV-147914</span> is the cleanest precedent (94% match). I'd start with a Wells Fargo re-auth, not a re-add.` },
+      { who:"you", text:`Why re-auth instead of delete + re-add? Maria asked.` },
+      { who:"analyst", text:`Re-add tears out the historical rules and category mappings for that account. The customer's "3rd time this week" tells me their rules are valuable - losing them turns a 10-minute fix into a 2-hour cleanup. Re-auth fixes 92% of BFE-350 cases per the INV cluster.` },
+      { who:"you", text:`Anything to verify before Maria walks the customer through it?` },
+      { who:"analyst", text:`Two checks: (1) ask if they changed their Wells Fargo online password in the last 7 days - that flips this to a credential issue, not aggregator; (2) confirm other connected banks in this file are syncing fine - rules out a file-level corruption. If both clear, send them through Banking - Link Account - reconnect.` },
+    ],
+  };
+
+  // ----- elements ---------------------------------------------------
+  const $ = s => document.querySelector(s);
+  const el = {
+    intake: $("#intake"), btnUpload: $("#btnUpload"), btnWebcam: $("#btnWebcam"),
+    btnDemo: $("#btnDemo"), btnNewCase: $("#btnNewCase"),
+    cam: $("#cam"), camBack: $("#camBack"), camBack2: $("#camBack2"),
+    shutter: $("#shutter"), camDerot: $("#camDerot"), camLevel: $("#camLevel"),
+    camTorch: $("#camTorch"), camHint: $("#camHint"),
+    doc: $("#doc"), horizon: $("#horizon"), levelBadge: $("#levelBadge"),
+
+    satParser:$("#satParser"), parserBar:$("#parserBar"),
+    parserFields:$("#parserFields"), parserSummary:$("#parserSummary"),
+    parserStamp:$("#parserStamp"),
+
+    satTriage:$("#satTriage"), triageEmpty:$("#triageEmpty"), triageBody:$("#triageBody"),
+    triageStamp:$("#triageStamp"),
+    tSevPill:$("#tSevPill"), tSevWord:$("#tSevWord"), tCat:$("#tCat"),
+    tFast:$("#tFast"), tNext:$("#tNext"), tMiss:$("#tMiss"),
+    confBar:$("#confBar"), confNum:$("#confNum"),
+
+    satInv:$("#satInv"), invList:$("#invList"), invStamp:$("#invStamp"),
+
+    analystFace:$("#analystFace"), analystName:$("#analystName"),
+    analystRole:$("#analystRole"), typing:$("#typing"), chat:$("#chat"),
+    composer:$("#composer"), btnSend:$("#btnSend"),
+    quoted:$("#quoted"), quotedText:$("#quotedText"), quotedX:$("#quotedX"),
+    btnBranch:$("#btnBranch"), btnReplayTrail:$("#btnReplayTrail"),
+
+    caseTitle:$("#caseTitle"), caseSub:$("#caseSub"), caseDot:$("#caseDot"),
+    psPill:$("#psPill"), trPill:$("#trPill"), ivPill:$("#ivPill"), anPill:$("#anPill"),
+
+    fill:$("#fill"), nubs:$("#nubs"), track:$("#track"),
+    scrubTime:$("#scrubTime"), btnJumpLive:$("#btnJumpLive"),
+    btnReplay:$("#btnReplay"),
+
+    trailGlobal:$("#trailGlobal"),
+    popover:$("#popover"), popK:$("#popK"), popQ:$("#popQ"),
+  };
+
+  // ----- timeline / state -------------------------------------------
+  const state = {
+    t0: 0,             // ms timestamp at case start
+    events: [],        // {at, label, kind} kind in parser|triage|inv|analyst|turn
+    snapshots: [],     // {at, label, render: fn(view)=>void}
+    duration: 30000,   // total expected duration (auto-grows)
+    live: true,
+    scrubT: 0,         // when not live, current scrub time
+  };
+
+  const now = () => performance.now() - state.t0;
+
+  function recordEvent(kind, label, snapshot){
+    const at = now();
+    state.events.push({ at, kind, label, snapshot: snapshot || (()=>{}) });
+    state.duration = Math.max(state.duration, at + 1500);
+    renderScrubber();
+  }
+
+  // Apply all snapshots whose at <= t, in order. Each snapshot is a small
+  // imperative function that puts the UI into the post-event state.
+  function applyStateUpTo(t){
+    // reset
+    clearVisuals();
+    state.events.forEach(ev => {
+      if(ev.at <= t){
+        try { ev.snapshot(); } catch(err){ /* swallow — snapshots are best-effort */ }
+      }
+    });
+    // refresh trails & confidence halo to match
+  }
+
+  function clearVisuals(){
+    // restore the "empty case" surface without disturbing the timeline
+    el.parserFields.innerHTML="";
+    el.parserSummary.innerHTML="";
+    el.satParser.classList.remove("collapsed");
+    el.parserBar.style.width="0%";
+    el.parserStamp.textContent="reading";
+    el.psPill.textContent="idle";
+
+    el.satTriage.dataset.state="idle";
+    el.triageEmpty.style.display="";
+    el.triageBody.style.display="none";
+    el.triageStamp.textContent="waiting";
+    el.confBar.style.width="0%"; el.confNum.textContent="--";
+    el.trPill.textContent="idle";
+
+    el.invStamp.textContent="waiting";
+    el.invList.innerHTML = `<div class="inv-empty"><div class="spin"></div><div>Searching prior cases by signature once parser commits.</div></div>`;
+    el.ivPill.textContent="idle";
+
+    el.analystFace.style.opacity=".35";
+    el.analystName.textContent="Awaiting analyst";
+    el.analystRole.textContent="Senior escalation analyst";
+    el.typing.classList.remove("on");
+    el.chat.innerHTML = `<div class="turn system"><div class="bubble">Stage is quiet. Once parser delivers fields and triage commits, the analyst joins.</div></div>`;
+    el.anPill.textContent="offstage";
+  }
+
+  // ----- intake actions ---------------------------------------------
+  el.btnDemo.addEventListener("click", () => runDemo());
+  el.btnUpload.addEventListener("click", () => runDemo()); // upload path mocked -> same demo
+  el.btnNewCase.addEventListener("click", () => resetCase());
+  el.btnReplay.addEventListener("click", () => replayFromStart());
+
+  el.btnWebcam.addEventListener("click", () => openCam());
+  el.camBack.addEventListener("click", () => closeCam(true));
+  el.camBack2.addEventListener("click", () => closeCam(true));
+  document.addEventListener("paste", e => { if(!el.intake.classList.contains("hidden")) runDemo(); });
+
+  // ----- webcam logic -----------------------------------------------
+  let camTimer = null, camTilt = -14;
+  function openCam(){
+    el.cam.classList.add("on");
+    el.intake.classList.add("hidden");
+    camTilt = -14;
+    updateDocTilt();
+    // simulate device orientation slowly leveling out
+    camTimer = setInterval(() => {
+      if(el.camDerot.classList.contains("on")){
+        camTilt += (0 - camTilt) * 0.18;
+      } else {
+        camTilt += (Math.random()-0.5) * 1.4;
+      }
+      updateDocTilt();
+    }, 70);
+  }
+  function closeCam(backToIntake){
+    el.cam.classList.remove("on");
+    clearInterval(camTimer); camTimer=null;
+    if(backToIntake) el.intake.classList.remove("hidden");
+  }
+  function updateDocTilt(){
+    el.doc.style.transform = `rotate(${camTilt.toFixed(2)}deg) scale(${0.94 + Math.min(0.06, (14-Math.abs(camTilt))/14*0.06)})`;
+    el.horizon.style.transform = `rotate(${camTilt.toFixed(2)}deg)`;
+    const level = Math.abs(camTilt) < 1.2 && el.camLevel.classList.contains("on");
+    el.doc.classList.toggle("level", level);
+    el.horizon.classList.toggle("level", level);
+    el.levelBadge.classList.toggle("locked", level);
+    el.levelBadge.textContent = level ? "Level locked - ready" : `Holding... tilt ${camTilt.toFixed(1)} deg`;
+    el.shutter.disabled = !level;
+    el.camHint.textContent = level ? "Tap to capture" : "Hold steady - waiting for level";
+  }
+  el.shutter.addEventListener("click", () => {
+    if(el.shutter.disabled) return;
+    // flash
+    el.cam.animate([{filter:"brightness(1)"},{filter:"brightness(2.4)"},{filter:"brightness(1)"}],{duration:240});
+    closeCam(false);
+    setTimeout(() => runDemo(), 240);
+  });
+  el.camTorch.addEventListener("click", () => el.camTorch.classList.toggle("on"));
+  el.camDerot.addEventListener("click", () => el.camDerot.classList.toggle("on"));
+  el.camLevel.addEventListener("click", () => el.camLevel.classList.toggle("on"));
+
+  // ----- main demo pipeline -----------------------------------------
+  let demoTimers = [];
+  function clearAllTimers(){ demoTimers.forEach(t=>clearTimeout(t)); demoTimers=[]; }
+  function later(ms, fn){ const t=setTimeout(fn,ms); demoTimers.push(t); return t; }
+
+  function resetCase(){
+    clearAllTimers();
+    state.events=[]; state.snapshots=[]; state.duration=30000; state.live=true; state.scrubT=0;
+    el.intake.classList.remove("hidden");
+    // reset UI
+    el.parserFields.innerHTML="";
+    el.parserSummary.innerHTML="";
+    el.satParser.classList.remove("collapsed");
+    el.parserBar.style.width="0%";
+    el.parserStamp.textContent="waiting";
+
+    el.satTriage.dataset.state="idle";
+    el.triageEmpty.style.display="";
+    el.triageBody.style.display="none";
+    el.triageStamp.textContent="waiting";
+    el.confBar.style.width="0%"; el.confNum.textContent="--";
+
+    el.invStamp.textContent="waiting";
+    el.invList.innerHTML = `<div class="inv-empty"><div class="spin"></div><div>Searching prior cases by signature once parser commits.</div></div>`;
+
+    el.analystFace.style.opacity=".35";
+    el.analystName.textContent="Awaiting analyst";
+    el.analystRole.textContent="Senior escalation analyst";
+    el.typing.classList.remove("on");
+    el.chat.innerHTML = `<div class="turn system"><div class="bubble">Stage is quiet. Once parser delivers fields and triage commits, the analyst joins.</div></div>`;
+
+    el.caseTitle.textContent="Case CASE-7831 - Awaiting intake";
+    el.psPill.textContent="idle"; el.trPill.textContent="idle"; el.ivPill.textContent="idle"; el.anPill.textContent="offstage";
+
+    renderScrubber();
+    drawTrails(); // clear
+  }
+
+  function runDemo(){
+    el.intake.classList.add("hidden");
+    state.t0 = performance.now();
+    state.events=[]; state.snapshots=[]; state.live=true;
+    el.caseTitle.textContent = `Case ${MOCK.case.id} - Bank feed BFE-350`;
+    el.caseSub.textContent = `opened just now - phone agent: ${MOCK.case.agent}`;
+    el.caseDot.style.background = "var(--warn)";
+    recordEvent("start","Intake received", () => {});
+
+    // PARSER --------------------------------------------------------
+    el.psPill.textContent = "reading";
+    el.parserStamp.textContent = "reading screenshot";
+    let pct = 0;
+    const tick = () => {
+      pct = Math.min(100, pct + 9 + Math.random()*7);
+      el.parserBar.style.width = pct+"%";
+      if(pct < 100) demoTimers.push(setTimeout(tick, 160));
+    };
+    tick();
+
+    // stagger parser field reveals
+    MOCK.parser.forEach((f, i) => {
+      later(420 + i*280, () => {
+        const pf = document.createElement("div");
+        pf.className="pf fresh";
+        pf.dataset.field = f.k;
+        pf.innerHTML = `<span class="k">${f.k}</span><span class="v">${escapeHtml(f.v)}</span>`;
+        pf.addEventListener("mouseenter", e => showPopover(pf, "Parser source", f.src));
+        pf.addEventListener("mouseleave", hidePopover);
+        el.parserFields.appendChild(pf);
+      });
+    });
+
+    // parser commit
+    later(420 + MOCK.parser.length*280 + 300, () => {
+      el.parserStamp.textContent = "9 fields";
+      el.psPill.textContent = "done";
+      recordEvent("parser","Parser committed 9 fields", () => {
+        // snapshot: parser shows all 9 fields (uncollapsed)
+        el.parserBar.style.width = "100%";
+        el.parserStamp.textContent = "9 fields";
+        el.psPill.textContent = "done";
+        el.parserFields.innerHTML = MOCK.parser.map(f =>
+          `<div class="pf"><span class="k">${escapeHtml(f.k)}</span><span class="v">${escapeHtml(f.v)}</span></div>`
+        ).join("");
+      });
+      // fire INV in parallel
+      kickInv();
+      // fire Triage in parallel — arrives first
+      kickTriage();
+    });
+  }
+
+  function kickTriage(){
+    el.trPill.textContent = "thinking";
+    el.satTriage.dataset.state = "awaiting";
+    el.triageStamp.textContent = "thinking";
+
+    // confidence climbs as it thinks
+    let c = 0.12;
+    const climb = () => {
+      c = Math.min(MOCK.triage.confidence, c + 0.06 + Math.random()*0.05);
+      el.confBar.style.width = (c*100).toFixed(0)+"%";
+      el.confNum.textContent = c.toFixed(2);
+      if(c < MOCK.triage.confidence - 0.01) demoTimers.push(setTimeout(climb, 240));
+    };
+    later(180, climb);
+
+    // commit triage
+    later(2200, () => {
+      el.triageEmpty.style.display = "none";
+      el.triageBody.style.display = "";
+      el.satTriage.classList.add("pop-in");
+      el.satTriage.dataset.state = "committed";
+      el.tSevPill.className = "sev-pill " + MOCK.triage.severity;
+      el.tSevPill.textContent = MOCK.triage.severity;
+      el.tSevWord.textContent = MOCK.triage.severityWord;
+      el.tCat.textContent = MOCK.triage.category;
+      el.tFast.textContent = MOCK.triage.fast;
+      el.tNext.textContent = MOCK.triage.next;
+      el.tMiss.textContent = MOCK.triage.missing;
+      el.confBar.style.width = (MOCK.triage.confidence*100).toFixed(0)+"%";
+      el.confNum.textContent = MOCK.triage.confidence.toFixed(2);
+      el.triageStamp.textContent = "committed";
+      el.trPill.textContent = "committed";
+
+      // wire hover/click for triage cells
+      el.triageBody.querySelectorAll("[data-prov]").forEach(cell => {
+        const key = cell.dataset.prov;
+        const label = cell.querySelector(".k,.lk")?.textContent || key;
+        cell.addEventListener("mouseenter", () => showPopover(cell, label + " - source", MOCK.triage.prov[key] || "(provenance unavailable)"));
+        cell.addEventListener("mouseleave", hidePopover);
+        cell.addEventListener("click", () => armQuote(`${label}: ${cell.querySelector(".v, span:not(.lk):not(.k)")?.textContent.trim()}`));
+      });
+
+      recordEvent("triage","Triage committed (P2 / bank-feeds / 0.88)", () => {
+        // snapshot: full triage visible + parser collapsed
+        el.triageEmpty.style.display = "none";
+        el.triageBody.style.display = "";
+        el.satTriage.dataset.state = "committed";
+        el.tSevPill.className = "sev-pill " + MOCK.triage.severity;
+        el.tSevPill.textContent = MOCK.triage.severity;
+        el.tSevWord.textContent = MOCK.triage.severityWord;
+        el.tCat.textContent = MOCK.triage.category;
+        el.tFast.textContent = MOCK.triage.fast;
+        el.tNext.textContent = MOCK.triage.next;
+        el.tMiss.textContent = MOCK.triage.missing;
+        el.confBar.style.width = (MOCK.triage.confidence*100).toFixed(0)+"%";
+        el.confNum.textContent = MOCK.triage.confidence.toFixed(2);
+        el.triageStamp.textContent = "committed";
+        el.trPill.textContent = "committed";
+        // collapse parser to summary chips
+        el.satParser.classList.add("collapsed");
+        const top = MOCK.parser.slice(0,4);
+        el.parserSummary.innerHTML =
+          top.map(f => `<span class="ps-chip" title="${escapeHtml(f.k+': '+f.v)}">${escapeHtml(f.v)}</span>`).join("")
+          + `<span class="ps-more">+ ${MOCK.parser.length - top.length} more</span>`;
+      });
+
+      // collapse parser to summary (live)
+      later(500, () => {
+        el.satParser.classList.add("collapsed");
+        const top = MOCK.parser.slice(0,4);
+        el.parserSummary.innerHTML =
+          top.map(f => `<span class="ps-chip" title="${escapeHtml(f.k+': '+f.v)}">${escapeHtml(f.v)}</span>`).join("")
+          + `<span class="ps-more" id="psMore">+ ${MOCK.parser.length - top.length} more</span>`;
+        document.getElementById("psMore").addEventListener("click", () => {
+          el.satParser.classList.toggle("collapsed");
+        });
+      });
+
+      // analyst arrives 600ms after triage
+      later(700, kickAnalyst);
+    });
+  }
+
+  function kickInv(){
+    el.ivPill.textContent = "searching";
+    el.invStamp.textContent = "searching";
+    later(1400, () => {
+      el.invList.innerHTML = "";
+      MOCK.inv.forEach((r, i) => {
+        later(i*240, () => {
+          const row = document.createElement("div");
+          row.className="inv-row pop-in";
+          row.innerHTML = `<span class="id">${r.id}</span><span class="desc">${escapeHtml(r.desc)}</span><span class="match">${(r.match*100|0)}% match</span>`;
+          row.addEventListener("mouseenter", () => showPopover(row, "INV record - " + r.id, r.desc + " - match score " + r.match.toFixed(2)));
+          row.addEventListener("mouseleave", hidePopover);
+          row.addEventListener("click", () => armQuote(`Re: ${r.id} - ${r.desc}`));
+          el.invList.appendChild(row);
+        });
+      });
+      later(MOCK.inv.length*240 + 200, () => {
+        el.ivPill.textContent = `${MOCK.inv.length} hits`;
+        el.invStamp.textContent = `${MOCK.inv.length} hits`;
+        recordEvent("inv","INV returned 4 candidates", () => {
+          // snapshot: full INV list shown
+          el.invList.innerHTML = "";
+          MOCK.inv.forEach(r => {
+            const row = document.createElement("div");
+            row.className="inv-row";
+            row.innerHTML = `<span class="id">${r.id}</span><span class="desc">${escapeHtml(r.desc)}</span><span class="match">${(r.match*100|0)}% match</span>`;
+            el.invList.appendChild(row);
+          });
+          el.ivPill.textContent = `${MOCK.inv.length} hits`;
+          el.invStamp.textContent = `${MOCK.inv.length} hits`;
+        });
+      });
+    });
+  }
+
+  function kickAnalyst(){
+    el.analystFace.style.transition = "opacity 600ms ease";
+    el.analystFace.style.opacity = "1";
+    el.analystName.textContent = MOCK.analyst.name;
+    el.analystRole.textContent = MOCK.analyst.role;
+    el.anPill.textContent = "on stage";
+    el.caseDot.style.background = "var(--good)";
+
+    // analyst opening line — shows handoff trails from triage AND inv
+    later(300, () => {
+      drawTrail("triage","stage", "P2 / bank-feeds");
+      drawTrail("inv","stage", "INV-147914 (94%)");
+    });
+
+    // analyst posts ack
+    later(900, () => {
+      const ack = document.createElement("div");
+      ack.className="turn system pop-in";
+      ack.innerHTML = `<div class="bubble">Analyst received triage (P2 / bank-feeds / 0.88) and INV-147914 (94% match).</div>`;
+      el.chat.appendChild(ack); scrollChat();
+      recordEvent("analyst","Analyst on stage - ack triage + INV", () => {
+        // snapshot: analyst face lit + ack bubble
+        el.analystFace.style.opacity = "1";
+        el.analystName.textContent = MOCK.analyst.name;
+        el.analystRole.textContent = MOCK.analyst.role;
+        el.anPill.textContent = "on stage";
+        el.chat.innerHTML = `<div class="turn system"><div class="bubble">Analyst received triage (P2 / bank-feeds / 0.88) and INV-147914 (94% match).</div></div>`;
+      });
+    });
+
+    // stream the rest
+    let delay = 1600;
+    MOCK.chat.forEach((m, i) => {
+      later(delay, () => streamTurn(m, () => {
+        const idx = i; // capture
+        recordEvent("turn", `${m.who}: ${stripHtml(m.text).slice(0,40)}...`, () => {
+          // snapshot: ack bubble + all chat turns up to and including idx
+          el.analystFace.style.opacity = "1";
+          el.analystName.textContent = MOCK.analyst.name;
+          el.analystRole.textContent = MOCK.analyst.role;
+          el.anPill.textContent = "on stage";
+          let html = `<div class="turn system"><div class="bubble">Analyst received triage (P2 / bank-feeds / 0.88) and INV-147914 (94% match).</div></div>`;
+          for(let j=0; j<=idx; j++){
+            const tm = MOCK.chat[j];
+            const av = tm.who==="analyst" ? "AC" : "KM";
+            html += `<div class="turn ${tm.who}"><div class="av">${av}</div><div><div class="bubble">${tm.text}</div><div class="turn-meta"><span style="color:var(--ink-3)">${tm.who==="analyst"?"analyst":"you"}</span></div></div></div>`;
+          }
+          el.chat.innerHTML = html;
+          attachCiteHandlers(el.chat);
+        });
+      }));
+      delay += 2800 + (m.who==="analyst" ? 1400 : 0);
+    });
+  }
+
+  function streamTurn(m, done){
+    el.typing.classList.toggle("on", m.who==="analyst");
+    const turn = document.createElement("div");
+    turn.className = "turn " + m.who + " pop-in";
+    const avText = m.who==="analyst" ? "AC" : "KM";
+    turn.innerHTML = `<div class="av">${avText}</div><div><div class="bubble"></div><div class="turn-meta"></div></div>`;
+    const bubble = turn.querySelector(".bubble");
+    const meta = turn.querySelector(".turn-meta");
+    el.chat.appendChild(turn); scrollChat();
+
+    // simulate streaming character-by-character for analyst
+    if(m.who === "analyst"){
+      let chars = 0;
+      const tokens = tokenizeWithHtml(m.text);
+      const stream = () => {
+        if(chars >= tokens.length){
+          el.typing.classList.remove("on");
+          attachCiteHandlers(bubble);
+          meta.innerHTML = `<span class="src">via triage + INV</span> - now`;
+          done && done();
+          return;
+        }
+        chars += 2 + Math.floor(Math.random()*3);
+        bubble.innerHTML = tokens.slice(0, chars).join("");
+        scrollChat();
+        demoTimers.push(setTimeout(stream, 22));
+      };
+      stream();
+    } else {
+      bubble.innerHTML = m.text;
+      meta.innerHTML = `<span style="color:var(--ink-3)">you - just now</span>`;
+      done && done();
+    }
+  }
+
+  function tokenizeWithHtml(str){
+    // splits the string into render-safe chunks; keeps html tags intact, splits text into chars
+    const out=[]; let i=0;
+    while(i<str.length){
+      if(str[i] === "<"){
+        const close = str.indexOf(">", i);
+        out.push(str.slice(i, close+1)); i = close+1;
+      } else {
+        out.push(str[i]); i++;
+      }
+    }
+    return out;
+  }
+
+  function attachCiteHandlers(scope){
+    scope.querySelectorAll(".cite").forEach(c => {
+      c.addEventListener("click", () => {
+        // replay the relevant trail
+        const ref = c.dataset.cite || "";
+        if(ref.startsWith("inv:")) drawTrail("inv","stage", c.textContent);
+        if(ref.startsWith("triage:")) drawTrail("triage","stage", c.textContent);
+      });
+    });
+  }
+
+  // ----- handoff trails ---------------------------------------------
+  function rectOf(elem){ return elem.getBoundingClientRect(); }
+
+  function drawTrail(fromKey, toKey, label){
+    const fromEl = ({
+      parser: el.satParser, triage: el.satTriage, inv: el.satInv,
+    })[fromKey];
+    const toEl = ({
+      stage: document.querySelector(".analyst-bar"),
+      triage: el.satTriage, analyst: document.querySelector(".analyst-bar"),
+    })[toKey];
+    if(!fromEl || !toEl) return;
+
+    const svg = el.trailGlobal;
+    const f = rectOf(fromEl);
+    const t = rectOf(toEl);
+
+    // points
+    const x1 = f.right - 8, y1 = f.top + f.height/2;
+    const x2 = t.left + 24, y2 = t.top + t.height/2;
+    const cx = (x1+x2)/2;
+    const path = document.createElementNS("http://www.w3.org/2000/svg","path");
+    path.setAttribute("d", `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`);
+    path.setAttribute("fill","none");
+    path.setAttribute("stroke", fromKey==="triage" ? "#9b7aff" : fromKey==="inv" ? "#5ed3a3" : "#f0b35c");
+    path.setAttribute("stroke-width","1.5");
+    path.setAttribute("stroke-dasharray","4 6");
+    path.setAttribute("opacity","0.0");
+    svg.appendChild(path);
+
+    // animate path opacity in then out
+    const length = path.getTotalLength?.() || 600;
+    path.style.strokeDasharray = `${length}`;
+    path.style.strokeDashoffset = `${length}`;
+    path.style.transition = "stroke-dashoffset 600ms ease, opacity 220ms ease";
+    requestAnimationFrame(() => {
+      path.style.opacity = "0.85";
+      path.style.strokeDashoffset = "0";
+    });
+
+    // token glyph
+    const tok = document.createElement("div");
+    tok.className="token";
+    tok.textContent = label;
+    tok.style.left = x1+"px"; tok.style.top = (y1-12)+"px";
+    document.body.appendChild(tok);
+    const startT = performance.now();
+    const dur = 720;
+    function frame(t){
+      const k = Math.min(1, (t - startT)/dur);
+      // sample the bezier roughly by lerping with eased control
+      const e = easeInOut(k);
+      // approximate by quadratic-ish using cx
+      const x = lerp(x1, x2, e);
+      const yMid = lerp(y1, y2, e);
+      const arc = Math.sin(e*Math.PI) * 28;
+      tok.style.left = (x - tok.offsetWidth/2) + "px";
+      tok.style.top  = (yMid - 12 - arc) + "px";
+      tok.style.opacity = (k < 0.85 ? 1 : 1 - (k-0.85)/0.15).toFixed(2);
+      if(k < 1) requestAnimationFrame(frame);
+      else {
+        tok.remove();
+        setTimeout(() => { path.style.opacity="0"; setTimeout(()=>path.remove(), 220); }, 400);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  function drawTrails(){ el.trailGlobal.innerHTML=""; }
+  const lerp = (a,b,k) => a + (b-a)*k;
+  const easeInOut = k => k<.5 ? 2*k*k : 1 - Math.pow(-2*k+2,2)/2;
+
+  el.btnReplayTrail.addEventListener("click", () => {
+    drawTrail("triage","stage","P2 / bank-feeds");
+    setTimeout(()=>drawTrail("inv","stage","INV-147914"), 180);
+  });
+
+  // ----- composer / co-pointer / quote arming -----------------------
+  function armQuote(text){
+    el.quotedText.textContent = text;
+    el.quoted.classList.add("on");
+    el.composer.focus();
+  }
+  el.quotedX.addEventListener("click", () => el.quoted.classList.remove("on"));
+  el.btnSend.addEventListener("click", sendMessage);
+  el.composer.addEventListener("keydown", e => {
+    if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); sendMessage(); }
+  });
+  function sendMessage(){
+    const text = el.composer.value.trim();
+    if(!text) return;
+    const quote = el.quoted.classList.contains("on") ? el.quotedText.textContent : "";
+    const full = quote ? `<span class="cite triage">${escapeHtml(quote)}</span> ${escapeHtml(text)}` : escapeHtml(text);
+    streamTurn({ who:"you", text:full });
+    el.composer.value=""; el.quoted.classList.remove("on");
+    // analyst responds with a canned reply
+    later(800, () => streamTurn({
+      who:"analyst",
+      text:`Got it. I'll factor that in and ping you if anything shifts the recommendation away from re-auth.`
+    }));
+  }
+
+  // ----- popover ----------------------------------------------------
+  let popHide = null;
+  function showPopover(anchor, label, text){
+    clearTimeout(popHide);
+    const r = rectOf(anchor);
+    el.popK.textContent = label;
+    el.popQ.textContent = text;
+    el.popover.classList.add("on");
+    el.popover.style.left = Math.min(window.innerWidth-320, r.right + 10) + "px";
+    el.popover.style.top  = Math.max(60, r.top - 6) + "px";
+    // co-pointer: pre-arm a quote when hovering triage fields
+    if(label.includes("source")){
+      // armQuote light: just preview
+      el.composer.placeholder = `Click "${anchor.querySelector('.v, span:not(.lk):not(.k)')?.textContent?.trim()?.slice(0,48) || ''}" to quote in reply`;
+    }
+  }
+  function hidePopover(){
+    popHide = setTimeout(() => {
+      el.popover.classList.remove("on");
+      el.composer.placeholder = "Ask the analyst - or hover a triage field / INV row to pre-arm a quoted reply";
+    }, 140);
+  }
+
+  // ----- scrubber ---------------------------------------------------
+  function renderScrubber(){
+    el.nubs.innerHTML = "";
+    state.events.forEach(ev => {
+      const pct = Math.max(0, Math.min(1, ev.at / state.duration));
+      const nub = document.createElement("div");
+      nub.className = `scrub-nub ${ev.kind} reached`;
+      nub.style.left = (pct*100)+"%";
+      nub.innerHTML = `<div class="pt"></div><div class="lab">${escapeHtml(ev.label)}</div>`;
+      el.nubs.appendChild(nub);
+    });
+    updateFill();
+  }
+  function updateFill(){
+    const t = state.live ? now() : state.scrubT;
+    const pct = Math.max(0, Math.min(1, t / state.duration));
+    el.fill.style.width = (pct*100)+"%";
+    el.scrubTime.textContent = `t = ${(t/1000).toFixed(1)}s`;
+    // mark "now"
+    el.nubs.querySelectorAll(".scrub-nub").forEach(n => n.classList.remove("now"));
+    let last=null;
+    el.nubs.querySelectorAll(".scrub-nub").forEach(n => {
+      const px = parseFloat(n.style.left);
+      if(px/100*state.duration <= t) last = n;
+    });
+    if(last) last.classList.add("now");
+  }
+  setInterval(updateFill, 200);
+
+  function scrubTo(clientX){
+    const r = el.track.getBoundingClientRect();
+    const k = Math.max(0, Math.min(1, (clientX - r.left)/r.width));
+    state.scrubT = k * state.duration;
+    state.live = false;
+    el.btnJumpLive.classList.remove("live");
+    el.btnJumpLive.textContent = "Resume live";
+    applyStateUpTo(state.scrubT);
+    updateFill();
+  }
+  let dragging = false;
+  el.track.addEventListener("mousedown", e => { dragging = true; scrubTo(e.clientX); });
+  window.addEventListener("mousemove", e => { if(dragging) scrubTo(e.clientX); });
+  window.addEventListener("mouseup", () => { dragging = false; });
+  el.track.addEventListener("click", e => scrubTo(e.clientX));
+
+  el.btnJumpLive.addEventListener("click", () => {
+    state.live = true;
+    el.btnJumpLive.classList.add("live");
+    el.btnJumpLive.textContent = "Live";
+    // re-apply the latest state to catch up
+    applyStateUpTo(state.duration);
+    updateFill();
+  });
+
+  // replay from start (re-runs the canned pipeline)
+  function replayFromStart(){
+    resetCase();
+    // briefly show intake closing then run demo so it feels like a replay
+    later(120, () => runDemo());
+  }
+
+  // ----- branch button (UNIQUE-ish bonus) ---------------------------
+  el.btnBranch.addEventListener("click", () => {
+    const sys = document.createElement("div");
+    sys.className="turn system pop-in";
+    sys.innerHTML = `<div class="bubble">Branch opened: "What if it's reconciliation, not bank-feeds?" - main reasoning preserved; flip back anytime.</div>`;
+    el.chat.appendChild(sys); scrollChat();
+    recordEvent("turn","Branch opened: alt-category", () => {});
+  });
+
+  // ----- utilities --------------------------------------------------
+  function scrollChat(){ el.chat.scrollTop = el.chat.scrollHeight; }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+  function stripHtml(s){ const d=document.createElement("div"); d.innerHTML=s; return d.textContent||""; }
+
+  // ----- init -------------------------------------------------------
+  resetCase();
+})();
+</script>
+</body>
+</html>

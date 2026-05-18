@@ -11,6 +11,7 @@ const {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
+const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 
 const PROVIDER_CONFIG = Object.freeze({
   'llm-gateway': Object.freeze({
@@ -26,7 +27,7 @@ const PROVIDER_CONFIG = Object.freeze({
     displayName: 'Anthropic API',
   }),
   openai: Object.freeze({
-    defaultModel: 'gpt-4o',
+    defaultModel: 'gpt-5.4-mini',
     baseUrl: 'https://api.openai.com',
     envKey: 'OPENAI_API_KEY',
     displayName: 'OpenAI API',
@@ -44,6 +45,29 @@ const PROVIDER_CONFIG = Object.freeze({
     displayName: 'Kimi API',
   }),
 });
+
+function normalizeOpenAiReasoningEffort(value) {
+  const requested = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return OPENAI_REASONING_EFFORTS.has(requested) ? requested : '';
+}
+
+function isOpenAiReasoningModel(model) {
+  const normalized = String(model || '').trim().toLowerCase();
+  return /^gpt-5(?:[.\-\w]*)?$/.test(normalized) || /^o\d/.test(normalized);
+}
+
+function applyOpenAiGenerationOptions(body, model, reasoningEffort) {
+  if (!body || typeof body !== 'object') return body;
+  if (isOpenAiReasoningModel(model)) {
+    body.max_completion_tokens = DEFAULT_MAX_TOKENS;
+    const effort = normalizeOpenAiReasoningEffort(reasoningEffort);
+    if (effort) body.reasoning_effort = effort;
+  } else {
+    body.max_tokens = DEFAULT_MAX_TOKENS;
+    body.temperature = 0.2;
+  }
+  return body;
+}
 
 function resolveTransport(baseUrl) {
   const url = new URL(baseUrl);
@@ -361,6 +385,7 @@ function requestOpenAiLikeChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   requestFn = jsonRequestCancelable,
 }) {
@@ -368,10 +393,14 @@ function requestOpenAiLikeChat({
     const effectiveModel = model || PROVIDER_CONFIG[providerId].defaultModel;
     const body = {
       model: effectiveModel,
-      max_tokens: DEFAULT_MAX_TOKENS,
-      temperature: 0.2,
       messages: buildOpenAiMessages(messages, systemPrompt),
     };
+    if (providerId === 'openai') {
+      applyOpenAiGenerationOptions(body, effectiveModel, reasoningEffort);
+    } else {
+      body.max_tokens = DEFAULT_MAX_TOKENS;
+      body.temperature = 0.2;
+    }
 
     const request = requestFn(
       'POST',
@@ -415,6 +444,7 @@ function requestLlmGatewayChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
@@ -445,6 +475,7 @@ function requestOpenAiChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
@@ -465,6 +496,7 @@ function requestOpenAiChat({
       messages,
       systemPrompt,
       model,
+      reasoningEffort,
       timeoutMs,
       requestFn,
     });
@@ -587,6 +619,7 @@ function createBufferedChatProvider(providerId, requestHandler) {
       messages,
       systemPrompt,
       model,
+      reasoningEffort,
       timeoutMs,
       onChunk,
       onDone,
@@ -605,6 +638,7 @@ function createBufferedChatProvider(providerId, requestHandler) {
       messages,
       systemPrompt,
       model,
+      reasoningEffort,
       timeoutMs,
     });
     cancelRequest = typeof request?.cancel === 'function' ? request.cancel : null;

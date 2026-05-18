@@ -22,6 +22,10 @@ const { stopPruning: stopWorkspacePruning } = require('./services/workspace-runt
 const { stopPruning: stopAgentSessionPruning } = require('./services/agent-session-runtime');
 const { stopChainCleanup: stopUsageChainCleanup } = require('./lib/usage-writer');
 const { resolveStartupControls } = require('./lib/startup-controls');
+const {
+  startAgentHealthMonitor,
+  stopAgentHealthMonitor,
+} = require('./services/agent-health-service');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
@@ -241,6 +245,12 @@ async function start(options = {}) {
           console.log('[startup] Workspace monitor disabled');
         }
 
+        if (startupControls.agentHealthCheck) {
+          startAgentHealthMonitor();
+        } else {
+          console.log('[startup] Agent health checks disabled');
+        }
+
         if (startupControls.imageParserStartupCheck || startupControls.imageParserHealthCheck) {
           const { checkProviderAvailability } = require('./services/image-parser');
 
@@ -353,6 +363,7 @@ function shutdown(signal, { exitCode = 0 } = {}) {
   if (shutdownPromise) return shutdownPromise;
 
   console.log(`\n${signal} received — shutting down`);
+  stopAgentHealthMonitor();
   stopImageParserHealthCheck();
   stopBriefingScheduler();
   stopWorkspaceMonitor();

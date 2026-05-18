@@ -91,6 +91,7 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
   const [attentionCounts, setAttentionCounts] = useState({ open: 0, resolved: 0, dismissed: 0, split: 0 });
   const [attentionKindCounts, setAttentionKindCounts] = useState({});
   const [attentionSeverityCounts, setAttentionSeverityCounts] = useState({ critical: 0, warning: 0, info: 0 });
+  const [attentionRefreshMeta, setAttentionRefreshMeta] = useState(null);
   const [attentionStatusFilter, setAttentionStatusFilter] = useState('open');
   const [attentionKindFilter, setAttentionKindFilter] = useState('all');
   const [attentionSort, setAttentionSort] = useState('priority');
@@ -162,20 +163,21 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     if (activeTab === 'knowledge') loadKnowledgeQueue();
   }, [activeTab, loadKnowledgeQueue]);
 
-  const loadAttentionQueue = useCallback(async () => {
+  const loadAttentionQueue = useCallback(async ({ refreshQueue = false } = {}) => {
     setAttentionLoading(true);
     try {
       const data = await listAttentionItems({
         status: attentionStatusFilter || 'open',
         kind: attentionKindFilter === 'all' ? undefined : attentionKindFilter,
         sort: attentionSort,
-        refresh: true,
+        refresh: refreshQueue,
       });
       setAttentionItems(data.items);
       setAttentionTotal(data.total);
       setAttentionCounts(data.counts);
       setAttentionKindCounts(data.kindCounts || {});
       setAttentionSeverityCounts(data.severityCounts || { critical: 0, warning: 0, info: 0 });
+      setAttentionRefreshMeta(data.refresh || null);
       setAttentionError(null);
     } catch (err) {
       setAttentionError(err?.message || 'Failed to load attention items');
@@ -275,7 +277,7 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
       return;
     }
     if (activeTab === 'attention') {
-      loadAttentionQueue();
+      loadAttentionQueue({ refreshQueue: true });
       return;
     }
     loadKnowledgeQueue();
@@ -313,6 +315,7 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     attentionCounts,
     attentionKindCounts,
     attentionSeverityCounts,
+    attentionRefreshMeta,
     attentionStatusFilter,
     setAttentionStatusFilter,
     attentionKindFilter,

@@ -244,4 +244,12 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   const triageRes = await agent.get('/api/agent-identities/triage-agent').expect(200);
   assert.equal(triageRes.body.agent.runtime.provider, 'gpt-5.5');
   assert.equal(triageRes.body.agent.runtime.configured, true);
+
+  const runtimeDefaultsRes = await agent
+    .get('/api/agent-identities/runtime-defaults?ids=triage-agent,escalation-template-parser')
+    .expect(200);
+  assert.equal(runtimeDefaultsRes.body.ok, true);
+  assert.equal(runtimeDefaultsRes.body.runtimes['triage-agent'].runtime.provider, 'gpt-5.5');
+  assert.equal(runtimeDefaultsRes.body.runtimes['triage-agent'].runtime.mode, 'fallback');
+  assert.equal(runtimeDefaultsRes.body.runtimes['escalation-template-parser'].runtime, null);
 });

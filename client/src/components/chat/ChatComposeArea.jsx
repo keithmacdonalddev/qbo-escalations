@@ -33,7 +33,7 @@ const MAIN_CHAT_WORKFLOWS = Object.freeze([
   {
     id: 'general',
     label: 'General',
-    hint: 'Ask QBO Analyst',
+    hint: 'Ask QBO Assistant',
     action: 'focus-chat',
   },
 ]);
@@ -187,7 +187,7 @@ export default function ChatComposeArea({
     ? 'Challenge triage or add follow-up context...'
     : parsedEscalationPreview
     ? 'Add a follow-up after the main chat replies, if needed.'
-    : 'Ask QBO Analyst or start a workflow...';
+    : 'Ask QBO Assistant or start a workflow...';
   const hasConversation = Array.isArray(messages) && messages.length > 1 && !isStreaming && Boolean(conversationId);
 
   const hasImagePayload = (payload) => {

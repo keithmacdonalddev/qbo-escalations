@@ -1,0 +1,1196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QBO Escalations — Linear V3 (Spine + Canvas)</title>
+<!--
+  ==========================================================================
+  DESIGNER: linear  (V3)
+  ==========================================================================
+
+  LAYOUTS CONSIDERED
+  ------------------
+  1) Vertical stack (V2 default) — REJECTED. Forces scroll; triage scrolls
+     out of view the moment chat starts. PO killed all 9 V2 entries for this.
+  2) 2x2 quadrants — REJECTED. Equal weight to four agents misrepresents the
+     hierarchy. Triage and analyst should dominate; parser/INV are supporting.
+  3) Focal-center with orbiting agents — REJECTED. Cute, but agents that
+     "orbit" are decorative; the operator needs them anchored, not floating.
+  4) Picture-in-picture (chat large, others PiP) — REJECTED. PiP tiles are
+     too small to read triage's "Fast read" + "Next step" copy at a glance.
+  5) Layered surfaces (z-axis) — REJECTED for primary; surfaces hidden by
+     stacking violate "all progress visible, quietly always-known".
+  6) Persistent rail + spine + canvas + edge-mounted evidence  (CHOSEN) —
+     A left workflow RAIL (chassis for future workflows). A top TRIAGE SPINE
+     that locks the primary signal across the entire case lifetime. A center
+     ANALYST CANVAS that owns the conversation. A right EVIDENCE COLUMN
+     (INV + parsed fields collapsed) that is glanceable but never competes.
+     A bottom PULSE that maps the arc in one strip. Webcam is a polished
+     overlay surface that respects "cancel back to upload".
+
+  WHY THIS WINS
+  -------------
+  Rail = chassis (directive H). Spine = triage stays visible forever
+  (directive B). Canvas = analyst is the brains, owns the room (locked
+  principle 3). Evidence column = INV + parser collapsed (directive C).
+  Pulse = "all progress visible, quietly always-known" in one strip
+  (locked principle 4). Zero scroll on the primary surface; only the chat
+  scrolls inside its own bounded zone (directive A).
+
+  THREE+ UNIQUE UNEXPECTED FEATURES (directive G)
+  -----------------------------------------------
+  1) TRIAGE SPINE WITH LIVE CONFIDENCE DIAL — triage is not a card that
+     arrives and leaves; it is a horizontal spine that locks across the
+     top with a confidence ring that re-scores in real time as the analyst
+     or operator adds info. Operator never loses the primary signal.
+  2) EVIDENCE THREADING — every analyst chat turn carries tiny linked
+     evidence chips (INV-#, parser-field, doc). Hover to see the source
+     popover. Click to pin to the spine. Turns "trust the LLM" into
+     "audit the LLM in one motion."
+  3) SMART DEROTATE WEBCAM — EXIF/gyro-aware preview that auto-rights
+     sideways phone shots, with a grid-snap framing guide that highlights
+     the QBO error region before capture. Cancel-back-to-upload built in.
+     Polished controls. Treats webcam as the primary intake it will be.
+  4) OPERATOR PULSE — bottom-edge one-glance timeline of the entire arc
+     (image → parsed → triage → INV → analyst → chat) with live status
+     dots. Click any dot to flash-focus that zone. The case state is
+     legible in 200ms.
+  5) WORKFLOW RAIL (CHASSIS) — left vertical rail of workflows
+     (Escalation active; INV start, Trip planner, Email composer stubbed).
+     The same chassis hosts any future agent pipeline without redesign.
+  6) PIN-TO-SPINE — operator can pin any chat fact, parsed field, or INV
+     match directly into the triage spine as durable case context.
+
+  EVERY VISIBLE ELEMENT HAS USER BENEFIT (directive F)
+  ----------------------------------------------------
+  rail        — switch workflows without leaving the chassis
+  spine       — primary signal always visible; never lost during chat
+  parser pill — parsed evidence one click away, never blocking
+  canvas      — the expert lives here; the conversation owns the space
+  evidence col- INV matches glanceable, click to inspect, never noisy
+  pulse       — entire case state in 200ms of looking
+  webcam      — polished intake that respects sideways phone capture
+
+  Build: skeleton-first save < 60s, then iterate layers in.
+  ==========================================================================
+-->
+<style>
+  :root{
+    /* Linear-inspired dark, but tuned for clinical clarity */
+    --bg:#0a0a0f;
+    --bg-1:#0f0f17;
+    --bg-2:#15151f;
+    --bg-3:#1c1c28;
+    --line:#262633;
+    --line-2:#33334a;
+    --ink:#e8e8f0;
+    --ink-2:#a8a8bc;
+    --ink-3:#6b6b85;
+    --accent:#7a5cff;       /* Linear purple */
+    --accent-2:#5b8def;     /* analyst blue */
+    --ok:#3ecf8e;
+    --warn:#ffb547;
+    --bad:#ff6b6b;
+    --p1:#ff6b6b;
+    --p2:#ffb547;
+    --p3:#5b8def;
+    --p4:#3ecf8e;
+    --radius:10px;
+    --radius-sm:6px;
+    --shadow-1:0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.35);
+    --shadow-2:0 1px 0 rgba(255,255,255,0.06) inset, 0 20px 60px rgba(0,0,0,0.55);
+    --font:-apple-system,BlinkMacSystemFont,"Inter","SF Pro Text","Segoe UI",Roboto,sans-serif;
+    --mono:"SF Mono","JetBrains Mono","Fira Code",ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-thumb{background:#2a2a3a;border-radius:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+
+  /* =====  CHASSIS GRID  ===== */
+  .chassis{
+    display:grid;
+    grid-template-columns: 64px 1fr 360px;
+    grid-template-rows: 56px 1fr 44px;
+    grid-template-areas:
+      "rail spine evidence"
+      "rail canvas evidence"
+      "rail pulse  pulse";
+    height:100vh;
+    width:100vw;
+  }
+
+  /* =====  WORKFLOW RAIL  ===== */
+  .rail{
+    grid-area:rail;
+    background:var(--bg-1);
+    border-right:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;
+    padding:10px 0;gap:6px;
+  }
+  .rail .brand{
+    width:36px;height:36px;border-radius:9px;
+    background:linear-gradient(135deg,#7a5cff,#5b8def);
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;font-weight:700;font-size:13px;
+    box-shadow:0 6px 16px rgba(122,92,255,0.35);
+    margin-bottom:8px;
+  }
+  .rail .wf{
+    width:40px;height:40px;border-radius:10px;
+    display:flex;align-items:center;justify-content:center;
+    color:var(--ink-3);position:relative;transition:.15s;
+  }
+  .rail .wf:hover{color:var(--ink);background:var(--bg-2)}
+  .rail .wf.active{color:#fff;background:var(--bg-3)}
+  .rail .wf.active::before{
+    content:"";position:absolute;left:-12px;top:8px;bottom:8px;width:3px;
+    background:var(--accent);border-radius:0 3px 3px 0;
+  }
+  .rail .wf svg{width:18px;height:18px}
+  .rail .sep{width:24px;height:1px;background:var(--line);margin:6px 0}
+  .rail .me{margin-top:auto;width:32px;height:32px;border-radius:50%;
+    background:linear-gradient(135deg,#3ecf8e,#5b8def);
+    display:flex;align-items:center;justify-content:center;color:#0a0a0f;font-weight:700;font-size:11px;
+  }
+  .tip{
+    position:absolute;left:48px;top:50%;transform:translateY(-50%);
+    background:var(--bg-3);border:1px solid var(--line-2);color:var(--ink);
+    padding:5px 9px;border-radius:6px;font-size:12px;white-space:nowrap;
+    opacity:0;pointer-events:none;transition:.15s;z-index:30;
+  }
+  .rail .wf:hover .tip{opacity:1;transform:translateY(-50%) translateX(4px)}
+
+  /* =====  TRIAGE SPINE  ===== */
+  .spine{
+    grid-area:spine;
+    background:linear-gradient(180deg,#13131c 0%,#0f0f17 100%);
+    border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:14px;padding:0 16px;
+    position:relative;
+  }
+  .spine .case{
+    display:flex;align-items:center;gap:10px;min-width:0;
+  }
+  .case-id{font-family:var(--mono);color:var(--ink-2);font-size:12px}
+  .case-title{font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    height:24px;padding:0 9px;border-radius:999px;font-size:11px;
+    background:var(--bg-3);border:1px solid var(--line-2);color:var(--ink-2);
+  }
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3)}
+  .pill.parser{cursor:pointer;transition:.15s}
+  .pill.parser:hover{border-color:var(--accent);color:var(--ink)}
+  .pill .count{font-family:var(--mono);color:var(--ink-3);font-size:10px}
+
+  .spine-divider{width:1px;height:28px;background:var(--line)}
+
+  .triage-block{
+    display:flex;align-items:center;gap:14px;flex:1;min-width:0;
+    opacity:0;transform:translateY(-6px);transition:.4s;
+  }
+  .triage-block.shown{opacity:1;transform:none}
+
+  .sev{
+    display:flex;align-items:center;gap:6px;font-weight:700;font-size:12px;
+    padding:4px 9px;border-radius:6px;
+  }
+  .sev.P1{background:rgba(255,107,107,0.12);color:var(--p1);border:1px solid rgba(255,107,107,0.35)}
+  .sev.P2{background:rgba(255,181,71,0.12);color:var(--p2);border:1px solid rgba(255,181,71,0.35)}
+  .sev.P3{background:rgba(91,141,239,0.12);color:var(--p3);border:1px solid rgba(91,141,239,0.35)}
+  .sev.P4{background:rgba(62,207,142,0.12);color:var(--p4);border:1px solid rgba(62,207,142,0.35)}
+
+  .cat{
+    font-family:var(--mono);font-size:11px;color:var(--ink-2);
+    background:var(--bg-3);border:1px solid var(--line);padding:3px 8px;border-radius:5px;
+  }
+
+  .fastread{
+    color:var(--ink);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;
+  }
+  .fastread b{color:#fff;font-weight:600}
+
+  .nextstep{
+    color:var(--ink-2);font-size:12px;display:flex;align-items:center;gap:6px;
+    background:var(--bg-2);border:1px solid var(--line);padding:5px 10px;border-radius:6px;
+    white-space:nowrap;
+  }
+  .nextstep .arrow{color:var(--accent)}
+
+  /* Confidence dial */
+  .conf{
+    position:relative;width:44px;height:44px;flex:none;
+  }
+  .conf svg{transform:rotate(-90deg)}
+  .conf .ring-bg{stroke:#26263a;fill:none;stroke-width:4}
+  .conf .ring-fg{stroke:var(--accent);fill:none;stroke-width:4;stroke-linecap:round;transition:stroke-dashoffset .7s}
+  .conf .num{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:11px;color:var(--ink);font-weight:600;
+  }
+  .conf .label{
+    position:absolute;left:50%;bottom:-14px;transform:translateX(-50%);
+    font-size:9px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;
+  }
+
+  /* placeholder while triage cooks */
+  .triage-cooking{
+    display:flex;align-items:center;gap:10px;color:var(--ink-3);font-size:12px;flex:1;
+  }
+  .cook-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite ease-in-out}
+  .cook-dot:nth-child(2){animation-delay:.2s}
+  .cook-dot:nth-child(3){animation-delay:.4s}
+  @keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+
+  /* =====  CANVAS (analyst conversation)  ===== */
+  .canvas{
+    grid-area:canvas;
+    background:var(--bg);
+    display:flex;flex-direction:column;
+    min-height:0;position:relative;
+  }
+  .canvas-head{
+    display:flex;align-items:center;gap:12px;padding:12px 18px;
+    border-bottom:1px solid var(--line);background:var(--bg-1);
+  }
+  .analyst-avatar{
+    width:34px;height:34px;border-radius:50%;
+    background:linear-gradient(135deg,#5b8def 0%,#7a5cff 100%);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:13px;
+    box-shadow:0 4px 12px rgba(91,141,239,0.3);position:relative;
+  }
+  .analyst-avatar::after{
+    content:"";position:absolute;right:-1px;bottom:-1px;width:10px;height:10px;border-radius:50%;
+    background:var(--ok);border:2px solid var(--bg-1);
+  }
+  .analyst-meta{display:flex;flex-direction:column;line-height:1.2}
+  .analyst-name{font-weight:600;color:#fff;font-size:14px}
+  .analyst-role{color:var(--ink-3);font-size:11px}
+  .canvas-actions{margin-left:auto;display:flex;gap:6px}
+  .icon-btn{
+    width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+    color:var(--ink-2);background:var(--bg-2);border:1px solid var(--line);transition:.15s;
+  }
+  .icon-btn:hover{color:var(--ink);border-color:var(--line-2);background:var(--bg-3)}
+  .icon-btn svg{width:14px;height:14px}
+
+  .stream{
+    flex:1;min-height:0;overflow:auto;padding:16px 22px 12px;
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .turn{
+    display:flex;gap:10px;max-width:88%;
+    opacity:0;transform:translateY(6px);animation:slideIn .35s forwards;
+  }
+  @keyframes slideIn{to{opacity:1;transform:none}}
+  .turn.user{align-self:flex-end;flex-direction:row-reverse}
+  .turn .av{
+    width:26px;height:26px;border-radius:50%;flex:none;font-size:10px;font-weight:700;
+    display:flex;align-items:center;justify-content:center;color:#fff;
+  }
+  .turn .av.a{background:linear-gradient(135deg,#5b8def,#7a5cff)}
+  .turn .av.u{background:linear-gradient(135deg,#3ecf8e,#5b8def);color:#0a0a0f}
+  .bubble{
+    background:var(--bg-2);border:1px solid var(--line);
+    padding:9px 12px;border-radius:10px;color:var(--ink);font-size:13px;line-height:1.5;
+    box-shadow:var(--shadow-1);
+  }
+  .turn.user .bubble{background:#1a2030;border-color:#2a3550}
+  .bubble .who{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+
+  /* evidence chips inside a bubble */
+  .evi-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+  .evi{
+    display:inline-flex;align-items:center;gap:4px;
+    font-family:var(--mono);font-size:10px;color:var(--ink-2);
+    padding:2px 7px;border-radius:999px;background:var(--bg-3);border:1px solid var(--line-2);
+    cursor:pointer;transition:.15s;position:relative;
+  }
+  .evi:hover{border-color:var(--accent);color:#fff}
+  .evi .ed{width:5px;height:5px;border-radius:50%;background:var(--accent-2)}
+  .evi.inv .ed{background:var(--warn)}
+  .evi.parsed .ed{background:var(--ok)}
+  .evi.doc .ed{background:var(--accent)}
+  .evi-pop{
+    position:absolute;bottom:calc(100% + 6px);left:0;
+    background:var(--bg-3);border:1px solid var(--line-2);border-radius:8px;
+    padding:8px 10px;min-width:220px;color:var(--ink);font-family:var(--font);font-size:11px;
+    box-shadow:var(--shadow-2);opacity:0;pointer-events:none;transition:.15s;z-index:50;
+    transform:translateY(4px);
+  }
+  .evi:hover .evi-pop{opacity:1;transform:none}
+  .evi-pop b{color:#fff;display:block;margin-bottom:3px}
+
+  .typing{display:inline-flex;gap:3px;align-items:center;height:14px}
+  .typing span{width:5px;height:5px;border-radius:50%;background:var(--ink-3);animation:pulse 1s infinite}
+  .typing span:nth-child(2){animation-delay:.15s}
+  .typing span:nth-child(3){animation-delay:.3s}
+
+  /* composer */
+  .composer{
+    border-top:1px solid var(--line);background:var(--bg-1);padding:10px 16px;
+    display:flex;align-items:center;gap:10px;
+  }
+  .composer input{
+    flex:1;background:var(--bg-2);border:1px solid var(--line);
+    border-radius:8px;padding:10px 12px;color:var(--ink);font:inherit;outline:none;
+  }
+  .composer input:focus{border-color:var(--accent)}
+  .composer .send{
+    height:36px;padding:0 14px;border-radius:8px;
+    background:linear-gradient(135deg,#7a5cff,#5b8def);color:#fff;font-weight:600;font-size:12px;
+    box-shadow:0 6px 16px rgba(122,92,255,0.3);
+  }
+  .composer .ghost{
+    width:36px;height:36px;border-radius:8px;background:var(--bg-2);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;color:var(--ink-2);
+  }
+  .composer .ghost:hover{color:var(--ink)}
+  .composer .ghost svg{width:15px;height:15px}
+
+  /* parser modal */
+  .parser-pop{
+    position:absolute;top:46px;left:16px;width:420px;
+    background:var(--bg-2);border:1px solid var(--line-2);border-radius:12px;
+    padding:14px;box-shadow:var(--shadow-2);z-index:40;
+    opacity:0;transform:translateY(-6px);pointer-events:none;transition:.18s;
+  }
+  .parser-pop.open{opacity:1;transform:none;pointer-events:auto}
+  .parser-pop h4{margin:0 0 10px;font-size:12px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:8px}
+  .parser-pop h4 .pa{
+    width:16px;height:16px;border-radius:50%;background:linear-gradient(135deg,#3ecf8e,#5b8def);
+    display:inline-flex;align-items:center;justify-content:center;font-size:8px;color:#0a0a0f;font-weight:700;
+  }
+  .parsed-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}
+  .parsed-field{display:flex;flex-direction:column;gap:2px}
+  .parsed-field .k{font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.05em}
+  .parsed-field .v{font-size:12px;color:var(--ink);font-family:var(--mono)}
+
+  /* =====  EVIDENCE COLUMN (right)  ===== */
+  .evidence{
+    grid-area:evidence;
+    background:var(--bg-1);
+    border-left:1px solid var(--line);
+    display:flex;flex-direction:column;min-height:0;
+  }
+  .ev-tabs{
+    display:flex;border-bottom:1px solid var(--line);background:var(--bg-1);
+  }
+  .ev-tab{
+    flex:1;padding:11px 12px;text-align:center;font-size:11px;color:var(--ink-3);
+    text-transform:uppercase;letter-spacing:.06em;font-weight:600;
+    border-bottom:2px solid transparent;transition:.15s;display:flex;align-items:center;justify-content:center;gap:6px;
+  }
+  .ev-tab .ct{font-family:var(--mono);font-size:10px;background:var(--bg-3);padding:1px 6px;border-radius:8px;color:var(--ink-2)}
+  .ev-tab.active{color:#fff;border-color:var(--accent)}
+  .ev-tab:hover{color:var(--ink)}
+
+  .ev-body{flex:1;min-height:0;overflow:auto;padding:10px}
+
+  .inv-row{
+    display:flex;flex-direction:column;gap:4px;
+    padding:9px 11px;border-radius:8px;background:var(--bg-2);border:1px solid var(--line);
+    margin-bottom:7px;cursor:pointer;transition:.15s;position:relative;
+  }
+  .inv-row:hover{border-color:var(--line-2);background:var(--bg-3)}
+  .inv-row .top{display:flex;align-items:center;justify-content:space-between}
+  .inv-id{font-family:var(--mono);font-size:11px;color:var(--ink);font-weight:600}
+  .match-bar{
+    display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--ink-2);font-family:var(--mono);
+  }
+  .match-bar .bar{width:48px;height:4px;background:var(--bg-3);border-radius:2px;overflow:hidden;position:relative}
+  .match-bar .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),var(--accent));border-radius:2px}
+  .inv-row .desc{font-size:11px;color:var(--ink-2);line-height:1.35}
+  .inv-row .meta{font-size:10px;color:var(--ink-3);display:flex;gap:8px;margin-top:2px;font-family:var(--mono)}
+  .inv-pin{
+    position:absolute;right:8px;top:8px;width:18px;height:18px;border-radius:5px;
+    background:transparent;color:var(--ink-3);display:none;align-items:center;justify-content:center;
+  }
+  .inv-row:hover .inv-pin{display:flex}
+  .inv-pin:hover{background:var(--bg-3);color:var(--accent)}
+
+  .inv-header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:4px 4px 8px;color:var(--ink-3);font-size:11px;
+  }
+  .inv-header .agent{display:flex;align-items:center;gap:6px}
+  .inv-header .agent .ai{
+    width:14px;height:14px;border-radius:50%;background:linear-gradient(135deg,#ffb547,#ff6b6b);
+    color:#0a0a0f;display:inline-flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;
+  }
+
+  .ev-empty{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:30px 20px;color:var(--ink-3);font-size:11px;text-align:center;
+  }
+
+  /* =====  PULSE  ===== */
+  .pulse{
+    grid-area:pulse;background:var(--bg-1);border-top:1px solid var(--line);
+    display:flex;align-items:center;padding:0 18px;gap:10px;font-size:11px;color:var(--ink-3);
+  }
+  .pulse-track{
+    flex:1;display:flex;align-items:center;gap:0;
+  }
+  .pulse-step{
+    flex:1;display:flex;align-items:center;gap:6px;position:relative;cursor:pointer;transition:.15s;
+  }
+  .pulse-step .pd{
+    width:9px;height:9px;border-radius:50%;background:#26263a;border:2px solid var(--bg-1);
+    box-shadow:0 0 0 1px #26263a;transition:.25s;flex:none;
+  }
+  .pulse-step.done .pd{background:var(--ok);box-shadow:0 0 0 1px var(--ok)}
+  .pulse-step.active .pd{background:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 12px rgba(122,92,255,0.6);animation:pulse 1.4s infinite}
+  .pulse-step .pl{color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;font-size:10px;white-space:nowrap}
+  .pulse-step.done .pl{color:var(--ink-2)}
+  .pulse-step.active .pl{color:#fff}
+  .pulse-step:not(:last-child)::after{
+    content:"";position:absolute;left:14px;right:0;top:5px;height:1px;background:#26263a;z-index:-1;
+  }
+  .pulse-step.done:not(:last-child)::after{background:var(--ok)}
+  .pulse-clock{font-family:var(--mono);color:var(--ink-2)}
+
+  /* =====  WEBCAM OVERLAY  ===== */
+  .scrim{
+    position:fixed;inset:0;background:rgba(5,5,10,0.78);backdrop-filter:blur(8px);
+    display:none;align-items:center;justify-content:center;z-index:100;
+  }
+  .scrim.open{display:flex}
+  .webcam{
+    width:min(880px,92vw);background:var(--bg-1);border:1px solid var(--line-2);
+    border-radius:16px;box-shadow:var(--shadow-2);overflow:hidden;display:flex;flex-direction:column;
+  }
+  .wc-head{
+    display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line);
+  }
+  .wc-head h3{margin:0;font-size:14px;color:#fff;display:flex;align-items:center;gap:8px}
+  .wc-head h3 .ld{width:8px;height:8px;border-radius:50%;background:var(--bad);animation:pulse 1s infinite}
+  .wc-close{color:var(--ink-2);font-size:18px;width:30px;height:30px;border-radius:8px}
+  .wc-close:hover{color:var(--ink);background:var(--bg-3)}
+
+  .wc-stage{
+    position:relative;background:#000;aspect-ratio:16/10;display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  .wc-feed{
+    width:100%;height:100%;position:relative;
+    background:
+      radial-gradient(ellipse at 50% 50%, rgba(91,141,239,0.15) 0%, transparent 60%),
+      linear-gradient(135deg,#1a1a28 0%, #0a0a0f 100%);
+    transition:transform .5s cubic-bezier(.4,.0,.2,1);
+  }
+  .wc-feed.rotated{transform:rotate(-90deg) scale(.7)}
+  .wc-feed.derotated{transform:rotate(0deg) scale(1)}
+  .wc-mock{
+    position:absolute;inset:18%;border:1px solid #2a3550;border-radius:6px;background:#0d1320;
+    display:flex;flex-direction:column;padding:8px;gap:6px;font-family:var(--mono);font-size:9px;color:#88a;
+  }
+  .wc-mock .bar{height:6px;background:#1a2030;border-radius:2px;width:60%}
+  .wc-mock .row{display:flex;justify-content:space-between;color:#aab}
+  .wc-mock .err{color:#ff8;background:rgba(255,181,71,0.08);padding:4px 6px;border-radius:3px;border-left:2px solid #ff8}
+
+  .wc-grid{
+    position:absolute;inset:0;pointer-events:none;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.06) 1px, transparent 1px);
+    background-size:33.33% 33.33%;
+  }
+  .wc-snap{
+    position:absolute;inset:18%;border:2px solid var(--accent);border-radius:8px;
+    box-shadow:0 0 0 9999px rgba(0,0,0,0.35), 0 0 20px rgba(122,92,255,0.5);
+    pointer-events:none;opacity:0;transition:.3s;
+  }
+  .wc-snap.show{opacity:1}
+  .wc-snap .lbl{
+    position:absolute;top:-22px;left:0;font-size:10px;color:var(--accent);
+    background:rgba(10,10,15,0.9);padding:2px 6px;border-radius:4px;font-family:var(--mono);
+    text-transform:uppercase;letter-spacing:.06em;
+  }
+
+  .wc-badge{
+    position:absolute;top:12px;left:12px;background:rgba(10,10,15,0.75);
+    padding:5px 10px;border-radius:6px;font-size:11px;color:var(--ink);
+    display:flex;align-items:center;gap:6px;font-family:var(--mono);
+  }
+  .wc-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);animation:pulse 1.4s infinite}
+  .wc-rotation{
+    position:absolute;top:12px;right:12px;background:rgba(10,10,15,0.75);
+    padding:5px 10px;border-radius:6px;font-size:11px;color:var(--ink);font-family:var(--mono);
+    display:flex;align-items:center;gap:6px;
+  }
+  .wc-rotation .gyro{width:10px;height:10px;border:1.5px solid var(--accent);border-top-color:transparent;border-radius:50%;animation:spin 2s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  .wc-controls{
+    display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--bg-2);
+    border-top:1px solid var(--line);gap:12px;
+  }
+  .wc-controls .left,.wc-controls .right{display:flex;align-items:center;gap:8px}
+  .wc-btn{
+    padding:9px 14px;border-radius:8px;font-size:12px;font-weight:600;
+    background:var(--bg-3);border:1px solid var(--line-2);color:var(--ink);transition:.15s;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .wc-btn:hover{border-color:var(--accent);color:#fff}
+  .wc-btn.primary{background:linear-gradient(135deg,#7a5cff,#5b8def);border:0;box-shadow:0 6px 16px rgba(122,92,255,0.4)}
+  .wc-btn.warn{color:var(--warn);border-color:rgba(255,181,71,0.4)}
+  .wc-btn.back{color:var(--ink-2)}
+  .wc-btn svg{width:14px;height:14px}
+
+  .wc-foot{
+    padding:9px 18px;background:var(--bg-1);border-top:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--ink-3);
+  }
+  .wc-foot kbd{
+    background:var(--bg-3);border:1px solid var(--line-2);border-bottom-width:2px;
+    padding:1px 6px;border-radius:4px;font-family:var(--mono);font-size:10px;color:var(--ink-2);
+  }
+
+  /* upload zone (initial state) */
+  .upload-overlay{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(ellipse at center, rgba(122,92,255,0.06) 0%, transparent 70%);
+    z-index:5;
+  }
+  .upload-card{
+    width:520px;max-width:90%;background:var(--bg-1);border:1px dashed var(--line-2);
+    border-radius:14px;padding:32px;text-align:center;
+  }
+  .upload-card h2{margin:0 0 8px;font-size:18px;color:#fff;font-weight:600}
+  .upload-card p{margin:0 0 18px;color:var(--ink-2);font-size:13px;line-height:1.5}
+  .upload-actions{display:flex;gap:10px;justify-content:center}
+  .upload-actions button{
+    padding:10px 16px;border-radius:8px;font-size:13px;font-weight:600;
+    display:inline-flex;align-items:center;gap:8px;
+  }
+  .upload-actions .primary{background:linear-gradient(135deg,#7a5cff,#5b8def);color:#fff;box-shadow:0 6px 16px rgba(122,92,255,0.3)}
+  .upload-actions .ghost{background:var(--bg-2);border:1px solid var(--line-2);color:var(--ink)}
+  .upload-actions .ghost:hover{border-color:var(--accent)}
+  .upload-card .hint{margin-top:14px;font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+
+  /* pin animation flash */
+  .flash{animation:flashring .9s ease-out}
+  @keyframes flashring{
+    0%{box-shadow:0 0 0 0 rgba(122,92,255,0.7)}
+    100%{box-shadow:0 0 0 14px rgba(122,92,255,0)}
+  }
+
+  /* parser progress mini-line on spine */
+  .progressline{
+    position:absolute;left:0;right:0;bottom:0;height:2px;background:transparent;
+  }
+  .progressline i{display:block;height:100%;width:0;background:linear-gradient(90deg,#7a5cff,#5b8def);transition:width .25s}
+</style>
+</head>
+<body>
+
+<div class="chassis" id="chassis">
+
+  <!-- ============================ WORKFLOW RAIL ============================ -->
+  <aside class="rail" aria-label="Workflow rail">
+    <div class="brand" title="QBO Escalations">Q</div>
+
+    <button class="wf active" title="Escalation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2 L2 22 L22 22 Z"/><path d="M12 9 L12 14"/><circle cx="12" cy="17.5" r="1" fill="currentColor"/></svg>
+      <span class="tip">Escalation case</span>
+    </button>
+    <button class="wf" title="INV start">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9 H21"/><path d="M8 14 H16"/></svg>
+      <span class="tip">INV start (coming soon)</span>
+    </button>
+    <button class="wf" title="Trip planner">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="10" r="3"/><path d="M12 2 C7 2 3 6 3 10 C3 16 12 22 12 22 C12 22 21 16 21 10 C21 6 17 2 12 2 Z"/></svg>
+      <span class="tip">Trip planner (coming soon)</span>
+    </button>
+    <button class="wf" title="Email composer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7 L12 13 L21 7"/></svg>
+      <span class="tip">Email composer (coming soon)</span>
+    </button>
+
+    <div class="sep"></div>
+
+    <button class="wf" title="Pinned">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17 L12 22"/><path d="M9 5 L15 5 L17 11 L7 11 Z"/><path d="M7 11 L17 11 L13 17 L11 17 Z"/></svg>
+      <span class="tip">Pinned</span>
+    </button>
+    <button class="wf" title="Playbook">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4 H18 A2 2 0 0 1 20 6 V20 H6 A2 2 0 0 1 4 18 Z"/><path d="M8 8 H16"/><path d="M8 12 H14"/></svg>
+      <span class="tip">Playbook</span>
+    </button>
+
+    <div class="me" title="Keith M.">KM</div>
+  </aside>
+
+  <!-- ============================ TRIAGE SPINE ============================ -->
+  <header class="spine" aria-label="Triage spine">
+    <div class="case">
+      <span class="case-id">ESC-4419</span>
+      <span class="case-title" id="caseTitle">Awaiting intake…</span>
+    </div>
+
+    <!-- parser pill (collapsed) -->
+    <button class="pill parser" id="parserPill" aria-expanded="false">
+      <span class="dot" style="background:var(--ok)"></span>
+      <span>Parsed</span>
+      <span class="count" id="parsedCount">0/9</span>
+    </button>
+
+    <div class="spine-divider"></div>
+
+    <!-- triage block — shown once committed -->
+    <div class="triage-block" id="triageBlock" aria-live="polite">
+      <span class="sev P2" id="sevPill">P2</span>
+      <span class="cat" id="catPill">payroll</span>
+      <span class="fastread" id="fastRead">—</span>
+      <div class="nextstep" id="nextStep">
+        <span class="arrow">→</span>
+        <span id="nextStepText">—</span>
+      </div>
+      <div class="conf" title="Triage confidence">
+        <svg width="44" height="44" viewBox="0 0 44 44">
+          <circle class="ring-bg" cx="22" cy="22" r="18"/>
+          <circle class="ring-fg" id="confRing" cx="22" cy="22" r="18"
+            stroke-dasharray="113.1" stroke-dashoffset="113.1"/>
+        </svg>
+        <span class="num" id="confNum">0</span>
+        <span class="label">conf</span>
+      </div>
+    </div>
+
+    <!-- placeholder while triage cooks -->
+    <div class="triage-cooking" id="triageCooking" style="display:none">
+      <div class="cook-dot"></div><div class="cook-dot"></div><div class="cook-dot"></div>
+      <span id="triageCookText">Triage sweeping fields…</span>
+    </div>
+
+    <!-- parser popout (expand on demand) -->
+    <div class="parser-pop" id="parserPop" role="dialog" aria-label="Parsed fields">
+      <h4><span class="pa">P</span> Parser output · vision-llm-v3 · 1.8s</h4>
+      <div class="parsed-grid" id="parsedGrid"></div>
+    </div>
+
+    <div class="progressline"><i id="parseBar"></i></div>
+  </header>
+
+  <!-- ============================ ANALYST CANVAS ============================ -->
+  <main class="canvas" aria-label="Analyst canvas">
+    <div class="canvas-head" id="canvasHead" style="display:none">
+      <div class="analyst-avatar">MA</div>
+      <div class="analyst-meta">
+        <span class="analyst-name">Maya Aldrin</span>
+        <span class="analyst-role">Senior Analyst · QBO Payroll · 6yr</span>
+      </div>
+      <div class="canvas-actions">
+        <button class="icon-btn" title="Hand off">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12 H19"/><path d="M13 6 L19 12 L13 18"/></svg>
+        </button>
+        <button class="icon-btn" title="Mute">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10 V14 H7 L12 18 V6 L7 10 Z"/><path d="M16 9 L21 14 M21 9 L16 14"/></svg>
+        </button>
+        <button class="icon-btn" title="More">
+          <svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="stream" id="stream">
+      <!-- chat turns injected here -->
+    </div>
+
+    <form class="composer" id="composerForm" style="display:none" onsubmit="event.preventDefault();sendUser()">
+      <button type="button" class="ghost" title="Attach">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12 L12 21 A5 5 0 0 1 5 14 L14 5 A4 4 0 0 1 19 10 L10 19"/></svg>
+      </button>
+      <input id="composerInput" placeholder="Reply to Maya…" autocomplete="off"/>
+      <button type="submit" class="send">Send</button>
+    </form>
+
+    <!-- upload card (initial state) -->
+    <div class="upload-overlay" id="uploadOverlay">
+      <div class="upload-card">
+        <h2>Hand over the case</h2>
+        <p>Drop a screenshot, paste from clipboard, or open the camera. Parser starts immediately.</p>
+        <div class="upload-actions">
+          <button class="primary" onclick="startCase()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5 V19"/><path d="M5 12 H19"/></svg>
+            Upload screenshot
+          </button>
+          <button class="ghost" onclick="openWebcam()">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10 L21 8 V16 L17 14"/></svg>
+            Open camera
+          </button>
+        </div>
+        <div class="hint">⌘V to paste · drag-and-drop · webcam supports sideways phone shots</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============================ EVIDENCE COLUMN ============================ -->
+  <aside class="evidence" aria-label="Evidence column">
+    <div class="ev-tabs">
+      <button class="ev-tab active" data-tab="inv">INV <span class="ct" id="invCount">0</span></button>
+      <button class="ev-tab" data-tab="pin">Pinned <span class="ct" id="pinCount">0</span></button>
+      <button class="ev-tab" data-tab="doc">Docs <span class="ct">3</span></button>
+    </div>
+    <div class="ev-body" id="evBody">
+      <div class="inv-header">
+        <div class="agent"><span class="ai">I</span> INV Search · inv-llm-v2</div>
+        <span id="invStatus">idle</span>
+      </div>
+      <div id="invList">
+        <div class="ev-empty">No matches yet — INV Search begins when parsing finishes.</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============================ PULSE ============================ -->
+  <footer class="pulse" aria-label="Case pulse">
+    <div class="pulse-track" id="pulseTrack">
+      <div class="pulse-step" data-step="upload"><span class="pd"></span><span class="pl">Intake</span></div>
+      <div class="pulse-step" data-step="parse"><span class="pd"></span><span class="pl">Parse</span></div>
+      <div class="pulse-step" data-step="triage"><span class="pd"></span><span class="pl">Triage</span></div>
+      <div class="pulse-step" data-step="inv"><span class="pd"></span><span class="pl">INV</span></div>
+      <div class="pulse-step" data-step="analyst"><span class="pd"></span><span class="pl">Analyst</span></div>
+      <div class="pulse-step" data-step="chat"><span class="pd"></span><span class="pl">Resolve</span></div>
+    </div>
+    <span class="pulse-clock" id="pulseClock">00:00</span>
+  </footer>
+
+</div>
+
+<!-- ================================ WEBCAM OVERLAY ================================ -->
+<div class="scrim" id="scrim">
+  <div class="webcam" role="dialog" aria-label="Camera capture">
+    <div class="wc-head">
+      <h3><span class="ld"></span> Camera intake</h3>
+      <button class="wc-close" onclick="closeWebcam()" aria-label="Close">×</button>
+    </div>
+    <div class="wc-stage">
+      <div class="wc-feed rotated" id="wcFeed">
+        <div class="wc-mock">
+          <div class="bar"></div>
+          <div class="row"><span>Customer · ACME Bookkeeping</span><span>QBO Plus</span></div>
+          <div class="bar" style="width:40%"></div>
+          <div class="err">Payroll error 30102 · employee Sarah Chen missing direct-deposit detail</div>
+          <div class="row"><span>Pay period</span><span>2026-05-10 → 2026-05-16</span></div>
+          <div class="bar" style="width:80%"></div>
+          <div class="row"><span>Gross</span><span>$3,420.00</span></div>
+          <div class="bar" style="width:55%"></div>
+        </div>
+        <div class="wc-grid"></div>
+        <div class="wc-snap" id="wcSnap"><span class="lbl">Error region detected</span></div>
+      </div>
+      <div class="wc-badge"><span class="dot"></span> LIVE · 1080p</div>
+      <div class="wc-rotation"><span class="gyro"></span> <span id="wcRot">gyro: 90° detected</span></div>
+    </div>
+    <div class="wc-controls">
+      <div class="left">
+        <button class="wc-btn back" onclick="closeWebcam()" title="Cancel back to upload">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 6 L9 12 L15 18"/></svg>
+          Back to upload
+        </button>
+      </div>
+      <div class="right">
+        <button class="wc-btn warn" id="derotateBtn" onclick="derotate()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12 A9 9 0 1 1 12 21"/><path d="M3 12 L3 6 L9 6"/></svg>
+          Auto-derotate
+        </button>
+        <button class="wc-btn" id="snapBtn" onclick="snapDetect()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="6" width="16" height="12" rx="2"/><circle cx="12" cy="12" r="3"/></svg>
+          Snap-frame
+        </button>
+        <button class="wc-btn primary" onclick="captureWebcam()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>
+          Capture
+        </button>
+      </div>
+    </div>
+    <div class="wc-foot">
+      <span><kbd>Space</kbd> capture · <kbd>R</kbd> derotate · <kbd>Esc</kbd> back</span>
+      <span>EXIF + gyro-aware · sideways auto-correct</span>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ======================================================================
+   STATE
+====================================================================== */
+const state = {
+  pulse: {upload:false, parse:false, triage:false, inv:false, analyst:false, chat:false},
+  parsed: [],
+  inv: [],
+  triage: null,
+  pinned: [],
+  startTime: null,
+  chatTurns: 0,
+};
+
+const MOCK = {
+  caseTitle: "Payroll error 30102 · ACME Bookkeeping",
+  parsed: [
+    {k:"Customer", v:"ACME Bookkeeping"},
+    {k:"Product", v:"QBO Plus"},
+    {k:"Error code", v:"30102"},
+    {k:"Module", v:"Payroll"},
+    {k:"Employee", v:"Sarah Chen"},
+    {k:"Pay period", v:"2026-05-10 → 16"},
+    {k:"Gross", v:"$3,420.00"},
+    {k:"OS", v:"macOS 14.5 / Chrome"},
+    {k:"Locale", v:"en-US · PT"},
+  ],
+  triage: {
+    sev:"P2", cat:"payroll", conf:84,
+    fast:"Direct-deposit detail missing for <b>Sarah Chen</b>; payroll run is blocked until employee record is completed.",
+    next:"Walk operator through Employee → Payment method → re-validate routing/account.",
+  },
+  inv: [
+    {id:"INV-147914", match:96, desc:"Payroll 30102 · missing DD detail · resolved by re-validating routing", days:"4d ago"},
+    {id:"INV-146208", match:82, desc:"Payroll 30102 · ACH return after employee bank closed", days:"12d ago"},
+    {id:"INV-141773", match:71, desc:"Payroll blocked · employee record incomplete (SSN)", days:"38d ago"},
+    {id:"INV-138420", match:64, desc:"DD routing rejected by ODFI · re-enrollment required", days:"61d ago"},
+  ],
+  chat: [
+    {who:"analyst", text:"Picked up the case. Parser flagged <b>error 30102</b>, triage already committed P2. I've got the closest INV match queued — looking at <b>INV-147914</b> first because the resolution path lines up.", evi:[
+      {type:"parsed", label:"parser:error_code", src:"Error code = 30102"},
+      {type:"inv", label:"INV-147914", src:"96% match · DD re-validation fix"},
+    ]},
+    {who:"user", text:"Yep — operator says employee just switched banks last Friday."},
+    {who:"analyst", text:"That confirms it. <b>Next step:</b> in QBO, go to Payroll → Employees → Sarah Chen → Payment method → switch to Direct deposit → re-enter routing and account, then send a $0.01 verify. Don't skip the verify; that's where the prior <span style='color:#ffb547'>INV-146208</span> case re-opened.", evi:[
+      {type:"doc", label:"playbook/payroll/dd-revalidate", src:"Direct deposit re-validation runbook"},
+      {type:"inv", label:"INV-146208", src:"82% match · skipped verify caused re-open"},
+    ]},
+    {who:"user", text:"Got it — sending now."},
+    {who:"analyst", text:"While you do that, I'll draft the operator-facing summary for the ticket. <b>Confidence is at 92%</b> — triage spine just updated. If verify clears within 24h, this closes itself.", evi:[
+      {type:"parsed", label:"parser:employee", src:"Employee = Sarah Chen"},
+    ]},
+  ],
+};
+
+/* ======================================================================
+   PULSE + CLOCK
+====================================================================== */
+function tickPulse(step){
+  state.pulse[step] = true;
+  document.querySelectorAll(".pulse-step").forEach(el=>{
+    const s = el.dataset.step;
+    el.classList.toggle("done", state.pulse[s]);
+    el.classList.remove("active");
+  });
+  // mark next undone as active
+  const order=["upload","parse","triage","inv","analyst","chat"];
+  const nextIdx = order.findIndex(s=>!state.pulse[s]);
+  if(nextIdx>=0){
+    document.querySelector(`.pulse-step[data-step="${order[nextIdx]}"]`).classList.add("active");
+  }
+}
+function startClock(){
+  state.startTime = Date.now();
+  setInterval(()=>{
+    if(!state.startTime) return;
+    const s = Math.floor((Date.now()-state.startTime)/1000);
+    document.getElementById("pulseClock").textContent =
+      `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+  },1000);
+}
+
+/* ======================================================================
+   PULSE STEP CLICK — flash-focus
+====================================================================== */
+document.querySelectorAll(".pulse-step").forEach(el=>{
+  el.addEventListener("click",()=>{
+    const target = {
+      upload:"#uploadOverlay",
+      parse:"#parserPill",
+      triage:"#triageBlock",
+      inv:".evidence",
+      analyst:"#canvasHead",
+      chat:".composer"
+    }[el.dataset.step];
+    if(!target) return;
+    const node = document.querySelector(target);
+    if(!node) return;
+    node.classList.add("flash");
+    setTimeout(()=>node.classList.remove("flash"),900);
+  });
+});
+
+/* ======================================================================
+   PARSER FLOW
+====================================================================== */
+function renderParsed(){
+  const g = document.getElementById("parsedGrid");
+  g.innerHTML = MOCK.parsed.map(f=>`
+    <div class="parsed-field"><span class="k">${f.k}</span><span class="v">${f.v}</span></div>
+  `).join("");
+}
+
+function runParser(){
+  tickPulse("upload");
+  document.getElementById("caseTitle").textContent = "Parsing screenshot…";
+  let pct = 0;
+  const bar = document.getElementById("parseBar");
+  const count = document.getElementById("parsedCount");
+  const iv = setInterval(()=>{
+    pct += 12 + Math.random()*8;
+    if(pct>=100){ pct=100; clearInterval(iv); onParserDone(); }
+    bar.style.width = pct+"%";
+    const k = Math.min(9, Math.round(pct/100*9));
+    count.textContent = `${k}/9`;
+  },180);
+}
+
+function onParserDone(){
+  tickPulse("parse");
+  document.getElementById("caseTitle").textContent = MOCK.caseTitle;
+  renderParsed();
+  setTimeout(()=>{
+    document.getElementById("parseBar").style.width="0%";
+  }, 600);
+  // kick off triage + INV in parallel (triage faster)
+  startTriage();
+  setTimeout(startINV, 400);
+}
+
+/* ======================================================================
+   TRIAGE FLOW (with live confidence dial)
+====================================================================== */
+function startTriage(){
+  const cook = document.getElementById("triageCooking");
+  cook.style.display="flex";
+  const texts = ["Categorizing…","Scoring severity…","Pulling fast-read…"];
+  let i=0;
+  document.getElementById("triageCookText").textContent = texts[0];
+  const iv = setInterval(()=>{
+    i++;
+    if(i>=texts.length){ clearInterval(iv); commitTriage(); }
+    else document.getElementById("triageCookText").textContent = texts[i];
+  },420);
+}
+
+function commitTriage(){
+  document.getElementById("triageCooking").style.display="none";
+  const t = MOCK.triage;
+  state.triage = t;
+  const blk = document.getElementById("triageBlock");
+  document.getElementById("sevPill").textContent = t.sev;
+  document.getElementById("sevPill").className = "sev "+t.sev;
+  document.getElementById("catPill").textContent = t.cat;
+  document.getElementById("fastRead").innerHTML = t.fast;
+  document.getElementById("nextStepText").textContent = t.next;
+  blk.classList.add("shown");
+  setConfidence(t.conf);
+  tickPulse("triage");
+  // arrive analyst shortly after triage
+  setTimeout(arriveAnalyst, 900);
+}
+
+function setConfidence(pct){
+  const circ = 2 * Math.PI * 18;
+  const off = circ * (1 - pct/100);
+  document.getElementById("confRing").setAttribute("stroke-dashoffset", off.toFixed(1));
+  document.getElementById("confNum").textContent = pct;
+}
+
+/* ======================================================================
+   INV FLOW
+====================================================================== */
+function startINV(){
+  document.getElementById("invStatus").textContent = "searching…";
+  document.getElementById("invList").innerHTML =
+    `<div class="ev-empty">Scanning ~38,400 historical INV records…</div>`;
+  let i=0;
+  const iv = setInterval(()=>{
+    if(i>=MOCK.inv.length){
+      clearInterval(iv);
+      document.getElementById("invStatus").textContent = `${MOCK.inv.length} matches · 1.4s`;
+      tickPulse("inv");
+      return;
+    }
+    addInvRow(MOCK.inv[i]); i++;
+  },280);
+}
+
+function addInvRow(row){
+  state.inv.push(row);
+  const list = document.getElementById("invList");
+  if(state.inv.length===1) list.innerHTML="";
+  const node = document.createElement("div");
+  node.className="inv-row";
+  node.innerHTML = `
+    <div class="top">
+      <span class="inv-id">${row.id}</span>
+      <span class="match-bar"><span class="bar"><i style="width:${row.match}%"></i></span> ${row.match}%</span>
+    </div>
+    <div class="desc">${row.desc}</div>
+    <div class="meta"><span>${row.days}</span><span>resolution: redo DD verify</span></div>
+    <button class="inv-pin" title="Pin to spine" onclick="pinToSpine('${row.id}')">
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17 L12 22"/><path d="M9 5 L15 5 L17 11 L7 11 Z"/></svg>
+    </button>`;
+  list.appendChild(node);
+  document.getElementById("invCount").textContent = state.inv.length;
+}
+
+/* ======================================================================
+   ANALYST + CHAT
+====================================================================== */
+function arriveAnalyst(){
+  document.getElementById("canvasHead").style.display="flex";
+  document.getElementById("composerForm").style.display="flex";
+  tickPulse("analyst");
+  streamChat();
+}
+
+function streamChat(){
+  let i=0;
+  function next(){
+    if(i>=MOCK.chat.length){ tickPulse("chat"); return; }
+    addTurn(MOCK.chat[i]); i++;
+    setTimeout(next, MOCK.chat[i-1].who==="user"?900:1700);
+  }
+  setTimeout(next, 500);
+}
+
+function addTurn(t){
+  const stream = document.getElementById("stream");
+  const turn = document.createElement("div");
+  turn.className="turn "+t.who;
+  const av = `<div class="av ${t.who==="user"?"u":"a"}">${t.who==="user"?"OP":"MA"}</div>`;
+  const evi = (t.evi||[]).map(e=>`
+    <span class="evi ${e.type}">
+      <span class="ed"></span>${e.label}
+      <div class="evi-pop"><b>${e.label}</b>${e.src}</div>
+    </span>`).join("");
+  turn.innerHTML = `
+    ${av}
+    <div class="bubble">
+      <div class="who">${t.who==="user"?"Operator":"Maya · senior analyst"}</div>
+      <div>${t.text}</div>
+      ${evi?`<div class="evi-row">${evi}</div>`:""}
+    </div>`;
+  stream.appendChild(turn);
+  stream.scrollTop = stream.scrollHeight;
+  state.chatTurns++;
+  // bump confidence as analyst contributes
+  if(t.who==="analyst" && state.triage){
+    const newConf = Math.min(99, MOCK.triage.conf + state.chatTurns*2);
+    setConfidence(newConf);
+  }
+}
+
+function sendUser(){
+  const input = document.getElementById("composerInput");
+  if(!input.value.trim()) return;
+  addTurn({who:"user", text:input.value});
+  input.value="";
+  // canned response
+  setTimeout(()=>{
+    addTurn({who:"analyst", text:"Noted. I'll add that to the case summary and update triage confidence.", evi:[]});
+  }, 1100);
+}
+
+/* ======================================================================
+   PARSER PILL TOGGLE
+====================================================================== */
+document.getElementById("parserPill").addEventListener("click",()=>{
+  const pop = document.getElementById("parserPop");
+  pop.classList.toggle("open");
+});
+document.addEventListener("click",(e)=>{
+  const pop = document.getElementById("parserPop");
+  const pill = document.getElementById("parserPill");
+  if(pop.classList.contains("open") && !pop.contains(e.target) && !pill.contains(e.target)){
+    pop.classList.remove("open");
+  }
+});
+
+/* ======================================================================
+   EV TABS
+====================================================================== */
+document.querySelectorAll(".ev-tab").forEach(t=>{
+  t.addEventListener("click",()=>{
+    document.querySelectorAll(".ev-tab").forEach(x=>x.classList.remove("active"));
+    t.classList.add("active");
+  });
+});
+
+/* ======================================================================
+   PIN TO SPINE
+====================================================================== */
+function pinToSpine(id){
+  state.pinned.push(id);
+  document.getElementById("pinCount").textContent = state.pinned.length;
+  // visual feedback — flash the spine
+  const spine = document.querySelector(".spine");
+  spine.classList.add("flash");
+  setTimeout(()=>spine.classList.remove("flash"),900);
+}
+
+/* ======================================================================
+   WEBCAM
+====================================================================== */
+function openWebcam(){
+  state.webcamOpen = true;
+  document.getElementById("scrim").classList.add("open");
+  // reset feed to "rotated" sideways simulation
+  const feed = document.getElementById("wcFeed");
+  feed.classList.remove("derotated"); feed.classList.add("rotated");
+  document.getElementById("wcRot").textContent = "gyro: 90° detected";
+  document.getElementById("derotateBtn").style.display="inline-flex";
+  document.getElementById("wcSnap").classList.remove("show");
+}
+function closeWebcam(){
+  state.webcamOpen = false;
+  document.getElementById("scrim").classList.remove("open");
+}
+function derotate(){
+  const feed = document.getElementById("wcFeed");
+  feed.classList.remove("rotated"); feed.classList.add("derotated");
+  document.getElementById("wcRot").textContent = "gyro: 0° · auto-corrected";
+  document.getElementById("derotateBtn").style.display="none";
+}
+function snapDetect(){
+  document.getElementById("wcSnap").classList.toggle("show");
+}
+function captureWebcam(){
+  closeWebcam();
+  document.getElementById("uploadOverlay").style.display="none";
+  runParser();
+}
+
+document.addEventListener("keydown",(e)=>{
+  const scrim = document.getElementById("scrim");
+  if(!scrim.classList.contains("open")) return;
+  if(e.key==="Escape") closeWebcam();
+  if(e.key===" "){ e.preventDefault(); captureWebcam(); }
+  if(e.key==="r" || e.key==="R") derotate();
+});
+
+/* ======================================================================
+   START CASE
+====================================================================== */
+function startCase(){
+  document.getElementById("uploadOverlay").style.display="none";
+  runParser();
+}
+
+/* ======================================================================
+   INIT
+====================================================================== */
+startClock();
+document.querySelector('.pulse-step[data-step="upload"]').classList.add("active");
+
+// kick off automatically after a beat so the demo runs without click
+setTimeout(()=>{
+  if(document.getElementById("uploadOverlay").style.display!=="none" && !state.webcamOpen){
+    startCase();
+  }
+}, 1800);
+</script>
+</body>
+</html>

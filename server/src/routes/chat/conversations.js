@@ -12,6 +12,7 @@ const {
   listConversations,
   updateConversation,
 } = require('../../services/chat-conversation-service');
+const { getEventStats } = require('../../services/event-stats-service');
 
 const router = express.Router();
 
@@ -56,6 +57,18 @@ router.get('/', async (req, res) => {
     return res.json({ ok: true, ...result });
   } catch (err) {
     return sendConversationError(res, err, 'LIST_FAILED', 'Failed to list conversations');
+  }
+});
+
+// Aggregated stats endpoint — must be declared before the `/:id` ObjectId
+// guard, otherwise Express will try to validate "event-stats" as an ObjectId
+// and reject it.
+router.get('/event-stats', async (req, res) => {
+  try {
+    const stats = await getEventStats();
+    return res.json({ ok: true, ...stats });
+  } catch (err) {
+    return sendConversationError(res, err, 'EVENT_STATS_FAILED', 'Failed to load event stats');
   }
 });
 

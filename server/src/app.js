@@ -13,6 +13,7 @@ const responseTimeout = require('./middleware/response-timeout');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 const PROTOTYPES_DIR = path.join(__dirname, '..', '..', 'prototypes');
+const PIPELINE_TEST_IMAGE_FIXTURES_DIR = path.join(__dirname, '..', 'fixtures', 'pipeline-tests', 'image-parser');
 
 function createApp() {
   if (!fs.existsSync(UPLOADS_DIR)) {
@@ -28,6 +29,7 @@ function createApp() {
   app.use(express.json({ limit: '12mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
   app.use('/prototypes', express.static(PROTOTYPES_DIR));
+  app.use('/api/pipeline-tests/image-fixtures', express.static(PIPELINE_TEST_IMAGE_FIXTURES_DIR));
 
   app.get('/api/health', (req, res) => {
     res.json({ ok: true, uptime: process.uptime() });
@@ -74,6 +76,7 @@ function createApp() {
   app.use('/api/investigations', require('./routes/investigations'));
   app.use('/api/preferences', require('./routes/preferences'));
   app.use('/api/image-parser', require('./routes/image-parser'));
+  app.use('/api/pipeline-tests', require('./routes/pipeline-tests'));
   app.use('/api/live-call-assist', require('./routes/live-call-assist'));
   app.use('/api/test-runner', require('./routes/test-runner'));
   app.use('/api/rooms', require('./routes/room'));

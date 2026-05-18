@@ -19,6 +19,7 @@ const {
 } = require('./parse-orchestrator');
 const invMatcherModule = require('./inv-matcher');
 const knownIssueSearchModule = require('./known-issue-search-agent');
+const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
 const {
   getAlternateProvider,
   getDefaultProvider,
@@ -242,8 +243,12 @@ async function prepareChatRequest({
   const normalizedRequestedFallbackProvider = normalizeProvider(
     resolvedRequestedFallback || getAlternateProvider(normalizedRequestedPrimaryProvider)
   );
-  const normalizedRequestedPrimaryModel = normalizeModelOverride(requestedPrimaryModel);
-  const normalizedRequestedFallbackModel = normalizeModelOverride(requestedFallbackModel);
+  const normalizedRequestedPrimaryModel = normalizeModelOverride(
+    requestedPrimaryModel || runtimeSettings.providerStrategy.defaultPrimaryModel
+  );
+  const normalizedRequestedFallbackModel = normalizeModelOverride(
+    requestedFallbackModel || runtimeSettings.providerStrategy.defaultFallbackModel
+  );
 
   let policy = applyChatFeatureFlags(resolvePolicy({
     mode: resolvedRequestedMode,
@@ -563,35 +568,70 @@ function buildTriageCardFromAgentOutput(output, parseFields) {
   return { card, issues: [] };
 }
 
-function buildTriageAgentPromptInput({ parserText, parseFields, knownIssueSearchResult }) {
-  const knownIssuePack = knownIssueSearchModule.buildKnownIssueRetrievalPack(knownIssueSearchResult);
+function normalizeTriageGenerationSource(source) {
+  const normalized = safeString(source, '').trim().toLowerCase();
+  if (normalized === 'agent' || normalized === TRIAGE_AGENT_ID || normalized === 'model') {
+    return 'agent';
+  }
+  return 'server';
+}
+
+function annotateTriageGeneration(card, {
+  source,
+  latencyMs,
+  provider,
+  model,
+} = {}) {
+  const baseCard = card || chatTriageModule.buildFallbackTriageCard();
+  const normalizedSource = normalizeTriageGenerationSource(source);
+  const existingGeneration = baseCard.generation && typeof baseCard.generation === 'object'
+    ? baseCard.generation
+    : {};
+  const providerLabel = safeString(provider, '').trim();
+  const modelLabel = safeString(model, '').trim();
+  return {
+    ...baseCard,
+    generation: {
+      ...existingGeneration,
+      source: normalizedSource,
+      label: normalizedSource === 'agent' ? 'Agent generated' : 'Server generated',
+      latencyMs: normalizeElapsedMs(latencyMs),
+      provider: providerLabel,
+      model: modelLabel,
+    },
+  };
+}
+
+function buildTriageAgentPromptInput({ parserText, parseFields }) {
   return [
     'Triage this parsed QBO escalation template.',
     '',
     'Use the parsed template as the source of truth. Do not assume external facts unless they are safe operational triage assumptions.',
-    knownIssuePack
-      ? 'Use the Known Issue Search Agent result as retrieval evidence. Do not upgrade confidence just because a search ran; only use a match when the evidence supports it.'
-      : '',
     'Return only the required labeled fields from your triage-agent prompt.',
     '',
     'Parsed fields JSON:',
     JSON.stringify(parseFields || {}, null, 2),
-    knownIssuePack ? '' : null,
-    knownIssuePack ? 'Known Issue Search Agent result JSON:' : null,
-    knownIssuePack ? JSON.stringify(knownIssuePack, null, 2) : null,
     '',
     'Raw parsed template:',
     safeString(parserText, '').trim(),
-  ].filter((line) => line !== null).join('\n');
+  ].join('\n');
 }
 
-function runTriageAgentCompletion({ policy, parserText, parseFields, knownIssueSearchResult, timeoutMs }) {
+function runTriageAgentCompletion({ policy, parserText, parseFields, timeoutMs, eventBus }) {
   const startedAt = Date.now();
   const systemPrompt = getRenderedAgentPrompt(TRIAGE_AGENT_ID);
   const messages = [{
     role: 'user',
-    content: buildTriageAgentPromptInput({ parserText, parseFields, knownIssueSearchResult }),
+    content: buildTriageAgentPromptInput({ parserText, parseFields }),
   }];
+  let streamingEmitted = false;
+  const thinkingCoalescer = createThinkingCoalescer((delta) => {
+    eventBus?.emit('llm.thinking', {
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+      delta,
+    });
+  });
 
   return new Promise((resolve) => {
     let settled = false;
@@ -600,11 +640,19 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, knownIssueS
     function finish(result) {
       if (settled) return;
       settled = true;
+      thinkingCoalescer.flush();
       resolve({
         ...result,
         latencyMs: result.latencyMs || (Date.now() - startedAt),
       });
     }
+
+    eventBus?.emit('llm.request', {
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+      reasoningEffort: policy.reasoningEffort || '',
+      mode: policy.mode,
+    });
 
     cleanup = startChatOrchestration({
       mode: policy.mode,
@@ -617,11 +665,41 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, knownIssueS
       images: [],
       reasoningEffort: policy.reasoningEffort,
       timeoutMs,
-      onChunk: () => {},
-      onThinkingChunk: () => {},
-      onProviderError: () => {},
-      onFallback: () => {},
-      onDone: (data) => finish({
+      onChunk: () => {
+        if (!streamingEmitted) {
+          streamingEmitted = true;
+          eventBus?.emit('llm.streaming', { provider: policy.primaryProvider });
+        }
+      },
+      onThinkingChunk: ({ thinking } = {}) => {
+        thinkingCoalescer.push(typeof thinking === 'string' ? thinking : '');
+      },
+      onProviderError: (info) => {
+        eventBus?.emit('error', {
+          code: info?.code || 'PROVIDER_ERROR',
+          message: info?.message || 'Provider attempt failed.',
+          provider: info?.provider || '',
+        });
+      },
+      onFallback: (info) => {
+        eventBus?.emit('llm.fallback', {
+          from: info?.from || '',
+          to: info?.to || '',
+          reason: info?.reason || '',
+        });
+      },
+      onDone: (data) => {
+        eventBus?.emit('llm.response', {
+          latencyMs: Date.now() - startedAt,
+          provider: data?.providerUsed || policy.primaryProvider,
+          model: data?.modelUsed || getProviderModelId(data?.providerUsed) || '',
+          usage: data?.usage ? {
+            inputTokens: data.usage.inputTokens,
+            outputTokens: data.usage.outputTokens,
+            totalTokens: data.usage.totalTokens,
+          } : null,
+        });
+        finish({
         ok: true,
         providerUsed: data.providerUsed,
         modelUsed: data.modelUsed || getProviderModelId(data.providerUsed),
@@ -632,7 +710,8 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, knownIssueS
         usage: data.usage || null,
         mode: data.mode || policy.mode,
         latencyMs: Date.now() - startedAt,
-      }),
+      });
+      },
       onError: (err) => finish({
         ok: false,
         providerUsed: policy.primaryProvider,
@@ -686,19 +765,20 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, knownIssueS
   });
 }
 
-function buildTriageAgentMeta({ policy, result, validation, fallbackReason }) {
+function buildTriageAgentMeta({ policy, result, validation, fallbackReason, fallbackFrom }) {
   const providerUsed = safeString(result?.providerUsed, policy.primaryProvider);
   const model = safeString(result?.modelUsed, '') || getProviderModelId(providerUsed) || '';
+  const ruleFallback = Boolean(fallbackReason);
   return {
     mode: result?.mode || policy.mode,
     providerUsed,
     winner: providerUsed,
     fallbackUsed: Boolean(result?.fallbackUsed),
-    fallbackFrom: result?.fallbackFrom || null,
+    fallbackFrom: ruleFallback ? (fallbackFrom || null) : (result?.fallbackFrom || null),
     attempts: Array.isArray(result?.attempts) ? result.attempts : [],
     candidates: [],
     usedRegexFallback: false,
-    usedRuleFallback: Boolean(fallbackReason),
+    usedRuleFallback: ruleFallback,
     validation: validation || null,
     parsedBy: TRIAGE_AGENT_ID,
     confidence: validation?.confidence || '',
@@ -756,7 +836,12 @@ function buildParserDerivedTriageContext({
 
   if (!text) {
     return {
-      triageCard: chatTriageModule.buildFallbackTriageCard(),
+      triageCard: annotateTriageGeneration(chatTriageModule.buildFallbackTriageCard(), {
+        source: 'server',
+        latencyMs: elapsedMs,
+        provider: parserProvider,
+        model: normalizedModel,
+      }),
       parseFields: {},
       parseMeta: {
         mode: 'single',
@@ -835,10 +920,23 @@ function buildParserDerivedTriageContext({
 
   return {
     triageCard: validation.passed
-      ? chatTriageModule.buildServerTriageCard(parsedFields)
-      : (Object.keys(fallbackFields).length > 0
-          ? chatTriageModule.buildServerTriageCard(fallbackFields)
-          : chatTriageModule.buildFallbackTriageCard()),
+      ? annotateTriageGeneration(chatTriageModule.buildServerTriageCard(parsedFields), {
+          source: 'server',
+          latencyMs: elapsedMs,
+          provider: parserProvider,
+          model: normalizedModel,
+        })
+      : annotateTriageGeneration(
+          Object.keys(fallbackFields).length > 0
+            ? chatTriageModule.buildServerTriageCard(fallbackFields)
+            : chatTriageModule.buildFallbackTriageCard(),
+          {
+            source: 'server',
+            latencyMs: elapsedMs,
+            provider: parserProvider,
+            model: normalizedModel,
+          }
+        ),
     parseFields: parsedFields,
     parseMeta: {
       mode: 'single',
@@ -900,6 +998,8 @@ async function buildAgentBackedTriageContext({
   onKnownIssueStart,
   onTriageStart,
   runKnownIssueSearch = true,
+  knownIssueEventBus,
+  triageEventBus,
 }) {
   const baseContext = buildParserDerivedTriageContext({
     parserText,
@@ -912,15 +1012,41 @@ async function buildAgentBackedTriageContext({
 
   if (baseContext.error || !baseContext.parseFields || Object.keys(baseContext.parseFields).length === 0) {
     const reason = baseContext.error?.message || 'Parsed template did not validate, so model-backed triage was skipped.';
+    knownIssueEventBus?.emit('stage.skipped', {
+      reason,
+      code: baseContext.error?.code || 'PARSE_VALIDATION_FAILED',
+    });
+    knownIssueEventBus?.emit('stage.completed', {
+      status: 'failed',
+      durationMs: 0,
+      fallbackUsed: true,
+    });
+    triageEventBus?.emit('stage.skipped', {
+      reason,
+      code: baseContext.error?.code || 'PARSE_VALIDATION_FAILED',
+    });
+    triageEventBus?.emit('stage.completed', {
+      status: 'failed',
+      durationMs: 0,
+      fallbackUsed: true,
+    });
     return {
       ...baseContext,
-      triageCard: annotateRuleFallbackCard(baseContext.triageCard, reason),
+      triageCard: annotateTriageGeneration(
+        annotateRuleFallbackCard(baseContext.triageCard, reason),
+        {
+          source: 'server',
+          latencyMs: baseContext.elapsedMs,
+          provider: baseContext.parseMeta?.providerUsed || parserProvider,
+          model: baseContext.parseMeta?.model || parserModel,
+        }
+      ),
       triageMeta: {
         mode: 'single',
         providerUsed: '',
         winner: '',
         fallbackUsed: false,
-        fallbackFrom: null,
+        fallbackFrom: 'parse-validation',
         attempts: [],
         candidates: [],
         usedRegexFallback: false,
@@ -950,34 +1076,19 @@ async function buildAgentBackedTriageContext({
     fallbackPolicy,
     fallbackReasoningEffort: reasoningEffort,
   });
-  let knownIssueSearchResult = null;
+  // Emit pre-flight status events sequentially (cheap), then kick INV + Triage
+  // off in parallel. Triage no longer consumes INV results, so they are
+  // independent. Both must resolve before the analyst leg, which still
+  // consumes knownIssueSearchResult downstream.
   if (runKnownIssueSearch && knownIssuePolicy.usedDefaultRuntime) {
     await emitStatus?.({
       level: 'warning',
-      message: 'Known Issue Search Agent has no saved runtime. Using the request/default chat runtime for this search pass.',
+      message: 'INV Search Agent has no saved runtime. Using the request/default chat runtime for this search pass.',
       code: 'KNOWN_ISSUE_AGENT_DEFAULT_RUNTIME',
       provider: knownIssuePolicy.primaryProvider,
       model: knownIssuePolicy.primaryModel || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
     });
   }
-  if (runKnownIssueSearch) {
-    await callOptional(onKnownIssueStart, {
-      provider: knownIssuePolicy.primaryProvider,
-      model: knownIssuePolicy.primaryModel || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
-    });
-    knownIssueSearchResult = await knownIssueSearchModule.runKnownIssueSearchAgent({
-      parserText,
-      parseFields: baseContext.parseFields,
-      policy: knownIssuePolicy,
-      timeoutMs,
-      emitStatus,
-    });
-  }
-
-  await callOptional(onTriageStart, {
-    provider: policy.primaryProvider,
-    model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
-  });
   if (policy.usedDefaultRuntime) {
     await emitStatus?.({
       level: 'warning',
@@ -987,19 +1098,97 @@ async function buildAgentBackedTriageContext({
       model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
     });
   }
-  await emitStatus?.({
-    message: `Running Triage Agent with ${policy.primaryProvider}.`,
-    code: 'TRIAGE_AGENT_STARTED',
-    provider: policy.primaryProvider,
-    model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
-  });
 
-  const result = await runTriageAgentCompletion({
-    policy,
-    parserText,
-    parseFields: baseContext.parseFields,
-    knownIssueSearchResult,
-    timeoutMs,
+  const knownIssuePromise = runKnownIssueSearch
+    ? (async () => {
+      await callOptional(onKnownIssueStart, {
+        provider: knownIssuePolicy.primaryProvider,
+        model: knownIssuePolicy.primaryModel || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
+      });
+      knownIssueEventBus?.emit('stage.started', {
+        agentName: 'INV Search Agent',
+        provider: knownIssuePolicy.primaryProvider,
+        model: knownIssuePolicy.primaryModel || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
+        reasoningEffort: knownIssuePolicy.reasoningEffort || '',
+      });
+      return knownIssueSearchModule.runKnownIssueSearchAgent({
+        parserText,
+        parseFields: baseContext.parseFields,
+        policy: knownIssuePolicy,
+        timeoutMs,
+        emitStatus,
+        eventBus: knownIssueEventBus,
+      });
+    })()
+    : Promise.resolve(null);
+
+  const triagePromise = (async () => {
+    await callOptional(onTriageStart, {
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+    });
+    await emitStatus?.({
+      message: `Running Triage Agent with ${policy.primaryProvider}.`,
+      code: 'TRIAGE_AGENT_STARTED',
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+    });
+    triageEventBus?.emit('stage.started', {
+      agentName: 'Triage Agent',
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+      reasoningEffort: policy.reasoningEffort || '',
+    });
+    triageEventBus?.emit('triage.context_built', {
+      parseFieldCount: Object.keys(baseContext.parseFields || {}).length,
+      parserTextChars: safeString(parserText, '').length,
+    });
+    return runTriageAgentCompletion({
+      policy,
+      parserText,
+      parseFields: baseContext.parseFields,
+      timeoutMs,
+      eventBus: triageEventBus,
+    });
+  })();
+
+  const [knownIssueSearchResult, result] = await Promise.all([knownIssuePromise, triagePromise]);
+
+  if (knownIssueSearchResult) {
+    const matchCount = Array.isArray(knownIssueSearchResult.matches) ? knownIssueSearchResult.matches.length : 0;
+    knownIssueEventBus?.emit('inv.matches_found', {
+      status: knownIssueSearchResult.status || '',
+      matchCount,
+      validationPassed: Boolean(knownIssueSearchResult.validation?.passed),
+    });
+    knownIssueEventBus?.emit('stage.completed', {
+      status: knownIssueSearchResult.ok ? 'success' : 'failed',
+      durationMs: normalizeElapsedMs(knownIssueSearchResult.meta?.latencyMs),
+      provider: knownIssueSearchResult.meta?.providerUsed || knownIssuePolicy.primaryProvider,
+      model: knownIssueSearchResult.meta?.model || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
+    });
+  }
+  if (result.ok) {
+    const triagePreview = buildTriageCardFromAgentOutput(result.fullResponse, baseContext.parseFields);
+    triageEventBus?.emit('triage.decision', {
+      cardBuilt: Boolean(triagePreview.card),
+      severity: triagePreview.card?.severity || '',
+      category: triagePreview.card?.category || '',
+      confidence: triagePreview.card?.confidence || '',
+      validationIssues: Array.isArray(triagePreview.issues) ? triagePreview.issues : [],
+    });
+  } else {
+    triageEventBus?.emit('triage.decision', {
+      cardBuilt: false,
+      errorCode: result.error?.code || 'TRIAGE_AGENT_FAILED',
+    });
+  }
+  triageEventBus?.emit('stage.completed', {
+    status: result.ok ? 'success' : 'failed',
+    durationMs: normalizeElapsedMs(result.latencyMs),
+    provider: result.providerUsed || policy.primaryProvider,
+    model: result.modelUsed || getProviderModelId(result.providerUsed || policy.primaryProvider) || '',
+    fallbackUsed: Boolean(result.fallbackUsed),
   });
 
   if (result.ok) {
@@ -1008,7 +1197,15 @@ async function buildAgentBackedTriageContext({
       return {
         ...baseContext,
         knownIssueSearchResult,
-        triageCard: annotateDefaultRuntimeCard(parsedOutput.card, policy),
+        triageCard: annotateTriageGeneration(
+          annotateDefaultRuntimeCard(parsedOutput.card, policy),
+          {
+            source: 'agent',
+            latencyMs: result.latencyMs,
+            provider: result.providerUsed || policy.primaryProvider,
+            model: result.modelUsed || getProviderModelId(result.providerUsed || policy.primaryProvider) || '',
+          }
+        ),
         triageMeta: buildTriageAgentMeta({
           policy,
           result,
@@ -1035,7 +1232,15 @@ async function buildAgentBackedTriageContext({
     return {
       ...baseContext,
       knownIssueSearchResult,
-      triageCard: annotateDefaultRuntimeCard(annotateRuleFallbackCard(baseContext.triageCard, reason), policy),
+      triageCard: annotateTriageGeneration(
+        annotateDefaultRuntimeCard(annotateRuleFallbackCard(baseContext.triageCard, reason), policy),
+        {
+          source: 'server',
+          latencyMs: result.latencyMs,
+          provider: result.providerUsed || policy.primaryProvider,
+          model: result.modelUsed || getProviderModelId(result.providerUsed || policy.primaryProvider) || '',
+        }
+      ),
       triageMeta: buildTriageAgentMeta({
         policy,
         result,
@@ -1047,6 +1252,7 @@ async function buildAgentBackedTriageContext({
           outputFormat: 'triage-agent-fields',
         },
         fallbackReason: reason,
+        fallbackFrom: 'agent-shape',
       }),
       elapsedMs: result.latencyMs,
     };
@@ -1063,7 +1269,15 @@ async function buildAgentBackedTriageContext({
   return {
     ...baseContext,
     knownIssueSearchResult,
-    triageCard: annotateDefaultRuntimeCard(annotateRuleFallbackCard(baseContext.triageCard, reason), policy),
+    triageCard: annotateTriageGeneration(
+      annotateDefaultRuntimeCard(annotateRuleFallbackCard(baseContext.triageCard, reason), policy),
+      {
+        source: 'server',
+        latencyMs: result.latencyMs,
+        provider: result.providerUsed || policy.primaryProvider,
+        model: result.modelUsed || getProviderModelId(result.providerUsed || policy.primaryProvider) || '',
+      }
+    ),
     triageMeta: buildTriageAgentMeta({
       policy,
       result,
@@ -1075,6 +1289,7 @@ async function buildAgentBackedTriageContext({
         outputFormat: 'triage-agent-fields',
       },
       fallbackReason: reason,
+      fallbackFrom: 'agent-error',
     }),
     elapsedMs: result.latencyMs,
   };
@@ -1186,6 +1401,9 @@ async function buildChatImageAugmentation({
   effectiveTimeoutMs,
   triageAgentRuntime,
   fallbackPolicy,
+  parserEventBus,
+  knownIssueEventBus,
+  triageEventBus,
 }) {
   let nonEscalationIntent = chatTriageModule.isNonEscalationIntent(messageText);
   const sendStatus = typeof emitStatus === 'function' ? emitStatus : async () => {};
@@ -1203,12 +1421,22 @@ async function buildChatImageAugmentation({
       model: safeString(parsedEscalationModel, ''),
       elapsedMs: normalizeElapsedMs(parsedEscalationElapsedMs),
     };
+    // Parser ran client-side via /api/image-parser/parse (which streams its
+    // own stage_event SSE). Don't synthesize a replay here — emit a single
+    // marker so the popout's saved-events fallback shows context if reopened.
+    parserEventBus?.emit('parser.replay_skipped', {
+      reason: 'events streamed by /api/image-parser/parse',
+      provider: imageTranscription.providerUsed,
+      model: imageTranscription.model,
+      elapsedMs: imageTranscription.elapsedMs,
+      charCount: imageTranscription.text.length,
+    });
   }
   if (normalizedImages.length > 0) {
     if (!imageParserConfig?.provider) {
       await sendStatus({
         level: 'warning',
-        message: 'Escalation Template Parser is not configured for this request. Using generic image transcription instead.',
+        message: 'Image Parser is not configured for this request. Using generic image transcription instead.',
         code: 'IMAGE_PARSER_AGENT_DISABLED',
       });
       imageTranscription = await runChatImageTranscriptionFallback({
@@ -1225,12 +1453,28 @@ async function buildChatImageAugmentation({
         provider: imageParserConfig.provider,
         model: imageParserConfig.model || '',
       });
+      parserEventBus?.emit('stage.started', {
+        agentName: 'Image Parser',
+        provider: imageParserConfig.provider,
+        model: imageParserConfig.model || '',
+        reasoningEffort: imageParserConfig.reasoningEffort || '',
+      });
+      parserEventBus?.emit('prompt.rendered', {
+        promptId: imageParserConfig.promptId || 'escalation-template-parser',
+      });
       await sendStatus('Parsing image with dedicated image parser...');
       try {
         const { parseImage } = require('./image-parser');
+        parserEventBus?.emit('llm.request', {
+          provider: imageParserConfig.provider,
+          model: imageParserConfig.model || '',
+          reasoningEffort: imageParserConfig.reasoningEffort || '',
+          promptId: imageParserConfig.promptId || 'escalation-template-parser',
+        });
         const parserResult = await parseImage(normalizedImages[0], {
           provider: imageParserConfig.provider,
           model: imageParserConfig.model || undefined,
+          reasoningEffort: imageParserConfig.reasoningEffort || undefined,
           promptId: imageParserConfig.promptId || 'escalation-template-parser',
           timeoutMs: 45_000,
         });
@@ -1247,13 +1491,31 @@ async function buildChatImageAugmentation({
           ),
           elapsedMs: Date.now() - parserStartedAt,
         };
+        parserEventBus?.emit('llm.response', {
+          latencyMs: imageTranscription.elapsedMs,
+          provider: imageTranscription.providerUsed,
+          model: imageTranscription.model,
+          charCount: imageTranscription.text.length,
+          usage: imageTranscription.usage ? {
+            inputTokens: imageTranscription.usage.inputTokens,
+            outputTokens: imageTranscription.usage.outputTokens,
+            totalTokens: imageTranscription.usage.totalTokens,
+          } : null,
+        });
         if (imageTranscription.role === 'inv-list') {
           nonEscalationIntent = true;
+          parserEventBus?.emit('image.normalized', { role: 'inv-list' });
+        } else if (imageTranscription.role) {
+          parserEventBus?.emit('image.normalized', { role: imageTranscription.role });
         }
         if (!safeString(imageTranscription.text, '').trim()) {
+          parserEventBus?.emit('error', {
+            code: 'IMAGE_PARSER_EMPTY_OUTPUT',
+            message: 'Image Parser returned empty text. Falling back to generic image transcription.',
+          });
           await sendStatus({
             level: 'warning',
-            message: 'Escalation Template Parser returned empty text. Falling back to generic image transcription.',
+            message: 'Image Parser returned empty text. Falling back to generic image transcription.',
             code: 'IMAGE_PARSER_EMPTY_OUTPUT',
             provider: imageParserConfig.provider,
             model: imageParserConfig.model || '',
@@ -1265,15 +1527,31 @@ async function buildChatImageAugmentation({
             effectiveTimeoutMs,
             sendStatus,
           });
+          parserEventBus?.emit('stage.completed', {
+            status: 'failed',
+            durationMs: Date.now() - parserStartedAt,
+            fallbackUsed: true,
+          });
+        } else {
+          parserEventBus?.emit('stage.completed', {
+            status: 'success',
+            durationMs: Date.now() - parserStartedAt,
+            provider: imageTranscription.providerUsed,
+            model: imageTranscription.model,
+          });
         }
       } catch (err) {
         parserError = err || null;
+        parserEventBus?.emit('error', {
+          code: err?.code || 'IMAGE_PARSER_FAILED',
+          message: err?.message || 'Image Parser failed.',
+        });
         if (IMAGE_PARSER_VERBOSE_LOGS) {
           console.warn('[chat] Dedicated image parser failed; falling back to standard image transcription:', err.message);
         }
         await sendStatus({
           level: 'warning',
-          message: 'Escalation Template Parser failed. Falling back to generic image transcription.',
+          message: 'Image Parser failed. Falling back to generic image transcription.',
           code: 'IMAGE_PARSER_FALLBACK',
           provider: imageParserConfig.provider,
           model: imageParserConfig.model || '',
@@ -1284,6 +1562,11 @@ async function buildChatImageAugmentation({
           effectiveReasoningEffort,
           effectiveTimeoutMs,
           sendStatus,
+        });
+        parserEventBus?.emit('stage.completed', {
+          status: 'failed',
+          durationMs: Date.now() - parserStartedAt,
+          fallbackUsed: true,
         });
       }
       await callOptional(onTranscriptionComplete, imageTranscription);
@@ -1298,7 +1581,7 @@ async function buildChatImageAugmentation({
   );
 
   if (shouldRunTriage) {
-    await sendStatus('Running Known Issue Search Agent before triage...');
+    await sendStatus('Running INV Search Agent before triage...');
   }
 
   const imageTriageContext = shouldRunTriage
@@ -1315,6 +1598,8 @@ async function buildChatImageAugmentation({
         emitStatus: sendStatus,
         onKnownIssueStart,
         onTriageStart,
+        knownIssueEventBus,
+        triageEventBus,
       })
     : null;
 

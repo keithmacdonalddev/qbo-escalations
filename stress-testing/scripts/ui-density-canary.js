@@ -10,24 +10,18 @@ const {
 
 const DESKTOP = { width: 1868, height: 869 };
 const MOBILE = { width: 390, height: 844 };
-const DOCK_WIDTH_BY_MODE = {
-  chat: 320,
-  workspace: 304,
-  standard: 296,
-  dense: 280,
-};
 
 const ROUTES = [
-  { id: 'workspace', hash: '#/workspace', dockMode: 'workspace' },
-  { id: 'workspace-inbox', hash: '#/workspace/inbox', dockMode: 'workspace' },
-  { id: 'workspace-calendar', hash: '#/workspace/calendar', dockMode: 'workspace' },
-  { id: 'usage', hash: '#/usage', dockMode: 'dense' },
-  { id: 'analytics', hash: '#/analytics', dockMode: 'dense' },
-  { id: 'templates', hash: '#/templates', dockMode: 'dense' },
-  { id: 'playbook', hash: '#/playbook', dockMode: 'dense' },
-  { id: 'agent-profile', hash: '#/agents/escalation-template-parser', dockMode: 'dense' },
-  { id: 'investigations', hash: '#/investigations', dockMode: 'dense' },
-  { id: 'chat', hash: '#/chat', dockMode: 'chat' },
+  { id: 'workspace', hash: '#/workspace' },
+  { id: 'workspace-inbox', hash: '#/workspace/inbox' },
+  { id: 'workspace-calendar', hash: '#/workspace/calendar' },
+  { id: 'usage', hash: '#/usage' },
+  { id: 'analytics', hash: '#/analytics' },
+  { id: 'templates', hash: '#/templates' },
+  { id: 'playbook', hash: '#/playbook' },
+  { id: 'agent-profile', hash: '#/agents/escalation-template-parser' },
+  { id: 'investigations', hash: '#/investigations' },
+  { id: 'chat', hash: '#/chat' },
 ];
 
 const CASE_TEMPLATE = [
@@ -128,15 +122,20 @@ function metricsScript() {
     const main = q('.app-shell-main-column');
     const shell = q('.app-shell-body');
     const workflow = q('.case-workflow-surface');
+    const headerAgentButtons = qa('.app-header-agent-btn').filter(visible);
+    const modalCount = qa('.agent-modal-shell').filter(visible).length;
     return {
       hash: window.location.hash,
       viewport: { width: window.innerWidth, height: window.innerHeight },
       scrollWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
       overflowX: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth) - window.innerWidth,
-      dockMode: dock?.dataset?.dockMode || '',
+      dockCount: qa('.app-global-dock-wrapper').filter(visible).length,
       dock: rect(dock),
       main: rect(main),
       shell: rect(shell),
+      headerAgentButtonCount: headerAgentButtons.length,
+      headerAgentLabels: headerAgentButtons.map((button) => button.getAttribute('aria-label') || ''),
+      modalCount,
       badNativeControls,
       caseWorkflow: rect(workflow),
       caseWorkflowCount: qa('.case-workflow-surface').filter(visible).length,
@@ -212,18 +211,18 @@ function assertRouteMetrics(metrics, route, viewport) {
   assert.ok(metrics.overflowX <= 1, `${route.id} has horizontal overflow: ${metrics.overflowX}px`);
   assert.equal(metrics.badNativeControls.length, 0, `${route.id} has native-looking controls: ${JSON.stringify(metrics.badNativeControls)}`);
   assert.ok(metrics.main?.w > 0, `${route.id} did not render a main content column`);
+  assert.equal(metrics.dockCount, 0, `${route.id} rendered the obsolete global dock`);
+  assert.equal(metrics.modalCount, 0, `${route.id} opened an agent modal during route load`);
+  assert.equal(metrics.headerAgentButtonCount, 3, `${route.id} should render three header agent buttons`);
 
   if (viewport.width >= 900) {
-    assert.equal(metrics.dockMode, route.dockMode, `${route.id} dock mode mismatch`);
-    const expectedDockWidth = DOCK_WIDTH_BY_MODE[route.dockMode];
-    assert.ok(metrics.dock?.w > 0, `${route.id} did not render the global dock`);
     assert.ok(
-      Math.abs(metrics.dock.w - expectedDockWidth) <= 4,
-      `${route.id} dock width ${metrics.dock.w}px did not match ${expectedDockWidth}px ${route.dockMode} mode`
+      Math.abs(metrics.main.w - metrics.shell.w) <= 2,
+      `${route.id} main column is not using the full shell width: main ${metrics.main.w}px, shell ${metrics.shell.w}px`
     );
     assert.ok(
-      metrics.main.right <= metrics.dock.x + 2,
-      `${route.id} main column overlaps the dock: main right ${metrics.main.right}, dock x ${metrics.dock.x}`
+      metrics.main.right <= metrics.shell.right + 2,
+      `${route.id} main column overflows the shell: main right ${metrics.main.right}, shell right ${metrics.shell.right}`
     );
   }
 }
@@ -235,8 +234,8 @@ function assertViewportOutputs(outputs, viewport, prefix) {
     return {
       route: route.id,
       overflowX: metrics.overflowX,
-      dockMode: metrics.dockMode,
-      dockWidth: metrics.dock?.w || 0,
+      dockCount: metrics.dockCount,
+      headerAgentButtonCount: metrics.headerAgentButtonCount,
       badNativeControlCount: metrics.badNativeControls.length,
     };
   });
@@ -248,6 +247,8 @@ function assertCaseWorkflowMetrics(metrics) {
   assert.ok(metrics.caseWorkflow?.h > 0, 'case workflow surface has no visible height');
   assert.ok(metrics.caseWorkflow.h <= 620, `case workflow surface is too tall: ${metrics.caseWorkflow.h}px`);
   assert.ok(metrics.overflowX <= 1, `case workflow has horizontal overflow: ${metrics.overflowX}px`);
+  assert.equal(metrics.dockCount, 0, 'case workflow rendered the obsolete global dock');
+  assert.equal(metrics.headerAgentButtonCount, 3, 'case workflow should render three header agent buttons');
   assert.equal(metrics.badNativeControls.length, 0, `case workflow has native-looking controls: ${JSON.stringify(metrics.badNativeControls)}`);
 }
 

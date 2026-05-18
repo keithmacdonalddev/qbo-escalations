@@ -1,17 +1,24 @@
 import { useState, useCallback } from 'react';
 import { apiFetch } from '../api/http.js';
+import { resolveImageParserSelection } from '../lib/imageParserCatalog.js';
 
 const IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
 const IMAGE_PARSER_MODEL_KEY = 'qbo-image-parser-model';
+const IMAGE_PARSER_REASONING_EFFORT_KEY = 'qbo-image-parser-reasoning-effort';
 
 function readStoredConfig() {
   try {
+    const selection = resolveImageParserSelection(
+      localStorage.getItem(IMAGE_PARSER_PROVIDER_KEY) || '',
+      localStorage.getItem(IMAGE_PARSER_MODEL_KEY) || ''
+    );
     return {
-      provider: localStorage.getItem(IMAGE_PARSER_PROVIDER_KEY) || '',
-      model: localStorage.getItem(IMAGE_PARSER_MODEL_KEY) || '',
+      provider: selection.provider,
+      model: selection.model,
+      reasoningEffort: localStorage.getItem(IMAGE_PARSER_REASONING_EFFORT_KEY) || '',
     };
   } catch {
-    return { provider: '', model: '' };
+    return { provider: '', model: '', reasoningEffort: '' };
   }
 }
 
@@ -31,6 +38,7 @@ export default function useImageParser() {
       const config = readStoredConfig();
       const provider = overrides.provider || config.provider;
       const model = overrides.model || config.model;
+      const reasoningEffort = overrides.reasoningEffort || config.reasoningEffort;
 
       if (!provider) throw new Error('No image parser provider configured');
 
@@ -41,6 +49,7 @@ export default function useImageParser() {
           image: imageBase64,
           provider,
           model: model || undefined,
+          reasoningEffort: reasoningEffort || undefined,
           promptId: overrides.promptId || overrides.parserPromptId || undefined,
           timeoutMs: overrides.timeoutMs,
         }),

@@ -1,0 +1,868 @@
+<!doctype html>
+<!--
+DESIGNER: stripe (V4)
+FORCED ANGLE: Horizontal workflow — left-to-right train of cards. No vertical scroll. Case progresses across the screen.
+FEATURES (max 2):
+  1) Sticky Triage Pair — the current stage card and the Triage card travel together as a frozen left-edge pair. Triage is always visible without overlay, panel, or rail.
+  2) Hand-off Copy — one-tap copy of the final analyst answer formatted for the phone agent (the only end-state the operator cares about).
+REGIONS (justification against the 4 user goals):
+  - Stage train (cards 1..N flowing left→right): goals 1 + 3 — see what's wrong, get the answer.
+  - Triage card (sticky-left): goal 2 — confirm or doubt the AI.
+  - Hand-off button on the final analyst card: goal 4 — use the answer.
+Everything else: deleted.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>v4 / stripe — horizontal</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #fafaf9;
+    --ink: #0a0a0a;
+    --ink-2: #525252;
+    --ink-3: #a3a3a3;
+    --line: #ececec;
+    --line-2: #f4f4f4;
+    --accent: #635bff; /* stripe purple, used sparingly */
+    --warn: #b45309;
+    --ok: #047857;
+    --card: #ffffff;
+    --radius: 14px;
+    --shadow: 0 1px 2px rgba(10,10,10,.04), 0 8px 24px rgba(10,10,10,.04);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    height: 100%; width: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+    overflow: hidden; /* no scroll, ever */
+    -webkit-font-smoothing: antialiased;
+  }
+  /* layout: a thin top bar + one horizontal track */
+  .app {
+    display: grid;
+    grid-template-rows: 44px 1fr;
+    height: 100vh;
+  }
+  .bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    background: var(--card);
+  }
+  .bar .left { display: flex; align-items: center; gap: 14px; }
+  .bar .mark {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: linear-gradient(135deg, #635bff 0%, #0a2540 100%);
+  }
+  .bar .case {
+    font-family: var(--mono);
+    font-size: 12px; color: var(--ink-2);
+  }
+  .bar .case b { color: var(--ink); font-weight: 600; }
+  .bar .right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--ink-3); }
+  .bar .right .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 6px; }
+
+  /* the horizontal stage track */
+  .track-wrap {
+    position: relative;
+    overflow: hidden;
+  }
+  .track {
+    position: absolute; inset: 0;
+    display: flex;
+    align-items: stretch;
+    padding: 24px 24px 24px 24px;
+    gap: 16px;
+    transform: translateX(0);
+    transition: transform .55s cubic-bezier(.22,.61,.36,1);
+    will-change: transform;
+  }
+
+  /* triage is sticky to the left edge of the visible area */
+  .triage-sticky {
+    position: absolute;
+    left: 24px;
+    top: 24px;
+    bottom: 24px;
+    width: 320px;
+    z-index: 5;
+    pointer-events: auto;
+  }
+
+  /* the train shifts so that current-stage sits just right of triage */
+  .track.shifted { padding-left: 360px; } /* 320 triage + 16 gap + 24 padding */
+
+  .card {
+    flex: 0 0 auto;
+    width: 360px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    transition: opacity .4s ease, transform .4s ease, filter .4s ease;
+  }
+  .card .head {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card .head .step {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-3);
+    letter-spacing: .04em;
+  }
+  .card .head .title { font-weight: 600; font-size: 13px; }
+  .card .body {
+    padding: 14px 16px;
+    flex: 1;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    gap: 10px;
+  }
+  .card .foot {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .card.dim { opacity: .42; filter: saturate(.6); }
+  .card.dim .foot button { pointer-events: none; }
+  .card.active { box-shadow: 0 1px 2px rgba(10,10,10,.04), 0 12px 36px rgba(10,10,10,.08); border-color: #dcdcdc; }
+
+  /* triage card style — quiet, single voice */
+  .triage {
+    height: 100%;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .triage .th {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .triage .th .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .04em;
+    color: var(--ink-3);
+  }
+  .triage .th .who { font-size: 11px; color: var(--ink-3); }
+  .triage .tb { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .triage .verdict { font-size: 17px; font-weight: 600; line-height: 1.3; }
+  .triage .why { font-size: 13px; color: var(--ink-2); }
+  .triage .meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px 12px;
+    font-size: 12px; color: var(--ink-2);
+    border-top: 1px solid var(--line-2);
+    padding-top: 12px;
+  }
+  .triage .meta b { color: var(--ink); font-weight: 600; }
+  .triage .conf-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--ink-3);
+  }
+  .triage .conf-bar {
+    flex: 1; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden;
+  }
+  .triage .conf-bar > i { display: block; height: 100%; background: var(--accent); width: 82%; }
+  .triage .tf {
+    border-top: 1px solid var(--line-2);
+    padding: 10px 16px 14px;
+    display: flex; gap: 8px;
+  }
+  .triage .tf button { flex: 1; }
+
+  /* buttons */
+  button {
+    appearance: none; border: 1px solid var(--line);
+    background: #fff; color: var(--ink);
+    font: inherit; font-size: 12px;
+    padding: 7px 12px; border-radius: 8px;
+    cursor: pointer; transition: background .15s ease, border-color .15s ease;
+  }
+  button:hover { background: #fafafa; border-color: #dcdcdc; }
+  button.primary {
+    background: var(--ink); color: #fff; border-color: var(--ink);
+  }
+  button.primary:hover { background: #1a1a1a; }
+  button.ghost { border-color: transparent; color: var(--ink-2); }
+  button.ghost:hover { color: var(--ink); background: var(--line-2); }
+  button[disabled] { opacity: .4; pointer-events: none; }
+
+  /* upload card */
+  .drop {
+    border: 1px dashed #d4d4d4;
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+    color: var(--ink-3);
+    font-size: 12px;
+    flex: 1;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    cursor: pointer;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .drop:hover { border-color: var(--ink-3); background: #fcfcfc; }
+  .drop .ic {
+    width: 28px; height: 28px; border-radius: 8px;
+    background: var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-2); font-size: 14px;
+  }
+  .thumb {
+    width: 100%; height: 130px;
+    border-radius: 10px;
+    background: #f4f4f4 url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><rect width="100" height="60" fill="%23f4f4f4"/><text x="50" y="34" font-family="monospace" font-size="9" fill="%23a3a3a3" text-anchor="middle">screenshot</text></svg>') center/cover no-repeat;
+    border: 1px solid var(--line);
+  }
+
+  /* parser card */
+  .fields { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 13px; }
+  .fields .row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line-2); }
+  .fields .row:last-child { border: none; }
+  .fields .k { font-size: 11px; color: var(--ink-3); width: 88px; text-transform: uppercase; letter-spacing: .04em; }
+  .fields .v { color: var(--ink); font-family: var(--mono); font-size: 12px; }
+  .skeleton {
+    display: inline-block; height: 10px; background: linear-gradient(90deg, #eee, #f5f5f5, #eee);
+    background-size: 200% 100%;
+    border-radius: 4px;
+    animation: shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+
+  /* INV card */
+  .inv-result {
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fcfcfc;
+    font-size: 12px;
+  }
+  .inv-result b { font-family: var(--mono); }
+  .inv-result .sub { color: var(--ink-3); font-size: 11px; margin-top: 4px; }
+
+  /* analyst card */
+  .analyst-card { width: 460px; }
+  .analyst-head {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .analyst-head .av {
+    width: 24px; height: 24px; border-radius: 50%;
+    background: linear-gradient(135deg, #635bff, #0a2540);
+  }
+  .analyst-head .who { font-weight: 600; font-size: 13px; }
+  .analyst-head .role { font-size: 11px; color: var(--ink-3); }
+  .chat {
+    flex: 1; overflow: hidden;
+    display: flex; flex-direction: column; gap: 10px;
+    padding-top: 4px;
+  }
+  .msg {
+    max-width: 92%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.45;
+    animation: rise .4s ease both;
+  }
+  .msg.them {
+    background: #f6f5ff;
+    border: 1px solid #ece9ff;
+    color: var(--ink);
+    align-self: flex-start;
+  }
+  .msg.you {
+    background: var(--card);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    align-self: flex-end;
+  }
+  .msg.them.final {
+    border-color: #d4cfff;
+    background: #f0eeff;
+  }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .typing {
+    display: inline-flex; gap: 3px; align-items: center;
+    padding: 8px 10px;
+  }
+  .typing i {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--ink-3);
+    animation: blink 1.2s infinite ease-in-out;
+  }
+  .typing i:nth-child(2) { animation-delay: .15s; }
+  .typing i:nth-child(3) { animation-delay: .3s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: .3 } 40% { opacity: 1 } }
+
+  .composer {
+    display: flex; gap: 8px; align-items: center;
+    border-top: 1px solid var(--line-2);
+    padding: 10px 16px 14px;
+  }
+  .composer input {
+    flex: 1; border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font: inherit; font-size: 13px;
+    background: var(--card); color: var(--ink);
+    outline: none;
+  }
+  .composer input:focus { border-color: #c4c4c4; }
+
+  /* nav arrows + dots */
+  .navwrap {
+    position: absolute;
+    bottom: 14px;
+    right: 24px;
+    display: flex; gap: 8px; align-items: center;
+    z-index: 6;
+  }
+  .dots { display: flex; gap: 5px; margin-right: 8px; }
+  .dots .d {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--ink-3); opacity: .35;
+    transition: opacity .2s ease, background .2s ease;
+  }
+  .dots .d.on { opacity: 1; background: var(--ink); }
+  .arrow {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 8px; cursor: pointer;
+    color: var(--ink-2);
+  }
+  .arrow:hover { color: var(--ink); border-color: #dcdcdc; }
+  .arrow[disabled] { opacity: .35; pointer-events: none; }
+
+  /* handoff toast */
+  .toast {
+    position: absolute;
+    bottom: 14px; left: 50%; transform: translate(-50%, 30px);
+    background: var(--ink); color: #fff;
+    padding: 10px 14px; border-radius: 999px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity .3s ease, transform .3s ease;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  /* final answer area inside analyst card */
+  .answer-final {
+    margin-top: 6px;
+    padding: 12px;
+    border: 1px solid #d4cfff;
+    background: #f6f5ff;
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--ink);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .answer-final .label {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: .06em; text-transform: uppercase;
+    color: var(--accent);
+  }
+  .answer-final pre {
+    margin: 0; font-family: var(--sans); white-space: pre-wrap;
+    font-size: 13px; color: var(--ink);
+  }
+  .answer-final .copyrow { display: flex; gap: 8px; }
+
+  /* sublabels */
+  .hint { font-size: 11px; color: var(--ink-3); }
+
+  /* stage chip in head */
+  .pill {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: .04em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--line-2); color: var(--ink-2);
+  }
+  .pill.done { background: #e7f6ee; color: var(--ok); }
+  .pill.live { background: #f1efff; color: var(--accent); }
+
+  /* upload tabs (webcam / file) */
+  .tabs { display: flex; gap: 4px; }
+  .tab {
+    font-size: 11px; padding: 4px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink-2);
+    cursor: pointer;
+  }
+  .tab.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+  /* tiny webcam stub */
+  .webcam-stub {
+    width: 100%; height: 130px; border-radius: 10px;
+    border: 1px solid var(--line);
+    background:
+      radial-gradient(circle at 50% 50%, #1a1a1a 0%, #0a0a0a 60%, #000 100%);
+    color: #888; font-size: 11px;
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+  }
+  .webcam-stub::before {
+    content: ""; position: absolute; top: 8px; left: 8px;
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #ef4444; box-shadow: 0 0 6px #ef4444;
+    animation: blink 1.5s infinite ease-in-out;
+  }
+
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="bar">
+    <div class="left">
+      <div class="mark"></div>
+      <div class="case">case <b>#ESC-48217</b> · phone agent <b>Maya R.</b></div>
+    </div>
+    <div class="right">
+      <span><span class="dot"></span>live</span>
+      <span id="stageLabel">stage 1 / 6 — upload</span>
+    </div>
+  </div>
+
+  <div class="track-wrap" id="trackWrap">
+    <!-- triage sticky panel (hidden until stage 4) -->
+    <div class="triage-sticky" id="triageSticky" style="display:none;">
+      <div class="triage">
+        <div class="th">
+          <span class="label">TRIAGE</span>
+          <span class="who">analyst · triage</span>
+        </div>
+        <div class="tb">
+          <div class="verdict" id="trVerdict">Direct-deposit failed because the bank flagged the routing number as invalid.</div>
+          <div class="why" id="trWhy">Screenshot shows DD reject code R03 and a 9-digit routing that fails ABA checksum.</div>
+          <div class="meta">
+            <span>category</span><b>Payroll · Direct Deposit</b>
+            <span>severity</span><b>high — pay date today</b>
+          </div>
+          <div class="conf-row">
+            <span>confidence</span>
+            <div class="conf-bar"><i></i></div>
+            <span>82%</span>
+          </div>
+        </div>
+        <div class="tf">
+          <button id="trConfirm">Confirm</button>
+          <button id="trDoubt" class="ghost">Doubt</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="track" id="track">
+
+      <!-- 1. upload -->
+      <div class="card" data-stage="1">
+        <div class="head">
+          <div>
+            <div class="step">01</div>
+            <div class="title">Capture the issue</div>
+          </div>
+          <span class="pill live">now</span>
+        </div>
+        <div class="body">
+          <div class="tabs">
+            <button class="tab on" data-tab="cam">Webcam</button>
+            <button class="tab" data-tab="file">Upload file</button>
+          </div>
+          <div id="capCam" class="webcam-stub">live · waiting for capture</div>
+          <div id="capFile" class="drop" style="display:none;">
+            <div class="ic">+</div>
+            <div>Drop screenshot or click to upload</div>
+          </div>
+          <div class="hint">PNG / JPG / paste · used for parsing &amp; triage</div>
+        </div>
+        <div class="foot">
+          <span class="hint">From phone agent's screen-share</span>
+          <button class="primary" id="btnCapture">Capture</button>
+        </div>
+      </div>
+
+      <!-- 2. parser running -->
+      <div class="card dim" data-stage="2">
+        <div class="head">
+          <div>
+            <div class="step">02</div>
+            <div class="title">Reading the screen</div>
+          </div>
+          <span class="pill" id="pill2">queued</span>
+        </div>
+        <div class="body">
+          <div class="thumb" id="thumb2"></div>
+          <div class="hint" id="parserState">Waiting for capture…</div>
+        </div>
+        <div class="foot">
+          <span class="hint">Parser · secondary</span>
+          <span class="hint" id="parserTime">—</span>
+        </div>
+      </div>
+
+      <!-- 3. parsed fields -->
+      <div class="card dim" data-stage="3">
+        <div class="head">
+          <div>
+            <div class="step">03</div>
+            <div class="title">What we read</div>
+          </div>
+          <span class="pill" id="pill3">queued</span>
+        </div>
+        <div class="body">
+          <div class="fields" id="fields3">
+            <div class="row"><span class="k">Company</span><span class="v"><span class="skeleton" style="width:140px"></span></span></div>
+            <div class="row"><span class="k">Error</span><span class="v"><span class="skeleton" style="width:90px"></span></span></div>
+            <div class="row"><span class="k">Module</span><span class="v"><span class="skeleton" style="width:110px"></span></span></div>
+            <div class="row"><span class="k">Date</span><span class="v"><span class="skeleton" style="width:80px"></span></span></div>
+          </div>
+        </div>
+        <div class="foot">
+          <span class="hint">Editable if wrong</span>
+          <button class="ghost" disabled>Edit fields</button>
+        </div>
+      </div>
+
+      <!-- 4. INV match (parallel with triage; triage is the sticky pair) -->
+      <div class="card dim" data-stage="4">
+        <div class="head">
+          <div>
+            <div class="step">04</div>
+            <div class="title">Prior case match</div>
+          </div>
+          <span class="pill" id="pill4">queued</span>
+        </div>
+        <div class="body">
+          <div id="invState" class="hint">Searching INV…</div>
+          <div id="invHit" style="display:none;">
+            <div class="inv-result">
+              <div><b>INV-7842</b> · resolved 12 days ago</div>
+              <div class="sub">Same R03 reject. Fix: re-verify routing in Setup → Bank.</div>
+            </div>
+          </div>
+        </div>
+        <div class="foot">
+          <span class="hint">Auto-search</span>
+          <button class="ghost" id="btnInvOpen" disabled>Open INV</button>
+        </div>
+      </div>
+
+      <!-- 5. analyst chat (final, biggest) -->
+      <div class="card analyst-card dim" data-stage="5">
+        <div class="head">
+          <div class="analyst-head">
+            <div class="av"></div>
+            <div>
+              <div class="who">Jordan</div>
+              <div class="role">main analyst</div>
+            </div>
+          </div>
+          <span class="pill" id="pill5">queued</span>
+        </div>
+        <div class="body">
+          <div class="chat" id="chat"></div>
+        </div>
+        <div class="composer">
+          <input id="composer" placeholder="Ask Jordan…" disabled />
+          <button class="primary" id="sendBtn" disabled>Send</button>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="navwrap">
+      <div class="dots" id="dots"></div>
+      <div class="arrow" id="prev" disabled>‹</div>
+      <div class="arrow" id="next">›</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">Copied. Paste into phone agent's chat.</div>
+
+<script>
+(() => {
+  // ---------- STATE ----------
+  const stages = [
+    { id: 1, label: "stage 1 / 6 — capture" },
+    { id: 2, label: "stage 2 / 6 — parsing" },
+    { id: 3, label: "stage 3 / 6 — fields" },
+    { id: 4, label: "stage 4 / 6 — prior case · triage live" },
+    { id: 5, label: "stage 5 / 6 — analyst" },
+    { id: 6, label: "stage 6 / 6 — hand-off" }
+  ];
+  let cur = 0;
+  const track = document.getElementById('track');
+  const trackWrap = document.getElementById('trackWrap');
+  const cards = [...document.querySelectorAll('.card')];
+  const stageLabel = document.getElementById('stageLabel');
+  const prev = document.getElementById('prev');
+  const next = document.getElementById('next');
+  const dotsEl = document.getElementById('dots');
+  const triageSticky = document.getElementById('triageSticky');
+
+  // build dots
+  for (let i = 0; i < stages.length; i++) {
+    const d = document.createElement('div');
+    d.className = 'd' + (i === 0 ? ' on' : '');
+    dotsEl.appendChild(d);
+  }
+  const dots = [...dotsEl.children];
+
+  // ---------- HORIZONTAL MOVEMENT ----------
+  // each card is ~360 + 16 gap; analyst card is 460
+  function cardOffsetFor(stageIdx) {
+    // stageIdx 0..4 map to cards; stage 5 = stay on card 5 (analyst), just update label
+    const widths = [360, 360, 360, 360, 460];
+    const gap = 16;
+    let off = 0;
+    const target = Math.min(stageIdx, 4);
+    for (let i = 0; i < target; i++) off += widths[i] + gap;
+    return off;
+  }
+
+  function applyShift() {
+    const triageVisible = cur >= 3; // stage 4 onwards
+    if (triageVisible) {
+      triageSticky.style.display = 'block';
+      track.classList.add('shifted');
+    } else {
+      triageSticky.style.display = 'none';
+      track.classList.remove('shifted');
+    }
+    const off = cardOffsetFor(cur);
+    track.style.transform = `translateX(${-off}px)`;
+
+    // active / dim
+    cards.forEach((c, i) => {
+      const active = i === Math.min(cur, 4);
+      c.classList.toggle('active', active);
+      // dim only stages strictly beyond current
+      const dim = i > cur;
+      c.classList.toggle('dim', dim);
+    });
+
+    // dots + label + arrows
+    dots.forEach((d, i) => d.classList.toggle('on', i === cur));
+    stageLabel.textContent = stages[cur].label;
+    prev.toggleAttribute('disabled', cur === 0);
+    next.toggleAttribute('disabled', cur === stages.length - 1);
+  }
+
+  function goTo(i) {
+    cur = Math.max(0, Math.min(stages.length - 1, i));
+    applyShift();
+    onEnter(cur);
+  }
+
+  prev.addEventListener('click', () => goTo(cur - 1));
+  next.addEventListener('click', () => goTo(cur + 1));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') goTo(cur + 1);
+    else if (e.key === 'ArrowLeft') goTo(cur - 1);
+  });
+
+  // ---------- STAGE 1 — capture ----------
+  const tabs = document.querySelectorAll('.tab');
+  tabs.forEach(t => t.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('on'));
+    t.classList.add('on');
+    const which = t.dataset.tab;
+    document.getElementById('capCam').style.display = which === 'cam' ? 'flex' : 'none';
+    document.getElementById('capFile').style.display = which === 'file' ? 'flex' : 'none';
+  }));
+  document.getElementById('btnCapture').addEventListener('click', () => {
+    // advance forward
+    goTo(1);
+  });
+
+  // ---------- STAGE 2 — parser ----------
+  let parsed = false;
+  function runParser() {
+    if (parsed) return;
+    const pill = document.getElementById('pill2');
+    const state = document.getElementById('parserState');
+    const time = document.getElementById('parserTime');
+    pill.textContent = 'reading'; pill.classList.add('live');
+    state.textContent = 'Extracting text and fields…';
+    setTimeout(() => {
+      pill.textContent = 'done'; pill.classList.remove('live'); pill.classList.add('done');
+      state.textContent = 'Read 4 fields from screenshot.';
+      time.textContent = '1.2s';
+      parsed = true;
+      fillFields();
+    }, 1100);
+  }
+
+  // ---------- STAGE 3 — fields ----------
+  function fillFields() {
+    const f = document.getElementById('fields3');
+    f.innerHTML = `
+      <div class="row"><span class="k">Company</span><span class="v">Acme Bakery LLC</span></div>
+      <div class="row"><span class="k">Error</span><span class="v">DD reject R03</span></div>
+      <div class="row"><span class="k">Module</span><span class="v">Payroll · Direct Deposit</span></div>
+      <div class="row"><span class="k">Date</span><span class="v">2026-05-16</span></div>
+    `;
+    const pill = document.getElementById('pill3');
+    pill.textContent = 'done'; pill.classList.add('done');
+  }
+
+  // ---------- STAGE 4 — INV + triage ----------
+  let invDone = false;
+  function runInv() {
+    if (invDone) return;
+    const pill = document.getElementById('pill4');
+    pill.textContent = 'searching'; pill.classList.add('live');
+    setTimeout(() => {
+      pill.textContent = '1 match'; pill.classList.remove('live'); pill.classList.add('done');
+      document.getElementById('invState').style.display = 'none';
+      document.getElementById('invHit').style.display = 'block';
+      document.getElementById('btnInvOpen').removeAttribute('disabled');
+      invDone = true;
+    }, 900);
+  }
+
+  // triage interactions
+  document.getElementById('trConfirm').addEventListener('click', () => {
+    document.getElementById('trVerdict').style.color = 'var(--ok)';
+    document.getElementById('trConfirm').textContent = 'Confirmed';
+    document.getElementById('trConfirm').classList.add('primary');
+  });
+  document.getElementById('trDoubt').addEventListener('click', () => {
+    const v = prompt('What does the triage have wrong?', 'Not R03 — looks like R02.');
+    if (v) {
+      document.getElementById('trVerdict').textContent = v;
+      document.getElementById('trVerdict').style.color = 'var(--warn)';
+    }
+  });
+
+  // ---------- STAGE 5 — analyst chat ----------
+  const chatEl = document.getElementById('chat');
+  const composerEl = document.getElementById('composer');
+  const sendBtn = document.getElementById('sendBtn');
+  let chatStarted = false;
+  let chatStep = 0;
+  const script = [
+    { from: 'them', text: "Hi — I'm Jordan. I see Acme Bakery's DD got an R03 reject today. Want the fix script for Maya to read aloud?" },
+    { from: 'you',  text: "Yes — short version. Bank routing first." },
+    { from: 'them', text: "On it. One moment.", typingAfter: 800 },
+    { from: 'them', final: true, text:
+`1. Open Setup → Payroll → Bank.
+2. Re-enter routing number; have customer read it from a voided check.
+3. Save. Run pre-note (instant).
+4. If pre-note passes, re-submit today's DD before 5pm ET cutoff.
+
+Cause: routing failed ABA checksum (R03). Likely typo.` }
+  ];
+
+  function pushMsg({ from, text, final }) {
+    const el = document.createElement('div');
+    el.className = `msg ${from}` + (final ? ' final' : '');
+    el.textContent = text;
+    chatEl.appendChild(el);
+
+    if (final) {
+      const ans = document.createElement('div');
+      ans.className = 'answer-final';
+      ans.innerHTML = `
+        <span class="label">HAND-OFF · for phone agent</span>
+        <pre id="answerText">${text}</pre>
+        <div class="copyrow">
+          <button class="primary" id="copyBtn">Copy answer</button>
+          <button class="ghost" id="copyShort">Copy one-liner</button>
+        </div>
+      `;
+      chatEl.appendChild(ans);
+      document.getElementById('copyBtn').addEventListener('click', () => copyHandoff(text));
+      document.getElementById('copyShort').addEventListener('click', () => copyHandoff('Re-enter routing in Setup → Payroll → Bank, run pre-note, re-submit DD before 5pm ET. Cause: R03 checksum fail.'));
+    }
+  }
+
+  function pushTyping() {
+    const el = document.createElement('div');
+    el.className = 'msg them';
+    el.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    el.id = 'typingNode';
+    chatEl.appendChild(el);
+  }
+  function clearTyping() {
+    const t = document.getElementById('typingNode');
+    if (t) t.remove();
+  }
+
+  function runChat() {
+    if (chatStarted) return;
+    chatStarted = true;
+    composerEl.removeAttribute('disabled');
+    sendBtn.removeAttribute('disabled');
+    setTimeout(stepChat, 400);
+  }
+  function stepChat() {
+    if (chatStep >= script.length) return;
+    const item = script[chatStep++];
+    if (item.from === 'them') {
+      pushTyping();
+      setTimeout(() => {
+        clearTyping();
+        pushMsg(item);
+        setTimeout(stepChat, item.typingAfter || 1200);
+      }, 700);
+    } else {
+      pushMsg(item);
+      setTimeout(stepChat, 600);
+    }
+  }
+
+  sendBtn.addEventListener('click', () => {
+    const v = composerEl.value.trim();
+    if (!v) return;
+    pushMsg({ from: 'you', text: v });
+    composerEl.value = '';
+    setTimeout(() => {
+      pushTyping();
+      setTimeout(() => {
+        clearTyping();
+        pushMsg({ from: 'them', text: "Got it — anything else for this case?" });
+      }, 900);
+    }, 250);
+  });
+
+  // ---------- HAND-OFF (feature 2) ----------
+  function copyHandoff(text) {
+    navigator.clipboard?.writeText(text);
+    const t = document.getElementById('toast');
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 1600);
+    // auto-advance to stage 6 (hand-off confirmed)
+    if (cur < 5) setTimeout(() => goTo(5), 250);
+  }
+
+  // ---------- STAGE ENTRY HOOKS ----------
+  function onEnter(i) {
+    if (i >= 1) runParser();
+    if (i >= 3) runInv();
+    if (i >= 4) runChat();
+  }
+
+  // initial
+  applyShift();
+})();
+</script>
+</body>
+</html>

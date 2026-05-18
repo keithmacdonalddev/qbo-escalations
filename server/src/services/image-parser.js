@@ -1,14 +1,24 @@
 'use strict';
 
+const { spawn } = require('child_process');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const codex = require('./codex');
 const { getLoadedModel, getModelSnapshot } = require('./lm-studio');
+const {
+  getCodexProviderIds,
+  getProviderModelId,
+} = require('./providers/catalog');
 const ImageParserApiKey = require('../models/ImageParserApiKey');
+const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
-const { validateCanonicalEscalationTemplateText } = require('../lib/escalation-template-contract');
+const {
+  CANONICAL_ESCALATION_TEMPLATE_LABELS,
+  validateCanonicalEscalationTemplateText,
+} = require('../lib/escalation-template-contract');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const { validateParsedEscalation } = require('../lib/parse-validation');
 const {
@@ -34,10 +44,32 @@ const LM_STUDIO_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:123
 const LM_STUDIO_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_STUDIO_API_KEY || null;
 const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
 const LLM_GATEWAY_DEFAULT_MODEL = process.env.LLM_GATEWAY_DEFAULT_MODEL || 'auto';
-const DEFAULT_TIMEOUT_MS = 60000;
+const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.4-mini';
+const DEFAULT_TIMEOUT_MS = 120000;
 const KEYS_FILE = path.join(__dirname, '..', '..', 'data', 'image-parser-keys.json');
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
 const DEFAULT_IMAGE_PARSE_PROMPT_ID = 'image-parser';
+const DIRECT_IMAGE_PARSER_PROVIDER_IDS = Object.freeze([
+  'llm-gateway',
+  'lm-studio',
+  'anthropic',
+  'openai',
+  'kimi',
+  'gemini',
+]);
+const CODEX_IMAGE_PARSER_PROVIDER_IDS = Object.freeze(getCodexProviderIds());
+const CODEX_IMAGE_PARSER_PROVIDER_ID_SET = new Set(CODEX_IMAGE_PARSER_PROVIDER_IDS);
+const CODEX_IMAGE_PARSER_PROVIDER_MODELS = Object.freeze(
+  CODEX_IMAGE_PARSER_PROVIDER_IDS.reduce((acc, providerId) => {
+    acc[providerId] = getProviderModelId(providerId) || providerId;
+    return acc;
+  }, {})
+);
+const VALID_IMAGE_PARSER_PROVIDERS = Object.freeze([
+  ...DIRECT_IMAGE_PARSER_PROVIDER_IDS,
+  ...CODEX_IMAGE_PARSER_PROVIDER_IDS,
+]);
+const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
 const IMAGE_PARSE_PROMPT_IDS = new Set([
   DEFAULT_IMAGE_PARSE_PROMPT_ID,
   'escalation-template-parser',
@@ -74,6 +106,29 @@ function verboseError(...args) {
 function normalizeImageParsePromptId(value) {
   const promptId = typeof value === 'string' ? value.trim() : '';
   return IMAGE_PARSE_PROMPT_IDS.has(promptId) ? promptId : DEFAULT_IMAGE_PARSE_PROMPT_ID;
+}
+
+function normalizeOpenAiReasoningEffort(value) {
+  const requested = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return OPENAI_REASONING_EFFORTS.has(requested) ? requested : '';
+}
+
+function isOpenAiReasoningModel(model) {
+  const normalized = String(model || '').trim().toLowerCase();
+  return /^gpt-5(?:[.\-\w]*)?$/.test(normalized) || /^o\d/.test(normalized);
+}
+
+function applyOpenAiGenerationOptions(body, model, reasoningEffort, maxTokens = 4096) {
+  if (!body || typeof body !== 'object') return body;
+  if (isOpenAiReasoningModel(model)) {
+    body.max_completion_tokens = maxTokens;
+    const effort = normalizeOpenAiReasoningEffort(reasoningEffort);
+    if (effort) body.reasoning_effort = effort;
+  } else {
+    body.max_tokens = maxTokens;
+    body.temperature = 0.1;
+  }
+  return body;
 }
 
 function isMongoKeyStoreReady() {
@@ -133,8 +188,11 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   openai: {
     hostname: 'api.openai.com',
     path: '/v1/chat/completions',
-    model: 'gpt-4o-mini',
-    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    model: OPENAI_DEFAULT_IMAGE_MODEL,
+    buildBody: (model) => JSON.stringify(applyOpenAiGenerationOptions({
+      model,
+      messages: [{ role: 'user', content: 'hi' }],
+    }, model, 'none', 1)),
     buildHeaders: (key) => ({
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',
@@ -271,6 +329,91 @@ function getRemoteProviderLabel(provider) {
     default:
       return provider;
   }
+}
+
+function isCodexImageParserProvider(provider) {
+  return CODEX_IMAGE_PARSER_PROVIDER_ID_SET.has(provider);
+}
+
+function getCodexImageParserModel(provider, model) {
+  const requested = typeof model === 'string' ? model.trim() : '';
+  if (requested) return requested;
+  return CODEX_IMAGE_PARSER_PROVIDER_MODELS[provider] || provider || '';
+}
+
+function checkCodexCliAvailability(model) {
+  if (isProvidersStubbed()) {
+    return Promise.resolve({
+      available: true,
+      code: 'OK',
+      reason: 'Codex CLI stubbed',
+      model,
+    });
+  }
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let output = '';
+    let errorOutput = '';
+
+    function finish(payload) {
+      if (settled) return;
+      settled = true;
+      resolve(payload);
+    }
+
+    const child = spawn('codex', ['--version'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      shell: true,
+      env: { ...process.env, CLAUDECODE: undefined },
+    });
+
+    const timeout = setTimeout(() => {
+      try { child.kill('SIGTERM'); } catch { /* ignore */ }
+      finish({
+        available: false,
+        code: 'TIMEOUT',
+        reason: 'Codex CLI availability check timed out',
+        model,
+      });
+    }, 3000);
+
+    child.stdout.on('data', (chunk) => {
+      if (output.length < 1000) output += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      if (errorOutput.length < 1000) errorOutput += chunk.toString();
+    });
+    child.on('error', (err) => {
+      clearTimeout(timeout);
+      finish({
+        available: false,
+        code: 'CLI_UNAVAILABLE',
+        reason: err.message || 'Codex CLI unavailable',
+        model,
+      });
+    });
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        const version = output.trim().split(/\r?\n/)[0] || 'Codex CLI ready';
+        finish({
+          available: true,
+          code: 'OK',
+          reason: version,
+          model,
+        });
+        return;
+      }
+
+      finish({
+        available: false,
+        code: 'CLI_UNAVAILABLE',
+        reason: (errorOutput || output || `Codex CLI exited with code ${code}`).trim().slice(0, 240),
+        model,
+      });
+    });
+  });
 }
 
 function extractProviderErrorMessage(body, fallback) {
@@ -745,11 +888,28 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
  * LM Studio — reuses jsonRequest pattern, non-streaming POST to /v1/chat/completions
  * Note: llama.cpp only supports PNG and JPEG. WebP/GIF are auto-converted to PNG.
  */
-async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs) {
+async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus) {
   const effectiveModel = model || await getLoadedModel(LM_STUDIO_API_URL);
 
   // llama.cpp (LM Studio backend) only supports PNG and JPEG — convert others
+  const needsConversion = mediaType === 'image/webp' || mediaType === 'image/gif';
+  if (needsConversion) {
+    eventBus?.emit('parser.image_conversion_started', {
+      from: mediaType,
+      to: 'image/png',
+    });
+  }
   const converted = await convertToPngIfNeeded(imageBase64, mediaType);
+  if (needsConversion) {
+    eventBus?.emit('parser.image_conversion_completed', {
+      from: mediaType,
+      to: converted.mediaType,
+      wasConverted: Boolean(converted.wasConverted),
+      originalSizeBytes: converted.originalSizeBytes,
+      convertedSizeBytes: converted.convertedSizeBytes,
+      conversionTimeMs: converted.conversionTimeMs,
+    });
+  }
   const conversionStats = {
     wasConverted: converted.wasConverted,
     originalSizeBytes: converted.originalSizeBytes,
@@ -868,7 +1028,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
 /**
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
-async function callOpenAI(systemPrompt, imageDataUrl, model, timeoutMs) {
+async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs) {
   const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
     const err = new Error('OpenAI API key not configured');
@@ -876,12 +1036,10 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, timeoutMs) {
     throw err;
   }
 
-  const effectiveModel = model || 'gpt-4o';
+  const effectiveModel = model || OPENAI_DEFAULT_IMAGE_MODEL;
 
-  const body = {
+  const body = applyOpenAiGenerationOptions({
     model: effectiveModel,
-    max_tokens: 4096,
-    temperature: 0.1,
     messages: [
       { role: 'system', content: systemPrompt },
       {
@@ -892,7 +1050,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, timeoutMs) {
         ],
       },
     ],
-  };
+  }, effectiveModel, reasoningEffort);
 
   const res = await jsonRequest('POST', 'https://api.openai.com', '/v1/chat/completions', body, {
     'Authorization': `Bearer ${apiKey}`,
@@ -1146,6 +1304,63 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
   return { text: text.trim(), usage };
 }
 
+async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus) {
+  const effectiveModel = getCodexImageParserModel(provider, model);
+
+  return new Promise((resolve, reject) => {
+    let streamedText = '';
+    let settled = false;
+    const coalescer = createThinkingCoalescer((delta) => {
+      eventBus?.emit('llm.thinking', {
+        provider,
+        model: effectiveModel || '',
+        delta,
+      });
+    });
+
+    function finishOk(text, usage) {
+      if (settled) return;
+      settled = true;
+      coalescer.flush();
+      resolve({
+        text: String(text || streamedText || '').trim(),
+        usage: usage || (effectiveModel ? { model: effectiveModel } : null),
+      });
+    }
+
+    function finishErr(err) {
+      if (settled) return;
+      settled = true;
+      coalescer.flush();
+      const error = err instanceof Error ? err : new Error(String(err));
+      if (!error.code) error.code = 'PROVIDER_ERROR';
+      reject(error);
+    }
+
+    try {
+      codex.chat({
+        messages: [
+          {
+            role: 'user',
+            content: 'Read the image and output only the parser result required by the system instructions.',
+          },
+        ],
+        systemPrompt,
+        images: [imageDataUrl],
+        model: effectiveModel,
+        reasoningEffort: reasoningEffort || process.env.CODEX_PARSE_REASONING_EFFORT,
+        timeoutMs,
+        onChunk: (chunk) => { streamedText += chunk || ''; },
+        onThinkingChunk: (delta) => { coalescer.push(typeof delta === 'string' ? delta : ''); },
+        onDone: finishOk,
+        onError: finishErr,
+      });
+    } catch (err) {
+      finishErr(err);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Role auto-detection from response text
 // ---------------------------------------------------------------------------
@@ -1194,6 +1409,32 @@ function buildFollowUpParseMeta(text) {
   };
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function recoverCanonicalTemplateBlock(text) {
+  const raw = typeof text === 'string' ? text : '';
+  if (!raw.trim()) return '';
+
+  const labelPattern = CANONICAL_ESCALATION_TEMPLATE_LABELS
+    .map((label) => escapeRegExp(label))
+    .join('|');
+  const anyLabel = new RegExp(`(?:${labelPattern}):`, 'i');
+  const firstLabel = raw.search(anyLabel);
+  if (firstLabel < 0) return raw;
+
+  const candidate = raw.slice(firstLabel);
+  const labelsAtLineStart = new RegExp(`(^|\\s)(${labelPattern}):`, 'gi');
+  return candidate
+    .replace(/\r\n?/g, '\n')
+    .replace(labelsAtLineStart, (match, prefix, label) => {
+      if (prefix === '') return `${label}:`;
+      return `\n${label}:`;
+    })
+    .trim();
+}
+
 function buildStructuredParseResult(text, role) {
   if (role === 'follow-up-chat') {
     return {
@@ -1209,9 +1450,12 @@ function buildStructuredParseResult(text, role) {
     };
   }
 
+  const recoveredText = recoverCanonicalTemplateBlock(text);
   const canonicalTemplate = validateCanonicalEscalationTemplateText(text);
-  const parsed = parseEscalationText(text);
-  const validation = validateParsedEscalation(parsed, { sourceText: text });
+  const recoveredCanonicalTemplate = validateCanonicalEscalationTemplateText(recoveredText);
+  const textForFields = recoveredText || text;
+  const parsed = parseEscalationText(textForFields);
+  const validation = validateParsedEscalation(parsed, { sourceText: textForFields });
   const parseFields = {};
 
   for (const [field, value] of Object.entries(validation.normalizedFields || {})) {
@@ -1243,6 +1487,8 @@ function buildStructuredParseResult(text, role) {
         passed: canonicalTemplate.ok,
         issues: canonicalTemplate.issues,
         labels: canonicalTemplate.labels,
+        recoveredPassed: recoveredCanonicalTemplate.ok,
+        recoveredText: recoveredText !== text ? recoveredText : '',
       },
     },
   };
@@ -1255,9 +1501,10 @@ function buildStructuredParseResult(text, role) {
 /**
  * @param {string} imageBase64 - Raw base64 or data-URI string
  * @param {Object} options
- * @param {string} options.provider - 'llm-gateway' | 'lm-studio' | 'anthropic' | 'openai' | 'kimi' | 'gemini'
+ * @param {string} options.provider - image parser provider ID, including API/local providers and Codex CLI catalog IDs
  * @param {string} [options.model] - Model ID override
- * @param {number} [options.timeoutMs=60000] - Request timeout
+ * @param {string} [options.reasoningEffort] - Provider-specific reasoning effort override
+ * @param {number} [options.timeoutMs=120000] - Request timeout
  * @returns {Promise<{
  *   text: string,
  *   role: 'escalation'|'inv-list'|'unknown',
@@ -1268,9 +1515,13 @@ function buildStructuredParseResult(text, role) {
  * }>}
  */
 async function parseImage(imageBase64, options = {}) {
-  const { provider, model, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { provider, model, reasoningEffort, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus } = options;
   const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
   const systemPrompt = getRenderedAgentPrompt(promptId);
+  eventBus?.emit('parser.prompt_resolved', {
+    promptId,
+    promptLength: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
+  });
 
   if (!imageBase64 || typeof imageBase64 !== 'string' || !imageBase64.trim()) {
     const err = new Error('Image data is required');
@@ -1287,9 +1538,30 @@ async function parseImage(imageBase64, options = {}) {
 
   // Compute original image size for stats
   const originalSizeBytes = Buffer.byteLength(normalized.rawBase64, 'base64');
+  eventBus?.emit('parser.image_normalized', {
+    sizeBytes: originalSizeBytes,
+    mediaType: normalized.mediaType || '',
+    isDataUrl: typeof imageBase64 === 'string' && imageBase64.startsWith('data:'),
+  });
+  eventBus?.emit('parser.media_type_detected', {
+    mediaType: normalized.mediaType || '',
+  });
+
+  eventBus?.emit('parser.provider_selected', {
+    provider,
+    model: model || '',
+    reasoningEffort: reasoningEffort || '',
+    promptId,
+    timeoutMs,
+  });
 
   let result;
   const providerStartTime = Date.now();
+  eventBus?.emit('parser.generation_started', {
+    provider,
+    model: model || '',
+    reasoningEffort: reasoningEffort || '',
+  });
   if (isProvidersStubbed()) {
     const stub = getProviderStub(provider, 'parseImage');
     if (!stub) throw new MissingProviderStubError(provider, 'parseImage');
@@ -1299,21 +1571,24 @@ async function parseImage(imageBase64, options = {}) {
       normalized,
       systemPrompt,
       model,
+      reasoningEffort,
       timeoutMs,
     });
+  } else if (isCodexImageParserProvider(provider)) {
+    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus);
   } else {
     switch (provider) {
       case 'llm-gateway':
         result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
         break;
       case 'lm-studio':
-        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         break;
       case 'anthropic':
         result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
         break;
       case 'openai':
-        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs);
         break;
       case 'gemini':
         result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
@@ -1322,13 +1597,27 @@ async function parseImage(imageBase64, options = {}) {
         result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
         break;
       default: {
-        const err = new Error(`Invalid provider: ${provider}. Must be one of: llm-gateway, lm-studio, anthropic, openai, kimi, gemini`);
+        const err = new Error(`Invalid provider: ${provider}. Must be one of: ${VALID_IMAGE_PARSER_PROVIDERS.join(', ')}`);
         err.code = 'INVALID_PROVIDER';
         throw err;
       }
     }
   }
   const providerLatencyMs = Date.now() - providerStartTime;
+  eventBus?.emit('parser.generation_completed', {
+    provider,
+    model: result?.usage?.model || model || '',
+    providerLatencyMs,
+    textLength: (result?.text || '').length,
+  });
+  if (result?.usage) {
+    eventBus?.emit('parser.usage_recorded', {
+      inputTokens: result.usage.inputTokens ?? null,
+      outputTokens: result.usage.outputTokens ?? null,
+      totalTokens: (result.usage.inputTokens ?? 0) + (result.usage.outputTokens ?? 0),
+      model: result.usage.model || model || '',
+    });
+  }
 
   // Build image stats — LM Studio includes conversion stats from convertToPngIfNeeded
   const convStats = result.conversionStats || {};
@@ -1342,7 +1631,33 @@ async function parseImage(imageBase64, options = {}) {
   };
 
   const role = detectRole(result.text, { promptId });
+  eventBus?.emit('parser.role_detected', {
+    role,
+    promptId,
+  });
+  if (role === 'escalation') {
+    const canonicalCheck = validateCanonicalEscalationTemplateText(result.text || '');
+    eventBus?.emit('parser.template_recovered', {
+      ok: Boolean(canonicalCheck?.ok),
+      labelCount: Array.isArray(canonicalCheck?.labels) ? canonicalCheck.labels.length : 0,
+      issueCount: Array.isArray(canonicalCheck?.issues) ? canonicalCheck.issues.length : 0,
+    });
+  }
   const { parseFields, parseMeta } = buildStructuredParseResult(result.text, role);
+  eventBus?.emit('parser.fields_extracted', {
+    fieldCount: parseFields ? Object.keys(parseFields).length : 0,
+    fields: parseFields ? Object.keys(parseFields) : [],
+    role,
+  });
+  if (role === 'escalation' && parseMeta) {
+    eventBus?.emit('parser.output_validated', {
+      passed: Boolean(parseMeta.passed),
+      score: parseMeta.score ?? null,
+      confidence: parseMeta.confidence || '',
+      fieldsFound: parseMeta.fieldsFound ?? 0,
+      issueCount: Array.isArray(parseMeta.issues) ? parseMeta.issues.length : 0,
+    });
+  }
 
   return {
     text: result.text,
@@ -1405,6 +1720,16 @@ async function resolveProviderAvailability() {
   const geminiKey = await resolveApiKey('gemini');
   providers['gemini'] = await validateRemoteProvider('gemini', geminiKey);
 
+  const codexAvailability = CODEX_IMAGE_PARSER_PROVIDER_IDS.length
+    ? await checkCodexCliAvailability('')
+    : null;
+  for (const providerId of CODEX_IMAGE_PARSER_PROVIDER_IDS) {
+    providers[providerId] = {
+      ...codexAvailability,
+      model: CODEX_IMAGE_PARSER_PROVIDER_MODELS[providerId] || providerId,
+    };
+  }
+
   return providers;
 }
 
@@ -1451,6 +1776,7 @@ module.exports = {
   parseImage,
   checkProviderAvailability,
   clearProviderAvailabilityCache,
+  VALID_IMAGE_PARSER_PROVIDERS,
   normalizeBase64,
   normalizeImageParsePromptId,
   detectMediaTypeFromBase64,

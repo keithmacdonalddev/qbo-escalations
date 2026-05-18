@@ -3,9 +3,10 @@
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { runAgentToolLoop } = require('./agent-tool-loop');
 const { getProviderModelId } = require('./providers/catalog');
+const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
 
 const KNOWN_ISSUE_AGENT_ID = 'known-issue-search-agent';
-const KNOWN_ISSUE_AGENT_NAME = 'Known Issue Search Agent';
+const KNOWN_ISSUE_AGENT_NAME = 'INV Search Agent';
 const KNOWN_ISSUE_ALLOWED_TOOLS = Object.freeze([
   'db.searchInvestigations',
   'db.getInvestigation',
@@ -270,7 +271,7 @@ function validateKnownIssueSearchResult(result, actionResults = []) {
 function parseKnownIssueAgentOutput(output, actionResults = []) {
   const raw = extractJsonObject(output);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    const result = buildUnavailableResult('Known Issue Search Agent did not return a JSON object.', {
+    const result = buildUnavailableResult('INV Search Agent did not return a JSON object.', {
       validationIssues: ['invalid_json'],
     });
     result.rawOutput = safeString(output, '');
@@ -356,11 +357,21 @@ async function runKnownIssueSearchAgent({
   policy,
   timeoutMs,
   emitStatus,
+  eventBus,
 }) {
   const startedAt = Date.now();
   if (!parseFields || typeof parseFields !== 'object' || Object.keys(parseFields).length === 0) {
     return buildUnavailableResult('No validated parsed escalation fields were available for known issue search.');
   }
+
+  let streamingEmitted = false;
+  const thinkingCoalescer = createThinkingCoalescer((delta) => {
+    eventBus?.emit('llm.thinking', {
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+      delta,
+    });
+  });
 
   try {
     await emitStatus?.({
@@ -368,6 +379,12 @@ async function runKnownIssueSearchAgent({
       code: 'KNOWN_ISSUE_SEARCH_STARTED',
       provider: policy.primaryProvider,
       model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+    });
+    eventBus?.emit('llm.request', {
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
+      reasoningEffort: policy.reasoningEffort || 'high',
+      allowedTools: KNOWN_ISSUE_ALLOWED_TOOLS,
     });
 
     const actionResults = [];
@@ -393,12 +410,38 @@ async function runKnownIssueSearchAgent({
       allowedToolNames: KNOWN_ISSUE_ALLOWED_TOOLS,
       includeActionParamsInResults: true,
       onActions: ({ results }) => {
-        if (Array.isArray(results)) actionResults.push(...results);
+        if (Array.isArray(results)) {
+          actionResults.push(...results);
+          eventBus?.emit('tool.actions', {
+            count: results.length,
+            tools: results.map((r) => r?.tool).filter(Boolean).slice(0, 8),
+          });
+        }
       },
       onStatus: emitStatus,
-      onChunk: () => {},
-      onThinkingChunk: () => {},
+      onChunk: () => {
+        if (!streamingEmitted) {
+          streamingEmitted = true;
+          eventBus?.emit('llm.streaming', { provider: policy.primaryProvider });
+        }
+      },
+      onThinkingChunk: ({ thinking } = {}) => {
+        thinkingCoalescer.push(typeof thinking === 'string' ? thinking : '');
+      },
       isCancelled: () => false,
+    });
+    thinkingCoalescer.flush();
+    eventBus?.emit('llm.response', {
+      latencyMs: Date.now() - startedAt,
+      provider: result?.providerUsed || policy.primaryProvider,
+      model: result?.modelUsed || getProviderModelId(result?.providerUsed || policy.primaryProvider) || '',
+      usage: result?.usage ? {
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+        totalTokens: result.usage.totalTokens,
+      } : null,
+      iterations: result?.iterations || 0,
+      actionCount: actionResults.length,
     });
 
     const parsed = parseKnownIssueAgentOutput(result.fullResponse, result.actions || actionResults);
@@ -419,17 +462,22 @@ async function runKnownIssueSearchAgent({
     }
     return parsed;
   } catch (err) {
+    thinkingCoalescer.flush();
     const error = {
       code: err?.code || 'KNOWN_ISSUE_SEARCH_FAILED',
-      message: err?.message || 'Known Issue Search Agent failed.',
+      message: err?.message || 'INV Search Agent failed.',
       detail: err?.detail || '',
     };
+    eventBus?.emit('error', {
+      code: error.code,
+      message: error.message,
+    });
     await emitStatus?.({
       level: 'warning',
       message: `${error.message} Continuing without a validated known-issue match.`,
       code: error.code,
     });
-    return buildUnavailableResult('Known Issue Search Agent failed before returning a validated result.', {
+    return buildUnavailableResult('INV Search Agent failed before returning a validated result.', {
       validationIssues: [error.code],
       error,
       meta: {

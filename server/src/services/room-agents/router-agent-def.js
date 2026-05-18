@@ -7,7 +7,7 @@ module.exports = {
   id: '__router',
   name: 'Router',
   internal: true,
-  preferredProvider: 'claude-sonnet-4-6',
+  preferredProvider: 'claude',
   // Token limits are controlled by the provider/chat-orchestrator, not agent definitions
 
   /**
@@ -44,7 +44,7 @@ Rules:
 - Only include agents whose expertise is clearly relevant.
 - Respect personality and initiative. Some agents are quieter, some are more socially proactive.
 - If the message is social, relational, or about room dynamics, you may include agents whose social style fits even if the topic is not purely task-based.
-- If unsure, include the "chat" agent (QBO Analyst) as default.
+- If unsure, include the "chat" agent (QBO Assistant) as default.
 - Return 1-3 agents maximum.
 - Return valid JSON only — no markdown fences, no explanation.`;
   },

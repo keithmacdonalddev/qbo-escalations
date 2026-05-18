@@ -7,6 +7,37 @@ const SEVERITY_COLORS = {
   P4: { bg: 'rgba(35, 165, 89, 0.06)', border: '#23a559', borderSubtle: 'rgba(35, 165, 89, 0.18)', text: '#23a559' },
 };
 
+function safeText(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function formatLatency(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return '';
+  const ms = Math.round(parsed);
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function getGenerationMeta(triageCard, fallbackUsed) {
+  const generation = triageCard?.generation && typeof triageCard.generation === 'object'
+    ? triageCard.generation
+    : {};
+  const explicitSource = safeText(generation.source).toLowerCase();
+  const legacySource = safeText(triageCard?.source).toLowerCase();
+  const source = explicitSource === 'agent' || explicitSource === 'server'
+    ? explicitSource
+    : (fallbackUsed || legacySource === 'rule-fallback' ? 'server' : 'agent');
+  const label = safeText(generation.label) || (source === 'server' ? 'Server generated' : 'Agent generated');
+  const latencyLabel = formatLatency(generation.latencyMs ?? triageCard?.latencyMs ?? triageCard?.elapsedMs);
+  return { label, latencyLabel };
+}
+
 export default function TriageCard({ triageCard }) {
   if (!triageCard) return null;
 
@@ -24,6 +55,7 @@ export default function TriageCard({ triageCard }) {
   const runtimeWarning = typeof triageCard.runtime?.warning === 'string'
     ? triageCard.runtime.warning.trim()
     : '';
+  const generationMeta = getGenerationMeta(triageCard, fallbackUsed);
 
   return (
     <motion.div
@@ -100,8 +132,13 @@ export default function TriageCard({ triageCard }) {
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
           opacity: 0.5,
+          textAlign: 'right',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
         }}>
-          {fallbackUsed ? 'Rule Fallback' : defaultRuntimeUsed ? 'Default Runtime' : 'Triage Agent'}
+          {generationMeta.latencyLabel
+            ? `${generationMeta.latencyLabel} - ${generationMeta.label}`
+            : generationMeta.label}
         </span>
       </div>
 

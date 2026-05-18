@@ -6,8 +6,8 @@ const { buildRoomImageContextSection } = require('./image-context-section');
 
 module.exports = {
   id: 'chat',
-  name: 'QBO Analyst',
-  shortName: 'Analyst',
+  name: 'QBO Assistant',
+  shortName: 'Assistant',
   icon: 'brain',
   color: '#6366f1',
   role: 'escalation-expert',
@@ -20,7 +20,7 @@ module.exports = {
   supportsAgentTools: true,
 
   /**
-   * Build context for the QBO Analyst using the full chat context pipeline.
+   * Build context for the QBO Assistant using the full chat context pipeline.
    *
    * Reuses buildChatModelContext from chat-context-builder.js so this agent
    * gets the same playbook retrieval, token budgeting, history trimming,
@@ -74,7 +74,7 @@ module.exports = {
   },
 
   /**
-   * QBO Analyst always responds — it's the default agent.
+   * QBO Assistant always responds — it's the default agent.
    */
   shouldRespond: (_message, _roomState) => true,
 };

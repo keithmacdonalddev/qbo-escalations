@@ -766,3 +766,62 @@ Apple's Dynamic Type lets users scale all text from 11pt to 30pt+. While accessi
 ---
 
 *This report was compiled from Apple's official Human Interface Guidelines, WWDC session videos, developer documentation, and verified third-party analysis. All hex values were cross-referenced against multiple sources. QBO application recommendations reference actual codebase files and components.*
+
+---
+
+## Appendix A — V4 Challenge Entry (designer-apple, strip-mode)
+
+Prototype: `C:\Projects\qbo-escalations\prototypes\escalation-chat-challenge\v4\apple\index.html`
+
+### Forced angle
+Mobile-like view switching. Only ONE view at a time, full-bleed. Swipe / tap between Intake, Triage, Invoice, Chat. iPad-app feel — no multi-panel layout, no sidebars, no docks.
+
+### How I solved "triage stays accessible at all times"
+Two ambient paths, neither of which take up screen real estate when idle:
+
+1. **Bottom thumb-zone tab bar.** Triage is the second tab — always one tap away, always in the thumb arc. The tab labels *are* the four user goals.
+2. **Triage Peek.** A 22 px grip sits under the status bar. Drag down (or tap) on any view to reveal a compact triage card with verdict + Confirm/Doubt buttons. Click the scrim or drag back up to dismiss. Triage is therefore always *one gesture* away without ever competing for attention.
+
+### 2 features (max)
+1. **Paged view deck** — pointer-drag / arrow-key / tab navigation between four full-bleed views with iOS spring easing (`cubic-bezier(.32,.72,0,1)`), page-dot indicator, and snap-back on cancelled drags.
+2. **Triage Peek** — top-edge drag-down (or tap-the-grip) overlay that exposes verdict + Confirm/Doubt anywhere in the app.
+
+The third feature I would have built — an inline AI provenance/source popover on each triage claim — was deliberately killed. It performs the AI, doesn't serve any of the four user goals, and would re-introduce V3-style chrome.
+
+### Region-to-goal map
+| Region | User goal |
+|---|---|
+| Status bar (case # + severity dot) | 1 — see what's wrong |
+| Intake view (image + parsed fields card) | 1 |
+| Triage view (verdict + why + Confirm/Doubt) | 2 — confirm/doubt the AI |
+| Invoice view (matched invoice list, top match highlighted) | 1 |
+| Chat view (Mira's bubbles, composer, Copy / Send to phone agent) | 3 — get the answer; 4 — use the answer |
+| Bottom tab bar | navigation between the four goals |
+| Triage Peek handle + overlay | 2, ambient |
+
+### Aesthetic notes
+- 17 px SF system stack; system grouped background (`#f2f2f7` light / `#000` dark).
+- 14, 20, 28 px continuous-feeling radii; hairlines at `rgba(60,60,67,.12)`.
+- System blue tint (`#007aff` / `#0a84ff`).
+- Large-title hierarchy: 34 px page title, 15 px lede.
+- iMessage-style bubbles with tail-corner asymmetry; tinted-blue self bubbles, surface-grey other bubbles.
+- Blurred translucent tab bar (`backdrop-filter: saturate(180%) blur(20px)`).
+- Auto dark mode via `prefers-color-scheme`.
+
+### Interaction inventory
+- Tap any tab → snap to that view.
+- Pointer-drag deck → live track + snap on release (≥ 60 px threshold).
+- Left/right arrow keys → previous/next view; `T` → toggle triage peek.
+- Drag down on the grip OR tap it → open peek; drag up or tap scrim → close.
+- Confirm in triage (either surface) → severity dot turns green, jumps to Chat, Mira drafts the response, Copy + Send to phone agent buttons appear.
+- Doubt in triage → severity dot turns red, jumps to Chat, Mira walks the operator through how to disambiguate.
+- Composer: Enter or send button posts a reply; Mira responds.
+
+### Self-check
+1. Usable with zero explanation? Yes — tabs are labelled with the four goals, swipe is a learned mobile gesture, the peek grip plus a 4.5 s toast (`Swipe between views · drag the top bar for triage`) cover discovery.
+2. Could the operator close their eyes for a second? Yes — nothing animates or pings on its own; the AI never demands attention except through the explicit handle.
+3. At or under 2 features? Yes — paged deck + triage peek. Everything else is layout.
+4. Forced angle structural, not bolted on? Yes — the entire layout *is* the angle.
+5. Anything visible that doesn't serve a goal? No — severity dot serves goal 1; page dots are decorative-but-functional position cues; tab labels *are* the goals.
+6. Quiet at all times? Yes — no status spines, no scrubbers, no confidence meters, no provenance hovers.
+7. Main analyst the only loud thing when speaking? Yes — Mira's tinted bubbles and the Copy / Send to phone agent buttons are the only saturated UI inside chat.

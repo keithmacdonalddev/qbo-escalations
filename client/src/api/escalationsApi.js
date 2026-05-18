@@ -169,7 +169,8 @@ export async function listAttentionItems({ status = 'open', kind, refresh = fals
   if (kind) params.set('kind', kind);
   if (refresh) params.set('refresh', '1');
 
-  const data = await apiFetchJson(`${BASE}/attention-items?${params}`, {}, 'Failed to list attention items');
+  const options = refresh ? { timeout: 45_000 } : {};
+  const data = await apiFetchJson(`${BASE}/attention-items?${params}`, options, 'Failed to list attention items');
   return {
     items: data.items,
     total: data.total,

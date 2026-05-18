@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Slipstream — QBO Escalation</title>
+<style>
+  /* ---------- Tokens (motion-first) ---------- */
+  :root{
+    --bg-0:#07080c;
+    --bg-1:#0c0e15;
+    --bg-2:#10131c;
+    --bg-3:#161a26;
+    --line:#1d2231;
+    --line-2:#262c40;
+    --ink-0:#f5f7ff;
+    --ink-1:#c8cee0;
+    --ink-2:#8b91a8;
+    --ink-3:#5a6079;
+    --accent:#7ce0c6;       /* slipstream cyan-green */
+    --accent-2:#92b4ff;     /* secondary motion */
+    --warn:#ffb56b;
+    --bad:#ff6b8b;
+    --good:#7be29a;
+    --violet:#b896ff;
+
+    --sev-s1:#ff5577;
+    --sev-s2:#ff9a3c;
+    --sev-s3:#ffd54f;
+    --sev-s4:#7ce0c6;
+
+    --t-instant:60ms;
+    --t-micro:120ms;
+    --t-fast:180ms;
+    --t-base:260ms;
+    --t-emph:420ms;
+    --t-slow:700ms;
+    --ease-out: cubic-bezier(.16,1,.3,1);
+    --ease-spring: cubic-bezier(.34,1.56,.64,1);
+    --ease-glide: cubic-bezier(.65,.05,.36,1);
+
+    --radius-1:6px;
+    --radius-2:10px;
+    --radius-3:16px;
+    --radius-4:22px;
+
+    --font: ui-sans-serif, -apple-system, "Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 700px at 70% -10%, rgba(124,224,198,.07), transparent 60%),
+      radial-gradient(900px 600px at 5% 110%, rgba(146,180,255,.06), transparent 60%),
+      var(--bg-0);
+    color:var(--ink-0);
+    font-family:var(--font);
+    font-size:13.5px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+    user-select:none;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    position:fixed; inset:0 0 auto 0; height:46px;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 18px;
+    background:linear-gradient(to bottom, rgba(7,8,12,.92), rgba(7,8,12,.65));
+    backdrop-filter: blur(10px);
+    border-bottom:1px solid var(--line);
+    z-index:20;
+  }
+  .brand{display:flex; align-items:center; gap:10px}
+  .brand-mark{
+    width:22px; height:22px; border-radius:6px;
+    background: conic-gradient(from 220deg, var(--accent), var(--accent-2), var(--violet), var(--accent));
+    box-shadow: 0 0 18px rgba(124,224,198,.35);
+    animation: slowSpin 22s linear infinite;
+  }
+  @keyframes slowSpin { to { transform: rotate(360deg) } }
+  .brand-name{font-weight:600; letter-spacing:.04em}
+  .brand-name em{color:var(--ink-2); font-style:normal; font-weight:400; margin-left:6px}
+  .topbar-right{display:flex; align-items:center; gap:14px; color:var(--ink-2); font-size:12px}
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:4px 9px; border:1px solid var(--line-2); border-radius:999px;
+    background:var(--bg-2); color:var(--ink-1);
+  }
+  .dot{width:6px; height:6px; border-radius:50%; background:var(--accent); box-shadow:0 0 8px var(--accent);}
+  .kbd{font-family:var(--mono); font-size:10.5px; padding:2px 6px; border-radius:4px; background:#0a0c12; border:1px solid var(--line-2); color:var(--ink-2)}
+
+  /* ---------- Layout ---------- */
+  .app{position:fixed; inset:46px 0 0 0; display:grid; grid-template-rows:auto minmax(360px, 1fr) auto;}
+  .queue-rail{
+    height:62px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px; padding:0 18px;
+    background:linear-gradient(to bottom, var(--bg-1), var(--bg-0));
+    overflow:hidden;
+  }
+  .queue-rail .label{
+    text-transform:uppercase; letter-spacing:.16em; font-size:10.5px; color:var(--ink-3);
+    padding-right:8px; border-right:1px solid var(--line-2); margin-right:4px;
+  }
+  .qcard{
+    flex:0 0 auto;
+    min-width:212px;
+    padding:8px 12px;
+    border:1px solid var(--line-2);
+    background:linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border-radius:var(--radius-2);
+    cursor:pointer;
+    display:flex; flex-direction:column; gap:3px;
+    transition: transform var(--t-fast) var(--ease-out), border-color var(--t-fast), background var(--t-fast);
+    position:relative;
+  }
+  .qcard:hover{ transform:translateY(-2px); border-color:#34405e}
+  .qcard.active{ border-color:var(--accent); box-shadow:0 0 0 1px rgba(124,224,198,.25), 0 8px 28px rgba(124,224,198,.08)}
+  .qcard.active::after{
+    content:""; position:absolute; left:8px; right:8px; bottom:-1px; height:2px;
+    background:linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: glide 1.6s var(--ease-glide) infinite;
+  }
+  @keyframes glide { from { transform: translateX(-30%) } to { transform: translateX(30%) } }
+  .qcard .top{display:flex; align-items:center; justify-content:space-between; gap:8px}
+  .qcard .case{font-family:var(--mono); font-size:11px; color:var(--ink-2)}
+  .qcard .sev{ width:8px; height:8px; border-radius:50%; }
+  .sev.s1{ background:var(--sev-s1); box-shadow:0 0 8px var(--sev-s1)}
+  .sev.s2{ background:var(--sev-s2); box-shadow:0 0 8px var(--sev-s2)}
+  .sev.s3{ background:var(--sev-s3); box-shadow:0 0 7px var(--sev-s3)}
+  .sev.s4{ background:var(--sev-s4); box-shadow:0 0 7px var(--sev-s4)}
+  .qcard .title{font-size:12.5px; color:var(--ink-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .qcard .meta{font-size:10.5px; color:var(--ink-3); display:flex; gap:8px; align-items:center}
+
+  /* ---------- The Slipstream (center stage) ---------- */
+  .stage{
+    position:relative;
+    overflow:hidden;
+    background:
+      radial-gradient(1200px 600px at 50% 50%, rgba(146,180,255,.05), transparent 60%),
+      var(--bg-0);
+  }
+
+  /* The river: a horizontal flowing canvas */
+  .river{
+    position:absolute; inset:0;
+    overflow:hidden;
+  }
+  .river-bg{
+    position:absolute; inset:0;
+    pointer-events:none;
+    opacity:.55;
+  }
+  .river-bg svg{position:absolute; inset:0; width:100%; height:100%}
+  .flow-line{
+    stroke:url(#flowGrad);
+    stroke-width:1.2; fill:none;
+    opacity:.6;
+    stroke-dasharray: 6 8;
+    animation: flow 16s linear infinite;
+  }
+  @keyframes flow { to { stroke-dashoffset: -240 } }
+
+  .stations{
+    position:absolute; left:0; right:0; top:38%;
+    height:auto; display:flex; align-items:center; justify-content:space-between;
+    padding: 0 5%;
+    z-index:2; pointer-events:none;
+  }
+  .station{
+    position:relative;
+    width:120px;
+    display:flex; flex-direction:column; align-items:center; gap:8px;
+    pointer-events:auto;
+  }
+  .station .ring{
+    width:54px; height:54px; border-radius:50%;
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,.08), rgba(0,0,0,0) 60%), var(--bg-2);
+    border:1px solid var(--line-2);
+    display:grid; place-items:center;
+    transition: transform var(--t-base) var(--ease-spring), border-color var(--t-base), box-shadow var(--t-base);
+    position:relative;
+  }
+  .station.done .ring{ border-color:var(--accent); box-shadow: 0 0 0 2px rgba(124,224,198,.12), 0 0 22px rgba(124,224,198,.18) }
+  .station.active .ring{
+    border-color:var(--accent);
+    box-shadow: 0 0 0 4px rgba(124,224,198,.10), 0 0 30px rgba(124,224,198,.35);
+    transform:scale(1.08);
+  }
+  .station .ring::before{
+    content:""; position:absolute; inset:-8px; border-radius:50%;
+    border:1px dashed rgba(124,224,198,.25);
+    opacity:0; transition:opacity var(--t-base);
+    animation: ringSpin 12s linear infinite;
+  }
+  .station.active .ring::before{opacity:1}
+  @keyframes ringSpin { to { transform: rotate(360deg) } }
+  .station .num{
+    font-family:var(--mono); font-size:11px; color:var(--ink-2);
+  }
+  .station.active .num,.station.done .num{ color:var(--accent) }
+  .station .lbl{
+    font-size:10.5px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3);
+    transition: color var(--t-base);
+  }
+  .station.active .lbl,.station.done .lbl{ color:var(--ink-1) }
+
+  /* The case token — glides through stations */
+  .token{
+    position:absolute; top:38%;
+    width:160px; height:160px; margin-top:-80px; margin-left:-80px;
+    border-radius:50%;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(124,224,198,.35), transparent 55%),
+      radial-gradient(circle at 70% 70%, rgba(146,180,255,.22), transparent 60%),
+      linear-gradient(135deg, #131a26, #0a0d16);
+    border:1px solid rgba(124,224,198,.35);
+    box-shadow:
+      0 0 0 1px rgba(124,224,198,.15),
+      0 0 60px rgba(124,224,198,.18),
+      inset 0 0 40px rgba(146,180,255,.12);
+    display:grid; place-items:center;
+    transition: left 1.2s var(--ease-glide), transform var(--t-base) var(--ease-spring);
+    z-index:3;
+    will-change: transform, left;
+  }
+  .token .core{
+    width:120px; height:120px; border-radius:50%;
+    background: var(--bg-1);
+    border:1px solid var(--line-2);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:2px; padding:8px; text-align:center;
+    position:relative;
+  }
+  .token .core .cid{ font-family:var(--mono); font-size:10.5px; color:var(--ink-2); letter-spacing:.05em }
+  .token .core .title{ font-size:11.5px; color:var(--ink-0); font-weight:500; line-height:1.3 }
+  .token .core .since{ font-size:10px; color:var(--ink-3); font-family:var(--mono) }
+
+  /* Orbit ring around the token (severity / confidence) */
+  .token .orbit{
+    position:absolute; inset:-6px; border-radius:50%;
+    border: 1.5px dashed rgba(124,224,198,.5);
+    animation: orbitSpin 18s linear infinite;
+  }
+  .token .orbit.wobble{ animation: orbitWobble 1.4s ease-in-out infinite }
+  @keyframes orbitSpin { to { transform: rotate(360deg) } }
+  @keyframes orbitWobble {
+    0%,100%{ transform: rotate(-3deg) }
+    50%{ transform: rotate(3deg) }
+  }
+  .token .orbit-sat{
+    position:absolute; width:10px; height:10px; border-radius:50%;
+    top:-6px; left:50%; margin-left:-5px;
+    background:var(--accent); box-shadow:0 0 10px var(--accent);
+  }
+
+  /* Severity readout below token */
+  .token-readout{
+    position:absolute; left:50%; transform:translateX(-50%);
+    top: calc(38% + 95px);
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    z-index:3; pointer-events:none;
+  }
+  .severity-chip{
+    display:flex; align-items:center; gap:8px;
+    padding:5px 12px; border-radius:999px;
+    background:var(--bg-2); border:1px solid var(--line-2);
+    font-size:11.5px;
+    transition: border-color var(--t-base), background var(--t-base), transform var(--t-base) var(--ease-spring);
+  }
+  .severity-chip[data-sev="S1"]{ border-color:rgba(255,85,119,.55); background:rgba(255,85,119,.08); color:#ffbacb}
+  .severity-chip[data-sev="S2"]{ border-color:rgba(255,154,60,.55); background:rgba(255,154,60,.08); color:#ffd2a7}
+  .severity-chip[data-sev="S3"]{ border-color:rgba(255,213,79,.55); background:rgba(255,213,79,.08); color:#ffe9a7}
+  .severity-chip[data-sev="S4"]{ border-color:rgba(124,224,198,.55); background:rgba(124,224,198,.08); color:#c4f1e2}
+  .severity-chip .label{font-family:var(--mono)}
+
+  /* The Crystal — reasoning attached to each stage */
+  .crystal-tray{
+    position:absolute; left:0; right:340px; bottom:0;
+    padding: 10px 18px 12px;
+    border-top:1px solid var(--line);
+    background:linear-gradient(to bottom, rgba(7,8,12,.4), rgba(7,8,12,.92));
+    backdrop-filter: blur(8px);
+    z-index:4;
+  }
+  .crystal-tray-head{
+    display:flex; align-items:center; justify-content:space-between; gap:18px;
+    margin-bottom:8px;
+  }
+  .crystal-tabs{display:flex; align-items:center; gap:4px}
+  .crystal-tab{
+    font-family:var(--mono); font-size:11px;
+    padding:4px 10px; border-radius:999px;
+    color:var(--ink-2); cursor:pointer;
+    border:1px solid transparent;
+    transition: all var(--t-fast);
+  }
+  .crystal-tab:hover{ color:var(--ink-1) }
+  .crystal-tab.on{ background:var(--bg-3); color:var(--ink-0); border-color:var(--line-2); box-shadow:0 0 0 1px rgba(124,224,198,.15)}
+  .crystal-tab .ix{color:var(--ink-3); margin-right:6px}
+
+  .crystals{ display:flex; gap:10px; overflow-x:auto; padding-bottom:6px; scrollbar-width:thin }
+  .crystals::-webkit-scrollbar{height:6px}
+  .crystals::-webkit-scrollbar-thumb{background:var(--line-2); border-radius:4px}
+
+  .crystal{
+    flex:0 0 280px;
+    min-height:78px;
+    padding:9px 11px;
+    background: linear-gradient(180deg, rgba(124,224,198,.04), rgba(146,180,255,.02)), var(--bg-2);
+    border:1px solid var(--line-2);
+    border-radius:var(--radius-2);
+    position:relative;
+    cursor:pointer;
+    transition: transform var(--t-fast) var(--ease-out), border-color var(--t-fast);
+  }
+  .crystal:hover{ transform:translateY(-2px); border-color:#34405e}
+  .crystal.bound{
+    border-color:rgba(124,224,198,.45);
+    box-shadow: 0 0 0 1px rgba(124,224,198,.18), 0 10px 26px rgba(0,0,0,.35);
+  }
+  .crystal .stage-pin{
+    display:inline-flex; align-items:center; gap:6px;
+    font-family:var(--mono); font-size:10.5px; color:var(--accent);
+    padding:2px 8px; border-radius:999px;
+    background:rgba(124,224,198,.08); border:1px solid rgba(124,224,198,.25);
+    margin-bottom:6px;
+  }
+  .crystal .stage-pin::before{ content:""; width:5px; height:5px; border-radius:50%; background:var(--accent)}
+  .crystal h4{margin:0 0 4px 0; font-size:12.5px; font-weight:500; color:var(--ink-0)}
+  .crystal p{ margin:0; color:var(--ink-1); font-size:11.5px; line-height:1.5}
+  .crystal .foot{
+    margin-top:6px; display:flex; justify-content:space-between; align-items:center;
+    font-size:10.5px; color:var(--ink-3); font-family:var(--mono)
+  }
+  .crystal .save{
+    background:transparent; border:1px solid var(--line-2); color:var(--ink-2);
+    padding:3px 8px; border-radius:4px; font-family:var(--mono); font-size:10px; cursor:pointer;
+    transition: all var(--t-fast);
+  }
+  .crystal .save:hover{ border-color:var(--accent); color:var(--accent)}
+  .crystal .save.saved{ border-color:var(--accent); color:var(--bg-0); background:var(--accent)}
+
+  /* ---------- Right inspector (contextual, never panel-y) ---------- */
+  .inspector{
+    position:absolute; top:14px; right:14px; bottom: 240px;
+    width: 320px; max-width: 32vw;
+    z-index:5;
+    display:flex; flex-direction:column; gap:10px;
+    overflow-y:auto; padding-right:4px;
+    scrollbar-width:thin;
+  }
+  .inspector::-webkit-scrollbar{width:6px}
+  .inspector::-webkit-scrollbar-thumb{background:var(--line-2); border-radius:4px}
+  .iblock{
+    background: linear-gradient(180deg, rgba(22,26,38,.95), rgba(13,16,24,.92));
+    border:1px solid var(--line-2);
+    border-radius:var(--radius-3);
+    padding:12px 14px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 10px 40px rgba(0,0,0,.4);
+  }
+  .iblock h5{
+    margin:0 0 8px; font-size:10.5px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--ink-3); display:flex; align-items:center; justify-content:space-between;
+  }
+  .iblock h5 .right{font-family:var(--mono); color:var(--ink-2); font-size:10px}
+
+  /* Intake bar inside inspector */
+  .intake{
+    display:grid; grid-template-columns: 1fr 1fr; gap:8px;
+  }
+  .intake button{
+    appearance:none; background:var(--bg-2); color:var(--ink-1);
+    border:1px dashed var(--line-2); border-radius:var(--radius-2);
+    padding:10px 8px; font-family:var(--font); font-size:11.5px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:flex-start; gap:4px; text-align:left;
+    transition: all var(--t-fast);
+  }
+  .intake button:hover{ border-color:var(--accent); color:var(--ink-0); transform: translateY(-1px)}
+  .intake button .ico{
+    width:22px; height:22px; border-radius:6px;
+    background: linear-gradient(135deg, rgba(124,224,198,.18), rgba(146,180,255,.12));
+    display:grid; place-items:center; color:var(--accent);
+    font-family:var(--mono); font-size:11px;
+  }
+  .intake button .lbl{font-size:11.5px}
+  .intake button .sub{font-size:10px; color:var(--ink-3); font-family:var(--mono)}
+
+  /* Parser progress */
+  .parser{ display:flex; flex-direction:column; gap:8px }
+  .parser-row{
+    display:flex; align-items:center; gap:8px;
+    font-size:11.5px; color:var(--ink-1);
+  }
+  .parser-row .name{flex:1; display:flex; align-items:center; gap:8px}
+  .parser-row .name .b{
+    width:6px; height:6px; border-radius:50%; background:var(--line-2);
+    transition: background var(--t-fast), box-shadow var(--t-fast);
+  }
+  .parser-row.done .name .b{ background:var(--accent); box-shadow:0 0 6px var(--accent)}
+  .parser-row.run .name .b{ background:var(--accent-2); box-shadow:0 0 8px var(--accent-2); animation:pulse 1.1s ease-in-out infinite }
+  @keyframes pulse {
+    0%,100%{ opacity:1 }
+    50%{ opacity:.3 }
+  }
+  .parser-row .bar{
+    flex:0 0 90px; height:3px; background:var(--bg-3); border-radius:999px; overflow:hidden;
+  }
+  .parser-row .bar > i{
+    display:block; height:100%; width:0%; background:linear-gradient(90deg, var(--accent), var(--accent-2));
+    transition: width var(--t-base) var(--ease-out);
+  }
+  .parser-row .v{ font-family:var(--mono); font-size:10.5px; color:var(--ink-2); min-width:32px; text-align:right }
+  .parser .parsed{
+    margin-top:4px; padding:8px 10px;
+    background:var(--bg-3); border-radius:var(--radius-1);
+    font-family:var(--mono); font-size:11px; color:var(--ink-1);
+    border:1px solid var(--line-2);
+    white-space:pre-wrap; line-height:1.5;
+    opacity:0; transform: translateY(4px);
+    transition: opacity var(--t-emph), transform var(--t-emph) var(--ease-out);
+  }
+  .parser .parsed.show{ opacity:1; transform:none }
+  .parser .parsed b{ color:var(--accent) }
+
+  /* INV orbit */
+  .inv-list{ display:flex; flex-direction:column; gap:6px }
+  .inv-row{
+    display:flex; align-items:center; gap:10px;
+    padding:8px 10px; border-radius:var(--radius-1);
+    background:var(--bg-2); border:1px solid var(--line-2);
+    cursor:pointer; transition: all var(--t-fast);
+    position:relative; overflow:hidden;
+  }
+  .inv-row::before{
+    content:""; position:absolute; inset:0;
+    background: linear-gradient(90deg, rgba(124,224,198,.10), transparent 30%);
+    opacity:0; transition: opacity var(--t-fast);
+  }
+  .inv-row:hover::before{opacity:1}
+  .inv-row.match{ border-color:var(--accent); box-shadow: 0 0 0 1px rgba(124,224,198,.2)}
+  .inv-row .meter{
+    width:38px; height:38px; flex:0 0 38px; position:relative;
+  }
+  .inv-row .meter svg{ width:100%; height:100% }
+  .inv-row .meter .ring-bg{ stroke:var(--bg-3) }
+  .inv-row .meter .ring-fg{ stroke:var(--accent); transition: stroke-dashoffset var(--t-emph) var(--ease-out)}
+  .inv-row .meter .pct{
+    position:absolute; inset:0; display:grid; place-items:center;
+    font-family:var(--mono); font-size:10px; color:var(--ink-1);
+  }
+  .inv-row .body{ flex:1; min-width:0 }
+  .inv-row .body .top{display:flex; gap:8px; align-items:center; font-family:var(--mono); font-size:11px; color:var(--ink-2)}
+  .inv-row .body .top .id{color:var(--accent)}
+  .inv-row .body .t{ font-size:12px; color:var(--ink-0); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+  .inv-row .act{
+    font-family:var(--mono); font-size:10px; color:var(--ink-2);
+    border:1px solid var(--line-2); padding:3px 7px; border-radius:4px;
+    transition: all var(--t-fast);
+  }
+  .inv-row:hover .act{ color:var(--accent); border-color:var(--accent)}
+
+  /* Phone-agent context inside inspector */
+  .ctx-text{
+    font-size:12px; color:var(--ink-1); padding:8px 10px;
+    background:var(--bg-2); border:1px solid var(--line-2);
+    border-radius:var(--radius-1); white-space:pre-wrap; line-height:1.5;
+    max-height:120px; overflow:auto;
+  }
+  .ctx-text .hl{ background:rgba(255,213,79,.14); border-bottom:1px dashed rgba(255,213,79,.45); padding:0 2px}
+
+  /* ---------- Bottom: Compose dock ---------- */
+  .composer{
+    position:relative;
+    border-top:1px solid var(--line);
+    background:linear-gradient(to bottom, rgba(7,8,12,.65), rgba(7,8,12,.95));
+    backdrop-filter: blur(10px);
+    padding:10px 18px 12px;
+    z-index:6;
+  }
+  .composer-head{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    margin-bottom:8px;
+  }
+  .templates{ display:flex; gap:6px; flex-wrap:wrap }
+  .tpl{
+    font-family:var(--mono); font-size:10.5px;
+    padding:4px 9px; border-radius:999px;
+    background:var(--bg-2); border:1px solid var(--line-2);
+    color:var(--ink-2); cursor:pointer;
+    transition: all var(--t-fast);
+  }
+  .tpl:hover{ color:var(--ink-0); border-color:var(--accent-2) }
+  .tpl.on{ background:rgba(124,224,198,.08); border-color:var(--accent); color:var(--accent) }
+
+  .provider-stack{ display:flex; align-items:center; gap:6px }
+  .prov{
+    width:28px; height:28px; border-radius:50%;
+    display:grid; place-items:center; font-family:var(--mono); font-size:11px;
+    color:#fff; border:2px solid var(--bg-0); cursor:pointer;
+    transition: transform var(--t-fast) var(--ease-spring), border-color var(--t-fast), filter var(--t-fast);
+    box-shadow: 0 0 0 1px var(--line-2);
+  }
+  .prov.claude{ background:linear-gradient(135deg, #d97757, #c14a2b)}
+  .prov.gpt{ background:linear-gradient(135deg, #2bb673, #117a4d)}
+  .prov.gemini{ background:linear-gradient(135deg, #4a8cff, #3a64d4)}
+  .prov.kimi{ background:linear-gradient(135deg, #b896ff, #6a47c9)}
+  .prov.active{ transform: scale(1.18); box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(124,224,198,.4) }
+  .prov:not(.active){ filter:saturate(.55) brightness(.9) }
+
+  .compose-row{
+    display:grid;
+    grid-template-columns: 1fr auto;
+    gap:10px;
+    align-items:stretch;
+  }
+  .draft{
+    position:relative;
+    background:var(--bg-2); border:1px solid var(--line-2); border-radius:var(--radius-2);
+    min-height:96px;
+    padding:10px 12px;
+    font-size:13px; color:var(--ink-1); line-height:1.55;
+    white-space:pre-wrap;
+    overflow:auto;
+    max-height: 28vh;
+    transition: border-color var(--t-fast);
+  }
+  .draft:focus{ outline:none; border-color:var(--accent)}
+  .draft .typed-cursor{display:inline-block; width:7px; height:14px; background:var(--accent); vertical-align:-2px; margin-left:1px; animation: blink 1s steps(2,end) infinite}
+  @keyframes blink { 50% { opacity:0 } }
+
+  .compose-actions{
+    display:flex; flex-direction:column; gap:6px; justify-content:flex-end;
+  }
+  .btn{
+    appearance:none; background:var(--bg-2); color:var(--ink-1);
+    border:1px solid var(--line-2); border-radius:8px;
+    padding:8px 12px; font-family:var(--font); font-size:12px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+    transition: all var(--t-fast);
+  }
+  .btn:hover{ border-color:#3e4a6b; color:var(--ink-0)}
+  .btn.primary{ background:linear-gradient(135deg, var(--accent), #5fc8a8); color:#08110d; border-color:transparent; font-weight:600}
+  .btn.primary:hover{ filter:brightness(1.06); transform:translateY(-1px); box-shadow: 0 8px 20px rgba(124,224,198,.18)}
+  .btn .k{ font-family:var(--mono); font-size:10.5px; color:rgba(255,255,255,.55); padding:1px 5px; border-radius:4px; background:rgba(0,0,0,.18) }
+
+  /* ---------- Compare drawer (provider compare) ---------- */
+  .compare{
+    position:fixed; left:18px; right: calc(360px + 36px); bottom:120px; top:130px;
+    background: linear-gradient(180deg, rgba(13,16,24,.96), rgba(8,10,14,.96));
+    border:1px solid var(--line-2);
+    border-radius:var(--radius-3);
+    box-shadow: 0 30px 80px rgba(0,0,0,.5);
+    z-index:30;
+    transform: translateY(20px) scale(.98); opacity:0; pointer-events:none;
+    transition: transform var(--t-emph) var(--ease-spring), opacity var(--t-base);
+    display:flex; flex-direction:column;
+  }
+  .compare.on{ transform: none; opacity:1; pointer-events:auto }
+  .compare header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:12px 16px; border-bottom:1px solid var(--line);
+  }
+  .compare header h3{margin:0; font-size:13px; font-weight:500; letter-spacing:.04em}
+  .compare-grid{
+    display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap:1px;
+    background:var(--line); flex:1; min-height:0;
+  }
+  .compare-cell{
+    background:var(--bg-1); padding:12px 12px 10px;
+    display:flex; flex-direction:column; gap:6px; min-height:0;
+  }
+  .compare-cell header{padding:0; border:none; align-items:center}
+  .compare-cell .who{display:flex; align-items:center; gap:8px}
+  .compare-cell .who .prov{transform:none !important; cursor:default; filter:none}
+  .compare-cell .latency{ font-family:var(--mono); font-size:10.5px; color:var(--ink-3)}
+  .compare-cell .body{
+    flex:1; overflow:auto; font-size:12px; line-height:1.5; color:var(--ink-1);
+    background:var(--bg-2); border-radius:var(--radius-1); border:1px solid var(--line-2);
+    padding:10px 12px; white-space:pre-wrap;
+  }
+  .compare-cell .footer{ display:flex; justify-content:space-between; align-items:center; font-family:var(--mono); font-size:10.5px; color:var(--ink-3)}
+  .compare-cell .pick{
+    padding:3px 8px; border-radius:4px; background:var(--bg-3); border:1px solid var(--line-2);
+    color:var(--ink-2); cursor:pointer; transition: all var(--t-fast); font-size:10.5px;
+  }
+  .compare-cell .pick:hover{ border-color:var(--accent); color:var(--accent)}
+  .compare-cell.win{ background:linear-gradient(180deg, rgba(124,224,198,.06), var(--bg-1)) }
+  .compare-cell.win .pick{ border-color:var(--accent); color:var(--accent)}
+
+  /* ---------- Webcam capture overlay ---------- */
+  .capture{
+    position:fixed; inset:0;
+    background: radial-gradient(circle at 50% 40%, rgba(124,224,198,.10), rgba(0,0,0,.85));
+    z-index:50;
+    display:none;
+    align-items:center; justify-content:center;
+  }
+  .capture.on{ display:flex }
+  .capture-frame{
+    width: 520px; height: 380px;
+    border-radius:18px;
+    background: var(--bg-1);
+    border:1px solid var(--line-2);
+    position:relative; overflow:hidden;
+    box-shadow: 0 30px 90px rgba(0,0,0,.6);
+  }
+  .capture-view{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(circle at 30% 30%, rgba(124,224,198,.08), transparent 50%),
+      radial-gradient(circle at 70% 70%, rgba(146,180,255,.06), transparent 50%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0px, rgba(255,255,255,.02) 1px, transparent 1px, transparent 4px),
+      linear-gradient(135deg, #0a1118, #050708);
+    animation: cameraFlicker 6s ease-in-out infinite;
+  }
+  @keyframes cameraFlicker { 0%,100%{ filter:brightness(1)} 50%{ filter:brightness(1.05)}}
+  .capture-overlay{
+    position:absolute; inset:0; pointer-events:none;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .scan{
+    position:absolute; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    box-shadow: 0 0 16px rgba(124,224,198,.7);
+    animation: scanDown 2.2s var(--ease-glide) infinite;
+  }
+  @keyframes scanDown {
+    0%{ top:0% } 100%{ top:100% }
+  }
+  .reticle{
+    width:200px; height:120px; border:1.5px solid rgba(124,224,198,.7);
+    border-radius:8px; position:relative;
+  }
+  .reticle::before, .reticle::after,
+  .reticle .c1, .reticle .c2{
+    content:""; position:absolute; width:18px; height:18px;
+    border-color: var(--accent); border-style: solid;
+  }
+  .reticle::before{ top:-2px; left:-2px; border-width: 2px 0 0 2px}
+  .reticle::after { top:-2px; right:-2px; border-width: 2px 2px 0 0}
+  .reticle .c1{ bottom:-2px; left:-2px; border-width: 0 0 2px 2px}
+  .reticle .c2{ bottom:-2px; right:-2px; border-width: 0 2px 2px 0}
+
+  .capture-bar{
+    position:absolute; left:0; right:0; bottom:0; padding:10px 14px;
+    display:flex; align-items:center; justify-content:space-between;
+    background:linear-gradient(to top, rgba(0,0,0,.7), transparent);
+    color:var(--ink-1); font-family:var(--mono); font-size:11px;
+  }
+  .capture-bar .left{ display:flex; gap:8px; align-items:center }
+  .capture-bar .live{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 8px; border-radius:999px; background:rgba(255,107,139,.15);
+    color:#ffb0bf; font-size:10.5px;
+  }
+  .capture-bar .live::before{ content:""; width:6px; height:6px; border-radius:50%; background:#ff6b8b; animation:pulse 1.2s ease-in-out infinite}
+  .capture-bar button{
+    background:var(--accent); color:#0a120e; border:none; padding:6px 14px;
+    border-radius:999px; cursor:pointer; font-family:var(--font); font-size:11.5px; font-weight:600;
+  }
+  .capture-close{
+    position:absolute; top:10px; right:12px;
+    background:transparent; border:1px solid var(--line-2); color:var(--ink-2);
+    padding:4px 8px; border-radius:6px; cursor:pointer; font-family:var(--mono); font-size:11px;
+  }
+
+  /* Confidence wobble (severity uncertain) */
+  .wobble-anim{ animation: wobble 1s ease-in-out infinite }
+  @keyframes wobble {
+    0%,100%{ transform: translate(0,0) rotate(0)}
+    25%{ transform: translate(.5px,-.5px) rotate(-.4deg)}
+    75%{ transform: translate(-.5px,.5px) rotate(.4deg)}
+  }
+
+  /* Ghost cursor for "AI working" cue */
+  .ghost{
+    position:absolute; pointer-events:none; z-index:7;
+    width:6px; height:6px; border-radius:50%; background:var(--accent-2);
+    box-shadow: 0 0 14px var(--accent-2);
+    opacity:.0;
+  }
+
+  /* Toast */
+  .toast{
+    position:fixed; bottom:18px; left:50%; transform:translateX(-50%) translateY(20px);
+    background:var(--bg-3); color:var(--ink-0); border:1px solid var(--line-2);
+    padding:8px 14px; border-radius:999px; font-size:12px;
+    opacity:0; transition: all var(--t-emph) var(--ease-spring); pointer-events:none;
+    z-index:80;
+    display:inline-flex; align-items:center; gap:8px;
+  }
+  .toast.on{ opacity:1; transform:translateX(-50%) translateY(0)}
+  .toast .dot{background:var(--accent)}
+
+  /* Hint chip */
+  .hint{
+    position:fixed; bottom:140px; left:50%; transform:translateX(-50%);
+    background:rgba(13,16,24,.85); border:1px solid var(--line-2); border-radius:999px;
+    padding:6px 12px; font-size:11px; color:var(--ink-2);
+    display:none; align-items:center; gap:8px;
+    z-index:9;
+  }
+  .hint.on{ display:inline-flex; animation: floaty 2.4s ease-in-out infinite }
+  @keyframes floaty { 0%,100%{ transform:translateX(-50%) translateY(0)} 50%{ transform:translateX(-50%) translateY(-4px)} }
+
+  /* Screenshot thumbnail inside intake area */
+  .thumb-wrap{
+    position:relative;
+    margin-top:10px;
+    border-radius:var(--radius-2); overflow:hidden;
+    border:1px solid var(--line-2);
+    background: var(--bg-2);
+    height: 132px;
+    transition: opacity var(--t-base);
+  }
+  .thumb-wrap.empty{ opacity:.45 }
+  .thumb-img{
+    position:absolute; inset:0;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,.04), rgba(0,0,0,0)),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.02) 0 2px, transparent 2px 4px),
+      radial-gradient(circle at 30% 30%, rgba(146,180,255,.12), transparent 50%),
+      linear-gradient(135deg, #0d1320, #0a0d16);
+  }
+  .thumb-mock{
+    position:absolute; inset:8px;
+    background: #fff;
+    color:#0e1116;
+    border-radius:6px;
+    padding:6px 8px;
+    font-family:var(--mono); font-size:9.5px; line-height:1.3;
+    overflow:hidden;
+  }
+  .thumb-mock .qbo-bar{
+    height:14px; background:#2ca01c; border-radius:3px; margin:-6px -8px 6px;
+    display:flex; align-items:center; padding:0 6px; color:#fff; font-size:9px; gap:6px;
+  }
+  .thumb-mock .qbo-bar::before{ content:""; width:8px; height:8px; background:#fff; border-radius:50% }
+  .thumb-mock .err{
+    background:#ffe9e9; color:#a8181c; padding:4px 6px; border-left:3px solid #c4282b;
+    margin-bottom:4px; border-radius:2px; font-size:9px;
+  }
+  .thumb-mock .lbl{ color:#5a6079; font-size:8.5px}
+  .thumb-mock .val{ color:#0e1116}
+  .thumb-tag{
+    position:absolute; top:6px; right:6px;
+    padding:2px 7px; border-radius:999px;
+    background:rgba(0,0,0,.5); color:#fff; font-family:var(--mono); font-size:9.5px;
+    backdrop-filter: blur(6px);
+  }
+  .thumb-actions{
+    position:absolute; left:6px; bottom:6px; display:flex; gap:6px;
+  }
+  .thumb-actions button{
+    background:rgba(0,0,0,.55); color:#fff; border:1px solid rgba(255,255,255,.12);
+    padding:3px 8px; border-radius:999px; font-family:var(--mono); font-size:10px; cursor:pointer;
+    backdrop-filter: blur(4px);
+  }
+  .thumb-actions button:hover{ border-color:var(--accent)}
+
+  /* Reduce motion */
+  @media (prefers-reduced-motion: reduce){
+    *{ animation: none !important; transition: none !important }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div class="brand-name">Slipstream <em>QBO Escalation</em></div>
+    <div class="pill" style="margin-left:14px"><span class="dot"></span> In flow</div>
+  </div>
+  <div class="topbar-right">
+    <span>Queue depth <b style="color:var(--ink-1)">14</b></span>
+    <span>Median triage <b style="color:var(--ink-1)">2m 18s</b></span>
+    <span class="pill">Operator <b style="color:var(--ink-1); margin-left:4px">K. Reyes</b></span>
+    <span class="kbd">⌘K</span>
+  </div>
+</div>
+
+<div class="app">
+
+  <!-- Queue rail (horizontally scrollable list of incoming cases) -->
+  <div class="queue-rail" id="queueRail">
+    <div class="label">Queue</div>
+    <!-- Cards injected by JS -->
+  </div>
+
+  <!-- The slipstream stage -->
+  <div class="stage" id="stage">
+
+    <!-- River background -->
+    <div class="river-bg">
+      <svg viewBox="0 0 1600 600" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="flowGrad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#7ce0c6" stop-opacity="0"/>
+            <stop offset=".5" stop-color="#7ce0c6" stop-opacity=".5"/>
+            <stop offset="1" stop-color="#92b4ff" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path class="flow-line" d="M0,320 C200,260 380,380 600,320 C820,260 1000,380 1200,320 C1400,260 1500,340 1600,320"/>
+        <path class="flow-line" style="animation-duration:22s" d="M0,260 C200,200 380,320 600,260 C820,200 1000,320 1200,260 C1400,200 1500,280 1600,260"/>
+        <path class="flow-line" style="animation-duration:28s" d="M0,380 C200,320 380,440 600,380 C820,320 1000,440 1200,380 C1400,320 1500,400 1600,380"/>
+      </svg>
+    </div>
+
+    <!-- Stations -->
+    <div class="stations" id="stations">
+      <div class="station" data-stage="1"><div class="ring"><div class="num">01</div></div><div class="lbl">Intake</div></div>
+      <div class="station" data-stage="2"><div class="ring"><div class="num">02</div></div><div class="lbl">Parse</div></div>
+      <div class="station" data-stage="3"><div class="ring"><div class="num">03</div></div><div class="lbl">Triage</div></div>
+      <div class="station" data-stage="4"><div class="ring"><div class="num">04</div></div><div class="lbl">INV Match</div></div>
+      <div class="station" data-stage="5"><div class="ring"><div class="num">05</div></div><div class="lbl">Draft</div></div>
+      <div class="station" data-stage="6"><div class="ring"><div class="num">06</div></div><div class="lbl">Send</div></div>
+    </div>
+
+    <!-- The Token (the case) -->
+    <div class="token" id="token" style="left:9%">
+      <div class="orbit wobble" id="orbit"><span class="orbit-sat"></span></div>
+      <div class="core" id="tokenCore">
+        <div class="cid" id="tCid">CASE-78321</div>
+        <div class="title" id="tTitle">Awaiting screenshot…</div>
+        <div class="since" id="tSince">held 0s</div>
+      </div>
+    </div>
+
+    <div class="token-readout">
+      <div class="severity-chip wobble-anim" id="sevChip" data-sev="?"><span class="label" id="sevLabel">SEV —</span> <span id="sevCat">Uncategorized</span></div>
+    </div>
+
+    <!-- Right inspector -->
+    <div class="inspector" id="inspector">
+      <!-- Intake -->
+      <div class="iblock" id="bIntake">
+        <h5>Intake <span class="right">stage 01</span></h5>
+        <div class="intake">
+          <button data-intake="paste"><span class="ico">⎘</span><span class="lbl">Paste from clipboard</span><span class="sub">⌘V</span></button>
+          <button data-intake="drag"><span class="ico">↧</span><span class="lbl">Drop a file</span><span class="sub">.png .jpg .pdf</span></button>
+          <button data-intake="webcam"><span class="ico">◉</span><span class="lbl">Capture w/ webcam</span><span class="sub">phone agent's screen</span></button>
+          <button data-intake="hand"><span class="ico">⌥</span><span class="lbl">Receive handoff</span><span class="sub">from phone agent</span></button>
+        </div>
+        <div class="thumb-wrap empty" id="thumbWrap">
+          <div class="thumb-img"></div>
+          <div class="thumb-mock" id="thumbMock" style="display:none">
+            <div class="qbo-bar">QuickBooks Online · Payroll</div>
+            <div class="err">We can't process this payroll right now. <br/>(QBO Error PS077)</div>
+            <div class="lbl">Company</div><div class="val">Riverside Cabinetry LLC</div>
+            <div class="lbl">Pay date</div><div class="val">Apr 30, 2026 · 1 employee</div>
+            <div class="lbl">Net pay</div><div class="val">$ 2,184.12</div>
+          </div>
+          <div class="thumb-tag" id="thumbTag">no source</div>
+          <div class="thumb-actions" id="thumbActions" style="display:none">
+            <button>Open</button><button>Rotate</button><button>Re-OCR</button>
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <h5 style="margin-bottom:6px">Phone-agent note</h5>
+          <div class="ctx-text" id="ctxText"><span class="hl">— intake pending —</span></div>
+        </div>
+      </div>
+
+      <!-- Parser -->
+      <div class="iblock" id="bParse" style="display:none">
+        <h5>Parsing <span class="right" id="parseTimer">0ms</span></h5>
+        <div class="parser" id="parser">
+          <div class="parser-row" data-step="ocr"><div class="name"><span class="b"></span>OCR · screen text</div><div class="bar"><i></i></div><div class="v">0%</div></div>
+          <div class="parser-row" data-step="ui"><div class="name"><span class="b"></span>UI region detect</div><div class="bar"><i></i></div><div class="v">0%</div></div>
+          <div class="parser-row" data-step="err"><div class="name"><span class="b"></span>Error code lookup</div><div class="bar"><i></i></div><div class="v">0%</div></div>
+          <div class="parser-row" data-step="ent"><div class="name"><span class="b"></span>Entity extraction</div><div class="bar"><i></i></div><div class="v">0%</div></div>
+          <div class="parsed" id="parsedOut"></div>
+        </div>
+      </div>
+
+      <!-- INV -->
+      <div class="iblock" id="bInv" style="display:none">
+        <h5>INV orbit <span class="right" id="invCount">searching…</span></h5>
+        <div class="inv-list" id="invList"></div>
+        <div style="display:flex; gap:6px; margin-top:8px">
+          <button class="btn" id="invAttach" style="flex:1">Attach match</button>
+          <button class="btn" id="invCreate">+ New INV</button>
+        </div>
+      </div>
+
+      <!-- Triage decision summary (becomes visible once severity locks) -->
+      <div class="iblock" id="bTriage" style="display:none">
+        <h5>Decision <span class="right" id="confLbl">confidence —</span></h5>
+        <div style="display:flex; align-items:center; gap:10px">
+          <div style="flex:1">
+            <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.14em">Severity</div>
+            <div id="dSev" style="font-size:16px; color:var(--ink-0); margin-top:2px">S2 · Customer impacted</div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.14em">Category</div>
+            <div id="dCat" style="font-size:16px; color:var(--ink-0); margin-top:2px">Payroll · Direct Deposit</div>
+          </div>
+        </div>
+        <div id="missing" style="margin-top:10px; display:none">
+          <div style="font-size:11px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.14em; margin-bottom:4px">Missing info</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px" id="missingChips"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reasoning Crystal tray -->
+    <div class="crystal-tray">
+      <div class="crystal-tray-head">
+        <div class="crystal-tabs">
+          <div class="crystal-tab on" data-filter="all"><span class="ix">∞</span>All reasoning</div>
+          <div class="crystal-tab" data-filter="parse"><span class="ix">02</span>Parse</div>
+          <div class="crystal-tab" data-filter="triage"><span class="ix">03</span>Triage</div>
+          <div class="crystal-tab" data-filter="inv"><span class="ix">04</span>INV match</div>
+          <div class="crystal-tab" data-filter="draft"><span class="ix">05</span>Draft</div>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <span style="font-size:11px; color:var(--ink-3)">Every chip in this case has a crystal. Click a crystal to bond.</span>
+          <button class="btn" id="saveAllReason" style="font-size:11px; padding:5px 10px">Save all to case</button>
+        </div>
+      </div>
+      <div class="crystals" id="crystals">
+        <!-- Crystals injected dynamically -->
+        <div class="crystal" style="opacity:.5; border-style:dashed">
+          <div class="stage-pin">waiting on intake</div>
+          <h4>Reasoning will crystallize here as the case flows.</h4>
+          <p>Each AI decision pins a tiny crystal of "why" to the chip that produced it. Tap a crystal to see the answer it explained. Saved crystals stay bonded to the INV record.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating hint -->
+    <div class="hint on" id="hint"><span class="dot"></span> Press <span class="kbd">Space</span> to begin · or pick an intake on the right</div>
+
+  </div>
+
+  <!-- Composer -->
+  <div class="composer">
+    <div class="composer-head">
+      <div class="templates" id="templates">
+        <div class="tpl" data-tpl="ack">Acknowledge</div>
+        <div class="tpl" data-tpl="diag">Diagnostic ask</div>
+        <div class="tpl" data-tpl="repro">Repro steps</div>
+        <div class="tpl" data-tpl="resolve">Resolution</div>
+        <div class="tpl" data-tpl="esc">Escalate to L3</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:14px">
+        <span style="font-size:11px; color:var(--ink-3); letter-spacing:.04em">Voice</span>
+        <div class="provider-stack" id="provStack" title="Switch / compare providers">
+          <div class="prov claude active" data-prov="claude" title="Claude · sonnet">C</div>
+          <div class="prov gpt" data-prov="gpt" title="GPT-5">G</div>
+          <div class="prov gemini" data-prov="gemini" title="Gemini 2.5">◇</div>
+          <div class="prov kimi" data-prov="kimi" title="Kimi K2">K</div>
+          <button class="btn" id="btnCompare" style="margin-left:6px; padding:5px 10px; font-size:11px">Compare all <span class="k">C</span></button>
+        </div>
+      </div>
+    </div>
+    <div class="compose-row">
+      <div class="draft" id="draft" contenteditable="true" spellcheck="true">
+        <span style="color:var(--ink-3)">Draft to phone agent appears here as the case settles. Pick a template, switch providers, or type freely.</span>
+      </div>
+      <div class="compose-actions">
+        <button class="btn" id="btnRegen">↻ Regenerate <span class="k">⌘R</span></button>
+        <button class="btn" id="btnSaveDraft">Save draft</button>
+        <button class="btn primary" id="btnSend">Send to phone agent <span class="k">⌘↵</span></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Compare drawer -->
+<div class="compare" id="compare">
+  <header>
+    <h3>Compare providers — same prompt, four voices</h3>
+    <div style="display:flex; gap:8px; align-items:center">
+      <span style="font-size:11px; color:var(--ink-3); font-family:var(--mono)">case CASE-78321 · INV-104442</span>
+      <button class="btn" id="compareClose">Close</button>
+    </div>
+  </header>
+  <div class="compare-grid" id="compareGrid">
+    <!-- Cells injected -->
+  </div>
+</div>
+
+<!-- Webcam capture overlay -->
+<div class="capture" id="capture">
+  <div class="capture-frame">
+    <button class="capture-close" id="captureClose">Esc</button>
+    <div class="capture-view"></div>
+    <div class="capture-overlay">
+      <div class="reticle"><span class="c1"></span><span class="c2"></span></div>
+      <div class="scan"></div>
+    </div>
+    <div class="capture-bar">
+      <div class="left"><span class="live">LIVE</span><span id="capStatus">Frame agent's monitor inside the box</span></div>
+      <button id="capShoot">Capture frame</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg">Saved.</span></div>
+
+<script>
+/* ---------- Mock data ---------- */
+const QUEUE = [
+  { id:"CASE-78321", title:"Payroll PS077 blocking payroll run", sev:"s2", age:"3m",  category:"Payroll · Direct Deposit", agent:"M. Cho" },
+  { id:"CASE-78322", title:"Bank feed disconnected — Chase", sev:"s3", age:"7m", category:"Banking · Feeds", agent:"L. Patel" },
+  { id:"CASE-78318", title:"Sales tax wrong jurisdiction (NJ→NY)", sev:"s2", age:"12m", category:"Sales Tax", agent:"R. Owens" },
+  { id:"CASE-78315", title:"1099 contractor missing TIN field", sev:"s4", age:"18m", category:"1099 / Forms", agent:"D. Nguyen" },
+  { id:"CASE-78314", title:"QBO won't sync mileage from app", sev:"s4", age:"22m", category:"Mobile App", agent:"V. Stone" },
+  { id:"CASE-78310", title:"Reconcile balance off by $0.02", sev:"s4", age:"31m", category:"Reconcile", agent:"P. Adams" },
+  { id:"CASE-78307", title:"Multi-user lockout (host machine offline)", sev:"s1", age:"42m", category:"QBDT Hosted", agent:"S. Carter" },
+];
+
+const ACTIVE = {
+  caseId: "CASE-78321",
+  title: "Payroll won't run — error PS077",
+  agentNote: "Customer called twice today. Tried to run payroll for 1 employee, gets a generic 'we can't process this payroll right now (PS077)'. Tried clearing cache, re-saving direct deposit info, no dice. Customer is upset — pay date is Friday. Used QBO for 3 years.",
+  category: "Payroll · Direct Deposit",
+  sevFinal: "S2",
+  confidence: 0.86,
+};
+
+const INV_MATCHES = [
+  { id:"INV-104442", title:"PS077 after DD bank-account re-verification (known)", pct:0.92, hits:42, status:"open", last:"4d ago" },
+  { id:"INV-101189", title:"PS077 caused by SSN mismatch in payroll setup",  pct:0.61, hits:18, status:"resolved", last:"3w ago" },
+  { id:"INV-099074", title:"Payroll halt — Intuit risk hold on company",       pct:0.34, hits:9,  status:"open", last:"2m ago" },
+];
+
+const REASON = {
+  parse: [
+    { stage:"02", t:"OCR · 412ms", title:"Recognized error code PS077", body:"Detected red banner text on payroll-run modal. Pattern 'we can't process this payroll right now' has 99.4% match to PS077 family." },
+    { stage:"02", t:"Entities · 88ms", title:"Extracted company, pay date, net pay", body:"Company name 'Riverside Cabinetry LLC' read from QBO header. Pay date Apr 30, 2026 read from active modal. Net pay $2,184.12 read from preview row." },
+  ],
+  triage: [
+    { stage:"03", t:"Triage · 240ms", title:"Severity S2 — single customer impact, hard block, deadline Friday", body:"S1 reserved for multi-customer / data-loss. PS077 is a single-customer payroll-run blocker. Friday pay-date elevates above S3. → S2." },
+    { stage:"03", t:"Category · 110ms", title:"Category: Payroll · Direct Deposit", body:"Modal context = payroll run, error PS077 family historically scopes to DD-trust check failures. Confirmed by INV-104442 association." },
+  ],
+  inv: [
+    { stage:"04", t:"INV match · 320ms", title:"INV-104442 is the answer (92% confidence)", body:"PS077 + recent DD bank-account re-verification appears in 38 of 42 closed PS077 cases in last 90d. Resolution playbook §4.2 applies. Did not match INV-101189 because SSN mismatch path requires Setup-Employee modal, which is absent here." },
+  ],
+  draft: [
+    { stage:"05", t:"Draft · streaming", title:"Drafted phone-agent response from template 'Resolution'", body:"Pulled language from playbook §4.2 (PS077 DD re-verification path). Substituted company name and pay date from parser output. Closed with 24h confirm-back ask." },
+  ]
+};
+
+const TEMPLATES = {
+  ack: `Got it — thanks for the clean handoff. I've got CASE-78321 in front of me. Looking at the PS077 + Friday pay date, this is matching INV-104442 (DD re-verification path). Owning this now. Will route the fix back to you in ~10 min.`,
+  diag: `Quick diagnostic — can you confirm with the customer:
+1. Did Intuit prompt them to re-verify the bank account in the last 14 days?
+2. Have they tried this payroll from a different browser?
+3. Has the principal officer's address changed in QBO recently?
+
+Send screenshots of any prompts they hit. I'll hold the case.`,
+  repro: `Repro path I'm seeing on INV-104442:
+- QBO → Payroll → Run payroll → confirms employees → "We can't process this payroll right now" with PS077.
+- Console shows POST /v3/payroll/run returns 422 with "BankAccountTrustExpired".
+- Resolves when customer re-confirms DD bank account via Account & Settings → Payroll → Direct Deposit.
+
+Have the customer attempt that path and tell me what they see on the verification screen.`,
+  resolve: `Resolution (matches INV-104442 §4.2):
+
+1) Customer goes to QBO → Settings (gear) → Payroll Settings → Direct Deposit.
+2) Click "Verify your bank account" — it will show two micro-deposits we sent on Apr 22.
+3) Enter the two amounts; this re-establishes DD trust.
+4) Return to Run Payroll. PS077 will clear immediately.
+
+If verification screen doesn't appear, escalate back to me with a screenshot of the DD page — that path means the trust record itself is missing and I'll open a new INV. Pay date Friday Apr 30 is recoverable as long as customer completes step 1-3 by EOD Thursday Pacific.`,
+  esc: `This one's escalating to L3 — INV-099074 path (Intuit risk hold on the company entity, not a normal PS077). Holding the customer; please send a calming note that we're routing internally and we'll be back within 2 business hours with a confirmed plan. I'll own the L3 thread and copy you.`,
+};
+
+const PROVIDER_DRAFTS = {
+  claude: TEMPLATES.resolve,
+  gpt:    `Here's what to tell the customer (mapped to INV-104442):\n\n• Go to Settings → Payroll Settings → Direct Deposit.\n• Use "Verify your bank account" and enter the two micro-deposit amounts from Apr 22.\n• Re-run payroll; PS077 should clear.\n\nIf they don't see the verify screen, kick back to me — that means trust record is missing, not just expired. Friday pay date still recoverable through EOD Thursday PT.`,
+  gemini: `Recommend the playbook §4.2 fix:\n1. Confirm Apr 22 micro-deposits in customer's bank.\n2. Direct them to QBO Settings ➜ Payroll Settings ➜ Direct Deposit ➜ "Verify your bank account".\n3. Enter both amounts; trust re-establishes.\n4. Retry payroll.\n\nIf any of steps 2-3 are missing UI, this is INV-099074 territory (risk hold). Escalate to L3 and pin the new INV.`,
+  kimi:   `INV-104442 fits 92%. Tell the agent:\n- Customer flow: gear icon → Payroll Settings → Direct Deposit → "Verify bank account" → enter the two Apr 22 micro-deposits.\n- After verification, re-run payroll. PS077 clears.\n- If verify screen not present, this is INV-099074 (risk hold). Different path.\n\nFriday pay date is recoverable if verification done before Thursday 6pm PT.`,
+};
+
+const PROVIDER_LATENCY = { claude:"1.84s", gpt:"1.41s", gemini:"2.06s", kimi:"1.12s" };
+
+/* ---------- State ---------- */
+let activeStage = 0;          // 0..6
+let provider = "claude";
+let crystals = [];            // pinned reasoning
+let savedReasons = new Set();
+let captureOn = false;
+
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+/* ---------- Build queue ---------- */
+function buildQueue(){
+  const rail = $("#queueRail");
+  // keep label, clear rest
+  $$(".qcard", rail).forEach(n => n.remove());
+  QUEUE.forEach((q, i) => {
+    const el = document.createElement("div");
+    el.className = "qcard" + (q.id === ACTIVE.caseId ? " active" : "");
+    el.innerHTML = `
+      <div class="top">
+        <div class="case">${q.id} · ${q.age}</div>
+        <div class="sev ${q.sev}"></div>
+      </div>
+      <div class="title">${q.title}</div>
+      <div class="meta"><span>${q.category}</span><span>· ${q.agent}</span></div>`;
+    el.addEventListener("click", () => {
+      $$(".qcard", rail).forEach(n => n.classList.remove("active"));
+      el.classList.add("active");
+      pulseToken();
+      toast("Switched to " + q.id);
+    });
+    rail.appendChild(el);
+  });
+}
+
+/* ---------- Token motion ---------- */
+const STATION_POS = [9, 26.5, 44, 61.5, 79, 95]; // 1..6
+function moveTokenTo(stage){
+  const token = $("#token");
+  const pos = STATION_POS[Math.max(0, Math.min(STATION_POS.length-1, stage-1))];
+  token.style.left = pos + "%";
+}
+function pulseToken(){
+  const t = $("#token");
+  t.style.transform = "scale(1.06)";
+  setTimeout(() => t.style.transform = "scale(1)", 220);
+}
+function setStation(stage){
+  activeStage = stage;
+  $$("#stations .station").forEach((s, i) => {
+    s.classList.remove("active","done");
+    const idx = i+1;
+    if (idx < stage) s.classList.add("done");
+    if (idx === stage) s.classList.add("active");
+  });
+  moveTokenTo(stage);
+}
+
+/* ---------- Severity / Orbit ---------- */
+function setSeverity(sev, category, confidence){
+  const chip = $("#sevChip");
+  const orb = $("#orbit");
+  chip.dataset.sev = sev;
+  $("#sevLabel").textContent = "SEV " + sev;
+  $("#sevCat").textContent = category;
+  if (confidence < 0.6){ chip.classList.add("wobble-anim"); orb.classList.add("wobble") }
+  else { chip.classList.remove("wobble-anim"); orb.classList.remove("wobble") }
+  if (confidence >= 0.6){
+    $("#bTriage").style.display = "";
+    $("#dSev").textContent = sev + " · " + (sev === "S1" ? "Critical" : sev === "S2" ? "Customer impacted" : sev === "S3" ? "Customer inconvenienced" : "Low impact");
+    $("#dCat").textContent = category;
+    $("#confLbl").textContent = "confidence " + Math.round(confidence*100) + "%";
+  }
+}
+
+/* ---------- Token core update ---------- */
+function setToken({ id, title, sinceMs }){
+  if (id) $("#tCid").textContent = id;
+  if (title) $("#tTitle").textContent = title;
+  if (sinceMs != null) $("#tSince").textContent = `held ${Math.round(sinceMs/1000)}s`;
+}
+
+/* ---------- Crystals ---------- */
+function pushCrystals(group, label){
+  const tray = $("#crystals");
+  // remove placeholder
+  $$(".crystal", tray).forEach(c => { if (c.dataset.placeholder === "true") c.remove() });
+  group.forEach((r,i) => {
+    const el = document.createElement("div");
+    el.className = "crystal";
+    el.dataset.filter = label;
+    el.style.opacity = "0";
+    el.style.transform = "translateY(8px)";
+    el.innerHTML = `
+      <div class="stage-pin">stage ${r.stage} · ${r.t}</div>
+      <h4>${r.title}</h4>
+      <p>${r.body}</p>
+      <div class="foot">
+        <span>${provider.toUpperCase()} · seed 0x${(Math.random()*1e6|0).toString(16)}</span>
+        <button class="save">Save</button>
+      </div>`;
+    el.querySelector(".save").addEventListener("click", e => {
+      e.stopPropagation();
+      const b = el.querySelector(".save");
+      b.classList.add("saved"); b.textContent = "Saved";
+      savedReasons.add(el.dataset.filter + "-" + i);
+      toast("Reasoning saved · bonded to " + (label === "inv" ? "INV-104442" : ACTIVE.caseId));
+    });
+    el.addEventListener("click", () => {
+      $$(".crystal").forEach(c => c.classList.remove("bound"));
+      el.classList.add("bound");
+    });
+    tray.appendChild(el);
+    requestAnimationFrame(() => {
+      setTimeout(() => { el.style.opacity = ""; el.style.transform = ""; }, i*70);
+    });
+  });
+  crystals = crystals.concat(group.map(r => ({...r, filter:label})));
+  applyCrystalFilter();
+}
+function applyCrystalFilter(){
+  const active = $(".crystal-tab.on")?.dataset.filter || "all";
+  $$(".crystal").forEach(c => {
+    if (active === "all" || c.dataset.filter === active) c.style.display = "";
+    else c.style.display = "none";
+  });
+}
+
+/* ---------- Intake handlers ---------- */
+function startFlow(method){
+  $("#hint").classList.remove("on");
+  if (method === "webcam"){ openCapture(); return }
+  // For paste / drag / hand — instant fill
+  fillThumbnail(method);
+  setStation(1);
+  pulseToken();
+  setToken({ title: "Screenshot received · " + method.toUpperCase(), sinceMs: 0 });
+  setTimeout(() => beginParse(), 600);
+}
+function fillThumbnail(method){
+  const wrap = $("#thumbWrap");
+  wrap.classList.remove("empty");
+  $("#thumbMock").style.display = "";
+  $("#thumbActions").style.display = "";
+  $("#thumbTag").textContent =
+    method === "paste" ? "from clipboard · 1284×742" :
+    method === "drag"  ? "uploaded · payroll-error.png" :
+    method === "webcam"? "webcam · deblurred · 1080p" :
+    "handoff · phone-agent-2891.png";
+  // Phone-agent note flows in
+  const ctx = $("#ctxText");
+  ctx.innerHTML = "";
+  typewriter(ctx, ACTIVE.agentNote, 18, () => {
+    // highlight key spans
+    ctx.innerHTML = ctx.textContent
+      .replace("PS077", `<span class="hl">PS077</span>`)
+      .replace("pay date is Friday", `<span class="hl">pay date is Friday</span>`)
+      .replace("3 years", `<span class="hl">3 years</span>`);
+  });
+}
+
+/* ---------- Parser ---------- */
+function beginParse(){
+  setStation(2);
+  $("#bIntake").style.display = "none";
+  $("#bParse").style.display = "";
+  setToken({ title: "Parsing screenshot…", sinceMs: 800 });
+  let elapsed = 0;
+  const start = performance.now();
+  const steps = ["ocr","ui","err","ent"];
+  let i = 0;
+  function runStep(){
+    if (i >= steps.length){
+      // show parsed structured output
+      const out = $("#parsedOut");
+      out.innerHTML = `<b>error</b>:    PS077  ("we can't process this payroll right now")
+<b>surface</b>:  Payroll → Run payroll modal
+<b>entity</b>:   Riverside Cabinetry LLC
+<b>paydate</b>:  2026-04-30  (Fri)
+<b>employee</b>: 1 · net $2,184.12
+<b>signal</b>:   modal blocking · no offered remediation`;
+      out.classList.add("show");
+      pushCrystals(REASON.parse, "parse");
+      setTimeout(beginTriage, 800);
+      return;
+    }
+    const row = $(`.parser-row[data-step="${steps[i]}"]`);
+    row.classList.add("run");
+    let p = 0;
+    const tick = setInterval(() => {
+      p += 8 + Math.random()*14;
+      if (p >= 100){
+        p = 100;
+        clearInterval(tick);
+        row.classList.remove("run"); row.classList.add("done");
+        row.querySelector(".bar > i").style.width = "100%";
+        row.querySelector(".v").textContent = "ok";
+        i++; runStep();
+      } else {
+        row.querySelector(".bar > i").style.width = p + "%";
+        row.querySelector(".v").textContent = Math.round(p) + "%";
+      }
+      $("#parseTimer").textContent = Math.round(performance.now() - start) + "ms";
+    }, 40);
+  }
+  runStep();
+}
+
+/* ---------- Triage ---------- */
+function beginTriage(){
+  setStation(3);
+  setToken({ title: "Settling severity…", sinceMs: 2100 });
+  // wobble first (uncertain), then lock
+  setSeverity("?", "Estimating…", 0.3);
+  setTimeout(() => setSeverity("S3", "Payroll · Direct Deposit", 0.55), 600);
+  setTimeout(() => {
+    setSeverity("S2", "Payroll · Direct Deposit", 0.86);
+    pushCrystals(REASON.triage, "triage");
+    setTimeout(beginInv, 700);
+  }, 1500);
+}
+
+/* ---------- INV ---------- */
+function beginInv(){
+  setStation(4);
+  setToken({ title: "Searching INV history…", sinceMs: 3400 });
+  $("#bInv").style.display = "";
+  $("#invCount").textContent = "searching 4,218 INVs…";
+  const list = $("#invList");
+  list.innerHTML = "";
+  INV_MATCHES.forEach((m, i) => {
+    const row = document.createElement("div");
+    row.className = "inv-row" + (m.pct >= 0.9 ? " match" : "");
+    const r = 16; const C = 2*Math.PI*r;
+    const off = C * (1 - m.pct);
+    row.innerHTML = `
+      <div class="meter">
+        <svg viewBox="0 0 40 40">
+          <circle class="ring-bg" cx="20" cy="20" r="${r}" fill="none" stroke-width="3"/>
+          <circle class="ring-fg" cx="20" cy="20" r="${r}" fill="none" stroke-width="3" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}" transform="rotate(-90 20 20)"/>
+        </svg>
+        <div class="pct">${Math.round(m.pct*100)}</div>
+      </div>
+      <div class="body">
+        <div class="top"><span class="id">${m.id}</span><span>· ${m.hits} hits</span><span>· ${m.status}</span></div>
+        <div class="t">${m.title}</div>
+      </div>
+      <div class="act">${m.pct >= 0.9 ? "Auto-pin" : "Inspect"}</div>`;
+    list.appendChild(row);
+    setTimeout(() => {
+      row.querySelector(".ring-fg").setAttribute("stroke-dashoffset", off);
+    }, 100 + i*180);
+    row.addEventListener("click", () => {
+      $$(".inv-row", list).forEach(r => r.classList.remove("match"));
+      row.classList.add("match");
+      toast(m.id + " bonded to case");
+    });
+  });
+  setTimeout(() => {
+    $("#invCount").textContent = INV_MATCHES.length + " matches · top 92%";
+    pushCrystals(REASON.inv, "inv");
+    setTimeout(beginDraft, 900);
+  }, 1100);
+}
+
+/* ---------- Draft ---------- */
+function beginDraft(){
+  setStation(5);
+  setToken({ title: "Drafting reply…", sinceMs: 4900 });
+  // Activate template
+  $$(".tpl").forEach(t => t.classList.remove("on"));
+  const target = $('.tpl[data-tpl="resolve"]');
+  target.classList.add("on");
+  // Stream draft
+  streamDraft(TEMPLATES.resolve, () => {
+    pushCrystals(REASON.draft, "draft");
+    setStation(6);
+    setToken({ title: "Ready to send", sinceMs: 6300 });
+    // Show missing-info chips conditionally
+    const miss = $("#missing");
+    miss.style.display = "";
+    const chips = $("#missingChips");
+    chips.innerHTML = "";
+    ["Did customer see verify-bank screen?", "Browser used for retry?"]
+      .forEach(t => {
+        const c = document.createElement("div");
+        c.className = "tpl on";
+        c.style.borderColor = "rgba(255,213,79,.5)";
+        c.style.color = "var(--sev-s3)";
+        c.style.background = "rgba(255,213,79,.08)";
+        c.textContent = "? " + t;
+        chips.appendChild(c);
+      });
+  });
+}
+
+function streamDraft(text, done){
+  const d = $("#draft");
+  d.innerHTML = "";
+  let i = 0;
+  const cursor = document.createElement("span");
+  cursor.className = "typed-cursor";
+  d.appendChild(cursor);
+  const speed = 6;
+  function step(){
+    if (i >= text.length){ cursor.remove(); done && done(); return }
+    cursor.insertAdjacentText("beforebegin", text.slice(i, i+speed));
+    i += speed;
+    d.scrollTop = d.scrollHeight;
+    setTimeout(step, 16);
+  }
+  step();
+}
+
+/* ---------- Templates ---------- */
+$$(".tpl").forEach(t => t.addEventListener("click", () => {
+  $$(".tpl").forEach(x => x.classList.remove("on"));
+  t.classList.add("on");
+  const tpl = TEMPLATES[t.dataset.tpl];
+  if (tpl) streamDraft(tpl);
+}));
+
+/* ---------- Providers ---------- */
+$$("#provStack .prov").forEach(p => p.addEventListener("click", () => {
+  $$("#provStack .prov").forEach(x => x.classList.remove("active"));
+  p.classList.add("active");
+  provider = p.dataset.prov;
+  const text = PROVIDER_DRAFTS[provider] || TEMPLATES.resolve;
+  streamDraft(text);
+  toast("Voice: " + provider.toUpperCase() + " · " + PROVIDER_LATENCY[provider]);
+}));
+
+$("#btnCompare").addEventListener("click", () => openCompare());
+$("#compareClose").addEventListener("click", () => closeCompare());
+
+function openCompare(){
+  const grid = $("#compareGrid");
+  grid.innerHTML = "";
+  const order = ["claude","gpt","gemini","kimi"];
+  const winner = "claude"; // confidence-weighted
+  order.forEach(k => {
+    const cell = document.createElement("div");
+    cell.className = "compare-cell" + (k === winner ? " win" : "");
+    cell.innerHTML = `
+      <header>
+        <div class="who"><div class="prov ${k} active">${k==='claude'?'C':k==='gpt'?'G':k==='gemini'?'◇':'K'}</div>
+        <div><div style="font-size:12.5px">${k.toUpperCase()}</div><div class="latency">${PROVIDER_LATENCY[k]} · ${k===winner?"recommended":"alt"}</div></div></div>
+        <button class="pick" data-pick="${k}">${k===winner?"Use this":"Use"}</button>
+      </header>
+      <div class="body">${PROVIDER_DRAFTS[k]}</div>
+      <div class="footer">
+        <span>tokens ${(120+Math.random()*40|0)}/${(220+Math.random()*60|0)}</span>
+        <span>${k===winner?"⭑ best fit · INV-104442":"flagged: minor playbook drift"}</span>
+      </div>`;
+    cell.querySelector(".pick").addEventListener("click", () => {
+      $$("#provStack .prov").forEach(x => x.classList.remove("active"));
+      $(`#provStack .prov[data-prov="${k}"]`).classList.add("active");
+      provider = k;
+      streamDraft(PROVIDER_DRAFTS[k]);
+      closeCompare();
+      toast("Adopted " + k.toUpperCase() + " draft");
+    });
+    grid.appendChild(cell);
+  });
+  $("#compare").classList.add("on");
+}
+function closeCompare(){ $("#compare").classList.remove("on") }
+
+/* ---------- Crystal tabs filter ---------- */
+$$(".crystal-tab").forEach(t => t.addEventListener("click", () => {
+  $$(".crystal-tab").forEach(x => x.classList.remove("on"));
+  t.classList.add("on");
+  applyCrystalFilter();
+}));
+$("#saveAllReason").addEventListener("click", () => {
+  $$(".crystal .save").forEach(b => { b.classList.add("saved"); b.textContent = "Saved" });
+  toast("All reasoning bonded to INV-104442");
+});
+
+/* ---------- INV actions ---------- */
+$("#invAttach").addEventListener("click", () => toast("INV-104442 attached to CASE-78321"));
+$("#invCreate").addEventListener("click", () => toast("Drafted INV-104451 (new) — placeholder created"));
+
+/* ---------- Webcam capture ---------- */
+function openCapture(){ $("#capture").classList.add("on"); captureOn = true }
+function closeCapture(){ $("#capture").classList.remove("on"); captureOn = false }
+$("#captureClose").addEventListener("click", closeCapture);
+$("#capShoot").addEventListener("click", () => {
+  $("#capStatus").textContent = "Captured · deblurring 1080p…";
+  setTimeout(() => {
+    closeCapture();
+    fillThumbnail("webcam");
+    setStation(1);
+    pulseToken();
+    setToken({ title:"Screenshot via webcam · deblurred", sinceMs:0 });
+    setTimeout(beginParse, 600);
+  }, 700);
+});
+
+/* ---------- Intake buttons ---------- */
+$$(".intake button").forEach(b => b.addEventListener("click", () => startFlow(b.dataset.intake)));
+
+/* ---------- Composer actions ---------- */
+$("#btnRegen").addEventListener("click", () => {
+  const text = PROVIDER_DRAFTS[provider] || TEMPLATES.resolve;
+  streamDraft(text);
+  toast("Regenerated · " + provider.toUpperCase());
+});
+$("#btnSaveDraft").addEventListener("click", () => toast("Draft saved · case CASE-78321"));
+$("#btnSend").addEventListener("click", () => {
+  setStation(6);
+  pulseToken();
+  toast("Reply sent to phone agent M. Cho · case closed");
+});
+
+/* ---------- Drag/Drop on stage ---------- */
+document.addEventListener("dragover", e => { e.preventDefault() });
+document.addEventListener("drop", e => {
+  e.preventDefault();
+  if (activeStage === 0) startFlow("drag");
+});
+
+/* ---------- Paste from clipboard ---------- */
+document.addEventListener("paste", e => {
+  if (activeStage === 0) startFlow("paste");
+});
+
+/* ---------- Keyboard ---------- */
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && captureOn) closeCapture();
+  if (e.key === "Escape" && $("#compare").classList.contains("on")) closeCompare();
+  if (e.code === "Space" && activeStage === 0){
+    e.preventDefault();
+    startFlow("hand");
+  }
+  if (e.key === "c" && (e.metaKey || e.ctrlKey) && e.shiftKey){ e.preventDefault(); openCompare(); }
+});
+
+/* ---------- Toast ---------- */
+let toastTimer = null;
+function toast(msg){
+  const t = $("#toast"); $("#toastMsg").textContent = msg;
+  t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("on"), 2200);
+}
+
+/* ---------- Typewriter ---------- */
+function typewriter(el, text, speed, done){
+  el.textContent = ""; let i = 0;
+  const tick = setInterval(() => {
+    el.textContent = text.slice(0, i);
+    i += 2;
+    if (i > text.length){ clearInterval(tick); el.textContent = text; done && done() }
+  }, speed);
+}
+
+/* ---------- Init ---------- */
+buildQueue();
+setStation(0);
+setSeverity("?", "Uncategorized", 0.0);
+moveTokenTo(1);
+
+// Ambient: occasionally pulse the token to suggest a heartbeat
+setInterval(() => {
+  if (activeStage === 0){
+    const t = $("#token");
+    t.animate(
+      [{ filter:"brightness(1)" },{ filter:"brightness(1.15)" },{ filter:"brightness(1)" }],
+      { duration: 1400, easing:"ease-in-out" }
+    );
+  }
+}, 3200);
+
+// First placeholder crystal
+$("#crystals > .crystal").dataset.placeholder = "true";
+
+</script>
+
+<!-- Inspiration:
+  - Slipstream concept: borrowed from production motion vernacular where state is conveyed by a token's path, not by panel switches.
+  - Reasoning-as-crystal: each AI decision pins an explanation to the chip that produced it (auditability requirement from brief, surface 7).
+  - Provider compare grid: shows 4 same-prompt outputs side-by-side with a confidence-weighted recommended pick — surface 9.
+  - Severity wobble → lock animation: motion encodes uncertainty, then collapses to certainty (motion as information channel, not decoration).
+-->
+</body>
+</html>

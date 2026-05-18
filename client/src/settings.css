@@ -1653,6 +1653,19 @@
     0 8px 14px rgba(18, 24, 40, 0.05);
 }
 
+.assistant-model-card:disabled,
+.assistant-model-card.is-disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
+.assistant-model-card:disabled:hover,
+.assistant-model-card.is-disabled:hover {
+  border-color: color-mix(in srgb, var(--line) 82%, white);
+  box-shadow: none;
+}
+
 .assistant-model-card:focus-visible,
 .assistant-mode-card:focus-visible,
 .assistant-choice-pill:focus-visible,

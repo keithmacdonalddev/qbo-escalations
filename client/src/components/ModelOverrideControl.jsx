@@ -23,6 +23,7 @@ export default function ModelOverrideControl({
   listId,
   suggestions = [],
   className = '',
+  disabled = false,
 }) {
   const normalizedModel = normalizeModelOverride(model);
   const defaultModel = getProviderDefaultModel(provider);
@@ -33,14 +34,14 @@ export default function ModelOverrideControl({
     .slice(0, 4);
 
   return (
-    <div className={`model-override-control${className ? ` ${className}` : ''}`}>
+    <div className={`model-override-control${className ? ` ${className}` : ''}${disabled ? ' is-disabled' : ''}`}>
       <div className="model-override-control__header">
         <div className="model-override-control__title">{label}</div>
         <button
           type="button"
           className="model-override-control__reset"
           onClick={() => onChange('')}
-          disabled={!normalizedModel}
+          disabled={disabled || !normalizedModel}
         >
           Use default
         </button>
@@ -64,6 +65,7 @@ export default function ModelOverrideControl({
               className={`model-override-control__quick-pick${normalizedModel === option.value ? ' is-active' : ''}`}
               onClick={() => onChange(option.value)}
               title={option.value}
+              disabled={disabled}
             >
               {option.label}
             </button>
@@ -79,6 +81,7 @@ export default function ModelOverrideControl({
           list={listId}
           placeholder={getProviderModelPlaceholder(provider)}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
         />
         <datalist id={listId}>
           {suggestions.map((option) => (

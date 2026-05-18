@@ -21,6 +21,11 @@ import {
   useSharedAgentSession,
 } from '../lib/agentSessions.js';
 import useCopilotRun from '../hooks/useCopilotRun.js';
+import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
+import {
+  getProviderOptionTitle,
+  isProviderMissingApiKey,
+} from '../lib/providerKeyStatus.js';
 
 const COPILOT_PRIMARY_MODEL_LIST_ID = 'copilot-primary-model-options';
 const COPILOT_FALLBACK_MODEL_LIST_ID = 'copilot-fallback-model-options';
@@ -163,8 +168,10 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
     usage,
   } = session;
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
+  const { providerStatus } = useProviderKeyStatus();
   const primaryModelSuggestions = useMemo(() => getProviderModelSuggestions(provider), [provider]);
   const fallbackModelSuggestions = useMemo(() => getProviderModelSuggestions(fallbackProvider), [fallbackProvider]);
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
   const providerButtonValue = getProviderShortLabel(provider);
   const providerButtonTitle = providerMode === 'fallback'
     ? `Primary provider: ${getProviderShortLabel(provider)}. Fallback provider: ${getProviderShortLabel(fallbackProvider)}.`
@@ -271,29 +278,35 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
           {providerMenuOpen && (
             <div className="workspace-agent-provider-popover" style={{ left: 'auto', right: 0, width: 340 }}>
               <div className="provider-popover-label">Provider</div>
-              {PROVIDER_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                  onClick={() => {
-                    const patch = { provider: option.value, model: '' };
-                    const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
-                    const allowed = getReasoningEffortOptions(nextFamily);
-                    if (!allowed.some((o) => o.value === reasoningEffort)) {
-                      patch.reasoningEffort = 'high';
-                    }
-                    if (option.value === fallbackProvider) {
-                      patch.fallbackProvider = provider;
-                      patch.fallbackModel = '';
-                    }
-                    patchSession(patch);
-                  }}
-                >
-                  <span>{option.label}</span>
-                  <span className="check">{provider === option.value ? '\u2713' : ''}</span>
-                </button>
-              ))}
+              {PROVIDER_OPTIONS.map((option) => {
+                const disabled = isMissingKey(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (disabled) return;
+                      const patch = { provider: option.value, model: '' };
+                      const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
+                      const allowed = getReasoningEffortOptions(nextFamily);
+                      if (!allowed.some((o) => o.value === reasoningEffort)) {
+                        patch.reasoningEffort = 'high';
+                      }
+                      if (option.value === fallbackProvider) {
+                        patch.fallbackProvider = provider;
+                        patch.fallbackModel = '';
+                      }
+                      patchSession(patch);
+                    }}
+                    title={getProviderOptionTitle(option, providerStatus)}
+                  >
+                    <span>{option.label}</span>
+                    <span className="check">{provider === option.value ? '\u2713' : ''}</span>
+                  </button>
+                );
+              })}
               <ModelOverrideControl
                 label="Primary Model"
                 provider={provider}
@@ -301,6 +314,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                 onChange={(value) => patchSession({ model: value })}
                 listId={COPILOT_PRIMARY_MODEL_LIST_ID}
                 suggestions={primaryModelSuggestions}
+                disabled={isMissingKey(provider)}
               />
               <div className="provider-popover-divider" />
               <div className="provider-popover-label">Mode</div>
@@ -322,17 +336,25 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                 <>
                   <div className="provider-popover-divider" />
                   <div className="provider-popover-label">Fallback Provider</div>
-                  {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
-                      onClick={() => patchSession({ fallbackProvider: option.value, fallbackModel: '' })}
-                    >
-                      <span>{option.label}</span>
-                      <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
-                    </button>
-                  ))}
+                  {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
+                    const disabled = isMissingKey(option.value);
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                        disabled={disabled}
+                        onClick={() => {
+                          if (disabled) return;
+                          patchSession({ fallbackProvider: option.value, fallbackModel: '' });
+                        }}
+                        title={getProviderOptionTitle(option, providerStatus)}
+                      >
+                        <span>{option.label}</span>
+                        <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                      </button>
+                    );
+                  })}
                   <ModelOverrideControl
                     label="Fallback Model"
                     provider={fallbackProvider}
@@ -340,6 +362,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                     onChange={(value) => patchSession({ fallbackModel: value })}
                     listId={COPILOT_FALLBACK_MODEL_LIST_ID}
                     suggestions={fallbackModelSuggestions}
+                    disabled={isMissingKey(fallbackProvider)}
                   />
                 </>
               )}

@@ -6,6 +6,8 @@ import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
+  getImageParserReasoningEffortOptions,
+  resolveImageParserSelection,
 } from '../../lib/imageParserCatalog.js';
 import {
   dispatchAgentRuntimeDefaultsApplied,
@@ -14,6 +16,7 @@ import {
   readAgentRuntimeState,
   writeAgentRuntimeState,
 } from '../../lib/agentRuntimeSettings.js';
+import { isProviderMissingApiKey } from '../../lib/providerKeyStatus.js';
 import { transitions } from '../../utils/motion.js';
 
 const IMAGE_PARSER_PROVIDERS = [
@@ -28,6 +31,7 @@ const DEFAULT_PARSER_MODE = 'escalation-template-parser';
 const IMAGE_PARSER_POPUP_MODEL_LIST_ID = 'chat-image-parser-model-options';
 const SHARED_IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
 const SHARED_IMAGE_PARSER_MODEL_KEY = 'qbo-image-parser-model';
+const SHARED_IMAGE_PARSER_REASONING_EFFORT_KEY = 'qbo-image-parser-reasoning-effort';
 
 const ScanIcon = ({ size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -68,16 +72,21 @@ function readParserRuntime(parserMode) {
     return {
       provider: state.provider || '',
       model: state.model || '',
+      reasoningEffort: state.reasoningEffort || '',
       source: 'agent-runtime',
     };
   }
 
-  const sharedProvider = localStorage.getItem(SHARED_IMAGE_PARSER_PROVIDER_KEY) || '';
-  const sharedModel = localStorage.getItem(SHARED_IMAGE_PARSER_MODEL_KEY) || '';
+  const sharedSelection = resolveImageParserSelection(
+    localStorage.getItem(SHARED_IMAGE_PARSER_PROVIDER_KEY) || '',
+    localStorage.getItem(SHARED_IMAGE_PARSER_MODEL_KEY) || ''
+  );
+  const sharedReasoningEffort = localStorage.getItem(SHARED_IMAGE_PARSER_REASONING_EFFORT_KEY) || '';
   return {
-    provider: sharedProvider,
-    model: sharedModel,
-    source: sharedProvider ? 'shared-image-parser' : 'empty',
+    provider: sharedSelection.provider,
+    model: sharedSelection.model,
+    reasoningEffort: sharedReasoningEffort,
+    source: sharedSelection.provider ? 'shared-image-parser' : 'empty',
   };
 }
 
@@ -98,6 +107,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const [parserMode, setParserMode] = useState(() => normalizeParserMode(initialParserMode));
   const [provider, setProvider] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).provider);
   const [model, setModel] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).model);
+  const [reasoningEffort, setReasoningEffort] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).reasoningEffort);
   const [imagePreview, setImagePreview] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -112,6 +122,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
+  const reasoningEffortOptions = getImageParserReasoningEffortOptions(provider);
 
   // Check provider availability when popup opens
   useEffect(() => {
@@ -132,8 +143,8 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   // Persist provider/model to the selected agent runtime so /agents and popup execution agree.
   useEffect(() => {
     if (!open) return;
-    persistParserRuntime(parserMode, { provider, model });
-  }, [open, parserMode, provider, model]);
+    persistParserRuntime(parserMode, { provider, model, reasoningEffort });
+  }, [open, parserMode, provider, model, reasoningEffort]);
 
   useEffect(() => {
     if (!open) return;
@@ -142,6 +153,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     setParserMode(nextParserMode);
     setProvider(runtime.provider);
     setModel(runtime.model);
+    setReasoningEffort(runtime.reasoningEffort);
     setRuntimeNotice(runtime.source === 'shared-image-parser'
       ? `${getParserModeLabel(nextParserMode)} is using shared image parser defaults. Saving them to this agent runtime.`
       : '');
@@ -244,18 +256,22 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     setParserMode(nextParserMode);
     setProvider(runtime.provider);
     setModel(runtime.model);
+    setReasoningEffort(runtime.reasoningEffort);
     setRuntimeNotice(runtime.source === 'shared-image-parser'
       ? `${getParserModeLabel(nextParserMode)} is using shared image parser defaults. Saving them to this agent runtime.`
       : '');
     setValidationError('');
   }, []);
 
+  const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
+
   const handleParse = useCallback(async () => {
-    if (!imageBase64 || !provider) return;
+    if (!imageBase64 || !provider || providerMissingApiKey) return;
     setValidationError('');
     const data = await parse(imageBase64, {
       provider,
       model: model || undefined,
+      reasoningEffort: reasoningEffort || undefined,
       promptId: parserMode,
     });
     if (data?.parseMeta && data.parseMeta.passed === false) {
@@ -272,6 +288,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
         parserPromptId: data.promptId || parserMode,
         providerUsed: provider,
         modelUsed: data?.usage?.model || model || '',
+        reasoningEffortUsed: reasoningEffort || '',
       });
       // Reset state for next use
       setImagePreview(null);
@@ -279,7 +296,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       setValidationError('');
       onClose();
     }
-  }, [imageBase64, provider, model, parserMode, parse, onParsed, onClose]);
+  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parserMode, parse, onParsed, onClose]);
 
   const handleClear = useCallback(() => {
     setValidationError('');
@@ -298,7 +315,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
   const providerStatus = provider && availability?.providers?.[provider];
   const isProviderOnline = providerStatus?.available;
-  const canParse = imageBase64 && provider && !parsing;
+  const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
 
   if (!open) return null;
 
@@ -351,9 +368,22 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
             </label>
             <label className="ip-popup-field">
               <span>Provider</span>
-              <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+              <select
+                value={provider}
+                onChange={(e) => {
+                  setProvider(e.target.value);
+                  setModel('');
+                  setReasoningEffort('');
+                }}
+              >
                 {IMAGE_PARSER_PROVIDERS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  <option
+                    key={opt.value}
+                    value={opt.value}
+                    disabled={isProviderMissingApiKey(opt.value, availability?.providers)}
+                  >
+                    {opt.label}
+                  </option>
                 ))}
               </select>
             </label>
@@ -365,6 +395,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                 placeholder={getImageParserModelPlaceholder(provider)}
                 list={IMAGE_PARSER_POPUP_MODEL_LIST_ID}
                 onChange={(e) => setModel(e.target.value)}
+                disabled={providerMissingApiKey}
               />
               <datalist id={IMAGE_PARSER_POPUP_MODEL_LIST_ID}>
                 {modelSuggestions.map((option) => (
@@ -372,6 +403,21 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                 ))}
               </datalist>
             </label>
+            {reasoningEffortOptions.length > 0 && (
+              <label className="ip-popup-field">
+                <span>Effort</span>
+                <select
+                  value={reasoningEffort}
+                  onChange={(e) => setReasoningEffort(e.target.value)}
+                  disabled={providerMissingApiKey}
+                >
+                  <option value="">Default</option>
+                  {reasoningEffortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
 
           {/* Drop zone / Preview */}

@@ -38,7 +38,7 @@ module.exports = {
   description: 'Escalation analysis, similar case search, template suggestions, and trend insights.',
   triggerKeywords: ['analyze', 'similar', 'template', 'suggest', 'trend', 'playbook', 'pattern', 'search'],
   triggerMentions: ['@copilot', '@co'],
-  // Priority 20 — runs in stage 2, after QBO Analyst (priority 10)
+  // Priority 20 — runs in stage 2, after QBO Assistant (priority 10)
   priority: 20,
   maxContextMessages: 15,
   preferredProvider: 'claude-opus-4-7',
@@ -185,7 +185,7 @@ module.exports = {
       'You know the other agents exist, you are expected to live in community with them, and you should keep one continuous identity across work and social conversation.\n\n' +
       'If another agent is quiet and their perspective would help, you may use agentProfiles.nudge to invite them in. ' +
       'Do not claim you cannot nudge another agent unless you have actually checked your available tools and confirmed the nudge tool is missing.\n\n' +
-      'You respond AFTER the QBO Analyst. Build on what the Analyst said. Do not repeat ' +
+      'You respond AFTER the QBO Assistant. Build on what the Assistant said. Do not repeat ' +
       'their answer — add the analytical layer they cannot provide: data comparisons, ' +
       'historical patterns, specific escalation context.\n\n' +
       'If no analysis data was pre-fetched, answer conversationally based on your knowledge. ' +

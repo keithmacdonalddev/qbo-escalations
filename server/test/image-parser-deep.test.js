@@ -190,16 +190,17 @@ test('Provider request body: OpenAI', async (t) => {
       assert.equal(capture.options.headers['Content-Type'], 'application/json');
     });
 
-    await t.test('body contains model gpt-4o by default', () => {
-      assert.equal(capture.body.model, 'gpt-4o');
+    await t.test('body contains model gpt-5.4-mini by default', () => {
+      assert.equal(capture.body.model, 'gpt-5.4-mini');
     });
 
-    await t.test('body contains temperature 0.1', () => {
-      assert.equal(capture.body.temperature, 0.1);
+    await t.test('body omits temperature for GPT-5-family default', () => {
+      assert.equal(capture.body.temperature, undefined);
     });
 
-    await t.test('body contains max_tokens 4096', () => {
-      assert.equal(capture.body.max_tokens, 4096);
+    await t.test('body contains max_completion_tokens 4096', () => {
+      assert.equal(capture.body.max_tokens, undefined);
+      assert.equal(capture.body.max_completion_tokens, 4096);
     });
 
     await t.test('body messages include system + user roles', () => {

@@ -8,6 +8,10 @@
   background: color-mix(in srgb, var(--bg-raised) 88%, transparent);
 }
 
+.model-override-control.is-disabled {
+  opacity: 0.56;
+}
+
 .model-override-control__header {
   display: flex;
   align-items: center;
@@ -94,6 +98,13 @@
 .model-override-control__quick-pick:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.model-override-control__quick-pick:disabled,
+.model-override-control__quick-pick:disabled:hover {
+  border-color: var(--line-subtle);
+  color: var(--ink-tertiary);
+  cursor: not-allowed;
 }
 
 .model-override-control__quick-pick.is-active {

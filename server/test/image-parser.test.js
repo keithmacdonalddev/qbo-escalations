@@ -346,6 +346,38 @@ test('parseImage derives structured escalation fields and parse confidence', asy
   }
 });
 
+test('parseImage recovers fields when provider adds chatter before canonical template', async () => {
+  mockHttpRequest(200, {
+    choices: [{
+      message: {
+        content: [
+          'I am extracting the visible fields and will return the template.COID/MID: 9130350484590926',
+          'CASE: 15154529119',
+          'CLIENT/CONTACT: oum-eirma hammedi',
+          'CX IS ATTEMPTING TO: payroll sync issue',
+          'EXPECTED OUTCOME:',
+          'ACTUAL OUTCOME: cannot match paycheques',
+          'KB/TOOLS USED:',
+          'TRIED TEST ACCOUNT: no',
+          'TS STEPS: checked COA and account is active',
+        ].join('\n'),
+      },
+    }],
+    model: 'test-vision-model',
+    usage: { prompt_tokens: 120, completion_tokens: 80 },
+  });
+
+  try {
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', promptId: 'escalation-template-parser' });
+    assert.equal(result.parseFields.coid, '9130350484590926');
+    assert.equal(result.parseFields.caseNumber, '15154529119');
+    assert.equal(result.parseMeta?.canonicalTemplate?.passed, false);
+    assert.equal(result.parseMeta?.canonicalTemplate?.recoveredPassed, true);
+  } finally {
+    clearHttpMock();
+  }
+});
+
 test('parseImage auto-detects inv-list role from INV pattern', async () => {
   mockHttpRequest(200, {
     choices: [{ message: { content: 'Friday:\n- INV-123456 Payroll sync issue\n- INV-789012 Bank feed timeout' } }],
@@ -787,7 +819,7 @@ test('parseImage routes to openai and returns parsed result', async () => {
   const cleanupKey = setupProviderKey('OPENAI_API_KEY', 'sk-openai-test-key');
   const httpsMock = mockHttpsRequest(200, {
     choices: [{ message: { content: 'COID/MID: 999\nCASE: CS-004' } }],
-    model: 'gpt-4o',
+    model: 'gpt-5.4-mini',
     usage: { prompt_tokens: 150, completion_tokens: 30 },
   });
 
@@ -798,7 +830,7 @@ test('parseImage routes to openai and returns parsed result', async () => {
     assert.ok(result.usage);
     assert.equal(result.usage.inputTokens, 150);
     assert.equal(result.usage.outputTokens, 30);
-    assert.equal(result.usage.model, 'gpt-4o');
+    assert.equal(result.usage.model, 'gpt-5.4-mini');
 
     // Verify OpenAI request body uses data URL (not raw base64)
     const body = httpsMock.getCapturedBody();
@@ -1673,7 +1705,7 @@ test('provider request body validation', async (t) => {
   // ---------------------------------------------------------------------------
   // 2. OpenAI request body shape
   // ---------------------------------------------------------------------------
-  await t.test('openai: sends correct request body shape (temperature 0.1, model, image format, auth)', async () => {
+  await t.test('openai: sends correct request body shape (reasoning model, image format, auth)', async () => {
     const origKey = process.env.OPENAI_API_KEY;
     const origRead = fs.readFileSync;
     process.env.OPENAI_API_KEY = 'sk-test-body-check';
@@ -1694,9 +1726,10 @@ test('provider request body validation', async (t) => {
 
       // Body shape
       const body = captured.body;
-      assert.equal(body.temperature, 0.1, 'OpenAI uses temperature: 0.1');
-      assert.equal(body.model, 'gpt-4o', 'default model must be gpt-4o');
-      assert.equal(body.max_tokens, 4096);
+      assert.equal(body.temperature, undefined, 'OpenAI GPT-5-family requests omit temperature');
+      assert.equal(body.model, 'gpt-5.4-mini', 'default model must be gpt-5.4-mini');
+      assert.equal(body.max_tokens, undefined);
+      assert.equal(body.max_completion_tokens, 4096);
 
       // Messages structure
       assert.equal(body.messages[0].role, 'system');
@@ -1835,7 +1868,7 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImage(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4-turbo-custom' });
-      assert.equal(captured.body.model, 'gpt-4-turbo-custom', 'custom model must override default gpt-4o');
+      assert.equal(captured.body.model, 'gpt-4-turbo-custom', 'custom model must override default gpt-5.4-mini');
     } finally {
       captured._restore();
       fs.readFileSync = origRead;
@@ -1934,7 +1967,7 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
-      assert.equal(captured.options.timeout, 60000, 'default timeout should be 60000ms');
+      assert.equal(captured.options.timeout, 120000, 'default timeout should be 120000ms');
     } finally {
       captured._restore();
       fs.readFileSync = origRead;

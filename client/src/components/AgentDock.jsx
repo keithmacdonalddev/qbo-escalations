@@ -1,7 +1,11 @@
 import './AgentDock.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { renderMarkdown } from '../utils/markdown.jsx';
-import { catalogSupportsThinking, getProviderShortLabel } from '../lib/providerCatalog.js';
+import {
+  catalogReportsReasoningActivity,
+  catalogSupportsThinking,
+  getProviderShortLabel,
+} from '../lib/providerCatalog.js';
 import WorkspaceAgentPanel from './WorkspaceAgentPanel.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 
@@ -149,6 +153,7 @@ function CompactConversationPane({
   const hasSavedReasoning = savedReasoningEntries.length > 0;
   const showSavedReasoning = liveMonitorMode && !isStreaming && !hasReasoningContent && hasSavedReasoning;
   const providerSupportsThinking = catalogSupportsThinking(providerId);
+  const providerReportsReasoningActivity = catalogReportsReasoningActivity(providerId);
   const latestProcessEvent = recentProcessEvents[0] || null;
   const reasoningStatusText = hasReasoningContent
     ? ''
@@ -157,7 +162,9 @@ function CompactConversationPane({
       : isStreaming
         ? providerSupportsThinking
           ? `Waiting for live reasoning from ${getProviderShortLabel(providerId)}.`
-          : `${getProviderShortLabel(providerId)} does not expose live reasoning.`
+          : providerReportsReasoningActivity
+            ? `${getProviderShortLabel(providerId)} is reasoning, but the stream does not expose a readable reasoning trace.`
+            : `${getProviderShortLabel(providerId)} does not expose live reasoning.`
         : hasSavedReasoning
           ? 'Showing the saved reasoning trace from the latest completed response.'
           : hasConversationHistory
@@ -442,6 +449,8 @@ export default function AgentDock({
   activeTab: controlledActiveTab,
   onActiveTabChange,
   hideTabs = false,
+  resizable = true,
+  modalMode = false,
   onClose,
 }) {
   const [internalActiveTab, setInternalActiveTab] = useState(() => normalizeTabId(defaultTab));
@@ -476,11 +485,12 @@ export default function AgentDock({
 
   // Apply width to the parent wrapper element via CSS custom property
   useEffect(() => {
+    if (!resizable) return;
     const wrapper = dockRef.current?.closest('.gmail-agent-dock-wrapper');
     if (wrapper) {
       wrapper.style.setProperty('--agent-dock-width', `${panelWidth}px`);
     }
-  }, [panelWidth]);
+  }, [panelWidth, resizable]);
 
   const handleMouseDown = useCallback((e) => {
     e.preventDefault();
@@ -527,13 +537,15 @@ export default function AgentDock({
   const chatTabUsesLiveMonitor = viewContext?.view === 'chat';
 
   return (
-    <div className="agent-dock" ref={dockRef} role="region" aria-label="Agent dock panel">
+    <div className={`agent-dock${modalMode ? ' agent-dock--floating' : ''}`} ref={dockRef} role="region" aria-label="Agent panel">
       <h2 className="sr-only">Agent Panel</h2>
-      <div
-        className={`agent-dock-resize-handle${isDragging ? ' is-dragging' : ''}`}
-        onMouseDown={handleMouseDown}
-        onDoubleClick={handleDoubleClick}
-      />
+      {resizable ? (
+        <div
+          className={`agent-dock-resize-handle${isDragging ? ' is-dragging' : ''}`}
+          onMouseDown={handleMouseDown}
+          onDoubleClick={handleDoubleClick}
+        />
+      ) : null}
       {!hideTabs ? (
         <div className="agent-dock-tabs" role="tablist" aria-label="Agent dock tabs">
           {TAB_OPTIONS.map((tab) => (
@@ -551,7 +563,7 @@ export default function AgentDock({
             </button>
           ))}
           <div className="agent-dock-tabs-right">
-            {onClose ? (
+            {onClose && !modalMode ? (
               <button
                 type="button"
                 className="agent-dock-close"

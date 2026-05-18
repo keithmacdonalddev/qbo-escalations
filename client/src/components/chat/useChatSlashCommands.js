@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo } from 'react';
 import { PROVIDER_FAMILY, getReasoningEffortOptions } from '../../lib/providerCatalog.js';
 import { useToast } from '../../hooks/useToast.jsx';
 import { getProviderLabel } from '../../utils/markdown.jsx';
+import useProviderKeyStatus from '../../hooks/useProviderKeyStatus.js';
+import { isProviderMissingApiKey } from '../../lib/providerKeyStatus.js';
 import {
   PARSE_ESCALATION_PROMPT,
   QUICK_PROMPT_COMMANDS,
@@ -29,6 +31,7 @@ export default function useChatSlashCommands({
   setReasoningEffort,
 }) {
   const toast = useToast();
+  const { providerStatus } = useProviderKeyStatus();
 
   const providerAliasMap = useMemo(() => createProviderAliasMap(provider), [provider]);
 
@@ -124,6 +127,10 @@ export default function useChatSlashCommands({
           toast.warning(`Unknown provider "${argRaw}".`);
           return true;
         }
+        if (isProviderMissingApiKey(resolvedProvider, providerStatus)) {
+          toast.warning(`${getProviderLabel(resolvedProvider)} needs an API key before it can be selected.`);
+          return true;
+        }
         setProvider(resolvedProvider);
         setInput('');
         toast.success(`Provider set to ${getProviderLabel(resolvedProvider)}.`);
@@ -194,6 +201,7 @@ export default function useChatSlashCommands({
     handleAttachClick,
     provider,
     providerAliasMap,
+    providerStatus,
     setInput,
     setMode,
     setProvider,

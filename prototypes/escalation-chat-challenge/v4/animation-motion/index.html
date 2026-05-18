@@ -1,0 +1,605 @@
+<!doctype html>
+<!--
+  designer-animation-motion — V4 STRIP-MODE
+  Forced angle: NO BUTTONS. Zero button-shaped affordances. Motion teaches.
+  2 features:
+    1. Gravity Cards — every card has weight; it leans, drifts, breathes toward
+       the operator's next action. Pulling a card down "uses" it (drag-to-paste).
+    2. Whisper Hold — press and hold ANYWHERE on a card to reveal its gestures.
+       First-use coach mark fades in once; never again.
+  Regions:
+    - Triage tile (top-left)  → goal 1 (see what's wrong) + goal 2 (confirm/doubt: lean to accept, push up to revise)
+    - Conversation column     → goal 3 (get the answer) — main analyst speaks; you reply by typing in the breathing field
+    - Answer drawer (bottom)  → goal 4 (use the answer) — drag the latest reply down into the drawer to copy
+  Nothing else is visible. Parser data lives inside the triage tile on long-hold reveal.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>QBO Escalation — Motion</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root{
+    --bg:#0e0f12;
+    --ink:#e9eaee;
+    --ink-dim:#8a8e99;
+    --ink-faint:#4a4e58;
+    --tile:#16181d;
+    --tile-2:#1c1f26;
+    --edge:#23262e;
+    --accent:#cbd5ff;
+    --accent-soft:#7a86b8;
+    --warn:#d9a86c;
+    --ok:#7fb18a;
+    --grab:#2a2e38;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+    font-family: ui-sans-serif, -apple-system, "Inter", "Segoe UI", system-ui, sans-serif;
+    font-size:14px; line-height:1.5; overflow:hidden;
+    -webkit-font-smoothing:antialiased; letter-spacing:.01em;
+  }
+  /* ambient breathing — the whole page exhales every 4s */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none;
+    background: radial-gradient(1200px 800px at 30% 20%, rgba(123,134,184,.06), transparent 60%),
+                radial-gradient(900px 700px at 80% 90%, rgba(127,177,138,.04), transparent 65%);
+    animation: ambient 9s ease-in-out infinite alternate;
+  }
+  @keyframes ambient{ from{opacity:.6} to{opacity:1} }
+
+  .stage{
+    position:fixed; inset:0;
+    display:grid;
+    grid-template-columns: minmax(320px, 380px) 1fr;
+    grid-template-rows: 1fr 92px;
+    gap:18px; padding:18px;
+  }
+
+  /* ============== TRIAGE TILE ============== */
+  .triage{
+    grid-column:1; grid-row:1;
+    position:relative;
+    background: var(--tile);
+    border-radius:18px;
+    padding:22px 22px 24px;
+    border:1px solid var(--edge);
+    display:flex; flex-direction:column; gap:14px;
+    cursor:grab;
+    transform-origin: 50% 50%;
+    transition: transform .35s cubic-bezier(.2,.7,.2,1), box-shadow .35s ease, border-color .3s ease;
+    box-shadow: 0 1px 0 rgba(255,255,255,.02) inset, 0 18px 40px -28px rgba(0,0,0,.7);
+    animation: tileBreath 5.2s ease-in-out infinite;
+    will-change: transform;
+  }
+  .triage:active{ cursor:grabbing; }
+  @keyframes tileBreath{
+    0%,100%{ transform: translateY(0) rotateX(0) rotateZ(0); }
+    50%    { transform: translateY(-2px); }
+  }
+  .triage.leaning-down{ animation:none; transform: translateY(8px) rotateX(4deg); box-shadow: 0 30px 60px -30px rgba(127,177,138,.35); border-color: rgba(127,177,138,.4); }
+  .triage.leaning-up  { animation:none; transform: translateY(-10px) rotateX(-5deg); box-shadow: 0 -10px 40px -20px rgba(217,168,108,.35); border-color: rgba(217,168,108,.45); }
+  .triage.committed   { animation:none; transform: scale(.985); border-color: rgba(127,177,138,.6); box-shadow: 0 0 0 1px rgba(127,177,138,.25) inset; }
+
+  .triage .who{
+    display:flex; align-items:center; gap:10px;
+    font-size:11px; color:var(--ink-faint); letter-spacing:.18em; text-transform:uppercase;
+  }
+  .who .dot{ width:6px; height:6px; border-radius:50%; background: var(--accent-soft); box-shadow: 0 0 12px var(--accent-soft); animation: pulseDot 2.4s ease-in-out infinite; }
+  @keyframes pulseDot{ 0%,100%{opacity:.6; transform:scale(1)} 50%{opacity:1; transform:scale(1.4)} }
+
+  .triage h1{
+    font-size: 22px; font-weight: 500; margin: 0; line-height:1.28;
+    color: var(--ink);
+  }
+  .triage .body{ color: var(--ink-dim); font-size: 13.5px; line-height:1.55; max-width:38ch; }
+  .triage .meta{
+    margin-top:auto; display:flex; gap:18px; align-items:flex-end;
+    color: var(--ink-faint); font-size:11.5px;
+  }
+  .triage .meta b{ color: var(--ink-dim); font-weight:500; }
+  .triage .lean-hint{
+    position:absolute; left:50%; transform:translateX(-50%);
+    font-size:10.5px; letter-spacing:.22em; text-transform:uppercase;
+    color: var(--ink-faint); pointer-events:none;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  .triage .lean-hint.down{ bottom:8px; }
+  .triage .lean-hint.up  { top:8px; }
+  .triage.leaning-down .lean-hint.down{ color: var(--ok); transform: translateX(-50%) translateY(-2px); }
+  .triage.leaning-up   .lean-hint.up  { color: var(--warn); transform: translateX(-50%) translateY(2px); }
+
+  /* reveal-on-hold (parser data, INV) */
+  .triage .reveal{
+    position:absolute; inset:0; border-radius:18px;
+    background: rgba(14,15,18,.94);
+    backdrop-filter: blur(10px);
+    display:flex; flex-direction:column; padding:22px;
+    opacity:0; pointer-events:none;
+    transition: opacity .25s ease;
+  }
+  .triage.holding .reveal{ opacity:1; pointer-events:auto; }
+  .reveal .row{ display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px dashed var(--edge); font-size:12.5px; }
+  .reveal .row:last-child{ border-bottom:none; }
+  .reveal .row span:first-child{ color: var(--ink-faint); letter-spacing:.12em; text-transform:uppercase; font-size:10.5px; }
+  .reveal .row span:last-child{ color: var(--ink); font-variant-numeric: tabular-nums; }
+  .reveal .label{
+    font-size:10.5px; letter-spacing:.22em; text-transform:uppercase; color: var(--accent-soft);
+    margin-bottom: 12px;
+  }
+
+  /* ============== CONVERSATION COLUMN ============== */
+  .convo{
+    grid-column:2; grid-row:1;
+    position:relative;
+    display:flex; flex-direction:column;
+    padding: 8px 24px 8px;
+    overflow:hidden;
+  }
+  .turns{
+    flex:1; overflow:hidden;
+    display:flex; flex-direction:column; justify-content:flex-end;
+    gap: 18px;
+    mask-image: linear-gradient(to bottom, transparent 0, #000 60px, #000 100%);
+  }
+  .turn{
+    max-width: 640px;
+    opacity:0; transform: translateY(14px);
+    animation: turnIn .55s cubic-bezier(.2,.7,.2,1) forwards;
+  }
+  @keyframes turnIn{ to{ opacity:1; transform: translateY(0); } }
+  .turn .who{
+    font-size:10.5px; letter-spacing:.22em; text-transform:uppercase;
+    color: var(--ink-faint); margin-bottom:6px;
+  }
+  .turn.analyst .who{ color: var(--accent-soft); }
+  .turn.you{ align-self: flex-end; text-align:right; }
+  .turn .text{
+    color: var(--ink); font-size:15px; line-height:1.55; font-weight:400;
+  }
+  .turn.you .text{ color: var(--ink-dim); }
+
+  /* the latest analyst turn is the only "loud" thing — draggable down */
+  .turn.analyst.latest{
+    cursor: grab;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(203,213,255,.06), rgba(203,213,255,.02));
+    border: 1px solid rgba(203,213,255,.12);
+    box-shadow: 0 20px 40px -28px rgba(203,213,255,.25);
+    animation: turnIn .55s cubic-bezier(.2,.7,.2,1) forwards, latestPulse 3.6s ease-in-out 1s infinite;
+    will-change: transform;
+    transition: transform .25s cubic-bezier(.2,.7,.2,1), box-shadow .25s ease, border-color .25s ease;
+  }
+  @keyframes latestPulse{
+    0%,100%{ box-shadow: 0 20px 40px -28px rgba(203,213,255,.25); border-color: rgba(203,213,255,.12); }
+    50%    { box-shadow: 0 28px 60px -28px rgba(203,213,255,.4);  border-color: rgba(203,213,255,.22); }
+  }
+  .turn.analyst.latest:active{ cursor:grabbing; }
+  .turn.analyst.latest.pulling{ animation:none; }
+
+  /* typing indicator — three dots that breathe */
+  .typing{ display:flex; gap:6px; align-items:center; padding:8px 0; }
+  .typing i{ width:6px; height:6px; border-radius:50%; background: var(--accent-soft); display:inline-block;
+    animation: typ 1.2s ease-in-out infinite; }
+  .typing i:nth-child(2){ animation-delay:.15s; }
+  .typing i:nth-child(3){ animation-delay:.3s; }
+  @keyframes typ{ 0%,100%{opacity:.25; transform: translateY(0)} 50%{opacity:1; transform: translateY(-3px)} }
+
+  /* reply field — a soft horizontal line that breathes; type and press Enter to send (no button) */
+  .reply{
+    margin-top: 14px;
+    position:relative;
+    display:flex; align-items:center;
+    border-bottom:1px solid var(--edge);
+    padding: 10px 2px 12px;
+    transition: border-color .3s ease;
+  }
+  .reply::before{
+    content:""; position:absolute; left:0; right:0; bottom:-1px; height:1px;
+    background: linear-gradient(90deg, transparent, var(--accent-soft), transparent);
+    transform: scaleX(0); transform-origin: center;
+    transition: transform .4s cubic-bezier(.2,.7,.2,1);
+  }
+  .reply:focus-within::before{ transform: scaleX(1); }
+  .reply .placeholder{
+    color: var(--ink-faint); font-size: 14px; pointer-events:none;
+    position:absolute; left:2px; top:50%; transform: translateY(-50%);
+    transition: opacity .2s ease;
+    animation: placeholderBreath 4s ease-in-out infinite;
+  }
+  @keyframes placeholderBreath{ 0%,100%{opacity:.6} 50%{opacity:.95} }
+  .reply input{
+    flex:1; background:transparent; border:0; outline:0; color:var(--ink);
+    font: inherit; font-size:14px; padding:0;
+  }
+  .reply input:focus + .placeholder, .reply input:not(:placeholder-shown) + .placeholder{ opacity:0; }
+  .reply .swipehint{
+    font-size:10.5px; letter-spacing:.2em; text-transform:uppercase;
+    color: var(--ink-faint); margin-left: 12px;
+    opacity:.55; transition: opacity .3s ease, color .3s ease;
+  }
+  .reply:focus-within .swipehint{ opacity:1; color: var(--accent-soft); }
+
+  /* ============== ANSWER DRAWER ============== */
+  .drawer{
+    grid-column: 1 / -1; grid-row:2;
+    position:relative;
+    border-radius: 18px;
+    background: linear-gradient(180deg, var(--tile-2), var(--tile));
+    border: 1px dashed var(--edge);
+    display:flex; align-items:center; justify-content:center;
+    color: var(--ink-faint); font-size:12px; letter-spacing:.22em; text-transform:uppercase;
+    transition: border-color .3s ease, background .3s ease, color .3s ease, transform .3s ease;
+    overflow:hidden;
+  }
+  .drawer .hint{ display:flex; align-items:center; gap:14px; }
+  .drawer .hint .arrow{
+    width:18px; height:18px; border-right:1.5px solid var(--ink-faint); border-bottom:1.5px solid var(--ink-faint);
+    transform: rotate(45deg) translate(-3px,-3px);
+    animation: arrowBob 2s ease-in-out infinite;
+  }
+  @keyframes arrowBob{ 0%,100%{ transform: rotate(45deg) translate(-3px,-3px) } 50%{ transform: rotate(45deg) translate(-1px,-1px) } }
+  .drawer.armed{ border-color: var(--accent-soft); color: var(--accent); background: linear-gradient(180deg, rgba(203,213,255,.08), rgba(203,213,255,.03)); }
+  .drawer.armed .hint .arrow{ border-color: var(--accent); }
+  .drawer.copied{ border-style: solid; border-color: var(--ok); color: var(--ok); background: linear-gradient(180deg, rgba(127,177,138,.10), rgba(127,177,138,.03)); }
+  .drawer .copied-msg{ position:absolute; opacity:0; transform: translateY(6px); transition: opacity .3s ease, transform .3s ease; }
+  .drawer.copied .copied-msg{ opacity:1; transform: translateY(0); }
+  .drawer.copied .hint{ opacity:0; }
+
+  /* ============== FIRST-USE COACH ============== */
+  .coach{
+    position:fixed; inset:0; pointer-events:none; z-index:80;
+    background: radial-gradient(600px 400px at 22% 38%, rgba(0,0,0,.0) 0, rgba(0,0,0,.65) 75%);
+    opacity:0; transition: opacity .5s ease;
+  }
+  .coach.show{ opacity:1; pointer-events:auto; cursor:pointer; }
+  .coach .tips{
+    position:absolute; color: var(--ink); font-size:12.5px; letter-spacing:.05em;
+    background: rgba(22,24,29,.92); border:1px solid var(--edge); border-radius:12px;
+    padding:10px 14px; backdrop-filter: blur(8px);
+    opacity:0; transform: translateY(6px); transition: opacity .5s ease .2s, transform .5s ease .2s;
+  }
+  .coach.show .tips{ opacity:1; transform: translateY(0); }
+  .coach .tip-triage{ left: 410px; top: 90px; }
+  .coach .tip-reply { right: 40px; bottom: 140px; }
+  .coach .tip-drawer{ left: 50%; transform: translateX(-50%); bottom: 110px; }
+  .coach .dismiss{
+    position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+    color: var(--ink-faint); font-size:11px; letter-spacing:.22em; text-transform:uppercase;
+    animation: dismissBreath 2.4s ease-in-out infinite;
+  }
+  @keyframes dismissBreath{ 0%,100%{opacity:.6} 50%{opacity:1} }
+
+  /* press-and-hold help overlay (fallback) */
+  .help-ring{
+    position:fixed; width:48px; height:48px; border-radius:50%;
+    border: 2px solid var(--accent-soft);
+    pointer-events:none; opacity:0;
+    transition: opacity .15s ease;
+    transform: translate(-50%, -50%) scale(.5);
+  }
+  .help-ring.on{ opacity:.9; animation: ring 1s linear forwards; }
+  @keyframes ring{
+    0%{ transform: translate(-50%,-50%) scale(.4); opacity:.0; }
+    100%{ transform: translate(-50%,-50%) scale(1.4); opacity:.0; }
+  }
+
+  /* webcam corner — small, present, never demanding */
+  .webcam{
+    position:fixed; right:18px; top:18px; width:54px; height:54px;
+    border-radius:50%; border:1px solid var(--edge); overflow:hidden;
+    background: radial-gradient(circle at 35% 30%, #2a2e38, #14161b 70%);
+    display:flex; align-items:center; justify-content:center;
+    color: var(--ink-faint); font-size:9.5px; letter-spacing:.2em; text-transform:uppercase;
+    opacity:.7; transition: opacity .3s ease, transform .3s ease;
+    z-index:5;
+  }
+  .webcam::before{
+    content:""; position:absolute; inset:6px; border-radius:50%;
+    background: linear-gradient(155deg, rgba(127,177,138,.35), rgba(127,177,138,.05));
+    animation: camBreath 4s ease-in-out infinite;
+  }
+  .webcam span{ position:relative; z-index:2; }
+  @keyframes camBreath{ 0%,100%{opacity:.35} 50%{opacity:.65} }
+
+  /* tiny agent presence dock — barely visible identities */
+  .presence{
+    position:fixed; left:18px; bottom: 110px;
+    display:flex; gap:6px; align-items:center;
+    z-index:5; opacity:.45; transition: opacity .3s ease;
+  }
+  .presence:hover{ opacity:1; }
+  .presence i{
+    width:6px; height:6px; border-radius:50%; background: var(--ink-faint);
+    transition: background .3s ease, transform .3s ease;
+  }
+  .presence i.active{ background: var(--accent-soft); transform: scale(1.6); box-shadow: 0 0 10px var(--accent-soft); }
+
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="stage" id="stage">
+
+    <!-- TRIAGE TILE — drag down to accept, drag up to revise, press+hold to reveal parser+INV -->
+    <section class="triage" id="triage" aria-label="Triage">
+      <div class="who"><span class="dot"></span><span>Triage</span></div>
+      <h1 id="triage-title">Payroll direct deposit failed for one employee on the 5/14 run.</h1>
+      <p class="body" id="triage-body">Bank rejected the deposit (R03 — no account). Other 14 employees paid normally. Customer needs the employee paid today; reversal not required.</p>
+      <div class="meta">
+        <span><b>INV</b>&nbsp; 8842-1097</span>
+        <span><b>Severity</b>&nbsp; high</span>
+        <span><b>Category</b>&nbsp; payroll</span>
+      </div>
+      <div class="lean-hint down">pull down to accept</div>
+      <div class="lean-hint up">push up to revise</div>
+
+      <!-- reveal on long-press: parser + INV details -->
+      <div class="reveal" aria-hidden="true">
+        <div class="label">From the image</div>
+        <div class="row"><span>Run date</span><span>2026-05-14</span></div>
+        <div class="row"><span>Employee</span><span>M. Alvarez</span></div>
+        <div class="row"><span>Amount</span><span>$2,418.55</span></div>
+        <div class="row"><span>Account ending</span><span>•••• 0427</span></div>
+        <div class="label" style="margin-top:18px">Invoice 8842-1097</div>
+        <div class="row"><span>Customer</span><span>Westline Roofing LLC</span></div>
+        <div class="row"><span>Plan</span><span>QBO Payroll Premium</span></div>
+        <div class="row"><span>Last contact</span><span>3h ago</span></div>
+      </div>
+    </section>
+
+    <!-- CONVERSATION — main analyst speaks; you reply by typing -->
+    <section class="convo">
+      <div class="turns" id="turns">
+        <!-- populated by JS -->
+      </div>
+
+      <div class="reply" id="reply">
+        <input id="replyInput" type="text" placeholder=" " autocomplete="off" />
+        <span class="placeholder">say something to the analyst…</span>
+        <span class="swipehint">enter to send</span>
+      </div>
+    </section>
+
+    <!-- ANSWER DRAWER — drag the latest analyst reply into here to copy it -->
+    <div class="drawer" id="drawer" aria-label="Drop the answer here to copy">
+      <div class="hint">
+        <span class="arrow"></span>
+        <span>drag the answer here to copy</span>
+      </div>
+      <div class="copied-msg">copied — paste it to the phone agent</div>
+    </div>
+  </div>
+
+  <!-- Webcam, presence, coach, help-ring -->
+  <div class="webcam" title="You"><span>You</span></div>
+  <div class="presence" id="presence" title="Agents present">
+    <i class="active" title="Main analyst"></i>
+    <i title="Triage"></i>
+    <i title="Parser"></i>
+    <i title="INV"></i>
+  </div>
+
+  <div class="coach" id="coach">
+    <div class="tips tip-triage">Pull the triage card <b>down</b> to accept · push <b>up</b> to revise · press and hold to peek</div>
+    <div class="tips tip-reply">Type here and press <b>Enter</b> to talk to the analyst</div>
+    <div class="tips tip-drawer">When the analyst answers, drag their reply <b>here</b> to copy</div>
+    <div class="dismiss">tap anywhere to begin</div>
+  </div>
+
+  <div class="help-ring" id="helpRing"></div>
+
+<script>
+(() => {
+  // ---------- conversation seed ----------
+  const seed = [
+    { who:'analyst', text:"R03 means the routing/account combo doesn't exist at the receiving bank. For a single-employee bounce on a clean run, the fastest path is a same-day off-cycle payroll once the employee re-verifies their account." },
+  ];
+  const followUps = {
+    'how': "Have them open their employee profile → Personal Info → Bank Account, re-enter and verify. Then in QBO Payroll, run an Off-Cycle Payroll for just M. Alvarez, amount $2,418.55, pay date today. Direct deposit cutoff for same-day is 7am PT — you have until 6:42am tomorrow if you miss today.",
+    'cost': "No charge for off-cycle on Premium. Standard same-day direct deposit fees only apply if they upgrade speed; the default next-day is included.",
+    'default': "I'd lead with the bank rejection cause (R03), then offer the off-cycle payroll as the resolution path. Keep the tone short — the customer is anxious about the employee being unpaid."
+  };
+
+  const turnsEl = document.getElementById('turns');
+
+  function renderTurns(){
+    turnsEl.innerHTML = '';
+    seed.forEach((t, i) => {
+      const el = document.createElement('div');
+      el.className = 'turn ' + t.who + (i === seed.length-1 && t.who==='analyst' ? ' latest' : '');
+      el.innerHTML = `<div class="who">${t.who === 'analyst' ? 'Main analyst' : 'You'}</div><div class="text">${t.text}</div>`;
+      turnsEl.appendChild(el);
+    });
+    bindLatest();
+  }
+
+  // ---------- typing input (no send button — Enter sends) ----------
+  const input = document.getElementById('replyInput');
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && input.value.trim()){
+      const msg = input.value.trim();
+      seed.push({ who:'you', text: msg });
+      input.value = '';
+      renderTurns();
+      // analyst typing then reply
+      const typingEl = document.createElement('div');
+      typingEl.className = 'turn analyst';
+      typingEl.innerHTML = `<div class="who">Main analyst</div><div class="typing"><i></i><i></i><i></i></div>`;
+      turnsEl.appendChild(typingEl);
+      setTimeout(() => {
+        typingEl.remove();
+        const key = /how|step|do/i.test(msg) ? 'how' : /cost|fee|charge|price/i.test(msg) ? 'cost' : 'default';
+        seed.push({ who:'analyst', text: followUps[key] });
+        renderTurns();
+      }, 950);
+    }
+  });
+
+  // ---------- TRIAGE: drag to accept (down) or revise (up); long-press to reveal ----------
+  const triage = document.getElementById('triage');
+  let tDrag = null;
+  let holdTimer = null;
+  const HOLD_MS = 520;
+
+  function onDownTriage(e){
+    if (triage.classList.contains('committed')) return;
+    const p = pointFrom(e);
+    tDrag = { startY: p.y, dy: 0 };
+    holdTimer = setTimeout(() => {
+      triage.classList.add('holding');
+      triage.classList.remove('leaning-down','leaning-up');
+      ripple(p.x, p.y);
+      tDrag = null;
+    }, HOLD_MS);
+    triage.setPointerCapture && e.pointerId !== undefined && triage.setPointerCapture(e.pointerId);
+  }
+  function onMoveTriage(e){
+    if (!tDrag) return;
+    const p = pointFrom(e);
+    const dy = p.y - tDrag.startY;
+    if (Math.abs(dy) > 6 && holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+    tDrag.dy = dy;
+    triage.classList.toggle('leaning-down', dy > 18);
+    triage.classList.toggle('leaning-up',   dy < -18);
+  }
+  function onUpTriage(){
+    if (holdTimer){ clearTimeout(holdTimer); holdTimer = null; }
+    if (triage.classList.contains('holding')){
+      // release the reveal
+      setTimeout(() => triage.classList.remove('holding'), 80);
+      tDrag = null; return;
+    }
+    if (!tDrag){ return; }
+    if (tDrag.dy > 60){
+      triage.classList.remove('leaning-down','leaning-up');
+      triage.classList.add('committed');
+      // small celebration: nudge presence dot for analyst
+      flashPresence(0);
+    } else if (tDrag.dy < -60){
+      triage.classList.remove('leaning-down','leaning-up');
+      triage.classList.add('leaning-up');
+      // open a revise affordance: focus the reply with a primed prompt
+      setTimeout(() => {
+        triage.classList.remove('leaning-up');
+        input.value = "I'd revise the triage — ";
+        input.focus();
+      }, 380);
+    } else {
+      triage.classList.remove('leaning-down','leaning-up');
+    }
+    tDrag = null;
+  }
+  triage.addEventListener('pointerdown', onDownTriage);
+  triage.addEventListener('pointermove', onMoveTriage);
+  triage.addEventListener('pointerup', onUpTriage);
+  triage.addEventListener('pointercancel', onUpTriage);
+  triage.addEventListener('pointerleave', () => { if (tDrag && Math.abs(tDrag.dy) < 5) onUpTriage(); });
+
+  // ---------- LATEST ANALYST TURN: drag down to the drawer to copy ----------
+  const drawer = document.getElementById('drawer');
+  function bindLatest(){
+    const latest = turnsEl.querySelector('.turn.analyst.latest');
+    if (!latest) return;
+    let lDrag = null;
+    latest.addEventListener('pointerdown', e => {
+      lDrag = { startY: e.clientY, startX: e.clientX, dy: 0 };
+      latest.classList.add('pulling');
+      latest.setPointerCapture && latest.setPointerCapture(e.pointerId);
+    });
+    latest.addEventListener('pointermove', e => {
+      if (!lDrag) return;
+      const dy = e.clientY - lDrag.startY;
+      const dx = e.clientX - lDrag.startX;
+      lDrag.dy = dy;
+      latest.style.transform = `translate(${dx*.4}px, ${Math.max(dy,0)}px)`;
+      latest.style.opacity = String(Math.max(0.35, 1 - dy/600));
+      drawer.classList.toggle('armed', dy > 80);
+    });
+    function endLatest(e){
+      if (!lDrag) return;
+      const dy = lDrag.dy;
+      latest.classList.remove('pulling');
+      if (dy > 120){
+        // copied!
+        const txt = latest.querySelector('.text').textContent;
+        navigator.clipboard && navigator.clipboard.writeText(txt).catch(()=>{});
+        drawer.classList.remove('armed');
+        drawer.classList.add('copied');
+        latest.style.transition = 'transform .35s ease, opacity .35s ease';
+        latest.style.transform = `translate(0, 240px)`;
+        latest.style.opacity = '0';
+        setTimeout(() => {
+          latest.style.transition = 'transform .3s ease, opacity .3s ease';
+          latest.style.transform = '';
+          latest.style.opacity = '';
+        }, 380);
+        setTimeout(() => drawer.classList.remove('copied'), 2400);
+      } else {
+        latest.style.transition = 'transform .35s cubic-bezier(.2,.7,.2,1), opacity .25s ease';
+        latest.style.transform = '';
+        latest.style.opacity = '';
+        drawer.classList.remove('armed');
+        setTimeout(() => latest.style.transition = '', 360);
+      }
+      lDrag = null;
+    }
+    latest.addEventListener('pointerup', endLatest);
+    latest.addEventListener('pointercancel', endLatest);
+  }
+
+  // ---------- press-and-hold ANYWHERE for fallback help ring ----------
+  const helpRing = document.getElementById('helpRing');
+  let pageHold = null;
+  document.addEventListener('pointerdown', e => {
+    if (e.target.closest('.triage') || e.target.closest('.turn.latest') || e.target.closest('.reply')) return;
+    pageHold = setTimeout(() => {
+      helpRing.style.left = e.clientX + 'px';
+      helpRing.style.top  = e.clientY + 'px';
+      helpRing.classList.remove('on');
+      void helpRing.offsetWidth;
+      helpRing.classList.add('on');
+      showCoach(true);
+    }, 600);
+  });
+  document.addEventListener('pointerup', () => { if (pageHold){ clearTimeout(pageHold); pageHold=null; } });
+  document.addEventListener('pointermove', () => { if (pageHold){ clearTimeout(pageHold); pageHold=null; } });
+
+  // ---------- helpers ----------
+  function pointFrom(e){ return { x: e.clientX ?? 0, y: e.clientY ?? 0 }; }
+  function ripple(x, y){
+    helpRing.style.left = x + 'px';
+    helpRing.style.top  = y + 'px';
+    helpRing.classList.remove('on');
+    void helpRing.offsetWidth;
+    helpRing.classList.add('on');
+  }
+  function flashPresence(i){
+    const dots = document.querySelectorAll('#presence i');
+    dots.forEach(d => d.classList.remove('active'));
+    if (dots[i]) dots[i].classList.add('active');
+  }
+
+  // ---------- first-use coach ----------
+  const coach = document.getElementById('coach');
+  function showCoach(force){
+    const seen = localStorage.getItem('motion-coach-v1');
+    if (seen && !force) return;
+    coach.classList.add('show');
+  }
+  coach.addEventListener('click', () => {
+    coach.classList.remove('show');
+    localStorage.setItem('motion-coach-v1', '1');
+  });
+
+  // boot
+  renderTurns();
+  setTimeout(showCoach, 350);
+})();
+</script>
+</body>
+</html>

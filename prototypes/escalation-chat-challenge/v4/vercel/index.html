@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vercel — Spatial Depth (V4)</title>
+<!--
+  designer: vercel
+  forced angle: SPATIAL / DEPTH-LAYERED — Z-axis hierarchy. Layers earn z-index by representing priority/recency/focus.
+  2 features:
+    1) DEPTH FOCUS — only the active layer is in focus; others recede (blur + dim + scale). Pull-forward on hover/focus.
+    2) RECEIPT — single copy-ready answer card lifts to top layer on demand (z-max), everything else drops.
+  regions:
+    - Webcam dock (back layer, z1) → upload entry → goal: see what's wrong
+    - Parser strip (mid-back, z2) → parsed fields → goal: see what's wrong
+    - Triage card (mid, z3) → AI's read → goal: confirm or doubt the AI
+    - Chat with main analyst (front, z4) → conversation → goal: get the answer
+    - Receipt (z-max, on demand) → copy-ready answer → goal: use the answer
+-->
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --bg-2: #0e0e0e;
+    --ink: #ededed;
+    --ink-2: #a1a1a1;
+    --ink-3: #6e6e6e;
+    --line: #1f1f1f;
+    --line-2: #2a2a2a;
+    --accent: #fff;
+    --warn: #f5a524;
+    --ok: #17c964;
+    --bad: #f31260;
+    --r: 10px;
+    --shadow-1: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.35);
+    --shadow-2: 0 1px 0 rgba(255,255,255,0.06) inset, 0 18px 50px rgba(0,0,0,0.55);
+    --shadow-3: 0 1px 0 rgba(255,255,255,0.08) inset, 0 30px 80px rgba(0,0,0,0.7);
+    --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "Geist Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.45;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* subtle depth backdrop */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(1200px 800px at 80% -10%, rgba(255,255,255,0.04), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(255,255,255,0.03), transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .stage {
+    position: relative;
+    height: 100vh;
+    width: 100vw;
+    perspective: 1600px;
+    perspective-origin: 50% 40%;
+    overflow: hidden;
+  }
+  /* Top bar — minimal */
+  .topbar {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 44px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(10,10,10,0.6);
+    backdrop-filter: blur(10px);
+    z-index: 100;
+  }
+  .topbar .brand { display: flex; gap: 10px; align-items: center; font-weight: 600; letter-spacing: -0.01em; }
+  .topbar .brand .dot { width: 8px; height: 8px; background: #fff; border-radius: 2px; transform: rotate(45deg); }
+  .topbar .meta { color: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+  .topbar .case { color: var(--ink-2); font-size: 12px; font-family: var(--mono); }
+
+  /* Layer common */
+  .layer {
+    position: absolute;
+    transition:
+      transform 360ms cubic-bezier(.2,.7,.2,1),
+      filter 280ms ease,
+      opacity 280ms ease,
+      box-shadow 280ms ease;
+    will-change: transform, filter, opacity;
+    transform-style: preserve-3d;
+  }
+  .surface {
+    background: linear-gradient(180deg, #111 0%, #0d0d0d 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--r);
+    box-shadow: var(--shadow-1);
+  }
+
+  /* L1 — Webcam dock (back) */
+  #layer-cam {
+    z-index: 10;
+    left: 28px;
+    bottom: 28px;
+    width: 260px;
+    transform: translateZ(-180px) translateY(0);
+  }
+  #layer-cam .surface {
+    padding: 10px;
+    backdrop-filter: blur(6px);
+    background: linear-gradient(180deg, rgba(20,20,20,0.7), rgba(12,12,12,0.7));
+  }
+  .cam-frame {
+    aspect-ratio: 4/3;
+    border-radius: 8px;
+    background:
+      repeating-linear-gradient(45deg, #161616 0 6px, #121212 6px 12px);
+    border: 1px solid var(--line-2);
+    display: flex; align-items: center; justify-content: center;
+    color: var(--ink-3); font-family: var(--mono); font-size: 11px;
+    position: relative;
+    overflow: hidden;
+  }
+  .cam-frame.live::before {
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 60%, #2a2a2a 0%, #0e0e0e 70%);
+  }
+  .cam-frame.live::after {
+    content: "INV 1042 visible"; position: absolute; bottom: 6px; left: 8px;
+    color: #c8c8c8; font-family: var(--mono); font-size: 10px;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.7);
+  }
+  .cam-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 4px 8px;
+    font-size: 11px; color: var(--ink-2); font-family: var(--mono);
+  }
+  .cam-head .live-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: var(--bad);
+    box-shadow: 0 0 8px var(--bad); margin-right: 6px; display: inline-block;
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+  .cam-actions { display: flex; gap: 6px; padding-top: 8px; }
+  .btn-ghost {
+    flex: 1; background: transparent; color: var(--ink-2);
+    border: 1px solid var(--line-2); padding: 6px 8px; border-radius: 6px;
+    font-family: var(--mono); font-size: 11px; cursor: pointer;
+    transition: all 160ms ease;
+  }
+  .btn-ghost:hover { color: var(--ink); border-color: #3a3a3a; background: #151515; }
+
+  /* L2 — Parser strip (mid-back) */
+  #layer-parser {
+    z-index: 20;
+    left: 320px;
+    bottom: 28px;
+    right: 28px;
+    transform: translateZ(-110px);
+  }
+  #layer-parser .surface {
+    padding: 10px 14px;
+    display: flex; align-items: center; gap: 16px;
+    backdrop-filter: blur(6px);
+  }
+  .p-label { color: var(--ink-3); font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .p-fields { display: flex; gap: 18px; align-items: center; flex: 1; flex-wrap: wrap; }
+  .pf { display: flex; flex-direction: column; gap: 2px; }
+  .pf .k { color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .pf .v { color: var(--ink); font-family: var(--mono); font-size: 13px; }
+  .pf .v.warn { color: var(--warn); }
+  .pf .v.bad { color: var(--bad); }
+  .p-status {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .p-status .ok-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+
+  /* L3 — Triage card (mid) */
+  #layer-triage {
+    z-index: 30;
+    right: 28px;
+    top: 72px;
+    width: 340px;
+    transform: translateZ(-40px);
+  }
+  #layer-triage .surface {
+    padding: 18px 18px 14px;
+  }
+  .triage-eyebrow {
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+  .triage-eyebrow .sev {
+    color: var(--bg); background: var(--warn); padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600;
+  }
+  .triage-summary {
+    font-size: 17px; line-height: 1.35; color: var(--ink);
+    letter-spacing: -0.01em;
+    margin-bottom: 14px;
+  }
+  .triage-actions { display: flex; gap: 8px; }
+  .btn {
+    background: #fff; color: #000;
+    border: 1px solid #fff; padding: 7px 12px; border-radius: 7px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    transition: all 160ms ease;
+  }
+  .btn:hover { background: #e5e5e5; }
+  .btn.secondary {
+    background: transparent; color: var(--ink-2); border-color: var(--line-2);
+  }
+  .btn.secondary:hover { color: var(--ink); border-color: #3a3a3a; background: #151515; }
+
+  /* L4 — Chat (front) */
+  #layer-chat {
+    z-index: 40;
+    left: 28px;
+    top: 72px;
+    width: calc(100vw - 28px - 28px - 340px - 24px);
+    height: calc(100vh - 72px - 28px - 130px - 16px);
+    transform: translateZ(0);
+  }
+  #layer-chat .surface {
+    height: 100%;
+    display: flex; flex-direction: column;
+    box-shadow: var(--shadow-2);
+  }
+  .chat-head {
+    padding: 14px 18px 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .who {
+    display: flex; align-items: center; gap: 10px;
+  }
+  .who .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: linear-gradient(135deg, #fff, #999);
+    display: flex; align-items: center; justify-content: center;
+    color: #000; font-weight: 600; font-size: 12px;
+  }
+  .who .name { font-weight: 600; font-size: 14px; letter-spacing: -0.01em; }
+  .who .role { color: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+  .chat-head .status {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .chat-head .status .d { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+
+  .chat-scroll {
+    flex: 1; overflow-y: auto;
+    padding: 18px 22px;
+    display: flex; flex-direction: column; gap: 14px;
+    scrollbar-width: thin;
+    scrollbar-color: #2a2a2a transparent;
+  }
+  .chat-scroll::-webkit-scrollbar { width: 6px; }
+  .chat-scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 3px; }
+  .msg { max-width: 78%; display: flex; flex-direction: column; gap: 4px; }
+  .msg.me { align-self: flex-end; align-items: flex-end; }
+  .msg .bubble {
+    background: #161616; border: 1px solid var(--line);
+    padding: 10px 14px; border-radius: 10px;
+    color: var(--ink); font-size: 14px; line-height: 1.5;
+  }
+  .msg.me .bubble {
+    background: #fff; color: #000; border-color: #fff;
+  }
+  .msg .meta {
+    font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+  }
+  .msg.has-receipt .bubble { border-color: #2a2a2a; }
+  .receipt-btn {
+    margin-top: 8px;
+    background: transparent; color: var(--ink-2); border: 1px dashed var(--line-2);
+    padding: 6px 10px; border-radius: 6px; font-family: var(--mono); font-size: 11px;
+    cursor: pointer; transition: all 160ms ease;
+    align-self: flex-start;
+  }
+  .receipt-btn:hover { color: var(--ink); border-color: #3a3a3a; background: #151515; }
+
+  .chat-input {
+    border-top: 1px solid var(--line);
+    padding: 12px 14px;
+    display: flex; gap: 10px; align-items: center;
+  }
+  .chat-input input {
+    flex: 1; background: #0d0d0d; border: 1px solid var(--line);
+    color: var(--ink); padding: 10px 12px; border-radius: 8px;
+    font-family: var(--font); font-size: 14px; outline: none;
+    transition: border-color 160ms ease;
+  }
+  .chat-input input:focus { border-color: #3a3a3a; }
+
+  /* DEPTH FOCUS — only active layer is forward. Others recede. */
+  .stage[data-focus="cam"] #layer-cam { transform: translateZ(40px); }
+  .stage[data-focus="cam"] #layer-cam .surface { box-shadow: var(--shadow-3); }
+  .stage[data-focus="cam"] #layer-parser,
+  .stage[data-focus="cam"] #layer-triage,
+  .stage[data-focus="cam"] #layer-chat {
+    filter: blur(1.5px) brightness(0.65);
+    opacity: 0.6;
+  }
+
+  .stage[data-focus="parser"] #layer-parser { transform: translateZ(30px); }
+  .stage[data-focus="parser"] #layer-parser .surface { box-shadow: var(--shadow-3); }
+  .stage[data-focus="parser"] #layer-cam,
+  .stage[data-focus="parser"] #layer-triage,
+  .stage[data-focus="parser"] #layer-chat {
+    filter: blur(1.5px) brightness(0.65);
+    opacity: 0.6;
+  }
+
+  .stage[data-focus="triage"] #layer-triage { transform: translateZ(60px); }
+  .stage[data-focus="triage"] #layer-triage .surface { box-shadow: var(--shadow-3); border-color: #3a3a3a; }
+  .stage[data-focus="triage"] #layer-cam,
+  .stage[data-focus="triage"] #layer-parser,
+  .stage[data-focus="triage"] #layer-chat {
+    filter: blur(1.5px) brightness(0.65);
+    opacity: 0.6;
+  }
+
+  .stage[data-focus="chat"] #layer-chat { transform: translateZ(20px); }
+  .stage[data-focus="chat"] #layer-cam,
+  .stage[data-focus="chat"] #layer-parser {
+    filter: blur(2px) brightness(0.55);
+    opacity: 0.5;
+  }
+  .stage[data-focus="chat"] #layer-triage {
+    filter: blur(0.5px) brightness(0.85);
+    opacity: 0.85;
+  }
+
+  /* RECEIPT — z-max layer, all others fall back */
+  #layer-receipt {
+    z-index: 200;
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 520px;
+    transform: translate(-50%, -50%) translateZ(140px) scale(0.96);
+    opacity: 0; pointer-events: none;
+  }
+  #layer-receipt .surface {
+    padding: 22px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 40px 100px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.04);
+    background: linear-gradient(180deg, #181818 0%, #0f0f0f 100%);
+  }
+  .stage.show-receipt #layer-receipt {
+    opacity: 1; pointer-events: auto;
+    transform: translate(-50%, -50%) translateZ(140px) scale(1);
+  }
+  .stage.show-receipt #layer-cam,
+  .stage.show-receipt #layer-parser,
+  .stage.show-receipt #layer-triage,
+  .stage.show-receipt #layer-chat {
+    filter: blur(4px) brightness(0.4);
+    opacity: 0.4;
+    transform: translateZ(-220px);
+  }
+  .stage.show-receipt::after {
+    content: ""; position: absolute; inset: 0;
+    background: rgba(0,0,0,0.4); z-index: 150;
+    backdrop-filter: blur(2px);
+  }
+  .receipt-eyebrow {
+    color: var(--ink-3); font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .receipt-body {
+    color: var(--ink); font-size: 15px; line-height: 1.6;
+    background: #0a0a0a; border: 1px solid var(--line);
+    padding: 14px 16px; border-radius: 8px;
+    font-family: var(--mono);
+    margin-bottom: 14px;
+    white-space: pre-wrap;
+  }
+  .receipt-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .close-x {
+    background: transparent; border: none; color: var(--ink-3);
+    cursor: pointer; font-size: 16px; padding: 2px 6px;
+  }
+  .close-x:hover { color: var(--ink); }
+
+  /* tiny copy toast */
+  .toast {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: #fff; color: #000; padding: 8px 14px; border-radius: 8px;
+    font-size: 12px; font-family: var(--mono); font-weight: 500;
+    z-index: 300; opacity: 0; pointer-events: none;
+    transition: all 240ms ease;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* hint */
+  .depth-hint {
+    position: absolute; bottom: 12px; right: 18px;
+    color: var(--ink-3); font-family: var(--mono); font-size: 10px;
+    z-index: 90; letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+<div class="stage" id="stage" data-focus="none">
+
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span> Escalations</div>
+    <div class="case">CASE-8841 · INV 1042</div>
+    <div class="meta" id="clock">--:--:--</div>
+  </header>
+
+  <!-- L1 — Webcam dock -->
+  <section class="layer" id="layer-cam" data-layer="cam">
+    <div class="surface">
+      <div class="cam-head">
+        <span><span class="live-dot"></span>WEBCAM</span>
+        <span id="cam-status">idle</span>
+      </div>
+      <div class="cam-frame" id="cam-frame"></div>
+      <div class="cam-actions">
+        <button class="btn-ghost" id="cam-capture">Capture</button>
+        <button class="btn-ghost" id="cam-upload">Upload</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- L2 — Parser strip -->
+  <section class="layer" id="layer-parser" data-layer="parser">
+    <div class="surface">
+      <span class="p-label">Parsed</span>
+      <div class="p-fields" id="p-fields">
+        <div class="pf"><span class="k">INV</span><span class="v" id="pf-inv">—</span></div>
+        <div class="pf"><span class="k">Customer</span><span class="v" id="pf-cust">—</span></div>
+        <div class="pf"><span class="k">Amount</span><span class="v" id="pf-amt">—</span></div>
+        <div class="pf"><span class="k">Status</span><span class="v" id="pf-stat">—</span></div>
+        <div class="pf"><span class="k">Issue</span><span class="v" id="pf-issue">—</span></div>
+      </div>
+      <div class="p-status" id="p-status"><span>awaiting image</span></div>
+    </div>
+  </section>
+
+  <!-- L3 — Triage -->
+  <section class="layer" id="layer-triage" data-layer="triage">
+    <div class="surface">
+      <div class="triage-eyebrow">
+        <span>Triage</span>
+        <span class="sev" id="t-sev">P2</span>
+      </div>
+      <div class="triage-summary" id="t-summary">
+        Waiting on parsed invoice.
+      </div>
+      <div class="triage-actions">
+        <button class="btn" id="t-confirm">Confirm</button>
+        <button class="btn secondary" id="t-revise">Revise</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- L4 — Chat -->
+  <section class="layer" id="layer-chat" data-layer="chat">
+    <div class="surface">
+      <div class="chat-head">
+        <div class="who">
+          <div class="avatar">M</div>
+          <div>
+            <div class="name">Mira</div>
+            <div class="role">lead analyst · QBO payroll</div>
+          </div>
+        </div>
+        <div class="status"><span class="d"></span><span id="chat-state">waiting on triage</span></div>
+      </div>
+      <div class="chat-scroll" id="chat-scroll"></div>
+      <div class="chat-input">
+        <input id="chat-input" placeholder="Reply to Mira…" />
+        <button class="btn" id="chat-send">Send</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Receipt (z-max) -->
+  <section class="layer" id="layer-receipt">
+    <div class="surface">
+      <div class="receipt-eyebrow">
+        <span>Answer · ready to send</span>
+        <button class="close-x" id="receipt-close">×</button>
+      </div>
+      <div class="receipt-body" id="receipt-body">—</div>
+      <div class="receipt-actions">
+        <button class="btn secondary" id="receipt-close-2">Back</button>
+        <button class="btn" id="receipt-copy">Copy answer</button>
+      </div>
+    </div>
+  </section>
+
+  <div class="toast" id="toast">Copied</div>
+  <div class="depth-hint">hover a layer to bring forward · esc to reset</div>
+
+</div>
+
+<script>
+(function(){
+  const stage = document.getElementById('stage');
+  const layers = document.querySelectorAll('.layer[data-layer]');
+  const clock = document.getElementById('clock');
+
+  // clock
+  function tick(){
+    const d = new Date();
+    clock.textContent = d.toTimeString().slice(0,8);
+  }
+  tick(); setInterval(tick, 1000);
+
+  // DEPTH FOCUS — hover/focus brings layer forward
+  layers.forEach(l => {
+    l.addEventListener('mouseenter', () => {
+      stage.dataset.focus = l.dataset.layer;
+    });
+    l.addEventListener('focusin', () => {
+      stage.dataset.focus = l.dataset.layer;
+    });
+  });
+  stage.addEventListener('mouseleave', () => { stage.dataset.focus = 'none'; });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      stage.dataset.focus = 'none';
+      stage.classList.remove('show-receipt');
+    }
+  });
+
+  // Workflow simulation
+  const camFrame = document.getElementById('cam-frame');
+  const camStatus = document.getElementById('cam-status');
+  const camCapture = document.getElementById('cam-capture');
+  const camUpload = document.getElementById('cam-upload');
+
+  const pStatus = document.getElementById('p-status');
+  const pfInv = document.getElementById('pf-inv');
+  const pfCust = document.getElementById('pf-cust');
+  const pfAmt = document.getElementById('pf-amt');
+  const pfStat = document.getElementById('pf-stat');
+  const pfIssue = document.getElementById('pf-issue');
+
+  const tSev = document.getElementById('t-sev');
+  const tSummary = document.getElementById('t-summary');
+  const tConfirm = document.getElementById('t-confirm');
+  const tRevise = document.getElementById('t-revise');
+
+  const chatState = document.getElementById('chat-state');
+  const chatScroll = document.getElementById('chat-scroll');
+  const chatInput = document.getElementById('chat-input');
+  const chatSend = document.getElementById('chat-send');
+
+  const receiptLayer = document.getElementById('layer-receipt');
+  const receiptBody = document.getElementById('receipt-body');
+  const receiptClose = document.getElementById('receipt-close');
+  const receiptClose2 = document.getElementById('receipt-close-2');
+  const receiptCopy = document.getElementById('receipt-copy');
+
+  const toast = document.getElementById('toast');
+  function showToast(msg='Copied'){
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(()=> toast.classList.remove('show'), 1400);
+  }
+
+  function addMsg(text, who='them', opts={}){
+    const m = document.createElement('div');
+    m.className = 'msg ' + (who==='me' ? 'me' : '');
+    if (opts.hasReceipt) m.classList.add('has-receipt');
+    const b = document.createElement('div');
+    b.className = 'bubble';
+    b.textContent = text;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = (who==='me' ? 'you' : 'Mira') + ' · ' + new Date().toTimeString().slice(0,5);
+    m.appendChild(b);
+    m.appendChild(meta);
+    if (opts.hasReceipt) {
+      const r = document.createElement('button');
+      r.className = 'receipt-btn';
+      r.textContent = '↑ open answer card';
+      r.addEventListener('click', ()=> openReceipt(opts.receiptText));
+      m.appendChild(r);
+    }
+    chatScroll.appendChild(m);
+    chatScroll.scrollTop = chatScroll.scrollHeight;
+    return m;
+  }
+
+  function openReceipt(text){
+    receiptBody.textContent = text;
+    stage.classList.add('show-receipt');
+    stage.dataset.focus = 'none';
+  }
+  function closeReceipt(){
+    stage.classList.remove('show-receipt');
+  }
+  receiptClose.addEventListener('click', closeReceipt);
+  receiptClose2.addEventListener('click', closeReceipt);
+  receiptCopy.addEventListener('click', ()=>{
+    navigator.clipboard?.writeText(receiptBody.textContent).catch(()=>{});
+    showToast('Copied to clipboard');
+    setTimeout(closeReceipt, 600);
+  });
+
+  // Step 1 — capture
+  function doCapture(){
+    camFrame.classList.add('live');
+    camStatus.textContent = 'captured';
+    camCapture.disabled = true;
+    camUpload.disabled = true;
+    setTimeout(runParser, 600);
+  }
+  camCapture.addEventListener('click', doCapture);
+  camUpload.addEventListener('click', doCapture);
+
+  // Step 2 — parser
+  function runParser(){
+    pStatus.innerHTML = '<span class="ok-dot"></span><span>parsing…</span>';
+    const steps = [
+      () => { pfInv.textContent = '1042'; },
+      () => { pfCust.textContent = 'Halverson HVAC'; },
+      () => { pfAmt.textContent = '$2,481.00'; },
+      () => { pfStat.innerHTML = '<span class="v warn">OVERDUE 14d</span>'; pfStat.className = 'v warn'; },
+      () => { pfIssue.innerHTML = '<span class="v bad">payment posted, not applied</span>'; pfIssue.className='v bad'; },
+    ];
+    let i = 0;
+    const iv = setInterval(()=>{
+      steps[i](); i++;
+      if (i >= steps.length){
+        clearInterval(iv);
+        pStatus.innerHTML = '<span class="ok-dot"></span><span>parsed · 5/5 fields</span>';
+        setTimeout(runTriage, 400);
+      }
+    }, 280);
+  }
+
+  // Step 3 — triage (parallel)
+  function runTriage(){
+    tSev.textContent = 'P2';
+    tSummary.textContent = 'Customer paid via ACH on May 9. Payment landed in Undeposited Funds and was never applied to INV 1042 — invoice still shows open. Fix is to apply the existing payment, not collect again.';
+    tSev.style.background = 'var(--warn)';
+    chatState.textContent = 'ready';
+    // gently nudge focus to triage
+    stage.dataset.focus = 'triage';
+    setTimeout(()=>{ stage.dataset.focus = 'none'; }, 1400);
+  }
+
+  // Step 4 — confirm → main analyst arrives
+  let chatStarted = false;
+  function startChat(){
+    if (chatStarted) return;
+    chatStarted = true;
+    chatState.textContent = 'live';
+    stage.dataset.focus = 'chat';
+
+    setTimeout(()=> addMsg("I have the picture — payment from Halverson is sitting in Undeposited Funds since May 9. We don't need to collect again. Want the script for the phone agent?", 'them'), 500);
+  }
+  tConfirm.addEventListener('click', startChat);
+  tRevise.addEventListener('click', ()=>{
+    tSummary.textContent = 'Awaiting your read. Type below and I will adjust.';
+    chatInput.focus();
+  });
+
+  // Chat behavior
+  function sendUser(text){
+    addMsg(text, 'me');
+    chatInput.value = '';
+    setTimeout(()=> respond(text), 600);
+  }
+  chatSend.addEventListener('click', ()=>{
+    const v = chatInput.value.trim();
+    if (!v) return;
+    sendUser(v);
+  });
+  chatInput.addEventListener('keydown', (e)=>{
+    if (e.key === 'Enter') {
+      const v = chatInput.value.trim();
+      if (v) sendUser(v);
+    }
+  });
+
+  let replyStep = 0;
+  function respond(userText){
+    replyStep++;
+    if (replyStep === 1) {
+      addMsg("Here is the exact wording for the agent — I included the why so the customer doesn't push back.", 'them', {
+        hasReceipt: true,
+        receiptText:
+`Hi — good news. Your May 9 payment of $2,481.00 did reach us; it just wasn't applied to invoice 1042 on our side. I'm applying it right now and you'll see the invoice clear within a few minutes. No further action needed and nothing else owed. Sorry for the confusion.`
+      });
+    } else {
+      addMsg("Anything else, or shall I close this out?", 'them');
+    }
+  }
+
+  // Click outside receipt to close
+  stage.addEventListener('click', (e) => {
+    if (stage.classList.contains('show-receipt')) {
+      if (!receiptLayer.contains(e.target)) {
+        closeReceipt();
+      }
+    }
+  });
+
+  // Kick — show camera as "ready"
+  setTimeout(()=>{
+    camStatus.textContent = 'ready';
+  }, 300);
+
+})();
+</script>
+</body>
+</html>

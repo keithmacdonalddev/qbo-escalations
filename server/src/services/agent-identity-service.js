@@ -336,6 +336,12 @@ function normalizeRuntimeReasoningEffort(provider, value) {
   return isAllowedEffort(provider, requested) ? requested : fallback;
 }
 
+function normalizeImageRuntimeReasoningEffort(provider, value) {
+  const requested = safeText(value).toLowerCase();
+  if (!requested || !provider) return '';
+  return isAllowedEffort(provider, requested) ? requested : '';
+}
+
 function normalizeAgentRuntimeState(agentId, input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   const imageRuntime = IMAGE_RUNTIME_AGENT_IDS.has(agentId);
@@ -356,7 +362,9 @@ function normalizeAgentRuntimeState(agentId, input = {}) {
     fallbackProvider,
     model: normalizeModelOverride(source.model || source.primaryModel || ''),
     fallbackModel: imageRuntime ? '' : normalizeModelOverride(source.fallbackModel || ''),
-    reasoningEffort: imageRuntime ? '' : normalizeRuntimeReasoningEffort(provider, source.reasoningEffort),
+    reasoningEffort: imageRuntime
+      ? normalizeImageRuntimeReasoningEffort(provider, source.reasoningEffort)
+      : normalizeRuntimeReasoningEffort(provider, source.reasoningEffort),
     configured: source.configured !== false && Boolean(provider || source.configured),
     source: safeText(source.source) || 'agent-profile',
   };
@@ -540,8 +548,15 @@ async function updateIdentityWithRetry(agentId, mutate, maxAttempts = 3) {
 function buildMergedIdentity(agentId, doc = null, docsById = null) {
   const profile = resolveAgentProfile(agentId, doc);
   if (!profile) return null;
+  const enabled = doc?.enabled !== false;
   return {
     agentId,
+    enabled,
+    lifecycle: {
+      enabled,
+      updatedAt: doc?.enabledUpdatedAt || null,
+      updatedBy: safeText(doc?.enabledUpdatedBy),
+    },
     promptId:
       safeText(doc?.custom?.promptId)
       || Object.entries(AGENT_PROMPT_MAP).find(([, mappedAgentId]) => mappedAgentId === agentId)?.[0]
@@ -605,6 +620,50 @@ async function listAgentIdentities() {
   return [...defaultIds, ...customIds]
     .map((agentId) => buildMergedIdentity(agentId, byId.get(agentId), byId))
     .filter(Boolean);
+}
+
+async function listAgentRuntimeDefaults(agentIds = []) {
+  const requestedIds = (Array.isArray(agentIds) ? agentIds : [])
+    .map((agentId) => safeText(agentId))
+    .filter(Boolean);
+  const ids = requestedIds.length > 0 ? requestedIds : Object.keys(DEFAULT_PROFILES);
+  const docs = await AgentIdentity.find({ agentId: { $in: ids } })
+    .select('agentId runtime updatedAt')
+    .lean();
+  const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
+
+  return ids.reduce((acc, agentId) => {
+    const doc = byId.get(agentId);
+    acc[agentId] = {
+      agentId,
+      runtime: doc?.runtime?.configured ? clone(doc.runtime) : null,
+      updatedAt: doc?.updatedAt || null,
+    };
+    return acc;
+  }, {});
+}
+
+async function listAgentLifecycleStates(agentIds = []) {
+  const requestedIds = (Array.isArray(agentIds) ? agentIds : [])
+    .map((agentId) => safeText(agentId))
+    .filter(Boolean);
+  const ids = requestedIds.length > 0 ? requestedIds : Object.keys(DEFAULT_PROFILES);
+  const docs = await AgentIdentity.find({ agentId: { $in: ids } })
+    .select('agentId enabled enabledUpdatedAt enabledUpdatedBy updatedAt')
+    .lean();
+  const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
+
+  return ids.reduce((acc, agentId) => {
+    const doc = byId.get(agentId);
+    const enabled = doc?.enabled !== false;
+    acc[agentId] = {
+      agentId,
+      enabled,
+      updatedAt: doc?.enabledUpdatedAt || doc?.updatedAt || null,
+      updatedBy: safeText(doc?.enabledUpdatedBy),
+    };
+    return acc;
+  }, {});
 }
 
 async function getAgentIdentity(agentId) {
@@ -730,6 +789,43 @@ async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summ
           mode: runtime.mode,
           fallbackProvider: runtime.fallbackProvider,
         },
+        createdAt: updatedAt,
+      },
+      ...(doc.activity?.entries || []),
+    ]);
+  });
+
+  return getAgentIdentity(agentId);
+}
+
+async function updateAgentEnabled(agentId, enabled, { actor = 'user', summary = '' } = {}) {
+  if (!(await canMutateIdentity(agentId))) return null;
+  const nextEnabled = enabled !== false;
+  const updatedAt = new Date();
+
+  await updateIdentityWithRetry(agentId, async (doc) => {
+    doc.enabled = nextEnabled;
+    doc.enabledUpdatedAt = updatedAt;
+    doc.enabledUpdatedBy = actor;
+    doc.history.entries = pruneHistory([
+      {
+        type: 'agent-lifecycle',
+        summary: safeText(summary) || `${nextEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
+        actor,
+        metadata: { enabled: nextEnabled },
+        createdAt: updatedAt,
+      },
+      ...(doc.history?.entries || []),
+    ]);
+    doc.activity = doc.activity || {};
+    doc.activity.entries = pruneActivity([
+      {
+        type: 'lifecycle',
+        phase: 'global-toggle',
+        surface: 'agent-profiles',
+        summary: safeText(summary) || `${nextEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
+        status: nextEnabled ? 'enabled' : 'disabled',
+        metadata: { enabled: nextEnabled },
         createdAt: updatedAt,
       },
       ...(doc.activity?.entries || []),
@@ -1719,11 +1815,15 @@ module.exports = {
   importAgentIdentities,
   learnFromInteraction,
   listAgentIdentities,
+  listAgentLifecycleStates,
+  listAgentRuntimeDefaults,
+  normalizeAgentRuntimeState,
   recordAgentNudge,
   recordAgentActivity,
   recordAgentHarnessRun,
   recordAgentReview,
   recordAgentToolUsage,
+  updateAgentEnabled,
   updateAgentIdentity,
   updateAgentRuntime,
 };

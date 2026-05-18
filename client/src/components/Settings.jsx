@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import Tooltip from './Tooltip.jsx';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
 import { apiFetch } from '../api/http.js';
+import { clearProviderKeyStatusCache } from '../hooks/useProviderKeyStatus.js';
 import {
   getDefaultCalendarAccount,
   getDefaultGmailAccount,
@@ -1089,6 +1090,7 @@ function ImageParserKeysSection() {
         setKeyStatus((s) => ({ ...s, [provider]: true }));
         setValues((s) => ({ ...s, [provider]: '' }));
         setSaveResult((s) => ({ ...s, [provider]: 'saved' }));
+        clearProviderKeyStatusCache();
       } else {
         setSaveResult((s) => ({ ...s, [provider]: 'error' }));
       }

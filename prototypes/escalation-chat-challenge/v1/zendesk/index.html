@@ -1,0 +1,1061 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Triage Console — QBO Escalations</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #151a22;
+    --panel-2: #1b212b;
+    --line: #232b37;
+    --line-2: #2c3543;
+    --ink: #e7ecf3;
+    --ink-2: #aab3c0;
+    --ink-3: #6b7585;
+    --accent: #4fc3a1;       /* Zendesk-ish calm green */
+    --accent-2: #6aa8ff;
+    --warn: #f0b35a;
+    --danger: #ff6b6b;
+    --provider-claude: #d97757;
+    --provider-gpt: #10a37f;
+    --provider-gemini: #4285f4;
+    --provider-local: #8b8b8b;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background: var(--bg); color: var(--ink); font-family: var(--sans); font-size:14px; line-height:1.45; height:100%; overflow:hidden; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  kbd { font-family: var(--mono); font-size:11px; padding:1px 5px; border:1px solid var(--line-2); border-bottom-width:2px; border-radius:4px; background:#0a0d12; color:var(--ink-2); }
+
+  /* Top bar */
+  .topbar {
+    height: 44px; display:flex; align-items:center; gap:14px;
+    padding: 0 14px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #131820 0%, #0e1116 100%);
+  }
+  .brand { display:flex; align-items:center; gap:8px; font-weight:600; letter-spacing:.2px; }
+  .brand .dot { width:10px; height:10px; border-radius:3px; background:var(--accent); box-shadow:0 0 12px rgba(79,195,161,.6); }
+  .crumbs { color: var(--ink-3); font-size:12px; }
+  .crumbs b { color: var(--ink-2); font-weight:600; }
+  .topbar .spacer { flex:1; }
+  .who { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--ink-2); }
+  .who .avatar { width:24px; height:24px; border-radius:50%; background:#3a4658; display:grid; place-items:center; font-size:11px; color:#fff; }
+
+  /* Layout */
+  .app { display:grid; grid-template-columns: 260px 1fr 360px; height: calc(100% - 44px); }
+  .queue, .canvas, .trail { overflow-y:auto; }
+  .queue { border-right:1px solid var(--line); background: var(--panel); }
+  .trail { border-left:1px solid var(--line); background: var(--panel); }
+  .canvas { background: var(--bg); position:relative; }
+
+  /* Queue */
+  .queue h3 { font-size:11px; text-transform:uppercase; letter-spacing:.12em; color:var(--ink-3); margin: 14px 14px 8px; }
+  .case-row { padding:10px 14px; border-left:3px solid transparent; cursor:pointer; border-bottom:1px solid var(--line); }
+  .case-row:hover { background:#19202a; }
+  .case-row.active { background:#1a2230; border-left-color: var(--accent); }
+  .case-row .top { display:flex; justify-content:space-between; font-size:11px; color:var(--ink-3); }
+  .case-row .who { font-size:13px; color:var(--ink); margin: 3px 0; }
+  .case-row .why { font-size:12px; color:var(--ink-2); }
+  .pill { display:inline-block; font-size:10px; padding:1px 7px; border-radius:99px; border:1px solid var(--line-2); color:var(--ink-2); }
+  .pill.sev-high { color:#ffd1d1; border-color:#5a2a2a; background:#2a1414; }
+  .pill.sev-med  { color:#ffe5b8; border-color:#5a4520; background:#2a1f0c; }
+  .pill.sev-low  { color:#cfeadc; border-color:#244236; background:#0f221a; }
+
+  /* Canvas / Case-as-canvas */
+  .canvas-inner { max-width: 880px; margin: 0 auto; padding: 24px 28px 200px; }
+  .case-header { display:flex; align-items:flex-start; gap:14px; }
+  .case-id { font-family: var(--mono); color: var(--ink-3); font-size:12px; }
+  .case-title { font-size:22px; font-weight:600; letter-spacing:-.01em; margin:2px 0 0; }
+  .case-meta { display:flex; gap:14px; flex-wrap:wrap; color:var(--ink-2); font-size:12px; margin-top:8px; }
+  .case-meta b { color:var(--ink); font-weight:500; }
+  .header-actions { margin-left:auto; display:flex; gap:8px; }
+  .btn { padding:6px 10px; border-radius:6px; border:1px solid var(--line-2); color:var(--ink); font-size:12px; }
+  .btn:hover { background:#1f2632; }
+  .btn.primary { background: var(--accent); color:#0a1f18; border-color: transparent; font-weight:600; }
+  .btn.primary:hover { background: #61d3b1; }
+
+  /* Sections / annotations */
+  .section { margin-top:22px; border:1px solid var(--line); border-radius: var(--radius); background: var(--panel); }
+  .section > header { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--line); font-size:12px; color:var(--ink-2); text-transform:uppercase; letter-spacing:.1em; }
+  .section > header .grow { flex:1; }
+  .section > .body { padding:14px; }
+  .field { display:grid; grid-template-columns: 130px 1fr; gap:10px; padding:6px 0; align-items:start; }
+  .field label { color: var(--ink-3); font-size:12px; padding-top:2px; }
+  .field .val { color: var(--ink); }
+  .field .val.muted { color: var(--ink-2); }
+
+  /* Inline annotation (AI evidence pinned to the case) */
+  .annotation {
+    margin-top:8px; border-left:2px solid var(--provider-claude);
+    background: #131a22; padding: 8px 12px 10px 12px; border-radius:0 6px 6px 0;
+    font-size:13px; color: var(--ink);
+    position:relative;
+  }
+  .annotation.streaming { animation: pulseBorder 1.4s ease-in-out infinite; }
+  @keyframes pulseBorder { 0%,100% { box-shadow: inset 2px 0 0 var(--provider-claude); } 50% { box-shadow: inset 4px 0 0 #ff9c7a; } }
+  .annotation .meta { display:flex; align-items:center; gap:8px; font-size:11px; color:var(--ink-3); margin-bottom:4px; }
+  .ident {
+    display:inline-flex; align-items:center; gap:6px; font-size:11px;
+    padding:2px 7px 2px 4px; border-radius:99px; border:1px solid var(--line-2);
+    color:var(--ink); background:#10151c; cursor:pointer;
+  }
+  .ident .ring { width:14px; height:14px; border-radius:50%; display:grid; place-items:center; font-size:9px; font-weight:700; color:#fff; }
+  .ident.claude .ring { background: var(--provider-claude); }
+  .ident.gpt    .ring { background: var(--provider-gpt); }
+  .ident.gemini .ring { background: var(--provider-gemini); }
+  .ident.local  .ring { background: var(--provider-local); }
+  .ident:hover { background:#1a212b; }
+  .ident-menu {
+    position:absolute; z-index:50; background:#1a212b; border:1px solid var(--line-2);
+    border-radius:8px; padding:6px; min-width:220px; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+    display:none;
+  }
+  .ident-menu.open { display:block; }
+  .ident-menu .opt { display:flex; gap:8px; align-items:center; padding:6px 8px; border-radius:6px; cursor:pointer; }
+  .ident-menu .opt:hover { background:#222b39; }
+  .ident-menu .opt .name { font-size:13px; }
+  .ident-menu .opt small { color: var(--ink-3); margin-left:auto; font-size:11px; }
+
+  .citations { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+  .cite {
+    font-size:11px; color: var(--ink-2); padding:2px 7px; border-radius:4px;
+    background:#0e1620; border:1px solid var(--line-2); cursor:pointer;
+  }
+  .cite:hover { color: var(--accent-2); border-color: var(--accent-2); }
+
+  /* Screenshot evidence */
+  .evidence-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+  .evidence {
+    border:1px dashed var(--line-2); border-radius:8px; padding:10px; background:#10161e;
+  }
+  .ss {
+    height:140px; border-radius:6px; position:relative; overflow:hidden;
+    background:
+      linear-gradient(135deg, #2a3850 0%, #1e2a3d 100%);
+  }
+  .ss .qbo-bar { position:absolute; left:0; right:0; top:0; height:22px; background:#0a4a3b; display:flex; align-items:center; gap:6px; padding:0 8px; font-size:10px; color:#cdebd9; }
+  .ss .qbo-bar .dot { width:8px; height:8px; border-radius:2px; background:#7ed3b3; }
+  .ss .err-banner {
+    position:absolute; left:10px; right:10px; top:32px; padding:6px 8px;
+    background:#3a1414; border:1px solid #6a2424; color:#ffb8b8; font-size:11px; border-radius:4px;
+  }
+  .ss .field-row { position:absolute; left:10px; right:10px; top:74px; height:14px; background:#23304a; border-radius:3px; }
+  .ss .field-row + .field-row { top:96px; }
+  .ss .field-row + .field-row + .field-row { top:118px; width:60%; }
+  .chip-overlay { position:absolute; padding:2px 6px; border-radius:4px; font-size:10px; font-family:var(--mono); border:1px solid; background:rgba(10,12,16,.85); }
+  .chip-overlay.qbo  { color:#7ed3b3; border-color:#2a6a55; top:4px; right:6px; }
+  .chip-overlay.err  { color:#ffb8b8; border-color:#6a2424; top:34px; right:14px; }
+  .chip-overlay.inv  { color:#cfd8ff; border-color:#3b4a8a; top:78px; right:14px; }
+
+  /* Reasoning Trail (right rail spine) */
+  .trail-head {
+    padding: 14px; border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:10px;
+  }
+  .trail-head .title { font-weight:600; }
+  .trail-head .sub { font-size:11px; color: var(--ink-3); }
+  .trail-list { padding: 8px 0; }
+  .trail-item {
+    position:relative; padding: 10px 14px 10px 38px; cursor:pointer;
+    border-left:2px solid transparent;
+  }
+  .trail-item::before {
+    content:""; position:absolute; left:18px; top:14px; width:10px; height:10px; border-radius:50%;
+    background:#2a3340; border:2px solid #1b212b;
+  }
+  .trail-item.done::before { background: var(--accent); }
+  .trail-item.live::before { background: var(--warn); box-shadow: 0 0 0 4px rgba(240,179,90,.18); }
+  .trail-item:hover { background:#19212c; }
+  .trail-item.active { background:#1b2532; border-left-color: var(--accent); }
+  .trail-item .t { font-size:13px; }
+  .trail-item .s { font-size:11px; color: var(--ink-3); margin-top:2px; }
+  .trail-item .badge { font-size:10px; color: var(--ink-2); margin-left:8px; }
+
+  /* Command bar */
+  .cmdbar {
+    position:fixed; left:50%; bottom:18px; transform: translateX(-50%);
+    width: min(720px, 80vw);
+    background: #11161e; border:1px solid var(--line-2); border-radius: 12px;
+    box-shadow: 0 14px 40px rgba(0,0,0,.55);
+    padding: 8px 10px; display:flex; align-items:center; gap:8px; z-index:80;
+  }
+  .cmdbar .prefix { font-family:var(--mono); color:var(--ink-3); font-size:12px; }
+  .cmdbar input {
+    flex:1; background:transparent; border:0; outline:0; color:var(--ink); font-size:14px;
+  }
+  .cmdbar .hint { font-size:11px; color:var(--ink-3); }
+  .cmdbar .ident { cursor:pointer; }
+
+  .cmdpop {
+    position:fixed; left:50%; transform: translateX(-50%);
+    bottom:64px; width:min(720px,80vw);
+    background:#141a22; border:1px solid var(--line-2); border-radius:12px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.6);
+    padding:6px; display:none; z-index:79;
+  }
+  .cmdpop.open { display:block; }
+  .cmdpop .opt { padding:8px 10px; border-radius:8px; display:flex; gap:10px; align-items:center; cursor:pointer; }
+  .cmdpop .opt:hover, .cmdpop .opt.kbdsel { background:#1e2632; }
+  .cmdpop .opt .k { font-family:var(--mono); color:var(--ink-3); font-size:11px; }
+  .cmdpop .opt .l { flex:1; }
+  .cmdpop .opt small { color: var(--ink-3); }
+
+  /* Composer (the draft response) */
+  .composer {
+    margin-top:16px; border:1px solid var(--line); border-radius: var(--radius);
+    background: var(--panel-2); padding:14px;
+  }
+  .composer .tabs { display:flex; gap:4px; margin-bottom:10px; }
+  .composer .tab { padding:5px 10px; font-size:12px; color:var(--ink-2); border-radius:6px; cursor:pointer; }
+  .composer .tab.active { background:#222b39; color:var(--ink); }
+  .composer .draft {
+    min-height:140px; padding:10px; background:#10161e; border:1px solid var(--line);
+    border-radius:8px; color:var(--ink); white-space:pre-wrap; font-size:13.5px;
+  }
+  .composer .draft .diff-add { background: rgba(79,195,161,.12); color:#b8eed9; border-bottom:1px dashed #2c6e5b; }
+  .composer .actions { display:flex; gap:8px; margin-top:10px; align-items:center; }
+  .composer .actions .grow { flex:1; }
+  .composer .stamp { font-size:11px; color:var(--ink-3); }
+
+  /* Toasts */
+  .toast {
+    position:fixed; bottom:90px; left:50%; transform: translateX(-50%);
+    background:#1b2532; border:1px solid var(--line-2); padding:8px 14px;
+    border-radius: 8px; color:var(--ink); font-size:13px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.4); z-index:90; opacity:0; pointer-events:none;
+    transition: opacity .2s ease, transform .2s ease;
+  }
+  .toast.show { opacity:1; transform: translateX(-50%) translateY(-4px); }
+
+  /* Provenance ribbon (mini) */
+  .ribbon {
+    display:flex; gap:8px; align-items:center; font-size:11px; color:var(--ink-3);
+    padding: 4px 0 0;
+  }
+  .ribbon .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+
+  /* Customer panel cards */
+  .kv { display:grid; grid-template-columns: 1fr 1fr; gap:6px 14px; font-size:13px; }
+  .kv div b { color: var(--ink); font-weight:600; }
+  .kv div span { color: var(--ink-3); display:block; font-size:11px; letter-spacing:.04em; text-transform:uppercase; }
+
+  /* Status pills */
+  .status-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .status { display:inline-flex; gap:6px; align-items:center; font-size:11px; padding:3px 8px; border-radius:99px; background:#10161e; border:1px solid var(--line-2); color:var(--ink-2); }
+
+  /* Cite popover */
+  .citepop {
+    position:fixed; z-index:100; background:#141a22; border:1px solid var(--line-2);
+    padding:10px 12px; border-radius:8px; max-width:360px; box-shadow:0 14px 40px rgba(0,0,0,.55);
+    display:none;
+  }
+  .citepop.open { display:block; }
+  .citepop h4 { margin:0 0 4px; font-size:12px; color: var(--ink); }
+  .citepop .src { font-size:11px; color: var(--ink-3); margin-bottom:6px; font-family: var(--mono); }
+  .citepop .snippet { font-size:12px; color: var(--ink-2); border-left:2px solid var(--accent); padding-left:8px; }
+
+  /* Diff toggle */
+  .diff-toggle { font-size:11px; color: var(--ink-3); cursor:pointer; }
+  .diff-toggle:hover { color: var(--accent-2); }
+
+  /* Webcam modal */
+  .modal { position:fixed; inset:0; background: rgba(6,9,14,.78); z-index:200; display:grid; place-items:center; backdrop-filter: blur(4px); }
+  .modal-card { width: min(640px, 92vw); background: var(--panel); border:1px solid var(--line-2); border-radius:14px; box-shadow:0 30px 80px rgba(0,0,0,.6); overflow:hidden; }
+  .modal-card header { display:flex; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--line); }
+  .modal-card header .title { font-weight:600; flex:1; }
+  .viewfinder {
+    position:relative; aspect-ratio: 16/10; margin: 14px;
+    border-radius:10px;
+    background:
+      radial-gradient(circle at 30% 40%, rgba(106,168,255,.18), transparent 40%),
+      radial-gradient(circle at 70% 60%, rgba(79,195,161,.18), transparent 45%),
+      linear-gradient(135deg, #0b0f15 0%, #131a22 100%);
+    border:1px solid var(--line-2); overflow:hidden;
+  }
+  .reticle {
+    position:absolute; inset:18%; border:2px dashed rgba(106,168,255,.6);
+    border-radius:6px;
+  }
+  .reticle::before, .reticle::after {
+    content:""; position:absolute; background: var(--accent-2);
+  }
+  .reticle::before { left:-1px; right:-1px; top:50%; height:1px; opacity:.4; }
+  .reticle::after { top:-1px; bottom:-1px; left:50%; width:1px; opacity:.4; }
+  .scanline {
+    position:absolute; left:0; right:0; height:2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 2.4s ease-in-out infinite;
+  }
+  @keyframes scan { 0%,100% { top:10%; } 50% { top:90%; } }
+  .vf-overlay {
+    position:absolute; left:10px; right:10px; bottom:10px;
+    background: rgba(10,15,22,.7); border:1px solid var(--line-2);
+    padding:6px 10px; border-radius:6px; font-size:12px; color:var(--ink-2);
+  }
+  .webcam-actions { display:flex; align-items:center; gap:8px; padding: 4px 14px 14px; }
+  .webcam-actions .grow { flex:1; }
+
+  /* Scrollbar polish */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #232b37; border-radius: 6px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2c3543; }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  /* Empty-ish placeholders that get rewritten by JS */
+  .skel { background: linear-gradient(90deg, #1a212b 0%, #222b39 50%, #1a212b 100%); background-size:200% 100%; animation: skel 1.2s linear infinite; border-radius: 4px; height: 12px; }
+  @keyframes skel { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><span class="dot"></span> Triage Console</div>
+  <div class="crumbs">Queue · <b>Tier-2 / Payroll</b> · case <b id="crumbCase">QBO-48217</b></div>
+  <div class="spacer"></div>
+  <div class="who">
+    <span>shift 2 of 3 · 14 in queue</span>
+    <div class="avatar">KM</div>
+  </div>
+</div>
+
+<div class="app">
+  <!-- LEFT: Queue -->
+  <aside class="queue" id="queue">
+    <h3>Live Queue</h3>
+    <!-- case rows injected -->
+  </aside>
+
+  <!-- CENTER: Case-as-canvas -->
+  <main class="canvas">
+    <div class="canvas-inner" id="canvasInner">
+      <!-- case detail injected -->
+    </div>
+  </main>
+
+  <!-- RIGHT: Reasoning Trail -->
+  <aside class="trail">
+    <div class="trail-head">
+      <div>
+        <div class="title">Reasoning Trail</div>
+        <div class="sub" id="trailSub">9 steps · 4 sources · 12.4s</div>
+      </div>
+    </div>
+    <div class="trail-list" id="trailList"></div>
+  </aside>
+</div>
+
+<!-- Command bar -->
+<div class="cmdbar" id="cmdbar">
+  <span class="prefix">⌘</span>
+  <input id="cmdInput" placeholder="Type a command, ask a follow-up, or paste a screenshot.  Try /draft, /escalate, /find-inv, /diff" />
+  <span class="ident claude" id="cmdIdent" title="Click to switch provider">
+    <span class="ring">C</span><span>Claude</span>
+  </span>
+  <span class="hint"><kbd>↵</kbd> run · <kbd>⌘K</kbd> palette</span>
+</div>
+
+<div class="cmdpop" id="cmdpop"></div>
+
+<!-- Floating popovers -->
+<div class="ident-menu" id="identMenu"></div>
+<div class="citepop" id="citepop"></div>
+<div class="toast" id="toast"></div>
+
+<!-- Webcam capture modal -->
+<div id="webcamModal" class="modal" style="display:none">
+  <div class="modal-card">
+    <header>
+      <div class="title">Webcam capture · case intake</div>
+      <button class="btn" onclick="closeWebcam()">✕</button>
+    </header>
+    <div class="viewfinder">
+      <div class="reticle"></div>
+      <div class="scanline"></div>
+      <div class="vf-overlay" id="vfOverlay">align the QBO error to the frame · sideways phone shots are auto-derotated</div>
+    </div>
+    <div class="webcam-actions">
+      <span class="status" id="webcamStatus">live · 1280×720 · auto-derotate ON · glare-reduce ON</span>
+      <span class="grow"></span>
+      <button class="btn" onclick="closeWebcam()">Cancel</button>
+      <button class="btn primary" id="captureBtn">Capture &amp; parse</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   Mock data — realistic-ish QBO escalation case
+============================================================ */
+const PROVIDERS = [
+  { id:'claude', name:'Claude Sonnet 4.7', short:'Claude', glyph:'C', class:'claude', strength:'Reasoning + long context', cost:'$0.018' },
+  { id:'gpt',    name:'GPT-4.1',           short:'GPT-4.1', glyph:'G', class:'gpt',    strength:'Tool calls + JSON',     cost:'$0.012' },
+  { id:'gemini', name:'Gemini 2.5 Pro',    short:'Gemini',  glyph:'g', class:'gemini', strength:'OCR + image grounding', cost:'$0.009' },
+  { id:'local',  name:'Local llama-3 70b', short:'Local',   glyph:'L', class:'local',  strength:'Private / no network',  cost:'$0.000' },
+];
+
+const QUEUE = [
+  { id:'QBO-48217', who:'Lori T. — Acme Window Co.', why:'Direct deposit returned: R03', sev:'high', ts:'2m', active:true },
+  { id:'QBO-48216', who:'Marcus B. — Brightside HVAC', why:'Bank feed disconnect (Wells Fargo Business)', sev:'med', ts:'8m' },
+  { id:'QBO-48215', who:'Priya N. — Greenleaf Catering', why:'Sales tax liability mismatch Q4', sev:'med', ts:'14m' },
+  { id:'QBO-48214', who:'Sam K. — Riverbend Plumbing', why:'Cannot reconcile transfer between two banks', sev:'low', ts:'22m' },
+  { id:'QBO-48213', who:'Ana M. — Coastline Designs', why:'1099-NEC contractor not appearing in run', sev:'low', ts:'31m' },
+  { id:'QBO-48212', who:'Doug W. — Pine Ridge Trucking', why:'IIF import error “unable to map account 1100”', sev:'med', ts:'42m' },
+];
+
+const CASE = {
+  id:'QBO-48217',
+  title:'Direct deposit returned with code R03 — payroll cycle 05/08',
+  customer:{
+    name:'Lori Thompson', company:'Acme Window Co.', plan:'QBO Payroll Premium',
+    company_id:'12345678901234567', employees:14, tier:'Tier-2', phone:'(503) 555-0142',
+    industry:'Construction · WA', payrollAdmin:'Lori Thompson', lastPayroll:'05/01/2026 — $48,217.04'
+  },
+  call:{
+    agent:'Jeremy R.', escalatedAt:'14:02 PT', minutesOnHold:6, transcriptSnippet:
+      '"…the bank said the routing’s fine but QuickBooks keeps rejecting it. I have to pay them tomorrow."'
+  },
+  evidence:[
+    { type:'screenshot', label:'Payroll > Direct Deposit Errors', errorBanner:'R03 — No account / unable to locate account', invHint:'INV-2026-0508-PR-0143' },
+    { type:'screenshot', label:'Employee Profile — Pay Method', errorBanner:'Routing 121000358 · Account ****4419', invHint:null },
+  ],
+  routing:'121000358', accountMasked:'****4419', cycleId:'PR-0143', amount:'$3,420.18',
+  intuitTicket:'INC-0091224', similarCases:7,
+};
+
+const TRAIL_STEPS = [
+  { id:1, t:'Operator opened case', s:'14:02:41 PT', done:true },
+  { id:2, t:'Parsed screenshot 1 (Direct Deposit Errors)', s:'OCR · 1.1s · INV pulled', done:true, cite:'shot-1' },
+  { id:3, t:'Parsed screenshot 2 (Employee Pay Method)', s:'OCR · 0.9s · routing + masked acct', done:true, cite:'shot-2' },
+  { id:4, t:'Looked up R03 in QBO playbook', s:'playbook/categories/payroll-direct-deposit.md', done:true, cite:'pb-r03' },
+  { id:5, t:'Cross-checked routing 121000358', s:'FedACH directory · "BANK OF AMERICA, N.A."', done:true, cite:'fed-aba' },
+  { id:6, t:'Drafted resolution + apology', s:'tone: empathetic · 220 words', done:true, cite:'draft-1' },
+  { id:7, t:'Live: searching prior similar tickets', s:'7 matches in last 30d · summarizing', live:true },
+  { id:8, t:'Pending: confirm bank notification window', s:'awaiting operator approval', done:false },
+  { id:9, t:'Pending: send to customer + close', s:'will mark INC-0091224 resolved', done:false },
+];
+
+let state = {
+  provider:'claude',
+  activeStep:6,
+  draftSent:false,
+  draftV2:false,
+  caseId:'QBO-48217',
+};
+
+/* ============================================================
+   Helpers
+============================================================ */
+const $ = sel => document.querySelector(sel);
+const $$ = sel => document.querySelectorAll(sel);
+function el(tag, cls, html) { const e=document.createElement(tag); if(cls)e.className=cls; if(html!=null)e.innerHTML=html; return e; }
+function toast(msg, ms=1800) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(window.__tt); window.__tt = setTimeout(()=>t.classList.remove('show'), ms);
+}
+function providerById(id) { return PROVIDERS.find(p=>p.id===id) || PROVIDERS[0]; }
+
+/* ============================================================
+   Render: Queue
+============================================================ */
+function renderQueue() {
+  const q = $('#queue');
+  // wipe everything after the h3
+  [...q.querySelectorAll('.case-row')].forEach(n=>n.remove());
+  QUEUE.forEach(c => {
+    const row = el('div','case-row' + (c.id===state.caseId?' active':''));
+    row.innerHTML = `
+      <div class="top"><span>${c.id}</span><span>${c.ts}</span></div>
+      <div class="who">${c.who}</div>
+      <div class="why">${c.why}</div>
+      <div style="margin-top:6px"><span class="pill sev-${c.sev}">${c.sev.toUpperCase()}</span></div>
+    `;
+    row.addEventListener('click', ()=>{
+      state.caseId = c.id;
+      $('#crumbCase').textContent = c.id;
+      renderQueue();
+      // Only QBO-48217 has full mock data; others show a stub
+      if (c.id === 'QBO-48217') renderCanvas();
+      else renderCanvasStub(c);
+      toast('Loaded ' + c.id);
+    });
+    q.appendChild(row);
+  });
+}
+
+function renderCanvasStub(c) {
+  $('#canvasInner').innerHTML = `
+    <div class="case-header">
+      <div>
+        <div class="case-id">${c.id} · escalated ${c.ts} ago</div>
+        <h1 class="case-title">${c.why}</h1>
+        <div class="case-meta"><span><b>${c.who}</b></span><span>severity: ${c.sev.toUpperCase()}</span></div>
+      </div>
+      <div class="header-actions">
+        <button class="btn">Reassign</button>
+        <button class="btn primary">Open in playbook</button>
+      </div>
+    </div>
+    <div class="section"><header><span>Case canvas — loading</span></header>
+      <div class="body" style="display:grid;gap:8px">
+        <div class="skel" style="width:80%"></div>
+        <div class="skel" style="width:65%"></div>
+        <div class="skel" style="width:90%"></div>
+        <div class="skel" style="width:55%"></div>
+      </div>
+    </div>`;
+}
+
+/* ============================================================
+   Render: Canvas (the case)
+============================================================ */
+function renderCanvas() {
+  const c = CASE;
+  const p = providerById(state.provider);
+  $('#canvasInner').innerHTML = `
+    <div class="case-header">
+      <div>
+        <div class="case-id">${c.id} · escalated 14:02 PT · agent ${c.call.agent} · ${c.call.minutesOnHold} min on hold</div>
+        <h1 class="case-title">${c.title}</h1>
+        <div class="case-meta">
+          <span><b>${c.customer.name}</b> · ${c.customer.company}</span>
+          <span>${c.customer.plan}</span>
+          <span>${c.customer.employees} employees · ${c.customer.industry}</span>
+          <span>cycle <b>${c.cycleId}</b> · ${c.amount}</span>
+        </div>
+        <div class="status-row">
+          <span class="status">Tier-2</span>
+          <span class="status" style="color:#ffb8b8;border-color:#5a2a2a">SEV-HIGH · payroll cutoff in 18h</span>
+          <span class="status">Intuit ticket ${c.intuitTicket}</span>
+          <span class="status">${c.similarCases} similar in 30d</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button class="btn" onclick="toast('Reassigned to Tier-2 lead')">Reassign</button>
+        <button class="btn" onclick="toast('Customer pinged — callback in 5')">Ping customer</button>
+        <button class="btn primary" id="sendBtn" onclick="sendDraft()">Send response →</button>
+      </div>
+    </div>
+
+    <!-- WHO -->
+    <div class="section" id="caseIntakeSection" data-surface="case-intake">
+      <header><span>Case intake · customer</span><span class="grow"></span><span style="text-transform:none;color:var(--ink-3);font-size:11px">pulled from QBO admin · refreshed 14:01 PT</span></header>
+      <div class="body">
+        <div class="kv">
+          <div><span>Company ID</span><b>${c.customer.company_id}</b></div>
+          <div><span>Phone</span><b>${c.customer.phone}</b></div>
+          <div><span>Payroll Admin</span><b>${c.customer.payrollAdmin}</b></div>
+          <div><span>Last payroll</span><b>${c.customer.lastPayroll}</b></div>
+        </div>
+
+        <div class="annotation" data-cite="call-snip">
+          <div class="meta">
+            <span>annotation · what the agent heard</span>
+            <span style="margin-left:auto">14:02 PT</span>
+          </div>
+          <div>“…the bank said the routing’s fine but QuickBooks keeps rejecting it. I have to pay them tomorrow.”</div>
+          <div class="ribbon"><span class="dot"></span> verbatim from intake call · agent ${c.call.agent}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHAT — evidence with chips -->
+    <div class="section" data-surface="evidence">
+      <header>
+        <span>Evidence · screenshot parser</span>
+        <span class="grow"></span>
+        <span class="status" style="margin-right:8px">parser · OCR 0.97 · 2.0s</span>
+        <button class="btn" id="webcamBtn" title="Capture screenshot from operator webcam (with auto-derotate for sideways phone shots)">＋ webcam capture</button>
+        <button class="btn" id="addShotBtn" title="Add another screenshot to the case intake">＋ screenshot</button>
+      </header>
+      <div class="body">
+        <div class="evidence-grid">
+          ${c.evidence.map((e,i)=>renderEvidence(e,i)).join('')}
+        </div>
+
+        <div class="annotation" data-cite="pb-r03" style="border-left-color: var(--provider-${p.id}); margin-top:14px">
+          <div class="meta">
+            <span class="ident ${p.class}" data-role="ident-on-annotation">
+              <span class="ring">${p.glyph}</span><span>${p.short}</span>
+            </span>
+            <span>extracted error code → <b style="color:#ffb8b8">R03</b></span>
+            <span style="margin-left:auto">1.1s · 412 tokens</span>
+          </div>
+          <div><b>R03</b> = “No account / unable to locate account” per ACH return codes. In QBO this fires when the employee’s account number passed Mod-10 but the receiving bank rejects it (closed, renumbered, or wrong type). Routing <code>${c.routing}</code> is valid — Bank of America, N.A. — so the issue is account-side.</div>
+          <div class="citations">
+            <span class="cite" data-cite="pb-r03">playbook/payroll-direct-deposit.md §R-codes</span>
+            <span class="cite" data-cite="fed-aba">FedACH directory · 121000358</span>
+            <span class="cite" data-cite="shot-1">screenshot 1 · INV ${c.evidence[0].invHint}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHY — playbook + similar -->
+    <div class="section">
+      <header><span>Why this happens</span><span class="grow"></span><span style="text-transform:none;color:var(--ink-3);font-size:11px">3 sources</span></header>
+      <div class="body">
+        <div class="annotation" data-cite="pb-r03" style="border-left-color: var(--provider-${p.id});">
+          <div class="meta">
+            <span class="ident ${p.class}" data-role="ident-on-annotation"><span class="ring">${p.glyph}</span><span>${p.short}</span></span>
+            <span>most likely cause · confidence high (3 of 3 prior R03s in last 30d matched)</span>
+          </div>
+          <ul style="margin:4px 0 0 18px; padding:0">
+            <li>Employee changed checking accounts but their <b>QBO profile still shows the old one</b>.</li>
+            <li>Bank closed the prior account after 90d dormancy — common with BoA Advantage accounts.</li>
+            <li>Customer typed account number from memory, missing a digit at position 5 (typo R03, not R04).</li>
+          </ul>
+          <div class="citations">
+            <span class="cite" data-cite="pb-r03">playbook/payroll-direct-deposit.md §R-codes</span>
+            <span class="cite" data-cite="prior-7">7 similar tickets · 30d</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- HOW — composer (draft response) -->
+    <div class="section composer-section">
+      <header><span>Response draft</span><span class="grow"></span>
+        <span class="diff-toggle" id="diffToggle">show diff vs. v1</span>
+      </header>
+      <div class="composer" id="composer">
+        <div class="tabs">
+          <span class="tab active">Customer reply</span>
+          <span class="tab">Internal note</span>
+          <span class="tab">Intuit escalation</span>
+        </div>
+        <div class="draft" id="draft"></div>
+        <div class="actions">
+          <span class="ident ${p.class}" id="draftIdent" title="Click to regenerate with a different provider">
+            <span class="ring">${p.glyph}</span><span>drafted by ${p.short}</span>
+          </span>
+          <span class="stamp" id="draftStamp">v1 · 220 words · est. read 50s</span>
+          <span class="grow"></span>
+          <button class="btn" onclick="regenerate()">Regenerate</button>
+          <button class="btn" onclick="toast('Copied to clipboard')">Copy</button>
+          <button class="btn primary" onclick="sendDraft()">Send to customer</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- NEXT -->
+    <div class="section">
+      <header><span>Next actions</span></header>
+      <div class="body">
+        <div class="field"><label>If customer confirms typo</label><div class="val">Push corrected account → re-run cycle ${c.cycleId} → ETA same day</div></div>
+        <div class="field"><label>If account is closed</label><div class="val">Cut a same-day paper check via QBO Print Checks · employee notification template ready</div></div>
+        <div class="field"><label>Escalate to Intuit</label><div class="val muted">Only if bank insists routing is wrong — attach screenshot 1 + INC-0091224</div></div>
+      </div>
+    </div>
+  `;
+  // streaming-style fill the draft
+  fillDraft();
+  // wire webcam + add-shot buttons
+  const wb = document.getElementById('webcamBtn');
+  if (wb) wb.addEventListener('click', openWebcam);
+  const ab = document.getElementById('addShotBtn');
+  if (ab) ab.addEventListener('click', () => {
+    CASE.evidence.push({ type:'screenshot', label:'Bank confirmation — routing valid', errorBanner:'BoA: routing 121000358 active for ACH credits', invHint:null });
+    toast('Screenshot added · parser ran in 1.2s');
+    renderCanvas();
+  });
+  // wire up ident menus on annotation chips + draft chip
+  $$('[data-role="ident-on-annotation"]').forEach(node=>{
+    node.addEventListener('click', e => openIdentMenu(e.currentTarget, /*scope*/'annotation'));
+  });
+  $('#draftIdent').addEventListener('click', e => openIdentMenu(e.currentTarget, 'draft'));
+  // citations
+  $$('.cite').forEach(c => c.addEventListener('click', e => openCitePop(e.currentTarget)));
+  $('#diffToggle').addEventListener('click', toggleDiff);
+}
+
+function renderEvidence(e, i) {
+  const inv = e.invHint
+    ? `<span class="chip-overlay inv">${e.invHint}</span>` : '';
+  const err = e.errorBanner ? `<div class="err-banner">${e.errorBanner}</div>` : '';
+  const errChip = e.errorBanner ? `<span class="chip-overlay err">R03 detected</span>` : '';
+  return `
+    <div class="evidence">
+      <div class="ss">
+        <div class="qbo-bar"><span class="dot"></span> QuickBooks Online · Payroll</div>
+        ${err}
+        <div class="field-row"></div>
+        <div class="field-row"></div>
+        <div class="field-row"></div>
+        <span class="chip-overlay qbo">QBO surface</span>
+        ${errChip}
+        ${inv}
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:var(--ink-2)">
+        <span>screenshot ${i+1} · ${e.label}</span>
+        <span style="color:var(--ink-3)">parsed in 1.${i}s</span>
+      </div>
+    </div>
+  `;
+}
+
+/* ============================================================
+   Draft streaming + diff
+============================================================ */
+const DRAFT_V1 = `Hi Lori,
+
+Thanks for hanging on — I know payroll going out tomorrow makes this urgent, and I’m on it with you.
+
+The error on screen (R03) means the receiving bank could not find the account number on file, even though the routing number (121000358 — Bank of America) is correct. In our experience this is almost always one of three things, in order of frequency:
+
+  1) The employee’s old account was closed and they have a new one — please confirm with them today.
+  2) A digit is off in the account number on their QBO profile.
+  3) The account exists but isn’t set up to receive ACH (rare on personal checking).
+
+Here’s what I recommend right now: ping the employee, get a photo of a recent paystub or a voided check, then I’ll push the corrected account through and re-run cycle PR-0143 the same business day. If the account is truly closed, we can cut a same-day paper check from QuickBooks so no one misses pay.
+
+I’ll stay on this case until it’s resolved. Reply here or call back to my direct line and ask for Jeremy R.
+
+— Acme Window Co. payroll support`;
+
+const DRAFT_V2 = `Hi Lori,
+
+Thanks for waiting — I know payroll going out tomorrow makes this urgent, and I have your back.
+
+The on-screen error (R03 — "no account / unable to locate account") means the receiving bank could not match the account number, even though the routing number 121000358 (Bank of America, N.A.) is valid. In 7 of 7 similar cases on this plan in the last 30 days the cause was one of these, in order:
+
+  1) The employee’s old account was closed by the bank and they’ve moved to a new one. Most common with BoA Advantage accounts after 90 days dormant.
+  2) A single digit is off in the account number on file — usually position 5.
+  3) The account exists but isn’t enabled for ACH credits (rare for personal checking).
+
+Recommended next step (we can do this today): ping the employee for a photo of a voided check or current paystub. I’ll push the corrected account through QBO and re-run cycle PR-0143 the same business day — funds land tomorrow morning. If the account is truly closed, we can also cut a same-day paper check from QuickBooks’ Print Checks so no one misses pay.
+
+I’ve already filed Intuit ticket INC-0091224 in case the bank insists the routing is the problem. I’ll keep this case open until your employee is paid — reply here or call back and ask for Jeremy R.
+
+— Acme Window Co. payroll support`;
+
+function fillDraft() {
+  const node = $('#draft');
+  const text = state.draftV2 ? DRAFT_V2 : DRAFT_V1;
+  node.textContent = '';
+  let i = 0;
+  clearInterval(window.__streamI);
+  window.__streamI = setInterval(()=>{
+    i += Math.max(3, Math.floor(Math.random()*12));
+    node.textContent = text.slice(0, i);
+    if (i >= text.length) {
+      clearInterval(window.__streamI);
+      $('#draftStamp').textContent = state.draftV2
+        ? 'v2 · 247 words · est. read 60s · regenerated with similar-case stats'
+        : 'v1 · 220 words · est. read 50s';
+    }
+  }, 22);
+}
+
+function regenerate() {
+  state.draftV2 = !state.draftV2;
+  toast(state.draftV2 ? 'Regenerated v2 — pulled similar-case stats' : 'Back to v1');
+  fillDraft();
+}
+
+function toggleDiff() {
+  const node = $('#draft');
+  if (!state.draftV2) {
+    toast('Regenerate first to see a diff');
+    return;
+  }
+  // crude word-level highlight of phrases that exist in v2 but not v1
+  const phrases = [
+    'in 7 of 7 similar cases on this plan in the last 30 days',
+    'Most common with BoA Advantage accounts after 90 days dormant.',
+    'I’ve already filed Intuit ticket INC-0091224 in case the bank insists the routing is the problem.',
+    'funds land tomorrow morning',
+    'usually position 5.',
+  ];
+  let html = DRAFT_V2.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+  phrases.forEach(p => {
+    const esc = p.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    html = html.replace(new RegExp(esc,'g'), `<span class="diff-add">${p}</span>`);
+  });
+  node.innerHTML = html;
+  toast('Showing v2 additions vs v1');
+}
+
+function sendDraft() {
+  if (state.draftSent) { toast('Already sent at 14:08 PT'); return; }
+  state.draftSent = true;
+  $('#sendBtn').textContent = 'Sent ✓';
+  $('#sendBtn').disabled = true;
+  toast('Response sent · case marked Awaiting customer');
+  // advance reasoning trail
+  TRAIL_STEPS.find(s=>s.id===7).live = false;
+  TRAIL_STEPS.find(s=>s.id===7).done = true;
+  TRAIL_STEPS.find(s=>s.id===8).live = true;
+  renderTrail();
+}
+
+/* ============================================================
+   Reasoning Trail
+============================================================ */
+function renderTrail() {
+  const list = $('#trailList'); list.innerHTML='';
+  TRAIL_STEPS.forEach(step => {
+    const cls = 'trail-item' + (step.done?' done':'') + (step.live?' live':'');
+    const node = el('div', cls);
+    node.innerHTML = `
+      <div class="t">${step.t}${step.live?' <span class="badge">live</span>':''}</div>
+      <div class="s">${step.s}</div>
+    `;
+    if (step.cite) node.addEventListener('click', ()=>{
+      // scroll to the matching annotation if any
+      const target = document.querySelector(`[data-cite="${step.cite}"]`);
+      if (target) {
+        target.scrollIntoView({behavior:'smooth', block:'center'});
+        target.style.outline = '2px solid var(--accent-2)';
+        setTimeout(()=>target.style.outline='', 1400);
+      } else toast('Source: ' + step.s);
+    });
+    list.appendChild(node);
+  });
+  const live = TRAIL_STEPS.find(s=>s.live);
+  $('#trailSub').textContent = `${TRAIL_STEPS.length} steps · 4 sources · ${live?'live ·':''} 12.4s`;
+}
+
+/* ============================================================
+   Provider identity chip — switch per answer
+============================================================ */
+function openIdentMenu(anchor, scope) {
+  const m = $('#identMenu');
+  m.innerHTML = `
+    <div style="font-size:11px;color:var(--ink-3);padding:4px 8px 6px;text-transform:uppercase;letter-spacing:.1em">
+      Re-answer with…
+    </div>
+    ${PROVIDERS.map(p=>`
+      <div class="opt" data-pid="${p.id}">
+        <span class="ident ${p.class}"><span class="ring">${p.glyph}</span><span>${p.short}</span></span>
+        <span class="name" style="color:var(--ink-2);font-size:12px">${p.strength}</span>
+        <small>${p.cost}/answer</small>
+      </div>`).join('')}
+  `;
+  const rect = anchor.getBoundingClientRect();
+  m.style.top = (rect.bottom + 6) + 'px';
+  m.style.left = Math.max(10, rect.left) + 'px';
+  m.classList.add('open');
+  m.querySelectorAll('.opt').forEach(opt => opt.addEventListener('click', () => {
+    const pid = opt.dataset.pid;
+    state.provider = pid;
+    m.classList.remove('open');
+    const p = providerById(pid);
+    toast(`Re-answered with ${p.name}`);
+    // re-render canvas with new provider identity chip + restream
+    renderCanvas();
+    // and update cmd bar chip
+    updateCmdIdent();
+  }));
+  // close on outside click
+  setTimeout(()=>{
+    document.addEventListener('click', closeIdentMenuOnce, true);
+  },0);
+}
+function closeIdentMenuOnce(e) {
+  if (!$('#identMenu').contains(e.target) && !e.target.closest('[data-role="ident-on-annotation"], #draftIdent, #cmdIdent')) {
+    $('#identMenu').classList.remove('open');
+    document.removeEventListener('click', closeIdentMenuOnce, true);
+  }
+}
+function updateCmdIdent() {
+  const p = providerById(state.provider);
+  $('#cmdIdent').className = 'ident ' + p.class;
+  $('#cmdIdent').innerHTML = `<span class="ring">${p.glyph}</span><span>${p.short}</span>`;
+}
+
+/* ============================================================
+   Citation popovers
+============================================================ */
+const CITES = {
+  'pb-r03': {
+    title:'playbook/payroll-direct-deposit.md §R-codes',
+    src:'local · last edited 2026-04-22 by Sasha L.',
+    snippet:'R03 — No account / unable to locate account. Most common after employee bank changes. Always verify with employee before re-running cycle. Do NOT request a new routing number — R03 is account-side.'
+  },
+  'fed-aba': {
+    title:'FedACH Participants Directory',
+    src:'frbservices.org · routing 121000358',
+    snippet:'BANK OF AMERICA, N.A. — RICHMOND, VA. Status: Receives ACH credits & debits. Last directory update: 2026-04-30.'
+  },
+  'shot-1': {
+    title:'Screenshot 1 · Payroll > Direct Deposit Errors',
+    src:'INV-2026-0508-PR-0143 · 1440x900 · OCR confidence 0.97',
+    snippet:'Error banner: "R03 — No account / unable to locate account". Cycle PR-0143. Affected employees: 1 of 14.'
+  },
+  'shot-2': {
+    title:'Screenshot 2 · Employee Profile · Pay Method',
+    src:'OCR confidence 0.94',
+    snippet:'Routing: 121000358. Account: ****4419 (masked). Account type: Checking. Status: Active in QBO.'
+  },
+  'prior-7': {
+    title:'7 similar tickets · last 30 days',
+    src:'Tier-2 / Payroll queue · all resolved',
+    snippet:'5 resolved by employee account update, 1 by paper check, 1 escalated to Intuit (later: bank-side). Avg resolution: 41 min.'
+  },
+  'call-snip': {
+    title:'Intake call transcript — 14:02 PT',
+    src:'agent Jeremy R. · 6m on hold',
+    snippet:'Operator note: customer sounds stressed, payroll due 05/09. Mentioned bank already verified routing.'
+  },
+  'draft-1': {
+    title:'Draft v1',
+    src:'streamed locally · provider: Claude',
+    snippet:'220 words · tone: empathetic + directive · CTA: confirm with employee today.'
+  },
+};
+
+function openCitePop(anchor) {
+  const id = anchor.dataset.cite;
+  const c = CITES[id];
+  if (!c) return;
+  const p = $('#citepop');
+  p.innerHTML = `
+    <h4>${c.title}</h4>
+    <div class="src">${c.src}</div>
+    <div class="snippet">${c.snippet}</div>
+  `;
+  const r = anchor.getBoundingClientRect();
+  p.style.left = Math.min(window.innerWidth - 380, r.left) + 'px';
+  p.style.top  = (r.bottom + 6) + 'px';
+  p.classList.add('open');
+  setTimeout(()=>document.addEventListener('click', closeCiteOnce, true), 0);
+}
+function closeCiteOnce(e) {
+  if (!$('#citepop').contains(e.target) && !e.target.classList.contains('cite')) {
+    $('#citepop').classList.remove('open');
+    document.removeEventListener('click', closeCiteOnce, true);
+  }
+}
+
+/* ============================================================
+   Command bar (the only input on the page)
+============================================================ */
+const COMMANDS = [
+  { k:'/draft',     l:'Draft response from current evidence',          run:()=>{ toast('Streaming draft…'); fillDraft(); } },
+  { k:'/regen',     l:'Regenerate draft (pull similar-case stats)',     run:regenerate },
+  { k:'/diff',      l:'Show diff of v2 vs v1',                          run:toggleDiff },
+  { k:'/find-inv',  l:'Find INV in screenshots',                        run:()=>toast('INV-2026-0508-PR-0143 → cycle PR-0143') },
+  { k:'/similar',   l:'Show 7 similar cases (last 30d)',                run:()=>{ const c=document.querySelector('[data-cite="prior-7"]'); if (c) openCitePop(c); } },
+  { k:'/escalate',  l:'Escalate to Intuit ticket INC-0091224',          run:()=>toast('Escalated to Intuit · case linked') },
+  { k:'/severity',  l:'Change severity (high / med / low)',             run:()=>toast('Severity stays HIGH · payroll cutoff < 18h') },
+  { k:'/paper',     l:'Switch resolution path → cut paper check',       run:()=>toast('Paper-check path armed') },
+  { k:'/callback',  l:'Schedule callback in 30 min',                    run:()=>toast('Callback scheduled · 14:38 PT') },
+  { k:'/webcam',    l:'Open webcam capture (auto-derotate)',            run:openWebcam },
+  { k:'/intake',    l:'Jump to case intake (customer + transcript)',    run:()=>document.getElementById('caseIntakeSection')?.scrollIntoView({behavior:'smooth',block:'start'}) },
+  { k:'/parser',    l:'Re-run parser on all screenshots',               run:()=>toast('Parser re-ran · OCR 0.97 · INV pulled · 2 chips added') },
+  { k:'/triage',    l:'Re-triage with current evidence',                run:()=>toast('Triage unchanged · SEV-HIGH · payroll · ACH return R03') },
+  { k:'/switch',    l:'Switch provider (Claude / GPT / Gemini / Local)', run:()=>{ openIdentMenu($('#cmdIdent'), 'global'); } },
+  { k:'/reasoning', l:'Jump to reasoning trail',                        run:()=>$('.trail').scrollIntoView({behavior:'smooth'}) },
+];
+
+let cmdSel = 0;
+function renderCmdPop(filter='') {
+  const pop = $('#cmdpop');
+  const items = COMMANDS.filter(c => !filter || (c.k + ' ' + c.l).toLowerCase().includes(filter.toLowerCase()));
+  if (!items.length) { pop.classList.remove('open'); return; }
+  cmdSel = Math.min(cmdSel, items.length-1);
+  pop.innerHTML = items.map((c,i)=>`
+    <div class="opt ${i===cmdSel?'kbdsel':''}" data-k="${c.k}">
+      <span class="k">${c.k}</span><span class="l">${c.l}</span><small>↵</small>
+    </div>`).join('');
+  pop.querySelectorAll('.opt').forEach(opt => opt.addEventListener('click', ()=>{
+    runCommand(opt.dataset.k);
+  }));
+  pop.classList.add('open');
+}
+function runCommand(k) {
+  const c = COMMANDS.find(x=>x.k===k);
+  $('#cmdpop').classList.remove('open');
+  $('#cmdInput').value = '';
+  if (c) c.run();
+  else toast('Sent as follow-up to ' + providerById(state.provider).short);
+}
+
+function wireCmd() {
+  const input = $('#cmdInput');
+  input.addEventListener('focus', ()=> renderCmdPop(input.value));
+  input.addEventListener('input', ()=> { cmdSel=0; renderCmdPop(input.value); });
+  input.addEventListener('keydown', e => {
+    const pop = $('#cmdpop');
+    const opts = pop.querySelectorAll('.opt');
+    if (e.key === 'ArrowDown') { cmdSel = (cmdSel+1)%opts.length; renderCmdPop(input.value); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { cmdSel = (cmdSel-1+opts.length)%opts.length; renderCmdPop(input.value); e.preventDefault(); }
+    else if (e.key === 'Enter') {
+      const k = opts[cmdSel]?.dataset.k;
+      if (k) runCommand(k);
+      else if (input.value.trim()) {
+        toast('Follow-up sent → ' + providerById(state.provider).short);
+        input.value = '';
+      }
+    } else if (e.key === 'Escape') {
+      pop.classList.remove('open'); input.blur();
+    }
+  });
+  $('#cmdIdent').addEventListener('click', e => { e.stopPropagation(); openIdentMenu(e.currentTarget, 'global'); });
+
+  // global shortcut
+  window.addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault(); input.focus();
+    }
+  });
+}
+
+/* ============================================================
+   Webcam capture (simulated, with auto-derotate)
+============================================================ */
+function openWebcam() {
+  const m = document.getElementById('webcamModal');
+  m.style.display = 'grid';
+  const cap = document.getElementById('captureBtn');
+  cap.onclick = () => {
+    const overlay = document.getElementById('vfOverlay');
+    overlay.textContent = 'captured · auto-derotate +12° · parsing…';
+    document.getElementById('webcamStatus').textContent = 'parsing · OCR running · INV detect';
+    setTimeout(()=>{
+      CASE.evidence.push({
+        type:'screenshot',
+        label:'Webcam capture · employee paystub photo',
+        errorBanner:'Account ****8830 (NEW — differs from QBO ****4419)',
+        invHint:null,
+      });
+      // append a fresh annotation showing the parser found the real account
+      closeWebcam();
+      toast('Webcam parsed · NEW account number detected → updates draft v2');
+      state.draftV2 = true;
+      renderCanvas();
+    }, 1200);
+  };
+}
+function closeWebcam() {
+  document.getElementById('webcamModal').style.display = 'none';
+  document.getElementById('vfOverlay').textContent = 'align the QBO error to the frame · sideways phone shots are auto-derotated';
+  document.getElementById('webcamStatus').textContent = 'live · 1280×720 · auto-derotate ON · glare-reduce ON';
+}
+
+/* ============================================================
+   Boot
+============================================================ */
+renderQueue();
+renderCanvas();
+renderTrail();
+updateCmdIdent();
+wireCmd();
+
+// Simulate the live step finishing after 6s
+setTimeout(()=>{
+  const s7 = TRAIL_STEPS.find(s=>s.id===7);
+  if (s7 && s7.live) {
+    s7.live = false; s7.done = true; s7.s = 'found 7 matches · summary woven into draft';
+    renderTrail();
+    toast('Reasoning trail updated · 7 similar tickets folded in');
+  }
+}, 6500);
+
+</script>
+</body>
+</html>

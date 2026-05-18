@@ -1,6 +1,7 @@
 'use strict';
 
 const { randomUUID } = require('node:crypto');
+const { categoryForKind } = require('./stage-events');
 
 const CASE_STATUS = {
   NONE: 'none',
@@ -109,9 +110,11 @@ function createRun({
   durationMs,
   fallbackUsed,
   fallbackFrom,
+  fallbackReason,
 }) {
   const normalizedStartedAt = startedAt ? normalizeDate(startedAt) : new Date();
   const normalizedCompletedAt = completedAt ? normalizeDate(completedAt) : null;
+  const fallbackUsedBool = Boolean(fallbackUsed);
   return {
     id: randomUUID(),
     agentId: safeString(agentId, ''),
@@ -124,10 +127,17 @@ function createRun({
     startedAt: normalizedStartedAt,
     completedAt: normalizedCompletedAt,
     durationMs: firstDurationMs(durationMs, calculateDurationMs(normalizedStartedAt, normalizedCompletedAt)),
-    fallbackUsed: Boolean(fallbackUsed),
+    fallbackUsed: fallbackUsedBool,
     fallbackFrom: safeString(fallbackFrom, ''),
+    fallback: {
+      used: fallbackUsedBool,
+      reason: fallbackUsedBool ? safeString(fallbackReason, '') : '',
+      from: fallbackUsedBool ? safeString(fallbackFrom, '') : '',
+    },
     summary: safeString(summary, ''),
     detail: clonePlain(detail, null),
+    events: [],
+    eventCount: 0,
   };
 }
 
@@ -225,6 +235,12 @@ function buildCaseIntakeFromParsedEscalation({
   );
   const triageError = imageTriageContext?.error || null;
   const triageFallback = Boolean(triageCard?.fallback?.used || triageMeta?.usedRuleFallback);
+  const triageFallbackReason = triageFallback
+    ? safeString(triageCard?.fallback?.reason || triageMeta?.fallbackReason, 'Triage Agent did not produce a usable card; rule fallback is displayed.')
+    : '';
+  const triageFallbackFrom = triageFallback
+    ? safeString(triageMeta?.fallbackFrom || triageCard?.fallback?.from, '')
+    : '';
   const knownIssueMeta = knownIssueSearchResult?.meta || null;
   const parserDurationMs = getMetaDurationMs(parseMeta);
   const triageDurationMs = firstDurationMs(getMetaDurationMs(triageMeta), imageTriageContext?.elapsedMs);
@@ -232,7 +248,7 @@ function buildCaseIntakeFromParsedEscalation({
 
   const parserRun = createRun({
     agentId: 'escalation-template-parser',
-    agentName: 'Escalation Template Parser',
+    agentName: 'Image Parser',
     phase: 'parse-template',
     status: canonicalTemplate ? 'completed' : 'failed',
     provider: parserProviderUsed,
@@ -256,7 +272,7 @@ function buildCaseIntakeFromParsedEscalation({
     agentId: 'triage-agent',
     agentName: 'Triage Agent',
     phase: 'triage',
-    status: triageError || triageFallback ? 'failed' : 'completed',
+    status: triageError ? 'failed' : 'completed',
     provider: safeString(triageMeta?.providerUsed, parserProviderUsed),
     model: safeString(triageMeta?.model, parserModelUsed),
     traceId,
@@ -264,16 +280,18 @@ function buildCaseIntakeFromParsedEscalation({
     completedAt: now,
     durationMs: triageDurationMs,
     fallbackUsed: Boolean(triageMeta?.fallbackUsed || triageFallback),
-    fallbackFrom: triageMeta?.fallbackFrom || '',
+    fallbackFrom: triageFallbackFrom,
+    fallbackReason: triageFallbackReason,
     summary: triageError
       ? safeString(triageError.message || triageError.code, 'Triage did not complete.')
       : triageFallback
-        ? safeString(triageCard?.fallback?.reason, 'Triage Agent did not produce a usable card; rule fallback is displayed.')
+        ? triageFallbackReason
       : summarizeTriageCard(triageCard),
     detail: triageError ? clonePlain(triageError, null) : {
       confidence: triageCard?.confidence || parseMeta?.confidence || '',
       missingInfo: Array.isArray(triageCard?.missingInfo) ? triageCard.missingInfo : [],
       source: triageCard?.source || '',
+      generation: clonePlain(triageCard?.generation, null),
       fallback: clonePlain(triageCard?.fallback, null),
       runtime: clonePlain(triageCard?.runtime, null) || {
         usedDefault: Boolean(triageMeta?.usedDefaultRuntime),
@@ -286,7 +304,7 @@ function buildCaseIntakeFromParsedEscalation({
 
   const knownIssueRun = knownIssueSearchResult ? createRun({
     agentId: 'known-issue-search-agent',
-    agentName: 'Known Issue Search Agent',
+    agentName: 'INV Search Agent',
     phase: 'known-issue-search',
     status: knownIssueSearchResult.ok ? 'completed' : 'failed',
     provider: safeString(knownIssueMeta?.providerUsed, parserProviderUsed),
@@ -316,7 +334,7 @@ function buildCaseIntakeFromParsedEscalation({
 
   const analystRun = createRun({
     agentId: 'chat',
-    agentName: 'QBO Analyst',
+    agentName: 'QBO Assistant',
     phase: 'analyst',
     status: 'running',
     provider: analystProvider,
@@ -364,7 +382,7 @@ function completeCaseIntakeAnalystRun(existing, {
     ...previous,
     id: safeString(previous.id, '') || randomUUID(),
     agentId: safeString(previous.agentId, 'chat'),
-    agentName: safeString(previous.agentName, 'QBO Analyst'),
+    agentName: safeString(previous.agentName, 'QBO Assistant'),
     phase: 'analyst',
     status: 'completed',
     provider: safeString(provider, previous.provider || ''),
@@ -403,7 +421,7 @@ function failCaseIntakeAnalystRun(existing, {
     ...previous,
     id: safeString(previous.id, '') || randomUUID(),
     agentId: safeString(previous.agentId, 'chat'),
-    agentName: safeString(previous.agentName, 'QBO Analyst'),
+    agentName: safeString(previous.agentName, 'QBO Assistant'),
     phase: 'analyst',
     status: 'failed',
     provider: safeString(provider, previous.provider || ''),
@@ -427,9 +445,88 @@ function failCaseIntakeAnalystRun(existing, {
   };
 }
 
+const MAX_EVENTS_PER_RUN = 200;
+
+function normalizeStageEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const kind = safeString(event.kind, '');
+  if (!kind) return null;
+  const ts = Number.isFinite(Number(event.ts)) ? Number(event.ts) : Date.now();
+  const seq = Number.isFinite(Number(event.seq)) ? Number(event.seq) : 0;
+  // Trust the bus's category when present; otherwise classify by kind so
+  // events from older code paths (or replayed events) get the right tag.
+  const category = event.category === 'ui' || event.category === 'run'
+    ? event.category
+    : categoryForKind(kind);
+  return {
+    kind,
+    ts,
+    seq,
+    category,
+    stageId: safeString(event.stageId, ''),
+    runId: safeString(event.runId, ''),
+    data: event.data === undefined ? null : clonePlain(event.data, event.data),
+  };
+}
+
+/**
+ * Append buffered stage_event records onto the matching run in
+ * caseIntake.runs[]. Stage-to-phase mapping mirrors how ChatV5Container.jsx
+ * labels its cards.
+ *
+ * @param {object} existing - the current caseIntake (may be null)
+ * @param {string} stageId  - 'parser' | 'inv' | 'triage' | 'main'
+ * @param {Array}  events   - flushed events from the per-stage bus
+ */
+function applyStageEventsToCaseIntake(existing, stageId, events) {
+  const intake = normalizeExistingIntake(existing);
+  if (!stageId || !Array.isArray(events) || events.length === 0) return intake;
+
+  const phaseByStageId = {
+    parser: 'parse-template',
+    inv: 'known-issue-search',
+    triage: 'triage',
+    main: 'analyst',
+  };
+  const phase = phaseByStageId[stageId];
+  if (!phase) return intake;
+
+  const normalizedEvents = events
+    .map(normalizeStageEvent)
+    .filter(Boolean)
+    .slice(0, MAX_EVENTS_PER_RUN);
+
+  if (normalizedEvents.length === 0) return intake;
+
+  const runs = (Array.isArray(intake.runs) ? intake.runs : []).map((run) => {
+    if (!run || run.phase !== phase) return run;
+    const existingEvents = Array.isArray(run.events) ? run.events : [];
+    const merged = [...existingEvents, ...normalizedEvents].slice(-MAX_EVENTS_PER_RUN);
+    // eventCount tracks the live total even after the bounded events array
+    // is sliced — keeps moving-average denominators truthful for long runs.
+    // Only `run`-category events count toward the denominator; `ui` events
+    // (popup open/close, replay-skipped, etc.) are stored for debugging but
+    // never inflate counters or moving averages.
+    const previousCount = Number.isFinite(Number(run.eventCount)) ? Number(run.eventCount) : 0;
+    const newRunEvents = normalizedEvents.filter((ev) => ev.category !== 'ui').length;
+    return {
+      ...run,
+      events: merged,
+      eventCount: previousCount + newRunEvents,
+    };
+  });
+
+  return {
+    ...intake,
+    runs,
+    updatedAt: new Date(),
+  };
+}
+
 module.exports = {
   CASE_STATUS,
   appendCaseIntakeFollowUp,
+  applyStageEventsToCaseIntake,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,

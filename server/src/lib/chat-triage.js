@@ -540,7 +540,7 @@ function buildInvMatchRefBlock(matches) {
   });
   return [
     '\n\n--- KNOWN ISSUE MATCHES (active INV investigations) ---',
-    'The following known issues were matched by the Known Issue Search Agent.',
+    'The following known issues were matched by the INV Search Agent.',
     'Reference them in your response when relevant. In the Steps for Agent section, give the',
     'customer the INV number and add them to affected users if the issue matches.',
     '',

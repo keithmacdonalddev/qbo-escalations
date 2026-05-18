@@ -1,0 +1,1036 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Escalation — Apple lens</title>
+<style>
+  :root{
+    /* Apple HIG semantic tokens (light) */
+    --bg:#F5F5F7;
+    --surface:#FFFFFF;
+    --surface-2:#F2F2F7;
+    --label:#1D1D1F;
+    --label-2:rgba(60,60,67,0.60);
+    --label-3:rgba(60,60,67,0.30);
+    --separator:rgba(60,60,67,0.12);
+    --separator-strong:rgba(60,60,67,0.22);
+    --blue:#0071E3;
+    --blue-2:#0A84FF;
+    --blue-tint:rgba(0,113,227,0.10);
+    --green:#30A46C;
+    --green-tint:rgba(48,164,108,0.10);
+    --orange:#C25C00;
+    --orange-tint:rgba(194,92,0,0.10);
+    --red:#D70015;
+    --red-tint:rgba(215,0,21,0.10);
+    --material-thin: blur(20px) saturate(1.8);
+    --material-thick: blur(40px) saturate(1.8);
+    --radius-sm:8px;
+    --radius:12px;
+    --radius-lg:18px;
+    --radius-xl:24px;
+    --shadow-1: 0 1px 2px rgba(0,0,0,0.04), 0 1px 1px rgba(0,0,0,0.03);
+    --shadow-2: 0 4px 16px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-3: 0 20px 50px -12px rgba(0,0,0,0.12), 0 8px 24px rgba(0,0,0,0.06);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  /* Dark mode (explicit via data-mode, set by JS on load from prefers-color-scheme) */
+  :root[data-mode="dark"]{
+    --bg:#000000;
+    --surface:#1C1C1E;
+    --surface-2:#2C2C2E;
+    --label:#FFFFFF;
+    --label-2:rgba(235,235,245,0.60);
+    --label-3:rgba(235,235,245,0.30);
+    --separator:rgba(84,84,88,0.36);
+    --separator-strong:rgba(84,84,88,0.60);
+    --blue:#0A84FF;
+    --blue-2:#409CFF;
+    --blue-tint:rgba(10,132,255,0.18);
+    --green:#30D158;
+    --green-tint:rgba(48,209,88,0.18);
+    --orange:#FF9F0A;
+    --orange-tint:rgba(255,159,10,0.18);
+    --red:#FF453A;
+    --red-tint:rgba(255,69,58,0.18);
+    --shadow-1: 0 1px 2px rgba(0,0,0,0.3);
+    --shadow-2: 0 4px 16px rgba(0,0,0,0.35);
+    --shadow-3: 0 20px 50px -12px rgba(0,0,0,0.55);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--label);font-family:var(--font);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;font-feature-settings:"ss01","cv11","tnum";}
+  body{min-height:100vh;display:flex;flex-direction:column}
+
+  /* Top chrome — translucent nav, very thin */
+  .nav{
+    position:sticky; top:0; z-index:50;
+    height:52px; padding:0 24px;
+    display:flex; align-items:center; gap:16px;
+    background: color-mix(in srgb, var(--bg) 70%, transparent);
+    backdrop-filter: var(--material-thin);
+    -webkit-backdrop-filter: var(--material-thin);
+    border-bottom:0.5px solid var(--separator);
+  }
+  .nav .brand{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;letter-spacing:-0.01em}
+  .brand-dot{width:18px;height:18px;border-radius:6px;background:linear-gradient(135deg,#0A84FF,#5E5CE6)}
+  .nav .pipe{flex:1}
+  .nav .progress{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--label-2)}
+  .progress-track{
+    position:relative; height:3px; width:280px; border-radius:99px;
+    background:var(--separator);
+    overflow:hidden;
+  }
+  .progress-fill{
+    position:absolute; left:0; top:0; bottom:0; width:0%;
+    background:linear-gradient(90deg, var(--blue), var(--blue-2));
+    border-radius:99px;
+    transition:width .9s cubic-bezier(0.32,0.72,0.10,1.00);
+  }
+  .nav .demo{display:flex;gap:6px}
+  .nav button.demo-btn{
+    appearance:none; border:none; background:var(--surface);
+    color:var(--label); border:0.5px solid var(--separator-strong);
+    height:28px; padding:0 12px; border-radius:14px;
+    font:inherit; font-size:12px; font-weight:500; cursor:pointer;
+    transition: background .2s ease, transform .15s ease;
+  }
+  .nav button.demo-btn:hover{background:var(--surface-2)}
+  .nav button.demo-btn:active{transform:scale(0.97)}
+  .nav button.demo-btn.primary{background:var(--blue);color:white;border-color:transparent}
+  .nav button.demo-btn.primary:hover{background:color-mix(in srgb, var(--blue) 92%, black)}
+
+  /* Document */
+  .doc{
+    max-width:780px;
+    margin: 24px auto 120px;
+    padding: 0 24px;
+    display:flex; flex-direction:column;
+    gap: 28px;
+  }
+
+  /* Header: case identity */
+  .head{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    padding: 8px 4px 0;
+  }
+  .head .eyebrow{
+    font-size:12px; font-weight:600; color:var(--label-2);
+    letter-spacing:0.02em; text-transform:uppercase;
+  }
+  .head h1{
+    margin:6px 0 0; font-size:28px; font-weight:700;
+    letter-spacing:-0.02em; line-height:1.15;
+  }
+  .head .meta{font-size:13px;color:var(--label-2);font-variant-numeric:tabular-nums}
+
+  /* Section card — surface with subtle bordered separation */
+  .card{
+    background:var(--surface);
+    border:0.5px solid var(--separator);
+    border-radius:var(--radius-lg);
+    box-shadow:var(--shadow-1);
+    overflow:hidden;
+  }
+  .card-head{
+    display:flex; align-items:center; gap:10px;
+    padding:14px 18px;
+    border-bottom:0.5px solid var(--separator);
+  }
+  .card-head .agent{
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:var(--label-2);
+  }
+  .card-head .agent .who{color:var(--label);font-weight:600}
+  .card-head .agent .role{color:var(--label-3)}
+  .card-head .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+
+  /* Status pill */
+  .pill{
+    display:inline-flex; align-items:center; gap:6px;
+    height:22px; padding:0 9px;
+    border-radius:11px;
+    font-size:11px; font-weight:600; letter-spacing:0.01em;
+    background:var(--surface-2); color:var(--label-2);
+    border:0.5px solid var(--separator);
+  }
+  .pill .dot{width:6px;height:6px;border-radius:50%;background:var(--label-3)}
+  .pill.idle .dot{background:var(--label-3)}
+  .pill.running{background:var(--blue-tint);color:var(--blue);border-color:transparent}
+  .pill.running .dot{background:var(--blue);box-shadow:0 0 0 0 var(--blue);animation:pulse 1.4s ease-out infinite}
+  .pill.done{background:var(--green-tint);color:var(--green);border-color:transparent}
+  .pill.done .dot{background:var(--green)}
+
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 color-mix(in srgb, var(--blue) 50%, transparent)}
+    70%{box-shadow:0 0 0 6px transparent}
+    100%{box-shadow:0 0 0 0 transparent}
+  }
+
+  .agent-glyph{
+    width:18px;height:18px;border-radius:50%;
+    display:inline-flex;align-items:center;justify-content:center;
+    font-size:10px;font-weight:700;color:white;flex-shrink:0;
+  }
+  .g-parser{background:linear-gradient(135deg,#8E8E93,#636366)}
+  .g-inv{background:linear-gradient(135deg,#5AC8FA,#0A84FF)}
+  .g-triage{background:linear-gradient(135deg,#FF9F0A,#FF6B00)}
+  .g-analyst{background:linear-gradient(135deg,#5E5CE6,#BF5AF2)}
+
+  /* Intake (state: pre-upload) */
+  .intake{
+    padding:0;
+  }
+  .dropzone{
+    margin:18px; padding:48px 24px;
+    border:1.5px dashed var(--separator-strong);
+    border-radius:var(--radius);
+    text-align:center;
+    background:
+      radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--blue) 6%, transparent), transparent 60%);
+    transition: background .25s ease, border-color .25s ease;
+    cursor: pointer;
+  }
+  .dropzone:hover{ border-color: var(--blue); background:
+      radial-gradient(120% 60% at 50% 0%, color-mix(in srgb, var(--blue) 10%, transparent), transparent 60%);}
+  .dropzone .glyph{
+    width:44px;height:44px;border-radius:14px;margin:0 auto 14px;
+    background:var(--surface-2); display:flex;align-items:center;justify-content:center;
+    color:var(--blue);
+  }
+  .dropzone h2{margin:0 0 6px;font-size:17px;font-weight:600;letter-spacing:-0.01em}
+  .dropzone p{margin:0;color:var(--label-2);font-size:13px}
+  .dropzone .actions{
+    display:flex; justify-content:center; gap:8px;
+    margin-top:18px;
+  }
+  .btn{
+    appearance:none;border:0.5px solid var(--separator-strong);
+    background:var(--surface);color:var(--label);
+    height:32px;padding:0 14px;border-radius:16px;
+    font:inherit;font-size:13px;font-weight:500;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+    transition:background .15s ease, transform .12s ease;
+  }
+  .btn:hover{background:var(--surface-2)}
+  .btn:active{transform:scale(0.98)}
+  .btn.primary{background:var(--blue);color:white;border-color:transparent}
+  .btn.primary:hover{background:color-mix(in srgb, var(--blue) 92%, black)}
+
+  /* Intake preview (after drop) */
+  .preview{
+    display:flex; gap:14px; align-items:center; padding:14px 18px;
+  }
+  .preview .thumb{
+    width:84px;height:84px;border-radius:10px;flex-shrink:0;
+    background:
+      linear-gradient(135deg, #2C2C2E, #1C1C1E);
+    position:relative; overflow:hidden;
+    border:0.5px solid var(--separator);
+    box-shadow:var(--shadow-1);
+  }
+  .preview .thumb::before{
+    content:"";position:absolute;inset:0;
+    background:
+      linear-gradient(180deg, transparent 0 26%, rgba(255,255,255,0.04) 26% 28%, transparent 28% 50%, rgba(255,255,255,0.05) 50% 52%, transparent 52% 74%, rgba(255,255,255,0.04) 74% 76%, transparent 76%);
+  }
+  .preview .thumb::after{
+    content:"DM";position:absolute;top:6px;left:8px;font-size:9px;font-weight:700;color:rgba(255,255,255,0.6);
+  }
+  .preview .info h3{margin:0;font-size:14px;font-weight:600;letter-spacing:-0.01em}
+  .preview .info p{margin:2px 0 0;color:var(--label-2);font-size:12px}
+
+  /* Parser fields grid */
+  .fields{padding:6px 18px 18px;display:grid;grid-template-columns:1fr 1fr;gap:0 24px}
+  .field{
+    border-top:0.5px solid var(--separator);
+    padding:12px 0;
+  }
+  .field:nth-child(1),.field:nth-child(2){border-top:none}
+  .field .k{font-size:11px;color:var(--label-2);letter-spacing:0.02em;text-transform:uppercase;font-weight:600}
+  .field .v{font-size:13.5px;color:var(--label);margin-top:3px;line-height:1.45}
+  .field.full{grid-column:1/-1}
+  .field .v .ph{
+    display:inline-block;height:0.9em;width:100%;max-width:240px;
+    background:linear-gradient(90deg, var(--surface-2) 0%, color-mix(in srgb, var(--surface-2) 60%, var(--separator)) 50%, var(--surface-2) 100%);
+    background-size:200% 100%;
+    border-radius:4px;
+    animation: shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+
+  /* Pipeline row (INV + Triage) */
+  .pipeline{
+    display:grid;
+    grid-template-columns: 1fr 1.6fr;
+    gap: 18px;
+  }
+  @media (max-width:680px){.pipeline{grid-template-columns:1fr}}
+
+  /* Triage — the moment of understanding (dominant) */
+  .triage{
+    position:relative;
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--orange) 5%, var(--surface)) 0%, var(--surface) 60%);
+    border:0.5px solid var(--separator);
+    border-radius:var(--radius-lg);
+    box-shadow: var(--shadow-2);
+    overflow:hidden;
+  }
+  .triage .card-head{padding:14px 20px;border-bottom-color:var(--separator)}
+  .triage-body{padding:8px 20px 20px}
+  .triage .severity-row{
+    display:flex;align-items:center;gap:10px;margin:14px 0 8px;
+  }
+  .sev{
+    display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;
+    font-size:12px;font-weight:700;letter-spacing:0.02em;
+  }
+  .sev.p1{background:var(--red-tint);color:var(--red)}
+  .sev.p2{background:var(--orange-tint);color:var(--orange)}
+  .sev.p3{background:var(--blue-tint);color:var(--blue)}
+  .sev.p4{background:var(--surface-2);color:var(--label-2)}
+  .cat{
+    display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:12px;
+    font-size:12px;font-weight:600;background:var(--surface-2);color:var(--label);
+    border:0.5px solid var(--separator);
+  }
+  .conf{font-size:11px;color:var(--label-2);margin-left:auto;font-variant-numeric:tabular-nums}
+  .conf b{color:var(--label);font-weight:600}
+  .fast-read{
+    font-size:22px; line-height:1.28; letter-spacing:-0.015em;
+    font-weight:600; color:var(--label);
+    margin:6px 0 14px;
+  }
+  .triage-sub{
+    display:grid; grid-template-columns:1fr; gap:10px;
+    border-top:0.5px solid var(--separator);
+    padding-top:14px;
+  }
+  .sub-row{display:flex;gap:10px;align-items:flex-start;font-size:13px;line-height:1.45}
+  .sub-row .label{
+    flex-shrink:0; width:118px; color:var(--label-2); font-size:12px;
+    font-weight:600; padding-top:1px;
+  }
+  .sub-row .val{color:var(--label)}
+  .sub-row .val em{font-style:normal;background:var(--orange-tint);color:var(--orange);padding:0 5px;border-radius:5px;font-weight:600;font-size:12px}
+
+  /* INV side card */
+  .inv .card-head{border-bottom-color:var(--separator)}
+  .inv-body{padding:14px 16px;min-height:140px;display:flex;flex-direction:column;justify-content:center}
+  .inv-match{
+    display:flex;flex-direction:column;gap:8px;
+  }
+  .inv-id{
+    font-family:var(--mono); font-size:12px; color:var(--blue);
+    background:var(--blue-tint); display:inline-block; align-self:flex-start;
+    padding:3px 8px; border-radius:8px; font-weight:600;
+    letter-spacing:-0.01em;
+  }
+  .inv-title{font-size:13px;color:var(--label);line-height:1.4;font-weight:500}
+  .inv-meta{font-size:11px;color:var(--label-2);font-variant-numeric:tabular-nums}
+  .inv .empty{font-size:12px;color:var(--label-2);font-style:italic}
+
+  /* Empty/Loading rows for sections not yet ready */
+  .skeleton-row{
+    display:flex; align-items:center; gap:12px;
+    padding: 16px 18px;
+    color:var(--label-2); font-size:12.5px;
+  }
+  .skeleton-row .spin{
+    width:14px;height:14px;border-radius:50%;
+    border:1.5px solid var(--separator-strong); border-top-color:var(--blue);
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Analyst arrival — emotional peak */
+  .analyst-arrival{
+    position:relative;
+    display:grid; grid-template-columns: auto 1fr auto; align-items:center; gap:16px;
+    padding: 20px 22px;
+    border:0.5px solid var(--separator);
+    border-radius:var(--radius-lg);
+    background:
+      radial-gradient(140% 100% at 100% 0%, color-mix(in srgb, #BF5AF2 9%, transparent), transparent 55%),
+      radial-gradient(80% 60% at 0% 100%, color-mix(in srgb, #5E5CE6 5%, transparent), transparent 60%),
+      var(--surface);
+    box-shadow: var(--shadow-2);
+    opacity:0; transform:translateY(10px);
+    transition: opacity .55s ease, transform .65s cubic-bezier(0.32,0.72,0.10,1.00);
+    overflow:hidden;
+  }
+  .analyst-arrival::after{
+    content:""; position:absolute; inset:-1px;
+    border-radius:inherit; pointer-events:none;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, #BF5AF2 18%, transparent);
+  }
+  .analyst-arrival.shown{opacity:1;transform:translateY(0)}
+  .avatar{
+    width:56px;height:56px;border-radius:50%;
+    background:
+      radial-gradient(120% 120% at 30% 25%, #8C7AFF 0%, #5E5CE6 45%, #BF5AF2 100%);
+    color:white;font-weight:600;font-size:22px;letter-spacing:-0.01em;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:
+      0 8px 24px color-mix(in srgb, #5E5CE6 35%, transparent),
+      inset 0 1px 0 rgba(255,255,255,0.25);
+    position:relative; flex-shrink:0;
+  }
+  .avatar .live{
+    position:absolute;bottom:0;right:0;
+    width:14px;height:14px;border-radius:50%;
+    background:var(--green); border:2.5px solid var(--surface);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent);
+    animation: livePulse 2s ease-out infinite;
+  }
+  @keyframes livePulse{
+    0%{box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent)}
+    70%{box-shadow: 0 0 0 8px transparent}
+    100%{box-shadow: 0 0 0 0 transparent}
+  }
+  .analyst-arrival .who{display:flex;flex-direction:column;gap:4px;min-width:0}
+  .analyst-arrival .name{font-size:17px;font-weight:600;letter-spacing:-0.015em;line-height:1.2}
+  .analyst-arrival .name .model{font-size:11px;color:var(--label-2);font-weight:500;margin-left:8px;font-variant-numeric:tabular-nums;letter-spacing:0}
+  .analyst-arrival .sub{font-size:13px;color:var(--label-2);line-height:1.45}
+  .analyst-arrival .credential{
+    font-size:11px;color:var(--label-2);
+    display:flex;align-items:center;gap:6px;margin-top:1px;
+  }
+  .analyst-arrival .credential::before{
+    content:"";width:3px;height:3px;border-radius:50%;background:var(--label-3);
+  }
+  .analyst-arrival .briefed-stack{
+    display:flex; flex-direction:column; align-items:flex-end; gap:6px;
+    font-size:11px;color:var(--label-2);
+  }
+  .briefed-stack .row{
+    display:inline-flex;align-items:center;gap:6px;
+    opacity:0; transform:translateX(4px);
+    transition: opacity .35s ease, transform .4s cubic-bezier(0.32,0.72,0.10,1.00);
+  }
+  .analyst-arrival.shown .briefed-stack .row{opacity:1;transform:translateX(0)}
+  .analyst-arrival.shown .briefed-stack .row:nth-child(1){transition-delay:.25s}
+  .analyst-arrival.shown .briefed-stack .row:nth-child(2){transition-delay:.40s}
+  .analyst-arrival.shown .briefed-stack .row:nth-child(3){transition-delay:.55s}
+  .analyst-arrival.shown .briefed-stack .row:nth-child(4){transition-delay:.70s}
+  .check{
+    width:14px;height:14px;border-radius:50%;background:var(--green);
+    color:white;display:inline-flex;align-items:center;justify-content:center;
+    font-size:9px; font-weight:700;
+  }
+
+  /* Chat — continuation, not handoff */
+  .chat{
+    display:flex; flex-direction:column; gap:14px;
+    padding: 6px 4px;
+  }
+  .msg{
+    display:flex; gap:10px; align-items:flex-start;
+    opacity:0; transform:translateY(6px);
+    transition: opacity .35s ease, transform .45s cubic-bezier(0.32,0.72,0.10,1.00);
+  }
+  .msg.shown{opacity:1;transform:translateY(0)}
+  .msg .avatar-sm{
+    width:28px;height:28px;border-radius:50%;
+    color:white;font-weight:600;font-size:11px;
+    display:flex;align-items:center;justify-content:center; flex-shrink:0;
+  }
+  .msg.analyst .avatar-sm{background:linear-gradient(135deg,#5E5CE6,#BF5AF2)}
+  .msg.op .avatar-sm{background:linear-gradient(135deg,#34C759,#30A46C)}
+  .msg .bubble{
+    max-width:560px; padding:10px 14px;
+    background:var(--surface); border:0.5px solid var(--separator);
+    border-radius:16px;
+    font-size:14px; line-height:1.5; color:var(--label);
+    box-shadow:var(--shadow-1);
+  }
+  .msg.op{flex-direction:row-reverse}
+  .msg.op .bubble{background:var(--blue);color:white;border-color:transparent}
+  .msg .nm{font-size:11px;color:var(--label-2);margin-bottom:3px;font-weight:600}
+  .msg.op .nm{text-align:right}
+  .typing{
+    display:inline-flex;gap:3px;align-items:center;height:1em;
+  }
+  .typing span{width:5px;height:5px;border-radius:50%;background:var(--label-3);animation:typing 1.2s infinite ease-in-out}
+  .typing span:nth-child(2){animation-delay:.15s}
+  .typing span:nth-child(3){animation-delay:.3s}
+  @keyframes typing{
+    0%,80%,100%{transform:translateY(0);opacity:0.35}
+    40%{transform:translateY(-3px);opacity:1}
+  }
+
+  /* Composer */
+  .composer{
+    position:sticky; bottom:16px;
+    margin-top:14px;
+    display:flex; align-items:center; gap:10px;
+    padding:8px 8px 8px 14px;
+    background: color-mix(in srgb, var(--surface) 92%, transparent);
+    backdrop-filter: var(--material-thin);
+    -webkit-backdrop-filter: var(--material-thin);
+    border:0.5px solid var(--separator);
+    border-radius:22px;
+    box-shadow: var(--shadow-3);
+  }
+  .composer input{
+    flex:1; appearance:none; background:transparent; border:none; outline:none;
+    color:var(--label); font:inherit; font-size:14px; padding:6px 0;
+  }
+  .composer input::placeholder{color:var(--label-3)}
+  .send-btn{
+    appearance:none;border:none;background:var(--blue);color:white;
+    width:32px;height:32px;border-radius:16px;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .send-btn:hover{background:color-mix(in srgb, var(--blue) 92%, black)}
+  .send-btn:active{transform:scale(0.94)}
+
+  /* Reveal helper: a section is invisible until JS adds .visible */
+  .reveal{
+    opacity:0; transform:translateY(8px);
+    transition:opacity .45s ease, transform .55s cubic-bezier(0.32,0.72,0.10,1.00);
+    pointer-events:none;
+  }
+  .reveal.visible{opacity:1; transform:translateY(0); pointer-events:auto}
+
+  /* Sections collapse to zero height before reveal so the doc grows downward */
+  .doc-section{display:flex;flex-direction:column}
+  .doc-section.hidden{display:none}
+
+  /* Footer hint */
+  .arc-hint{
+    text-align:center;font-size:11px;color:var(--label-3);
+    margin: 32px 0 8px; letter-spacing:0.04em; text-transform:uppercase;
+  }
+
+  /* Webcam modal (intake alt) */
+  .webcam-shade{
+    position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+    background:color-mix(in srgb, #000 50%, transparent);
+    backdrop-filter: var(--material-thick);
+    -webkit-backdrop-filter: var(--material-thick);
+    z-index:100;
+  }
+  .webcam-shade.open{display:flex}
+  .webcam{
+    width:min(560px, 92vw); background:var(--surface); border:0.5px solid var(--separator);
+    border-radius:var(--radius-xl); padding:18px; box-shadow:var(--shadow-3);
+    display:flex;flex-direction:column;gap:14px;
+  }
+  .webcam .frame{
+    aspect-ratio:4/3; border-radius:14px; background:#000;
+    background-image:
+      linear-gradient(135deg, rgba(255,255,255,0.05), transparent 40%),
+      radial-gradient(120% 80% at 30% 30%, rgba(10,132,255,0.15), transparent 50%);
+    position:relative; overflow:hidden;
+    display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.5);
+    font-size:12px;
+  }
+  .webcam .frame::after{
+    content:""; position:absolute; inset:8%;
+    border:1px dashed rgba(255,255,255,0.25); border-radius:10px;
+  }
+  .webcam .row{display:flex;gap:8px;justify-content:space-between;align-items:center}
+  .webcam .ctrls{display:flex;gap:8px}
+
+  /* Pre-section hidden but kept in flow for predictable layout */
+
+  /* Focus visibility */
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    *{animation-duration:0.01ms !important;transition-duration:0.01ms !important}
+  }
+</style>
+</head>
+<body>
+
+<!-- Top nav: brand, demo controls, quiet progress -->
+<nav class="nav" aria-label="App">
+  <div class="brand"><span class="brand-dot" aria-hidden="true"></span><span>Escalations</span></div>
+  <div class="progress" aria-hidden="true">
+    <span id="progressLabel">Ready</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+  <div class="pipe"></div>
+  <div class="demo">
+    <button class="demo-btn" id="btnTheme" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg id="iconSun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+    </button>
+    <button class="demo-btn" id="btnReset" type="button">Reset</button>
+    <button class="demo-btn primary" id="btnPlay" type="button">Play arc</button>
+  </div>
+</nav>
+
+<main class="doc" id="doc">
+  <!-- HEAD -->
+  <header class="head" id="head">
+    <div>
+      <div class="eyebrow">New case</div>
+      <h1 id="caseTitle">Ready when you are</h1>
+    </div>
+    <div class="meta" id="caseMeta">No screenshot yet</div>
+  </header>
+
+  <!-- 1. INTAKE -->
+  <section class="doc-section" id="sec-intake" aria-label="Intake">
+    <article class="card intake" id="intakeCard">
+      <div class="card-head">
+        <div class="agent">
+          <span class="agent-glyph g-parser" aria-hidden="true">P</span>
+          <span class="who">Drop a screenshot</span>
+          <span class="role">·  Paste, drag, file, or webcam</span>
+        </div>
+        <div class="right">
+          <span class="pill idle" id="pillIntake"><span class="dot"></span>Waiting</span>
+        </div>
+      </div>
+
+      <!-- pre-upload -->
+      <div id="dropzoneWrap">
+        <div class="dropzone" id="dropzone" role="button" tabindex="0" aria-label="Drop a screenshot, click to choose, or press Cmd+V to paste">
+          <div class="glyph" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="m21 17-5-5-9 8"/></svg>
+          </div>
+          <h2>Drop the phone agent's DM screenshot</h2>
+          <p>Or paste with <kbd style="font:inherit;font-size:11px;background:var(--surface-2);border:0.5px solid var(--separator);border-radius:5px;padding:1px 6px;color:var(--label-2)">⌘V</kbd> · click to choose · use webcam</p>
+          <div class="actions">
+            <button class="btn" id="btnChoose" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Choose file
+            </button>
+            <button class="btn" id="btnWebcam" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+              Webcam
+            </button>
+            <button class="btn primary" id="btnSample" type="button">
+              Use sample
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- post-upload preview (revealed) -->
+      <div id="previewWrap" class="reveal" aria-hidden="true">
+        <div class="preview">
+          <div class="thumb" aria-hidden="true"></div>
+          <div class="info">
+            <h3>escalation-dm-2026-05-16.png</h3>
+            <p>1170 × 2532 · From: Brittany K (phone agent) · QBO Slack</p>
+          </div>
+        </div>
+      </div>
+    </article>
+  </section>
+
+  <!-- 2. PARSER -->
+  <section class="doc-section reveal" id="sec-parser" aria-label="Parsed template">
+    <article class="card">
+      <div class="card-head">
+        <div class="agent">
+          <span class="agent-glyph g-parser" aria-hidden="true">P</span>
+          <span class="who">Parser</span>
+          <span class="role">·  Vision · Claude Haiku 4.5</span>
+        </div>
+        <div class="right">
+          <span class="pill idle" id="pillParser"><span class="dot"></span>Waiting</span>
+        </div>
+      </div>
+      <div class="fields" id="fields" aria-live="polite">
+        <div class="field"><div class="k">Attempting to</div><div class="v" data-k="attempt"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Expected outcome</div><div class="v" data-k="expect"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Actual outcome</div><div class="v" data-k="actual"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Customer</div><div class="v" data-k="cust"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Phone agent</div><div class="v" data-k="agent"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Product area</div><div class="v" data-k="area"><span class="ph"></span></div></div>
+        <div class="field full"><div class="k">Steps tried</div><div class="v" data-k="steps"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Subscription</div><div class="v" data-k="sub"><span class="ph"></span></div></div>
+        <div class="field"><div class="k">Urgency note</div><div class="v" data-k="urg"><span class="ph"></span></div></div>
+      </div>
+    </article>
+  </section>
+
+  <!-- 3. PIPELINE: INV + TRIAGE -->
+  <section class="doc-section reveal" id="sec-pipeline" aria-label="Triage and INV">
+    <div class="pipeline">
+      <!-- INV (supportive) -->
+      <article class="card inv" id="invCard">
+        <div class="card-head">
+          <div class="agent">
+            <span class="agent-glyph g-inv" aria-hidden="true">I</span>
+            <span class="who">INV Search</span>
+            <span class="role">·  Sonnet 4.5</span>
+          </div>
+          <div class="right">
+            <span class="pill idle" id="pillInv"><span class="dot"></span>Waiting</span>
+          </div>
+        </div>
+        <div class="inv-body" id="invBody">
+          <div class="skeleton-row" id="invLoading" hidden>
+            <span class="spin" aria-hidden="true"></span>
+            <span>Searching investigation archive…</span>
+          </div>
+          <div class="inv-match" id="invMatch" hidden>
+            <span class="inv-id">INV-147914</span>
+            <span class="inv-title">Unscheduled payroll blocked when termination date precedes pay-period start (CA, Core Payroll)</span>
+            <span class="inv-meta">Opened 2025-11-08 · 7 related cases · status: workaround documented</span>
+          </div>
+          <div class="empty" id="invEmpty" hidden>No close match — proceeding without prior INV.</div>
+        </div>
+      </article>
+
+      <!-- TRIAGE (primary signal) -->
+      <article class="triage" id="triageCard">
+        <div class="card-head">
+          <div class="agent">
+            <span class="agent-glyph g-triage" aria-hidden="true">T</span>
+            <span class="who">Triage</span>
+            <span class="role">·  Senior · Sonnet 4.5</span>
+          </div>
+          <div class="right">
+            <span class="pill idle" id="pillTriage"><span class="dot"></span>Waiting</span>
+          </div>
+        </div>
+        <div class="triage-body" id="triageBody">
+          <div class="skeleton-row" id="triageLoading" hidden>
+            <span class="spin" aria-hidden="true"></span>
+            <span>Triage reading the case…</span>
+          </div>
+          <div id="triageReady" hidden>
+            <div class="severity-row">
+              <span class="sev p2" id="sevPill">P2</span>
+              <span class="cat" id="catPill">payroll</span>
+              <span class="conf">Confidence <b id="confVal">high</b></span>
+            </div>
+            <p class="fast-read" id="fastRead">
+              Customer is mid-payroll. Terminated employee's final cheque can't process — termination date is after the pay period start, blocking the run before Friday's deadline.
+            </p>
+            <div class="triage-sub">
+              <div class="sub-row">
+                <span class="label">Next step</span>
+                <span class="val">Open the employee record, set termination date to the last working day of the prior period, then re-run the unscheduled cheque. Confirm with customer before saving.</span>
+              </div>
+              <div class="sub-row">
+                <span class="label">Missing</span>
+                <span class="val"><em>Exact termination date</em> · <em>Pay period dates</em> · <em>State withholding setup confirmation</em></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- 4. ANALYST ARRIVAL -->
+  <section class="doc-section reveal" id="sec-analyst" aria-label="Main analyst">
+    <div class="analyst-arrival" id="analystArrival">
+      <div class="avatar" aria-hidden="true">M<span class="live" aria-hidden="true"></span></div>
+      <div class="who">
+        <div class="name">Maya<span class="model">Senior analyst · Claude Opus 4.7</span></div>
+        <div class="sub" id="analystSub">Read the screenshot, the parsed template, the triage, and INV-147914. Ready to walk you through it.</div>
+        <div class="credential">11 yrs QBO payroll · 2,300 escalations resolved</div>
+      </div>
+      <div class="briefed-stack">
+        <div class="row"><span class="check" aria-hidden="true">✓</span><span>Screenshot</span></div>
+        <div class="row"><span class="check" aria-hidden="true">✓</span><span>9 fields</span></div>
+        <div class="row"><span class="check" aria-hidden="true">✓</span><span>Triage</span></div>
+        <div class="row"><span class="check" aria-hidden="true">✓</span><span>INV-147914</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5. CHAT -->
+  <section class="doc-section reveal" id="sec-chat" aria-label="Conversation">
+    <div class="chat" id="chat">
+      <!-- messages injected here -->
+    </div>
+
+    <form class="composer" id="composer" autocomplete="off" onsubmit="event.preventDefault()">
+      <input id="composerInput" type="text" placeholder="Reply to Maya…" aria-label="Reply to Maya"/>
+      <button class="send-btn" type="submit" aria-label="Send">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l14-7-7 14-2-5-5-2z"/></svg>
+      </button>
+    </form>
+
+    <div class="arc-hint">End of arc · the case is in your hands now</div>
+  </section>
+</main>
+
+<!-- Webcam modal -->
+<div class="webcam-shade" id="webcamShade" role="dialog" aria-modal="true" aria-label="Capture with webcam">
+  <div class="webcam">
+    <div class="row">
+      <strong style="font-size:14px;letter-spacing:-0.01em">Webcam</strong>
+      <button class="btn" id="webcamCancel" type="button">Cancel</button>
+    </div>
+    <div class="frame">Camera preview</div>
+    <div class="row">
+      <span style="font-size:12px;color:var(--label-2)">Hold the phone steady, frame the DM.</span>
+      <div class="ctrls">
+        <button class="btn" id="webcamRotate" type="button">Rotate</button>
+        <button class="btn primary" id="webcamCapture" type="button">Capture</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => document.querySelectorAll(s);
+
+  // Initial reveal state: only intake visible
+  const sections = {
+    parser: $('#sec-parser'),
+    pipeline: $('#sec-pipeline'),
+    analyst: $('#sec-analyst'),
+    chat: $('#sec-chat'),
+  };
+  Object.values(sections).forEach(s => s.classList.add('hidden'));
+
+  function show(sectionEl){
+    sectionEl.classList.remove('hidden');
+    // next frame to allow transition
+    requestAnimationFrame(() => sectionEl.classList.add('visible'));
+  }
+
+  function setPill(id, state, label){
+    const el = document.getElementById(id);
+    el.classList.remove('idle','running','done');
+    el.classList.add(state);
+    el.innerHTML = `<span class="dot"></span>${label}`;
+  }
+
+  function setProgress(pct, label){
+    $('#progressFill').style.width = pct + '%';
+    $('#progressLabel').textContent = label;
+  }
+
+  // Sample QBO data
+  const parsed = {
+    attempt: 'Run unscheduled payroll cheque for a terminated employee in California',
+    expect: 'Final cheque (~$2,840) issued and paid out before Friday EOD',
+    actual: 'QBO blocks the run with "Termination date is after pay period start"',
+    cust:   'Coastal Greens Landscaping · Acct 4471883',
+    agent:  'Brittany K · Tier 1 · pod 3',
+    area:   'Core Payroll · CA',
+    steps:  'Verified employee status, checked pay schedule, attempted manual override; customer is on hold.',
+    sub:    'QuickBooks Online Plus + Payroll Core',
+    urg:    'Customer needs cheque by Friday — terminated employee on premises.',
+  };
+
+  function startArc(){
+    resetArc(false);
+
+    // PARSER
+    show(sections.parser);
+    setPill('pillIntake','done','Captured');
+    setPill('pillParser','running','Reading screenshot');
+    setProgress(20, 'Parser reading');
+    $('#caseTitle').textContent = 'Coastal Greens Landscaping';
+    $('#caseMeta').textContent = 'Case opened ' + new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'});
+    $('#dropzoneWrap').style.display = 'none';
+    $('#previewWrap').setAttribute('aria-hidden','false');
+    $('#previewWrap').classList.add('visible');
+
+    // reveal fields one-by-one
+    const order = ['attempt','expect','actual','cust','agent','area','steps','sub','urg'];
+    order.forEach((k, i) => {
+      setTimeout(() => {
+        const v = document.querySelector(`.v[data-k="${k}"]`);
+        if (!v) return;
+        v.innerHTML = '';
+        const span = document.createElement('span');
+        span.textContent = parsed[k];
+        span.style.opacity = '0';
+        span.style.transition = 'opacity .25s ease';
+        v.appendChild(span);
+        requestAnimationFrame(() => span.style.opacity = '1');
+      }, 350 + i * 180);
+    });
+
+    // when parser done -> kick triage + inv
+    setTimeout(() => {
+      setPill('pillParser','done','9 fields ready');
+      setProgress(45, 'Triage + INV running');
+      show(sections.pipeline);
+
+      // Both start running
+      setPill('pillTriage','running','Reading case');
+      setPill('pillInv','running','Searching');
+      $('#triageLoading').hidden = false;
+      $('#invLoading').hidden = false;
+
+      // TRIAGE arrives first (per brief: never gated on INV)
+      setTimeout(() => {
+        $('#triageLoading').hidden = true;
+        $('#triageReady').hidden = false;
+        setPill('pillTriage','done','P2 · payroll · high');
+        setProgress(70, 'Triage in');
+        // gentle scale-in for fast-read
+        const fr = $('#fastRead');
+        fr.animate(
+          [{opacity:0, transform:'translateY(4px)'},{opacity:1, transform:'translateY(0)'}],
+          {duration:450, easing:'cubic-bezier(0.32,0.72,0.10,1.00)', fill:'forwards'}
+        );
+      }, 1400);
+
+      // INV arrives later (lagging but supportive)
+      setTimeout(() => {
+        $('#invLoading').hidden = true;
+        $('#invMatch').hidden = false;
+        setPill('pillInv','done','1 match');
+        setProgress(85, 'INV in');
+      }, 2400);
+
+      // ANALYST assembling, then arriving
+      setTimeout(() => {
+        show(sections.analyst);
+        $('#analystArrival').classList.add('shown');
+        setProgress(95, 'Analyst briefed');
+      }, 2800);
+
+      // CHAT begins
+      setTimeout(() => {
+        show(sections.chat);
+        beginChat();
+        setProgress(100, 'In conversation');
+      }, 3500);
+
+    }, 350 + order.length * 180 + 200);
+  }
+
+  function appendMessage(role, name, html){
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ' + role;
+    wrap.innerHTML = `
+      <div class="avatar-sm" aria-hidden="true">${role === 'analyst' ? 'M' : 'O'}</div>
+      <div>
+        <div class="nm">${name}</div>
+        <div class="bubble">${html}</div>
+      </div>
+    `;
+    $('#chat').appendChild(wrap);
+    requestAnimationFrame(() => wrap.classList.add('shown'));
+    return wrap;
+  }
+
+  function beginChat(){
+    const turns = [
+      {role:'analyst', name:'Maya', delay: 200, typing: 1100, html:
+        `Here's what I'm seeing. The cheque is blocked because <b>termination date 05/14</b> is after the pay-period start (05/12). QBO won't run an unscheduled cheque if the employee was already terminated when the period opened — even by two days.`},
+      {role:'analyst', name:'Maya', delay: 350, typing: 900, html:
+        `Cleanest fix: move the termination date to <b>05/11</b> (last working day of the prior period), run the cheque, then restore the original termination date. <span style="color:var(--label-2)">INV-147914 is the same pattern — workaround documented, no platform fix yet.</span>`},
+      {role:'op', name:'You', delay: 1400, typing: 0, html:
+        `Got it. Will the date-restore break the W-2 alignment for year-end?`},
+      {role:'analyst', name:'Maya', delay: 350, typing: 1200, html:
+        `No — W-2 uses the cheque date, not the termination date, so restoring afterward is safe. I'd add a one-line note to the employee record so payroll audit isn't surprised next quarter.`},
+    ];
+    let t = 0;
+    turns.forEach((turn) => {
+      t += turn.delay;
+      setTimeout(() => {
+        if (turn.typing > 0) {
+          // show typing bubble
+          const typing = appendMessage(turn.role, turn.name, '<span class="typing"><span></span><span></span><span></span></span>');
+          setTimeout(() => {
+            typing.remove();
+            appendMessage(turn.role, turn.name, turn.html);
+          }, turn.typing);
+        } else {
+          appendMessage(turn.role, turn.name, turn.html);
+        }
+      }, t);
+      t += turn.typing + 200;
+    });
+  }
+
+  function resetArc(scroll = true){
+    Object.values(sections).forEach(s => { s.classList.remove('visible'); s.classList.add('hidden'); });
+    $('#caseTitle').textContent = 'Ready when you are';
+    $('#caseMeta').textContent = 'No screenshot yet';
+    setPill('pillIntake','idle','Waiting');
+    setPill('pillParser','idle','Waiting');
+    setPill('pillInv','idle','Waiting');
+    setPill('pillTriage','idle','Waiting');
+    setProgress(0, 'Ready');
+    $('#dropzoneWrap').style.display = '';
+    $('#previewWrap').setAttribute('aria-hidden','true');
+    $('#previewWrap').classList.remove('visible');
+    $('#triageLoading').hidden = true;
+    $('#triageReady').hidden = true;
+    $('#invLoading').hidden = true;
+    $('#invMatch').hidden = true;
+    $('#invEmpty').hidden = true;
+    $('#analystArrival').classList.remove('shown');
+    $('#chat').innerHTML = '';
+    // restore field placeholders
+    document.querySelectorAll('.v[data-k]').forEach(v => v.innerHTML = '<span class="ph"></span>');
+    if (scroll) window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  // Wire up
+  $('#btnPlay').addEventListener('click', startArc);
+  $('#btnReset').addEventListener('click', () => resetArc(true));
+  $('#btnSample').addEventListener('click', startArc);
+  $('#btnChoose').addEventListener('click', startArc);
+  $('#dropzone').addEventListener('click', startArc);
+  $('#dropzone').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startArc(); }
+  });
+
+  // Paste-to-start
+  document.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items || [];
+    for (const it of items) {
+      if (it.type && it.type.startsWith('image/')) { startArc(); return; }
+    }
+  });
+
+  // Drag-drop on dropzone
+  const dz = $('#dropzone');
+  ['dragenter','dragover'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.style.borderColor = 'var(--blue)'; }));
+  ['dragleave','drop'].forEach(ev => dz.addEventListener(ev, (e) => { e.preventDefault(); dz.style.borderColor = ''; }));
+  dz.addEventListener('drop', startArc);
+
+  // Webcam modal
+  $('#btnWebcam').addEventListener('click', () => $('#webcamShade').classList.add('open'));
+  $('#webcamCancel').addEventListener('click', () => $('#webcamShade').classList.remove('open'));
+  $('#webcamCapture').addEventListener('click', () => { $('#webcamShade').classList.remove('open'); startArc(); });
+  $('#webcamShade').addEventListener('click', (e) => { if (e.target === $('#webcamShade')) $('#webcamShade').classList.remove('open'); });
+
+  // Composer (demo)
+  $('#composer').addEventListener('submit', () => {
+    const v = $('#composerInput').value.trim();
+    if (!v) return;
+    appendMessage('op','You', v.replace(/</g,'&lt;'));
+    $('#composerInput').value = '';
+    setTimeout(() => {
+      const typing = appendMessage('analyst','Maya', '<span class="typing"><span></span><span></span><span></span></span>');
+      setTimeout(() => {
+        typing.remove();
+        appendMessage('analyst','Maya','Noted — let me pull that up.');
+      }, 1100);
+    }, 400);
+  });
+
+  // Theme toggle (Apple HIG: respect system on first load, then user can override)
+  const root = document.documentElement;
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  root.setAttribute('data-mode', prefersDark ? 'dark' : 'light');
+  $('#btnTheme').addEventListener('click', () => {
+    const next = root.getAttribute('data-mode') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-mode', next);
+  });
+
+  // Init
+  resetArc(false);
+})();
+</script>
+</body>
+</html>

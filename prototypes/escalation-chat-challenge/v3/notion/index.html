@@ -1,0 +1,1287 @@
+<!doctype html>
+<!--
+  QBO Escalation Console — V3 / designer-notion
+  ============================================================================
+  LAYOUT EXPLORATION (per directive E)
+  ----------------------------------------------------------------------------
+  1) Vertical stack (V2 baseline) — REJECTED. Triage scrolls offscreen, INV
+     loses placement, parser dominates. This is what the PO rejected 9 times.
+  2) Lateral split (chat-left / facts-right) — REJECTED. Better, but triage
+     still gets buried in a sidebar list. The operator's eye lives in chat.
+  3) Sectored quadrants (2x2) — REJECTED. Wastes the chat surface; agents
+     compete for equal real estate which makes nothing primary.
+  4) Persistent rail + canvas — partial. Good for workflow switching but
+     does nothing for triage/INV/webcam composition.
+  5) Focal-center with orbital agents — interesting but ornamental.
+  6) CHOSEN: "DOSSIER + CONVERSATION" — a horizontal card-stack dossier
+     pinned to the top edge (Parser pill, INV constellation, Triage card,
+     Analyst chip) above a full-bleed conversation canvas. Triage is the
+     largest pinned card and NEVER moves. Parser self-collapses to a 1-line
+     pill the moment triage commits. The conversation flows under this
+     dossier without ever pushing it off. A workflow rail on the left edge
+     proves the chassis (Escalation active; INV Start, Trip Planner,
+     Email Composer stubbed). Webcam takes the full canvas as a modal
+     stage with auto-derotate, cancel-back-to-upload, and real cockpit.
+
+  WHY THIS LAYOUT:
+  The operator's job is "read triage, act in chat." The dossier keeps the
+  answer and the evidence permanently above the conversation while the
+  conversation gets the room it deserves. No scrolling for the primary
+  surface (A). Triage pinned (B). Parser auto-collapses (C). Webcam its
+  own polished stage (D). The left rail is the chassis (H).
+
+  THREE+ UNIQUE UNEXPECTED FEATURES (directive G)
+  ----------------------------------------------------------------------------
+  1. TRIAGE TAPE — a single-pixel-thin horizontal "tape" runs across the
+     top of the conversation. It is the spine of the case: tick marks for
+     each step (Parser / INV / Triage / Analyst / each reply), filling in
+     as they complete. Hover rewinds; click jumps. Whole case state legible
+     in one glance, no panel needed.
+  2. INV CONSTELLATION — matched INVs render as a tiny dot-graph orbiting
+     the new case by similarity, not as a list. Operator sees relative
+     strength of matches instantly. Hover for the match, click to pin a
+     quote into the composer. Never seen in a ticket tool.
+  3. DRAFT SHADOW — every analyst suggestion auto-projects a ghost-text
+     draft into the composer at the bottom. Tab to accept, ship. Collapses
+     "read analyst → switch app → paste → edit" into one keystroke.
+  4. WORKFLOW TELESCOPE — left rail collapses to icons / expands to labels;
+     switching workflows preserves case context as a returnable pin so
+     multi-tasking doesn't lose anyone.
+  5. PROVENANCE PEEK — hover any triage field; it highlights the exact line
+     in the parser collapsed-pill that produced it. Trust without leaving.
+
+  Built by designer-notion. Warm cream palette, reclaimed.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QBO Console — Escalation</title>
+<style>
+  :root{
+    --bg:#f5efe4;            /* warm cream base */
+    --bg-2:#efe7d6;          /* card cream */
+    --bg-3:#e8dec8;          /* deeper cream */
+    --paper:#fbf7ee;         /* paper highlight */
+    --ink:#1d1b16;
+    --ink-2:#2c2820;
+    --muted:#8a8170;
+    --muted-2:#6c6555;
+    --line:#dccdb0;
+    --line-2:#e8ddc4;
+    --accent:#2f5d3f;        /* deep forest — triage primary */
+    --accent-2:#4f8c63;
+    --warn:#b3541e;          /* amber for warnings */
+    --warn-2:#d97a3a;
+    --danger:#8a2a1f;
+    --gold:#a37410;          /* analyst presence */
+    --gold-2:#d9a23a;
+    --shadow:0 1px 0 rgba(35,28,16,.05), 0 8px 24px -10px rgba(35,28,16,.18);
+    --shadow-soft:0 1px 0 rgba(35,28,16,.04), 0 4px 14px -8px rgba(35,28,16,.12);
+    --radius:14px;
+    --radius-sm:8px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:'Iowan Old Style','Charter','Source Serif Pro',ui-serif,Georgia,serif;
+    font-feature-settings:"ss01","liga","calt";
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  .sans{font-family:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;}
+  .mono{font-family:'Berkeley Mono','JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;}
+
+  /* ===================== APP SHELL ===================== */
+  .app{
+    display:grid;
+    grid-template-columns: 220px 1fr;
+    grid-template-rows: 44px 1fr;
+    height:100vh;
+    width:100vw;
+    background:
+      radial-gradient(1200px 600px at 75% -10%, rgba(217,162,58,.08), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(47,93,63,.07), transparent 60%),
+      var(--bg);
+  }
+
+  /* ---- top bar ---- */
+  .topbar{
+    grid-column: 1 / -1;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 14px 0 14px;
+    border-bottom:1px solid var(--line-2);
+    background:rgba(251,247,238,.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
+  .brand{display:flex;align-items:center;gap:10px;font-family:'Iowan Old Style','Charter',serif;}
+  .brand .mark{
+    width:22px;height:22px;border-radius:6px;
+    background:linear-gradient(135deg,#2f5d3f,#1d3a26);
+    color:#fbf7ee; font-size:11px; font-weight:700; letter-spacing:.04em;
+    display:grid;place-items:center;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.1);
+    font-family:'Inter',sans-serif;
+  }
+  .brand .name{font-size:14px;font-weight:600;color:var(--ink-2);}
+  .brand .crumb{color:var(--muted);font-size:12.5px;margin-left:6px;}
+  .topbar .right{display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;font-size:12px;color:var(--muted-2);}
+  .kbd{font-family:'Berkeley Mono',ui-monospace,monospace;font-size:10.5px;
+    border:1px solid var(--line); border-bottom-width:2px; border-radius:5px;
+    padding:1px 5px; color:var(--muted-2); background:var(--paper);}
+  .who{display:flex;align-items:center;gap:8px;}
+  .who .avatar{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#d9a23a,#a37410);color:#1d1b16;font-size:10px;font-weight:700;display:grid;place-items:center;font-family:'Inter',sans-serif;}
+
+  /* ===================== WORKFLOW RAIL (CHASSIS) ===================== */
+  .rail{
+    border-right:1px solid var(--line-2);
+    background:linear-gradient(180deg, rgba(232,222,200,.55), rgba(245,239,228,.4));
+    display:flex; flex-direction:column;
+    padding:14px 10px 10px 10px;
+    gap:6px;
+    transition: width .18s ease;
+    overflow:hidden;
+  }
+  .rail .grp-label{
+    font-family:'Inter',sans-serif; font-size:10px; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--muted); padding:8px 8px 4px;
+  }
+  .wf{
+    display:flex; align-items:center; gap:10px;
+    padding:8px 10px; border-radius:10px;
+    color:var(--ink-2); cursor:pointer;
+    font-family:'Inter',sans-serif; font-size:13px;
+    border:1px solid transparent;
+    position:relative;
+  }
+  .wf:hover{background:rgba(251,247,238,.7);}
+  .wf .ico{width:22px;height:22px;border-radius:6px;display:grid;place-items:center;background:var(--bg-3);color:var(--ink-2);font-size:12px;border:1px solid var(--line-2);}
+  .wf.active{background:var(--paper); border-color:var(--line); box-shadow: var(--shadow-soft);}
+  .wf.active .ico{background:var(--accent); color:#fbf7ee; border-color:transparent;}
+  .wf .label{flex:1;}
+  .wf .pin{font-family:'Berkeley Mono',monospace; font-size:10px; color:var(--muted); border:1px solid var(--line); border-radius:99px; padding:1px 6px;}
+  .wf.stub{color:var(--muted);}
+  .wf.stub .ico{color:var(--muted);}
+  .wf.stub .label{opacity:.85;}
+  .wf.stub:after{content:'soon';font-family:'Inter',sans-serif;font-size:9.5px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+  .rail .telescope{
+    margin-top:auto; display:flex; align-items:center; justify-content:space-between;
+    padding:8px 10px; font-family:'Inter',sans-serif; font-size:11.5px; color:var(--muted-2);
+    border-top:1px solid var(--line-2);
+  }
+  .rail .telescope button{
+    background:transparent; border:1px solid var(--line); border-radius:6px;
+    padding:3px 8px; font-family:'Inter',sans-serif; font-size:11px; color:var(--muted-2); cursor:pointer;
+  }
+  .app.collapsed{ grid-template-columns: 56px 1fr; }
+  .app.collapsed .rail .label, .app.collapsed .rail .pin, .app.collapsed .rail .grp-label, .app.collapsed .rail .telescope span{display:none;}
+  .app.collapsed .rail .telescope{justify-content:center;}
+
+  /* ===================== CANVAS ===================== */
+  .canvas{
+    position:relative; overflow:hidden;
+    display:grid;
+    grid-template-rows: auto auto 1fr auto;
+  }
+
+  /* ---- TRIAGE TAPE (unique feature #1) ---- */
+  .tape{
+    position:relative;
+    height:28px; padding:0 18px;
+    display:flex; align-items:center; gap:0;
+    border-bottom:1px solid var(--line-2);
+    background:linear-gradient(180deg, rgba(251,247,238,.7), rgba(245,239,228,.5));
+    font-family:'Inter',sans-serif;
+  }
+  .tape .rail-line{position:absolute;left:18px;right:18px;top:50%;height:1px;background:var(--line);}
+  .tape .rail-fill{position:absolute;left:18px;top:50%;height:1px;background:linear-gradient(90deg,var(--accent),var(--gold));transition: width .6s ease;}
+  .tape .ticks{display:flex;flex:1;justify-content:space-between;position:relative;z-index:2;}
+  .tape .tick{
+    display:flex;flex-direction:column;align-items:center;gap:2px;
+    cursor:pointer; padding-top:6px;
+  }
+  .tape .dot{width:9px;height:9px;border-radius:50%;background:var(--bg-3);border:1px solid var(--line);}
+  .tape .tick.done .dot{background:var(--accent);border-color:var(--accent);}
+  .tape .tick.live .dot{background:var(--gold);border-color:var(--gold);box-shadow:0 0 0 4px rgba(217,162,58,.18);animation:pulse 1.4s ease-in-out infinite;}
+  .tape .lbl{font-size:9.5px; color:var(--muted); letter-spacing:.04em; text-transform:uppercase; transform:translateY(2px);}
+  .tape .tick.done .lbl{color:var(--accent);}
+  .tape .tick.live .lbl{color:var(--gold);}
+  @keyframes pulse{0%,100%{box-shadow:0 0 0 4px rgba(217,162,58,.18);}50%{box-shadow:0 0 0 8px rgba(217,162,58,.06);}}
+
+  /* ---- DOSSIER (the always-present top strip) ---- */
+  .dossier{
+    display:grid;
+    grid-template-columns: 1.05fr 1.25fr 1.45fr .85fr;
+    gap:10px;
+    padding:12px 18px 8px 18px;
+    border-bottom:1px dashed var(--line);
+  }
+  .card{
+    position:relative;
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:10px 12px;
+    box-shadow: var(--shadow-soft);
+    min-height:118px;
+  }
+  .card .hdr{
+    display:flex; align-items:center; justify-content:space-between;
+    font-family:'Inter',sans-serif; font-size:10.5px; letter-spacing:.12em;
+    text-transform:uppercase; color:var(--muted); margin-bottom:6px;
+  }
+  .card .hdr .agent{display:flex;align-items:center;gap:6px;}
+  .card .hdr .agent .a-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);}
+  .card .hdr .status{font-size:9.5px; color:var(--muted-2);}
+  .card .hdr .status.live{color:var(--gold);}
+  .card .hdr .status.done{color:var(--accent);}
+
+  /* PARSER CARD — collapses on triage commit */
+  .card.parser{transition: min-height .35s ease, padding .35s ease;}
+  .card.parser .fields{
+    display:grid; grid-template-columns: 1fr 1fr; gap:4px 10px;
+    font-family:'Inter',sans-serif; font-size:11.5px;
+  }
+  .card.parser .fld{display:flex; gap:6px; align-items:baseline;}
+  .card.parser .fld .k{color:var(--muted); font-size:10px; min-width:62px;}
+  .card.parser .fld .v{color:var(--ink-2); font-weight:500;}
+  .card.parser .progress{
+    height:3px; background:var(--bg-3); border-radius:3px; overflow:hidden; margin-top:8px;
+  }
+  .card.parser .progress > i{display:block; height:100%; width:0; background:linear-gradient(90deg,var(--accent),var(--accent-2)); transition: width .25s ease;}
+  .card.parser.collapsed{min-height:0; padding:8px 12px;}
+  .card.parser.collapsed .fields, .card.parser.collapsed .progress{display:none;}
+  .card.parser .collapsed-line{display:none;}
+  .card.parser.collapsed .collapsed-line{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    font-family:'Inter',sans-serif; font-size:11.5px; color:var(--ink-2);
+  }
+  .card.parser.collapsed .collapsed-line .pills{display:flex; gap:4px; flex-wrap:wrap;}
+  .card.parser .pill{
+    display:inline-block; padding:2px 7px; border-radius:99px;
+    background:var(--bg-3); border:1px solid var(--line); font-size:10.5px; color:var(--ink-2);
+  }
+  .card.parser .expand{background:transparent;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:10px;color:var(--muted-2);cursor:pointer;font-family:'Inter',sans-serif;}
+
+  /* INV CONSTELLATION CARD — unique feature #2 */
+  .card.inv .const{
+    position:relative; width:100%; height:88px;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(47,93,63,.05), transparent 60%);
+    border-radius:10px;
+  }
+  .card.inv .core{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:18px; height:18px; border-radius:50%;
+    background:var(--accent); box-shadow:0 0 0 4px rgba(47,93,63,.12);
+    display:grid; place-items:center; color:#fbf7ee; font-family:'Inter',sans-serif; font-size:9px; font-weight:700;
+  }
+  .card.inv .ring{position:absolute; left:50%; top:50%; border:1px dashed rgba(47,93,63,.18); border-radius:50%; transform:translate(-50%,-50%);}
+  .card.inv .r1{width:60px;height:60px;}
+  .card.inv .r2{width:104px;height:104px;}
+  .card.inv .r3{width:148px;height:148px;}
+  .card.inv .dot{
+    position:absolute; width:11px; height:11px; border-radius:50%;
+    background:var(--gold-2); border:1px solid #fbf7ee;
+    box-shadow:0 1px 4px rgba(35,28,16,.18);
+    cursor:pointer;
+    transform:translate(-50%,-50%);
+    transition: transform .15s ease;
+  }
+  .card.inv .dot:hover{transform:translate(-50%,-50%) scale(1.35); z-index:3;}
+  .card.inv .dot.match-hi{background:var(--accent-2);}
+  .card.inv .dot.match-lo{background:#b6a98a;}
+  .card.inv .legend{
+    position:absolute; right:6px; bottom:6px;
+    font-family:'Inter',sans-serif; font-size:9.5px; color:var(--muted);
+    display:flex; gap:8px; align-items:center;
+  }
+  .card.inv .legend i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:3px;vertical-align:middle;}
+  .inv-tip{
+    position:absolute; pointer-events:none;
+    background:var(--ink); color:#fbf7ee; padding:6px 8px; border-radius:6px;
+    font-family:'Inter',sans-serif; font-size:10.5px; line-height:1.3;
+    box-shadow: 0 6px 18px rgba(0,0,0,.25);
+    opacity:0; transform:translateY(-4px); transition: opacity .12s ease, transform .12s ease;
+    z-index:50; max-width:240px; white-space:normal;
+  }
+  .inv-tip.on{opacity:1; transform:translateY(0);}
+  .inv-tip .id{font-family:'Berkeley Mono',monospace; font-size:10px; color:var(--gold-2);}
+  .inv-tip .pct{float:right; color:var(--gold-2);}
+
+  /* TRIAGE CARD — the always-pinned one */
+  .card.triage{
+    background:linear-gradient(180deg, #fbf7ee, #f4ecd9);
+    border-color:var(--line);
+    box-shadow: var(--shadow);
+  }
+  .card.triage .hdr .agent .a-dot{background:var(--accent);}
+  .card.triage .top-row{
+    display:flex; align-items:center; gap:8px; margin-bottom:6px;
+  }
+  .card.triage .cat{
+    background:var(--accent); color:#fbf7ee; padding:3px 8px; border-radius:99px;
+    font-family:'Inter',sans-serif; font-size:11px; font-weight:600; letter-spacing:.02em;
+  }
+  .card.triage .sev{
+    border:1px solid var(--warn); color:var(--warn); padding:2px 7px; border-radius:99px;
+    font-family:'Inter',sans-serif; font-size:11px; font-weight:600;
+  }
+  .card.triage .conf{
+    margin-left:auto; font-family:'Inter',sans-serif; font-size:10.5px; color:var(--muted-2);
+    display:flex; align-items:center; gap:6px;
+  }
+  .card.triage .conf .bar{width:48px;height:4px;background:var(--bg-3);border-radius:99px;overflow:hidden;}
+  .card.triage .conf .bar > i{display:block;height:100%;background:var(--accent);width:0;transition:width .8s ease;}
+  .card.triage .fast{
+    font-family:'Iowan Old Style','Charter',serif; font-size:13.5px; line-height:1.35;
+    color:var(--ink); margin:4px 0 6px 0;
+  }
+  .card.triage .next{
+    font-family:'Inter',sans-serif; font-size:11.5px; color:var(--ink-2);
+    background:rgba(47,93,63,.08); border-left:2px solid var(--accent);
+    padding:5px 8px; border-radius:4px;
+  }
+  .card.triage .next b{color:var(--accent);}
+  .card.triage .missing{
+    margin-top:6px; font-family:'Inter',sans-serif; font-size:10.5px; color:var(--warn);
+  }
+  .card.triage .skeleton{
+    display:flex; flex-direction:column; gap:6px; padding-top:6px;
+  }
+  .card.triage .skeleton .ln{height:8px;border-radius:4px;background:linear-gradient(90deg,var(--bg-3),var(--bg-2),var(--bg-3));background-size:200% 100%;animation:shimmer 1.4s linear infinite;}
+  @keyframes shimmer{0%{background-position:0% 0;}100%{background-position:-200% 0;}}
+  .card.triage[data-state="pending"] .top-row,
+  .card.triage[data-state="pending"] .fast,
+  .card.triage[data-state="pending"] .next,
+  .card.triage[data-state="pending"] .missing{display:none;}
+  .card.triage[data-state="committed"] .skeleton{display:none;}
+
+  /* ANALYST CARD */
+  .card.analyst{
+    background:linear-gradient(180deg, #fbf7ee, #efe1c2);
+    border-color:var(--line);
+  }
+  .card.analyst .a-dot{background:var(--gold)!important;}
+  .card.analyst .who-row{display:flex; align-items:center; gap:10px; margin-top:2px;}
+  .card.analyst .face{
+    width:42px; height:42px; border-radius:50%;
+    background:
+      radial-gradient(circle at 30% 30%, #f6d59a, #c08a2e 65%, #6b4a14 100%);
+    box-shadow: inset 0 -3px 6px rgba(0,0,0,.18), 0 1px 0 #fbf7ee;
+    display:grid; place-items:center; color:#1d1b16;
+    font-family:'Iowan Old Style','Charter',serif; font-weight:700; font-size:15px;
+    border:1px solid #b8902f;
+  }
+  .card.analyst .name{font-family:'Iowan Old Style','Charter',serif; font-size:14.5px; color:var(--ink); font-weight:700;}
+  .card.analyst .role{font-family:'Inter',sans-serif; font-size:11px; color:var(--muted-2);}
+  .card.analyst .status-line{
+    font-family:'Inter',sans-serif; font-size:11px; color:var(--muted-2);
+    margin-top:8px; display:flex; align-items:center; gap:6px;
+  }
+  .card.analyst .heartbeat{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 0 3px rgba(217,162,58,.18);animation:beat 1.6s ease-in-out infinite;}
+  @keyframes beat{0%,100%{transform:scale(1);opacity:1;}50%{transform:scale(1.25);opacity:.7;}}
+  .card.analyst.pending .face{filter:grayscale(.85) opacity(.5);}
+  .card.analyst.pending .name{color:var(--muted);}
+  .card.analyst.pending .heartbeat{background:var(--muted);box-shadow:0 0 0 3px rgba(108,101,85,.12); animation:none;}
+
+  /* ===================== CONVERSATION ===================== */
+  .convo{
+    position:relative; overflow:hidden;
+    padding:12px 18px 0 18px;
+    display:flex; flex-direction:column;
+    min-height:0;
+  }
+  .convo .scroll{
+    flex:1; overflow:auto;
+    padding:6px 6px 14px 6px;
+    scroll-behavior:smooth;
+  }
+  .convo .scroll::-webkit-scrollbar{width:8px;}
+  .convo .scroll::-webkit-scrollbar-thumb{background:var(--line); border-radius:99px;}
+
+  .turn{
+    display:grid; grid-template-columns: 28px 1fr; gap:10px;
+    margin-bottom:14px;
+    animation: rise .35s ease both;
+  }
+  @keyframes rise{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:none;}}
+  .turn .av{
+    width:28px; height:28px; border-radius:50%;
+    display:grid; place-items:center;
+    font-family:'Inter',sans-serif; font-size:10.5px; font-weight:700;
+    color:#fbf7ee;
+  }
+  .turn[data-who="parser"] .av{background:#6b6450;}
+  .turn[data-who="inv"] .av{background:#7a6a3a;}
+  .turn[data-who="triage"] .av{background:var(--accent);}
+  .turn[data-who="analyst"] .av{background:linear-gradient(135deg,#d9a23a,#a37410); color:#1d1b16;}
+  .turn[data-who="operator"] .av{background:#1d1b16;}
+  .turn .body .meta{
+    font-family:'Inter',sans-serif; font-size:10.5px; color:var(--muted);
+    display:flex; align-items:center; gap:8px; margin-bottom:3px;
+  }
+  .turn .body .meta b{color:var(--ink-2); font-weight:600;}
+  .turn .body .meta .ts{color:var(--muted);}
+  .turn .body .bubble{
+    font-family:'Iowan Old Style','Charter',serif;
+    font-size:14px; line-height:1.5; color:var(--ink);
+    background:var(--paper); border:1px solid var(--line-2);
+    padding:9px 12px; border-radius:10px;
+    box-shadow: var(--shadow-soft);
+  }
+  .turn[data-who="analyst"] .bubble{background:linear-gradient(180deg,#fbf7ee,#f4ecd9); border-color:var(--line);}
+  .turn[data-who="operator"] .bubble{background:#1d1b16;color:#fbf7ee; border-color:#1d1b16;}
+  .turn .bubble .quote{
+    font-family:'Iowan Old Style','Charter',serif;
+    border-left:2px solid var(--accent);
+    padding:2px 8px; margin:6px 0; color:var(--muted-2); font-size:13px; font-style:italic;
+  }
+  .turn .bubble .system-ack{
+    font-family:'Inter',sans-serif; font-size:11px; color:var(--muted-2);
+    background:rgba(47,93,63,.08); border-radius:6px; padding:4px 8px; margin-bottom:6px;
+    display:inline-block;
+  }
+  .typing{display:inline-flex; gap:3px; align-items:center;}
+  .typing i{width:5px;height:5px;border-radius:50%;background:var(--muted);animation:tdot 1.1s ease-in-out infinite;}
+  .typing i:nth-child(2){animation-delay:.18s;} .typing i:nth-child(3){animation-delay:.36s;}
+  @keyframes tdot{0%,80%,100%{transform:translateY(0);opacity:.4;}40%{transform:translateY(-3px);opacity:1;}}
+
+  /* ---- COMPOSER + DRAFT SHADOW (unique #3) ---- */
+  .composer-wrap{
+    border-top:1px solid var(--line-2);
+    background:linear-gradient(180deg, rgba(251,247,238,.7), rgba(245,239,228,.55));
+    padding:10px 18px 12px;
+  }
+  .composer{
+    position:relative;
+    background:var(--paper); border:1px solid var(--line); border-radius:12px;
+    box-shadow: var(--shadow-soft);
+    padding:10px 12px;
+  }
+  .composer .row{display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .composer .tag{
+    font-family:'Inter',sans-serif; font-size:10.5px; color:var(--muted-2);
+    background:var(--bg-3); border:1px solid var(--line-2); padding:2px 7px; border-radius:99px;
+  }
+  .composer .tag b{color:var(--accent); font-weight:600;}
+  .composer .right{margin-left:auto; display:flex; align-items:center; gap:6px;}
+  .composer .field{
+    position:relative; min-height:54px;
+    font-family:'Iowan Old Style','Charter',serif; font-size:14px; line-height:1.5;
+    color:var(--ink);
+    outline:none;
+  }
+  .composer .field[data-empty="true"]:before{
+    content: attr(data-placeholder);
+    color:var(--muted);
+    position:absolute; left:0; top:0; pointer-events:none; font-style:italic;
+  }
+  .composer .ghost{
+    position:absolute; left:0; top:0;
+    font-family:'Iowan Old Style','Charter',serif; font-size:14px; line-height:1.5;
+    color: rgba(28,24,18,.32);
+    pointer-events:none; white-space:pre-wrap; padding-right:60px;
+  }
+  .composer .ghost .gtag{
+    display:inline-flex; align-items:center; gap:4px;
+    background:rgba(217,162,58,.14); color:var(--gold);
+    padding:0 5px; border-radius:4px;
+    font-family:'Inter',sans-serif; font-size:10px; font-style:normal;
+    margin-right:5px;
+  }
+  .composer .send{
+    background:var(--ink); color:#fbf7ee; border:0; border-radius:8px;
+    padding:6px 12px; font-family:'Inter',sans-serif; font-size:12px; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+  }
+  .composer .send .kb{background:rgba(255,255,255,.12); padding:0 4px; border-radius:3px; font-size:10px;}
+  .composer .accept{
+    background:var(--gold); color:#1d1b16; border:0; border-radius:8px;
+    padding:6px 10px; font-family:'Inter',sans-serif; font-size:12px; cursor:pointer;
+    display:flex; align-items:center; gap:6px; font-weight:600;
+  }
+  .composer .accept:disabled{opacity:.4; cursor:default;}
+
+  /* ---- WEBCAM affordance + modal ---- */
+  .intake-cluster{
+    position:absolute; right:18px; top:54px;
+    display:flex; gap:6px; z-index:6;
+  }
+  .intake-cluster .btn{
+    background:var(--paper); border:1px solid var(--line); border-radius:99px;
+    font-family:'Inter',sans-serif; font-size:11.5px; padding:5px 10px; cursor:pointer;
+    color:var(--ink-2); display:flex; align-items:center; gap:6px;
+    box-shadow: var(--shadow-soft);
+  }
+  .intake-cluster .btn:hover{background:#fff;}
+  .intake-cluster .btn .ico{font-size:13px;}
+
+  .webcam-veil{
+    position:fixed; inset:0; background:rgba(15,12,8,.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    display:none; align-items:center; justify-content:center; z-index:100;
+  }
+  .webcam-veil.on{display:flex;}
+  .webcam{
+    width:min(880px,92vw); height:min(560px,82vh);
+    background:#0f0c08; border-radius:18px; overflow:hidden;
+    box-shadow: 0 30px 60px -20px rgba(0,0,0,.6);
+    display:grid; grid-template-rows: 44px 1fr 60px;
+    position:relative;
+  }
+  .webcam .wb-top{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:0 14px; color:#e8dec8;
+    font-family:'Inter',sans-serif; font-size:12px;
+    border-bottom:1px solid rgba(255,255,255,.08);
+  }
+  .webcam .wb-top .lhs{display:flex; align-items:center; gap:8px;}
+  .webcam .wb-top .lhs .live{width:8px;height:8px;border-radius:50%;background:#d97a3a;box-shadow:0 0 0 3px rgba(217,122,58,.22);animation:beat 1.4s ease-in-out infinite;}
+  .webcam .wb-top button{background:transparent; border:1px solid rgba(255,255,255,.18); color:#e8dec8; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer; font-family:'Inter',sans-serif;}
+  .webcam .wb-top button:hover{background:rgba(255,255,255,.08);}
+  .webcam .wb-stage{
+    position:relative; overflow:hidden;
+    background:
+      repeating-linear-gradient(45deg, #1a1610 0 12px, #16120c 12px 24px);
+  }
+  .webcam .frame{
+    position:absolute; inset:18px;
+    border:2px dashed rgba(232,222,200,.35); border-radius:12px;
+  }
+  .webcam .target{
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    width:240px; height:320px;
+    background:linear-gradient(180deg,#2e2820,#1a1610);
+    border-radius:8px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.5);
+    display:grid; grid-template-rows: 30px 1fr; overflow:hidden;
+    transform-origin: center;
+    transition: transform .5s cubic-bezier(.2,.7,.2,1);
+  }
+  .webcam .target.rotated{transform:translate(-50%,-50%) rotate(90deg);}
+  .webcam .target.derotating{transform:translate(-50%,-50%) rotate(0deg);}
+  .webcam .target .bar{background:#3a342a; border-bottom:1px solid #4a4232; display:flex; align-items:center; padding:0 8px; gap:6px;}
+  .webcam .target .bar i{width:6px;height:6px;border-radius:50%;background:#c08a2e;}
+  .webcam .target .doc{
+    padding:8px;
+    color:#d9cbb0; font-family:'Iowan Old Style','Charter',serif; font-size:9px; line-height:1.45;
+  }
+  .webcam .target .doc .h{color:#fbf7ee; font-weight:700; font-size:11px; margin-bottom:4px;}
+  .webcam .horizon{
+    position:absolute; left:50%; top:50%;
+    width:300px; height:1px; transform:translate(-50%,-50%);
+    background:linear-gradient(90deg, transparent, rgba(217,162,58,.6), transparent);
+    opacity:0; transition: opacity .25s ease;
+  }
+  .webcam.tilted .horizon{opacity:1;}
+  .webcam .reticle{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:14px; height:14px; border-radius:50%;
+    border:1px solid rgba(232,222,200,.4);
+    pointer-events:none;
+  }
+  .webcam .reticle:before, .webcam .reticle:after{
+    content:""; position:absolute; background:rgba(232,222,200,.4);
+  }
+  .webcam .reticle:before{left:50%; top:-8px; bottom:-8px; width:1px; transform:translateX(-50%);}
+  .webcam .reticle:after{top:50%; left:-8px; right:-8px; height:1px; transform:translateY(-50%);}
+  .webcam .hint{
+    position:absolute; left:50%; bottom:18px; transform:translateX(-50%);
+    color:#e8dec8; font-family:'Inter',sans-serif; font-size:11px;
+    background:rgba(0,0,0,.4); padding:5px 10px; border-radius:99px;
+    border:1px solid rgba(255,255,255,.08);
+  }
+  .webcam .wb-ctrl{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    background:#16120c; border-top:1px solid rgba(255,255,255,.08);
+    padding:0 14px;
+  }
+  .webcam .wb-ctrl button{
+    background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12);
+    color:#e8dec8; border-radius:8px; padding:6px 12px;
+    font-family:'Inter',sans-serif; font-size:12px; cursor:pointer;
+    display:flex; align-items:center; gap:6px;
+  }
+  .webcam .wb-ctrl button:hover{background:rgba(255,255,255,.1);}
+  .webcam .wb-ctrl .shutter{
+    width:46px; height:46px; border-radius:50%;
+    background:#fbf7ee; border:3px solid #16120c;
+    box-shadow: 0 0 0 2px #fbf7ee;
+    padding:0; cursor:pointer;
+  }
+  .webcam .wb-ctrl .shutter:hover{background:#fff;}
+  .webcam .wb-ctrl .toggle{font-size:11px; color:var(--muted);}
+  .webcam .wb-ctrl .toggle input{vertical-align:middle; accent-color: var(--gold);}
+  .webcam .badge-derot{
+    position:absolute; right:14px; top:54px;
+    background:rgba(47,93,63,.85); color:#fbf7ee;
+    padding:5px 10px; border-radius:99px;
+    font-family:'Inter',sans-serif; font-size:11px;
+    display:none; align-items:center; gap:6px;
+  }
+  .webcam.derot .badge-derot{display:inline-flex;}
+
+  /* ---- triage-tape tooltip ---- */
+  .tape-tip{
+    position:absolute; background:var(--ink); color:#fbf7ee;
+    padding:5px 8px; border-radius:6px; font-family:'Inter',sans-serif; font-size:10.5px;
+    pointer-events:none; opacity:0; transform:translateY(-2px);
+    transition: opacity .12s ease, transform .12s ease; z-index:30;
+  }
+  .tape-tip.on{opacity:1; transform:translateY(0);}
+
+  /* ---- provenance peek highlight ---- */
+  .card.parser .pill[data-peek="on"]{
+    background:rgba(217,162,58,.25); border-color:var(--gold); color:var(--ink);
+    box-shadow: 0 0 0 2px rgba(217,162,58,.18);
+  }
+  .card.triage .fld-peek{
+    cursor:default;
+  }
+  .card.triage .fld-peek:hover{
+    background:rgba(217,162,58,.10); border-radius:4px;
+  }
+
+  /* utility */
+  .row{display:flex; gap:8px; align-items:center;}
+  .grow{flex:1;}
+  .muted{color:var(--muted);}
+
+  /* hide things until ready */
+  .hide{display:none!important;}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+  <!-- ===== TOP BAR ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark">qb</div>
+      <div class="name">QBO Console</div>
+      <div class="crumb">/ Escalations / Case ESC-58213</div>
+    </div>
+    <div class="right">
+      <span><span class="kbd">⌘K</span> command</span>
+      <span><span class="kbd">Tab</span> accept draft</span>
+      <span><span class="kbd">[</span> rail</span>
+      <span class="who"><span class="avatar">JM</span> J. Morales</span>
+    </div>
+  </header>
+
+  <!-- ===== WORKFLOW RAIL (CHASSIS) ===== -->
+  <aside class="rail" id="rail">
+    <div class="grp-label">Workflows</div>
+    <div class="wf active" data-wf="escalation">
+      <div class="ico">E</div>
+      <div class="label">Escalation</div>
+      <div class="pin">live</div>
+    </div>
+    <div class="wf stub" data-wf="inv-start">
+      <div class="ico">I</div>
+      <div class="label">INV Start</div>
+    </div>
+    <div class="wf stub" data-wf="trip">
+      <div class="ico">T</div>
+      <div class="label">Trip Planner</div>
+    </div>
+    <div class="wf stub" data-wf="email">
+      <div class="ico">@</div>
+      <div class="label">Email Composer</div>
+    </div>
+    <div class="grp-label">Pinned cases</div>
+    <div class="wf" data-wf="case-58210">
+      <div class="ico">·</div>
+      <div class="label">ESC-58210 · Bank feeds</div>
+    </div>
+    <div class="wf" data-wf="case-58197">
+      <div class="ico">·</div>
+      <div class="label">ESC-58197 · Payroll</div>
+    </div>
+    <div class="telescope">
+      <span>Workflow Telescope</span>
+      <button id="telescopeBtn" title="[ to toggle">⇆</button>
+    </div>
+  </aside>
+
+  <!-- ===== CANVAS ===== -->
+  <main class="canvas" id="canvas">
+
+    <!-- TRIAGE TAPE -->
+    <div class="tape" id="tape">
+      <div class="rail-line"></div>
+      <div class="rail-fill" id="tapeFill"></div>
+      <div class="ticks" id="ticks">
+        <div class="tick" data-step="parser"><div class="dot"></div><div class="lbl">Parser</div></div>
+        <div class="tick" data-step="inv"><div class="dot"></div><div class="lbl">INV</div></div>
+        <div class="tick" data-step="triage"><div class="dot"></div><div class="lbl">Triage</div></div>
+        <div class="tick" data-step="analyst"><div class="dot"></div><div class="lbl">Analyst</div></div>
+        <div class="tick" data-step="reply1"><div class="dot"></div><div class="lbl">Reply 1</div></div>
+        <div class="tick" data-step="reply2"><div class="dot"></div><div class="lbl">Reply 2</div></div>
+        <div class="tick" data-step="resolve"><div class="dot"></div><div class="lbl">Resolve</div></div>
+      </div>
+      <div class="tape-tip" id="tapeTip"></div>
+    </div>
+
+    <!-- INTAKE buttons (only before parser arrives) -->
+    <div class="intake-cluster" id="intakeCluster">
+      <button class="btn" id="openWebcam"><span class="ico">📷</span>Webcam</button>
+      <button class="btn" id="reupload"><span class="ico">↺</span>Re-upload</button>
+    </div>
+
+    <!-- DOSSIER -->
+    <section class="dossier" id="dossier">
+
+      <!-- PARSER -->
+      <div class="card parser" id="parserCard">
+        <div class="hdr">
+          <div class="agent"><span class="a-dot"></span><span>Parser · gpt-4o-vision</span></div>
+          <div class="status" id="parserStatus">working…</div>
+        </div>
+        <div class="fields" id="parserFields">
+          <div class="fld"><span class="k">Case ID</span><span class="v">ESC-58213</span></div>
+          <div class="fld"><span class="k">Caller</span><span class="v">Linda Chen</span></div>
+          <div class="fld"><span class="k">Company</span><span class="v">Maple Ridge LLC</span></div>
+          <div class="fld"><span class="k">Realm</span><span class="v">1934028401</span></div>
+          <div class="fld"><span class="k">Product</span><span class="v">QBO Payroll Premium</span></div>
+          <div class="fld"><span class="k">Issue</span><span class="v">Direct deposit reversed</span></div>
+          <div class="fld"><span class="k">Amount</span><span class="v">$4,218.40</span></div>
+          <div class="fld"><span class="k">Pay date</span><span class="v">2026-05-15</span></div>
+          <div class="fld"><span class="k">Bank</span><span class="v">Wells Fargo · ••2210</span></div>
+        </div>
+        <div class="progress"><i id="parserBar"></i></div>
+        <div class="collapsed-line">
+          <div class="pills" id="parserPills">
+            <span class="pill" data-field="caseId">ESC-58213</span>
+            <span class="pill" data-field="caller">Linda Chen</span>
+            <span class="pill" data-field="company">Maple Ridge LLC</span>
+            <span class="pill" data-field="product">Payroll Premium</span>
+            <span class="pill" data-field="issue">DD reversed · $4,218.40</span>
+            <span class="pill" data-field="bank">WF ••2210</span>
+          </div>
+          <button class="expand" id="parserExpand">Expand</button>
+        </div>
+      </div>
+
+      <!-- INV CONSTELLATION -->
+      <div class="card inv">
+        <div class="hdr">
+          <div class="agent"><span class="a-dot" style="background:#a37410;"></span><span>INV Search · claude-3.5-haiku</span></div>
+          <div class="status" id="invStatus">searching…</div>
+        </div>
+        <div class="const" id="constellation">
+          <div class="ring r1"></div><div class="ring r2"></div><div class="ring r3"></div>
+          <div class="core" title="this case">·</div>
+          <!-- dots inserted by JS -->
+          <div class="legend">
+            <span><i style="background:var(--accent-2);"></i>strong</span>
+            <span><i style="background:var(--gold-2);"></i>likely</span>
+            <span><i style="background:#b6a98a;"></i>weak</span>
+          </div>
+          <div class="inv-tip" id="invTip"></div>
+        </div>
+      </div>
+
+      <!-- TRIAGE (pinned) -->
+      <div class="card triage" id="triageCard" data-state="pending">
+        <div class="hdr">
+          <div class="agent"><span class="a-dot"></span><span>Triage · claude-opus-4-7</span></div>
+          <div class="status" id="triageStatus">analyzing…</div>
+        </div>
+        <div class="skeleton">
+          <div class="ln" style="width:62%;"></div>
+          <div class="ln" style="width:88%;"></div>
+          <div class="ln" style="width:74%;"></div>
+          <div class="ln" style="width:50%;"></div>
+        </div>
+        <div class="top-row">
+          <span class="cat" id="triageCat">payroll</span>
+          <span class="sev" id="triageSev">P2</span>
+          <span class="conf">conf <span class="bar"><i id="triageConfBar"></i></span><span id="triageConfNum">—</span></span>
+        </div>
+        <div class="fast fld-peek" data-prov="issue,amount,pay date" id="triageFast">
+          Direct-deposit run reversed by bank ACH return code R03 after a stop-payment that the
+          customer's bookkeeper did not authorize — funds are at WF, employees were not paid 5/15.
+        </div>
+        <div class="next fld-peek" data-prov="bank,pay date">
+          <b>Next:</b> confirm ACH return code in Payroll → ACH Activity, then re-issue same-day off-cycle for the 3 affected employees.
+        </div>
+        <div class="missing">Missing: confirmation that bookkeeper has admin role on the bank profile.</div>
+      </div>
+
+      <!-- ANALYST -->
+      <div class="card analyst pending" id="analystCard">
+        <div class="hdr">
+          <div class="agent"><span class="a-dot"></span><span>Analyst</span></div>
+          <div class="status" id="analystStatus">waiting on triage…</div>
+        </div>
+        <div class="who-row">
+          <div class="face" id="analystFace">SA</div>
+          <div>
+            <div class="name" id="analystName">Sasha Adler</div>
+            <div class="role">Sr. Escalation Analyst · 7y QBO Payroll</div>
+          </div>
+        </div>
+        <div class="status-line"><span class="heartbeat"></span><span id="analystSubline">arriving when triage lands</span></div>
+      </div>
+    </section>
+
+    <!-- CONVERSATION -->
+    <section class="convo">
+      <div class="scroll" id="scroll">
+        <!-- turns inserted by JS -->
+      </div>
+
+      <!-- COMPOSER -->
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="row">
+            <span class="tag">Reply to <b id="composerTo">caller</b></span>
+            <span class="tag" id="composerHint">analyst will propose drafts as the case develops</span>
+            <div class="right">
+              <button class="accept" id="acceptDraft" disabled>Accept draft <span class="kbd">Tab</span></button>
+              <button class="send" id="sendBtn">Send <span class="kb">⌘↵</span></button>
+            </div>
+          </div>
+          <div class="field" id="field" contenteditable="true" data-empty="true" data-placeholder="Type a reply… or press Tab to accept the analyst's draft above."></div>
+          <div class="ghost" id="ghost"></div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ===== WEBCAM MODAL ===== -->
+<div class="webcam-veil" id="webcamVeil">
+  <div class="webcam" id="webcamStage">
+    <div class="wb-top">
+      <div class="lhs"><span class="live"></span><span>Live capture · rear camera</span></div>
+      <div class="row" style="gap:6px;">
+        <button id="wbCancel" title="Cancel back to upload">← Cancel · back to upload</button>
+        <button id="wbSwap">Front / Rear</button>
+        <button id="wbDone">Use upload instead</button>
+      </div>
+    </div>
+    <div class="wb-stage">
+      <div class="frame"></div>
+      <div class="reticle"></div>
+      <div class="horizon"></div>
+      <div class="target" id="wbTarget">
+        <div class="bar"><i></i><i style="background:#6b6450;"></i><i style="background:#6b6450;"></i></div>
+        <div class="doc">
+          <div class="h">QBO Payroll · Direct Deposit</div>
+          ACH return — code R03<br/>
+          Bank: Wells Fargo ••2210<br/>
+          Pay date: 2026-05-15<br/>
+          3 employees affected<br/>
+          Total: $4,218.40<br/>
+          Status: <b style="color:#d97a3a;">REVERSED</b><br/><br/>
+          Caller: Linda Chen<br/>
+          Company: Maple Ridge LLC<br/>
+          Realm: 1934028401
+        </div>
+      </div>
+      <div class="badge-derot">⟳ Auto-derotated · phone held sideways</div>
+      <div class="hint" id="wbHint">Hold steady — align the document inside the dashed frame</div>
+    </div>
+    <div class="wb-ctrl">
+      <button id="wbTorch">Torch off</button>
+      <button id="wbGrid">Grid</button>
+      <button class="shutter" id="wbShutter" title="Capture"></button>
+      <button id="wbBurst">Burst (3)</button>
+      <label class="toggle"><input type="checkbox" id="wbAuto" checked /> Auto-derotate</label>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =====================================================================
+   QBO Escalation Console — V3 / notion
+   ===================================================================== */
+
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+/* -------- TAPE -------- */
+const STEPS = ['parser','inv','triage','analyst','reply1','reply2','resolve'];
+function setStep(name, state){
+  const tick = $('#ticks .tick[data-step="'+name+'"]');
+  if(!tick) return;
+  tick.classList.remove('live','done');
+  if(state) tick.classList.add(state);
+  // fill bar by % of done ticks
+  const done = $$('#ticks .tick.done').length;
+  const total = STEPS.length - 1;
+  const pct = Math.min(100, (done/total)*100);
+  $('#tapeFill').style.width = pct + '%';
+}
+function tickTooltip(){
+  const tip = $('#tapeTip');
+  $$('#ticks .tick').forEach(t => {
+    t.addEventListener('mouseenter', e => {
+      const map = {
+        parser:'Parser read the screenshot in 3.1s · 9 fields extracted',
+        inv:'INV Search matched 6 historical cases (top: INV-147914 · 0.91)',
+        triage:'Triage committed: payroll · P2 · conf 0.87',
+        analyst:'Analyst Sasha Adler joined',
+        reply1:'First reply drafted',
+        reply2:'Follow-up sent',
+        resolve:'Case resolved'
+      };
+      tip.textContent = map[t.dataset.step] || '';
+      const r = t.getBoundingClientRect();
+      const cr = $('#canvas').getBoundingClientRect();
+      tip.style.left = (r.left - cr.left + r.width/2 - 80) + 'px';
+      tip.style.top = (r.bottom - cr.top + 4) + 'px';
+      tip.classList.add('on');
+    });
+    t.addEventListener('mouseleave', () => tip.classList.remove('on'));
+  });
+}
+tickTooltip();
+
+/* -------- WORKFLOW TELESCOPE -------- */
+$('#telescopeBtn').addEventListener('click', () => $('#app').classList.toggle('collapsed'));
+document.addEventListener('keydown', e => {
+  if(e.key === '[' && !isTyping(e.target)) $('#app').classList.toggle('collapsed');
+});
+function isTyping(el){ return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable); }
+
+/* -------- PARSER PROGRESS -------- */
+async function runParser(){
+  setStep('parser','live');
+  const bar = $('#parserBar');
+  for(let p=0; p<=100; p+=5){
+    bar.style.width = p + '%';
+    await sleep(60);
+  }
+  $('#parserStatus').textContent = 'done · 3.1s';
+  $('#parserStatus').className = 'status done';
+  setStep('parser','done');
+}
+
+/* -------- INV CONSTELLATION -------- */
+const INV_DATA = [
+  {id:'INV-147914', score:0.91, note:'WF ACH R03 reversal, payroll, off-cycle reissue resolved'},
+  {id:'INV-145220', score:0.84, note:'ACH return on DD, R03, bookkeeper auth dispute'},
+  {id:'INV-150311', score:0.78, note:'Same-day off-cycle process · 3 employees · multi-state'},
+  {id:'INV-149087', score:0.64, note:'Stop-payment without auth · contact escalation path'},
+  {id:'INV-143002', score:0.55, note:'WF feed timing · not a reversal but adjacent'},
+  {id:'INV-138842', score:0.41, note:'Premium payroll product · DD timing'},
+];
+function placeConstellation(){
+  const cont = $('#constellation');
+  const w = cont.clientWidth, h = cont.clientHeight;
+  const cx = w/2, cy = h/2;
+  // map score 0.4..1.0 -> radius 8..62
+  INV_DATA.forEach((d,i) => {
+    const r = 62 - ((d.score - 0.4) / 0.6) * 54;
+    const angle = (i / INV_DATA.length) * Math.PI * 2 - Math.PI/2;
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    const dot = document.createElement('div');
+    dot.className = 'dot ' + (d.score>0.8?'match-hi':d.score>0.6?'':'match-lo');
+    dot.style.left = x + 'px';
+    dot.style.top = y + 'px';
+    dot.dataset.id = d.id;
+    dot.dataset.score = d.score;
+    dot.dataset.note = d.note;
+    dot.style.opacity = 0; dot.style.transition = 'opacity .35s ease, transform .15s ease';
+    cont.appendChild(dot);
+    setTimeout(() => dot.style.opacity = 1, 250 + i*120);
+    // tooltip
+    dot.addEventListener('mouseenter', () => {
+      const tip = $('#invTip');
+      tip.innerHTML = '<span class="id">'+d.id+'</span><span class="pct">'+Math.round(d.score*100)+'%</span><br/>'+d.note;
+      tip.style.left = (x + 12) + 'px';
+      tip.style.top = (y - 6) + 'px';
+      tip.classList.add('on');
+    });
+    dot.addEventListener('mouseleave', () => $('#invTip').classList.remove('on'));
+    dot.addEventListener('click', () => pinINV(d));
+  });
+}
+function pinINV(d){
+  // pin into composer as a quoted reference
+  const field = $('#field');
+  field.dataset.empty = 'false';
+  const chunk = ' [ref: '+d.id+' · '+Math.round(d.score*100)+'%] ';
+  field.innerText = (field.innerText || '') + chunk;
+  field.focus();
+  placeCaretEnd(field);
+}
+async function runINV(){
+  setStep('inv','live');
+  await sleep(900);
+  placeConstellation();
+  await sleep(2200);
+  $('#invStatus').textContent = '6 matches · top 91%';
+  $('#invStatus').className = 'status done';
+  setStep('inv','done');
+}
+
+/* -------- TRIAGE -------- */
+async function runTriage(){
+  setStep('triage','live');
+  await sleep(2600); // arrives after parser, in parallel with INV
+  $('#triageCard').dataset.state = 'committed';
+  $('#triageStatus').textContent = 'committed · 0.87';
+  $('#triageStatus').className = 'status done';
+  // confidence animation
+  setTimeout(() => {
+    $('#triageConfBar').style.width = '87%';
+    $('#triageConfNum').textContent = '0.87';
+  }, 50);
+  setStep('triage','done');
+  // collapse parser now that triage commits (directive C)
+  $('#parserCard').classList.add('collapsed');
+  $('#parserStatus').textContent = 'collapsed · hover to peek';
+}
+$('#parserExpand').addEventListener('click', () => $('#parserCard').classList.toggle('collapsed'));
+
+/* PROVENANCE PEEK */
+$$('#triageCard .fld-peek').forEach(el => {
+  el.addEventListener('mouseenter', () => {
+    const keys = (el.dataset.prov||'').split(',').map(s=>s.trim());
+    keys.forEach(k => {
+      const p = $('#parserPills .pill[data-field="'+slugField(k)+'"]');
+      if(p) p.dataset.peek = 'on';
+    });
+  });
+  el.addEventListener('mouseleave', () => {
+    $$('#parserPills .pill').forEach(p => p.dataset.peek = '');
+  });
+});
+function slugField(k){
+  const map = {'issue':'issue','amount':'issue','pay date':'issue','bank':'bank','company':'company','caller':'caller','product':'product'};
+  return map[k] || k;
+}
+
+/* -------- ANALYST + CHAT -------- */
+const TURNS = [
+  {who:'parser', name:'Parser', text:'Screenshot read. 9 fields extracted. Handing off to Triage and INV Search.'},
+  {who:'inv', name:'INV Search', text:'6 historical matches. Strongest: INV-147914 (0.91) — same WF ACH R03 reversal, resolved by same-day off-cycle.'},
+  {who:'triage', name:'Triage', text:'Committed: **payroll · P2**, confidence 0.87. Fast read: ACH return R03 after unauthorized stop-payment, employees unpaid. Pinned above.'},
+  {who:'analyst', name:'Sasha Adler', text:'Reading triage and INV-147914 — picking up the case now.',
+    ack:'Received: triage (payroll · P2 · 0.87) + INV-147914 top match · plan: confirm ACH activity, then same-day off-cycle.'},
+  {who:'analyst', name:'Sasha Adler', text:'Three things I need to confirm in 90 seconds: (1) the ACH return code shown in *Payroll → ACH Activity* (must be R03 to match the playbook), (2) the bookkeeper\'s role on the WF bank profile (admin vs. signer), and (3) that the customer has not already filed an ACH dispute with WF — that would change our path entirely.',
+    draft:{to:'caller', text:'Hi Linda — confirmed your direct deposit run for 5/15 was returned by Wells Fargo. I\'m looking at it now alongside a near-identical case we resolved cleanly. Could you tell me one thing while I prep the off-cycle: has anyone on your side called Wells Fargo about a stop-payment in the last 48 hours?'} },
+  {who:'operator', name:'You', text:'Confirmed R03 in ACH Activity. Bookkeeper is admin. No ACH dispute filed yet.'},
+  {who:'analyst', name:'Sasha Adler', text:'Perfect. Path is clear: queue a same-day off-cycle for the 3 affected employees from the original run, then file a courtesy note to WF\'s business support referencing the stop-payment that was never authorized. The off-cycle will land tonight if you start before 4pm PT.',
+    draft:{to:'caller', text:'Good news — we can fix this tonight. I\'m queuing a same-day off-cycle for the three employees from the original run. You should see funds land in their accounts by tomorrow morning. I\'ll also note Wells Fargo on the unauthorized stop-payment so this doesn\'t repeat.'} },
+];
+
+let turnsRendered = 0;
+async function streamTurn(turn){
+  const root = $('#scroll');
+  const el = document.createElement('div');
+  el.className = 'turn';
+  el.dataset.who = turn.who;
+  const initial = (turn.who==='operator' ? 'YO' : (turn.who==='analyst' ? 'SA' : turn.who==='triage' ? 'TR' : turn.who==='inv' ? 'IN' : 'PA'));
+  el.innerHTML = `
+    <div class="av">${initial}</div>
+    <div class="body">
+      <div class="meta"><b>${turn.name}</b><span class="ts">just now</span>${turn.ack?'':''}</div>
+      ${turn.ack?`<div class="bubble"><div class="system-ack">${turn.ack}</div><span class="bub-text"></span></div>`:`<div class="bubble"><span class="bub-text"></span></div>`}
+    </div>`;
+  root.appendChild(el);
+  root.scrollTop = root.scrollHeight;
+  // typing indicator
+  const bub = el.querySelector('.bub-text');
+  if(turn.who === 'analyst' || turn.who === 'operator'){
+    bub.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    await sleep(700);
+    bub.innerHTML = '';
+    // stream
+    const words = turn.text.split(' ');
+    for(let i=0;i<words.length;i++){
+      bub.innerHTML += (i?' ':'') + words[i];
+      bub.innerHTML = bub.innerHTML.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+      root.scrollTop = root.scrollHeight;
+      await sleep(28 + Math.random()*40);
+    }
+  } else {
+    // quick render for the supporting agents (they're already shown in dossier)
+    bub.innerHTML = turn.text.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  }
+  // DRAFT SHADOW (unique #3)
+  if(turn.draft){
+    showDraft(turn.draft);
+  }
+}
+
+let pendingDraft = null;
+function showDraft(d){
+  pendingDraft = d;
+  $('#composerTo').textContent = d.to;
+  $('#composerHint').innerHTML = 'analyst proposes — <b>Tab</b> to accept';
+  const ghost = $('#ghost');
+  ghost.innerHTML = '<span class="gtag">draft · Sasha</span>' + escapeHTML(d.text);
+  $('#acceptDraft').disabled = false;
+}
+function clearDraft(){
+  pendingDraft = null;
+  $('#ghost').innerHTML = '';
+  $('#composerHint').textContent = 'analyst will propose drafts as the case develops';
+  $('#acceptDraft').disabled = true;
+}
+function acceptDraft(){
+  if(!pendingDraft) return;
+  const f = $('#field');
+  f.dataset.empty = 'false';
+  f.innerText = pendingDraft.text;
+  placeCaretEnd(f);
+  f.focus();
+  clearDraft();
+}
+$('#acceptDraft').addEventListener('click', acceptDraft);
+document.addEventListener('keydown', e => {
+  if(e.key === 'Tab' && pendingDraft && !isTyping(e.target)){
+    e.preventDefault();
+    acceptDraft();
+  }
+  if(e.key === 'Tab' && pendingDraft && e.target === $('#field') && $('#field').innerText.trim() === ''){
+    e.preventDefault();
+    acceptDraft();
+  }
+});
+$('#field').addEventListener('input', e => {
+  $('#field').dataset.empty = ($('#field').innerText.trim() === '') ? 'true' : 'false';
+  if($('#field').innerText.trim() !== '') clearDraft();
+});
+$('#sendBtn').addEventListener('click', sendReply);
+document.addEventListener('keydown', e => {
+  if((e.metaKey || e.ctrlKey) && e.key === 'Enter'){ e.preventDefault(); sendReply(); }
+});
+function sendReply(){
+  const f = $('#field');
+  const txt = f.innerText.trim();
+  if(!txt) return;
+  f.innerText = ''; f.dataset.empty = 'true';
+  streamTurn({who:'operator', name:'You', text: txt});
+}
+function escapeHTML(s){return s.replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));}
+function placeCaretEnd(el){
+  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+
+/* -------- ANALYST ARRIVAL -------- */
+async function arriveAnalyst(){
+  setStep('analyst','live');
+  $('#analystCard').classList.remove('pending');
+  $('#analystSubline').textContent = 'reading triage + INV-147914…';
+  $('#analystStatus').textContent = 'on the line';
+  $('#analystStatus').className = 'status live';
+  await sleep(800);
+  setStep('analyst','done');
+}
+
+/* -------- SCRIPTED CASE -------- */
+async function runCase(){
+  await runParser();
+  // chat turns: parser line
+  await streamTurn(TURNS[0]);
+  // INV starts before triage commits
+  const invP = runINV();
+  await sleep(300);
+  await runTriage();
+  await streamTurn(TURNS[2]);  // triage line
+  await invP;                  // wait for INV
+  await streamTurn(TURNS[1]);  // INV line (after triage already pinned)
+  await sleep(400);
+  await arriveAnalyst();
+  await streamTurn(TURNS[3]);   // analyst ack
+  await sleep(600);
+  await streamTurn(TURNS[4]);   // analyst questions + draft
+  setStep('reply1','live');
+  // wait for operator to send
+}
+
+// after operator sends second-to-last turn, advance
+let operatorReplies = 0;
+const origStream = streamTurn;
+streamTurn = async function(turn){
+  await origStream(turn);
+  if(turn.who === 'operator'){
+    operatorReplies++;
+    setStep('reply1','done');
+    if(operatorReplies === 1){
+      await sleep(600);
+      await origStream(TURNS[6]); // final analyst with resolution
+      setStep('reply2','done');
+      setStep('resolve','done');
+      $('#analystStatus').textContent = 'standing by';
+      $('#analystStatus').className = 'status done';
+    }
+  }
+};
+
+/* =====================================================================
+   WEBCAM MODAL
+   ===================================================================== */
+const veil = $('#webcamVeil');
+const stage = $('#webcamStage');
+const target = $('#wbTarget');
+const wbAuto = $('#wbAuto');
+const wbHint = $('#wbHint');
+
+function openWebcam(){
+  veil.classList.add('on');
+  // simulate phone-sideways arrival
+  target.classList.remove('derotating');
+  target.classList.add('rotated');
+  stage.classList.remove('derot','tilted');
+  wbHint.textContent = 'Detected sideways orientation…';
+  setTimeout(() => {
+    if(wbAuto.checked){
+      target.classList.add('derotating');
+      target.classList.remove('rotated');
+      stage.classList.add('derot');
+      wbHint.textContent = 'Auto-derotated · hold steady';
+      setTimeout(()=>{ stage.classList.add('tilted'); }, 400);
+      setTimeout(()=>{ stage.classList.remove('tilted'); wbHint.textContent='Aligned · tap shutter to capture'; }, 1400);
+    } else {
+      wbHint.textContent = 'Rotate phone upright (auto-derotate is off)';
+    }
+  }, 600);
+}
+$('#openWebcam').addEventListener('click', openWebcam);
+$('#wbCancel').addEventListener('click', () => { veil.classList.remove('on'); });
+$('#wbDone').addEventListener('click', () => { veil.classList.remove('on'); });
+$('#wbShutter').addEventListener('click', () => {
+  wbHint.textContent = 'Captured · sending to parser…';
+  stage.style.transition = 'filter .14s ease';
+  stage.style.filter = 'brightness(1.6)';
+  setTimeout(()=> stage.style.filter='', 120);
+  setTimeout(()=>{ veil.classList.remove('on'); }, 600);
+});
+$('#wbSwap').addEventListener('click', () => { target.classList.toggle('rotated'); });
+$('#wbBurst').addEventListener('click', () => { wbHint.textContent = 'Burst x3 captured · best-of-3 picked'; });
+$('#wbTorch').addEventListener('click', e => { e.target.textContent = e.target.textContent.includes('on') ? 'Torch off' : 'Torch on'; });
+$('#wbGrid').addEventListener('click', () => { stage.classList.toggle('tilted'); });
+wbAuto.addEventListener('change', () => {
+  if(wbAuto.checked && target.classList.contains('rotated')){
+    target.classList.remove('rotated'); target.classList.add('derotating');
+    stage.classList.add('derot'); wbHint.textContent='Auto-derotated';
+  }
+});
+
+/* esc closes webcam */
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && veil.classList.contains('on')) veil.classList.remove('on');
+});
+
+/* -------- kick off -------- */
+window.addEventListener('load', () => {
+  // small intro delay
+  setTimeout(runCase, 350);
+});
+
+</script>
+</body>
+</html>

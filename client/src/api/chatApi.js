@@ -11,7 +11,7 @@ const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
  * @param {{ onInit: Function, onChunk: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onLocalStage?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage }) {
+export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage, onStageEvent }) {
   const controller = new AbortController();
   const url = `${BASE}/chat`;
   const hasImages = Array.isArray(body.images) && body.images.length > 0;
@@ -68,6 +68,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         else if (eventType === 'triage_card') onTriageCard?.(data);
         else if (eventType === 'case_intake') onCaseIntake?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
+        else if (eventType === 'stage_event') onStageEvent?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);
@@ -190,6 +191,19 @@ export async function parseChatEscalation(body) {
     timeout: 120_000,
     noRetry: true,
   }, 'Failed to parse escalation');
+}
+
+/**
+ * Aggregated pipeline event stats — moving-average denominators per stage
+ * plus all-time totals for the sessions page. Cheap, cached on the client.
+ */
+export async function getEventStats() {
+  const data = await apiFetchJson(`${BASE}/conversations/event-stats`, {}, 'Failed to load event stats');
+  return {
+    byStage: data.byStage || {},
+    totals: data.totals || { allTime: 0, perSession: 0, sessionCount: 0 },
+    windowSize: data.windowSize || 0,
+  };
 }
 
 /** List conversations (with optional search) */

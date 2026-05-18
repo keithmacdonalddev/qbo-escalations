@@ -928,7 +928,7 @@ test('POST /parse — timeoutMs edge values', async (t) => {
     assert.equal(res.body.ok, true);
   });
 
-  await t.test('timeoutMs = 0 uses default (60000)', async () => {
+  await t.test('timeoutMs = 0 uses default (120000)', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
     interceptHost('api.anthropic.com', {
       statusCode: 200,

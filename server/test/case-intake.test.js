@@ -30,6 +30,13 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
         read: 'Payroll export issue.',
         action: 'Verify the tax form export path.',
         confidence: 'medium',
+        generation: {
+          source: 'agent',
+          label: 'Agent generated',
+          latencyMs: 2400,
+          provider: 'claude',
+          model: 'claude-opus-4-7',
+        },
       },
     },
     parserProvider: 'llm-gateway',
@@ -50,6 +57,8 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
   assert.equal(intake.runs[0].provider, 'llm-gateway');
   assert.equal(intake.runs[0].durationMs, 1250);
   assert.equal(intake.runs[1].durationMs, 2400);
+  assert.equal(intake.runs[1].detail.generation.source, 'agent');
+  assert.equal(intake.runs[1].detail.generation.label, 'Agent generated');
   assert.equal(intake.runs[2].provider, 'gpt-5.5');
   assert.equal(intake.activeRunId, intake.runs[2].id);
 });
@@ -160,6 +169,78 @@ test('failCaseIntakeAnalystRun marks analyst failures for review', () => {
   assert.equal(analyst.durationMs, 5000);
   assert.equal(analyst.summary, 'Timed out');
   assert.deepEqual(analyst.detail, { code: 'TIMEOUT', message: 'Timed out' });
+});
+
+test('buildCaseIntakeFromParsedEscalation treats rule fallback as completed with fallback.used=true', () => {
+  const intake = buildCaseIntakeFromParsedEscalation({
+    sourceText: 'COID/MID: 123\nCASE: 456',
+    imageTriageContext: {
+      parseFields: { coid: '123', caseNumber: '456' },
+      parseMeta: { providerUsed: 'llm-gateway', model: 'auto', validation: { passed: true, score: 0.95 } },
+      triageMeta: {
+        providerUsed: 'claude',
+        model: 'claude-opus-4-7',
+        usedRuleFallback: true,
+        fallbackFrom: 'agent-shape',
+        fallbackReason: 'Triage Agent response did not match the required field format.',
+      },
+      triageCard: {
+        category: 'payroll',
+        severity: 'P3',
+        read: 'Payroll export issue.',
+        action: 'Verify the tax form export path.',
+        confidence: 'low',
+        source: 'rule-fallback',
+        fallback: {
+          used: true,
+          reason: 'Triage Agent response did not match the required field format.',
+        },
+      },
+      elapsedMs: 2400,
+    },
+    parserProvider: 'llm-gateway',
+    parserModel: 'auto',
+    analystProvider: 'gpt-5.5',
+    analystModel: 'gpt-5.5',
+    traceId: 'trace-fallback',
+    startedAt: STARTED_AT,
+  });
+
+  const triageRun = intake.runs.find((run) => run.phase === 'triage');
+  assert.equal(triageRun.status, 'completed');
+  assert.equal(triageRun.fallback.used, true);
+  assert.equal(triageRun.fallback.from, 'agent-shape');
+  assert.match(triageRun.fallback.reason, /did not match the required field format/);
+  assert.equal(triageRun.fallbackUsed, true);
+  assert.equal(triageRun.summary, triageRun.fallback.reason);
+});
+
+test('buildCaseIntakeFromParsedEscalation marks triage as failed only when the run errors', () => {
+  const intake = buildCaseIntakeFromParsedEscalation({
+    sourceText: 'COID/MID: 123\nCASE: 456',
+    imageTriageContext: {
+      parseFields: { coid: '123', caseNumber: '456' },
+      parseMeta: { providerUsed: 'llm-gateway', model: 'auto', validation: { passed: true, score: 0.95 } },
+      triageMeta: null,
+      triageCard: null,
+      error: { code: 'TRIAGE_AGENT_TIMEOUT', message: 'Triage Agent timed out before responding.' },
+      elapsedMs: 30_000,
+    },
+    parserProvider: 'llm-gateway',
+    parserModel: 'auto',
+    analystProvider: 'gpt-5.5',
+    analystModel: 'gpt-5.5',
+    traceId: 'trace-error',
+    startedAt: STARTED_AT,
+  });
+
+  const triageRun = intake.runs.find((run) => run.phase === 'triage');
+  assert.equal(triageRun.status, 'failed');
+  assert.equal(triageRun.fallback.used, false);
+  assert.equal(triageRun.fallback.reason, '');
+  assert.equal(triageRun.fallback.from, '');
+  assert.equal(triageRun.fallbackUsed, false);
+  assert.match(triageRun.summary, /timed out/i);
 });
 
 test('appendCaseIntakeFollowUp stores parsed phone-agent chat context without changing analyst status', () => {

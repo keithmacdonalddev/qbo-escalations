@@ -1,111 +1,62 @@
-# Animation & Motion Design Report
-## QBO Escalation Assistant -- Comprehensive Animation Reference
+# designer-animation-motion — V4 Strip-Mode Entry Report
 
-*Prepared March 2026.*
-
----
-
-## 1. Executive Summary
-
-The QBO Escalation Assistant has a solid animation foundation: motion tokens, Framer Motion config, AnimatePresence for routes, skeletons, and reduced-motion support. What it lacks: layout animations, scroll-driven effects, stagger sequences, spring tuning, 3D depth, and micro-interactions. This report catalogs every technique worth considering.
+**Prototype:** `prototypes/escalation-chat-challenge/v4/animation-motion/index.html`
+**Forced angle:** NO BUTTONS. Zero button-shaped affordances. Motion teaches the interface.
+**Date:** 2026-05-16
 
 ---
 
-## 2. Current Animation Audit
+## The thesis
 
-### 2.1 CSS Keyframes (19 total)
+A button is a static rectangle that asks "click me." If you replace the question with a *gesture* and let the *card* lean toward what comes next, the interface stops shouting and starts whispering. Motion is the affordance.
 
-pulse-ring, shimmer, cursor-blink, toast-in/out, modal-overlay-in, modal-content-in, fade-in, spin, thinkingDot, skeletonShimmer, headerDev*(4), popoverIn, chat-live-pulse, circuit-pulse. Most use opacity/transform (GPU-composited).
+V3 lost because every designer covered the canvas in chrome to *prove* the AI was working. V4 strip-mode says: stop performing the AI. So I stripped further — I stripped the controls themselves. What's left has to *move* if it wants to be used.
 
-### 2.2 Framer Motion
+## The 2 features (the third was killed)
 
-Used: MotionConfig, useReducedMotion, AnimatePresence routes, motion.div, motion.button whileHover/whileTap.
-NOT used: layout, layoutId, useScroll, useTransform, useSpring, drag, stagger (defined unused).
+1. **Gravity Cards** — every card has weight; it leans, drifts, breathes toward the operator's next action. Pulling the triage card down "accepts" it. Pushing it up "revises" it (and primes the reply input). Dragging the latest analyst reply down into the drawer "copies" it. No buttons; only weight.
+2. **Whisper Hold** — press and hold the triage card to reveal parser fields and INV details. Press and hold anywhere else to summon a first-use coach. The coach appears once on first visit (via localStorage) and again on demand. After the first hold, you know everything.
 
-### 2.3 Good: 3-layer token system, reduced-motion catch-all, .gpu-layer utility, calibrated springs.
-### 2.4 Missing: layout animations, shared transitions, scroll animations, stagger, counters, theme crossfade.
+(The third feature I wanted — a "scrub the conversation back in time by dragging horizontally" — would have been delightful but it isn't one of the 4 user goals. Killed.)
 
----
+## The 4 user goals, each mapped to a visible region
 
-## 3. Animation Philosophy
+| Goal                    | Region                                | How                                                                                       |
+| ----------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------- |
+| See what's wrong        | Triage tile (left)                    | The biggest words on the page are the triage headline + body. Severity/INV are footnotes. |
+| Confirm or doubt the AI | Triage tile gesture                   | Pull DOWN to accept (card leans + glows green). Push UP to revise (card leans + primes the reply field with "I'd revise the triage —"). |
+| Get the answer          | Conversation column (right)           | Main analyst speaks; latest analyst turn is the only loud thing — softly pulsing card. Type freely, Enter to send. |
+| Use the answer          | Drawer (bottom)                       | Drag the latest analyst reply into the drawer. Drawer turns green. Text is on the clipboard. |
 
-8+ hr/day tool. Functional + selective Ambient. Linear: fast (100-200ms), purposeful, never blocking, springs. The 200ms Rule is correct.
+Nothing else exists. The webcam is a 54px breathing dot in the corner (first-class but not loud). Agent identities are 6px dots above the drawer — they swell on hover, fade otherwise.
 
----
+## How motion solves the discoverability problem
 
-## 4. CSS Mastery
+The brief warns: no buttons creates a learning curve. My answers:
 
-GPU-safe: transform, opacity, filter. Never: width/height/top/left/margin/padding. will-change: max 20 elements. contain: layout/paint on chat/sidebar. Scroll-driven animations: off main thread, Tokopedia CPU 50%->2%.
+- **Breathing affordances.** The triage card has a subtle 5.2s breath. The latest analyst reply has a 3.6s pulse. The reply field underline has a horizontal sweep on focus. The drawer arrow bobs. Anything that moves can be touched.
+- **Lean hints.** "pull down to accept" and "push up to revise" live faded at the edges of the triage card. They brighten when the card actually leans that direction.
+- **First-use coach.** A radial vignette dims the page once, with three one-line tips anchored to the three regions. Dismisses on tap. Never returns (localStorage).
+- **Press-and-hold fallback.** Hold anywhere with no specific affordance and a ring ripples + the coach reappears. The "help button" is a gesture instead of a button.
+- **Affordance asymmetry.** The latest analyst turn has a different background and a soft border. Older turns are flat text. Only the *useful* thing is touchable-looking.
 
----
+## Calm checklist (V4 self-check)
 
-## 5. Framer Motion Patterns
+1. Could a normal person use this with zero explanation? — Yes, with the once-only coach. Without the coach, the press-and-hold fallback always recovers.
+2. Could the operator close their eyes for a second and not feel like they missed something? — Yes. Nothing animates faster than a 3.6s pulse. No flashes, no slides-in unless you typed.
+3. ≤ 2 unique features? — Yes (Gravity Cards, Whisper Hold).
+4. Forced angle structurally shapes the design? — Yes; there is literally no button-shaped element anywhere in the DOM.
+5. Anything visible that doesn't serve a goal? — No. Webcam and presence dots are below 50% opacity at rest, surfacing on hover.
+6. Quiet at all times? — Ambient breath + one pulse on the latest reply. That's it.
+7. Main analyst the only loud thing when speaking? — Yes; the latest analyst turn is the only element with a soft tinted background and pulse.
 
-layout: FLIP technique, most impactful unused feature.
-layoutId: .sidebar-nav-indicator-bg ready, transitions.layout spring configured.
-Springs: Snappy(400/30/1,0.75), Gentle(200/25/1,0.88), Layout(500/35/0.8,0.88). Add: Bouncy(300/10/0.5), Heavy(150/30/2), Instant(700/40/0.5).
-Stagger: 0.04-0.06s/item, cap 8-12.
-useTransform+useSpring: reactive values without re-render.
+## Risks & where this could lose
 
----
+- Gestures on first contact still require the coach. If the coach is dismissed by accident before reading, the press-and-hold fallback saves them — but they may not discover it. Mitigation: the lean-hint text is *always* visible on the triage card.
+- Drag-to-copy on the analyst reply means accidental tiny drags do nothing — threshold is 120px. Below that it springs back. This is intentional; copy is a deliberate gesture, not a slip.
+- `prefers-reduced-motion` collapses every animation to a no-op. The lean-hints remain visible static text, so the design degrades to "read the hint, do the gesture." It still works without motion.
 
-## 6. 3D Effects
+## File paths
 
-perspective:800px, preserve-3d, backface-visibility:hidden. Tilt max 4-8deg. GPU-composited. Disable mobile.
-
----
-
-## 7. Route Transitions
-
-View Transitions API: Baseline Oct 2025. Shared elements: layoutId escalation cards dashboard->detail.
-
----
-
-## 8. Micro-Interactions
-
-Button:50ms active. Toggle:layout+spring. Counter:useSpring. Copy:AnimatePresence. Toast:spring+swipe. Tooltip:120ms. Progress:scaleX. Skeleton:@property.
-
----
-
-## 9. Ambient Effects
-
-Gradient mesh: empty states, 20s+, 5-8% opacity. Frosted glass: already excellent. Noise: 2% overlay.
-
----
-
-## 10. App-Specific Recommendations
-
-Chat: springGentle entrance (user right, assistant left). Sidebar: layoutId indicator, conversation stagger. Dashboard: 40ms card stagger, AnimatedCounter. Lab: spring pop results, scaleX progress. Gmail: layout on rows. Modals: spring(300/28). Theme: View Transitions API. Toasts: spring+swipe.
-
----
-
-## 11. Performance
-
-16.67ms/frame. Never animate width/height/margin. will-change max 20. Reduced motion done. Mobile: no 3D, less stagger, content-visibility.
-
----
-
-## 12. Priority
-
-T1(1-2h): sidebar layoutId, chat entrance, stat counters, card stagger, toast spring.
-T2(2-4h): shared elements, theme crossfade, modal spring, email layout, tab indicator.
-T3(4-8h): scroll header, 3D tilt, directional routes, lab progress, odometer.
-T4: scroll CSS, gradient mesh, noise, parallax, Lottie.
-
----
-
-## 13. Tools
-
-Have: Framer Motion 12 (95% coverage), React 19, Vite 7.
-Consider: Lottie (~15KB). Skip: GSAP, R3F.
-Native: View Transitions, scroll-driven, @property, contain, content-visibility.
-
----
-
-## Appendix
-
-Duration: instant(50), micro(100), fast(150), normal(200), emphasis(300), slow(400), dramatic(700)ms
-Easing: standard, decelerate, accelerate, emphasized, spring, apple, out-expo, in-out-quart
-Springs: Snappy(400/30/1), Gentle(200/25/1), Layout(500/35/0.8)
-
-*Purpose over polish.*
+- Prototype: `C:\Projects\qbo-escalations\prototypes\escalation-chat-challenge\v4\animation-motion\index.html`
+- This report: `C:\Projects\qbo-escalations\docs\design-reports\animation-motion-report.md`

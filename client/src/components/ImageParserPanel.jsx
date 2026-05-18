@@ -5,11 +5,14 @@ import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
+  getImageParserReasoningEffortOptions,
+  resolveImageParserSelection,
 } from '../lib/imageParserCatalog.js';
 import {
   getImageParserStatusBadgeText,
   getImageParserStatusLabel,
 } from '../lib/imageParserStatus.js';
+import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
 import './ImageParserPanel.css';
 
@@ -18,6 +21,7 @@ const IMAGE_PARSER_PROVIDERS = [
   ...IMAGE_PARSER_PROVIDER_OPTIONS,
 ];
 const IMAGE_PARSER_PANEL_MODEL_LIST_ID = 'image-parser-panel-model-options';
+const IMAGE_PARSER_REASONING_EFFORT_KEY = 'qbo-image-parser-reasoning-effort';
 
 const ScanIcon = ({ size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -130,11 +134,17 @@ export default function ImageParserPanel() {
     parse, parsing, result, error, checkAvailability,
     history, historyMeta, historyLoading, fetchHistory, fetchHistoryItem,
   } = useImageParser();
-  const [provider, setProvider] = useState(() =>
-    localStorage.getItem('qbo-image-parser-provider') || ''
-  );
-  const [model, setModel] = useState(() =>
-    localStorage.getItem('qbo-image-parser-model') || ''
+  const initialSelectionRef = useRef(null);
+  if (!initialSelectionRef.current) {
+    initialSelectionRef.current = resolveImageParserSelection(
+      localStorage.getItem('qbo-image-parser-provider') || '',
+      localStorage.getItem('qbo-image-parser-model') || ''
+    );
+  }
+  const [provider, setProvider] = useState(() => initialSelectionRef.current.provider);
+  const [model, setModel] = useState(() => initialSelectionRef.current.model);
+  const [reasoningEffort, setReasoningEffort] = useState(() =>
+    localStorage.getItem(IMAGE_PARSER_REASONING_EFFORT_KEY) || ''
   );
   const [imagePreview, setImagePreview] = useState(null);
   const [imageBase64, setImageBase64] = useState(null);
@@ -146,6 +156,7 @@ export default function ImageParserPanel() {
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
+  const reasoningEffortOptions = getImageParserReasoningEffortOptions(provider);
 
   // Check provider availability on mount
   useEffect(() => {
@@ -169,6 +180,9 @@ export default function ImageParserPanel() {
   useEffect(() => {
     localStorage.setItem('qbo-image-parser-model', model);
   }, [model]);
+  useEffect(() => {
+    localStorage.setItem(IMAGE_PARSER_REASONING_EFFORT_KEY, reasoningEffort);
+  }, [reasoningEffort]);
 
   const processFile = useCallback((file) => {
     if (!file || !file.type.startsWith('image/')) return;
@@ -231,10 +245,16 @@ export default function ImageParserPanel() {
     }
   }, [processFile]);
 
+  const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
+
   const handleParse = useCallback(() => {
-    if (!imageBase64 || !provider) return;
-    parse(imageBase64, { provider, model: model || undefined });
-  }, [imageBase64, provider, model, parse]);
+    if (!imageBase64 || !provider || providerMissingApiKey) return;
+    parse(imageBase64, {
+      provider,
+      model: model || undefined,
+      reasoningEffort: reasoningEffort || undefined,
+    });
+  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parse]);
 
   const handleClear = useCallback(() => {
     setImagePreview(null);
@@ -300,7 +320,7 @@ export default function ImageParserPanel() {
   const providerStatusBadgeText = provider
     ? getImageParserStatusBadgeText(provider, providerStatus)
     : 'Unknown';
-  const canParse = imageBase64 && provider && !parsing;
+  const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
 
   const renderedOutput = result?.text ? renderMarkdown(result.text) : null;
 
@@ -327,9 +347,22 @@ export default function ImageParserPanel() {
         <div className="image-parser-config-row">
           <label className="image-parser-field">
             <span>Provider</span>
-            <select value={provider} onChange={(e) => setProvider(e.target.value)}>
+            <select
+              value={provider}
+              onChange={(e) => {
+                setProvider(e.target.value);
+                setModel('');
+                setReasoningEffort('');
+              }}
+            >
               {IMAGE_PARSER_PROVIDERS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                <option
+                  key={opt.value}
+                  value={opt.value}
+                  disabled={isProviderMissingApiKey(opt.value, availability?.providers)}
+                >
+                  {opt.label}
+                </option>
               ))}
             </select>
           </label>
@@ -341,6 +374,7 @@ export default function ImageParserPanel() {
               placeholder={getImageParserModelPlaceholder(provider)}
               list={IMAGE_PARSER_PANEL_MODEL_LIST_ID}
               onChange={(e) => setModel(e.target.value)}
+              disabled={providerMissingApiKey}
             />
             <datalist id={IMAGE_PARSER_PANEL_MODEL_LIST_ID}>
               {modelSuggestions.map((option) => (
@@ -348,6 +382,21 @@ export default function ImageParserPanel() {
               ))}
             </datalist>
           </label>
+          {reasoningEffortOptions.length > 0 && (
+            <label className="image-parser-field">
+              <span>Effort</span>
+              <select
+                value={reasoningEffort}
+                onChange={(e) => setReasoningEffort(e.target.value)}
+                disabled={providerMissingApiKey}
+              >
+                <option value="">Default</option>
+                {reasoningEffortOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
 
         {/* Drop zone / Image preview */}

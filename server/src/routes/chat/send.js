@@ -54,10 +54,12 @@ const {
 } = require('../../services/chat-request-service');
 const {
   appendCaseIntakeFollowUp,
+  applyStageEventsToCaseIntake,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
 } = require('../../lib/case-intake');
+const { createStageEventBus } = require('../../lib/stage-events');
 const { createLinkedEscalationFromConversation } = require('../../lib/escalation-dedup');
 const {
   buildContextDebugPayload,
@@ -119,7 +121,7 @@ function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceI
       type: 'case-intake',
       phase: 'known-issue-search',
       status: knownIssueRun.status || 'completed',
-      summary: knownIssueRun.summary || 'Known Issue Search Agent checked active investigations.',
+      summary: knownIssueRun.summary || 'INV Search Agent checked active investigations.',
       detail: {
         provider: knownIssueRun.provider || '',
         model: knownIssueRun.model || '',
@@ -591,6 +593,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     'X-Accel-Buffering': 'no',
   });
 
+  const sendStageEvent = (eventName, payload) => {
+    try {
+      res.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch { /* client disconnected */ }
+  };
+  const parserEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'parser' });
+  const knownIssueEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'inv' });
+  const triageEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'triage' });
+  const mainEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'main' });
+
   const {
     effectiveSystemPrompt,
     imageTranscription,
@@ -601,6 +613,9 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     normalizedImages,
     messageText: message || '',
     baseSystemPrompt: contextBundle.systemPrompt,
+    parserEventBus,
+    knownIssueEventBus,
+    triageEventBus,
     emitStatus: async (statusMessage) => {
       try {
         const payload = statusMessage && typeof statusMessage === 'object'
@@ -640,7 +655,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
       await appendTraceEvent(trace?._id, {
         key: 'known_issue_search_started',
-        label: 'Known Issue Search Agent started',
+        label: 'INV Search Agent started',
         status: 'info',
         provider: traceProvider,
         model: traceModel,
@@ -663,6 +678,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       ? {
           provider: req.body.imageParserProvider,
           model: req.body.imageParserModel || undefined,
+          reasoningEffort: req.body.imageParserReasoningEffort || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
         }
       : null,
@@ -693,6 +709,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       traceId: trace ? trace._id.toString() : null,
       startedAt: traceStartedAt,
     });
+    // Persist the buffered stage events from the parser / INV / triage legs
+    // onto the matching runs in caseIntake.runs[]. The popout reads these
+    // events when the live SSE channel has already closed.
+    conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'parser', parserEventBus.flush());
+    conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'inv', knownIssueEventBus.flush());
+    conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'triage', triageEventBus.flush());
     conversation.markModified?.('caseIntake');
     recordCaseIntakeWorkflowActivities(conversation.caseIntake, {
       conversationId: conversation._id ? conversation._id.toString() : '',
@@ -728,7 +750,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   } else if (imageTriageContext?.knownIssueSearchResult) {
     await appendTraceEvent(trace?._id, {
       key: 'known_issue_search_completed',
-      label: 'Known Issue Search Agent completed',
+      label: 'INV Search Agent completed',
       status: imageTriageContext.knownIssueSearchResult.ok ? 'success' : 'warning',
       message: imageTriageContext.knownIssueSearchResult.summary || 'Known issue search completed without a matched INV.',
       detail: imageTriageContext.knownIssueSearchResult.validation || null,
@@ -936,6 +958,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     streamSettled = true;
     clearInterval(heartbeat);
     if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+      mainEventBus.emit('error', {
+        code: 'SSE_STREAM_TIMEOUT',
+        message: 'Request timed out - please try again',
+      });
+      mainEventBus.emit('stage.completed', {
+        status: 'failed',
+        durationMs: SSE_SAFETY_TIMEOUT_MS,
+        provider: policy.primaryProvider,
+        model: primaryTraceModel,
+      });
       conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
         provider: policy.primaryProvider,
         model: primaryTraceModel,
@@ -946,6 +978,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         },
         completedAt: new Date(),
       });
+      conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
       conversation.markModified?.('caseIntake');
       saveConversationLenient(conversation).catch(() => {});
     }
@@ -963,6 +996,21 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }, SSE_SAFETY_TIMEOUT_MS);
   if (typeof sseSafetyTimeout.unref === 'function') sseSafetyTimeout.unref();
 
+  mainEventBus.emit('stage.started', {
+    agentName: 'QBO Assistant',
+    provider: policy.primaryProvider,
+    model: policy.primaryModel || primaryTraceModel,
+    mode: policy.mode,
+    reasoningEffort: effectiveReasoningEffort || '',
+    useAgentTools: Boolean(useSharedAgentTools),
+  });
+  mainEventBus.emit('llm.request', {
+    provider: policy.primaryProvider,
+    model: policy.primaryModel || primaryTraceModel,
+    mode: policy.mode,
+    reasoningEffort: effectiveReasoningEffort || '',
+  });
+  let mainStreamingEmitted = false;
   cleanupFn = startMainChatExecution({
     useAgentTools: useSharedAgentTools,
     policy,
@@ -990,6 +1038,14 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           message: `First output chunk arrived from ${chunkProvider}.`,
           elapsedMs: firstChunkMs,
         }, traceStartedAt).catch(() => {});
+      }
+      if (!mainStreamingEmitted) {
+        mainStreamingEmitted = true;
+        mainEventBus.emit('llm.streaming', { provider: chunkProvider });
+        mainEventBus.emit('chunk.first_token', {
+          provider: chunkProvider,
+          elapsedMs: firstChunkMs,
+        });
       }
       try {
         res.write('event: chunk\ndata: ' + JSON.stringify({ provider: chunkProvider, text }) + '\n\n');
@@ -1301,6 +1357,33 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             .replace(/\s+/g, ' ')
             .trim()
             .slice(0, 240);
+          mainEventBus.emit('llm.response', {
+            latencyMs,
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: analystModelUsed,
+            usage: compliantData.usage ? {
+              inputTokens: compliantData.usage.inputTokens,
+              outputTokens: compliantData.usage.outputTokens,
+              totalTokens: compliantData.usage.totalTokens,
+            } : null,
+            chunkCount: traceStats.chunkCount,
+            chunkChars: traceStats.chunkChars,
+            firstChunkMs,
+            firstThinkingMs,
+          });
+          mainEventBus.emit('chunk.complete', {
+            chunkCount: traceStats.chunkCount,
+            chunkChars: traceStats.chunkChars,
+            thinkingChunkCount: traceStats.thinkingChunkCount,
+            outputTokens: compliantData.usage?.outputTokens ?? null,
+          });
+          mainEventBus.emit('stage.completed', {
+            status: 'success',
+            durationMs: latencyMs,
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: analystModelUsed,
+            fallbackUsed: Boolean(compliantData.fallbackUsed),
+          });
           conversation.caseIntake = completeCaseIntakeAnalystRun(conversation.caseIntake, {
             provider: compliantData.providerUsed || policy.primaryProvider,
             model: analystModelUsed,
@@ -1314,6 +1397,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             },
             completedAt: new Date(),
           });
+          conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
           conversation.markModified?.('caseIntake');
         }
 
@@ -1543,6 +1627,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         severity: 'error',
       });
       if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+        mainEventBus.emit('error', {
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          message: err.message || 'Chat failed',
+        });
+        mainEventBus.emit('stage.completed', {
+          status: 'failed',
+          durationMs: latencyMs,
+          provider: policy.primaryProvider,
+          model: safeString(err && err.modelUsed, '') || primaryTraceModel,
+        });
         conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
           provider: policy.primaryProvider,
           model: safeString(err && err.modelUsed, '') || primaryTraceModel,
@@ -1554,6 +1648,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           },
           completedAt: new Date(),
         });
+        conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
         conversation.markModified?.('caseIntake');
         saveConversationLenient(conversation).catch(() => {});
       }
@@ -1633,6 +1728,16 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         detail: { attempts: abortData.attempts || [] },
       }, traceStartedAt).catch(() => {});
       if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
+        mainEventBus.emit('error', {
+          code: 'CLIENT_ABORT',
+          message: 'Chat request aborted before completion',
+        });
+        mainEventBus.emit('stage.completed', {
+          status: 'failed',
+          durationMs: Date.now() - turnStartedAt,
+          provider: policy.primaryProvider,
+          model: primaryTraceModel,
+        });
         conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
           provider: policy.primaryProvider,
           model: primaryTraceModel,
@@ -1643,6 +1748,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           },
           completedAt: new Date(),
         });
+        conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
         conversation.markModified?.('caseIntake');
         saveConversationLenient(conversation).catch(() => {});
       }
@@ -2030,7 +2136,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
       await appendTraceEvent(trace?._id, {
         key: 'known_issue_search_started',
-        label: 'Known Issue Search Agent started',
+        label: 'INV Search Agent started',
         status: 'info',
         provider: traceProvider,
         model: traceModel,
@@ -2053,6 +2159,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       ? {
           provider: req.body.imageParserProvider,
           model: req.body.imageParserModel || undefined,
+          reasoningEffort: req.body.imageParserReasoningEffort || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
         }
       : null,
@@ -2071,7 +2178,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   } else if (imageTriageContext?.knownIssueSearchResult) {
     await appendTraceEvent(trace?._id, {
       key: 'known_issue_search_completed',
-      label: 'Known Issue Search Agent completed',
+      label: 'INV Search Agent completed',
       status: imageTriageContext.knownIssueSearchResult.ok ? 'success' : 'warning',
       message: imageTriageContext.knownIssueSearchResult.summary || 'Known issue search completed without a matched INV.',
       detail: imageTriageContext.knownIssueSearchResult.validation || null,

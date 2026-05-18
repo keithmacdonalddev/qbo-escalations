@@ -4,6 +4,7 @@ import {
   PROVIDER_IDS,
   getAlternateProvider,
   normalizeReasoningEffort,
+  resolveProviderSelection,
 } from './providerCatalog.js';
 
 const STORAGE_KEY = 'qbo-ai-runtime-settings-v1';
@@ -38,7 +39,9 @@ export const DEFAULT_AI_SETTINGS = Object.freeze({
   providerStrategy: {
     defaultMode: 'single',
     defaultPrimaryProvider: DEFAULT_PROVIDER,
+    defaultPrimaryModel: '',
     defaultFallbackProvider: getAlternateProvider(DEFAULT_PROVIDER),
+    defaultFallbackModel: '',
     reasoningEffort: DEFAULT_REASONING_EFFORT,
     timeoutMs: 0,
   },
@@ -107,6 +110,15 @@ export function normalizeAiSettings(raw) {
   const debugRaw = source.debug && typeof source.debug === 'object' ? source.debug : {};
 
   const percents = normalizePercents(contextRaw);
+  const primarySelection = resolveProviderSelection(
+    providerRaw.defaultPrimaryProvider || DEFAULT_AI_SETTINGS.providerStrategy.defaultPrimaryProvider
+  );
+  const fallbackSelection = resolveProviderSelection(
+    providerRaw.defaultFallbackProvider || DEFAULT_AI_SETTINGS.providerStrategy.defaultFallbackProvider
+  );
+  const fallbackProvider = fallbackSelection.provider === primarySelection.provider
+    ? getAlternateProvider(primarySelection.provider)
+    : fallbackSelection.provider;
 
   return {
     context: {
@@ -150,12 +162,14 @@ export function normalizeAiSettings(raw) {
       defaultMode: ['single', 'fallback', 'parallel'].includes(providerRaw.defaultMode)
         ? providerRaw.defaultMode
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultMode,
-      defaultPrimaryProvider: PROVIDER_IDS.includes(providerRaw.defaultPrimaryProvider)
-        ? providerRaw.defaultPrimaryProvider
+      defaultPrimaryProvider: PROVIDER_IDS.includes(primarySelection.provider)
+        ? primarySelection.provider
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultPrimaryProvider,
-      defaultFallbackProvider: PROVIDER_IDS.includes(providerRaw.defaultFallbackProvider)
-        ? providerRaw.defaultFallbackProvider
+      defaultPrimaryModel: primarySelection.model,
+      defaultFallbackProvider: PROVIDER_IDS.includes(fallbackProvider)
+        ? fallbackProvider
         : DEFAULT_AI_SETTINGS.providerStrategy.defaultFallbackProvider,
+      defaultFallbackModel: fallbackProvider === fallbackSelection.provider ? fallbackSelection.model : '',
       reasoningEffort: normalizeReasoningEffort(providerRaw.reasoningEffort),
       timeoutMs: clampInt(providerRaw.timeoutMs, 0, 900000, DEFAULT_AI_SETTINGS.providerStrategy.timeoutMs),
     },

@@ -4,10 +4,13 @@ import {
   getAgentIdentity,
   getAgentIdentityHistory,
   importAgentIdentities,
+  listImageParserTestResults,
   listAgentIdentities,
   recordAgentHarnessRun,
   recordAgentReview,
+  updateImageParserTestResult,
   updateAgentIdentity,
+  updateAgentEnabled,
   updateAgentRuntime,
 } from '../api/agentIdentitiesApi.js';
 import {
@@ -22,11 +25,17 @@ import {
   getAgentRuntimeModelPlaceholder,
   getAgentRuntimeModelSuggestions,
   getAgentRuntimeSummary,
+  normalizeAgentRuntimeState,
   readAgentRuntimeState,
   writeAgentRuntimeState,
 } from '../lib/agentRuntimeSettings.js';
-import { IMAGE_PARSER_PROVIDER_OPTIONS } from '../lib/imageParserCatalog.js';
+import {
+  IMAGE_PARSER_PROVIDER_OPTIONS,
+  getImageParserReasoningEffortOptions,
+} from '../lib/imageParserCatalog.js';
 import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
+import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import './AgentsView.css';
 
 const PROFILE_FIELDS = [
@@ -54,6 +63,12 @@ const PROFILE_TABS = [
   { id: 'workflows', label: 'Workflows' },
   { id: 'activity', label: 'Activity' },
   { id: 'versions', label: 'Versions' },
+];
+
+const IMAGE_PARSER_PROFILE_TABS = [
+  ...PROFILE_TABS.slice(0, 4),
+  { id: 'test-results', label: 'Test Results' },
+  ...PROFILE_TABS.slice(4),
 ];
 
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
@@ -189,6 +204,7 @@ const STATUS_LABELS = {
   idle: 'Idle',
   review: 'Needs Attention',
   degraded: 'Degraded',
+  disabled: 'Off',
 };
 
 function AgentsView({ agentIdFromRoute = null }) {
@@ -207,6 +223,7 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [profileDraft, setProfileDraft] = useState(emptyProfile);
   const [profileSummary, setProfileSummary] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
+  const [enabledSaving, setEnabledSaving] = useState(false);
   const [history, setHistory] = useState(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState(null);
@@ -225,6 +242,10 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [registryMessage, setRegistryMessage] = useState('');
   const [reviewSaving, setReviewSaving] = useState(false);
   const [harnessSaving, setHarnessSaving] = useState(false);
+  const [parserTestResults, setParserTestResults] = useState({ results: [], stats: null, dbAvailable: true });
+  const [parserTestResultsLoading, setParserTestResultsLoading] = useState(false);
+  const [parserTestResultsError, setParserTestResultsError] = useState(null);
+  const [parserResultPreview, setParserResultPreview] = useState(null);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -277,6 +298,23 @@ function AgentsView({ agentIdFromRoute = null }) {
     []
   );
 
+  const loadParserTestResults = useCallback(async () => {
+    try {
+      setParserTestResultsLoading(true);
+      const data = await listImageParserTestResults({ limit: 80 });
+      setParserTestResults({
+        results: data.results || [],
+        stats: data.stats || null,
+        dbAvailable: data.dbAvailable !== false,
+      });
+      setParserTestResultsError(null);
+    } catch (err) {
+      setParserTestResultsError(err.message || 'Failed to load parser test results.');
+    } finally {
+      setParserTestResultsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAgents();
   }, [loadAgents]);
@@ -288,10 +326,22 @@ function AgentsView({ agentIdFromRoute = null }) {
   }, [agentIdFromRoute, selectedAgentId]);
 
   useEffect(() => {
+    if (selectedAgentId !== 'escalation-template-parser' && activeProfileTab === 'test-results') {
+      setActiveProfileTab('overview');
+    }
+  }, [activeProfileTab, selectedAgentId]);
+
+  useEffect(() => {
     if (selectedAgentId) {
       loadSelectedAgent(selectedAgentId);
     }
   }, [loadSelectedAgent, selectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId === 'escalation-template-parser' && activeProfileTab === 'test-results') {
+      loadParserTestResults();
+    }
+  }, [activeProfileTab, loadParserTestResults, selectedAgentId]);
 
   useEffect(() => {
     setHistory(null);
@@ -465,9 +515,28 @@ function AgentsView({ agentIdFromRoute = null }) {
       dispatchAgentRuntimeDefaultsApplied({
         [selectedAgent.agentId]: updatedRuntime,
       });
+      window.dispatchEvent(new CustomEvent('agent-health-refresh'));
       setRuntimeSaveStatus('Runtime defaults saved to server.');
     } catch (err) {
       setRuntimeSaveStatus(err.message || 'Failed to save runtime defaults.');
+    }
+  }
+
+  async function handleToggleAgentEnabled(nextEnabled) {
+    if (!selectedAgent?.agentId) return;
+    try {
+      setEnabledSaving(true);
+      const updated = await updateAgentEnabled(
+        selectedAgent.agentId,
+        nextEnabled,
+        `${nextEnabled ? 'Enabled' : 'Disabled'} ${selectedAgent.profile?.roleTitle || selectedAgent.agentId} globally.`
+      );
+      applyUpdatedAgent(updated);
+      window.dispatchEvent(new CustomEvent('agent-health-refresh'));
+    } catch (err) {
+      setError(err.message || 'Failed to update agent status.');
+    } finally {
+      setEnabledSaving(false);
     }
   }
 
@@ -605,6 +674,24 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }
 
+  async function handleUpdateParserTestResult(id, status) {
+    try {
+      const result = await updateImageParserTestResult(id, {
+        status,
+        operatorNote: status === 'fail'
+          ? 'Operator marked this parser test result as incorrect from the agent profile.'
+          : 'Operator marked this parser test result as correct from the agent profile.',
+      });
+      setParserTestResults((prev) => ({
+        ...prev,
+        results: (prev.results || []).map((entry) => (entry.id === result.id ? result : entry)),
+      }));
+      loadParserTestResults();
+    } catch (err) {
+      setParserTestResultsError(err.message || 'Failed to update parser test result.');
+    }
+  }
+
   function handleSelectAgent(agentId) {
     if (!agentId) {
       return;
@@ -626,6 +713,9 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
     if (tabId === 'activity' || tabId === 'versions') {
       loadHistoryForSelectedAgent();
+    }
+    if (tabId === 'test-results') {
+      loadParserTestResults();
     }
   }
 
@@ -673,6 +763,10 @@ function AgentsView({ agentIdFromRoute = null }) {
     runtimeSaveStatus,
     reviewSaving,
     harnessSaving,
+    parserTestResults,
+    parserTestResultsLoading,
+    parserTestResultsError,
+    parserResultPreview,
     onPromptDraftChange: setPromptDraft,
     onPromptSummaryChange: setPromptSummary,
     onPromptSave: handleSavePrompt,
@@ -681,9 +775,15 @@ function AgentsView({ agentIdFromRoute = null }) {
     onProfileChange: handleProfileChange,
     onProfileSummaryChange: setProfileSummary,
     onProfileSave: handleSaveProfile,
-    onRuntimeSave: handleSaveRuntime,
-    onMarkReviewed: handleMarkReviewed,
+      onRuntimeSave: handleSaveRuntime,
+      onToggleAgentEnabled: handleToggleAgentEnabled,
+      enabledSaving,
+      onMarkReviewed: handleMarkReviewed,
     onRecordHarnessRun: handleRecordHarnessRun,
+    onLoadParserTestResults: loadParserTestResults,
+    onUpdateParserTestResult: handleUpdateParserTestResult,
+    onPreviewParserResult: setParserResultPreview,
+    onCloseParserResultPreview: () => setParserResultPreview(null),
     onLoadHistory: loadHistoryForSelectedAgent,
     onLoadPrompt: loadPromptForSelectedAgent,
   };
@@ -1156,13 +1256,15 @@ function AgentProfileDetailPage({
             agent={selectedAgent}
             operation={selectedOperation}
             loading={loadingCurrent}
+            enabledSaving={workspaceProps.enabledSaving}
+            onToggleEnabled={workspaceProps.onToggleAgentEnabled}
             onOpenPrompt={onOpenPrompt}
             onOpenConfig={onOpenConfig}
             onOpenHarness={onOpenHarness}
           />
 
           <AgentProfileTabs
-            tabs={PROFILE_TABS}
+            tabs={selectedAgent.agentId === 'escalation-template-parser' ? IMAGE_PARSER_PROFILE_TABS : PROFILE_TABS}
             activeTab={activeProfileTab}
             onChange={onTabChange}
           />
@@ -1368,10 +1470,13 @@ function AgentProfileHero({
   agent,
   operation,
   loading,
+  enabledSaving,
+  onToggleEnabled,
   onOpenPrompt,
   onOpenConfig,
   onOpenHarness,
 }) {
+  const enabled = agent?.enabled !== false;
   return (
     <section className="agent-profile-hero">
       <div className="profile-identity">
@@ -1402,6 +1507,15 @@ function AgentProfileHero({
 
       <div className="profile-actions">
         {loading && <InlineLoading label="Refreshing profile..." />}
+        <label className={`agent-enabled-toggle${enabled ? ' is-on' : ' is-off'}`}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={enabledSaving}
+            onChange={(event) => onToggleEnabled?.(event.target.checked)}
+          />
+          <span>{enabled ? 'On' : 'Off'}</span>
+        </label>
         <button type="button" className="secondary-action" onClick={onOpenConfig}>
           Edit
         </button>
@@ -1444,6 +1558,9 @@ function AgentProfileWorkspace(props) {
   }
   if (activeTab === 'harness') {
     return <AgentHarnessTab {...props} />;
+  }
+  if (activeTab === 'test-results') {
+    return <ImageParserTestResultsTab {...props} />;
   }
   if (activeTab === 'workflows') {
     return <AgentWorkflowsTab {...props} />;
@@ -1933,6 +2050,157 @@ function AgentHarnessTab({
   );
 }
 
+function ImageParserTestResultsTab({
+  parserTestResults,
+  parserTestResultsLoading,
+  parserTestResultsError,
+  parserResultPreview,
+  onLoadParserTestResults,
+  onUpdateParserTestResult,
+  onPreviewParserResult,
+  onCloseParserResultPreview,
+}) {
+  const stats = parserTestResults?.stats || {};
+  const results = parserTestResults?.results || [];
+
+  return (
+    <section className="agent-tab-content parser-results-layout">
+      <Panel
+        title="Image Parser Test Results"
+        actions={<button type="button" className="text-action" onClick={onLoadParserTestResults}>Refresh</button>}
+      >
+        {parserTestResultsLoading ? (
+          <InlineLoading label="Loading parser test results..." />
+        ) : parserTestResultsError ? (
+          <EmptyState title="Test results unavailable" copy={parserTestResultsError} />
+        ) : parserTestResults?.dbAvailable === false ? (
+          <EmptyState title="Database unavailable" copy="Parser test results are separate from escalation logs, and MongoDB is not currently connected." />
+        ) : (
+          <>
+            <div className="parser-result-stat-grid">
+              <ParserResultMetric label="Total" value={stats.total || 0} detail={`${stats.pending || 0} pending review`} />
+              <ParserResultMetric label="Pass Rate" value={formatRate(stats.passRate)} detail={`${stats.pass || 0} pass / ${stats.fail || 0} fail`} />
+              <ParserResultMetric label="Avg Time" value={formatMs(stats.avgElapsedMs)} detail="Live parser test elapsed time" />
+            </div>
+            <ParserResultBreakdown title="By Provider" rows={stats.byProvider || []} labelFor={(row) => row.provider || 'Unknown'} />
+            <ParserResultBreakdown title="By Model" rows={stats.byModel || []} labelFor={(row) => [row.provider, row.model].filter(Boolean).join(' / ') || 'Unknown'} />
+            <ParserResultBreakdown title="By Test Image" rows={stats.byFixture || []} labelFor={(row) => row.fixtureName || 'Unknown fixture'} withThumbs />
+          </>
+        )}
+      </Panel>
+
+      <Panel title="Recent Runs">
+        {results.length ? (
+          <div className="parser-result-list">
+            {results.map((result) => (
+              <article className={`parser-result-card is-${result.status || 'pending-review'}`} key={result.id}>
+                <button
+                  type="button"
+                  className="parser-result-thumb"
+                  onClick={() => onPreviewParserResult(result)}
+                  title="Open test image"
+                >
+                  {result.fixture?.url ? <img src={result.fixture.url} alt="" /> : <span>No image</span>}
+                </button>
+                <div className="parser-result-main">
+                  <header>
+                    <strong>{result.fixture?.name || 'Unknown fixture'}</strong>
+                    <span>{formatDate(result.createdAt)}</span>
+                  </header>
+                  <div className="parser-result-meta">
+                    <span>{result.provider || 'provider?'}</span>
+                    <span>{result.model || 'model?'}</span>
+                    <span>{result.reasoningEffort || 'default effort'}</span>
+                    <span>{formatMs(result.elapsedMs)}</span>
+                    <span>9-label {result.canonicalPassed === false ? 'failed' : result.canonicalPassed === true ? 'passed' : 'unknown'}</span>
+                  </div>
+                  <pre>{result.parsedText || 'No parser output saved.'}</pre>
+                </div>
+                <div className="parser-result-actions">
+                  <button type="button" className={result.status === 'pass' ? 'is-pass' : ''} onClick={() => onUpdateParserTestResult(result.id, 'pass')}>Pass</button>
+                  <button type="button" className={result.status === 'fail' ? 'is-fail' : ''} onClick={() => onUpdateParserTestResult(result.id, 'fail')}>Fail</button>
+                  <span>{result.status || 'pending-review'}</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No parser tests saved yet" copy="Run the Image Parser test from Chat, then mark the result pass or fail." />
+        )}
+      </Panel>
+
+      {parserResultPreview && (
+        <ImageParserResultPreviewModal result={parserResultPreview} onClose={onCloseParserResultPreview} />
+      )}
+    </section>
+  );
+}
+
+function ParserResultMetric({ label, value, detail }) {
+  return (
+    <div className="parser-result-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function ParserResultBreakdown({ title, rows, labelFor, withThumbs = false }) {
+  return (
+    <div className="parser-result-breakdown">
+      <h4>{title}</h4>
+      {rows.length ? rows.map((row) => (
+        <div className="parser-result-breakdown-row" key={`${title}-${labelFor(row)}`}>
+          {withThumbs && row.fixture?.url && <img src={row.fixture.url} alt="" />}
+          <strong>{labelFor(row)}</strong>
+          <span>{row.total || 0} runs</span>
+          <span>{formatRate(row.passRate)}</span>
+          <span>{row.fail || 0} fail</span>
+          <span>{formatMs(row.avgElapsedMs)}</span>
+        </div>
+      )) : (
+        <div className="muted-text">No data yet.</div>
+      )}
+    </div>
+  );
+}
+
+function ImageParserResultPreviewModal({ result, onClose }) {
+  const [zoom, setZoom] = useState(100);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="parser-result-preview-modal" role="dialog" aria-modal="true" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <div className="parser-result-preview-panel">
+        <header>
+          <strong>{result.fixture?.name || 'Parser test image'}</strong>
+          <div>
+            <button type="button" onClick={() => setZoom((value) => Math.max(50, value - 25))}>-</button>
+            <span>{zoom}%</span>
+            <button type="button" onClick={() => setZoom((value) => Math.min(225, value + 25))}>+</button>
+            <button type="button" onClick={() => setZoom(100)}>1:1</button>
+            <button type="button" onClick={onClose}>Close</button>
+          </div>
+        </header>
+        <main>
+          {result.fixture?.url && <img src={result.fixture.url} alt={result.fixture?.name || 'Parser test image'} style={{ width: `${zoom}%` }} />}
+          <pre>{result.parsedText || ''}</pre>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function AgentWorkflowsTab({ agent, operation }) {
   return (
     <section className="agent-tab-content workflows-layout">
@@ -2014,22 +2282,25 @@ function AgentVersionsTab({ history, historyLoading, historyError, onLoadHistory
 }
 
 function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onSave }) {
-  const [provider, setProvider] = useState(runtimeState?.provider || '');
-  const [mode, setMode] = useState(runtimeState?.mode || definition?.defaultMode || 'single');
-  const [fallbackProvider, setFallbackProvider] = useState(runtimeState?.fallbackProvider || '');
-  const [model, setModel] = useState(runtimeState?.model || '');
-  const [fallbackModel, setFallbackModel] = useState(runtimeState?.fallbackModel || '');
+  const { providerStatus } = useProviderKeyStatus();
+  const normalizedRuntimeState = normalizeAgentRuntimeState(definition, runtimeState || {});
+  const [provider, setProvider] = useState(normalizedRuntimeState?.provider || '');
+  const [mode, setMode] = useState(normalizedRuntimeState?.mode || definition?.defaultMode || 'single');
+  const [fallbackProvider, setFallbackProvider] = useState(normalizedRuntimeState?.fallbackProvider || '');
+  const [model, setModel] = useState(normalizedRuntimeState?.model || '');
+  const [fallbackModel, setFallbackModel] = useState(normalizedRuntimeState?.fallbackModel || '');
   const [reasoningEffort, setReasoningEffort] = useState(
-    runtimeState?.reasoningEffort || ''
+    normalizedRuntimeState?.reasoningEffort || ''
   );
 
   useEffect(() => {
-    setProvider(runtimeState?.provider || '');
-    setMode(runtimeState?.mode || definition?.defaultMode || 'single');
-    setFallbackProvider(runtimeState?.fallbackProvider || '');
-    setModel(runtimeState?.model || '');
-    setFallbackModel(runtimeState?.fallbackModel || '');
-    setReasoningEffort(runtimeState?.reasoningEffort || '');
+    const normalized = normalizeAgentRuntimeState(definition, runtimeState || {});
+    setProvider(normalized?.provider || '');
+    setMode(normalized?.mode || definition?.defaultMode || 'single');
+    setFallbackProvider(normalized?.fallbackProvider || '');
+    setModel(normalized?.model || '');
+    setFallbackModel(normalized?.fallbackModel || '');
+    setReasoningEffort(normalized?.reasoningEffort || '');
   }, [definition, runtimeState]);
 
   if (!definition) {
@@ -2044,6 +2315,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
   const providerOptions = definition.kind === 'image-parser'
     ? IMAGE_PARSER_PROVIDER_OPTIONS
     : PROVIDER_OPTIONS;
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
   const currentRuntime = {
     provider,
     mode,
@@ -2058,10 +2330,14 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
   });
   const modelListId = `${definition.id}-model-suggestions`;
   const fallbackModelListId = `${definition.id}-fallback-model-suggestions`;
+  const reasoningOptions = definition.kind === 'image-parser'
+    ? getImageParserReasoningEffortOptions(provider)
+    : REASONING_EFFORT_OPTIONS;
 
   function handleProviderChange(nextProvider) {
     setProvider(nextProvider);
     setModel('');
+    if (definition.kind === 'image-parser') setReasoningEffort('');
   }
 
   function handleFallbackProviderChange(nextProvider) {
@@ -2076,7 +2352,11 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
           <span>Provider</span>
           <select value={provider} onChange={(event) => handleProviderChange(event.target.value)}>
             {providerOptions.map((option) => (
-              <option key={option.value} value={option.value}>
+              <option
+                key={option.value}
+                value={option.value}
+                disabled={isMissingKey(option.value)}
+              >
                 {option.shortLabel || option.label}
               </option>
             ))}
@@ -2103,6 +2383,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
             list={modelListId}
             placeholder={getAgentRuntimeModelPlaceholder(definition, currentRuntime)}
             onChange={(event) => setModel(event.target.value)}
+            disabled={isMissingKey(provider)}
           />
           <datalist id={modelListId}>
             {modelSuggestions.map((option) => (
@@ -2121,7 +2402,11 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
               onChange={(event) => handleFallbackProviderChange(event.target.value)}
             >
               {providerOptions.map((option) => (
-                <option key={option.value} value={option.value}>
+                <option
+                  key={option.value}
+                  value={option.value}
+                  disabled={isMissingKey(option.value)}
+                >
                   {option.shortLabel || option.label}
                 </option>
               ))}
@@ -2139,6 +2424,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
                 fallback: true,
               })}
               onChange={(event) => setFallbackModel(event.target.value)}
+              disabled={isMissingKey(fallbackProvider)}
             />
             <datalist id={fallbackModelListId}>
               {fallbackModelSuggestions.map((option) => (
@@ -2153,12 +2439,12 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
           </label>
         )}
 
-        {definition.supportsReasoning && (
+        {definition.supportsReasoning && reasoningOptions.length > 0 && (
           <label>
             <span>Reasoning effort</span>
             <select value={reasoningEffort} onChange={(event) => setReasoningEffort(event.target.value)}>
               <option value="">Default</option>
-              {REASONING_EFFORT_OPTIONS.map((option) => (
+              {reasoningOptions.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -2754,6 +3040,9 @@ function getAgentMeta(agentId) {
 }
 
 function resolveOperationalStatus(meta, agent) {
+  if (agent?.enabled === false) {
+    return 'disabled';
+  }
   if (!agent?.promptId && !agent?.agentId?.includes('parser')) {
     return meta.status === 'active' ? 'idle' : meta.status;
   }
@@ -2853,6 +3142,18 @@ function formatDate(value) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+function formatMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return '0.0s';
+  return `${(numeric / 1000).toFixed(1)}s`;
+}
+
+function formatRate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '0%';
+  return `${Math.round(numeric * 100)}%`;
 }
 
 function clamp(value, min, max) {

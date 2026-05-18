@@ -144,7 +144,7 @@ test('POST /parse route edge cases', async (t) => {
 test('POST /parse timeoutMs edge values', async (t) => {
   const handler = findHandler('post', '/parse');
 
-  await t.test('timeoutMs: NaN → uses default 60s', async () => {
+  await t.test('timeoutMs: NaN → uses default 120s', async () => {
     let capturedTimeout = null;
     _mockParseImage = async (img, opts) => {
       capturedTimeout = opts.timeoutMs;
@@ -156,14 +156,14 @@ test('POST /parse timeoutMs edge values', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      // NaN is not Number.isFinite → effectiveTimeout = 60000
-      assert.equal(respTimeout, 70000);
+      // NaN is not Number.isFinite → effectiveTimeout = 120000
+      assert.equal(respTimeout, 130000);
     } finally {
       _mockParseImage = null;
     }
   });
 
-  await t.test('timeoutMs: negative → uses default 60s', async () => {
+  await t.test('timeoutMs: negative → uses default 120s', async () => {
     let respTimeout = null;
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const req = makeReq({ image: 'AAAA', provider: 'lm-studio', timeoutMs: -5000 });
@@ -171,13 +171,13 @@ test('POST /parse timeoutMs edge values', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      assert.equal(respTimeout, 70000);
+      assert.equal(respTimeout, 130000);
     } finally {
       _mockParseImage = null;
     }
   });
 
-  await t.test('timeoutMs: string → uses default 60s', async () => {
+  await t.test('timeoutMs: string → uses default 120s', async () => {
     let respTimeout = null;
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const req = makeReq({ image: 'AAAA', provider: 'lm-studio', timeoutMs: 'thirty thousand' });
@@ -185,13 +185,13 @@ test('POST /parse timeoutMs edge values', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      assert.equal(respTimeout, 70000);
+      assert.equal(respTimeout, 130000);
     } finally {
       _mockParseImage = null;
     }
   });
 
-  await t.test('timeoutMs: Infinity → uses default 60s', async () => {
+  await t.test('timeoutMs: Infinity → uses default 120s', async () => {
     let respTimeout = null;
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const req = makeReq({ image: 'AAAA', provider: 'lm-studio', timeoutMs: Infinity });
@@ -199,13 +199,13 @@ test('POST /parse timeoutMs edge values', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      assert.equal(respTimeout, 70000);
+      assert.equal(respTimeout, 130000);
     } finally {
       _mockParseImage = null;
     }
   });
 
-  await t.test('timeoutMs: 0 → uses default 60s (not positive)', async () => {
+  await t.test('timeoutMs: 0 → uses default 120s (not positive)', async () => {
     let respTimeout = null;
     _mockParseImage = async () => ({ text: 'ok', role: 'unknown', usage: null });
     const req = makeReq({ image: 'AAAA', provider: 'lm-studio', timeoutMs: 0 });
@@ -213,7 +213,7 @@ test('POST /parse timeoutMs edge values', async (t) => {
     const res = makeRes();
     try {
       await handler(req, res);
-      assert.equal(respTimeout, 70000);
+      assert.equal(respTimeout, 130000);
     } finally {
       _mockParseImage = null;
     }
@@ -639,7 +639,7 @@ test('POST /keys/test deep tests', async (t) => {
     res = makeRes();
     await handler(makeReq({ provider: 'openai', key: 'sk-test' }), res);
     body = JSON.parse(_lastCapturedBody);
-    assert.equal(body.model, 'gpt-4o-mini');
+    assert.equal(body.model, 'gpt-5.4-mini');
     restoreHttps();
 
     // Kimi

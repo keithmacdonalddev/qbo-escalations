@@ -1,0 +1,2070 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pipeline — QBO Escalation Triage</title>
+<style>
+/* =====================================================================
+   PIPELINE — QBO Escalation Triage
+   Designer: designer-vercel
+   Lens: Geist / Vercel — status-first, restraint, log-as-truth.
+   First-principles bet: a case is a deployment. Stages run in parallel.
+   The operator intercepts; they do not navigate. Reasoning IS the log.
+   No chat box. No textarea. ⌘K is the only typing surface.
+   ===================================================================== */
+
+:root {
+  /* Geist palette (true neutrals, single blue accent) */
+  --bg-0: #000000;
+  --bg-1: #0a0a0a;
+  --bg-2: #111111;
+  --bg-3: #1a1a1a;
+  --bg-hover: #1f1f1f;
+  --border: #2a2a2a;
+  --border-strong: #3a3a3a;
+  --fg-0: #ffffff;
+  --fg-1: #ededed;
+  --fg-2: #a0a0a0;
+  --fg-3: #6f6f6f;
+  --fg-4: #444444;
+  --accent: #0070f3;      /* Vercel blue — sole accent */
+  --accent-dim: #003a82;
+  --accent-bg: rgba(0,112,243,0.10);
+  --success: #0070f3;     /* Vercel uses blue for ready */
+  --error: #ee0000;
+  --warning: #f5a623;
+  --teal: #50e3c2;
+  --purple: #8a63d2;
+  --pink: #ff0080;
+
+  --radius-1: 4px;
+  --radius-2: 6px;
+  --radius-3: 8px;
+  --radius-4: 12px;
+  --radius-5: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.6);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.5);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,.7);
+
+  --t-fast: 120ms;
+  --t-base: 180ms;
+  --ease: cubic-bezier(.2,.8,.2,1);
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Geist Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+button { cursor: pointer; }
+::selection { background: var(--accent); color: white; }
+
+/* =====================================================================
+   SHELL — three columns: Queue | Pipeline | Inspector
+   ===================================================================== */
+
+.shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  grid-template-rows: 48px 1fr 28px;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* Top bar */
+.topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-0);
+}
+.brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600; font-size: 14px; letter-spacing: -0.01em;
+}
+.brand-mark {
+  width: 22px; height: 22px;
+  background: var(--fg-1);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.brand-divider {
+  width: 1px; height: 16px; background: var(--border-strong);
+  transform: skewX(-20deg);
+}
+.brand-context {
+  color: var(--fg-2); font-size: 13px;
+}
+.brand-context b { color: var(--fg-1); font-weight: 500; }
+
+.topbar-spacer { flex: 1; }
+
+.cmdk-trigger {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  font-size: 12px; color: var(--fg-2);
+  background: var(--bg-1);
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+  width: 320px; max-width: 40vw;
+}
+.cmdk-trigger:hover { border-color: var(--border-strong); color: var(--fg-1); }
+.cmdk-trigger .kbd { color: var(--fg-3); font-family: var(--font-mono); font-size: 11px; }
+
+.topbar-actions { display: flex; gap: 4px; }
+.icon-btn {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: var(--radius-2);
+  color: var(--fg-2);
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.icon-btn:hover { background: var(--bg-2); color: var(--fg-1); }
+.icon-btn svg { width: 16px; height: 16px; }
+
+/* Footer bar */
+.statusbar {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 16px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-0);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.statusbar .seg { display: flex; align-items: center; gap: 6px; }
+.statusbar .seg b { color: var(--fg-1); font-weight: 500; }
+.statusbar .spacer { flex: 1; }
+
+/* =====================================================================
+   QUEUE — left column, list of incoming cases
+   ===================================================================== */
+.queue {
+  border-right: 1px solid var(--border);
+  background: var(--bg-0);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.queue-head {
+  padding: 12px 14px 8px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+.queue-head h2 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-2);
+}
+.queue-count {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+}
+.queue-list {
+  flex: 1; overflow-y: auto;
+  padding: 4px;
+}
+.queue-item {
+  display: block;
+  padding: 10px 10px;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.queue-item:hover { background: var(--bg-1); }
+.queue-item.active {
+  background: var(--bg-2); border-color: var(--border-strong);
+}
+.queue-item-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 4px;
+}
+.queue-item-id {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-2);
+}
+.queue-item-time {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+}
+.queue-item-title {
+  font-size: 13px; color: var(--fg-1);
+  line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.queue-item-meta {
+  margin-top: 6px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--fg-3);
+}
+
+/* StatusDot — the most important visual primitive */
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot.queued { background: var(--fg-3); }
+.dot.building { background: var(--accent); box-shadow: 0 0 0 0 rgba(0,112,243,.6); animation: pulse 1.6s var(--ease) infinite; }
+.dot.ready { background: var(--accent); }
+.dot.error { background: var(--error); }
+.dot.warning { background: var(--warning); }
+.dot.canceled { background: var(--fg-3); opacity: .6; }
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0,112,243,.55); }
+  70% { box-shadow: 0 0 0 6px rgba(0,112,243,0); }
+  100% { box-shadow: 0 0 0 0 rgba(0,112,243,0); }
+}
+
+.sev {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 5px; border-radius: 3px;
+  letter-spacing: 0.04em; text-transform: uppercase;
+  font-weight: 600;
+}
+.sev.s1 { background: rgba(238,0,0,.12); color: #ff5050; border: 1px solid rgba(238,0,0,.3); }
+.sev.s2 { background: rgba(245,166,35,.10); color: #f5a623; border: 1px solid rgba(245,166,35,.25); }
+.sev.s3 { background: rgba(0,112,243,.10); color: #4d97ff; border: 1px solid rgba(0,112,243,.25); }
+.sev.s4 { background: var(--bg-2); color: var(--fg-2); border: 1px solid var(--border); }
+
+/* =====================================================================
+   PIPELINE — main column, the case-as-deployment
+   ===================================================================== */
+.pipeline {
+  display: flex; flex-direction: column;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+
+.case-head {
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.case-head-row {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+.case-id {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-2);
+  flex-shrink: 0;
+}
+.case-title {
+  margin: 0; font-size: 15px; font-weight: 600;
+  letter-spacing: -0.01em; line-height: 1.3;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.case-meta {
+  display: flex; gap: 14px; font-size: 11px; color: var(--fg-3);
+  margin-top: 4px; font-family: var(--font-mono);
+  flex-wrap: wrap;
+}
+.case-meta span b { color: var(--fg-2); font-weight: 500; }
+.case-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.case-actions .btn { padding: 5px 10px; font-size: 12px; }
+.case-actions .btn .kbd { display: none; }
+@media (min-width: 1280px) {
+  .case-actions .btn .kbd { display: inline; }
+}
+
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--border);
+  font-size: 13px; font-weight: 500;
+  color: var(--fg-1);
+  background: var(--bg-1);
+  transition: all var(--t-fast) var(--ease);
+}
+.btn:hover { background: var(--bg-2); border-color: var(--border-strong); }
+.btn.primary {
+  background: var(--fg-1); color: var(--bg-0); border-color: var(--fg-1);
+}
+.btn.primary:hover { background: var(--fg-0); }
+.btn.danger { color: #ff6b6b; border-color: rgba(238,0,0,.4); }
+.btn.danger:hover { background: rgba(238,0,0,.08); }
+.btn svg { width: 14px; height: 14px; }
+.btn .kbd {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--fg-3);
+  padding: 1px 4px; border: 1px solid var(--border); border-radius: 3px;
+  margin-left: 4px;
+}
+
+/* The pipeline strip — five parallel stages */
+.stages {
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.stage {
+  background: var(--bg-0);
+  padding: 12px 16px;
+  cursor: pointer;
+  position: relative;
+  transition: background var(--t-fast);
+}
+.stage:hover { background: var(--bg-1); }
+.stage.active { background: var(--bg-2); }
+.stage.active::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: var(--accent);
+}
+.stage-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+}
+.stage-num {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--fg-3);
+  width: 16px; height: 16px;
+  border: 1px solid var(--border-strong); border-radius: 50%;
+  display: grid; place-items: center;
+}
+.stage.done .stage-num { background: var(--accent); border-color: var(--accent); color: white; }
+.stage.active .stage-num { border-color: var(--accent); color: var(--accent); }
+.stage-name {
+  font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-2);
+}
+.stage.done .stage-name { color: var(--fg-1); }
+.stage-status {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+  display: flex; align-items: center; gap: 6px;
+}
+.stage-duration {
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--fg-3);
+  margin-left: auto;
+}
+
+/* The body — split: stage view (left) + reasoning log (right) */
+.case-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  overflow: hidden;
+  min-height: 0;
+}
+@media (max-width: 1400px) {
+  .case-body { grid-template-columns: minmax(0, 1fr) 340px; }
+}
+.stage-view {
+  overflow-y: auto;
+  padding: 20px 24px 32px;
+}
+.reasoning-rail {
+  border-left: 1px solid var(--border);
+  background: var(--bg-1);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+/* Stage view sections */
+.section { margin-bottom: 28px; }
+.section-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 10px;
+}
+.section-head h3 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-2);
+}
+.section-head .hint {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+}
+
+/* Drop zone — single affordance for all intake mechanisms */
+.dropzone {
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-3);
+  padding: 32px;
+  text-align: center;
+  background: var(--bg-1);
+  transition: all var(--t-fast) var(--ease);
+}
+.dropzone.dragover { border-color: var(--accent); background: var(--accent-bg); }
+.dropzone-icon {
+  width: 36px; height: 36px;
+  margin: 0 auto 12px;
+  color: var(--fg-3);
+}
+.dropzone-title {
+  font-size: 15px; font-weight: 500; color: var(--fg-1);
+  margin-bottom: 6px;
+}
+.dropzone-sub {
+  font-size: 13px; color: var(--fg-2);
+}
+.dropzone-actions {
+  display: flex; justify-content: center; gap: 8px;
+  margin-top: 14px;
+}
+.dropzone-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-1);
+  font-size: 12px; color: var(--fg-2);
+  background: var(--bg-0);
+  transition: all var(--t-fast);
+}
+.dropzone-chip:hover { color: var(--fg-1); border-color: var(--border-strong); background: var(--bg-2); }
+.dropzone-chip .kbd { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+
+/* Screenshot preview */
+.shot-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.shot-head {
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.shot-head .name { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); }
+.shot-head .size { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.shot-head .actions { margin-left: auto; display: flex; gap: 4px; }
+.shot-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+}
+.shot-image, .shot-parsed {
+  background: var(--bg-2);
+  padding: 12px;
+  min-height: 220px;
+}
+.shot-image-canvas {
+  width: 100%; height: 100%;
+  border-radius: var(--radius-1);
+  background: linear-gradient(135deg, #1c1c1c 0%, #161616 100%);
+  position: relative;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: #ccc;
+  padding: 12px;
+}
+
+/* Faux QBO screenshot rendered with HTML */
+.qbo-shot {
+  width: 100%; height: 100%;
+  background: #fafafa; color: #292929;
+  border-radius: 4px;
+  display: flex; flex-direction: column;
+  font-family: -apple-system, sans-serif;
+}
+.qbo-shot-bar {
+  background: #2ca01c; color: white;
+  padding: 6px 10px; font-size: 11px; font-weight: 600;
+  display: flex; align-items: center; gap: 6px;
+}
+.qbo-shot-bar::before {
+  content: ""; width: 16px; height: 16px;
+  background: white; color: #2ca01c;
+  border-radius: 50%;
+  background-image: radial-gradient(circle, white 4px, #2ca01c 5px);
+}
+.qbo-shot-body {
+  flex: 1; padding: 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.qbo-error {
+  background: #fff4f0;
+  border: 1px solid #ffd6c4;
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 11px; color: #8a3000;
+  display: flex; gap: 8px;
+}
+.qbo-error::before {
+  content: "!"; flex-shrink: 0;
+  width: 16px; height: 16px; background: #d63300; color: white;
+  border-radius: 50%; display: grid; place-items: center;
+  font-weight: 700; font-size: 11px;
+}
+.qbo-row { display: flex; justify-content: space-between; font-size: 11px; color: #555; }
+.qbo-row b { color: #292929; }
+
+/* Parsed result */
+.parsed-list { display: flex; flex-direction: column; gap: 6px; }
+.parsed-row {
+  display: grid; grid-template-columns: 110px 1fr;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-1);
+  font-size: 12px;
+}
+.parsed-row:hover { background: var(--bg-3); }
+.parsed-row .k {
+  font-family: var(--font-mono); color: var(--fg-3);
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px;
+}
+.parsed-row .v { color: var(--fg-1); font-family: var(--font-mono); }
+.parsed-row .v.code { color: var(--accent); }
+.parsed-row .v.muted { color: var(--fg-2); }
+
+/* Triage card */
+.triage-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  overflow: hidden;
+}
+.triage-cell {
+  background: var(--bg-1);
+  padding: 14px 16px;
+}
+.triage-label {
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-3);
+  margin-bottom: 8px;
+}
+.triage-value {
+  font-size: 14px; font-weight: 500; color: var(--fg-1);
+  display: flex; align-items: center; gap: 8px;
+}
+.triage-value .secondary {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+}
+.triage-value select {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  border-radius: var(--radius-1);
+  font-size: 13px;
+  width: 100%;
+}
+
+/* Missing info bar */
+.missing-bar {
+  margin-top: 12px;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: rgba(245,166,35,.06);
+  border: 1px solid rgba(245,166,35,.25);
+  border-radius: var(--radius-2);
+  font-size: 13px;
+  color: var(--fg-1);
+}
+.missing-bar .dot.warning { animation: pulse-amber 2s var(--ease) infinite; }
+@keyframes pulse-amber {
+  0% { box-shadow: 0 0 0 0 rgba(245,166,35,.5); }
+  70% { box-shadow: 0 0 0 6px rgba(245,166,35,0); }
+  100% { box-shadow: 0 0 0 0 rgba(245,166,35,0); }
+}
+.missing-bar .grow { flex: 1; }
+.missing-bar .req-link { color: var(--accent); cursor: pointer; }
+.missing-bar .req-link:hover { text-decoration: underline; }
+
+/* INV matches */
+.inv-list { display: flex; flex-direction: column; gap: 1px; }
+.inv-row {
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr) 50px 100px 70px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.inv-row:first-child { border-radius: var(--radius-3) var(--radius-3) 0 0; }
+.inv-row:last-child { border-radius: 0 0 var(--radius-3) var(--radius-3); border-bottom: 1px solid var(--border); }
+.inv-row:only-child { border-radius: var(--radius-3); border-bottom: 1px solid var(--border); }
+.inv-row:hover { background: var(--bg-2); }
+.inv-row.selected { background: var(--bg-2); box-shadow: inset 2px 0 0 var(--accent); }
+.inv-id {
+  font-family: var(--font-mono); font-size: 12px; color: var(--accent);
+}
+.inv-title {
+  color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.inv-score {
+  font-family: var(--font-mono); font-size: 12px;
+  text-align: right;
+}
+.inv-score.high { color: var(--accent); }
+.inv-score.med { color: var(--warning); }
+.inv-score.low { color: var(--fg-3); }
+.inv-meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.inv-action { text-align: right; }
+
+.inv-create-row {
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-3);
+  font-size: 13px;
+  color: var(--fg-2);
+  display: flex; align-items: center; gap: 10px;
+  cursor: pointer;
+  transition: all var(--t-fast);
+}
+.inv-create-row:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+
+/* Draft card */
+.draft-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.draft-head {
+  padding: 10px 14px;
+  display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg-2);
+}
+.draft-head .label { font-family: var(--font-mono); color: var(--fg-3); }
+.draft-head .channel {
+  padding: 1px 6px; border-radius: 3px;
+  background: var(--bg-3); color: var(--fg-1);
+  font-family: var(--font-mono); font-size: 11px;
+}
+.draft-body {
+  padding: 18px 18px;
+  font-size: 14px; line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--fg-1);
+  min-height: 200px;
+  position: relative;
+}
+.draft-body .streaming-cursor {
+  display: inline-block; width: 7px; height: 16px;
+  background: var(--accent); vertical-align: -3px;
+  animation: blink 1s steps(2) infinite;
+  margin-left: 1px;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.draft-toolbar {
+  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px;
+}
+.draft-toolbar .spacer { flex: 1; }
+.draft-toolbar .meta {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+}
+
+/* Provider tabs (Redeploy with…) */
+.provider-tabs {
+  display: flex; gap: 4px;
+  margin-bottom: 12px;
+}
+.provider-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  font-size: 11px;
+  color: var(--fg-2);
+  background: var(--bg-1);
+  transition: all var(--t-fast);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.provider-tab:hover { color: var(--fg-1); border-color: var(--border-strong); }
+.provider-tab.active {
+  color: var(--fg-1);
+  border-color: var(--fg-1);
+  background: var(--bg-2);
+}
+.provider-tab .glyph {
+  width: 14px; height: 14px; border-radius: 3px;
+  display: grid; place-items: center;
+  font-weight: 700; font-size: 9px;
+  color: white;
+}
+.provider-tab.claude .glyph { background: #d97757; }
+.provider-tab.gpt .glyph { background: #10a37f; }
+.provider-tab.gemini .glyph { background: linear-gradient(135deg,#4285f4,#9b72cb 50%,#d96570); }
+.provider-tab.kimi .glyph { background: #1f1f1f; border: 1px solid #444; color: #ccc; }
+.provider-tab .ms { color: var(--fg-3); font-size: 11px; }
+
+/* Compare strip — when user opens compare view */
+.compare-strip {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-3);
+  overflow: hidden;
+  margin-top: 8px;
+}
+.compare-col {
+  background: var(--bg-1);
+  padding: 12px 14px;
+  min-height: 160px;
+}
+.compare-col h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-2);
+  display: flex; align-items: center; gap: 6px;
+}
+.compare-col p {
+  margin: 0;
+  font-size: 12px; line-height: 1.6;
+  color: var(--fg-1);
+  white-space: pre-wrap;
+}
+.compare-col .diff-add { background: rgba(0,112,243,.16); color: #9ec6ff; padding: 0 2px; border-radius: 2px; }
+
+/* =====================================================================
+   REASONING RAIL — the build log
+   ===================================================================== */
+.rail-head {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+}
+.rail-head h3 {
+  margin: 0; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-2);
+}
+.rail-head .live {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+}
+.rail-head .live.streaming { color: var(--accent); }
+
+.rail-body {
+  flex: 1;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 8px 0;
+}
+.log-group { padding: 0; }
+.log-group-head {
+  padding: 6px 16px;
+  display: flex; align-items: center; gap: 8px;
+  color: var(--fg-2);
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.log-group-head:hover { background: var(--bg-2); color: var(--fg-1); }
+.log-group-head .chevron {
+  width: 10px; height: 10px;
+  transition: transform var(--t-fast);
+}
+.log-group.collapsed .chevron { transform: rotate(-90deg); }
+.log-group.collapsed .log-lines { display: none; }
+.log-group-head .stage-tag {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  padding: 1px 6px; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--fg-2);
+}
+.log-group-head .stage-tag.done { color: var(--accent); border-color: rgba(0,112,243,.4); }
+.log-group-head .dur {
+  margin-left: auto; color: var(--fg-3);
+}
+.log-lines { padding: 4px 16px 10px; }
+.log-line {
+  display: grid; grid-template-columns: 76px 1fr;
+  gap: 10px;
+  color: var(--fg-2);
+  padding: 1px 0;
+}
+.log-line:hover { background: var(--bg-2); color: var(--fg-1); border-radius: 2px; }
+.log-line.err { color: #ff7777; }
+.log-line.ok { color: #4d97ff; }
+.log-line .ts { color: var(--fg-4); }
+.log-line .msg .pin {
+  margin-left: 6px;
+  opacity: 0; transition: opacity var(--t-fast);
+  color: var(--fg-3);
+  cursor: pointer;
+  font-size: 11px;
+}
+.log-line:hover .pin { opacity: 1; }
+.log-line .msg .pin:hover { color: var(--accent); }
+.log-line .msg .pin.pinned { opacity: 1; color: var(--accent); }
+
+.log-line .citation {
+  display: inline-block;
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 0 4px;
+  border-radius: 2px;
+  background: var(--bg-3);
+  color: var(--accent);
+  margin-left: 4px;
+  border: 1px solid rgba(0,112,243,.3);
+  cursor: pointer;
+}
+.log-line .citation:hover { background: var(--accent); color: white; }
+
+.rail-foot {
+  border-top: 1px solid var(--border);
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--bg-1);
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+.rail-foot .grow { flex: 1; }
+.rail-foot button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-1);
+  color: var(--fg-2);
+}
+.rail-foot button:hover { color: var(--fg-1); border-color: var(--border-strong); }
+
+/* =====================================================================
+   COMMAND PALETTE (⌘K)
+   ===================================================================== */
+.cmdk-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.6);
+  display: none;
+  align-items: flex-start; justify-content: center;
+  padding-top: 14vh;
+  z-index: 100;
+  backdrop-filter: blur(2px);
+}
+.cmdk-overlay.open { display: flex; }
+.cmdk {
+  width: 560px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-4);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  animation: cmdk-in 140ms var(--ease);
+}
+@keyframes cmdk-in { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.cmdk-input-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.cmdk-input-row svg { color: var(--fg-3); width: 16px; height: 16px; }
+.cmdk-input {
+  flex: 1;
+  font-size: 15px; color: var(--fg-1);
+  outline: none;
+}
+.cmdk-input::placeholder { color: var(--fg-3); }
+.cmdk-results {
+  max-height: 420px; overflow-y: auto;
+  padding: 6px;
+}
+.cmdk-group-label {
+  padding: 8px 10px 4px;
+  font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--fg-3);
+}
+.cmdk-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-1);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-1);
+}
+.cmdk-item:hover, .cmdk-item.active {
+  background: var(--bg-3);
+}
+.cmdk-item .icon { width: 16px; height: 16px; color: var(--fg-3); }
+.cmdk-item .label { flex: 1; }
+.cmdk-item .hint { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
+.cmdk-foot {
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+  display: flex; gap: 14px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3);
+}
+.cmdk-foot .k { color: var(--fg-2); }
+
+/* =====================================================================
+   TOAST
+   ===================================================================== */
+.toast-stack {
+  position: fixed; bottom: 36px; right: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 90;
+}
+.toast {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  color: var(--fg-1);
+  min-width: 240px;
+  animation: toast-in 200ms var(--ease);
+}
+@keyframes toast-in { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* =====================================================================
+   MODALS — drawers for screenshot capture, request info, deploy confirm
+   ===================================================================== */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.65);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-4);
+  box-shadow: var(--shadow-lg);
+  width: 520px; max-width: calc(100vw - 32px);
+  overflow: hidden;
+  animation: cmdk-in 160ms var(--ease);
+}
+.modal-head {
+  padding: 16px 20px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.modal-head p { margin: 4px 0 0; font-size: 13px; color: var(--fg-2); }
+.modal-body { padding: 16px 20px; }
+.modal-foot {
+  padding: 12px 20px; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+
+/* Webcam view */
+.webcam-stage {
+  background: #050505;
+  border-radius: var(--radius-2);
+  overflow: hidden;
+  aspect-ratio: 16/10;
+  position: relative;
+  margin-bottom: 12px;
+}
+.webcam-faux {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 30% 35%, #2a3038 0%, #14171a 60%, #060708 100%);
+  display: grid; place-items: center;
+  color: var(--fg-3);
+  font-family: var(--font-mono); font-size: 12px;
+}
+.webcam-target {
+  position: absolute; inset: 18% 16%;
+  border: 1px solid rgba(0,112,243,.6);
+  border-radius: 4px;
+  background: rgba(0,112,243,.04);
+}
+.webcam-target::before, .webcam-target::after {
+  content: ""; position: absolute;
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--accent);
+}
+.webcam-target::before { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
+.webcam-target::after { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
+.webcam-meta {
+  position: absolute; top: 8px; left: 8px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: rgba(255,255,255,.7);
+  background: rgba(0,0,0,.4); padding: 2px 6px; border-radius: 3px;
+}
+.webcam-rec {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px;
+  color: white;
+  background: rgba(0,0,0,.4); padding: 2px 8px; border-radius: 3px;
+}
+.webcam-rec .dot { background: var(--error); animation: pulse 1s var(--ease) infinite; }
+
+/* Request info textarea */
+.req-form { display: flex; flex-direction: column; gap: 10px; }
+.req-form label { font-size: 12px; color: var(--fg-2); }
+.req-form .field {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  padding: 10px 12px;
+  color: var(--fg-1);
+  font-size: 13px;
+  width: 100%;
+  outline: none;
+  min-height: 90px;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.req-form .field:focus { border-color: var(--accent); }
+.req-suggestions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.req-chip {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--fg-2);
+  cursor: pointer;
+}
+.req-chip:hover { color: var(--fg-1); border-color: var(--accent); }
+
+/* Pin pulse */
+.pin-flash { animation: pin-flash 700ms var(--ease); }
+@keyframes pin-flash {
+  0% { background: rgba(0,112,243,.3); }
+  100% { background: transparent; }
+}
+
+/* Scrollbar — Geist style: invisible until hover */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; }
+:hover::-webkit-scrollbar-thumb { background: var(--border-strong); }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-4); }
+
+/* Small adjustments */
+.row { display: flex; align-items: center; gap: 8px; }
+.gap-2 { gap: 8px; }
+.muted { color: var(--fg-3); }
+.mono { font-family: var(--font-mono); }
+.tiny { font-size: 11px; }
+.spacer-h { height: 12px; }
+.kbd-inline {
+  font-family: var(--font-mono); font-size: 10px;
+  padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--fg-3); background: var(--bg-1);
+}
+
+/* Stage-specific content shown/hidden via .visible */
+.stage-content { display: none; }
+.stage-content.visible { display: block; animation: fade-in 180ms var(--ease); }
+@keyframes fade-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+
+/* Skeleton */
+.skel {
+  background: linear-gradient(90deg, var(--bg-2) 0%, var(--bg-3) 50%, var(--bg-2) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: var(--radius-1);
+  height: 12px;
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* Responsive squish */
+@media (max-width: 1200px) {
+  .shell { grid-template-columns: 220px 1fr; }
+  .case-body { grid-template-columns: minmax(0, 1fr) 320px; }
+}
+@media (max-width: 1000px) {
+  .shell { grid-template-columns: 200px 1fr; }
+  .case-body { grid-template-columns: minmax(0, 1fr); }
+  .reasoning-rail { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============================== TOPBAR ============================== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <span>Pipeline</span>
+    </div>
+    <div class="brand-divider"></div>
+    <div class="brand-context">QBO Escalations · <b>tier-2 / triage</b></div>
+
+    <div class="topbar-spacer"></div>
+
+    <button class="cmdk-trigger" id="cmdk-trigger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="7"/></svg>
+      <span>Search, jump, or run a command…</span>
+      <span class="topbar-spacer"></span>
+      <span class="kbd">⌘K</span>
+    </button>
+
+    <div class="topbar-actions">
+      <button class="icon-btn" title="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 1112 0c0 7 3 9 3 9H3s3-2 3-9z"/><path d="M10 21a2 2 0 004 0"/></svg></button>
+      <button class="icon-btn" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg></button>
+      <div class="icon-btn" title="Operator" style="background:var(--bg-2); color:var(--fg-1); font-family:var(--font-mono); font-size:11px;">KM</div>
+    </div>
+  </header>
+
+  <!-- ============================== QUEUE ============================== -->
+  <aside class="queue">
+    <div class="queue-head">
+      <h2>Inbound</h2>
+      <span class="queue-count" id="queue-count">7</span>
+    </div>
+    <div class="queue-list" id="queue-list"><!-- injected --></div>
+  </aside>
+
+  <!-- ============================== PIPELINE ============================== -->
+  <main class="pipeline">
+
+    <!-- case header -->
+    <div class="case-head">
+      <div class="case-head-row">
+        <span class="dot building" id="case-status-dot"></span>
+        <span class="case-id mono">CASE-2026-1041</span>
+        <h1 class="case-title" id="case-title">Direct Deposit failed — error message references payroll account not connected</h1>
+        <div class="case-actions">
+          <button class="btn" id="open-cmdk-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg> Command<span class="kbd">⌘K</span></button>
+          <button class="btn danger" title="Stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" rx="1"/></svg> Cancel</button>
+          <button class="btn primary" id="ship-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg> Ship response<span class="kbd">⌘↵</span></button>
+        </div>
+      </div>
+      <div class="case-meta">
+        <span>From: <b>Agent J. Reyes</b> · Phone team-3</span>
+        <span>Customer: <b>Wildgrove Bakery LLC</b></span>
+        <span>Received: <b>2m ago</b></span>
+        <span>Queue position: <b>#1</b> of 7</span>
+      </div>
+    </div>
+
+    <!-- stages strip -->
+    <div class="stages" id="stages">
+      <div class="stage done" data-stage="intake">
+        <div class="stage-head">
+          <div class="stage-num">1</div>
+          <span class="stage-name">Intake</span>
+          <span class="stage-duration mono">0.4s</span>
+        </div>
+        <div class="stage-status"><span class="dot ready"></span> Screenshot received</div>
+      </div>
+      <div class="stage done" data-stage="parse">
+        <div class="stage-head">
+          <div class="stage-num">2</div>
+          <span class="stage-name">Parse</span>
+          <span class="stage-duration mono">1.2s</span>
+        </div>
+        <div class="stage-status"><span class="dot ready"></span> 14 fields extracted</div>
+      </div>
+      <div class="stage done" data-stage="triage">
+        <div class="stage-head">
+          <div class="stage-num">3</div>
+          <span class="stage-name">Triage</span>
+          <span class="stage-duration mono">0.8s</span>
+        </div>
+        <div class="stage-status"><span class="dot warning"></span> Sev-2 · Payroll</div>
+      </div>
+      <div class="stage active" data-stage="match">
+        <div class="stage-head">
+          <div class="stage-num">4</div>
+          <span class="stage-name">Match</span>
+          <span class="stage-duration mono" id="match-dur">2.1s</span>
+        </div>
+        <div class="stage-status"><span class="dot building"></span> Searching INV…</div>
+      </div>
+      <div class="stage" data-stage="draft">
+        <div class="stage-head">
+          <div class="stage-num">5</div>
+          <span class="stage-name">Draft</span>
+          <span class="stage-duration mono">—</span>
+        </div>
+        <div class="stage-status"><span class="dot queued"></span> Queued</div>
+      </div>
+    </div>
+
+    <!-- body: stage view + reasoning rail -->
+    <div class="case-body">
+
+      <!-- ===================== STAGE VIEW ===================== -->
+      <section class="stage-view" id="stage-view">
+
+        <!-- INTAKE -->
+        <div class="stage-content" data-content="intake">
+          <div class="section">
+            <div class="section-head">
+              <h3>Intake source</h3>
+              <span class="hint mono">single drop · paste · capture · upload</span>
+            </div>
+            <div class="dropzone" id="dropzone">
+              <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 3v14"/><path d="M5 10l7-7 7 7"/><rect x="3" y="17" width="18" height="4" rx="1"/></svg>
+              <div class="dropzone-title">Drop, paste, capture, or browse</div>
+              <div class="dropzone-sub">Any screenshot — file, clipboard paste, webcam capture, or DnD. One affordance.</div>
+              <div class="dropzone-actions">
+                <button class="dropzone-chip" data-intake="upload"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7-7 7 7"/></svg> Browse <span class="kbd">U</span></button>
+                <button class="dropzone-chip" data-intake="paste"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4h6v2H9z"/></svg> Paste from clipboard <span class="kbd">⌘V</span></button>
+                <button class="dropzone-chip" data-intake="webcam" id="webcam-trigger"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M17 10l4-2v8l-4-2z"/></svg> Webcam capture <span class="kbd">C</span></button>
+                <button class="dropzone-chip" data-intake="phone"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg> Pull from phone agent <span class="kbd">P</span></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head"><h3>Already on the case</h3></div>
+            <div class="shot-card">
+              <div class="shot-head">
+                <span class="dot ready"></span>
+                <span class="name">QBO_Payroll_DD_Error_03142026.png</span>
+                <span class="size">948 × 612 · 142 KB</span>
+                <div class="actions">
+                  <button class="icon-btn" title="Re-parse"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1015-6.7L21 8"/><path d="M21 3v5h-5"/></svg></button>
+                  <button class="icon-btn" title="Replace"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 12l3 3 5-5"/></svg></button>
+                </div>
+              </div>
+              <div class="shot-body">
+                <div class="shot-image">
+                  <div class="qbo-shot">
+                    <div class="qbo-shot-bar">QuickBooks Online · Payroll</div>
+                    <div class="qbo-shot-body">
+                      <div class="qbo-row"><span>Pay date</span><b>Mar 14, 2026</b></div>
+                      <div class="qbo-row"><span>Run total</span><b>$8,412.06</b></div>
+                      <div class="qbo-row"><span>Employees</span><b>11 of 11</b></div>
+                      <div class="qbo-error">
+                        <div>
+                          <b>We can't submit this payroll.</b><br/>
+                          The bank account connected to Direct Deposit is no longer linked. Connect a verified account to continue. <span style="color:#6f6f6f">[error code: PR-DD-0142]</span>
+                        </div>
+                      </div>
+                      <div class="qbo-row"><span>Connected account</span><b style="color:#d63300">— none —</b></div>
+                      <div class="qbo-row"><span>Last successful run</span><b>Feb 28, 2026</b></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="shot-parsed">
+                  <div class="parsed-list" id="parsed-list">
+                    <div class="parsed-row"><span class="k">Product</span><span class="v">QuickBooks Online</span></div>
+                    <div class="parsed-row"><span class="k">Module</span><span class="v">Payroll · Direct Deposit</span></div>
+                    <div class="parsed-row"><span class="k">Error code</span><span class="v code">PR-DD-0142</span></div>
+                    <div class="parsed-row"><span class="k">Error text</span><span class="v">"bank account no longer linked"</span></div>
+                    <div class="parsed-row"><span class="k">Pay date</span><span class="v">2026-03-14</span></div>
+                    <div class="parsed-row"><span class="k">Run total</span><span class="v">$8,412.06</span></div>
+                    <div class="parsed-row"><span class="k">Employees</span><span class="v">11</span></div>
+                    <div class="parsed-row"><span class="k">Last good run</span><span class="v">2026-02-28</span></div>
+                    <div class="parsed-row"><span class="k">Customer</span><span class="v">Wildgrove Bakery LLC</span></div>
+                    <div class="parsed-row"><span class="k">QBO realm</span><span class="v code">re_4422106831</span></div>
+                    <div class="parsed-row"><span class="k">Subscription</span><span class="v">Payroll Premium</span></div>
+                    <div class="parsed-row"><span class="k">Detected language</span><span class="v muted">en-US</span></div>
+                    <div class="parsed-row"><span class="k">Image quality</span><span class="v">crisp · 1.0x · 0° tilt</span></div>
+                    <div class="parsed-row"><span class="k">Confidence</span><span class="v">98.6%</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PARSE -->
+        <div class="stage-content" data-content="parse">
+          <div class="section">
+            <div class="section-head">
+              <h3>Parser output</h3>
+              <span class="hint mono">extractor · vision-2 · 1.2s · 14 fields</span>
+            </div>
+            <div class="shot-card">
+              <div class="shot-head">
+                <span class="dot ready"></span>
+                <span class="name mono">parsed.json</span>
+                <span class="size mono">2.1 KB</span>
+              </div>
+              <div class="shot-body" style="grid-template-columns:1fr">
+                <div class="shot-parsed">
+                  <div class="parsed-list">
+                    <div class="parsed-row"><span class="k">type</span><span class="v">payroll.direct_deposit.error</span></div>
+                    <div class="parsed-row"><span class="k">error_code</span><span class="v code">PR-DD-0142</span></div>
+                    <div class="parsed-row"><span class="k">error_text</span><span class="v">bank account no longer linked</span></div>
+                    <div class="parsed-row"><span class="k">customer.name</span><span class="v">Wildgrove Bakery LLC</span></div>
+                    <div class="parsed-row"><span class="k">customer.realm</span><span class="v code">re_4422106831</span></div>
+                    <div class="parsed-row"><span class="k">customer.sub</span><span class="v">payroll.premium</span></div>
+                    <div class="parsed-row"><span class="k">payroll.pay_date</span><span class="v">2026-03-14</span></div>
+                    <div class="parsed-row"><span class="k">payroll.run_total_usd</span><span class="v">8412.06</span></div>
+                    <div class="parsed-row"><span class="k">payroll.employee_count</span><span class="v">11</span></div>
+                    <div class="parsed-row"><span class="k">payroll.last_good_run</span><span class="v">2026-02-28</span></div>
+                    <div class="parsed-row"><span class="k">payroll.account_connected</span><span class="v" style="color:#ff5050">false</span></div>
+                    <div class="parsed-row"><span class="k">image.quality</span><span class="v">crisp</span></div>
+                    <div class="parsed-row"><span class="k">image.tilt_deg</span><span class="v">0</span></div>
+                    <div class="parsed-row"><span class="k">confidence</span><span class="v">0.986</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TRIAGE -->
+        <div class="stage-content" data-content="triage">
+          <div class="section">
+            <div class="section-head">
+              <h3>Triage decision</h3>
+              <span class="hint mono">classifier · 0.8s · override any value</span>
+            </div>
+            <div class="triage-grid">
+              <div class="triage-cell">
+                <div class="triage-label">Severity</div>
+                <div class="triage-value">
+                  <span class="sev s2">SEV-2</span>
+                  <span class="secondary">payroll-deadline-risk</span>
+                </div>
+              </div>
+              <div class="triage-cell">
+                <div class="triage-label">Category</div>
+                <div class="triage-value">
+                  payroll · direct-deposit
+                  <span class="secondary">·  account-link</span>
+                </div>
+              </div>
+              <div class="triage-cell">
+                <div class="triage-label">Next step</div>
+                <div class="triage-value">
+                  Match against INV
+                  <span class="secondary">2 candidates</span>
+                </div>
+              </div>
+              <div class="triage-cell">
+                <div class="triage-label">SLA</div>
+                <div class="triage-value">
+                  4h
+                  <span class="secondary mono">3h 47m left</span>
+                </div>
+              </div>
+              <div class="triage-cell">
+                <div class="triage-label">Customer tier</div>
+                <div class="triage-value">
+                  Standard
+                  <span class="secondary">no escalation history</span>
+                </div>
+              </div>
+              <div class="triage-cell">
+                <div class="triage-label">Response channel</div>
+                <div class="triage-value">
+                  Slack to Reyes
+                  <span class="secondary">phone callback in 12m</span>
+                </div>
+              </div>
+            </div>
+            <div class="missing-bar" id="missing-bar">
+              <span class="dot warning"></span>
+              <span class="grow">
+                <b>One field missing</b> — was the bank account disconnected by the customer, or did it drop on its own? Affects template selection (PR-DD-0142a vs 0142b).
+              </span>
+              <button class="btn" id="request-info-btn">Request from agent <span class="kbd">R</span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- MATCH (default visible) -->
+        <div class="stage-content visible" data-content="match">
+          <div class="section">
+            <div class="section-head">
+              <h3>INV candidates</h3>
+              <span class="hint mono">semantic + code match · 2.1s · 2 results</span>
+            </div>
+            <div class="inv-list" id="inv-list">
+              <div class="inv-row selected" data-inv="INV-204418">
+                <span class="inv-id">INV-204418</span>
+                <span class="inv-title">Payroll DD account silently unlinked after bank's MFA refresh (Mar 2026 wave)</span>
+                <span class="inv-score high">0.94</span>
+                <span class="inv-meta">12 linked · open</span>
+                <span class="inv-action"><span class="kbd-inline">↵ Link</span></span>
+              </div>
+              <div class="inv-row" data-inv="INV-203012">
+                <span class="inv-id">INV-203012</span>
+                <span class="inv-title">DD account removed by user during onboarding wizard rerun</span>
+                <span class="inv-score med">0.61</span>
+                <span class="inv-meta">3 linked · resolved Feb</span>
+                <span class="inv-action"><span class="kbd-inline">↵ Link</span></span>
+              </div>
+            </div>
+            <div class="inv-create-row" id="inv-create">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Create new INV from this case
+              <span class="muted mono" style="margin-left:auto">⌘N</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head"><h3>Linked playbook</h3><span class="hint mono">auto-pinned from INV-204418</span></div>
+            <div class="shot-card">
+              <div class="shot-head">
+                <span class="dot ready"></span>
+                <span class="name mono">playbook/payroll/dd-bank-unlink-recovery.md</span>
+                <span class="size mono">v8 · edited 4d</span>
+                <div class="actions">
+                  <button class="icon-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg></button>
+                </div>
+              </div>
+              <div class="draft-body" style="min-height:auto; font-size:13px;">When PR-DD-0142 surfaces with <code style="color:var(--accent);font-family:var(--font-mono)">account_connected=false</code> and a recent <i>last_good_run</i>, the customer's bank has almost certainly rolled MFA and the connection token expired silently. Path:  1) Reconnect via Banking → Connections → Reauthorize  2) Re-verify deposit account fingerprints  3) Re-run payroll. Skip Steps 4-7 in the legacy doc — they predate the 2025 refresh.</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DRAFT -->
+        <div class="stage-content" data-content="draft">
+          <div class="section">
+            <div class="section-head">
+              <h3>Response draft</h3>
+              <span class="hint mono">to: J. Reyes · channel: slack · streaming</span>
+            </div>
+
+            <div class="provider-tabs" id="provider-tabs">
+              <button class="provider-tab claude active" data-provider="claude"><span class="glyph">C</span> claude-3.7-sonnet <span class="ms">· 1.4s · primary</span></button>
+              <button class="provider-tab gpt" data-provider="gpt"><span class="glyph">G</span> gpt-4.1 <span class="ms">· redeploy</span></button>
+              <button class="provider-tab gemini" data-provider="gemini"><span class="glyph">✦</span> gemini-2.5-pro <span class="ms">· redeploy</span></button>
+              <button class="provider-tab kimi" data-provider="kimi"><span class="glyph">K</span> kimi-k2 <span class="ms">· redeploy</span></button>
+              <button class="provider-tab" id="compare-btn" style="margin-left:auto"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h7M3 12h12M3 18h7"/><path d="M14 6l4 4-4 4"/></svg> Compare</button>
+            </div>
+
+            <div class="draft-card">
+              <div class="draft-head">
+                <span class="label">DRAFT_REPLY.md</span>
+                <span class="channel">slack · #esc-payroll → @reyes</span>
+                <span style="margin-left:auto" class="mono muted">v4 · auto-saved 2s ago</span>
+              </div>
+              <div class="draft-body" id="draft-body"><!-- streamed --></div>
+              <div class="draft-toolbar">
+                <button class="btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1015-6.7L21 8"/></svg> Regenerate</button>
+                <button class="btn">Soften tone</button>
+                <button class="btn">Add steps as numbered list</button>
+                <button class="btn">Insert INV-204418 link</button>
+                <div class="spacer"></div>
+                <span class="meta">grounded in: playbook · INV-204418</span>
+                <button class="btn primary"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg> Ship <span class="kbd">⌘↵</span></button>
+              </div>
+            </div>
+
+            <div id="compare-strip" style="display:none">
+              <div class="section-head" style="margin-top:18px"><h3>Compare with redeployed providers</h3><span class="hint mono">three providers run side-by-side · pick the strongest</span></div>
+              <div class="compare-strip">
+                <div class="compare-col">
+                  <h4><span class="provider-tab claude" style="padding:1px 6px; font-size:10px;"><span class="glyph">C</span> claude-3.7</span> primary</h4>
+                  <p>Hi Jules — confirmed PR-DD-0142. This is the <span class="diff-add">Mar 2026 bank MFA refresh</span> wave (INV-204418, 12 cases this week). Walk customer through: 1) Banking → Connections → Reauthorize, 2) Re-verify DD fingerprint, 3) Re-run payroll. Skip steps 4-7 in the legacy doc — they predate the 2025 refresh.</p>
+                </div>
+                <div class="compare-col">
+                  <h4><span class="provider-tab gpt" style="padding:1px 6px; font-size:10px;"><span class="glyph">G</span> gpt-4.1</span> redeployed</h4>
+                  <p>Hey Jules, this matches PR-DD-0142. The bank disconnected the account during their <span class="diff-add">recent security update</span>. To fix: reconnect via Banking → Connections → Reauthorize, verify the deposit account, then re-run payroll. Reference INV-204418.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===================== REASONING RAIL ===================== -->
+      <aside class="reasoning-rail">
+        <div class="rail-head">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h10M4 18h16"/></svg>
+          <h3>Reasoning log</h3>
+          <span class="live streaming" id="rail-live"><span class="dot building"></span> live</span>
+        </div>
+        <div class="rail-body" id="rail-body">
+          <!-- log groups injected -->
+        </div>
+        <div class="rail-foot">
+          <span id="log-count">0 events</span>
+          <span class="grow"></span>
+          <button id="pin-all">Pin draft + log</button>
+          <button id="copy-log">Copy</button>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <!-- ============================== STATUSBAR ============================== -->
+  <footer class="statusbar">
+    <span class="seg"><span class="dot ready"></span> Pipeline <b>operational</b></span>
+    <span class="seg">primary: <b>claude-3.7-sonnet</b></span>
+    <span class="seg">fallback: <b>gpt-4.1</b></span>
+    <span class="seg">avg case: <b>52s</b></span>
+    <span class="seg">your shift: <b>4h 12m</b> · 38 cases · 0 returned</span>
+    <span class="spacer"></span>
+    <span class="seg">⌘K command · ⌘↵ ship · ⌘N new INV · ⌘\ compare</span>
+  </footer>
+
+</div>
+
+<!-- ============================== CMDK ============================== -->
+<div class="cmdk-overlay" id="cmdk-overlay">
+  <div class="cmdk" role="dialog" aria-label="Command palette">
+    <div class="cmdk-input-row">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 21l-4.35-4.35"/><circle cx="11" cy="11" r="7"/></svg>
+      <input class="cmdk-input" id="cmdk-input" placeholder="Search cases, INV, playbook, or run a command…" autocomplete="off" />
+      <span class="kbd-inline">esc</span>
+    </div>
+    <div class="cmdk-results" id="cmdk-results">
+      <!-- populated -->
+    </div>
+    <div class="cmdk-foot">
+      <span><span class="k">↑↓</span> navigate</span>
+      <span><span class="k">↵</span> select</span>
+      <span><span class="k">⌘↵</span> run + ship</span>
+      <span style="margin-left:auto"><span class="k">esc</span> close</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== MODAL: WEBCAM ============================== -->
+<div class="modal-overlay" id="webcam-modal">
+  <div class="modal" style="width:640px">
+    <div class="modal-head">
+      <h3>Webcam capture</h3>
+      <p>Auto-detecting screen edges. Hold steady — auto-deskew and crop on capture.</p>
+    </div>
+    <div class="modal-body">
+      <div class="webcam-stage">
+        <div class="webcam-faux">Live · camera 0 (FaceTime HD)</div>
+        <div class="webcam-target"></div>
+        <div class="webcam-meta">1920×1080 · 30fps · skew 0.4°</div>
+        <div class="webcam-rec"><span class="dot"></span> READY</div>
+      </div>
+      <div class="row" style="justify-content:space-between">
+        <span class="muted tiny mono">Auto-correction: deskew · perspective · contrast boost</span>
+        <span class="muted tiny mono">Tip: press <span class="kbd-inline">space</span> to capture</span>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close-modal>Cancel</button>
+      <button class="btn primary" id="webcam-capture-btn"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><rect x="3" y="6" width="18" height="14" rx="2"/></svg> Capture <span class="kbd">space</span></button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== MODAL: REQUEST INFO ============================== -->
+<div class="modal-overlay" id="request-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Request missing info from Jules Reyes</h3>
+      <p>Pre-filled from the gap detected in triage. Edit if you want.</p>
+    </div>
+    <div class="modal-body">
+      <div class="req-form">
+        <label>Message (will be sent over Slack)</label>
+        <textarea class="field" id="req-text">Hey Jules — quick clarification for CASE-2026-1041:
+
+Did the customer disconnect their payroll bank account themselves, or did it drop on its own (no action from them)? This decides which recovery template I send back.
+
+You can just reply "manual" or "auto" — I'll handle the rest.</textarea>
+        <label>Or pick a one-tap question</label>
+        <div class="req-suggestions">
+          <button class="req-chip">Did the customer change their bank's password recently?</button>
+          <button class="req-chip">Any error before this one in the last 30 min?</button>
+          <button class="req-chip">Confirm the realm ID: re_4422106831</button>
+          <button class="req-chip">Customer present on call still?</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" data-close-modal>Cancel</button>
+      <button class="btn primary"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12l5 5L20 7"/></svg> Send · ⌘↵</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================== TOASTS ============================== -->
+<div class="toast-stack" id="toast-stack"></div>
+
+<script>
+/* =====================================================================
+   PIPELINE — JS
+   ===================================================================== */
+
+/* ----- Mock data: queue ----- */
+const QUEUE = [
+  { id: "CASE-2026-1041", title: "Direct Deposit failed — bank account no longer linked", sev: "s2", status: "building", ts: "2m", invHits: 2, who: "Wildgrove Bakery LLC" },
+  { id: "CASE-2026-1040", title: "Bank feed disconnected — Chase reauth loop, OFX-211", sev: "s3", status: "queued", ts: "7m", invHits: 1, who: "Northbridge Auto" },
+  { id: "CASE-2026-1039", title: "Invoice email bounces — IMAP smtp-out rejected, 5.7.1", sev: "s3", status: "queued", ts: "11m", invHits: 0, who: "Pine + Plaster Co." },
+  { id: "CASE-2026-1038", title: "Sales tax mis-allocated to wrong jurisdiction (TN-Davidson)", sev: "s2", status: "queued", ts: "18m", invHits: 1, who: "Volunteer State Tools" },
+  { id: "CASE-2026-1037", title: "Payroll garnishment line missing — child support order #4011", sev: "s1", status: "error", ts: "23m", invHits: 0, who: "Beacon Hill HR" },
+  { id: "CASE-2026-1036", title: "Onboarding wizard loops at company-type screen on Safari 17", sev: "s4", status: "queued", ts: "31m", invHits: 3, who: "Maple Heights Realty" },
+  { id: "CASE-2026-1035", title: "1099 vendor totals show $0 after import — Plaid mapping broke", sev: "s3", status: "queued", ts: "44m", invHits: 1, who: "Lakeview Studios" },
+];
+
+/* ----- Render queue ----- */
+const queueList = document.getElementById("queue-list");
+function renderQueue() {
+  queueList.innerHTML = "";
+  QUEUE.forEach((c, i) => {
+    const el = document.createElement("div");
+    el.className = "queue-item" + (i === 0 ? " active" : "");
+    el.dataset.id = c.id;
+    el.innerHTML = `
+      <div class="queue-item-row">
+        <span class="dot ${c.status}"></span>
+        <span class="queue-item-id mono">${c.id}</span>
+        <span class="queue-item-time mono">${c.ts}</span>
+      </div>
+      <div class="queue-item-title">${c.title}</div>
+      <div class="queue-item-meta">
+        <span class="sev ${c.sev}">${c.sev.toUpperCase().replace('S','SEV-')}</span>
+        <span>·</span>
+        <span>${c.who}</span>
+        <span style="margin-left:auto">${c.invHits ? c.invHits + " INV" : "no match"}</span>
+      </div>
+    `;
+    el.addEventListener("click", () => {
+      document.querySelectorAll(".queue-item").forEach(x => x.classList.remove("active"));
+      el.classList.add("active");
+      toast(`Loaded ${c.id}`);
+    });
+    queueList.appendChild(el);
+  });
+  document.getElementById("queue-count").textContent = QUEUE.length;
+}
+renderQueue();
+
+/* ----- Stages: click to switch stage content ----- */
+const stageContents = document.querySelectorAll(".stage-content");
+document.querySelectorAll(".stage").forEach(stageEl => {
+  stageEl.addEventListener("click", () => {
+    const which = stageEl.dataset.stage;
+    document.querySelectorAll(".stage").forEach(s => s.classList.remove("active"));
+    stageEl.classList.add("active");
+    stageContents.forEach(c => c.classList.toggle("visible", c.dataset.content === which));
+  });
+});
+
+/* ----- Reasoning log: streaming groups + pinning ----- */
+const rail = document.getElementById("rail-body");
+const logCountEl = document.getElementById("log-count");
+let logCount = 0;
+const pinned = new Set();
+
+function makeGroup(stage, label, opts={}) {
+  const g = document.createElement("div");
+  g.className = "log-group";
+  g.dataset.stage = stage;
+  g.innerHTML = `
+    <div class="log-group-head">
+      <svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      <span class="stage-tag ${opts.done ? 'done' : ''}">${stage}</span>
+      <span>${label}</span>
+      <span class="dur">${opts.dur || ""}</span>
+    </div>
+    <div class="log-lines"></div>
+  `;
+  g.querySelector(".log-group-head").addEventListener("click", () => g.classList.toggle("collapsed"));
+  rail.appendChild(g);
+  rail.scrollTop = rail.scrollHeight;
+  return g;
+}
+
+function pushLine(group, ts, msg, cls="") {
+  const lines = group.querySelector(".log-lines");
+  const line = document.createElement("div");
+  line.className = "log-line " + cls;
+  line.innerHTML = `
+    <span class="ts">${ts}</span>
+    <span class="msg">${msg}<span class="pin" title="Pin to draft">⤓ pin</span></span>
+  `;
+  line.querySelector(".pin").addEventListener("click", e => {
+    e.stopPropagation();
+    const el = e.target;
+    el.classList.toggle("pinned");
+    if (el.classList.contains("pinned")) {
+      pinned.add(msg);
+      el.textContent = "📌 pinned";
+      toast("Pinned to draft + audit");
+      line.classList.add("pin-flash");
+    } else {
+      pinned.delete(msg);
+      el.textContent = "⤓ pin";
+    }
+  });
+  lines.appendChild(line);
+  rail.scrollTop = rail.scrollHeight;
+  logCount++;
+  logCountEl.textContent = logCount + " event" + (logCount === 1 ? "" : "s");
+}
+
+/* ----- Seed: intake + parse groups already done ----- */
+const gIntake = makeGroup("INTAKE", "screenshot received from Reyes (slack upload)", { done: true, dur: "0.4s" });
+pushLine(gIntake, "10:42:01.082", "image accepted · 948×612 · 142 KB · png");
+pushLine(gIntake, "10:42:01.149", "channel: slack #esc-payroll · operator: K. Macdonald");
+pushLine(gIntake, "10:42:01.488", "queued for parse <span class='citation'>vision-2</span>", "ok");
+
+const gParse = makeGroup("PARSE", "extracted 14 fields (confidence 0.986)", { done: true, dur: "1.2s" });
+pushLine(gParse, "10:42:01.501", "OCR pass: 28 text regions");
+pushLine(gParse, "10:42:01.870", "schema match: <b>payroll.direct_deposit.error</b>");
+pushLine(gParse, "10:42:02.013", "error code captured: <b>PR-DD-0142</b>");
+pushLine(gParse, "10:42:02.041", "structured to JSON · confidence 0.986", "ok");
+
+const gTriage = makeGroup("TRIAGE", "classified Sev-2 · payroll · DD account-link", { done: true, dur: "0.8s" });
+pushLine(gTriage, "10:42:02.054", "category match: payroll &gt; direct-deposit (1.0)");
+pushLine(gTriage, "10:42:02.221", "severity heuristic: pay_date within 24h &amp; total &gt; $5k &rArr; <b>SEV-2</b>");
+pushLine(gTriage, "10:42:02.388", "SLA: 4h · 3h 47m remaining");
+pushLine(gTriage, "10:42:02.812", "completeness gap: <b>cause attribution</b> (manual vs auto) <span class='citation'>req-info?</span>", "ok");
+
+const gMatch = makeGroup("MATCH", "searching INV…", { dur: "running" });
+pushLine(gMatch, "10:42:02.834", "vector query (top-k=5) over INV corpus (24,118 docs)");
+pushLine(gMatch, "10:42:03.022", "match: <b>INV-204418</b> @ 0.94 — Mar 2026 bank MFA refresh wave <span class='citation'>view</span>", "ok");
+pushLine(gMatch, "10:42:03.110", "match: <b>INV-203012</b> @ 0.61 — user-initiated unlink");
+pushLine(gMatch, "10:42:03.198", "<b>recommendation:</b> link to INV-204418; playbook auto-pinned", "ok");
+
+/* ----- Provider streaming into draft ----- */
+const draftBody = document.getElementById("draft-body");
+const DRAFT_TEXT = `Hey Jules — good catch sending this up. Confirmed PR-DD-0142.
+
+This matches INV-204418, which is the Mar 2026 bank-MFA refresh wave (12 customers hit this week, all the same fingerprint: silent token expiry, no email, "account no longer linked").
+
+Walk the customer through:
+  1. QBO → Banking → Connections → find Wildgrove's bank → Reauthorize
+  2. Re-verify the Direct Deposit account fingerprint (system will prompt)
+  3. Re-run the payroll (pay date Mar 14 — they have ~3h before they miss the funding cutoff)
+
+Skip steps 4-7 in the legacy doc — they predate the 2025 refresh and just add friction.
+
+If they hit error PR-DD-0143 on the reauthorize step, escalate back to me directly — that variant is in active triage with the banking team.
+
+— Keith / Tier-2`;
+
+let streamIdx = 0;
+let streaming = false;
+let streamTimer = null;
+const gDraft = makeGroup("DRAFT", "claude-3.7-sonnet · streaming…", { dur: "running" });
+pushLine(gDraft, "10:42:03.420", "context assembled: parsed.json + INV-204418 + playbook v8 (1,842 tokens)");
+pushLine(gDraft, "10:42:03.512", "tone: professional, concise, addressed to phone-agent peer");
+
+function startStream() {
+  if (streaming) return;
+  streaming = true;
+  draftBody.textContent = "";
+  draftBody.insertAdjacentHTML("beforeend", '<span class="streaming-cursor"></span>');
+  streamIdx = 0;
+  pushLine(gDraft, "10:42:03.580", "first token received · streaming…");
+  streamTimer = setInterval(() => {
+    streamIdx += Math.floor(Math.random() * 4) + 2;
+    if (streamIdx >= DRAFT_TEXT.length) {
+      streamIdx = DRAFT_TEXT.length;
+      draftBody.textContent = DRAFT_TEXT;
+      clearInterval(streamTimer);
+      streaming = false;
+      pushLine(gDraft, "10:42:05.108", "draft complete · 1.5s · 712 chars · grounded in 2 sources", "ok");
+      document.getElementById("rail-live").classList.remove("streaming");
+      document.getElementById("rail-live").innerHTML = '<span class="dot ready"></span> idle';
+      // mark match stage done
+      const matchStage = document.querySelector('.stage[data-stage="match"]');
+      matchStage.classList.remove("active"); matchStage.classList.add("done");
+      matchStage.querySelector(".stage-status").innerHTML = '<span class="dot ready"></span> INV-204418 linked';
+      const draftStage = document.querySelector('.stage[data-stage="draft"]');
+      draftStage.classList.add("done");
+      draftStage.querySelector(".stage-status").innerHTML = '<span class="dot ready"></span> v4 ready';
+      draftStage.querySelector(".stage-duration").textContent = "1.5s";
+      document.getElementById("case-status-dot").classList.remove("building");
+      document.getElementById("case-status-dot").classList.add("ready");
+      return;
+    }
+    const txt = DRAFT_TEXT.slice(0, streamIdx);
+    draftBody.innerHTML = escapeHtml(txt) + '<span class="streaming-cursor"></span>';
+  }, 38);
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[ch]));
+}
+
+/* Start streaming after a brief delay to show the flow */
+setTimeout(startStream, 800);
+
+/* ----- Provider tab switching: simulate redeploy ----- */
+document.querySelectorAll(".provider-tab[data-provider]").forEach(tab => {
+  tab.addEventListener("click", () => {
+    document.querySelectorAll(".provider-tab[data-provider]").forEach(t => t.classList.remove("active"));
+    tab.classList.add("active");
+    const provider = tab.dataset.provider;
+    toast(`Redeploying with ${provider}…`);
+    pushLine(gDraft, nowStamp(), `↻ redeploy with <b>${provider}</b> requested`);
+    setTimeout(() => {
+      pushLine(gDraft, nowStamp(), `<b>${provider}</b> stream complete · 1.7s · grounded in same 2 sources`, "ok");
+    }, 1400);
+  });
+});
+
+/* ----- Compare strip ----- */
+document.getElementById("compare-btn").addEventListener("click", () => {
+  const strip = document.getElementById("compare-strip");
+  const open = strip.style.display !== "none";
+  strip.style.display = open ? "none" : "block";
+  if (!open) {
+    toast("Compare mode · two providers side-by-side");
+    pushLine(gDraft, nowStamp(), "↻ compare mode: gpt-4.1 redeployed for parallel eval");
+  }
+});
+
+/* ----- Dropzone ----- */
+const dz = document.getElementById("dropzone");
+["dragenter", "dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("dragover"); }));
+["dragleave", "drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("dragover"); }));
+dz.addEventListener("drop", () => {
+  toast("Image dropped · re-parsing…");
+  pushLine(gIntake, nowStamp(), "additional screenshot dropped · re-parse queued");
+});
+
+document.querySelectorAll(".dropzone-chip").forEach(chip => {
+  chip.addEventListener("click", () => {
+    const type = chip.dataset.intake;
+    if (type === "webcam") openModal("webcam-modal");
+    else toast(`Intake via ${type} → simulated`);
+  });
+});
+
+/* ----- Webcam capture ----- */
+document.getElementById("webcam-capture-btn").addEventListener("click", () => {
+  closeModal("webcam-modal");
+  toast("Captured · auto-deskewed · parsing…");
+  pushLine(gIntake, nowStamp(), "webcam capture: 1920×1080 → deskewed 0.4° → cropped to QBO viewport");
+  pushLine(gParse, nowStamp(), "re-parse on new capture · 6 new fields aligned", "ok");
+});
+
+/* ----- Request info modal ----- */
+document.getElementById("request-info-btn") && document.getElementById("request-info-btn").addEventListener("click", () => openModal("request-modal"));
+
+document.querySelectorAll("[data-close-modal]").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll(".modal-overlay.open").forEach(m => m.classList.remove("open"));
+}));
+
+function openModal(id) { document.getElementById(id).classList.add("open"); }
+function closeModal(id) { document.getElementById(id).classList.remove("open"); }
+
+/* ----- INV row selection + create ----- */
+document.querySelectorAll(".inv-row").forEach(row => {
+  row.addEventListener("click", () => {
+    document.querySelectorAll(".inv-row").forEach(r => r.classList.remove("selected"));
+    row.classList.add("selected");
+    const id = row.dataset.inv;
+    toast(`Linked ${id}`);
+    pushLine(gMatch, nowStamp(), `operator linked <b>${id}</b>`, "ok");
+  });
+});
+document.getElementById("inv-create").addEventListener("click", () => {
+  toast("New INV created from this case (draft)");
+  pushLine(gMatch, nowStamp(), "operator created <b>INV-204451 (draft)</b> · this case attached", "ok");
+});
+
+/* ----- Ship action ----- */
+document.getElementById("ship-btn").addEventListener("click", () => {
+  toast("✓ Shipped to Reyes · case archived with reasoning trail");
+  pushLine(gDraft, nowStamp(), "<b>SHIPPED</b> · reply sent + reasoning frozen + INV-204418 linked", "ok");
+  document.getElementById("case-status-dot").className = "dot ready";
+});
+
+/* ----- Toasts ----- */
+function toast(text) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.innerHTML = `<span class="dot ready"></span> ${text}`;
+  document.getElementById("toast-stack").appendChild(t);
+  setTimeout(() => {
+    t.style.transition = "opacity 200ms, transform 200ms";
+    t.style.opacity = "0"; t.style.transform = "translateX(20px)";
+    setTimeout(() => t.remove(), 220);
+  }, 2400);
+}
+
+/* ----- CMD-K ----- */
+const overlay = document.getElementById("cmdk-overlay");
+const cmdkInput = document.getElementById("cmdk-input");
+const cmdkResults = document.getElementById("cmdk-results");
+
+const CMDK_DATA = [
+  { group: "Pipeline actions", items: [
+    { icon: "▶", label: "Ship draft response", hint: "⌘↵", run: () => document.getElementById("ship-btn").click() },
+    { icon: "↻", label: "Regenerate draft with current provider", hint: "⌘R", run: () => { startStream(); } },
+    { icon: "↻", label: "Redeploy with GPT-4.1", hint: "G",
+      run: () => document.querySelector('.provider-tab[data-provider="gpt"]').click() },
+    { icon: "↻", label: "Redeploy with Gemini 2.5 Pro", hint: "M",
+      run: () => document.querySelector('.provider-tab[data-provider="gemini"]').click() },
+    { icon: "↻", label: "Redeploy with Kimi K2", hint: "K",
+      run: () => document.querySelector('.provider-tab[data-provider="kimi"]').click() },
+    { icon: "⇆", label: "Toggle compare mode", hint: "⌘\\", run: () => document.getElementById("compare-btn").click() },
+    { icon: "✦", label: "Request missing info from agent", hint: "R", run: () => openModal("request-modal") },
+    { icon: "📷", label: "Capture via webcam", hint: "C", run: () => openModal("webcam-modal") },
+    { icon: "+", label: "Create new INV from this case", hint: "⌘N", run: () => document.getElementById("inv-create").click() },
+  ]},
+  { group: "Triage overrides", items: [
+    { icon: "▮", label: "Set severity → SEV-1", hint: "1", run: () => toast("Severity → SEV-1 (audit logged)") },
+    { icon: "▮", label: "Set severity → SEV-2", hint: "2", run: () => toast("Severity → SEV-2 (no change)") },
+    { icon: "▮", label: "Set severity → SEV-3", hint: "3", run: () => toast("Severity → SEV-3 (audit logged)") },
+    { icon: "⌖", label: "Change category → bank-feeds", hint: "B", run: () => toast("Category → bank-feeds") },
+  ]},
+  { group: "Jump", items: [
+    { icon: "→", label: "Jump to stage: Intake", run: () => clickStage("intake") },
+    { icon: "→", label: "Jump to stage: Parse", run: () => clickStage("parse") },
+    { icon: "→", label: "Jump to stage: Triage", run: () => clickStage("triage") },
+    { icon: "→", label: "Jump to stage: Match", run: () => clickStage("match") },
+    { icon: "→", label: "Jump to stage: Draft", run: () => clickStage("draft") },
+  ]},
+  { group: "Search", items: [
+    { icon: "🔎", label: "INV-204418 — Bank MFA refresh wave", hint: "INV", run: () => toast("Opening INV-204418") },
+    { icon: "🔎", label: "INV-203012 — User-initiated unlink", hint: "INV", run: () => toast("Opening INV-203012") },
+    { icon: "📖", label: "Playbook: payroll/dd-bank-unlink-recovery.md", hint: "DOC", run: () => toast("Opening playbook") },
+    { icon: "📖", label: "Playbook: payroll/funding-cutoff-windows.md", hint: "DOC", run: () => toast("Opening playbook") },
+  ]},
+];
+
+function clickStage(s) {
+  document.querySelector(`.stage[data-stage="${s}"]`).click();
+}
+
+let activeIdx = 0;
+let flatItems = [];
+
+function renderCmdk(query="") {
+  const q = query.toLowerCase();
+  cmdkResults.innerHTML = "";
+  flatItems = [];
+  CMDK_DATA.forEach(group => {
+    const matched = group.items.filter(i => !q || i.label.toLowerCase().includes(q));
+    if (!matched.length) return;
+    const lab = document.createElement("div");
+    lab.className = "cmdk-group-label";
+    lab.textContent = group.group;
+    cmdkResults.appendChild(lab);
+    matched.forEach(item => {
+      const idx = flatItems.length;
+      const row = document.createElement("div");
+      row.className = "cmdk-item" + (idx === activeIdx ? " active" : "");
+      row.innerHTML = `<span class="icon">${item.icon}</span><span class="label">${item.label}</span>${item.hint ? `<span class="hint">${item.hint}</span>` : ""}`;
+      row.addEventListener("click", () => { item.run(); closeCmdk(); });
+      cmdkResults.appendChild(row);
+      flatItems.push({ row, item });
+    });
+  });
+  if (!flatItems.length) {
+    const empty = document.createElement("div");
+    empty.className = "cmdk-group-label";
+    empty.style.padding = "20px";
+    empty.style.textAlign = "center";
+    empty.textContent = "No matches. Press ↵ to dispatch as ad-hoc command to the AI.";
+    cmdkResults.appendChild(empty);
+  }
+}
+
+function openCmdk() { overlay.classList.add("open"); cmdkInput.value = ""; activeIdx = 0; renderCmdk(); setTimeout(() => cmdkInput.focus(), 30); }
+function closeCmdk() { overlay.classList.remove("open"); }
+
+document.getElementById("cmdk-trigger").addEventListener("click", openCmdk);
+document.getElementById("open-cmdk-btn").addEventListener("click", openCmdk);
+overlay.addEventListener("click", e => { if (e.target === overlay) closeCmdk(); });
+
+cmdkInput.addEventListener("input", e => { activeIdx = 0; renderCmdk(e.target.value); });
+cmdkInput.addEventListener("keydown", e => {
+  if (e.key === "Escape") { closeCmdk(); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = Math.min(flatItems.length - 1, activeIdx + 1); refreshActive(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = Math.max(0, activeIdx - 1); refreshActive(); }
+  else if (e.key === "Enter") { e.preventDefault(); if (flatItems[activeIdx]) { flatItems[activeIdx].item.run(); closeCmdk(); } }
+});
+function refreshActive() {
+  flatItems.forEach((it, i) => it.row.classList.toggle("active", i === activeIdx));
+  if (flatItems[activeIdx]) flatItems[activeIdx].row.scrollIntoView({ block: "nearest" });
+}
+
+/* ----- Global keyboard shortcuts ----- */
+document.addEventListener("keydown", e => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); openCmdk(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); document.getElementById("ship-btn").click(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key === "\\") { e.preventDefault(); document.getElementById("compare-btn").click(); }
+  else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n") { e.preventDefault(); document.getElementById("inv-create").click(); }
+  else if (e.key === "Escape" && document.querySelectorAll(".modal-overlay.open").length) {
+    document.querySelectorAll(".modal-overlay.open").forEach(m => m.classList.remove("open"));
+  }
+});
+
+/* ----- pin all ----- */
+document.getElementById("pin-all").addEventListener("click", () => {
+  document.querySelectorAll(".log-line .pin:not(.pinned)").forEach(p => p.click());
+  toast("All log lines pinned to draft + audit");
+});
+document.getElementById("copy-log").addEventListener("click", () => toast("Reasoning log copied to clipboard"));
+
+/* ----- helpers ----- */
+function nowStamp() {
+  const d = new Date();
+  const pad = (n, w=2) => String(n).padStart(w, "0");
+  return `10:42:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+}
+
+</script>
+
+<!-- =====================================================================
+     Inspiration / Research
+     - Geist Design System (Vercel): status-first surfaces, materials tiers,
+       single-accent restraint, log-as-truth — https://vercel.com/geist
+     - Vercel deployment dashboard: stages running in parallel with StatusDots
+     - Linear command palette pattern (⌘K as primary input surface)
+     - Replit / Raycast cmdk semantics (grouped, fuzzy, keyboard-first)
+     - First-principles: replace chat with a deployment pipeline. The case
+       is the deployment. Reasoning is the build log. Operator intercepts.
+     ===================================================================== -->
+
+</body>
+</html>

@@ -21,7 +21,7 @@ const {
  * 1. Windows the room's messages to the agent's maxContextMessages limit
  * 2. Delegates to the agent's own buildContext() for actual prompt construction
  *
- * Each agent type controls its own context strategy. The QBO Analyst agent,
+ * Each agent type controls its own context strategy. The QBO Assistant agent,
  * for example, delegates to buildChatModelContext() for full playbook retrieval,
  * token budgeting, and citation support.
  *
@@ -93,7 +93,7 @@ async function buildAgentContext(agent, room, opts = {}) {
   return {
     systemPrompt: [
       result.systemPrompt || '',
-      'You are sending exactly one chat bubble as yourself. Never write dialogue for another agent, never script a multi-speaker scene, and never include transcript prefixes like "[Copilot]:" or "QBO Analyst:" for anyone else in your final answer. If you want another agent to speak, nudge them or mention them, but do not write their reply for them.',
+      'You are sending exactly one chat bubble as yourself. Never write dialogue for another agent, never script a multi-speaker scene, and never include transcript prefixes like "[Copilot]:" or "QBO Assistant:" for anyone else in your final answer. If you want another agent to speak, nudge them or mention them, but do not write their reply for them.',
       buildAgentIdentityOverlay(identity?.profile || agent.id),
       buildRoomRuntimeContext(agent.id, room.activeAgents || [], opts.runtimeSelections || {}),
       buildIdentityMemoryContext(identity),

@@ -7,9 +7,166 @@ import {
   PROVIDER_FAMILY,
   PROVIDER_OPTIONS,
 } from '../../lib/providerCatalog.js';
+import {
+  getProviderOptionTitle,
+  isProviderMissingApiKey,
+} from '../../lib/providerKeyStatus.js';
+import useProviderKeyStatus from '../../hooks/useProviderKeyStatus.js';
 
 const WORKSPACE_PRIMARY_MODEL_LIST_ID = 'workspace-agent-primary-model-options';
 const WORKSPACE_FALLBACK_MODEL_LIST_ID = 'workspace-agent-fallback-model-options';
+const QUICK_PROVIDER_IDS = ['codex', 'claude', 'llm-gateway', 'openai', 'lm-studio'];
+
+function pickUniqueProviders(ids, currentProvider) {
+  const seen = new Set();
+  return [currentProvider, ...ids]
+    .filter(Boolean)
+    .map((id) => PROVIDER_OPTIONS.find((option) => option.value === id))
+    .filter((option) => {
+      if (!option || seen.has(option.value)) return false;
+      seen.add(option.value);
+      return true;
+    });
+}
+
+function WorkspaceCompactProviderMenu({
+  provider,
+  mode,
+  fallbackProvider,
+  model,
+  fallbackModel,
+  reasoningEffort,
+  primaryModelSuggestions,
+  fallbackModelSuggestions,
+  quickProviderOptions,
+  advancedProviderOptions,
+  providerStatus,
+  onSelectProvider,
+  patchSession,
+}) {
+  const currentProvider = PROVIDER_OPTIONS.find((option) => option.value === provider);
+  const defaultModel = currentProvider?.model || 'provider default';
+  const currentModel = model || defaultModel;
+  const reasoningOptions = getReasoningEffortOptions(PROVIDER_FAMILY[provider] || 'claude');
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
+
+  return (
+    <motion.div
+      className="workspace-agent-quick-provider-menu"
+      role="region"
+      aria-label="Workspace provider settings"
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.15 }}
+    >
+      <div className="workspace-agent-provider-summary">
+        <span className="workspace-agent-provider-summary-label">Active</span>
+        <strong>{currentProvider?.shortLabel || currentProvider?.label || provider}</strong>
+        <span>{currentModel}</span>
+      </div>
+
+      <div className="workspace-agent-provider-choice-grid" aria-label="Recommended providers">
+        {quickProviderOptions.map((option) => {
+          const disabled = isMissingKey(option.value);
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`workspace-agent-provider-choice${provider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+              disabled={disabled}
+              onClick={() => {
+                if (disabled) return;
+                onSelectProvider(option.value);
+              }}
+              title={getProviderOptionTitle(option, providerStatus)}
+            >
+              <span>{option.shortLabel || option.label}</span>
+              {provider === option.value ? <span aria-hidden="true">✓</span> : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="workspace-agent-provider-compact-row">
+        <div className="workspace-agent-provider-segment" aria-label="Provider mode">
+          {[
+            { value: 'single', label: 'Single' },
+            { value: 'fallback', label: 'Fallback' },
+          ].map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={mode === option.value ? 'is-selected' : ''}
+              onClick={() => patchSession({ mode: option.value })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <div className="workspace-agent-provider-segment" aria-label="Reasoning effort">
+          {reasoningOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={reasoningEffort === option.value ? 'is-selected' : ''}
+              onClick={() => patchSession({ reasoningEffort: option.value })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <details className="workspace-agent-provider-advanced">
+        <summary>Advanced provider and model settings</summary>
+        <div className="workspace-agent-provider-choice-grid is-advanced" aria-label="All providers">
+          {advancedProviderOptions.map((option) => {
+            const disabled = isMissingKey(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`workspace-agent-provider-choice${provider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  onSelectProvider(option.value);
+                }}
+                title={getProviderOptionTitle(option, providerStatus)}
+              >
+                <span>{option.shortLabel || option.label}</span>
+                {provider === option.value ? <span aria-hidden="true">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+        <ModelOverrideControl
+          label="Primary Model"
+          provider={provider}
+          model={model}
+          onChange={(value) => patchSession({ model: value })}
+          listId={WORKSPACE_PRIMARY_MODEL_LIST_ID}
+          suggestions={primaryModelSuggestions}
+          className="workspace-agent-model-field"
+          disabled={isMissingKey(provider)}
+        />
+        {mode === 'fallback' && (
+          <ModelOverrideControl
+            label="Fallback Model"
+            provider={fallbackProvider}
+            model={fallbackModel}
+            onChange={(value) => patchSession({ fallbackModel: value })}
+            listId={WORKSPACE_FALLBACK_MODEL_LIST_ID}
+            suggestions={fallbackModelSuggestions}
+            className="workspace-agent-model-field"
+            disabled={isMissingKey(fallbackProvider)}
+          />
+        )}
+      </details>
+    </motion.div>
+  );
+}
 
 export default function WorkspacePanelHeader({
   embedded = false,
@@ -31,6 +188,7 @@ export default function WorkspacePanelHeader({
   onCopyConversation,
   onClose,
 }) {
+  const { providerStatus } = useProviderKeyStatus();
   const providerLabel = getProviderShortLabel(provider);
   const fallbackLabel = mode === 'fallback' ? getProviderShortLabel(fallbackProvider) : '';
   const primaryModelSuggestions = getProviderModelSuggestions(provider);
@@ -39,6 +197,24 @@ export default function WorkspacePanelHeader({
   const buttonTitle = mode === 'fallback'
     ? `Primary provider: ${providerLabel}. Fallback provider: ${fallbackLabel}.`
     : `Primary provider: ${providerLabel}.`;
+  const quickProviderOptions = pickUniqueProviders(QUICK_PROVIDER_IDS, provider);
+  const quickProviderIds = new Set(quickProviderOptions.map((option) => option.value));
+  const advancedProviderOptions = PROVIDER_OPTIONS.filter((option) => !quickProviderIds.has(option.value));
+  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
+  const handleSelectProvider = (providerId) => {
+    if (isMissingKey(providerId)) return;
+    const patch = { provider: providerId, model: '' };
+    const nextFamily = PROVIDER_FAMILY[providerId] || 'claude';
+    const allowed = getReasoningEffortOptions(nextFamily);
+    if (!allowed.some((option) => option.value === reasoningEffort)) {
+      patch.reasoningEffort = 'high';
+    }
+    if (providerId === fallbackProvider) {
+      patch.fallbackProvider = provider;
+      patch.fallbackModel = '';
+    }
+    patchSession(patch);
+  };
 
   return (
     <>
@@ -190,7 +366,24 @@ export default function WorkspacePanelHeader({
       )}
 
       <AnimatePresence>
-        {providerMenuOpen && (
+        {providerMenuOpen && embedded && (
+          <WorkspaceCompactProviderMenu
+            provider={provider}
+            mode={mode}
+            fallbackProvider={fallbackProvider}
+            model={model}
+            fallbackModel={fallbackModel}
+            reasoningEffort={reasoningEffort}
+            primaryModelSuggestions={primaryModelSuggestions}
+            fallbackModelSuggestions={fallbackModelSuggestions}
+            quickProviderOptions={quickProviderOptions}
+            advancedProviderOptions={advancedProviderOptions}
+            providerStatus={providerStatus}
+            onSelectProvider={handleSelectProvider}
+            patchSession={patchSession}
+          />
+        )}
+        {providerMenuOpen && !embedded && (
           <motion.div
             className="workspace-agent-settings-tray"
             role="region"
@@ -201,29 +394,25 @@ export default function WorkspacePanelHeader({
             transition={{ duration: 0.15 }}
           >
             <div className="provider-popover-label">Provider</div>
-            {PROVIDER_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}`}
-                onClick={() => {
-                  const patch = { provider: option.value, model: '' };
-                  const nextFamily = PROVIDER_FAMILY[option.value] || 'claude';
-                  const allowed = getReasoningEffortOptions(nextFamily);
-                  if (!allowed.some((o) => o.value === reasoningEffort)) {
-                    patch.reasoningEffort = 'high';
-                  }
-                  if (option.value === fallbackProvider) {
-                    patch.fallbackProvider = provider;
-                    patch.fallbackModel = '';
-                  }
-                  patchSession(patch);
-                }}
-              >
-                <span>{option.label}</span>
-                <span className="check">{provider === option.value ? '\u2713' : ''}</span>
-              </button>
-            ))}
+            {PROVIDER_OPTIONS.map((option) => {
+              const disabled = isMissingKey(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`provider-popover-option${provider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return;
+                    handleSelectProvider(option.value);
+                  }}
+                  title={getProviderOptionTitle(option, providerStatus)}
+                >
+                  <span>{option.label}</span>
+                  <span className="check">{provider === option.value ? '\u2713' : ''}</span>
+                </button>
+              );
+            })}
             <ModelOverrideControl
               label="Primary Model"
               provider={provider}
@@ -232,6 +421,7 @@ export default function WorkspacePanelHeader({
               listId={WORKSPACE_PRIMARY_MODEL_LIST_ID}
               suggestions={primaryModelSuggestions}
               className="workspace-agent-model-field"
+              disabled={isMissingKey(provider)}
             />
             <div className="provider-popover-divider" />
             <div className="provider-popover-label">Mode</div>
@@ -253,17 +443,25 @@ export default function WorkspacePanelHeader({
               <>
                 <div className="provider-popover-divider" />
                 <div className="provider-popover-label">Fallback Provider</div>
-                {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => (
-                  <button
-                  key={option.value}
-                  type="button"
-                  className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}`}
-                  onClick={() => patchSession({ fallbackProvider: option.value, fallbackModel: '' })}
-                >
-                  <span>{option.label}</span>
-                  <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
-                </button>
-                ))}
+                {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
+                  const disabled = isMissingKey(option.value);
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      className={`provider-popover-option${fallbackProvider === option.value ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                      disabled={disabled}
+                      onClick={() => {
+                        if (disabled) return;
+                        patchSession({ fallbackProvider: option.value, fallbackModel: '' });
+                      }}
+                      title={getProviderOptionTitle(option, providerStatus)}
+                    >
+                      <span>{option.label}</span>
+                      <span className="check">{fallbackProvider === option.value ? '\u2713' : ''}</span>
+                    </button>
+                  );
+                })}
                 <ModelOverrideControl
                   label="Fallback Model"
                   provider={fallbackProvider}
@@ -272,6 +470,7 @@ export default function WorkspacePanelHeader({
                   listId={WORKSPACE_FALLBACK_MODEL_LIST_ID}
                   suggestions={fallbackModelSuggestions}
                   className="workspace-agent-model-field"
+                  disabled={isMissingKey(fallbackProvider)}
                 />
               </>
             )}

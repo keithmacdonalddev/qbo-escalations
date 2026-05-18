@@ -1,5 +1,10 @@
 import { motion } from 'framer-motion';
 import { PROVIDER_FAMILY, PROVIDER_OPTIONS, getReasoningEffortOptions } from '../lib/providerCatalog.js';
+import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
+import {
+  getProviderOptionTitle,
+  isProviderMissingApiKey,
+} from '../lib/providerKeyStatus.js';
 
 export const MODE_OPTIONS = [
   { value: 'single', label: 'Single', description: 'Fastest. One model handles the request start to finish.' },
@@ -36,6 +41,8 @@ export default function AiAssistantProviderStrategyPanel({
   timeoutMs,
   updateField,
 }) {
+  const { providerStatus } = useProviderKeyStatus();
+
   return (
     <>
       <motion.section className="assistant-settings-panel assistant-model-selector" {...motionProps}>
@@ -55,14 +62,20 @@ export default function AiAssistantProviderStrategyPanel({
             const isSelected = currentPrimary === option.value;
             const tone = PROVIDER_FAMILY[option.value] || option.family || 'claude';
             const effortOptions = getReasoningEffortOptions(tone);
+            const disabled = isProviderMissingApiKey(option.value, providerStatus);
             return (
               <motion.button
                 key={option.value}
                 type="button"
-                className={`assistant-model-card family-${tone}${isSelected ? ' is-selected' : ''}`}
-                onClick={() => updateField('providerStrategy.defaultPrimaryProvider', option.value)}
-                whileHover={shouldReduceMotion ? undefined : { y: -4, scale: 1.01 }}
-                whileTap={shouldReduceMotion ? undefined : { scale: 0.99 }}
+                className={`assistant-model-card family-${tone}${isSelected ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}`}
+                disabled={disabled}
+                onClick={() => {
+                  if (disabled) return;
+                  updateField('providerStrategy.defaultPrimaryProvider', option.value);
+                }}
+                title={getProviderOptionTitle(option, providerStatus)}
+                whileHover={shouldReduceMotion || disabled ? undefined : { y: -4, scale: 1.01 }}
+                whileTap={shouldReduceMotion || disabled ? undefined : { scale: 0.99 }}
               >
                 <div className="assistant-model-card-brow">
                   <span className="assistant-model-badge">{tone}</span>
@@ -120,7 +133,13 @@ export default function AiAssistantProviderStrategyPanel({
               onChange={(event) => updateField('providerStrategy.defaultFallbackProvider', event.target.value)}
             >
               {PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <option
+                  key={option.value}
+                  value={option.value}
+                  disabled={isProviderMissingApiKey(option.value, providerStatus)}
+                >
+                  {option.label}
+                </option>
               ))}
             </select>
           </label>

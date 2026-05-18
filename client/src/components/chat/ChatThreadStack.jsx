@@ -110,10 +110,10 @@ function CaseAnalystGuidance({
   if (!text && !isStreaming) return null;
 
   return (
-    <section className={`case-analyst-guidance${isStreaming ? ' is-streaming' : ''}`} aria-label="QBO Analyst guidance">
+    <section className={`case-analyst-guidance${isStreaming ? ' is-streaming' : ''}`} aria-label="QBO Assistant guidance">
       <div className="case-analyst-guidance-head">
         <span className="case-workflow-dot" aria-hidden="true" />
-        <strong>QBO Analyst</strong>
+        <strong>QBO Assistant</strong>
         <span>{isStreaming ? 'Working' : `${getProviderLabel(provider)}${displayModel ? ` / ${displayModel}` : ''}`}</span>
       </div>
       {text ? (

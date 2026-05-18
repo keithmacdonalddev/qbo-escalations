@@ -34,6 +34,9 @@ test('buildParserDerivedTriageContext accepts canonical escalation template text
   assert.equal(context.parseFields.clientContact, 'Doug Mckensie');
   assert.equal(context.triageCard.category, 'payroll');
   assert.equal(context.triageCard.confidence, 'high');
+  assert.equal(context.triageCard.generation.source, 'server');
+  assert.equal(context.triageCard.generation.label, 'Server generated');
+  assert.equal(context.triageCard.generation.latencyMs, 123);
   assert.equal(context.parseMeta.validation.passed, true);
   assert.equal(context.parseMeta.validation.canonicalTemplate.passed, true);
 });
@@ -54,6 +57,7 @@ test('buildParserDerivedTriageContext rejects non-canonical parser fields while 
   assert.deepEqual(context.parseFields, {});
   assert.equal(context.triageCard.agent, 'Phone Agent');
   assert.equal(context.triageCard.confidence, 'high');
+  assert.equal(context.triageCard.generation.source, 'server');
   assert.equal(context.parseMeta.validation.passed, false);
   assert.ok(context.parseMeta.validation.issues.includes('canonical_NON_CANONICAL_FIELD'));
   assert.equal(context.parseMeta.validation.canonicalTemplate.passed, false);
@@ -132,12 +136,16 @@ test('buildAgentBackedTriageContext uses formatted triage-agent model output', a
   assert.match(capturedMessage, /Raw parsed template/i);
   assert.equal(context.triageCard.source, 'triage-agent');
   assert.equal(context.triageCard.fallback.used, false);
+  assert.equal(context.triageCard.generation.source, 'agent');
+  assert.equal(context.triageCard.generation.label, 'Agent generated');
+  assert.equal(context.triageCard.generation.provider, 'claude');
+  assert.equal(context.triageCard.generation.model, 'claude-opus-4-7');
   assert.equal(context.triageMeta.providerUsed, 'claude');
   assert.equal(context.triageMeta.model, 'claude-opus-4-7');
   assert.equal(context.triageMeta.usedRuleFallback, false);
 });
 
-test('buildAgentBackedTriageContext feeds Known Issue Search Agent result into triage prompt', async (t) => {
+test('buildAgentBackedTriageContext runs Known Issue Search Agent alongside triage', async (t) => {
   const originalClaudeChat = claude.chat;
   const originalKnownIssueSearch = knownIssueSearch.runKnownIssueSearchAgent;
   t.after(() => {
@@ -210,10 +218,52 @@ test('buildAgentBackedTriageContext feeds Known Issue Search Agent result into t
     timeoutMs: 1000,
   });
 
-  assert.match(capturedMessage, /Known Issue Search Agent result JSON/);
-  assert.match(capturedMessage, /INV-149001/);
+  assert.match(capturedMessage, /Raw parsed template/i);
+  assert.doesNotMatch(capturedMessage, /INV-149001/);
   assert.equal(context.knownIssueSearchResult.status, 'match');
+  assert.equal(context.knownIssueSearchResult.matches[0].invNumber, 'INV-149001');
   assert.equal(context.triageCard.source, 'triage-agent');
+  assert.equal(context.triageCard.generation.source, 'agent');
+});
+
+test('buildAgentBackedTriageContext marks rule fallback triage as server generated', async (t) => {
+  const originalClaudeChat = claude.chat;
+  t.after(() => {
+    claude.chat = originalClaudeChat;
+  });
+
+  claude.chat = ({ onDone }) => {
+    onDone('Not the required labeled fields.', { inputTokens: 12, outputTokens: 7, model: 'claude-opus-4-7' });
+    return () => {};
+  };
+
+  const context = await buildAgentBackedTriageContext({
+    parserText: CANONICAL_TEMPLATE,
+    parserProvider: 'llm-gateway',
+    parserUsage: null,
+    parserModel: 'qwen/qwen3.6-27b',
+    elapsedMs: 50,
+    triageAgentRuntime: {
+      'triage-agent': {
+        provider: 'claude',
+        mode: 'single',
+        reasoningEffort: 'high',
+      },
+    },
+    fallbackPolicy: {
+      primaryProvider: 'claude',
+      fallbackProvider: 'gpt-5.5',
+    },
+    reasoningEffort: 'high',
+    timeoutMs: 1000,
+    runKnownIssueSearch: false,
+  });
+
+  assert.equal(context.triageCard.fallback.used, true);
+  assert.equal(context.triageCard.generation.source, 'server');
+  assert.equal(context.triageCard.generation.label, 'Server generated');
+  assert.equal(context.triageCard.generation.provider, 'claude');
+  assert.equal(context.triageMeta.usedRuleFallback, true);
 });
 
 test('buildAgentBackedTriageContext warns when Triage Agent runtime is not saved', async (t) => {
@@ -261,6 +311,7 @@ test('buildAgentBackedTriageContext warns when Triage Agent runtime is not saved
 
   assert.equal(context.triageCard.source, 'triage-agent');
   assert.equal(context.triageCard.runtime.usedDefault, true);
+  assert.equal(context.triageCard.generation.source, 'agent');
   assert.equal(context.triageMeta.usedDefaultRuntime, true);
   assert.equal(context.triageMeta.runtimeConfigured, false);
   assert.ok(statuses.some((status) => status.code === 'TRIAGE_AGENT_DEFAULT_RUNTIME'));

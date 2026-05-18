@@ -1,0 +1,1275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Escalation — Geist</title>
+<style>
+  /* ================================================================
+     Geist / Vercel lens for the QBO escalation arc.
+     One continuous column. Status-first. Monospace for time and IDs.
+     No metaphor. Just the pipeline, quietly always-known.
+  ================================================================ */
+
+  :root {
+    color-scheme: light;
+    --bg:          #ffffff;
+    --bg-2:        #fafafa;
+    --bg-3:        #f5f5f5;
+    --line:        #eaeaea;
+    --line-2:      #d4d4d4;
+    --ink:         #000000;
+    --ink-2:       #525252;
+    --ink-3:       #8f8f8f;
+    --ink-4:       #b3b3b3;
+    --blue:        #0070f3;
+    --blue-bg:     #e8f1ff;
+    --green:       #0a7f3f;
+    --amber:       #b45309;
+    --red:         #d12c2c;
+    --purple:      #7c3aed;
+    --shadow-1:    0 1px 2px rgba(0,0,0,.04);
+    --shadow-2:    0 4px 14px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    --r-1: 6px;
+    --r-2: 8px;
+    --r-3: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:     #0a0a0a;
+      --bg-2:   #111111;
+      --bg-3:   #161616;
+      --line:   #1f1f1f;
+      --line-2: #2a2a2a;
+      --ink:    #ededed;
+      --ink-2:  #a1a1a1;
+      --ink-3:  #707070;
+      --ink-4:  #4a4a4a;
+      --blue:   #3291ff;
+      --blue-bg:#0c2d57;
+      --green:  #62c073;
+      --amber:  #f5a623;
+      --red:    #ff5a5a;
+      --purple: #a78bfa;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.6);
+      --shadow-2: 0 4px 14px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.6);
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: "ss01", "cv11";
+    min-height: 100vh;
+  }
+
+  /* ------- shell ------- */
+  .shell {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 32px 24px 96px;
+  }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 13px; letter-spacing: -0.01em; color: var(--ink);
+  }
+  .brand-mark {
+    width: 18px; height: 18px;
+    background: var(--ink);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+  .brand-name { font-weight: 600; }
+  .brand-sep { color: var(--ink-4); }
+  .brand-case { color: var(--ink-2); font-family: var(--mono); font-size: 12px; }
+
+  .topbar-right {
+    display: flex; gap: 6px; align-items: center;
+  }
+  .step-pill {
+    height: 22px; min-width: 22px; padding: 0 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font: 500 11px/1 var(--mono);
+    color: var(--ink-4);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    transition: all 180ms ease;
+  }
+  .step-pill.is-active { color: var(--ink); border-color: var(--ink); }
+  .step-pill.is-done { color: var(--ink-2); border-color: var(--line-2); background: var(--bg-2); }
+
+  /* ------- stage / timeline column ------- */
+  .stage {
+    display: flex; flex-direction: column;
+    gap: 0;
+  }
+
+  .moment {
+    position: relative;
+    padding: 18px 0 22px 28px;
+    border-left: 1px solid var(--line);
+    margin-left: 8px;
+  }
+  .moment:last-child { border-left-color: transparent; }
+  .moment::before {
+    /* the rail dot */
+    content: "";
+    position: absolute;
+    left: -5px; top: 24px;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1.5px solid var(--line-2);
+    transition: all 220ms ease;
+  }
+  .moment.is-active::before {
+    border-color: var(--blue);
+    background: var(--blue);
+    box-shadow: 0 0 0 4px var(--blue-bg);
+  }
+  .moment.is-done::before {
+    background: var(--ink);
+    border-color: var(--ink);
+  }
+
+  .moment-head {
+    display: flex; align-items: baseline; gap: 10px;
+    color: var(--ink-3); font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .moment-head .label {
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-weight: 500; color: var(--ink-2);
+  }
+  .moment-head .t {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-4);
+    font-variant-numeric: tabular-nums;
+  }
+  .moment-head .sep { color: var(--ink-4); }
+  .moment-head .status {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3);
+  }
+
+  /* ------- upload card (moment 1 / 2) ------- */
+  .drop {
+    border: 1px dashed var(--line-2);
+    border-radius: var(--r-2);
+    padding: 32px 24px;
+    text-align: center;
+    background: var(--bg);
+    transition: all 180ms ease;
+    cursor: pointer;
+    user-select: none;
+  }
+  .drop:hover, .drop.is-hover {
+    border-color: var(--ink-2);
+    background: var(--bg-2);
+  }
+  .drop-title {
+    font-size: 14px; font-weight: 500; color: var(--ink);
+    letter-spacing: -0.01em; margin-bottom: 4px;
+  }
+  .drop-sub {
+    font-size: 12px; color: var(--ink-3);
+    margin-bottom: 16px;
+  }
+  .drop-actions {
+    display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;
+  }
+  .btn {
+    height: 30px; padding: 0 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 500 12.5px/1 var(--sans);
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-1);
+    cursor: pointer;
+    transition: all 140ms ease;
+  }
+  .btn:hover { background: var(--bg-2); border-color: var(--ink-3); }
+  .btn-primary {
+    background: var(--ink); color: var(--bg); border-color: var(--ink);
+  }
+  .btn-primary:hover { background: var(--ink-2); border-color: var(--ink-2); }
+  .btn .ico { width: 12px; height: 12px; display: inline-block; }
+  .btn-ghost { background: transparent; border-color: transparent; color: var(--ink-2); }
+  .btn-ghost:hover { background: var(--bg-2); color: var(--ink); }
+
+  /* webcam overlay */
+  .cam {
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    background: var(--bg-2);
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .cam-frame {
+    aspect-ratio: 4/3;
+    background: linear-gradient(135deg, #1a1a1a, #0a0a0a);
+    border-radius: var(--r-1);
+    position: relative;
+    overflow: hidden;
+  }
+  .cam-frame::after {
+    content: "live preview";
+    position: absolute; left: 10px; bottom: 8px;
+    font: 500 10px/1 var(--mono); color: #fff;
+    letter-spacing: 0.05em;
+    background: rgba(0,0,0,.5); padding: 3px 6px; border-radius: 3px;
+  }
+  .cam-frame::before {
+    content: "";
+    position: absolute; left: 10px; top: 10px;
+    width: 8px; height: 8px; border-radius: 50%; background: var(--red);
+    box-shadow: 0 0 0 3px rgba(209,44,44,.2);
+    animation: pulse-red 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse-red {
+    0%,100% { box-shadow: 0 0 0 3px rgba(209,44,44,.2); }
+    50%     { box-shadow: 0 0 0 5px rgba(209,44,44,.08); }
+  }
+  .cam-actions {
+    display: flex; gap: 8px; justify-content: space-between;
+  }
+  .cam-actions .left, .cam-actions .right { display: flex; gap: 8px; }
+
+  /* ------- thumb + parsed ------- */
+  .upload-result {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 16px; align-items: start;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    padding: 12px;
+  }
+  .thumb {
+    width: 96px; aspect-ratio: 3/4;
+    border-radius: var(--r-1);
+    background: linear-gradient(135deg, #e3e8ef 0%, #c9d1da 50%, #b0bac4 100%);
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .thumb::after {
+    content: "DM"; position: absolute; inset: 0;
+    display: grid; place-items: center;
+    color: rgba(255,255,255,.5); font: 600 16px/1 var(--mono);
+  }
+  .upload-meta { font-size: 12px; color: var(--ink-2); }
+  .upload-meta .filename { color: var(--ink); font-weight: 500; }
+  .upload-meta .row { display: flex; gap: 8px; align-items: center; }
+  .upload-meta .dot { width: 3px; height: 3px; background: var(--ink-4); border-radius: 50%; display: inline-block; }
+  .upload-meta .lnk { color: var(--blue); cursor: pointer; }
+
+  /* ------- agent row ------- */
+  .agent-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    margin-bottom: 10px;
+  }
+  .agent-row .av {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: grid; place-items: center;
+    font: 600 10px/1 var(--mono);
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .av-parser { background: #6b7280; }
+  .av-inv    { background: #475569; }
+  .av-triage { background: #1f2937; }
+  .av-analyst{ background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%); }
+
+  .agent-row .who { font-size: 13px; color: var(--ink); font-weight: 500; }
+  .agent-row .model { font: 500 11px/1 var(--mono); color: var(--ink-3); margin-left: 4px; }
+  .agent-row .grow { flex: 1; }
+  .agent-row .state {
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 500 11px/1 var(--mono); color: var(--ink-2);
+  }
+  .agent-row .dur { font: 500 11px/1 var(--mono); color: var(--ink-4); }
+
+  /* status dot — Geist */
+  .sd { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-4); display: inline-block; }
+  .sd-running {
+    background: var(--blue);
+    box-shadow: 0 0 0 0 rgba(0,112,243,.6);
+    animation: sd-pulse 1.6s ease-out infinite;
+  }
+  .sd-done    { background: var(--green); }
+  .sd-queued  { background: var(--ink-4); }
+  @keyframes sd-pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(0,112,243,.55); }
+    70%  { box-shadow: 0 0 0 6px rgba(0,112,243,0); }
+    100% { box-shadow: 0 0 0 0 rgba(0,112,243,0); }
+  }
+
+  /* parsed fields */
+  .fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    overflow: hidden;
+    background: var(--bg);
+  }
+  .field {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    border-right: 1px solid var(--line);
+    min-height: 56px;
+  }
+  .field:nth-child(2n) { border-right: none; }
+  .field:nth-last-child(-n+2) { border-bottom: none; }
+  .field-label {
+    font: 500 10px/1 var(--mono);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--ink-3);
+    margin-bottom: 4px;
+  }
+  .field-value {
+    font-size: 13px; color: var(--ink); line-height: 1.4;
+  }
+  .field-value.placeholder { color: var(--ink-4); font-style: italic; }
+  .field.full-span { grid-column: span 2; border-right: none; }
+
+  /* skeleton shimmer for fields */
+  .sk {
+    display: inline-block;
+    height: 10px;
+    background: linear-gradient(90deg, var(--bg-3) 0%, var(--line) 50%, var(--bg-3) 100%);
+    background-size: 200% 100%;
+    animation: sk-shimmer 1.6s linear infinite;
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+  @keyframes sk-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  /* ------- triage — dominant ------- */
+  .triage {
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-3);
+    background: var(--bg);
+    padding: 0;
+    overflow: hidden;
+    box-shadow: var(--shadow-2);
+    position: relative;
+  }
+  .triage.is-loading {
+    border-style: dashed;
+    border-color: var(--line-2);
+    box-shadow: none;
+  }
+  .triage-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-2);
+  }
+  .triage-head .who { font-size: 12px; color: var(--ink-2); }
+  .triage-head .who strong { color: var(--ink); font-weight: 600; }
+  .triage-head .who .model { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+  .triage-head .right { margin-left: auto; display: inline-flex; gap: 10px; align-items: center; }
+
+  .triage-body { padding: 18px 20px 20px; }
+  .triage-row1 {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 14px; flex-wrap: wrap;
+  }
+  .badge {
+    height: 22px; padding: 0 8px;
+    display: inline-flex; align-items: center; gap: 6px;
+    font: 500 11.5px/1 var(--sans);
+    border-radius: 999px;
+    border: 1px solid transparent;
+  }
+  .badge .b-dot { width: 6px; height: 6px; border-radius: 50%; }
+  .b-sev-p2 { background: #fff7ed; color: #b45309; border-color: #fdba74; }
+  .b-sev-p2 .b-dot { background: #d97706; }
+  .b-cat    { background: var(--bg-2); color: var(--ink); border-color: var(--line-2); font-family: var(--mono); font-size: 11px; text-transform: lowercase; }
+  .b-conf-high { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
+  .b-conf-high .b-dot { background: #16a34a; }
+
+  @media (prefers-color-scheme: dark) {
+    .b-sev-p2 { background: #2a1d0a; color: #fbbf24; border-color: #78350f; }
+    .b-sev-p2 .b-dot { background: #f59e0b; }
+    .b-conf-high { background: #06210e; color: #86efac; border-color: #14532d; }
+    .b-conf-high .b-dot { background: #22c55e; }
+  }
+
+  .fast-read {
+    font-size: 17px; line-height: 1.4;
+    color: var(--ink);
+    letter-spacing: -0.012em;
+    font-weight: 450;
+    margin: 0 0 16px;
+  }
+  .next-step {
+    display: flex; gap: 12px; align-items: flex-start;
+    padding: 12px 14px;
+    background: var(--blue-bg);
+    border-radius: var(--r-2);
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+  .next-step .ns-label {
+    font: 600 10px/1 var(--mono); letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--blue);
+    flex-shrink: 0; padding-top: 2px;
+    min-width: 92px;
+  }
+  .next-step .ns-text { font-size: 13.5px; line-height: 1.45; }
+  .missing {
+    font-size: 12.5px; color: var(--ink-2);
+    display: flex; gap: 8px; align-items: baseline;
+  }
+  .missing .m-label {
+    font: 600 10px/1 var(--mono); letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3);
+    flex-shrink: 0; min-width: 92px;
+  }
+
+  /* triage skeleton */
+  .triage-skel {
+    padding: 20px 22px 22px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .triage-skel .sk-row { height: 22px; display: flex; gap: 8px; }
+  .triage-skel .sk-row .sk { height: 22px; border-radius: 999px; }
+
+  /* ------- INV — supportive ------- */
+  .inv {
+    margin-top: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-2);
+    background: var(--bg);
+    overflow: hidden;
+  }
+  .inv-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+    font-size: 12px; color: var(--ink-2);
+  }
+  .inv-head .who { color: var(--ink-2); }
+  .inv-head .who strong { color: var(--ink); font-weight: 600; }
+  .inv-head .who .model { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: 6px; }
+  .inv-head .right { margin-left: auto; display: inline-flex; gap: 10px; align-items: center; }
+
+  .inv-body { padding: 12px 14px; }
+  .inv-match {
+    display: flex; gap: 12px; align-items: flex-start;
+    text-decoration: none; color: inherit;
+  }
+  .inv-id {
+    font: 600 12px/1.2 var(--mono);
+    color: var(--blue);
+    flex-shrink: 0;
+    padding-top: 1px;
+  }
+  .inv-title { font-size: 13px; line-height: 1.4; color: var(--ink); }
+  .inv-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 4px; font-family: var(--mono); }
+
+  /* ------- analyst arrival ------- */
+  .analyst-card {
+    border: 1px solid var(--line);
+    border-radius: var(--r-3);
+    overflow: hidden;
+    background: var(--bg);
+    box-shadow: var(--shadow-1);
+  }
+  .analyst-hero {
+    padding: 22px 22px 16px;
+    background:
+      radial-gradient(ellipse at 14% 0%, rgba(239,68,68,0.06), transparent 50%),
+      radial-gradient(ellipse at 110% 0%, rgba(245,158,11,0.06), transparent 50%),
+      var(--bg);
+    border-bottom: 1px solid var(--line);
+    display: flex; gap: 16px; align-items: center;
+  }
+  .analyst-av {
+    width: 52px; height: 52px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%);
+    color: #fff;
+    display: grid; place-items: center;
+    font: 600 18px/1 var(--sans);
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+    box-shadow: 0 6px 24px rgba(239,68,68,.18), inset 0 0 0 1px rgba(255,255,255,.12);
+    position: relative;
+  }
+  .analyst-av::after {
+    content: "";
+    position: absolute;
+    right: -2px; bottom: -2px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--green);
+    border: 2.5px solid var(--bg);
+  }
+  .analyst-meta .name {
+    font-size: 17px; font-weight: 600; letter-spacing: -0.015em;
+    color: var(--ink);
+    margin-bottom: 2px;
+  }
+  .analyst-meta .role {
+    font-size: 12.5px; color: var(--ink-2);
+  }
+  .analyst-meta .role .model {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: 6px;
+    padding: 2px 6px; background: var(--bg-2); border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .analyst-briefed {
+    padding: 12px 22px 14px;
+    font-size: 12px; color: var(--ink-2);
+    display: flex; flex-wrap: wrap; gap: 8px 14px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .analyst-briefed .bp {
+    display: inline-flex; gap: 6px; align-items: center;
+  }
+  .analyst-briefed .check {
+    width: 12px; height: 12px;
+    color: var(--green);
+  }
+
+  /* ------- chat ------- */
+  .chat {
+    padding: 18px 22px 22px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .msg { display: flex; gap: 12px; max-width: 100%; }
+  .msg-av {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: grid; place-items: center;
+    flex-shrink: 0;
+    font: 600 11px/1 var(--sans);
+    color: #fff;
+    margin-top: 2px;
+  }
+  .msg-av.op { background: var(--ink-2); }
+  .msg-av.an { background: linear-gradient(135deg, #ef4444 0%, #f59e0b 100%); }
+  .msg-bubble { font-size: 14px; line-height: 1.5; color: var(--ink); }
+  .msg-name {
+    font-size: 11px; color: var(--ink-3);
+    margin-bottom: 2px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+  }
+  .msg-bubble code, .msg-bubble .kbd {
+    font: 500 12px/1 var(--mono);
+    background: var(--bg-2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    border: 1px solid var(--line);
+  }
+  .typing-cursor {
+    display: inline-block; width: 7px; height: 14px;
+    background: var(--ink); margin-left: 2px; vertical-align: -2px;
+    animation: blink 1s steps(2,end) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .compose {
+    margin-top: 6px;
+    display: flex; gap: 8px;
+    border: 1px solid var(--line-2);
+    background: var(--bg);
+    border-radius: var(--r-2);
+    padding: 8px 8px 8px 14px;
+    align-items: center;
+  }
+  .compose input {
+    border: 0; outline: 0; background: transparent;
+    flex: 1; font: 400 14px/1.4 var(--sans);
+    color: var(--ink); padding: 6px 0;
+  }
+  .compose input::placeholder { color: var(--ink-3); }
+
+  /* ------- demo footer ------- */
+  .demo-bar {
+    position: fixed;
+    left: 50%; bottom: 16px;
+    transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 6px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    box-shadow: var(--shadow-2);
+    z-index: 50;
+  }
+  .demo-bar button {
+    height: 28px; padding: 0 10px;
+    font: 500 12px/1 var(--sans);
+    background: transparent;
+    color: var(--ink-2);
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .demo-bar button:hover { color: var(--ink); background: var(--bg-2); }
+  .demo-bar button.is-current { background: var(--ink); color: var(--bg); }
+  .demo-bar .sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+  .demo-bar .lbl { font: 500 10.5px/1 var(--mono); color: var(--ink-3); padding: 0 8px; letter-spacing: 0.06em; text-transform: uppercase; }
+
+  /* ------- utility ------- */
+  .hidden { display: none !important; }
+  .fade-in { animation: fadeIn 380ms ease both; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* a small focus state in the Geist key */
+  :focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* helpful container queries-ish */
+  @media (max-width: 560px) {
+    .fields { grid-template-columns: 1fr; }
+    .field:nth-child(n) { border-right: none; }
+    .upload-result { grid-template-columns: 64px 1fr; }
+    .thumb { width: 64px; }
+    .next-step .ns-label, .missing .m-label { min-width: unset; display:block; margin-bottom: 4px; }
+    .next-step { flex-direction: column; }
+    .missing { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============ TOP BAR ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Escalations</span>
+      <span class="brand-sep">/</span>
+      <span class="brand-case" id="case-id">new case</span>
+    </div>
+    <div class="topbar-right" aria-label="Pipeline progress" id="steps">
+      <span class="step-pill" data-step="1" title="Image">1</span>
+      <span class="step-pill" data-step="2" title="Parse">2</span>
+      <span class="step-pill" data-step="3" title="Triage">3</span>
+      <span class="step-pill" data-step="4" title="History">4</span>
+      <span class="step-pill" data-step="5" title="Analyst">5</span>
+      <span class="step-pill" data-step="6" title="Conversation">6</span>
+    </div>
+  </header>
+
+  <!-- ============ STAGE ============ -->
+  <section class="stage" id="stage">
+
+    <!-- ---------- moment 1 + 2: intake ---------- -->
+    <article class="moment" id="m-intake">
+      <div class="moment-head">
+        <span class="label">Screenshot</span>
+        <span class="sep">·</span>
+        <span class="status" id="intake-status">ready</span>
+      </div>
+
+      <!-- pre-upload + image intake -->
+      <div id="intake-drop" class="drop" tabindex="0" role="button"
+           aria-label="Drop screenshot, paste, or upload">
+        <div class="drop-title">Drop the phone-agent screenshot</div>
+        <div class="drop-sub">PNG, JPG, or paste from clipboard · or use webcam</div>
+        <div class="drop-actions">
+          <button class="btn btn-primary" id="btn-upload">
+            <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 11V2m0 0l-3 3m3-3l3 3M3 11v2a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2"/></svg>
+            Upload file
+          </button>
+          <button class="btn" id="btn-paste">Paste</button>
+          <button class="btn" id="btn-cam">
+            <svg class="ico" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="4" width="12" height="9" rx="1.5"/><circle cx="8" cy="8.5" r="2.5"/></svg>
+            Use webcam
+          </button>
+        </div>
+      </div>
+
+      <!-- webcam panel (hidden until activated) -->
+      <div id="intake-cam" class="cam hidden" aria-label="Webcam capture">
+        <div class="cam-frame" aria-hidden="true"></div>
+        <div class="cam-actions">
+          <div class="left">
+            <button class="btn btn-ghost" id="cam-cancel">← Back</button>
+          </div>
+          <div class="right">
+            <button class="btn">Rotate</button>
+            <button class="btn btn-primary" id="cam-capture">Capture</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- result thumbnail (after upload) -->
+      <div id="intake-result" class="upload-result hidden">
+        <div class="thumb" aria-hidden="true"></div>
+        <div class="upload-meta">
+          <div class="filename" id="intake-name">escalation-dm.png</div>
+          <div class="row">
+            <span id="intake-size">312 KB</span>
+            <span class="dot"></span>
+            <span id="intake-from">from clipboard</span>
+            <span class="dot"></span>
+            <span class="lnk" id="intake-replace">replace</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ---------- moment 3: parse ---------- -->
+    <article class="moment hidden" id="m-parse">
+      <div class="moment-head">
+        <span class="label">Parse</span>
+        <span class="sep">·</span>
+        <span class="status" id="parse-status">queued</span>
+        <span class="sep">·</span>
+        <span class="t" id="parse-t">—</span>
+      </div>
+
+      <div class="agent-row">
+        <span class="av av-parser" title="Parser">P</span>
+        <div>
+          <div><span class="who">Parser</span><span class="model">claude-haiku · vision</span></div>
+        </div>
+        <span class="grow"></span>
+        <span class="state"><span class="sd sd-running" id="parse-sd"></span><span id="parse-statetext">reading screenshot</span></span>
+        <span class="dur" id="parse-dur">0.0s</span>
+      </div>
+
+      <div class="fields" id="fields">
+        <!-- fields populated dynamically -->
+      </div>
+    </article>
+
+    <!-- ---------- moment 4: triage (PRIMARY) ---------- -->
+    <article class="moment hidden" id="m-triage">
+      <div class="moment-head">
+        <span class="label">Triage</span>
+        <span class="sep">·</span>
+        <span class="status" id="triage-status">queued</span>
+        <span class="sep">·</span>
+        <span class="t" id="triage-t">—</span>
+      </div>
+
+      <!-- triage skeleton placeholder -->
+      <div class="triage is-loading" id="triage-loading">
+        <div class="triage-head">
+          <div class="who">
+            <strong>Triage</strong>
+            <span class="model">claude-sonnet</span>
+          </div>
+          <div class="right">
+            <span class="state"><span class="sd sd-running"></span><span style="font:500 11px/1 var(--mono);color:var(--ink-2)">analyzing template</span></span>
+          </div>
+        </div>
+        <div class="triage-skel">
+          <div class="sk-row"><span class="sk" style="width:48px"></span><span class="sk" style="width:80px"></span><span class="sk" style="width:90px"></span></div>
+          <span class="sk" style="width:90%;height:18px"></span>
+          <span class="sk" style="width:70%;height:18px"></span>
+        </div>
+      </div>
+
+      <!-- triage final -->
+      <div class="triage hidden" id="triage-final">
+        <div class="triage-head">
+          <div class="who">
+            <strong>Triage</strong>
+            <span class="model">claude-sonnet</span>
+          </div>
+          <div class="right">
+            <span class="state"><span class="sd sd-done"></span><span style="font:500 11px/1 var(--mono);color:var(--ink-2)">ready</span></span>
+            <span class="dur" id="triage-dur" style="font:500 11px/1 var(--mono);color:var(--ink-4)">3.1s</span>
+          </div>
+        </div>
+        <div class="triage-body">
+          <div class="triage-row1">
+            <span class="badge b-sev-p2"><span class="b-dot"></span>P2 · time-sensitive</span>
+            <span class="badge b-cat">payroll</span>
+            <span class="badge b-conf-high"><span class="b-dot"></span>high confidence</span>
+          </div>
+
+          <p class="fast-read" id="fast-read">
+            Customer is mid-payroll; terminated employee's final cheque can't process
+            because the termination date is set after the pay-period start.
+          </p>
+
+          <div class="next-step">
+            <span class="ns-label">Next step</span>
+            <span class="ns-text">
+              Have the phone agent edit the employee's termination date to
+              <strong>on or before</strong> the pay-period start, then re-queue payroll.
+              If customer needs the date as-is, run an unscheduled payroll for that
+              employee only.
+            </span>
+          </div>
+
+          <div class="missing">
+            <span class="m-label">Missing</span>
+            <span>Pay-period start date, employee termination date, and whether
+              direct deposit cut-off has already passed for this run.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- INV — supportive context, never competing -->
+      <div class="inv hidden" id="inv">
+        <div class="inv-head">
+          <div class="who">
+            <strong>History</strong>
+            <span class="model">claude-haiku · INV index</span>
+          </div>
+          <div class="right">
+            <span class="state" id="inv-state">
+              <span class="sd sd-running" id="inv-sd"></span>
+              <span style="font:500 11px/1 var(--mono);color:var(--ink-2)" id="inv-statetext">searching</span>
+            </span>
+            <span class="dur" id="inv-dur" style="font:500 11px/1 var(--mono);color:var(--ink-4)">—</span>
+          </div>
+        </div>
+        <div class="inv-body" id="inv-body">
+          <!-- populated when done -->
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span class="sk" style="width:120px;height:14px"></span>
+            <span class="sk" style="width:60%;height:14px"></span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <!-- ---------- moment 5 + 6: analyst + chat ---------- -->
+    <article class="moment hidden" id="m-analyst">
+      <div class="moment-head">
+        <span class="label">Analyst</span>
+        <span class="sep">·</span>
+        <span class="status" id="analyst-status">assembling context</span>
+      </div>
+
+      <div class="analyst-card">
+        <div class="analyst-hero">
+          <div class="analyst-av" aria-hidden="true">RA</div>
+          <div class="analyst-meta">
+            <div class="name">Riley · Senior Analyst</div>
+            <div class="role">QBO escalations · payroll specialist <span class="model">claude-opus</span></div>
+          </div>
+        </div>
+
+        <div class="analyst-briefed" id="analyst-briefed">
+          <span class="bp">
+            <svg class="check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l3 3 7-7"/></svg>
+            Read the DM
+          </span>
+          <span class="bp">
+            <svg class="check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l3 3 7-7"/></svg>
+            Reviewed triage
+          </span>
+          <span class="bp">
+            <svg class="check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l3 3 7-7"/></svg>
+            Pulled history
+          </span>
+          <span class="bp">
+            <svg class="check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 8l3 3 7-7"/></svg>
+            Loaded payroll playbook
+          </span>
+        </div>
+
+        <div class="chat" id="chat">
+          <!-- analyst opens -->
+          <div class="msg" id="msg-analyst">
+            <div class="msg-av an" aria-hidden="true">R</div>
+            <div>
+              <div class="msg-name">Riley</div>
+              <div class="msg-bubble" id="msg-analyst-body"></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 0 22px 22px;">
+          <form class="compose" id="compose" onsubmit="return false;">
+            <input id="compose-input" placeholder="Reply to Riley…" autocomplete="off"/>
+            <button class="btn btn-primary" type="submit">Send</button>
+          </form>
+        </div>
+      </div>
+    </article>
+
+  </section>
+</div>
+
+<!-- ============ DEMO CONTROL ============ -->
+<nav class="demo-bar" aria-label="Walk the arc">
+  <span class="lbl">arc</span>
+  <button data-jump="reset">Reset</button>
+  <button data-jump="upload">1 · Upload</button>
+  <button data-jump="parse">2 · Parse</button>
+  <button data-jump="triage">3 · Triage</button>
+  <button data-jump="analyst">4 · Analyst</button>
+  <span class="sep"></span>
+  <button id="play-btn" class="is-current">Auto-play</button>
+</nav>
+
+<script>
+/* =====================================================================
+   Geist / Vercel — Escalation Arc
+   One column. Status-first. Realistic QBO data.
+===================================================================== */
+
+const $  = (s, p=document) => p.querySelector(s);
+const $$ = (s, p=document) => Array.from(p.querySelectorAll(s));
+
+const state = {
+  step: 0,                   // 0..6
+  startedAt: 0,
+  caseId: 'ESC-' + (Math.floor(Math.random()*9000)+1000),
+  parsedFields: [
+    { label: 'Attempting to',     value: 'Run scheduled payroll for pay period 04/29–05/12.' },
+    { label: 'Expected outcome',  value: 'Payroll processes, including final cheque for terminated employee Marcus T.' },
+    { label: 'Actual outcome',    value: 'Marcus T is excluded; payroll completes for 8 of 9 employees.' },
+    { label: 'Customer info',     value: 'Greenline Landscaping · Account #4729844 · CA' },
+    { label: 'Phone agent',       value: 'Dana K · ext. 4421' },
+    { label: 'Steps tried',       value: 'Verified pay schedule; re-ran payroll twice; checked employee status (Terminated).' },
+    { label: 'Customer impact',   value: 'Marcus\'s final cheque required by 05/16 (state final-pay rule).' },
+    { label: 'QBO version',       value: 'QuickBooks Online Payroll Premium · Web' },
+    { label: 'Attachments',       value: 'screenshot of employee profile + payroll preview' },
+  ],
+  invMatch: {
+    id: 'INV-148206',
+    title: 'Terminated employee excluded from scheduled payroll when termination date falls after pay-period start',
+    meta: 'Resolved 03/14/2026 · 11 similar cases · Resolution: edit termination date OR run unscheduled payroll',
+  },
+  analystOpening:
+    "Got it — Greenline is mid-payroll and Marcus's final cheque is the blocker. CA's final-pay rule means we need it processed by Saturday. Two clean paths: (1) ask Dana to have the customer edit Marcus's termination date to on-or-before 04/29 (pay-period start) and re-run, or (2) leave the date and run an unscheduled payroll for Marcus only. Option 2 is safer if the customer's already filed the termination paperwork. Want me to draft the response to Dana?",
+};
+
+$('#case-id').textContent = state.caseId;
+
+/* ---------- step pill helpers ---------- */
+function setStep(n) {
+  state.step = n;
+  $$('.step-pill').forEach(p => {
+    const s = +p.dataset.step;
+    p.classList.toggle('is-done',   s < n);
+    p.classList.toggle('is-active', s === n);
+  });
+}
+
+/* ---------- timing ---------- */
+function fmtSec(ms) { return (ms/1000).toFixed(1) + 's'; }
+
+/* ---------- moment 2: image intake ---------- */
+function showDrop()  { $('#intake-drop').classList.remove('hidden'); $('#intake-cam').classList.add('hidden'); $('#intake-result').classList.add('hidden'); }
+function showCam()   { $('#intake-drop').classList.add('hidden');    $('#intake-cam').classList.remove('hidden'); $('#intake-result').classList.add('hidden'); $('#intake-status').textContent = 'camera open'; }
+function showResult(from='clipboard') {
+  $('#intake-drop').classList.add('hidden');
+  $('#intake-cam').classList.add('hidden');
+  $('#intake-result').classList.remove('hidden');
+  $('#intake-from').textContent = 'from ' + from;
+  $('#intake-status').textContent = 'received';
+}
+
+$('#btn-cam').addEventListener('click', e => { e.preventDefault(); showCam(); });
+$('#cam-cancel').addEventListener('click', e => { e.preventDefault(); showDrop(); $('#intake-status').textContent = 'ready'; });
+$('#cam-capture').addEventListener('click', e => { e.preventDefault(); handleUpload('webcam'); });
+$('#btn-upload').addEventListener('click', e => { e.preventDefault(); handleUpload('upload'); });
+$('#btn-paste').addEventListener('click', e => { e.preventDefault(); handleUpload('clipboard'); });
+$('#intake-drop').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleUpload('upload'); }
+});
+$('#intake-replace')?.addEventListener('click', () => { reset(); showDrop(); });
+
+let parseTimer, triageTimer, invTimer, analystTimer, typeTimer;
+
+function handleUpload(from) {
+  setStep(2);
+  showResult(from);
+  // begin parser
+  setTimeout(runParser, 380);
+}
+
+/* ---------- moment 3: parser ---------- */
+function runParser() {
+  setStep(2);
+  const m = $('#m-parse'); m.classList.remove('hidden'); m.classList.add('fade-in');
+  $('#parse-status').textContent = 'running';
+  $('#parse-statetext').textContent = 'transcribing 9 fields';
+  $('#parse-sd').className = 'sd sd-running';
+
+  // populate skeleton field rows
+  const fields = $('#fields');
+  fields.innerHTML = '';
+  state.parsedFields.forEach((f, i) => {
+    const cls = (i === 8) ? 'field full-span' : 'field';
+    fields.insertAdjacentHTML('beforeend', `
+      <div class="${cls}" data-i="${i}">
+        <div class="field-label">${f.label}</div>
+        <div class="field-value placeholder"><span class="sk" style="width:70%"></span></div>
+      </div>`);
+  });
+
+  // duration counter
+  const t0 = Date.now();
+  state.startedAt = t0;
+  $('#parse-t').textContent = nowStamp();
+  clearInterval(parseTimer);
+  parseTimer = setInterval(() => {
+    $('#parse-dur').textContent = fmtSec(Date.now() - t0);
+  }, 80);
+
+  // fields stream in
+  state.parsedFields.forEach((f, i) => {
+    setTimeout(() => {
+      const el = $(`.field[data-i="${i}"] .field-value`);
+      el.classList.remove('placeholder');
+      el.innerHTML = f.value;
+      el.parentElement.classList.add('fade-in');
+    }, 280 + i * 180);
+  });
+
+  // parser done → fork to triage + INV
+  setTimeout(() => {
+    clearInterval(parseTimer);
+    $('#parse-sd').className = 'sd sd-done';
+    $('#parse-statetext').textContent = '9 fields';
+    $('#parse-status').textContent = 'done';
+    $('#parse-dur').textContent = '2.1s';
+    setStep(3);
+    forkTriageAndInv();
+  }, 2120);
+}
+
+function nowStamp() {
+  const d = new Date();
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/* ---------- moments 4a/4b: triage + INV in parallel ---------- */
+function forkTriageAndInv() {
+  const m = $('#m-triage'); m.classList.remove('hidden'); m.classList.add('fade-in');
+  $('#triage-status').textContent = 'running';
+  $('#triage-t').textContent = nowStamp();
+
+  // triage runs ~3.1s → wins the race
+  triageTimer = setTimeout(arriveTriage, 3100);
+
+  // INV runs ~4.6s → arrives second, as supportive context
+  $('#inv').classList.remove('hidden');
+  invTimer = setTimeout(arriveInv, 4600);
+}
+
+function arriveTriage() {
+  $('#triage-loading').classList.add('hidden');
+  const t = $('#triage-final');
+  t.classList.remove('hidden');
+  t.classList.add('fade-in');
+  $('#triage-status').textContent = 'ready · primary signal';
+
+  // start analyst assembling shortly after triage (does NOT wait for INV)
+  setTimeout(beginAnalystAssembly, 700);
+}
+
+function arriveInv() {
+  $('#inv-sd').className = 'sd sd-done';
+  $('#inv-statetext').textContent = '1 match';
+  $('#inv-dur').textContent = '4.6s';
+  const body = $('#inv-body');
+  body.innerHTML = `
+    <a class="inv-match" href="#">
+      <span class="inv-id">${state.invMatch.id}</span>
+      <span>
+        <div class="inv-title">${state.invMatch.title}</div>
+        <div class="inv-meta">${state.invMatch.meta}</div>
+      </span>
+    </a>`;
+  $('#triage-status').textContent = 'ready · primary signal · 1 prior case';
+}
+
+/* ---------- moments 5 + 6: analyst arrival + chat ---------- */
+function beginAnalystAssembly() {
+  setStep(5);
+  const m = $('#m-analyst'); m.classList.remove('hidden'); m.classList.add('fade-in');
+  $('#analyst-status').textContent = 'assembling context';
+
+  // 1.0s of soft "assembling" then analyst speaks
+  analystTimer = setTimeout(analystSpeaks, 1200);
+}
+
+function analystSpeaks() {
+  setStep(6);
+  $('#analyst-status').textContent = 'in conversation';
+  streamText('#msg-analyst-body', state.analystOpening);
+}
+
+function streamText(sel, text) {
+  const el = $(sel);
+  el.innerHTML = '<span class="typing-cursor"></span>';
+  const cursor = el.querySelector('.typing-cursor');
+  let i = 0;
+  clearInterval(typeTimer);
+  typeTimer = setInterval(() => {
+    i += Math.max(1, Math.round(Math.random() * 3));
+    if (i >= text.length) {
+      el.innerHTML = text;
+      clearInterval(typeTimer);
+      return;
+    }
+    el.innerHTML = text.slice(0, i) + '<span class="typing-cursor"></span>';
+  }, 22);
+}
+
+/* ---------- compose reply (extends the conversation a bit) ---------- */
+$('#compose').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = $('#compose-input');
+  const txt = input.value.trim();
+  if (!txt) return;
+  input.value = '';
+  appendOp(txt);
+  setTimeout(() => appendAnalystReply(txt), 600);
+});
+
+function appendOp(text) {
+  const chat = $('#chat');
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="msg fade-in">
+      <div class="msg-av op" aria-hidden="true">You</div>
+      <div>
+        <div class="msg-name">Operator</div>
+        <div class="msg-bubble">${escapeHTML(text)}</div>
+      </div>
+    </div>`);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function appendAnalystReply(prompt) {
+  const chat = $('#chat');
+  const id = 'r' + Date.now();
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="msg fade-in">
+      <div class="msg-av an" aria-hidden="true">R</div>
+      <div>
+        <div class="msg-name">Riley</div>
+        <div class="msg-bubble" id="${id}"></div>
+      </div>
+    </div>`);
+  const reply = canned(prompt);
+  streamText('#' + id, reply);
+}
+
+function canned(p) {
+  const lower = p.toLowerCase();
+  if (/draft|response|reply|template/.test(lower)) {
+    return 'Drafting for Dana: "Hi — for Greenline\'s payroll: please ask the customer to either (a) edit Marcus\'s termination date to on-or-before 04/29 then re-run scheduled payroll, or (b) leave the date and run an unscheduled payroll for Marcus only. Direct-deposit cut-off is 5pm PT today. Reach back if you hit anything weird in the preview step." Want me to send it?';
+  }
+  if (/deposit|cut.?off|deadline|time/.test(lower)) {
+    return 'Direct deposit cut-off for this customer is 5:00pm PT today (intuit-batch window). If we miss it, the cheque becomes a paper-cheque print job and CA\'s 72-hour final-pay clock still ticks from termination date. Worth flagging to Dana up front.';
+  }
+  if (/option 1|edit|termination/.test(lower)) {
+    return 'Path 1 — edit termination date: Employees → Marcus T → Employment → Termination date → set to 04/29. Then Payroll → Run payroll → Marcus reappears in the list. The downside is they\'ll need to update their HR system afterward so the dates match.';
+  }
+  if (/option 2|unscheduled/.test(lower)) {
+    return 'Path 2 — unscheduled payroll: Payroll → Run payroll → "Unscheduled" → select Marcus only → enter hours and final-pay items (PTO payout if applicable per CA). This bypasses the date conflict entirely.';
+  }
+  return 'Sure — what specifically? I can write the message to Dana, walk through either path step-by-step, or pull the CA final-pay rule text if the customer pushes back.';
+}
+
+function escapeHTML(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------- demo bar ---------- */
+function clearAllTimers() {
+  clearInterval(parseTimer); clearInterval(typeTimer);
+  clearTimeout(triageTimer); clearTimeout(invTimer); clearTimeout(analystTimer);
+}
+
+function reset() {
+  clearAllTimers();
+  setStep(1);
+  // hide moments after intake
+  ['#m-parse','#m-triage','#m-analyst'].forEach(s => $(s).classList.add('hidden'));
+  // reset triage
+  $('#triage-loading').classList.remove('hidden');
+  $('#triage-final').classList.add('hidden');
+  $('#inv').classList.add('hidden');
+  $('#inv-sd').className = 'sd sd-running';
+  $('#inv-statetext').textContent = 'searching';
+  $('#inv-dur').textContent = '—';
+  $('#inv-body').innerHTML = `<div style="display:flex;gap:10px;align-items:center;">
+      <span class="sk" style="width:120px;height:14px"></span>
+      <span class="sk" style="width:60%;height:14px"></span>
+    </div>`;
+  // reset intake
+  showDrop();
+  $('#intake-status').textContent = 'ready';
+  // reset parser bits
+  $('#parse-status').textContent = 'queued';
+  $('#parse-statetext').textContent = 'reading screenshot';
+  $('#parse-dur').textContent = '0.0s';
+  $('#parse-t').textContent = '—';
+  // reset triage status
+  $('#triage-status').textContent = 'queued';
+  $('#triage-t').textContent = '—';
+  // reset analyst
+  $('#msg-analyst-body').innerHTML = '';
+  $('#analyst-status').textContent = 'assembling context';
+  // remove extra chat messages
+  $$('#chat > .msg').forEach((el, i) => { if (i > 0) el.remove(); });
+}
+
+function autoPlay() {
+  reset();
+  setStep(1);
+  setTimeout(() => handleUpload('clipboard'), 700);
+}
+
+$$('.demo-bar button').forEach(b => {
+  b.addEventListener('click', () => {
+    $$('.demo-bar button').forEach(x => x.classList.remove('is-current'));
+    b.classList.add('is-current');
+    if (b.id === 'play-btn') { autoPlay(); return; }
+    const j = b.dataset.jump;
+    if (j === 'reset') reset();
+    else if (j === 'upload') { reset(); }
+    else if (j === 'parse')   { reset(); setTimeout(() => handleUpload('clipboard'), 200); }
+    else if (j === 'triage')  { reset(); setTimeout(() => handleUpload('clipboard'), 100); /* will naturally proceed */ }
+    else if (j === 'analyst') { reset(); setTimeout(() => handleUpload('clipboard'), 50); }
+  });
+});
+
+/* ---------- init ---------- */
+setStep(1);
+// kick off auto-play after a short beat so the operator can see the calm start
+setTimeout(autoPlay, 1000);
+
+</script>
+</body>
+</html>

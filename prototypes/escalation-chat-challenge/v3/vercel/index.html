@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Vercel V3 — Escalation Console</title>
+<!--
+================================================================================
+DESIGNER: vercel  ·  CHALLENGE V3  ·  Escalation Workflow Console
+================================================================================
+
+LAYOUTS CONSIDERED (3+ structurally different):
+
+  1. PERSISTENT-RAIL + ORBITED CANVAS (chosen)
+     Left rail = workflow chassis (escalation active, others stubbed).
+     Center canvas = main analyst conversation, full-bleed.
+     Right "orbit" = triage card (persistent, primary signal) + INV card
+     stacked so both stay in view at all viewports >= 1280px.
+     Parser collapses to a 1-line chip strip across the top once it commits.
+
+  2. FOCAL-CENTER WITH ORBITING AGENTS (rejected)
+     Analyst portrait in geometric center; parser/triage/INV orbit at 120deg.
+     Beautiful in still frames, breaks down once chat streams 5+ turns —
+     orbiting cards either occlude chat or shrink to uselessness.
+
+  3. SECTORED QUADRANTS 2x2 (rejected)
+     Equal weight to parser/INV/triage/chat. Violates Directive C — parser
+     does NOT deserve a quarter of the screen once triage has committed.
+     Also: equal weight = no hierarchy = no calm.
+
+  4. LAYERED Z-AXIS (PIP) (rejected as primary, kept as embellishment)
+     Floating peek panels for INV detail. Cool but disorienting as the
+     governing structure. Demoted to the "INV peek" feature.
+
+CHOSEN: Persistent left rail (chassis) + center canvas (analyst) + right
+column (triage always-on, INV docked beneath). No scroll on the working
+surface at any width >= 1280px. Triage cannot be hidden — it is the column,
+not a card inside a scroll region. This shape hosts any future workflow:
+the rail swaps the active workflow, the canvas becomes that workflow's
+primary surface, the right column becomes whatever that workflow's
+"persistent reference" is.
+
+UNIQUE UNEXPECTED FEATURES (>=3 invented for this brief):
+
+  F1. TRIAGE LOCK-RAIL — once triage commits, the triage card becomes a
+      vertical "rail" pinned to the right edge with category/severity/next-step
+      visible at all times AND a tiny progress dot showing how much of the
+      analyst's reply is still "consistent" with triage. If the analyst's
+      advice drifts from triage (e.g. category mismatch), the rail glows
+      amber and a one-click "Re-triage" affordance appears. No other tool
+      does this — it makes triage a live contract, not a stale label.
+
+  F2. INV PEEK ON HOVER (no click, no nav) — hovering any INV-XXXXXX token
+      anywhere on the page (chat, triage, parsed fields) opens a layered
+      peek card with that case's resolution summary + outcome chip. Cursor
+      leaves, peek closes. Operator never loses their place.
+
+  F3. SCRUB-BACK TIMELINE — a slim horizontal "case ribbon" at the very
+      bottom shows each agent's contribution as a colored segment. Operator
+      can hover any segment to dim the rest of the UI and spotlight what
+      that agent contributed (e.g. hover Parser segment -> the 9 parsed
+      fields fade up over the chat). Replaces the "scroll up to see what
+      happened" pattern entirely.
+
+  F4. WEBCAM AS FULL MODAL with auto-derotate (EXIF), cancel-back-to-upload,
+      torch toggle, edge-detection overlay that highlights the screenshot
+      rectangle in the operator's hand, and a one-tap "snap & parse" shortcut.
+      Mobile-first controls even on desktop because phone-in-hand is the
+      real input device.
+
+  F5. ANALYST PRESENCE BAR — the main analyst (Mara K.) has a thin
+      always-visible identity strip with avatar, current action verb
+      ("reading triage", "checking INV-147914", "drafting reply"), and a
+      heartbeat dot. Makes the analyst a person, not a model.
+
+EVERY ELEMENT JUSTIFICATION (internal — each element on the page exists
+because it accelerates the operator's next decision; if it doesn't, it's
+cut. The workflow rail accelerates "what am I working on"; triage rail
+accelerates "what is this case"; INV dock accelerates "have we seen this";
+analyst strip accelerates "is the expert here yet"; ribbon accelerates
+"what just happened"; webcam accelerates "I have a phone and a screenshot
+on my desk RIGHT NOW.")
+================================================================================
+-->
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111; --panel-2:#161616; --line:#262626;
+    --ink:#ededed; --ink-2:#a1a1a1; --ink-3:#737373;
+    --accent:#fff; --ok:#22c55e; --warn:#f59e0b; --crit:#ef4444; --info:#3b82f6;
+    --triage:#a78bfa; --parser:#60a5fa; --inv:#34d399; --analyst:#f472b6;
+    --radius:10px; --radius-sm:6px;
+    --font:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,sans-serif;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+  /* ============== SHELL: rail | canvas | persistent triage column ========== */
+  .shell{display:grid;grid-template-columns:220px 1fr 320px;grid-template-rows:48px 1fr 32px;height:100vh;width:100vw}
+  .topbar{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .topbar .logo{width:22px;height:22px;background:#fff;clip-path:polygon(50% 0,100% 100%,0 100%)}
+  .topbar h1{font-size:13px;margin:0;font-weight:600;letter-spacing:-.01em}
+  .topbar .crumbs{color:var(--ink-3);font-size:12px}
+  .topbar .crumbs b{color:var(--ink-2);font-weight:500}
+  .topbar .spacer{flex:1}
+  .topbar .kbd{font-family:var(--mono);font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+
+  /* ============== LEFT RAIL — workflow chassis ============================= */
+  .rail{border-right:1px solid var(--line);background:var(--panel);padding:14px 10px;display:flex;flex-direction:column;gap:18px;overflow:hidden}
+  .rail-section h4{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin:0 8px 8px}
+  .rail-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--radius-sm);color:var(--ink-2);font-size:13px;cursor:pointer;border:1px solid transparent}
+  .rail-item:hover{background:var(--panel-2);color:var(--ink)}
+  .rail-item.active{background:#1c1c1c;border-color:var(--line);color:var(--ink)}
+  .rail-item .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3)}
+  .rail-item.active .dot{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .rail-item.stub{opacity:.55;cursor:not-allowed}
+  .rail-item.stub .badge{margin-left:auto;font-size:9px;letter-spacing:.06em;color:var(--ink-3);border:1px solid var(--line);border-radius:3px;padding:1px 5px;text-transform:uppercase}
+  .rail-foot{margin-top:auto;display:flex;align-items:center;gap:8px;padding:8px;border-top:1px solid var(--line)}
+  .rail-foot .who{display:flex;flex-direction:column}
+  .rail-foot .who small{color:var(--ink-3);font-size:11px}
+  .avatar{width:24px;height:24px;border-radius:50%;background:linear-gradient(135deg,#f472b6,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#000}
+
+  /* ============== CANVAS ===================================================*/
+  .canvas{display:flex;flex-direction:column;min-width:0;background:#0a0a0a;position:relative}
+  .parser-strip{display:flex;align-items:center;gap:8px;padding:10px 16px;border-bottom:1px solid var(--line);background:#0d0d0d;flex-wrap:wrap;min-height:48px}
+  .parser-strip .label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+  .pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink-2);padding:3px 8px;border-radius:999px;font-size:11px;font-family:var(--mono);white-space:nowrap}
+  .pill b{color:var(--ink);font-weight:500}
+  .pill.parser-dot::before{content:"";width:5px;height:5px;border-radius:50%;background:var(--parser)}
+  .parser-strip .expand{margin-left:auto;color:var(--ink-3);font-size:11px;border:1px solid var(--line);padding:3px 8px;border-radius:4px}
+  .parser-strip .expand:hover{color:var(--ink);background:var(--panel-2)}
+  .parser-progress{flex:1;max-width:240px;height:3px;background:#1a1a1a;border-radius:2px;overflow:hidden;margin:0 8px}
+  .parser-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--parser),#a5d4ff);transition:width .15s linear}
+  .pill.arrive{animation:popIn .35s ease both}
+  @keyframes popIn{from{opacity:0;transform:translateY(-3px) scale(.95)}to{opacity:1;transform:translateY(0) scale(1)}}
+  .dot-anim{display:inline-block;animation:dots 1.2s steps(4) infinite;font-family:var(--mono)}
+  @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}100%{content:""}}
+  .parser-strip.collapsed .label{color:var(--ink-3);font-size:10px;letter-spacing:.08em;text-transform:uppercase}
+  .parser-strip.collapsed .summary-pill{display:inline-flex}
+  .summary-pill{display:none;align-items:center;gap:6px;background:var(--panel-2);border:1px solid var(--line);padding:3px 10px;border-radius:999px;font-size:11.5px;color:var(--ink-2)}
+  .summary-pill b{color:var(--ink);font-weight:500}
+  .summary-pill .more{color:var(--parser);font-size:10.5px;margin-left:6px;cursor:pointer}
+
+  /* Triage pre-commit shimmer */
+  .triage.pending{opacity:.55}
+  .triage.pending h3::before{background:var(--ink-3);box-shadow:none;animation:thinking 1s ease-in-out infinite}
+  @keyframes thinking{0%,100%{opacity:.35}50%{opacity:1}}
+  .triage h3 .pending-tag{margin-left:6px;color:var(--ink-3);font-weight:500;font-size:10px;letter-spacing:.04em;text-transform:none}
+  .triage.drift{background:linear-gradient(180deg,#231408 0%,#111 100%)!important}
+  .triage.drift .consistency .bar i{background:var(--warn)!important}
+  .retriage{display:none;margin-top:8px;padding:6px 10px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);border-radius:6px;color:var(--warn);font-size:11px;cursor:pointer;width:100%;text-align:center}
+  .triage.drift .retriage{display:block}
+
+  /* INV pending state */
+  .inv-dock.pending .inv-list{opacity:.45}
+  .inv-skeleton{padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);margin-bottom:6px}
+  .inv-skeleton .ln{height:9px;background:#1f1f1f;border-radius:3px;margin:3px 0;overflow:hidden;position:relative}
+  .inv-skeleton .ln::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,#2a2a2a,transparent);animation:shimmer 1.2s infinite}
+  @keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+
+  /* Analyst presence bar (Feature F5) */
+  .analyst-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:linear-gradient(90deg,#120e14 0%,#0a0a0a 60%)}
+  .analyst-bar .av{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#f472b6,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#000;box-shadow:0 0 0 2px #0a0a0a, 0 0 0 3px var(--analyst)}
+  .analyst-bar .name{font-weight:600;color:var(--ink);font-size:13px}
+  .analyst-bar .role{color:var(--ink-3);font-size:11px}
+  .analyst-bar .verb{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--ink-2);font-size:12px}
+  .heartbeat{width:7px;height:7px;border-radius:50%;background:var(--analyst);animation:pulse 1.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.35;transform:scale(.85)}50%{opacity:1;transform:scale(1.15)}}
+
+  /* Chat */
+  .chat{flex:1;overflow-y:auto;padding:16px 18px 18px;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
+  .chat::-webkit-scrollbar{width:8px}
+  .chat::-webkit-scrollbar-thumb{background:#222;border-radius:4px}
+  .turn{display:flex;gap:10px;max-width:760px}
+  .turn .who{width:28px;height:28px;border-radius:50%;flex:0 0 28px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#000}
+  .turn.analyst .who{background:linear-gradient(135deg,#f472b6,#a78bfa)}
+  .turn.op .who{background:#fff;color:#000}
+  .turn .body{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;color:var(--ink);font-size:13.5px;line-height:1.55}
+  .turn.op .body{background:#1a1a1a}
+  .turn .meta{font-size:10.5px;color:var(--ink-3);margin-bottom:4px;letter-spacing:.02em}
+  .turn .meta b{color:var(--ink-2);font-weight:600}
+  .inv-token{color:var(--inv);border-bottom:1px dashed rgba(52,211,153,.4);cursor:help;font-family:var(--mono);font-size:12px;padding:0 2px;border-radius:2px}
+  .inv-token:hover{background:rgba(52,211,153,.08)}
+  .cursor{display:inline-block;width:7px;height:14px;background:var(--ink);margin-left:2px;vertical-align:text-bottom;animation:blink .9s steps(1) infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* Composer */
+  .composer{border-top:1px solid var(--line);padding:10px 16px;background:#0d0d0d;display:flex;gap:10px;align-items:flex-end}
+  .composer textarea{flex:1;background:#111;border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:9px 11px;font:inherit;resize:none;min-height:38px;max-height:120px;outline:none}
+  .composer textarea:focus{border-color:#404040}
+  .composer .send{background:#fff;color:#000;padding:8px 14px;border-radius:8px;font-weight:600;font-size:12px}
+
+  /* ============== RIGHT COLUMN — TRIAGE RAIL + INV DOCK ==================== */
+  .rcol{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+  .triage{padding:14px 14px 12px;border-bottom:1px solid var(--line);position:relative}
+  .triage.committed{background:linear-gradient(180deg,#171022 0%,#111 100%)}
+  .triage h3{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--triage);margin:0 0 10px;display:flex;align-items:center;gap:6px}
+  .triage h3::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--triage);box-shadow:0 0 6px var(--triage)}
+  .triage .row{display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px dashed #1f1f1f;font-size:12px}
+  .triage .row:last-of-type{border-bottom:0}
+  .triage .row .k{color:var(--ink-3);font-size:11px;letter-spacing:.02em}
+  .triage .row .v{color:var(--ink);font-weight:500;text-align:right}
+  .sev{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;font-family:var(--mono)}
+  .sev.P2{background:rgba(245,158,11,.12);color:var(--warn);border:1px solid rgba(245,158,11,.3)}
+  .triage .next{margin-top:10px;padding:10px;background:#0a0a0a;border:1px solid var(--line);border-radius:8px;color:var(--ink);font-size:12.5px;line-height:1.5}
+  .triage .next b{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:4px;font-weight:600}
+  .triage .consistency{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--ink-3)}
+  .triage .consistency .bar{flex:1;height:3px;background:#1a1a1a;border-radius:2px;overflow:hidden}
+  .triage .consistency .bar i{display:block;height:100%;background:var(--ok);width:96%;transition:width .3s}
+  .triage .who-built{font-size:10px;color:var(--ink-3);margin-top:8px;display:flex;align-items:center;gap:6px}
+  .triage .who-built .ch{width:14px;height:14px;border-radius:50%;background:var(--triage);display:inline-flex;align-items:center;justify-content:center;color:#000;font-size:9px;font-weight:700}
+
+  .inv-dock{flex:1;padding:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0}
+  .inv-dock h3{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--inv);margin:0 0 10px;display:flex;align-items:center;gap:6px}
+  .inv-dock h3::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--inv);box-shadow:0 0 6px var(--inv)}
+  .inv-list{display:flex;flex-direction:column;gap:6px;overflow-y:auto;min-height:0;padding-right:4px}
+  .inv-list::-webkit-scrollbar{width:6px}
+  .inv-list::-webkit-scrollbar-thumb{background:#222;border-radius:3px}
+  .inv-item{padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel-2);cursor:pointer;transition:.15s}
+  .inv-item:hover{border-color:#3b3b3b;background:#1c1c1c}
+  .inv-item .head{display:flex;justify-content:space-between;align-items:center;font-family:var(--mono);font-size:12px;color:var(--inv)}
+  .inv-item .head .score{color:var(--ink-3);font-size:10.5px;letter-spacing:.04em}
+  .inv-item .desc{color:var(--ink-2);font-size:11.5px;margin-top:3px;line-height:1.4}
+  .inv-item .outcome{margin-top:5px;font-size:10px;color:var(--ok);text-transform:uppercase;letter-spacing:.06em}
+
+  /* Ribbon timeline (F3) */
+  .ribbon{grid-column:1/-1;display:flex;align-items:center;border-top:1px solid var(--line);background:#0d0d0d;padding:0 12px;gap:8px;font-size:10.5px;color:var(--ink-3)}
+  .ribbon .segs{flex:1;display:flex;gap:2px;height:18px;align-items:center}
+  .ribbon .seg{height:6px;border-radius:2px;flex:1;background:var(--panel-2);position:relative;cursor:pointer;transition:.15s}
+  .ribbon .seg[data-agent=parser]{background:var(--parser)}
+  .ribbon .seg[data-agent=inv]{background:var(--inv)}
+  .ribbon .seg[data-agent=triage]{background:var(--triage)}
+  .ribbon .seg[data-agent=analyst]{background:var(--analyst)}
+  .ribbon .seg:hover{height:10px;box-shadow:0 0 8px currentColor}
+  .ribbon .now{font-family:var(--mono);color:var(--ink-2)}
+
+  /* ============== PEEK CARDS (F2 INV peek) ================================= */
+  .peek{position:fixed;z-index:50;background:#171717;border:1px solid #2a2a2a;border-radius:10px;padding:12px;width:280px;box-shadow:0 18px 50px rgba(0,0,0,.55);pointer-events:none;opacity:0;transform:translateY(4px);transition:.12s}
+  .peek.show{opacity:1;transform:translateY(0)}
+  .peek h5{margin:0 0 6px;font-family:var(--mono);color:var(--inv);font-size:12px}
+  .peek p{margin:0;color:var(--ink-2);font-size:11.5px;line-height:1.45}
+  .peek .chip{display:inline-block;margin-top:8px;padding:2px 7px;border-radius:999px;font-size:10px;border:1px solid var(--line);color:var(--ink-2)}
+  .peek .chip.ok{background:rgba(34,197,94,.1);color:var(--ok);border-color:rgba(34,197,94,.3)}
+
+  /* ============== WEBCAM MODAL (F4) ======================================== */
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:100;padding:24px}
+  .modal.show{display:flex}
+  .cam{width:min(720px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;display:flex;flex-direction:column}
+  .cam-head{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line);gap:10px}
+  .cam-head h3{margin:0;font-size:13px;font-weight:600}
+  .cam-head .back{padding:5px 10px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--ink-2)}
+  .cam-head .back:hover{background:var(--panel-2);color:var(--ink)}
+  .cam-head .spacer{flex:1}
+  .cam-head .close{font-size:18px;color:var(--ink-3);padding:0 6px}
+  .cam-stage{position:relative;background:#000;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;overflow:hidden}
+  .cam-stage .view{width:100%;height:100%;background:repeating-linear-gradient(45deg,#111 0 10px,#0a0a0a 10px 20px);display:flex;align-items:center;justify-content:center;color:var(--ink-3);font-size:11px;letter-spacing:.04em;text-transform:uppercase;transition:transform .35s ease}
+  .cam-stage .frame{position:absolute;inset:14% 18%;border:2px dashed rgba(96,165,250,.65);border-radius:8px;pointer-events:none}
+  .cam-stage .frame::after{content:"screenshot detected · auto-derotate ready";position:absolute;left:0;right:0;bottom:-22px;text-align:center;font-size:10.5px;color:var(--parser);letter-spacing:.06em;text-transform:uppercase}
+  .cam-controls{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#0d0d0d;border-top:1px solid var(--line)}
+  .cam-controls .ctl{padding:7px 12px;border:1px solid var(--line);border-radius:6px;color:var(--ink-2);font-size:12px}
+  .cam-controls .ctl:hover{color:var(--ink);background:var(--panel-2)}
+  .cam-controls .ctl.on{color:var(--warn);border-color:rgba(245,158,11,.5)}
+  .cam-controls .shutter{margin:0 auto;width:54px;height:54px;border-radius:50%;background:#fff;color:#000;font-weight:700;display:flex;align-items:center;justify-content:center;border:4px solid #2a2a2a;font-size:11px}
+  .cam-controls .shutter:hover{background:#eee}
+
+  /* ============== TOAST ==================================================== */
+  .toast{position:fixed;left:50%;bottom:60px;transform:translateX(-50%) translateY(8px);background:#171717;border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--ink-2);opacity:0;transition:.2s;pointer-events:none;z-index:200}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* Tiny "ribbon spotlight" overlay */
+  .spotlight{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;display:none;align-items:center;justify-content:center;pointer-events:none}
+  .spotlight.show{display:flex}
+  .spotlight .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-width:520px;color:var(--ink);font-size:12.5px;line-height:1.55;pointer-events:auto}
+  .spotlight .card h4{margin:0 0 10px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    *{animation:none!important;transition:none!important}
+  }
+
+  /* Responsive guard */
+  @media (max-width:1279px){
+    .shell{grid-template-columns:64px 1fr 280px}
+    .rail-item span.lbl, .rail-section h4, .rail-foot .who{display:none}
+    .rail-item{justify-content:center;padding:8px 0}
+  }
+</style>
+</head>
+<body>
+<div class="shell" id="shell">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="logo" aria-hidden="true"></div>
+    <h1>Escalation Console</h1>
+    <span class="crumbs">Workflow · <b>QBO Escalation</b> · Case #4471</span>
+    <span class="spacer"></span>
+    <span class="kbd">⌘K</span>
+    <button class="kbd" id="webcamBtn" title="Open webcam intake">📷 Webcam</button>
+  </header>
+
+  <!-- LEFT RAIL — CHASSIS -->
+  <aside class="rail">
+    <div class="rail-section">
+      <h4>Workflows</h4>
+      <div class="rail-item active"><span class="dot"></span><span class="lbl">QBO Escalation</span></div>
+      <div class="rail-item stub"><span class="dot"></span><span class="lbl">INV Lookup</span><span class="badge">soon</span></div>
+      <div class="rail-item stub"><span class="dot"></span><span class="lbl">Trip Planner</span><span class="badge">soon</span></div>
+      <div class="rail-item stub"><span class="dot"></span><span class="lbl">Email Composer</span><span class="badge">soon</span></div>
+      <div class="rail-item stub"><span class="dot"></span><span class="lbl">+ New Workflow</span></div>
+    </div>
+    <div class="rail-section">
+      <h4>This Case</h4>
+      <div class="rail-item"><span class="dot" style="background:var(--parser)"></span><span class="lbl">Parser</span></div>
+      <div class="rail-item"><span class="dot" style="background:var(--inv)"></span><span class="lbl">INV Search</span></div>
+      <div class="rail-item"><span class="dot" style="background:var(--triage)"></span><span class="lbl">Triage</span></div>
+      <div class="rail-item"><span class="dot" style="background:var(--analyst)"></span><span class="lbl">Analyst · Mara K.</span></div>
+    </div>
+    <div class="rail-foot">
+      <div class="avatar">OK</div>
+      <div class="who"><span>Olivia K.</span><small>Operator · Tier 2</small></div>
+    </div>
+  </aside>
+
+  <!-- CANVAS -->
+  <main class="canvas">
+    <!-- Parser strip: starts in "running" state, fills chips as fields land, collapses to 1-line summary post-triage -->
+    <div class="parser-strip" id="parserStrip">
+      <span class="label" id="parserLabel">Parsing<span class="dot-anim">…</span></span>
+      <span class="parser-progress" id="parserProgress" aria-hidden="true"><i></i></span>
+      <button class="expand" id="expandParser" style="display:none">+3 fields</button>
+      <button class="expand" id="restartDemo" title="Replay the whole arrival sequence">↻ Replay</button>
+    </div>
+
+    <!-- Analyst presence bar (F5) -->
+    <div class="analyst-bar">
+      <div class="av">MK</div>
+      <div>
+        <div class="name">Mara K.</div>
+        <div class="role">Senior Escalation Analyst · 6yrs payroll</div>
+      </div>
+      <div class="verb"><span id="analystVerb">reading triage…</span><span class="heartbeat"></span></div>
+    </div>
+
+    <!-- Chat -->
+    <section class="chat" id="chat"></section>
+
+    <!-- Composer -->
+    <form class="composer" id="composer" onsubmit="return false">
+      <textarea id="composerInput" placeholder="Reply to Mara, or type / for commands…"></textarea>
+      <button class="send">Send</button>
+    </form>
+  </main>
+
+  <!-- RIGHT COLUMN — TRIAGE (always visible) + INV DOCK -->
+  <aside class="rcol">
+    <div class="triage pending" id="triage">
+      <h3>Triage <span class="pending-tag" id="triagePendingTag">· thinking</span> <span class="who-built" style="margin-left:auto" id="triageWho"><span class="ch">T</span>Triage Agent</span></h3>
+      <div id="triageBody" style="opacity:.35">
+        <div class="row"><span class="k">Category</span><span class="v">—</span></div>
+        <div class="row"><span class="k">Severity</span><span class="v">—</span></div>
+        <div class="row"><span class="k">Confidence</span><span class="v">—</span></div>
+        <div class="row"><span class="k">Fast read</span><span class="v">—</span></div>
+        <div class="next"><b>Immediate next step</b>—</div>
+      </div>
+      <div class="consistency" title="How well the analyst's reply still matches triage" style="display:none" id="consistencyRow">
+        <span>Reply consistency</span>
+        <span class="bar"><i id="consBar" style="width:96%"></i></span>
+        <span id="consVal">96%</span>
+      </div>
+      <button class="retriage" id="retriageBtn">↻ Re-triage (drift detected)</button>
+    </div>
+    <div class="inv-dock pending" id="invDock">
+      <h3>Similar INV cases <span style="margin-left:auto;color:var(--ink-3);font-weight:500;font-size:10px;letter-spacing:.04em;text-transform:none" id="invStatus">searching…</span></h3>
+      <div class="inv-list" id="invList" style="display:none">
+        <div class="inv-item" data-inv="INV-147914">
+          <div class="head"><span>INV-147914</span><span class="score">match 0.92</span></div>
+          <div class="desc">QBO Plus · payroll DD rejected · NOC code R03 · resolved by re-verifying routing in Bank settings.</div>
+          <div class="outcome">resolved · 1 call</div>
+        </div>
+        <div class="inv-item" data-inv="INV-146220">
+          <div class="head"><span>INV-146220</span><span class="score">match 0.81</span></div>
+          <div class="desc">Payroll batch rejected after bank merger · required updated routing + DDA re-auth.</div>
+          <div class="outcome">resolved · 2 calls</div>
+        </div>
+        <div class="inv-item" data-inv="INV-144087">
+          <div class="head"><span>INV-144087</span><span class="score">match 0.74</span></div>
+          <div class="desc">PS107 on first payroll of new entity · DD agreement missing signature.</div>
+          <div class="outcome">resolved · escalated</div>
+        </div>
+        <div class="inv-item" data-inv="INV-141955">
+          <div class="head"><span>INV-141955</span><span class="score">match 0.68</span></div>
+          <div class="desc">Caller routing # transposed by 2 digits · resolved in-call.</div>
+          <div class="outcome">resolved · 1 call</div>
+        </div>
+      </div>
+      <div id="invSkeletons">
+        <div class="inv-skeleton"><div class="ln" style="width:60%"></div><div class="ln" style="width:90%"></div></div>
+        <div class="inv-skeleton"><div class="ln" style="width:55%"></div><div class="ln" style="width:80%"></div></div>
+        <div class="inv-skeleton"><div class="ln" style="width:50%"></div><div class="ln" style="width:75%"></div></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- RIBBON / SCRUB-BACK TIMELINE (F3) -->
+  <footer class="ribbon">
+    <span class="now" id="ribbonClock">00:02:14</span>
+    <div class="segs" id="ribbonSegs"></div>
+    <span>hover to scrub · F1 keyboard</span>
+  </footer>
+</div>
+
+<!-- Peek card (F2) -->
+<div class="peek" id="peek" role="tooltip">
+  <h5 id="peekTitle">INV-147914</h5>
+  <p id="peekBody">QBO Plus · payroll DD rejected · NOC code R03 · resolved by re-verifying routing in Bank settings.</p>
+  <span class="chip ok">resolved · 1 call</span>
+</div>
+
+<!-- Spotlight overlay (F3 detail) -->
+<div class="spotlight" id="spotlight">
+  <div class="card">
+    <h4 id="spotTitle">Parser contribution</h4>
+    <div id="spotBody">9 fields transcribed in 4.1s · 1 low-confidence field flagged for confirmation.</div>
+  </div>
+</div>
+
+<!-- WEBCAM MODAL (F4) -->
+<div class="modal" id="webcamModal" role="dialog" aria-label="Webcam intake">
+  <div class="cam">
+    <div class="cam-head">
+      <button class="back" id="camBack">← Back to upload</button>
+      <div class="spacer"></div>
+      <h3>Capture screenshot</h3>
+      <div class="spacer"></div>
+      <button class="close" id="camClose" aria-label="Close">✕</button>
+    </div>
+    <div class="cam-stage">
+      <div class="view" id="camView">camera preview · auto-derotate on</div>
+      <div class="frame"></div>
+    </div>
+    <div class="cam-controls">
+      <button class="ctl" id="ctlRotate">⟳ Rotate</button>
+      <button class="ctl" id="ctlTorch">🔦 Torch</button>
+      <button class="ctl" id="ctlGrid">⊞ Grid</button>
+      <button class="shutter" id="camShutter">SNAP</button>
+      <button class="ctl" id="ctlMirror">↔ Mirror</button>
+      <button class="ctl" id="ctlAuto">Auto-derotate: ON</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+(()=>{
+  // ============== chat simulation ==========================================
+  const chat = document.getElementById('chat');
+  const verb = document.getElementById('analystVerb');
+  const composer = document.getElementById('composer');
+  const composerInput = document.getElementById('composerInput');
+
+  function el(tag, cls, html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!=null)e.innerHTML=html;return e}
+  function linkifyInv(text){
+    return text.replace(/INV-(\d{6})/g, '<span class="inv-token" data-inv="INV-$1">INV-$1</span>');
+  }
+  function addTurn({who='analyst', name='Mara K.', initials='MK', text='', meta=''}){
+    const t = el('div','turn '+who);
+    t.appendChild(el('div','who',initials));
+    const body = el('div','');
+    body.appendChild(el('div','meta',`<b>${name}</b> · ${meta||new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`));
+    const b = el('div','body','');
+    body.appendChild(b);
+    t.appendChild(body);
+    chat.appendChild(t);
+    chat.scrollTop = chat.scrollHeight;
+    return b;
+  }
+  function streamInto(node, text, speed=14){
+    return new Promise(res=>{
+      let i=0; node.innerHTML='<span class="cursor"></span>';
+      const tick=()=>{ if(i<=text.length){
+        node.innerHTML = linkifyInv(text.slice(0,i))+'<span class="cursor"></span>';
+        chat.scrollTop=chat.scrollHeight; i+=2; setTimeout(tick,speed);
+      } else { node.innerHTML = linkifyInv(text); res(); }};
+      tick();
+    });
+  }
+
+  function wait(ms){return new Promise(r=>setTimeout(r,ms))}
+
+  // ---- ribbon segs ----
+  const ribbonSegs = document.getElementById('ribbonSegs');
+  function ribbonAdd(agent,label){
+    const s = el('div','seg'); s.dataset.agent=agent; s.dataset.label=label;
+    s.style.opacity='0'; ribbonSegs.appendChild(s);
+    requestAnimationFrame(()=>{s.style.transition='opacity .4s';s.style.opacity='1'});
+  }
+
+  // ---- parser progress + chip arrival ----
+  const parserStrip = document.getElementById('parserStrip');
+  const parserLabel = document.getElementById('parserLabel');
+  const parserProgress = document.getElementById('parserProgress');
+  const PARSED = [
+    {k:'Caller', v:'Sarah Mendel'},
+    {k:'Realm', v:'1932-0048'},
+    {k:'Product', v:'QBO Plus'},
+    {k:'Issue', v:'Payroll DD failed'},
+    {k:'Error', v:'PS107'},
+    {k:'Last login', v:'3d ago'},
+    {k:'Plan', v:'Plus'},
+    {k:'Subscription', v:'active'},
+    {k:'Last error', v:'2h ago'},
+  ];
+  async function runParser(){
+    const bar = parserProgress.querySelector('i');
+    for(let i=0;i<PARSED.length;i++){
+      await wait(280 + Math.random()*180);
+      const f = PARSED[i];
+      const pill = el('span','pill parser-dot arrive'); pill.innerHTML = `${f.k} <b>${f.v}</b>`;
+      parserStrip.insertBefore(pill, parserProgress);
+      bar.style.width = ((i+1)/PARSED.length*100)+'%';
+    }
+    await wait(220);
+    parserLabel.innerHTML = 'Parsed';
+    parserProgress.style.display='none';
+    ribbonAdd('parser','Parser transcribed 9 fields in '+(2.8+Math.random()*0.6).toFixed(1)+'s');
+  }
+
+  async function collapseParser(){
+    // post-triage: parser collapses to a one-line summary pill + +N more
+    const pills = parserStrip.querySelectorAll('.pill');
+    pills.forEach(p=>p.remove());
+    parserLabel.innerHTML = 'Parsed';
+    parserStrip.classList.add('collapsed');
+    const summary = el('span','summary-pill');
+    summary.innerHTML = `<b>Sarah Mendel</b> · QBO Plus · <b>PS107</b> · Payroll DD failed <span class="more" id="expandSummary">+6 fields</span>`;
+    parserStrip.insertBefore(summary, document.getElementById('expandParser'));
+    document.getElementById('expandParser').style.display='none';
+    document.getElementById('expandSummary').addEventListener('click', expandFromSummary);
+  }
+  function expandFromSummary(){
+    parserStrip.classList.remove('collapsed');
+    parserStrip.querySelector('.summary-pill').remove();
+    parserLabel.innerHTML = 'Parsed';
+    PARSED.forEach(f=>{
+      const pill = el('span','pill parser-dot'); pill.innerHTML = `${f.k} <b>${f.v}</b>`;
+      parserStrip.insertBefore(pill, document.getElementById('expandParser'));
+    });
+    const btn = document.getElementById('expandParser');
+    btn.style.display='inline-block';
+    btn.textContent = '− collapse';
+    btn.onclick = ()=>{ collapseParser(); btn.onclick = null; };
+  }
+
+  // ---- triage commit ----
+  const triageEl = document.getElementById('triage');
+  const triageBody = document.getElementById('triageBody');
+  const triagePendingTag = document.getElementById('triagePendingTag');
+  async function commitTriage(){
+    triageEl.classList.remove('pending');
+    triageEl.classList.add('committed');
+    triagePendingTag.textContent = '· committed';
+    triagePendingTag.style.color = 'var(--ok)';
+    triageBody.style.transition='opacity .35s';
+    triageBody.style.opacity='1';
+    triageBody.innerHTML = `
+      <div class="row"><span class="k">Category</span><span class="v">payroll</span></div>
+      <div class="row"><span class="k">Severity</span><span class="v"><span class="sev P2">● P2</span></span></div>
+      <div class="row"><span class="k">Confidence</span><span class="v">94%</span></div>
+      <div class="row"><span class="k">Fast read</span><span class="v" style="max-width:200px">Direct deposit rejected, bank returned NOC. Likely stale routing # on file.</span></div>
+      <div class="next"><b>Immediate next step</b>Have caller re-verify routing # in Payroll Settings → Bank, then re-run payroll batch.</div>
+      <div class="row" style="margin-top:8px"><span class="k">Missing info</span><span class="v" style="color:var(--warn)">Bank NOC code</span></div>`;
+    document.getElementById('consistencyRow').style.display='flex';
+    ribbonAdd('triage','Triage committed: payroll · P2 · 94% confidence');
+  }
+
+  // ---- INV settle ----
+  async function settleInv(){
+    document.getElementById('invSkeletons').style.display='none';
+    document.getElementById('invList').style.display='flex';
+    document.getElementById('invDock').classList.remove('pending');
+    document.getElementById('invStatus').textContent = '4 matches · top 0.92';
+    ribbonAdd('inv','INV Search returned 4 likely matches (top 0.92)');
+  }
+
+  // ---- analyst arrival + chat ----
+  async function runConversation(){
+    verb.textContent = 'reading triage…';
+    await wait(600);
+    let b = addTurn({text:'', meta:'arrived'});
+    await streamInto(b, "Hi Olivia — I'm picking this up. Triage has it as P2 payroll DD reject, 94% confidence — that matches what I'm seeing. INV-147914 is a near-twin (NOC R03, resolved in one call). Let's run that play.");
+    ribbonAdd('analyst','Mara K. arrived, acknowledged triage + INV-147914');
+    verb.textContent = 'checking INV-147914';
+
+    await wait(800);
+    b = addTurn({text:''});
+    await streamInto(b, "Ask Sarah to open Payroll → Bank → Bank Accounts. Have her confirm the routing # ends in <b>•••0218</b>. If it does, that's our stale number — bank changed routing after the regional merger in March.");
+    verb.textContent = 'drafting next step';
+
+    await wait(800);
+    b = addTurn({text:''});
+    await streamInto(b, "Then: Settings → Payroll Settings → Direct Deposit, click <b>Update</b> next to the bank, re-verify the two micro-deposits (they show in 1–2 biz days). After that, re-run the failed payroll batch from Payroll → Run Payroll → Resume.");
+    ribbonAdd('analyst','Mara K. drafted 3-step resolution');
+    verb.textContent = 'standing by';
+
+    await wait(700);
+    b = addTurn({text:''});
+    await streamInto(b, "If the routing # is something other than •••0218, ping me — that puts us into INV-146220 territory and we'll need a DDA re-auth.");
+    verb.textContent = 'idle';
+  }
+
+  // ---- full boot orchestration: async arrivals, triage before INV ----
+  async function boot(){
+    await runParser();              // parser runs, fields arrive
+    await wait(350);
+    await commitTriage();           // triage commits FIRST (per spec: not gated on INV)
+    await wait(250);
+    await collapseParser();         // parser becomes 1-line summary
+    await wait(900);
+    await settleInv();              // INV settles in alongside
+    await wait(450);
+    await runConversation();        // analyst arrives, acknowledges, talks
+  }
+  document.getElementById('restartDemo').addEventListener('click', ()=>location.reload());
+
+  // Operator can send too
+  composer.addEventListener('submit', sendOp);
+  composerInput.addEventListener('keydown', e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendOp(); }
+  });
+  function sendOp(){
+    const v = composerInput.value.trim(); if(!v) return;
+    const b = addTurn({who:'op', name:'Olivia K.', initials:'OK', text:''});
+    b.innerHTML = linkifyInv(v);
+    composerInput.value='';
+    // Mara responds
+    setTimeout(async ()=>{
+      verb.textContent='thinking…';
+      const b2 = addTurn({text:''});
+      await streamInto(b2, "Got it — give me 10s. I'll cross-check against INV-147914 and confirm.");
+      verb.textContent='idle';
+    }, 400);
+  }
+
+  // ============== F2 INV peek on hover ====================================
+  const peek = document.getElementById('peek');
+  const peekTitle = document.getElementById('peekTitle');
+  const peekBody = document.getElementById('peekBody');
+  const invData = {
+    'INV-147914':{body:'QBO Plus · payroll DD rejected · NOC code R03 · resolved by re-verifying routing in Bank settings.', outcome:'resolved · 1 call'},
+    'INV-146220':{body:'Payroll batch rejected after bank merger · required updated routing + DDA re-auth.', outcome:'resolved · 2 calls'},
+    'INV-144087':{body:'PS107 on first payroll of new entity · DD agreement missing signature.', outcome:'resolved · escalated'},
+    'INV-141955':{body:'Caller routing # transposed by 2 digits · resolved in-call.', outcome:'resolved · 1 call'},
+  };
+  document.body.addEventListener('mouseover', e=>{
+    const inv = e.target.closest('[data-inv]'); if(!inv) return;
+    const id = inv.dataset.inv; const d = invData[id]; if(!d) return;
+    peekTitle.textContent = id;
+    peekBody.textContent = d.body;
+    peek.querySelector('.chip').textContent = d.outcome;
+    const r = inv.getBoundingClientRect();
+    let x = Math.min(window.innerWidth-300, r.left);
+    let y = r.bottom + 8;
+    if(y+160 > window.innerHeight) y = r.top - 160;
+    peek.style.left = x+'px'; peek.style.top = y+'px';
+    peek.classList.add('show');
+  });
+  document.body.addEventListener('mouseout', e=>{
+    const inv = e.target.closest('[data-inv]'); if(!inv) return;
+    peek.classList.remove('show');
+  });
+
+  // ============== F3 ribbon scrub spotlight ===============================
+  const spot = document.getElementById('spotlight');
+  const spotTitle = document.getElementById('spotTitle');
+  const spotBody = document.getElementById('spotBody');
+  document.getElementById('ribbonSegs').addEventListener('mouseover', e=>{
+    const seg = e.target.closest('.seg'); if(!seg) return;
+    spotTitle.textContent = seg.dataset.agent.toUpperCase()+' · contribution';
+    spotBody.textContent = seg.dataset.label;
+    spot.classList.add('show');
+  });
+  document.getElementById('ribbonSegs').addEventListener('mouseout', ()=>spot.classList.remove('show'));
+
+  // Ribbon clock
+  let secs = 134;
+  setInterval(()=>{
+    secs++; const h=String(Math.floor(secs/3600)).padStart(2,'0');
+    const m=String(Math.floor(secs%3600/60)).padStart(2,'0');
+    const s=String(secs%60).padStart(2,'0');
+    document.getElementById('ribbonClock').textContent = `${h}:${m}:${s}`;
+  },1000);
+
+  // ============== F4 webcam modal =========================================
+  const cam = document.getElementById('webcamModal');
+  const camView = document.getElementById('camView');
+  document.getElementById('webcamBtn').addEventListener('click',()=>cam.classList.add('show'));
+  document.getElementById('camClose').addEventListener('click',()=>cam.classList.remove('show'));
+  document.getElementById('camBack').addEventListener('click',()=>{cam.classList.remove('show'); toast('Back to file upload');});
+  let rot=0; document.getElementById('ctlRotate').addEventListener('click',()=>{rot=(rot+90)%360; camView.style.transform=`rotate(${rot}deg)`; toast('Rotated '+rot+'°');});
+  document.getElementById('ctlTorch').addEventListener('click',e=>{e.currentTarget.classList.toggle('on');});
+  document.getElementById('ctlGrid').addEventListener('click',e=>{e.currentTarget.classList.toggle('on');});
+  document.getElementById('ctlMirror').addEventListener('click',e=>{e.currentTarget.classList.toggle('on'); camView.style.transform = camView.style.transform.includes('scaleX(-1)') ? `rotate(${rot}deg)` : `rotate(${rot}deg) scaleX(-1)`;});
+  document.getElementById('ctlAuto').addEventListener('click',e=>{
+    const on = e.currentTarget.textContent.includes('ON');
+    e.currentTarget.textContent = 'Auto-derotate: ' + (on?'OFF':'ON');
+  });
+  document.getElementById('camShutter').addEventListener('click',()=>{
+    cam.classList.remove('show'); toast('Snap captured · parsing…');
+  });
+
+  // (parser expand/collapse handled by collapseParser/expandFromSummary above)
+
+  // ============== Toast util ==============================================
+  const toastEl = document.getElementById('toast');
+  let toastT;
+  function toast(msg){
+    toastEl.textContent = msg; toastEl.classList.add('show');
+    clearTimeout(toastT); toastT = setTimeout(()=>toastEl.classList.remove('show'), 1800);
+  }
+
+  // ============== INV item click → insert into composer ===================
+  document.getElementById('invList').addEventListener('click', e=>{
+    const it = e.target.closest('.inv-item'); if(!it) return;
+    composerInput.value = (composerInput.value? composerInput.value+' ' : '') + it.dataset.inv;
+    composerInput.focus();
+  });
+
+  // ============== drift demo: typing words like "bank-feeds" drops consistency ==
+  const consBar = document.getElementById('consBar');
+  const consVal = document.getElementById('consVal');
+  const driftWords = ['bank-feeds','reconciliation','permissions','tax','reports','invoicing'];
+  composerInput.addEventListener('input', ()=>{
+    const v = composerInput.value.toLowerCase();
+    const hit = driftWords.some(w=>v.includes(w));
+    if(hit){
+      consBar.style.width='42%'; consVal.textContent='42%';
+      document.getElementById('triage').classList.add('drift');
+    } else {
+      consBar.style.width='96%'; consVal.textContent='96%';
+      document.getElementById('triage').classList.remove('drift');
+    }
+  });
+  document.getElementById('retriageBtn').addEventListener('click', ()=>{
+    document.getElementById('triage').classList.remove('drift');
+    consBar.style.width='96%'; consVal.textContent='96%';
+    toast('Re-triage requested · Triage Agent recomputing');
+  });
+
+  // ============== keyboard: F1 to scrub last segment ======================
+  document.addEventListener('keydown', e=>{
+    if(e.key==='F1'){
+      e.preventDefault();
+      const segs = ribbonSegs.querySelectorAll('.seg');
+      const last = segs[segs.length-1]; if(!last) return;
+      spotTitle.textContent = last.dataset.agent.toUpperCase()+' · contribution';
+      spotBody.textContent = last.dataset.label;
+      spot.classList.add('show');
+      setTimeout(()=>spot.classList.remove('show'), 1400);
+    }
+    if(e.key==='Escape'){
+      cam.classList.remove('show');
+    }
+  });
+
+  // Boot
+  boot();
+})();
+</script>
+</body>
+</html>

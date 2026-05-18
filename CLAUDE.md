@@ -25,7 +25,7 @@ qbo-escalations/
 | UI       | React 19, Vite 7, Framer Motion 12                              |
 | Server   | Express 5, Mongoose 9                                           |
 | Database | MongoDB Atlas                                                   |
-| AI       | Claude CLI subprocess (`claude -p --output-format stream-json`) |
+| AI       | Claude CLI subprocess + direct provider APIs (see AI Integration) |
 | Dev      | concurrently, nodemon                                           |
 
 ## Commands
@@ -40,25 +40,46 @@ npm start            # Production server
 
 ## Key Files
 
-| File                            | Purpose                                              |
-| ------------------------------- | ---------------------------------------------------- |
-| `client/src/App.jsx`            | Main React component                                 |
-| `client/src/main.jsx`           | React root entry                                     |
-| `client/vite.config.js`         | Vite config, proxies /api/\* to :4000                |
-| `server/src/index.js`           | Express entry point, MongoDB connection              |
-| `server/src/services/claude.js` | Claude CLI subprocess wrapper                        |
-| `server/src/routes/chat.js`     | Chat API with SSE streaming                          |
-| `server/src/models/`            | Mongoose models                                      |
-| `playbook/`                     | QBO knowledge base loaded as system prompt context   |
+| File                            | Purpose                                            |
+| ------------------------------- | -------------------------------------------------- |
+| `client/src/App.jsx`            | Main React component                               |
+| `client/src/main.jsx`           | React root entry                                   |
+| `client/vite.config.js`         | Vite config, proxies /api/\* to :4000              |
+| `server/src/index.js`           | Express entry point, MongoDB connection            |
+| `server/src/services/claude.js` | Claude CLI subprocess wrapper                      |
+| `server/src/routes/chat.js`     | Chat API with SSE streaming                        |
+| `server/src/models/`            | Mongoose models                                    |
+| `playbook/`                     | QBO knowledge base loaded as system prompt context |
 
-## Claude Integration
+## AI Integration
 
-Uses Claude CLI subprocess (`claude -p`) with the user's Max subscription. No API key needed.
+The app uses **two independent transports** for talking to AI models. They run side by side; configure either or both.
 
+### Transport 1 — Claude CLI subprocess
+
+Spawns `claude -p --output-format stream-json` as a child process, authenticated via the user's Claude Max subscription. No API key needed.
+
+- Used by: chat / triage / analyst legs of the pipeline
 - Streaming via `--output-format stream-json`
 - Playbook content prepended to stdin as `System instructions:`
 - Images via temp files + `--add-dir` (paths appended to prompt text)
 - Each request spawns a fresh process; conversation history reconstructed from MongoDB
+- Wrapper: `server/src/services/claude.js`
+
+### Transport 2 — Direct provider APIs
+
+Server makes HTTPS calls directly to provider endpoints using stored API keys or local server URLs.
+
+- Used by: image parser, and any agent the user picks from the provider catalog
+- Providers: Anthropic, OpenAI, Gemini, Kimi, LM Studio, Codex, LLM gateway, and the user's local AI server
+- Provider/model chosen via UI dropdown, persisted to `localStorage`; API keys / base URLs come from server env
+- Images sent inline as base64 in the JSON request body (not via temp files)
+- Provider catalog: `shared/ai-provider-catalog.json`
+- Image-parser entrypoint: `server/src/services/image-parser.js`
+
+### Mixing transports
+
+The two transports are independent. If you only have a local API server configured (no Anthropic/OpenAI key), the CLI-subprocess legs still work via Claude Max, and the direct-API legs work against whatever providers you have keys or URLs for.
 
 ## API Response Format
 
@@ -78,6 +99,7 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 Write tests for important or high-risk parts of the application. Do not over-test trivial changes.
 
 ### Server Tests
+
 - **Framework**: Node.js built-in `node:test` + `supertest` + `mongodb-memory-server`
 - **Location**: `server/test/`
 - **Run**: `npm test` (root) or `npm --prefix server test`
@@ -85,12 +107,14 @@ Write tests for important or high-risk parts of the application. Do not over-tes
 - **Skip tests for**: trivial CRUD wrappers, config changes, one-off scripts
 
 ### Visual Tests (agent-browser)
+
 - Use `agent-browser` to screenshot the UI at `localhost:5174` after significant UI changes
 - Save screenshots to `review-screenshots/` using descriptive filenames (e.g., `desktop-chat-after-fix.png`)
 - Use `agent-browser snapshot -i` to verify interactive elements are present and correctly labelled
 - Capture before/after pairs when fixing visual bugs
 
 ### Rules
+
 - Do not run the test suite mid-implementation — run tests as a separate, explicit step
 - Do not write tests for every change — only when the change is high-risk or explicitly requested
 - Never block implementation progress waiting on test completeness
@@ -137,6 +161,7 @@ Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot afte
 ## Claude Code
 
 ### Quick Reference
+
 - Full dev: `npm run dev` (server + client concurrently)
 - Server only: `npm run dev:server`
 - Client only: `npm run dev:client`
@@ -144,4 +169,12 @@ Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot afte
 - Image parser test: `npm run test:image-parser`
 
 ### Memory
+
 - Shared memory hooks run at user-level — project hooks handle PM rules and config freshness only.
+
+## More Rules
+
+- Think before coding Don't assume. Don't hide confusion. State ambiguity explicitly. Present multiple interpretations rather than silently picking one. Push back if a simpler approach exists. Stop and ask rather than guess.
+- Simplicity first. The test: would a senior engineer say this is overcomplicated? If yes, rewrite it.
+- Surgical changes. Don't "improve" adjacent code. Don't refactor things that aren't broken. Match the existing style even if you'd do it differently. If you notice unrelated dead code, mention it, don't delete it. Every changed line should trace directly to the request.
+- Goal-driven execution. Transform "fix the bug" into "write a test that reproduces it, then make it pass." Transform "add validation" into "write tests for invalid inputs, then make them pass." Give it success criteria and watch it loop until done.

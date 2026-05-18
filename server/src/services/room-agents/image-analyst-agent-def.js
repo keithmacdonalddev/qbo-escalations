@@ -13,7 +13,7 @@ module.exports = {
   triggerMentions: ['@image-analyst', '@image', '@img'],
   priority: 10,
   maxContextMessages: 20,
-  preferredProvider: 'claude-sonnet-4-6',
+  preferredProvider: 'claude',
   supportsAgentTools: true,
 
   /**

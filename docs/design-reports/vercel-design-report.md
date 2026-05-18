@@ -1,5 +1,56 @@
 # Vercel / Geist Design System -- Design Research Report
 
+---
+
+## V4 STRIP-MODE DESIGN NOTE (2026-05-16)
+
+**Forced angle:** SPATIAL / DEPTH-LAYERED — Z-axis hierarchy. Layers earn z-index by representing semantic priority (recency / focus / call-to-action). The page has depth, not just width and height.
+
+**Deliverable:** `prototypes/escalation-chat-challenge/v4/vercel/index.html`
+
+### 2 features (strip-mode ceiling)
+
+1. **Depth Focus** — only the layer the operator is engaging with is in focus. The other layers physically recede on the Z-axis (translateZ negative), blur slightly, and dim. Hover or focus pulls a layer forward (translateZ positive, sharper shadow, full brightness). No tab keys, no panels, no menus — the operator moves through the workflow by simply looking at the next layer. This makes "what matters right now" a spatial fact, not a chrome decision.
+
+2. **Receipt** — the copy-ready answer is a separate z-max layer. When the operator triggers "open answer card" from a Mira message, every other layer falls back along Z (deep blur + opacity drop) and the receipt floats forward on its own plane. Copy → close → workflow returns. This makes goal #4 ("use the answer") a distinct physical act, not a scroll-and-hunt.
+
+The third feature I wanted (a layered INV match list behind the chat) — killed. Triage already delivers the read; a second AI-evidence layer would re-introduce V3 overload.
+
+### Region justification (against the 4 user goals)
+
+| Region | Layer (z) | Goal served |
+| --- | --- | --- |
+| Webcam dock | back (z-180px) | see what's wrong — image capture entry |
+| Parser strip | mid-back (z-110px) | see what's wrong — parsed fields |
+| Triage card | mid (z-40px) | confirm or doubt the AI |
+| Chat with Mira | front (z0) | get the answer |
+| Receipt | z-max (z+140px, on demand) | use the answer |
+
+Top bar is `case + clock` only — the operator's only orientation anchors. No nav, no menus, no AI status spine.
+
+### Why depth (not bolted-on)
+
+Depth here is informational, not decorative. The Z position of each layer literally encodes its current priority to the operator. When triage is the question, triage is closest. When chat is happening, chat is closest. When the answer is needed, the answer is the only thing in focus and everything else physically recedes. The operator never has to decide *where to look* — the page has already answered.
+
+### Geist alignment
+
+- Monochrome palette (Vercel near-black `#0a0a0a` base, pure white CTA, warn/bad reserved for parser status)
+- Geist Mono for metadata, labels, parsed values; sans for prose and analyst voice
+- Soft shadows + 1px hairline borders + `backdrop-filter: blur` — Geist's frosted-surface vocabulary natively supports stacked layers
+- 10px corner radius, restrained spacing, no gradients on text
+
+### Self-check
+
+1. Zero-explanation usable? Yes — capture, confirm, talk, copy.
+2. Close eyes for a second? Yes — the focused layer is always the only loud thing.
+3. ≤2 features? Yes — Depth Focus + Receipt.
+4. Forced angle structural? Yes — Z-axis literally drives the focus model and the receipt reveal; remove depth and the design collapses.
+5. Anything not serving the 4 goals? No — no status spine, no provenance, no drift meter, no second AI panel.
+6. Quiet at rest? Yes — neutral surfaces, no animation idle, parser only highlights warn/bad fields.
+7. Mira loud when speaking? Yes — chat layer comes to z+20 with stronger shadow when in focus; receipt eclipses everything else when invoked.
+
+---
+
 *Prepared 2026-03-19. Research agent: Claude Opus 4.6.*
 *Sources: vercel.com/geist, github.com/vercel/geist-font, vercel.com/design, existing QBO codebase analysis.*
 

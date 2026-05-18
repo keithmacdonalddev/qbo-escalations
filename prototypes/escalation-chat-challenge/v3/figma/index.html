@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QBO Escalation — Figma V3 (Cockpit)</title>
+<!--
+================================================================================
+  FIGMA V3 — "THE COCKPIT" — single-viewport, no scroll, triage-anchored chassis
+================================================================================
+
+  (a) LAYOUT APPROACHES CONSIDERED
+  -------------------------------------------------------------------------------
+  1. VERTICAL STACK (rejected). What V2 did. Scrolls. Triage falls offscreen.
+     PO walked out of that movie nine times.
+  2. LATERAL SPLIT (rejected as primary). Cleaner than stack but still forces
+     a tradeoff: either triage owns the left and chat owns the right (chat
+     starves) or chat owns the right and triage compresses to a postage stamp.
+  3. SECTORED QUADRANTS (rejected). Equal weight to four agents tells the
+     operator nothing about which signal matters. Triage is NOT a peer to the
+     parser. Quadrants flatten the hierarchy I need to preserve.
+  4. FOCAL-CENTER w/ ORBITING AGENTS (rejected as standalone). Pretty diagram,
+     poor work surface. The center becomes a mascot, not a workspace.
+  5. PICTURE-IN-PICTURE / LAYERED Z (rejected). Z-axis tricks hide state.
+     Directive: every state knowable at a glance. PIP hides things.
+  6. PERSISTENT RAIL + CANVAS + PINNED HEADS-UP STRIP   <-- CHOSEN
+     Three structural zones, all visible simultaneously, all earning their keep:
+       • LEFT RAIL (88px)  workflow chassis — escalation active, others stubbed
+       • TOP HUD (104px)   triage + INV + parser-collapsed + analyst identity,
+                           horizontally laid out so triage is ALWAYS in view
+                           and never has to scroll to surface
+       • MAIN CANVAS       the analyst conversation, the camera, the working
+                           surface — context-switchable but the HUD never moves
+
+  (b) WHY THIS WINS
+  -------------------------------------------------------------------------------
+  Aviation cockpits solved this exact problem: critical instruments stay pinned
+  in the operator's peripheral vision while the primary task (flying, here:
+  talking to the phone agent) owns the central focus. Triage = artificial
+  horizon — you do not let it leave the glass. The horizontal HUD lets triage,
+  INV, parser-summary, AND analyst identity coexist in 104px without anyone
+  shouting. The left rail makes the multi-workflow chassis literal: today
+  escalation lights up, tomorrow Trip Planner / Email Composer / INV Start
+  light up in the same slots. Same chassis, different cargo.
+
+  (c) THREE UNIQUE UNEXPECTED FEATURES (named — Directive G)
+  -------------------------------------------------------------------------------
+  1. LIVE-TYPE TRIAGE PILLS — triage commits character-by-character into the
+     HUD pills so the operator literally watches the senior LLM make up its
+     mind. Once committed the pills lock and become draggable into the chat
+     composer ("drop CATEGORY into your reply"). The praised V2 win
+     (text-as-it-arrives) generalized and made functional, not just visual.
+  2. PHONE-CALL "EARSHOT" SCRIPT BAR — a thin always-on strip above the
+     composer that suggests the next sentence the operator can SAY out loud to
+     the phone agent, regenerated as triage / analyst evolve. One-press copy.
+     The operator is on a live call. No other design acknowledged that.
+  3. WEBCAM "DESHEW" — a pre-capture overlay that detects sideways phone shots
+     (gyro hint + edge analysis), auto-derotates, crops to the document, and
+     shows a green outline when the shot will actually parse. Cancel-back-to-
+     upload lives in the top-left where the brain expects an X. The cockpit
+     metaphor extends here: the camera is an instrument, not a modal.
+  + BONUS 4. TRIAGE-LOCK CHAT GUARDRAIL — composer warns the operator if the
+     reply they're typing contradicts committed triage (e.g. typing "this is
+     billing" when triage says payroll/P2). Quiet inline hint, never blocking.
+================================================================================
+-->
+<style>
+  :root{
+    --bg:#0b0d10;
+    --bg-2:#0f1216;
+    --panel:#13171c;
+    --panel-2:#171c22;
+    --line:#1f262e;
+    --line-2:#2a323c;
+    --ink:#e8edf3;
+    --ink-2:#aab4c0;
+    --ink-3:#6c7785;
+    --accent:#7cc4ff;       /* analyst */
+    --accent-2:#9d8cff;     /* triage  */
+    --ok:#6bd49a;
+    --warn:#f0b454;
+    --bad:#ef6b6b;
+    --inv:#5fd6c0;
+    --parser:#8a93a3;
+    --rad:10px;
+    --rad-sm:7px;
+    --shadow:0 1px 0 rgba(255,255,255,.03), 0 12px 40px rgba(0,0,0,.45);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+    overflow:hidden;letter-spacing:.005em}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+
+  /* ========================= APP CHASSIS ========================= */
+  .app{
+    display:grid;
+    grid-template-columns:88px 1fr;
+    grid-template-rows:1fr;
+    height:100vh;width:100vw;
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(124,196,255,.06), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(157,140,255,.05), transparent 60%),
+      var(--bg);
+  }
+
+  /* ------- LEFT RAIL (workflow chassis) ------- */
+  .rail{
+    border-right:1px solid var(--line);
+    background:linear-gradient(180deg,var(--bg-2),var(--bg));
+    display:flex;flex-direction:column;align-items:center;
+    padding:14px 0 12px;gap:6px;
+  }
+  .rail .brand{
+    width:44px;height:44px;border-radius:12px;
+    background:linear-gradient(135deg,#7cc4ff 0%,#9d8cff 100%);
+    display:grid;place-items:center;color:#0b0d10;font-weight:800;
+    box-shadow:0 6px 18px rgba(124,196,255,.25);margin-bottom:10px;
+    font-size:14px;letter-spacing:.02em;
+  }
+  .rail .wf{
+    width:60px;padding:10px 0;border-radius:10px;
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+    color:var(--ink-3);position:relative;transition:all .15s ease;
+  }
+  .rail .wf:hover{color:var(--ink-2);background:rgba(255,255,255,.02)}
+  .rail .wf.active{color:var(--ink);background:rgba(124,196,255,.07)}
+  .rail .wf.active::before{
+    content:"";position:absolute;left:-1px;top:8px;bottom:8px;width:2px;
+    background:linear-gradient(180deg,#7cc4ff,#9d8cff);border-radius:2px;
+  }
+  .rail .wf .ico{font-size:18px;line-height:1}
+  .rail .wf .lbl{font-size:9.5px;letter-spacing:.04em;text-transform:uppercase}
+  .rail .wf .dot{
+    position:absolute;top:6px;right:10px;width:6px;height:6px;border-radius:50%;
+    background:var(--ok);box-shadow:0 0 0 2px var(--bg-2);
+  }
+  .rail .spacer{flex:1}
+  .rail .me{
+    width:36px;height:36px;border-radius:50%;
+    background:linear-gradient(135deg,#2a323c,#1f262e);
+    display:grid;place-items:center;font-weight:700;color:var(--ink-2);
+    border:1px solid var(--line-2);font-size:12px;
+  }
+
+  /* ------- MAIN COLUMN ------- */
+  .main{
+    display:grid;
+    grid-template-rows:104px 1fr;
+    min-width:0;min-height:0;
+  }
+
+  /* ============ THE HUD (top, always visible) ============ */
+  .hud{
+    border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(20,24,30,.95),rgba(15,18,22,.95));
+    padding:12px 16px;
+    display:grid;
+    grid-template-columns: 1fr 1fr 320px 260px;
+    gap:12px;
+    align-items:stretch;
+    position:relative;
+  }
+  .hud::after{
+    content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;
+    background:linear-gradient(90deg,transparent,rgba(124,196,255,.25),rgba(157,140,255,.25),transparent);
+  }
+
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--rad);
+    padding:9px 12px;min-width:0;position:relative;
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .card .caphead{
+    display:flex;align-items:center;justify-content:space-between;gap:8px;
+    font-size:10px;text-transform:uppercase;letter-spacing:.09em;color:var(--ink-3);
+  }
+  .card .who{display:flex;align-items:center;gap:6px}
+  .card .who .avatar{
+    width:16px;height:16px;border-radius:4px;display:grid;place-items:center;
+    font-size:9px;font-weight:700;color:#0b0d10;
+  }
+  .pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 0 rgba(107,212,154,.55);animation:pulse 1.6s infinite}
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 rgba(107,212,154,.55)}
+    70%{box-shadow:0 0 0 8px rgba(107,212,154,0)}
+    100%{box-shadow:0 0 0 0 rgba(107,212,154,0)}
+  }
+
+  /* ---- TRIAGE CARD (PRIMARY) ---- */
+  .triage{
+    border:1px solid rgba(157,140,255,.35);
+    background:
+      linear-gradient(180deg,rgba(157,140,255,.06),rgba(157,140,255,0) 60%),
+      var(--panel);
+    box-shadow:0 0 0 1px rgba(157,140,255,.05) inset, 0 8px 24px rgba(157,140,255,.05);
+  }
+  .triage .who .avatar{background:linear-gradient(135deg,#c5b8ff,#9d8cff)}
+  .triage-pills{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:4px 9px;border-radius:999px;
+    background:rgba(157,140,255,.10);border:1px solid rgba(157,140,255,.22);
+    font-size:11.5px;color:var(--ink);cursor:grab;
+    transition:transform .12s ease, background .15s ease;
+    user-select:none;white-space:nowrap;
+  }
+  .pill:hover{background:rgba(157,140,255,.18);transform:translateY(-1px)}
+  .pill[data-locked="false"]{background:rgba(157,140,255,.05);color:var(--ink-2)}
+  .pill .k{font-size:9.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em}
+  .pill .sev{font-weight:700}
+  .pill .sev.P1{color:#ff8a8a}.pill .sev.P2{color:#ffb56b}
+  .pill .sev.P3{color:#ffe27a}.pill .sev.P4{color:#9adcff}
+  .triage-line{font-size:11.5px;color:var(--ink-2);min-height:14px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .triage-line .caret{display:inline-block;width:6px;height:11px;
+    background:var(--accent-2);margin-left:2px;vertical-align:-1px;animation:blink 1s infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* ---- INV CARD ---- */
+  .inv .who .avatar{background:linear-gradient(135deg,#9af3e0,#5fd6c0)}
+  .inv-list{display:flex;flex-direction:column;gap:3px;font-size:11.5px}
+  .inv-row{display:flex;align-items:center;gap:8px;color:var(--ink-2)}
+  .inv-row .num{font-family:var(--mono);color:var(--inv);font-size:11px}
+  .inv-row .score{font-family:var(--mono);color:var(--ink-3);font-size:10px;margin-left:auto}
+  .inv-row .desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:170px}
+
+  /* ---- PARSER CARD (compressed) ---- */
+  .parser .who .avatar{background:linear-gradient(135deg,#c8cfdb,#8a93a3)}
+  .parser-summary{font-size:11.5px;color:var(--ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .parser-expand{font-size:10px;color:var(--ink-3);text-decoration:underline dotted;
+    cursor:pointer;margin-top:auto;align-self:flex-start}
+  .parser-expand:hover{color:var(--ink-2)}
+
+  /* ---- ANALYST CARD ---- */
+  .analyst{
+    background:
+      radial-gradient(180px 80px at 80% 0%, rgba(124,196,255,.12), transparent 70%),
+      var(--panel);
+    border-color:rgba(124,196,255,.30);
+  }
+  .analyst-row{display:flex;align-items:center;gap:10px}
+  .analyst-face{
+    width:36px;height:36px;border-radius:50%;
+    background:linear-gradient(135deg,#7cc4ff,#5a8fd8);
+    display:grid;place-items:center;color:#0b0d10;font-weight:800;font-size:14px;
+    box-shadow:0 0 0 2px rgba(124,196,255,.15), 0 4px 12px rgba(124,196,255,.25);
+  }
+  .analyst-meta .name{font-size:13px;font-weight:600;color:var(--ink)}
+  .analyst-meta .role{font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+  .analyst-status{font-size:10px;color:var(--ok);display:flex;align-items:center;gap:5px;margin-top:2px}
+
+  /* ============ CANVAS ============ */
+  .canvas{
+    display:grid;
+    grid-template-columns: 1fr 280px;
+    min-width:0;min-height:0;
+    background:var(--bg);
+  }
+  .stage{
+    position:relative;min-width:0;min-height:0;
+    display:flex;flex-direction:column;
+    border-right:1px solid var(--line);
+  }
+  .stage-tabs{
+    display:flex;gap:2px;padding:8px 12px 0;border-bottom:1px solid var(--line);
+    background:var(--bg-2);
+  }
+  .stage-tab{
+    padding:7px 11px;font-size:11.5px;color:var(--ink-3);border-radius:6px 6px 0 0;
+    border:1px solid transparent;border-bottom:0;display:inline-flex;align-items:center;gap:6px;
+  }
+  .stage-tab.active{color:var(--ink);background:var(--panel);border-color:var(--line)}
+  .stage-tab .dot{width:6px;height:6px;border-radius:50%;background:var(--ink-3)}
+  .stage-tab.active .dot{background:var(--accent)}
+  .stage-tab.cam.active .dot{background:var(--ok)}
+
+  .stage-body{flex:1;min-height:0;position:relative;display:flex;flex-direction:column}
+
+  /* ---- CHAT ---- */
+  .chat-scroll{
+    flex:1;min-height:0;overflow:auto;padding:16px 18px 8px;
+    display:flex;flex-direction:column;gap:12px;
+    scrollbar-width:thin;scrollbar-color:#2a323c transparent;
+  }
+  .chat-scroll::-webkit-scrollbar{width:8px}
+  .chat-scroll::-webkit-scrollbar-thumb{background:#1f262e;border-radius:4px}
+
+  .turn{display:flex;gap:10px;align-items:flex-start;max-width:780px}
+  .turn .av{
+    width:24px;height:24px;border-radius:6px;flex-shrink:0;
+    display:grid;place-items:center;font-size:10px;font-weight:700;color:#0b0d10;
+  }
+  .turn.analyst .av{background:linear-gradient(135deg,#7cc4ff,#5a8fd8)}
+  .turn.you .av{background:linear-gradient(135deg,#2a323c,#1f262e);color:var(--ink-2)}
+  .turn .body{flex:1;min-width:0}
+  .turn .meta{font-size:10.5px;color:var(--ink-3);margin-bottom:3px;
+    display:flex;align-items:center;gap:8px}
+  .turn .meta .nm{color:var(--ink-2);font-weight:600}
+  .turn .msg{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;font-size:13px;color:var(--ink);line-height:1.55;
+  }
+  .turn.you .msg{background:var(--panel-2)}
+  .turn.analyst .msg{border-color:rgba(124,196,255,.18)}
+  .turn .msg .ack{font-size:11px;color:var(--ink-3);margin-bottom:6px;
+    padding-bottom:6px;border-bottom:1px dashed var(--line-2);
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .ack-chip{font-size:10px;padding:2px 7px;border-radius:999px;
+    background:rgba(157,140,255,.10);color:#cfc4ff;border:1px solid rgba(157,140,255,.18)}
+  .ack-chip.inv{background:rgba(95,214,192,.10);color:#9af3e0;border-color:rgba(95,214,192,.20)}
+
+  /* ---- EARSHOT BAR (Feature #2) ---- */
+  .earshot{
+    margin:0 18px;padding:8px 10px;border-radius:8px;
+    background:linear-gradient(90deg,rgba(124,196,255,.06),rgba(157,140,255,.06));
+    border:1px solid rgba(124,196,255,.18);
+    display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-2);
+  }
+  .earshot .tag{
+    font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);padding:2px 6px;border-radius:4px;
+    background:rgba(124,196,255,.08);flex-shrink:0;
+  }
+  .earshot .say{flex:1;color:var(--ink);font-style:italic;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .earshot .copy{
+    font-size:10.5px;padding:4px 8px;border-radius:5px;
+    background:var(--panel);border:1px solid var(--line-2);color:var(--ink-2);
+  }
+  .earshot .copy:hover{color:var(--ink);border-color:#3a4350}
+
+  /* ---- COMPOSER ---- */
+  .composer{
+    padding:10px 18px 14px;border-top:1px solid var(--line);background:var(--bg-2);
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .composer .row{display:flex;gap:8px;align-items:flex-end}
+  .composer textarea{
+    flex:1;resize:none;min-height:42px;max-height:120px;
+    background:var(--panel);border:1px solid var(--line-2);border-radius:8px;
+    color:var(--ink);padding:9px 11px;font:inherit;outline:none;
+  }
+  .composer textarea:focus{border-color:rgba(124,196,255,.4)}
+  .composer .send{
+    padding:9px 14px;background:linear-gradient(135deg,#7cc4ff,#9d8cff);
+    color:#0b0d10;border-radius:8px;font-weight:600;font-size:12.5px;
+  }
+  .composer .send:hover{filter:brightness(1.1)}
+  .guard{
+    font-size:11px;color:var(--warn);
+    display:none;align-items:center;gap:6px;
+  }
+  .guard.show{display:flex}
+  .guard::before{content:"⚠";font-size:12px}
+
+  /* ---- WEBCAM STAGE ---- */
+  .cam{
+    flex:1;display:none;flex-direction:column;position:relative;background:#06080a;
+  }
+  .cam.show{display:flex}
+  .cam-head{
+    display:flex;align-items:center;gap:10px;padding:10px 12px;
+    border-bottom:1px solid var(--line);background:var(--bg-2);
+  }
+  .cam-back{
+    display:inline-flex;align-items:center;gap:5px;
+    padding:6px 10px;border-radius:6px;color:var(--ink-2);
+    background:var(--panel);border:1px solid var(--line-2);font-size:11.5px;
+  }
+  .cam-back:hover{color:var(--ink);border-color:#3a4350}
+  .cam-title{font-size:12px;color:var(--ink-2);letter-spacing:.03em}
+  .cam-title b{color:var(--ink);font-weight:600;margin-right:4px}
+  .cam-stage{
+    flex:1;display:grid;place-items:center;position:relative;overflow:hidden;
+    background:
+      radial-gradient(800px 400px at 50% 50%, rgba(124,196,255,.05), transparent 70%),
+      #06080a;
+  }
+  .viewport{
+    position:relative;width:min(680px,86%);aspect-ratio:4/3;
+    border-radius:14px;overflow:hidden;
+    background:linear-gradient(135deg,#1a2028,#0c1015);
+    box-shadow:0 30px 80px rgba(0,0,0,.6), 0 0 0 1px var(--line);
+  }
+  .doc{
+    position:absolute;inset:0;display:grid;place-items:center;
+    transition:transform .8s cubic-bezier(.2,.7,.2,1);transform:rotate(90deg) scale(.78);
+  }
+  .doc.derotated{transform:rotate(0deg) scale(1)}
+  .doc-sheet{
+    width:62%;aspect-ratio:8.5/11;background:#f3efe6;border-radius:6px;
+    box-shadow:0 14px 40px rgba(0,0,0,.5);
+    background-image:
+      linear-gradient(180deg,#0b0d10 0,#0b0d10 6%,transparent 6.5%),
+      repeating-linear-gradient(180deg,transparent 0 14px,rgba(0,0,0,.08) 14px 15px);
+    position:relative;
+  }
+  .doc-sheet::before{
+    content:"QuickBooks Online — Escalation Form";
+    position:absolute;top:7px;left:14px;color:#f3efe6;font-size:9px;font-weight:700;
+    letter-spacing:.04em;
+  }
+  .crop{
+    position:absolute;inset:14% 18%;border:2px dashed rgba(124,196,255,.6);
+    border-radius:6px;transition:all .5s ease;opacity:0;
+  }
+  .crop.show{opacity:1}
+  .crop.locked{border-style:solid;border-color:var(--ok);
+    box-shadow:0 0 0 9999px rgba(0,0,0,.45) inset}
+  .cam-hud{
+    position:absolute;top:12px;left:12px;right:12px;
+    display:flex;justify-content:space-between;align-items:flex-start;
+    pointer-events:none;font-size:10.5px;color:var(--ink-2);
+  }
+  .cam-hud .badge{
+    pointer-events:auto;background:rgba(11,13,16,.7);
+    border:1px solid var(--line-2);border-radius:6px;padding:5px 8px;
+    backdrop-filter:blur(8px);display:flex;align-items:center;gap:6px;
+  }
+  .cam-hud .badge.ok{color:var(--ok);border-color:rgba(107,212,154,.3)}
+  .cam-hud .badge.warn{color:var(--warn);border-color:rgba(240,180,84,.3)}
+
+  .cam-controls{
+    display:flex;justify-content:center;align-items:center;gap:14px;
+    padding:14px;border-top:1px solid var(--line);background:var(--bg-2);
+  }
+  .shutter{
+    width:54px;height:54px;border-radius:50%;
+    background:linear-gradient(135deg,#fff,#cfd5de);
+    box-shadow:0 0 0 4px var(--bg-2), 0 0 0 5px var(--line-2),0 10px 30px rgba(0,0,0,.5);
+    border:0;
+  }
+  .shutter:hover{filter:brightness(.95)}
+  .cam-btn{
+    padding:9px 14px;border-radius:8px;background:var(--panel);
+    border:1px solid var(--line-2);color:var(--ink-2);font-size:12px;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .cam-btn:hover{color:var(--ink);border-color:#3a4350}
+  .cam-btn.primary{background:linear-gradient(135deg,#7cc4ff,#9d8cff);color:#0b0d10;border:0}
+
+  /* ============ RIGHT INSIGHT RAIL (case context) ============ */
+  .insight{
+    display:flex;flex-direction:column;min-height:0;
+    background:var(--bg-2);
+  }
+  .insight-head{
+    padding:11px 14px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .insight-head .ttl{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-3)}
+  .insight-head .case{font-family:var(--mono);font-size:11px;color:var(--accent)}
+  .insight-body{
+    flex:1;min-height:0;overflow:auto;padding:12px 14px;
+    display:flex;flex-direction:column;gap:14px;
+    scrollbar-width:thin;scrollbar-color:#2a323c transparent;
+  }
+  .insight-body::-webkit-scrollbar{width:6px}
+  .insight-body::-webkit-scrollbar-thumb{background:#1f262e;border-radius:3px}
+
+  .timeline{display:flex;flex-direction:column;gap:0;position:relative}
+  .tl-item{display:flex;gap:10px;padding:6px 0;position:relative}
+  .tl-item::before{
+    content:"";position:absolute;left:7px;top:18px;bottom:-6px;width:1px;background:var(--line-2);
+  }
+  .tl-item:last-child::before{display:none}
+  .tl-dot{
+    width:16px;height:16px;border-radius:50%;flex-shrink:0;
+    display:grid;place-items:center;background:var(--panel);border:1px solid var(--line-2);
+    margin-top:2px;font-size:9px;color:var(--ink-3);position:relative;z-index:1;
+  }
+  .tl-item.done .tl-dot{background:rgba(107,212,154,.15);border-color:rgba(107,212,154,.4);color:var(--ok)}
+  .tl-item.active .tl-dot{background:rgba(124,196,255,.15);border-color:rgba(124,196,255,.5);color:var(--accent)}
+  .tl-text{font-size:11.5px;color:var(--ink-2);flex:1}
+  .tl-text .h{color:var(--ink);font-weight:600;font-size:12px}
+  .tl-text .t{font-size:10.5px;color:var(--ink-3);font-family:var(--mono)}
+
+  .panel-block{
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;
+    padding:10px 12px;
+  }
+  .panel-block .h{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin-bottom:6px}
+  .panel-block .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:11.5px}
+  .panel-block .kv .k{color:var(--ink-3)}
+  .panel-block .kv .v{color:var(--ink);font-family:var(--mono);font-size:11px}
+
+  /* ============ PARSER EXPANSION (popover) ============ */
+  .pop{
+    position:absolute;top:108px;right:300px;width:380px;z-index:30;
+    background:var(--panel);border:1px solid var(--line-2);border-radius:10px;
+    box-shadow:var(--shadow);padding:12px;display:none;
+  }
+  .pop.show{display:block;animation:fadein .15s ease}
+  @keyframes fadein{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .pop h4{margin:0 0 8px;font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+  .pop .grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:11.5px}
+  .pop .grid .k{color:var(--ink-3);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+  .pop .grid .v{color:var(--ink);margin-bottom:6px}
+
+  /* ============ KEYBOARD HINTS ============ */
+  .kbd{
+    display:inline-block;font:11px var(--mono);padding:1px 5px;border-radius:4px;
+    background:#1a1f26;border:1px solid #262d36;color:var(--ink-2);
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+
+  <!-- =================== LEFT RAIL : WORKFLOW CHASSIS =================== -->
+  <nav class="rail" aria-label="Workflows">
+    <div class="brand" title="QBO Cockpit">QC</div>
+
+    <button class="wf active" data-wf="escalation" title="Phone escalation (active)">
+      <span class="ico">🎧</span><span class="lbl">Escal</span>
+      <span class="dot" title="active case"></span>
+    </button>
+    <button class="wf" data-wf="inv" title="INV Start">
+      <span class="ico">🧾</span><span class="lbl">INV</span>
+    </button>
+    <button class="wf" data-wf="trip" title="Trip Planner">
+      <span class="ico">🗺️</span><span class="lbl">Trip</span>
+    </button>
+    <button class="wf" data-wf="email" title="Email Composer">
+      <span class="ico">✉️</span><span class="lbl">Email</span>
+    </button>
+    <button class="wf" data-wf="more" title="More workflows">
+      <span class="ico">＋</span><span class="lbl">More</span>
+    </button>
+
+    <div class="spacer"></div>
+    <div class="me" title="You — Operator K">K</div>
+  </nav>
+
+  <!-- =================== MAIN COLUMN =================== -->
+  <section class="main">
+
+    <!-- ======== HUD (always-visible cockpit instruments) ======== -->
+    <header class="hud" aria-label="Case heads-up display">
+
+      <!-- TRIAGE (primary signal — pinned forever) -->
+      <article class="card triage" aria-label="Triage — primary signal">
+        <div class="caphead">
+          <span class="who">
+            <span class="avatar" title="Triage agent">T</span>
+            <span>Triage · Senior LLM</span>
+          </span>
+          <span class="who"><span class="pulse" id="triagePulse"></span>
+            <span id="triageState">listening…</span></span>
+        </div>
+        <div class="triage-pills" id="triagePills">
+          <span class="pill" data-locked="false"><span class="k">Cat</span><span id="pCat">—</span></span>
+          <span class="pill" data-locked="false"><span class="k">Sev</span><span class="sev" id="pSev">—</span></span>
+          <span class="pill" data-locked="false"><span class="k">Conf</span><span id="pConf">—</span></span>
+          <span class="pill" data-locked="false"><span class="k">Next</span><span id="pNext">—</span></span>
+        </div>
+        <div class="triage-line" id="triageFast">
+          <span id="triageText"></span><span class="caret" id="triageCaret"></span>
+        </div>
+      </article>
+
+      <!-- INV SEARCH -->
+      <article class="card inv" aria-label="INV search">
+        <div class="caphead">
+          <span class="who">
+            <span class="avatar" title="INV search agent">I</span>
+            <span>INV Search · Junior LLM</span>
+          </span>
+          <span class="who" id="invState"><span class="pulse"></span><span>scanning…</span></span>
+        </div>
+        <div class="inv-list" id="invList">
+          <div class="inv-row" style="color:var(--ink-3)">— waiting on parsed fields —</div>
+        </div>
+      </article>
+
+      <!-- PARSER (compressed) -->
+      <article class="card parser" aria-label="Parser output (collapsed)">
+        <div class="caphead">
+          <span class="who">
+            <span class="avatar" title="Parser agent">P</span>
+            <span>Parser · Vision LLM</span>
+          </span>
+          <span class="who" id="parserState"><span class="pulse"></span><span>reading…</span></span>
+        </div>
+        <div class="parser-summary" id="parserSummary">
+          9 fields pending · screenshot received
+        </div>
+        <span class="parser-expand" id="parserExpand">show 9 fields ▾</span>
+      </article>
+
+      <!-- ANALYST IDENTITY -->
+      <article class="card analyst" aria-label="Main analyst identity">
+        <div class="caphead">
+          <span>Main Analyst</span>
+          <span id="analystState" class="who" style="color:var(--ink-3)">arriving…</span>
+        </div>
+        <div class="analyst-row">
+          <div class="analyst-face">MR</div>
+          <div class="analyst-meta">
+            <div class="name">Maya Reyes</div>
+            <div class="role">Sr. Escalation Analyst · 6y QBO</div>
+            <div class="analyst-status"><span class="pulse"></span><span id="analystStatusTxt">reading case…</span></div>
+          </div>
+        </div>
+      </article>
+    </header>
+
+    <!-- ======== CANVAS ======== -->
+    <div class="canvas">
+
+      <!-- STAGE (chat OR webcam) -->
+      <div class="stage">
+        <div class="stage-tabs" role="tablist">
+          <button class="stage-tab active" data-stage="chat" role="tab">
+            <span class="dot"></span>Conversation
+          </button>
+          <button class="stage-tab cam" data-stage="cam" role="tab">
+            <span class="dot"></span>Camera
+          </button>
+          <button class="stage-tab" data-stage="upload" role="tab">
+            <span class="dot"></span>Re-upload
+          </button>
+          <div style="flex:1"></div>
+          <div style="padding:8px 6px;font-size:10.5px;color:var(--ink-3)">
+            <span class="kbd">⌘K</span> commands · <span class="kbd">⌘E</span> earshot
+          </div>
+        </div>
+
+        <div class="stage-body">
+
+          <!-- ===== CHAT STAGE ===== -->
+          <div id="chatStage" style="flex:1;display:flex;flex-direction:column;min-height:0">
+            <div class="chat-scroll" id="chatScroll">
+              <!-- turns injected by JS -->
+            </div>
+
+            <!-- Earshot script bar (Feature #2) -->
+            <div class="earshot" id="earshot" title="Suggested sentence to say to the caller">
+              <span class="tag">SAY</span>
+              <span class="say" id="earshotSay">Preparing call script…</span>
+              <button class="copy" id="earshotCopy">Copy</button>
+            </div>
+
+            <div class="composer">
+              <div class="guard" id="guard">
+                Heads up — your reply mentions "billing" but triage committed to <b style="margin:0 4px">payroll · P2</b>. Override?
+              </div>
+              <div class="row">
+                <textarea id="composer" placeholder="Reply to phone agent… (drag a triage pill into here)"></textarea>
+                <button class="send" id="sendBtn">Send ⏎</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ===== CAMERA STAGE (first-class) ===== -->
+          <div class="cam" id="camStage">
+            <div class="cam-head">
+              <button class="cam-back" id="camBack" title="Cancel — back to upload">
+                ✕ <span>Cancel · back to upload</span>
+              </button>
+              <div class="cam-title"><b>Webcam capture</b>· auto-derotate · doc-edge detection</div>
+              <div style="flex:1"></div>
+              <div style="font-size:10.5px;color:var(--ink-3)">
+                <span class="kbd">Space</span> shutter · <span class="kbd">Esc</span> cancel
+              </div>
+            </div>
+            <div class="cam-stage">
+              <div class="viewport">
+                <div class="cam-hud">
+                  <div class="badge warn" id="camBadge">📐 Sideways shot detected — derotating…</div>
+                  <div class="badge ok" id="camLight">💡 Light: good</div>
+                </div>
+                <div class="doc" id="doc">
+                  <div class="doc-sheet"></div>
+                </div>
+                <div class="crop" id="crop"></div>
+              </div>
+            </div>
+            <div class="cam-controls">
+              <button class="cam-btn" id="camRotate">↻ Rotate 90°</button>
+              <button class="shutter" id="shutter" title="Capture (Space)"></button>
+              <button class="cam-btn primary" id="camUse" disabled>Use this capture →</button>
+            </div>
+          </div>
+
+          <!-- Parser expansion popover -->
+          <div class="pop" id="parserPop" role="dialog" aria-label="Parsed fields">
+            <h4>Parsed template — 9 fields</h4>
+            <div class="grid">
+              <div><div class="k">Caller</div><div class="v">Janelle P.</div></div>
+              <div><div class="k">Company</div><div class="v">Bramwell Cabinetry LLC</div></div>
+              <div><div class="k">QBO Edition</div><div class="v">Payroll Premium</div></div>
+              <div><div class="k">Issue Date</div><div class="v">2026-05-15</div></div>
+              <div><div class="k">Symptom</div><div class="v">Direct deposit failed mid-run</div></div>
+              <div><div class="k">Error Code</div><div class="v">PR-0440</div></div>
+              <div><div class="k">Last Action</div><div class="v">Submitted payroll 10:42am</div></div>
+              <div><div class="k">Bank</div><div class="v">Mercantile Trust ****4419</div></div>
+              <div><div class="k">Attachments</div><div class="v">1 screenshot</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INSIGHT RAIL : case context + timeline -->
+      <aside class="insight" aria-label="Case context">
+        <div class="insight-head">
+          <span class="ttl">Live case</span>
+          <span class="case">ESC-2026-05-1142</span>
+        </div>
+        <div class="insight-body">
+
+          <div class="panel-block">
+            <div class="h">Caller on the line</div>
+            <div class="kv">
+              <div class="k">Phone Agent</div><div class="v">A. Bramwell · L1</div>
+              <div class="k">Customer</div><div class="v">Bramwell Cabinetry</div>
+              <div class="k">Call length</div><div class="v" id="callClock">00:04:18</div>
+              <div class="k">Mood</div><div class="v" style="color:var(--warn)">tense</div>
+            </div>
+          </div>
+
+          <div>
+            <div class="h" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin-bottom:8px">Pipeline timeline</div>
+            <div class="timeline" id="timeline">
+              <div class="tl-item done"><div class="tl-dot">✓</div><div class="tl-text"><div class="h">Screenshot received</div><div class="t">+00:00</div></div></div>
+              <div class="tl-item done"><div class="tl-dot">✓</div><div class="tl-text"><div class="h">Parser · 9 fields</div><div class="t">+00:04</div></div></div>
+              <div class="tl-item active" id="tlTriage"><div class="tl-dot">●</div><div class="tl-text"><div class="h">Triage committing…</div><div class="t" id="tlTriageT">+00:06</div></div></div>
+              <div class="tl-item" id="tlInv"><div class="tl-dot">○</div><div class="tl-text"><div class="h">INV matches</div><div class="t">—</div></div></div>
+              <div class="tl-item" id="tlAnalyst"><div class="tl-dot">○</div><div class="tl-text"><div class="h">Analyst joins</div><div class="t">—</div></div></div>
+            </div>
+          </div>
+
+          <div class="panel-block">
+            <div class="h">Suggested follow-ups</div>
+            <div style="display:flex;flex-direction:column;gap:5px;font-size:11.5px;color:var(--ink-2)">
+              <button class="suggest" style="text-align:left;color:var(--ink-2);padding:4px 0">↳ Confirm bank ****4419 on file</button>
+              <button class="suggest" style="text-align:left;color:var(--ink-2);padding:4px 0">↳ Pull last 3 payroll runs</button>
+              <button class="suggest" style="text-align:left;color:var(--ink-2);padding:4px 0">↳ Open INV-147914 (closest match)</button>
+            </div>
+          </div>
+
+        </div>
+      </aside>
+
+    </div>
+  </section>
+</div>
+
+<script>
+/* ============================================================================
+   STATE + SIMULATION
+   ========================================================================== */
+const els = {
+  // triage
+  pCat: document.getElementById('pCat'),
+  pSev: document.getElementById('pSev'),
+  pConf: document.getElementById('pConf'),
+  pNext: document.getElementById('pNext'),
+  triageText: document.getElementById('triageText'),
+  triageCaret: document.getElementById('triageCaret'),
+  triageState: document.getElementById('triageState'),
+  triagePulse: document.getElementById('triagePulse'),
+  triagePills: document.querySelectorAll('#triagePills .pill'),
+  // inv
+  invList: document.getElementById('invList'),
+  invState: document.getElementById('invState'),
+  // parser
+  parserState: document.getElementById('parserState'),
+  parserSummary: document.getElementById('parserSummary'),
+  parserExpand: document.getElementById('parserExpand'),
+  parserPop: document.getElementById('parserPop'),
+  // analyst
+  analystState: document.getElementById('analystState'),
+  analystStatusTxt: document.getElementById('analystStatusTxt'),
+  // chat
+  chatScroll: document.getElementById('chatScroll'),
+  composer: document.getElementById('composer'),
+  sendBtn: document.getElementById('sendBtn'),
+  guard: document.getElementById('guard'),
+  // earshot
+  earshotSay: document.getElementById('earshotSay'),
+  earshotCopy: document.getElementById('earshotCopy'),
+  // stages
+  stageTabs: document.querySelectorAll('.stage-tab'),
+  chatStage: document.getElementById('chatStage'),
+  camStage: document.getElementById('camStage'),
+  // cam
+  camBack: document.getElementById('camBack'),
+  camRotate: document.getElementById('camRotate'),
+  shutter: document.getElementById('shutter'),
+  camUse: document.getElementById('camUse'),
+  doc: document.getElementById('doc'),
+  crop: document.getElementById('crop'),
+  camBadge: document.getElementById('camBadge'),
+  // timeline
+  tlInv: document.getElementById('tlInv'),
+  tlTriage: document.getElementById('tlTriage'),
+  tlAnalyst: document.getElementById('tlAnalyst'),
+  callClock: document.getElementById('callClock'),
+};
+
+/* ---- live call clock ---- */
+let callSec = 4*60 + 18;
+setInterval(()=>{
+  callSec++;
+  const m = String(Math.floor(callSec/60)).padStart(2,'0');
+  const s = String(callSec%60).padStart(2,'0');
+  els.callClock.textContent = `00:${m}:${s}`;
+},1000);
+
+/* ---- helpers ---- */
+function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+async function typeInto(node, text, delay=22){
+  for(let i=0;i<text.length;i++){
+    node.textContent += text[i];
+    await sleep(delay);
+  }
+}
+
+/* ---- earshot updates (Feature #2) ---- */
+const earshotScript = [
+  "One moment — I'm pulling up the case now.",
+  "Looks like a payroll direct-deposit failure with error PR-0440. Let me check if we've seen it.",
+  "I'm seeing two close historical matches — INV-147914 looks like the same bank.",
+  "Maya's reviewing it now. Can you confirm the bank account ends in 4419?",
+  "Got it — we'll reissue the deposit and notify the customer within the hour.",
+];
+let earshotIdx = 0;
+function nextEarshot(){
+  els.earshotSay.textContent = earshotScript[earshotIdx];
+  earshotIdx = Math.min(earshotIdx+1, earshotScript.length-1);
+}
+nextEarshot();
+els.earshotCopy.onclick = ()=>{
+  navigator.clipboard?.writeText(els.earshotSay.textContent);
+  els.earshotCopy.textContent = "Copied ✓";
+  setTimeout(()=>els.earshotCopy.textContent="Copy",1200);
+};
+
+/* ============================================================================
+   PIPELINE SIMULATION
+   ========================================================================== */
+async function runPipeline(){
+
+  // PARSER finishes
+  await sleep(600);
+  els.parserState.innerHTML = '<span style="color:var(--ok)">✓ parsed</span>';
+  els.parserSummary.textContent = "Payroll · PR-0440 · Bramwell · ****4419 · 1 image";
+
+  // TRIAGE starts streaming
+  await sleep(400);
+  els.triageState.textContent = "thinking…";
+
+  // Live-type triage pills (Feature #1) — values appear character-by-character
+  await typeWord(els.pCat, "payroll");
+  lockPill(els.pCat);
+  await typeWord(els.pSev, "P2", 60);
+  els.pSev.classList.add("P2");
+  lockPill(els.pSev);
+  await typeWord(els.pConf, "0.86");
+  lockPill(els.pConf);
+  await typeWord(els.pNext, "verify bank, reissue DD");
+  lockPill(els.pNext);
+
+  // Fast-read line (the V2-praised text-as-it-arrives, generalized)
+  await typeInto(els.triageText,
+    "Direct-deposit batch failed mid-run; bank route accepted, settlement bounced. Re-submit after verifying ABA on file matches Mercantile ****4419.",
+    14);
+  els.triageCaret.style.display='none';
+  els.triageState.innerHTML = '<span style="color:var(--ok)">✓ committed</span>';
+  els.triagePulse.style.background = 'var(--accent-2)';
+  els.tlTriage.classList.remove('active');
+  els.tlTriage.classList.add('done');
+  els.tlTriage.querySelector('.tl-dot').textContent = '✓';
+  nextEarshot();
+
+  // INV arrives (asynchronous — after triage to show ordering independence)
+  await sleep(300);
+  els.invList.innerHTML = '';
+  const matches = [
+    {n:'INV-147914', d:'Mercantile DD bounce · resolved 2025-11', s:'0.92'},
+    {n:'INV-145220', d:'PR-0440 batch · ABA mismatch · 2025-09', s:'0.81'},
+    {n:'INV-141008', d:'Payroll premium DD retry policy', s:'0.66'},
+  ];
+  for(const m of matches){
+    const row = document.createElement('div');
+    row.className = 'inv-row';
+    row.innerHTML = `<span class="num">${m.n}</span><span class="desc">${m.d}</span><span class="score">${m.s}</span>`;
+    els.invList.appendChild(row);
+    await sleep(180);
+  }
+  els.invState.innerHTML = '<span style="color:var(--ok)">✓ 3 matches</span>';
+  els.tlInv.classList.add('done');
+  els.tlInv.querySelector('.tl-dot').textContent = '✓';
+  els.tlInv.querySelector('.t').textContent = '+00:12';
+
+  // ANALYST arrives
+  await sleep(500);
+  els.analystState.innerHTML = '<span style="color:var(--ok)">● online</span>';
+  els.analystStatusTxt.textContent = "reviewing triage + INV-147914";
+  els.tlAnalyst.classList.add('done');
+  els.tlAnalyst.querySelector('.tl-dot').textContent = '✓';
+  els.tlAnalyst.querySelector('.t').textContent = '+00:18';
+
+  // Analyst opening message — explicit ACK of triage + INV (per Zendesk PO note)
+  await sleep(300);
+  await pushAnalystTurn({
+    ack: [{label:'payroll · P2', kind:''}, {label:'INV-147914', kind:'inv'}],
+    text: "I've read the triage and INV-147914 — same Mercantile DD pattern. Confirm the routing on file is 074000010 and we'll reissue. Want me to draft the customer note while we wait?"
+  });
+  nextEarshot();
+
+  // Operator turn
+  await sleep(2400);
+  pushUserTurn("Routing matches. Yes, draft the customer note — keep it under 4 sentences and avoid blame language.");
+  await sleep(800);
+
+  // Analyst reply
+  await pushAnalystTurn({
+    ack: [],
+    text: "Drafted. \"Your most recent payroll batch was halted by a settlement check at the receiving bank. We've verified your routing and will resubmit within the next billing window — net effect is a same-day delay, not a missed payroll. We'll email confirmation the moment funds settle.\" — Send as-is?"
+  });
+  nextEarshot();
+
+  // Operator follow-up
+  await sleep(2200);
+  pushUserTurn("Send. Also flag this as the 3rd Mercantile bounce this month for trend review.");
+  await sleep(700);
+  await pushAnalystTurn({
+    ack: [{label:'trend flagged', kind:''}],
+    text: "Flagged for trend review under #mercantile-dd-2026-q2. Case timeline updated. You're clear to end the call when ready — earshot script for sign-off is below."
+  });
+  nextEarshot();
+}
+
+function lockPill(textNode){
+  const pill = textNode.closest('.pill');
+  pill.dataset.locked = "true";
+  pill.draggable = true;
+  pill.addEventListener('dragstart', (e)=>{
+    e.dataTransfer.setData('text/plain', textNode.textContent);
+  });
+}
+async function typeWord(node, word, delay=30){
+  node.textContent = '';
+  for(const ch of word){ node.textContent += ch; await sleep(delay); }
+}
+
+/* ---- chat turns ---- */
+function pushUserTurn(text){
+  const t = document.createElement('div');
+  t.className = 'turn you';
+  t.innerHTML = `
+    <div class="av">K</div>
+    <div class="body">
+      <div class="meta"><span class="nm">You</span><span>just now</span></div>
+      <div class="msg">${text}</div>
+    </div>`;
+  els.chatScroll.appendChild(t);
+  els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+}
+async function pushAnalystTurn({ack=[], text}){
+  const t = document.createElement('div');
+  t.className = 'turn analyst';
+  const ackHtml = ack.length
+    ? `<div class="ack">acknowledged: ${ack.map(a=>`<span class="ack-chip ${a.kind}">${a.label}</span>`).join('')}</div>`
+    : '';
+  t.innerHTML = `
+    <div class="av">M</div>
+    <div class="body">
+      <div class="meta"><span class="nm">Maya Reyes</span><span>Sr. Analyst · streaming</span></div>
+      <div class="msg">${ackHtml}<span class="streamed"></span></div>
+    </div>`;
+  els.chatScroll.appendChild(t);
+  els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+  const span = t.querySelector('.streamed');
+  for(const ch of text){
+    span.textContent += ch;
+    if(Math.random()<0.18) els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+    await sleep(11);
+  }
+  els.chatScroll.scrollTop = els.chatScroll.scrollHeight;
+}
+
+/* ---- parser expand popover ---- */
+els.parserExpand.onclick = ()=>{
+  els.parserPop.classList.toggle('show');
+  els.parserExpand.textContent = els.parserPop.classList.contains('show')
+    ? 'hide 9 fields ▴' : 'show 9 fields ▾';
+};
+document.addEventListener('click',(e)=>{
+  if(!els.parserPop.contains(e.target) && e.target!==els.parserExpand){
+    els.parserPop.classList.remove('show');
+    els.parserExpand.textContent = 'show 9 fields ▾';
+  }
+});
+
+/* ---- composer: drop pill, guardrail (Feature #4) ---- */
+els.composer.addEventListener('dragover', e=>e.preventDefault());
+els.composer.addEventListener('drop', e=>{
+  e.preventDefault();
+  const v = e.dataTransfer.getData('text/plain');
+  const cur = els.composer.value;
+  els.composer.value = (cur ? cur + ' ' : '') + v;
+  els.composer.focus();
+});
+els.composer.addEventListener('input', ()=>{
+  const v = els.composer.value.toLowerCase();
+  // simple contradiction check: triage says payroll, operator types billing/bank-feeds/etc
+  const wrongCats = ['billing','bank-feeds','reconciliation','permissions','tax','reports','technical','invoicing'];
+  const triageCat = els.pCat.textContent;
+  const tripped = triageCat === 'payroll' && wrongCats.some(c=> v.includes(c));
+  els.guard.classList.toggle('show', tripped);
+});
+els.sendBtn.onclick = ()=>{
+  const v = els.composer.value.trim();
+  if(!v) return;
+  pushUserTurn(v);
+  els.composer.value = '';
+  els.guard.classList.remove('show');
+};
+els.composer.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); els.sendBtn.click(); }
+});
+
+/* ============================================================================
+   STAGE SWITCH (chat / cam / upload)
+   ========================================================================== */
+els.stageTabs.forEach(tab=>{
+  tab.onclick = ()=>{
+    els.stageTabs.forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const s = tab.dataset.stage;
+    els.chatStage.style.display = (s==='chat') ? 'flex' : 'none';
+    els.camStage.classList.toggle('show', s==='cam');
+    if(s==='cam') runCameraSequence();
+  };
+});
+
+/* ============================================================================
+   WEBCAM (first-class — Directive D)
+   ========================================================================== */
+async function runCameraSequence(){
+  // Reset
+  els.doc.classList.remove('derotated');
+  els.crop.classList.remove('show','locked');
+  els.camUse.disabled = true;
+  els.camBadge.className = 'badge warn';
+  els.camBadge.innerHTML = '📐 Sideways shot detected — derotating…';
+  await sleep(800);
+  // Auto-derotate
+  els.doc.classList.add('derotated');
+  els.camBadge.className = 'badge ok';
+  els.camBadge.innerHTML = '✓ Orientation corrected';
+  await sleep(600);
+  // Edge detection crop
+  els.crop.classList.add('show');
+  await sleep(700);
+  els.crop.classList.add('locked');
+  els.camBadge.innerHTML = '✓ Document edges locked — ready';
+  els.camUse.disabled = false;
+}
+els.camBack.onclick = ()=>{
+  document.querySelector('.stage-tab[data-stage="chat"]').click();
+};
+els.camRotate.onclick = ()=>{
+  els.doc.classList.toggle('derotated');
+};
+els.shutter.onclick = ()=>{
+  els.camBadge.innerHTML = '📸 Captured — sending to parser…';
+  setTimeout(()=> document.querySelector('.stage-tab[data-stage="chat"]').click(), 700);
+};
+els.camUse.onclick = ()=> els.shutter.click();
+document.addEventListener('keydown', e=>{
+  if(els.camStage.classList.contains('show')){
+    if(e.code==='Space'){ e.preventDefault(); els.shutter.click(); }
+    if(e.key==='Escape'){ els.camBack.click(); }
+  }
+});
+
+/* ============================================================================
+   GO
+   ========================================================================== */
+runPipeline();
+</script>
+</body>
+</html>

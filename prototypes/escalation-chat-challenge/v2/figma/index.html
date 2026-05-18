@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QBO Escalation — figma</title>
+<style>
+  /* -------- foundations -------- */
+  :root{
+    --bg:        #FAFAF7;          /* warm neutral, recedes */
+    --surface:   #FFFFFF;
+    --ink:       #1B1B1A;
+    --ink-2:     #4A4A47;
+    --muted:     #8A8A85;
+    --hair:      #ECECE8;
+    --hair-2:    #E2E2DE;
+    --accent:    #C76A22;          /* qbo warm authority amber */
+    --accent-soft: #FBEFE3;
+    --ok:        #2F8F5A;
+    --warn:      #C57A14;
+    --danger:    #B23A2A;
+    --p1: #B23A2A; --p2:#C57A14; --p3:#3A6FB2; --p4:#6E6E69;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow-1: 0 1px 0 rgba(20,20,18,.04), 0 1px 2px rgba(20,20,18,.04);
+    --shadow-2: 0 1px 0 rgba(20,20,18,.05), 0 8px 24px -10px rgba(20,20,18,.18);
+    --ease: cubic-bezier(.2,.7,.2,1);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Inter", "SF Pro Text", Segoe UI, sans-serif;
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    font-feature-settings: "ss01","cv11";
+  }
+  .mono{font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace; font-size:12.5px}
+
+  /* -------- frame -------- */
+  .app{
+    min-height:100vh; display:grid; grid-template-rows:auto 1fr auto;
+  }
+  header.top{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:14px 28px; border-bottom:1px solid var(--hair); background:var(--bg);
+    position:sticky; top:0; z-index:5;
+  }
+  header.top .brand{display:flex; align-items:center; gap:10px; color:var(--ink-2); font-weight:500}
+  header.top .brand .dot{
+    width:18px;height:18px;border-radius:5px;
+    background: conic-gradient(from 200deg, #E0A86A, #C76A22, #8C4A18, #C76A22);
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+  }
+  header.top .status{display:flex; gap:18px; align-items:center; color:var(--muted); font-size:12.5px}
+  header.top .pill{display:inline-flex; align-items:center; gap:6px;}
+  .kbd{font-family:inherit; font-size:11.5px; color:var(--muted); border:1px solid var(--hair-2); border-bottom-width:2px; padding:1px 6px; border-radius:5px; background:#fff}
+
+  /* -------- main canvas, single column -------- */
+  main{
+    max-width: 740px; margin:0 auto; padding:48px 32px 160px;
+    display:flex; flex-direction:column; gap:32px;
+  }
+
+  /* -------- step 1+2: dropzone / intake -------- */
+  .dropzone{
+    border:1.5px dashed var(--hair-2);
+    border-radius: 14px; padding: 56px 24px; background:var(--surface);
+    text-align:center; transition: border-color .2s var(--ease), background .2s var(--ease), transform .25s var(--ease);
+    cursor: pointer; position:relative;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color: var(--accent); background: #FFFCF7;
+  }
+  .dropzone h1{
+    margin:0 0 6px; font-size:18px; font-weight:600; letter-spacing:-0.005em; color:var(--ink);
+  }
+  .dropzone p{margin:0; color:var(--muted); font-size:13.5px}
+  .dropzone .iconwrap{
+    width:48px; height:48px; margin:0 auto 14px; border-radius:12px; background: var(--accent-soft);
+    display:flex; align-items:center; justify-content:center; color: var(--accent);
+  }
+  .dropzone .actions{margin-top:18px; display:flex; gap:8px; justify-content:center; flex-wrap:wrap}
+  .btn{
+    appearance:none; border:1px solid var(--hair-2); background:#fff; color:var(--ink);
+    padding:7px 13px; border-radius:8px; font:inherit; font-size:13px; cursor:pointer;
+    transition: transform .12s var(--ease), border-color .12s var(--ease), background .12s var(--ease);
+  }
+  .btn:hover{border-color:#cfcfca; background:#fafaf6}
+  .btn:active{transform: translateY(1px)}
+  .btn.primary{background: var(--ink); color:#fff; border-color: var(--ink)}
+  .btn.primary:hover{background:#000}
+  .btn.ghost{background:transparent; border-color: transparent; color: var(--muted)}
+  .btn.ghost:hover{color: var(--ink); background: var(--hair)}
+
+  /* -------- webcam (calmer than today's) -------- */
+  .webcam{
+    border-radius: 14px; background: #111; aspect-ratio: 16/10; position:relative; overflow:hidden;
+    box-shadow: var(--shadow-2); animation: fadein .25s var(--ease);
+  }
+  .webcam .vp{
+    position:absolute; inset:0;
+    background:
+      radial-gradient(120% 80% at 50% 40%, rgba(255,255,255,.08), transparent 60%),
+      linear-gradient(135deg,#2a2722,#0f0d0b);
+  }
+  .webcam .guides{
+    position:absolute; inset: 12% 14%;
+    border: 1px dashed rgba(255,255,255,.35); border-radius: 10px;
+  }
+  .webcam .ctrls{
+    position:absolute; left:0; right:0; bottom:0; display:flex; justify-content:center; gap:10px; padding:14px;
+    background: linear-gradient(transparent, rgba(0,0,0,.45));
+  }
+  .webcam .shutter{
+    width:54px; height:54px; border-radius:50%; background:#fff; border:none; cursor:pointer;
+    box-shadow: 0 0 0 4px rgba(255,255,255,.18);
+  }
+  .webcam .cancel{
+    position:absolute; top:12px; right:12px; background: rgba(0,0,0,.45); color:#fff; border:none;
+    padding:6px 10px; border-radius:8px; cursor:pointer; backdrop-filter: blur(8px); font:inherit; font-size:12.5px
+  }
+  .webcam .hint{
+    position:absolute; top:12px; left:12px; color:rgba(255,255,255,.85); font-size:12.5px;
+    background: rgba(0,0,0,.4); padding:6px 10px; border-radius: 8px; backdrop-filter: blur(8px);
+  }
+
+  /* -------- the case object (after upload) -------- */
+  .case{
+    background: var(--surface); border:1px solid var(--hair); border-radius: 14px;
+    box-shadow: var(--shadow-1); overflow:hidden; animation: fadein .3s var(--ease);
+  }
+  .case .thumb{
+    display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--hair); background:#FCFCFA;
+  }
+  .case .thumb .img{
+    width:44px; height:44px; border-radius:8px; background:
+      linear-gradient(135deg, #f4ead8 0%, #e7d6b1 60%, #cdb585 100%);
+    border:1px solid var(--hair-2); position:relative; overflow:hidden;
+  }
+  .case .thumb .img::after{
+    content:""; position:absolute; inset:6px 6px auto 6px; height:3px; background: rgba(0,0,0,.18); border-radius:2px;
+    box-shadow: 0 6px 0 rgba(0,0,0,.12), 0 12px 0 rgba(0,0,0,.08), 0 18px 0 rgba(0,0,0,.06);
+  }
+  .case .thumb .meta{display:flex; flex-direction:column}
+  .case .thumb .meta .name{font-weight:500}
+  .case .thumb .meta .sub{color:var(--muted); font-size:12.5px}
+  .case .thumb .spacer{flex:1}
+
+  /* -------- agent strip (always-known progress) -------- */
+  .strip{
+    display:grid; grid-template-columns: 1fr 1fr 1fr; gap:0;
+    border-top:1px solid var(--hair); background:#fff;
+  }
+  .ag{
+    padding:14px 16px; display:flex; align-items:center; gap:10px; min-width:0;
+    border-right:1px solid var(--hair); font-size:13px; color: var(--ink-2);
+  }
+  .ag:last-child{border-right:none}
+  .ag .who{display:flex; flex-direction:column; line-height:1.2; min-width:0; flex:1}
+  .ag .who .role{font-weight:500; color:var(--ink); font-size:13px; white-space:nowrap}
+  .ag .who .model{font-size:11px; color:var(--muted); letter-spacing:.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .ag .state{font-size:11px; color:var(--muted); font-variant-numeric: tabular-nums; white-space:nowrap; flex:none}
+
+  /* state circles — linear-style, but quieter */
+  .cir{
+    width:14px; height:14px; border-radius:50%; border:1.5px solid var(--hair-2); background:#fff;
+    position:relative; flex:none;
+  }
+  .cir.pending{border-style: dashed; border-color:#d6d6d1}
+  .cir.running{
+    border-color: var(--accent); border-style: solid;
+    background: conic-gradient(var(--accent) 0 var(--p,30%), transparent var(--p,30%) 100%);
+    -webkit-mask: radial-gradient(circle, transparent 35%, #000 36%);
+            mask: radial-gradient(circle, transparent 35%, #000 36%);
+  }
+  .cir.done{background: var(--ok); border-color: var(--ok)}
+  .cir.done::after{
+    content:""; position:absolute; inset:0; display:block;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14'><path d='M3.5 7.3 6 9.8 10.6 4.5' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>") center/12px no-repeat;
+  }
+
+  /* -------- parsed fields (Figma properties-panel rhythm) -------- */
+  .fields{
+    padding: 4px 6px 8px; background:#fff;
+  }
+  .field{
+    display:grid; grid-template-columns: 170px 1fr; gap: 14px; padding: 10px 18px;
+    border-top:1px solid var(--hair);
+    animation: fadein .35s var(--ease) both;
+  }
+  .field:first-child{border-top:none}
+  .field .label{color:var(--muted); font-size:12px; letter-spacing:.04em; text-transform: uppercase}
+  .field .val{color: var(--ink); font-size:13.5px}
+  .field .val.placeholder{color: var(--muted); font-style: italic}
+
+  /* skeleton lines for parser-running */
+  .skel{
+    display:block; height: 11px; border-radius:4px;
+    background: linear-gradient(90deg, #efefe9 0%, #f7f7f3 50%, #efefe9 100%);
+    background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
+  }
+  @keyframes shimmer{ to{background-position: -200% 0} }
+
+  /* -------- triage (the dominant card) -------- */
+  .triage{
+    background: var(--surface); border:1px solid var(--hair); border-radius: 14px;
+    box-shadow: var(--shadow-2); overflow:hidden;
+    transform-origin: 50% 0; animation: triagein .5s var(--ease);
+  }
+  @keyframes triagein{
+    0%{opacity:0; transform: translateY(6px) scale(.99)}
+    100%{opacity:1; transform: none}
+  }
+  .triage .head{
+    display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid var(--hair);
+    background: #FFFCF7;
+  }
+  .triage .head .who{font-size:12px; color:var(--muted); letter-spacing:.04em; text-transform:uppercase}
+  .triage .head .spacer{flex:1}
+  .conf{font-size:11.5px; color:var(--muted); display:inline-flex; align-items:center; gap:6px}
+  .conf .bar{width:36px; height:4px; border-radius:3px; background:var(--hair); overflow:hidden}
+  .conf .bar i{display:block; height:100%; background: var(--accent); width:84%}
+  .triage .body{padding: 18px 20px 6px; display:flex; flex-direction:column; gap: 14px}
+  .triage h2{
+    margin:0; font-size: 22px; line-height:1.25; letter-spacing:-0.01em; font-weight:600; color:var(--ink);
+  }
+  .triage .tags{display:flex; gap:8px; flex-wrap:wrap}
+  .tag{
+    display:inline-flex; align-items:center; gap:6px; font-size:12px; padding: 4px 9px; border-radius:999px;
+    border:1px solid var(--hair-2); background:#fff; color: var(--ink-2);
+  }
+  .tag .swatch{width:8px;height:8px;border-radius:50%}
+  .tag.cat-payroll .swatch{background:#7a4ec9}
+  .tag.cat-bank-feeds .swatch{background:#1ABCFE}
+  .tag.cat-tax .swatch{background:#B23A2A}
+  .tag.sev-p1 .swatch{background: var(--p1)}
+  .tag.sev-p2 .swatch{background: var(--p2)}
+  .tag.sev-p3 .swatch{background: var(--p3)}
+  .tag.sev-p4 .swatch{background: var(--p4)}
+
+  .triage .row{display:grid; grid-template-columns: 130px 1fr; gap:14px; padding: 8px 0; border-top:1px solid var(--hair)}
+  .triage .row .k{color:var(--muted); font-size:12px; letter-spacing:.04em; text-transform:uppercase}
+  .triage .row .v{color: var(--ink); font-size: 14px}
+  .triage .foot{padding: 4px 20px 18px}
+
+  /* -------- INV (supportive) -------- */
+  .inv{
+    display:flex; gap:10px; align-items:flex-start; padding: 12px 14px;
+    border:1px solid var(--hair); border-radius: 10px; background:#FCFCFA;
+    animation: fadein .35s var(--ease);
+  }
+  .inv .icon{
+    width:28px;height:28px;border-radius:7px;background:#EEF4FA; color:#3A6FB2;
+    display:flex;align-items:center;justify-content:center; flex:none; font-weight:600; font-size:11px; letter-spacing:.02em;
+  }
+  .inv .meta{display:flex; flex-direction:column; gap:2px}
+  .inv .meta .id{font-weight:500; color:var(--ink); font-size:13px}
+  .inv .meta .id .num{font-family: ui-monospace, monospace; font-size:12.5px; color: var(--ink-2); margin-right:8px}
+  .inv .meta .sum{color:var(--muted); font-size:12.5px}
+  .inv .spacer{flex:1}
+  .inv .open{color:var(--ink-2); font-size:12.5px; cursor:pointer; padding:4px 8px; border-radius:6px}
+  .inv .open:hover{background: var(--hair)}
+
+  /* -------- analyst arrival (the moment) -------- */
+  .analyst-card{
+    display:flex; gap:14px; align-items:flex-start; padding: 18px 20px;
+    background: var(--surface); border:1px solid var(--hair); border-radius: 14px;
+    box-shadow: var(--shadow-1);
+    animation: arrive .55s var(--ease);
+  }
+  @keyframes arrive{
+    0%{opacity:0; transform: translateY(8px)}
+    100%{opacity:1; transform: none}
+  }
+  .avatar{
+    width:44px;height:44px;border-radius:50%;flex:none;
+    background:
+      radial-gradient(circle at 32% 30%, #f7e6cf 0%, #d8a866 45%, #8a4a14 100%);
+    box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(199,106,34,.35);
+    position:relative;
+  }
+  .avatar::after{
+    content:""; position:absolute; bottom:0; right:-2px; width:11px; height:11px; border-radius:50%;
+    background:#2F8F5A; box-shadow: 0 0 0 2px #fff;
+  }
+  .analyst-card .meta{display:flex; flex-direction:column; gap:2px; min-width:0; flex:1}
+  .analyst-card .name{font-weight:600; font-size: 15px}
+  .analyst-card .name .role{font-weight:400; color: var(--muted); margin-left:6px}
+  .analyst-card .micro{color: var(--muted); font-size:12.5px; display:flex; align-items:center; gap:8px}
+  .analyst-card .hello{margin-top:8px; color: var(--ink); font-size:14.5px; line-height:1.55}
+
+  /* -------- chat thread (continuous, no seam) -------- */
+  .thread{display:flex; flex-direction:column; gap:18px}
+  .msg{display:flex; gap:12px; align-items:flex-start; animation: fadein .35s var(--ease)}
+  .msg .av{width:28px;height:28px;border-radius:50%;flex:none}
+  .msg.user .av{background:#E2E2DE; border:1px solid var(--hair-2);
+    display:flex;align-items:center;justify-content:center;color:#6E6E69;font-weight:600;font-size:11.5px}
+  .msg.analyst .av{
+    background: radial-gradient(circle at 32% 30%, #f7e6cf 0%, #d8a866 45%, #8a4a14 100%);
+  }
+  .msg .bubble{flex:1; min-width:0}
+  .msg .bubble .who{font-size:12px; color:var(--muted); margin-bottom:3px}
+  .msg .bubble .body{font-size:14.5px; line-height:1.55; color: var(--ink)}
+  .msg .bubble .body p{margin: 0 0 8px}
+  .msg .bubble .body p:last-child{margin-bottom:0}
+  .msg .bubble .body ol{margin:6px 0 0; padding-left:18px}
+  .msg .bubble .body ol li{margin:4px 0}
+
+  .typing{display:inline-flex; gap:3px; vertical-align:middle}
+  .typing i{width:4px; height:4px; border-radius:50%; background: var(--muted); animation: blink 1.2s var(--ease) infinite}
+  .typing i:nth-child(2){animation-delay:.15s}
+  .typing i:nth-child(3){animation-delay:.3s}
+  @keyframes blink{ 0%,80%,100%{opacity:.25} 40%{opacity:1} }
+
+  /* -------- compose (bottom, slim, present once analyst arrives) -------- */
+  .compose-wrap{
+    position: sticky; bottom:0; z-index: 4;
+    background: linear-gradient(to top, var(--bg) 55%, rgba(250,250,247,0));
+    padding: 28px 0 28px;
+  }
+  .compose-inner{
+    max-width: 740px; margin:0 auto; padding: 0 32px;
+  }
+  .compose{
+    background: var(--surface); border:1px solid var(--hair-2); border-radius: 14px;
+    box-shadow: var(--shadow-2); padding: 8px 8px 8px 14px;
+    display:flex; gap:8px; align-items:flex-end;
+  }
+  .compose textarea{
+    flex:1; border:none; outline:none; resize:none; font:inherit; font-size:14.5px; padding:10px 4px;
+    background:transparent; color: var(--ink); max-height: 120px;
+  }
+  .compose .send{
+    background: var(--ink); color:#fff; border:none; border-radius:10px; padding:9px 13px; cursor:pointer; font:inherit;
+  }
+  .compose .send:disabled{background: var(--hair-2); color: var(--muted); cursor: default}
+
+  /* -------- demo control (small, recedes) -------- */
+  .demo{
+    position: fixed; right: 18px; bottom: 18px; z-index: 10;
+    background: var(--surface); border:1px solid var(--hair-2); border-radius: 12px; box-shadow: var(--shadow-2);
+    padding: 8px; display:flex; gap:6px; align-items:center;
+  }
+  .demo button{
+    background:#fff; border:1px solid var(--hair); border-radius:8px; padding:6px 10px; font:inherit; font-size:12.5px; cursor:pointer; color:var(--ink-2)
+  }
+  .demo button:hover{border-color: var(--accent); color: var(--ink)}
+  .demo .lbl{font-size:11.5px; color: var(--muted); padding:0 6px; letter-spacing:.04em; text-transform: uppercase}
+
+  /* -------- utilities -------- */
+  .hidden{display:none !important}
+  .quiet{color: var(--muted)}
+  @keyframes fadein{from{opacity:0; transform: translateY(2px)} to{opacity:1; transform:none}}
+
+  /* reduced motion */
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{ animation-duration: .001ms !important; transition: none !important }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- top frame — quiet -->
+  <header class="top">
+    <div class="brand">
+      <span class="dot" aria-hidden="true"></span>
+      <span>Escalations</span>
+      <span class="quiet" id="caseId" style="margin-left:6px"></span>
+    </div>
+    <div class="status">
+      <span class="pill"><span class="cir done" style="width:8px;height:8px"></span> connected</span>
+      <span>Phone agent: <strong style="color:var(--ink-2)">Mara R.</strong></span>
+      <span class="kbd">⌘ V to paste</span>
+    </div>
+  </header>
+
+  <!-- main canvas — single column, breathing -->
+  <main id="canvas">
+
+    <!-- STAGE 1: pre-upload -->
+    <section class="dropzone" id="dropzone" tabindex="0" aria-label="Drop screenshot to begin">
+      <div class="iconwrap" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></svg>
+      </div>
+      <h1>Drop a screenshot to begin</h1>
+      <p>Paste, drop, or upload the phone agent's escalation DM. We'll take it from there.</p>
+      <div class="actions">
+        <button class="btn primary" id="fakeUpload">Use sample screenshot</button>
+        <button class="btn" id="openWebcam">Use webcam</button>
+        <button class="btn ghost" type="button">Paste from clipboard</button>
+      </div>
+    </section>
+
+    <!-- STAGE 2 (optional): webcam — calmer than today -->
+    <section class="webcam hidden" id="webcam" aria-label="Webcam capture">
+      <div class="vp"></div>
+      <div class="guides" aria-hidden="true"></div>
+      <button class="cancel" id="cancelCam">← Back</button>
+      <div class="hint">Hold the phone steady inside the frame</div>
+      <div class="ctrls">
+        <button class="shutter" id="shutter" aria-label="Capture"></button>
+      </div>
+    </section>
+
+    <!-- STAGE 3+: the case object (parsed fields), agent strip, then triage, INV, analyst, chat -->
+    <section class="case hidden" id="case" aria-live="polite">
+      <div class="thumb">
+        <div class="img" aria-hidden="true"></div>
+        <div class="meta">
+          <div class="name">escalation-template.png</div>
+          <div class="sub mono"><span id="thumbSize">428 KB</span> · received <span id="thumbTime">just now</span></div>
+        </div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="resetBtn" title="Drop another">Replace</button>
+      </div>
+
+      <!-- agent strip: parser / INV / triage — always-known, never shouting -->
+      <div class="strip" id="strip">
+        <div class="ag" data-ag="parser">
+          <span class="cir pending" id="cirParser" style="--p:0%"></span>
+          <span class="who"><span class="role">Parser</span><span class="model">Sonnet 4.5 · vision</span></span>
+          <span class="state" id="stParser">queued</span>
+        </div>
+        <div class="ag" data-ag="inv">
+          <span class="cir pending" id="cirInv"></span>
+          <span class="who"><span class="role">INV Search</span><span class="model">Haiku 4 · db</span></span>
+          <span class="state" id="stInv">queued</span>
+        </div>
+        <div class="ag" data-ag="triage">
+          <span class="cir pending" id="cirTriage"></span>
+          <span class="who"><span class="role">Triage</span><span class="model">Opus 4.7 · senior</span></span>
+          <span class="state" id="stTriage">queued</span>
+        </div>
+      </div>
+
+      <!-- parsed fields: properties-panel rhythm -->
+      <div class="fields" id="fields"><!-- injected --></div>
+    </section>
+
+    <!-- STAGE 4: triage card (dominant when present) -->
+    <section id="triageMount"></section>
+
+    <!-- STAGE 4b: INV (supportive) -->
+    <section id="invMount"></section>
+
+    <!-- STAGE 5: analyst arrival -->
+    <section id="analystMount"></section>
+
+    <!-- STAGE 6: chat thread -->
+    <section class="thread" id="thread"></section>
+
+  </main>
+
+  <!-- compose: slim, sticky, appears once analyst has arrived -->
+  <div class="compose-wrap hidden" id="composeWrap">
+    <div class="compose-inner">
+      <div class="compose">
+        <textarea id="composeInput" rows="1" placeholder="Reply to Eleanor…"></textarea>
+        <button class="send" id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- demo scrubber: small, recedes -->
+<div class="demo" role="group" aria-label="Demo">
+  <span class="lbl">demo</span>
+  <button id="dReset">Reset</button>
+  <button id="dPlay">Play whole arc ▸</button>
+</div>
+
+<script>
+/* ---------- realistic QBO mock ---------- */
+const PARSED = [
+  ["Attempting to",  "Run unscheduled payroll for terminated employee in CA"],
+  ["Expected outcome", "Final cheque issues for pay period 04/22–05/05"],
+  ["Actual outcome", "QBO blocks: \"Termination date must be within pay period\""],
+  ["Customer info",  "Pacific Roast Coffee · QBO Payroll Premium · 14 employees"],
+  ["Agent info",     "Mara R. · Tier-1 phone · ext 4118"],
+  ["Steps tried",    "Re-checked term date (05/12), tried Run payroll → Unscheduled, cleared cache"],
+  ["Error / IDs",    "Realm 1234567890123456 · payroll item PAY-99421"],
+  ["Urgency given",  "Customer is mid-payroll, deadline today 5pm PT"],
+  ["Attachments",    "1 screenshot (above)"]
+];
+
+const TRIAGE = {
+  category: "payroll",
+  severity: "P2",
+  fastRead: "Termination date (05/12) falls after pay period start (04/22) — QBO's guardrail is blocking the final cheque, but it's a known workaround, not a bug.",
+  nextStep: "Have Mara change the termination date to the last day actually worked (within the pay period), run unscheduled payroll, then restore the true termination date.",
+  missingInfo: "Last day actually worked, and whether the employee accrued PTO that needs paying out separately.",
+  confidence: "high"
+};
+
+const INV = {
+  id: "INV-147914",
+  title: "Unscheduled payroll blocks final cheque when term date is outside pay period",
+  match: "92% match"
+};
+
+const ANALYST = {
+  name: "Eleanor",
+  role: "Senior Escalation Analyst",
+  model: "Claude Opus 4.7",
+  hello: "Hi — I've read Mara's note and the parser output. This is the unscheduled-payroll/term-date guardrail; I've also pulled INV-147914 which is the same shape. I have a clean walkthrough for Mara and a one-liner she can read to the customer. Want me to start with the customer-facing script or the in-app steps?"
+};
+
+const TURNS = [
+  { who:"user", text:"Customer-facing script first, please. She'll need to set expectations before she clicks anything." },
+  { who:"analyst", text:
+    `<p>Good call. Here's what Mara can read, in her voice:</p>
+     <p><em>"Hey, I see exactly what's happening — QBO is being protective because the termination date you entered falls outside this pay period. I'm going to walk you through a tiny date adjustment so we can release the final cheque today, and then we'll put the real termination date back. Takes about ninety seconds. Ready?"</em></p>
+     <p>Then the in-app steps. Want them now?</p>`
+  },
+  { who:"user", text:"Yes." }
+];
+
+/* ---------- helpers ---------- */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+function setState(id, label, cls, p){
+  const cir = $('#cir'+id.charAt(0).toUpperCase()+id.slice(1));
+  const st = $('#st'+id.charAt(0).toUpperCase()+id.slice(1));
+  if (!cir || !st) return;
+  cir.classList.remove('pending','running','done');
+  cir.classList.add(cls);
+  if (p!=null) cir.style.setProperty('--p', p+'%');
+  st.textContent = label;
+}
+
+function renderFieldsSkeleton(){
+  const f = $('#fields'); f.innerHTML = '';
+  for (const [label] of PARSED){
+    const row = document.createElement('div');
+    row.className = 'field';
+    row.innerHTML = `<div class="label">${label}</div><div class="val"><span class="skel" style="width:${40+Math.random()*45}%"></span></div>`;
+    f.appendChild(row);
+  }
+}
+function fillField(idx, value){
+  const rows = $$('.field', $('#fields'));
+  if (!rows[idx]) return;
+  rows[idx].querySelector('.val').innerHTML = value;
+}
+
+function renderTriage(){
+  const c = `<div class="triage" role="region" aria-label="Triage summary">
+    <div class="head">
+      <span class="cir done" style="width:10px;height:10px"></span>
+      <span class="who">Triage · Senior · Opus 4.7</span>
+      <span class="spacer"></span>
+      <span class="conf">confidence
+        <span class="bar"><i style="width:${TRIAGE.confidence==='high'?'88%':TRIAGE.confidence==='medium'?'55%':'25%'}"></i></span>
+        ${TRIAGE.confidence}
+      </span>
+    </div>
+    <div class="body">
+      <h2>${TRIAGE.fastRead}</h2>
+      <div class="tags">
+        <span class="tag cat-${TRIAGE.category}"><span class="swatch"></span>${TRIAGE.category}</span>
+        <span class="tag sev-${TRIAGE.severity.toLowerCase()}"><span class="swatch"></span>${TRIAGE.severity} · time-sensitive</span>
+      </div>
+      <div class="row"><div class="k">First step</div><div class="v">${TRIAGE.nextStep}</div></div>
+      <div class="row"><div class="k">Missing info</div><div class="v">${TRIAGE.missingInfo}</div></div>
+    </div>
+    <div class="foot"></div>
+  </div>`;
+  $('#triageMount').innerHTML = c;
+}
+
+function renderInv(){
+  $('#invMount').innerHTML = `
+    <div class="inv">
+      <div class="icon">INV</div>
+      <div class="meta">
+        <div class="id"><span class="num">${INV.id}</span>${INV.title}</div>
+        <div class="sum">Closest historical match · ${INV.match} · resolved 2025-11-02</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="open">Open</button>
+    </div>`;
+}
+
+function renderAnalyst(){
+  $('#analystMount').innerHTML = `
+    <div class="analyst-card" role="region" aria-label="Analyst arrived">
+      <div class="avatar" aria-hidden="true"></div>
+      <div class="meta">
+        <div class="name">${ANALYST.name} <span class="role">· ${ANALYST.role}</span></div>
+        <div class="micro"><span class="cir done" style="width:8px;height:8px"></span> ${ANALYST.model} · here, briefed on the case</div>
+        <div class="hello" id="helloText"></div>
+      </div>
+    </div>`;
+}
+
+function addMsg(who, html, withTyping=false){
+  const t = $('#thread');
+  const node = document.createElement('div');
+  node.className = 'msg '+who;
+  const initials = who==='user' ? 'You' : '';
+  node.innerHTML = `
+    <div class="av">${who==='user'?initials:''}</div>
+    <div class="bubble">
+      <div class="who">${who==='user'?'You':ANALYST.name}</div>
+      <div class="body">${withTyping?'<span class="typing"><i></i><i></i><i></i></span>':html}</div>
+    </div>`;
+  t.appendChild(node);
+  return node;
+}
+
+async function typeInto(node, html){
+  const body = node.querySelector('.body');
+  body.innerHTML = '';
+  // stream the html in chunks but keep tags intact
+  const tmp = document.createElement('div'); tmp.innerHTML = html;
+  const final = tmp.innerHTML;
+  const tokens = final.split(/(<[^>]+>)/g);
+  let acc = '';
+  for (const tk of tokens){
+    if (tk.startsWith('<')){
+      acc += tk; body.innerHTML = acc; await wait(6);
+    } else {
+      for (let i=0; i<tk.length; i+=4){
+        acc += tk.slice(i, i+4);
+        body.innerHTML = acc;
+        await wait(13);
+      }
+    }
+  }
+  body.innerHTML = final;
+}
+
+/* ---------- the arc ---------- */
+let timers = [];
+function clearTimers(){ timers.forEach(t => clearTimeout(t)); timers = []; }
+function later(fn, ms){ const t = setTimeout(fn, ms); timers.push(t); return t; }
+
+function reset(){
+  clearTimers();
+  $('#dropzone').classList.remove('hidden');
+  $('#webcam').classList.add('hidden');
+  $('#case').classList.add('hidden');
+  $('#triageMount').innerHTML = '';
+  $('#invMount').innerHTML = '';
+  $('#analystMount').innerHTML = '';
+  $('#thread').innerHTML = '';
+  $('#composeWrap').classList.add('hidden');
+  $('#caseId').textContent = '';
+  setState('parser','queued','pending',0);
+  setState('inv','queued','pending');
+  setState('triage','queued','pending');
+}
+
+async function runArc(){
+  // 1) reveal case
+  $('#dropzone').classList.add('hidden');
+  $('#webcam').classList.add('hidden');
+  $('#case').classList.remove('hidden');
+  $('#caseId').textContent = '· CASE-2026-0518-031';
+  renderFieldsSkeleton();
+  window.scrollTo({top:0, behavior:'smooth'});
+
+  // 2) parser begins
+  setState('parser','reading screenshot','running', 8);
+  $('#stParser').textContent = 'reading screenshot';
+  // progressively advance the parser ring + fill fields
+  const fillSchedule = [
+    [0, 'Run unscheduled payroll for terminated employee in CA', 18],
+    [1, 'Final cheque issues for pay period 04/22–05/05', 28],
+    [3, 'Pacific Roast Coffee · QBO Payroll Premium · 14 employees', 40],
+    [2, 'QBO blocks: <span class="quiet">"Termination date must be within pay period"</span>', 56],
+    [4, 'Mara R. · Tier-1 phone · ext 4118', 68],
+    [6, '<span class="mono">Realm 1234567890123456 · payroll item PAY-99421</span>', 78],
+    [5, 'Re-checked term date (05/12), tried Run payroll → Unscheduled, cleared cache', 90],
+    [7, 'Customer is mid-payroll, <strong>deadline today 5pm PT</strong>', 96],
+    [8, '1 screenshot (above)', 100]
+  ];
+
+  // start INV in parallel almost immediately
+  later(() => { setState('inv','searching history','running', 30); }, 350);
+  // start triage shortly after fields begin landing
+  later(() => { setState('triage','reading the room','running', 22); }, 1100);
+
+  let delay = 400;
+  for (const [idx, val, prog] of fillSchedule){
+    later(() => {
+      fillField(idx, val);
+      setState('parser', prog<100?'reading screenshot':'done', prog<100?'running':'done', prog);
+      $('#stParser').textContent = prog<100?`${prog}%`:'done · 2.1s';
+    }, delay);
+    delay += 280;
+  }
+
+  // 3) Triage arrives — DOMINANT (before INV intentionally, to show async)
+  later(() => {
+    setState('triage','done · 3.4s','done');
+    renderTriage();
+    $('#triageMount').scrollIntoView({behavior:'smooth', block:'center'});
+  }, delay + 350);
+
+  // 4) INV arrives a beat later — supportive
+  later(() => {
+    setState('inv','1 match · 4.0s','done');
+    renderInv();
+  }, delay + 1300);
+
+  // 5) Analyst arrives — the moment
+  later(() => {
+    renderAnalyst();
+    const hello = $('#helloText');
+    hello.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+    later(async () => {
+      hello.innerHTML = '';
+      // stream the hello
+      const text = ANALYST.hello;
+      for (let i=0; i<text.length; i++){
+        hello.textContent = text.slice(0, i+1);
+        await wait(13);
+      }
+      $('#composeWrap').classList.remove('hidden');
+      $('#composeInput').focus();
+      $('#analystMount').scrollIntoView({behavior:'smooth', block:'center'});
+    }, 550);
+  }, delay + 2300);
+
+  // 6) brief simulated chat
+  later(() => playTurns(), delay + 6800);
+}
+
+async function playTurns(){
+  for (const t of TURNS){
+    if (t.who==='user'){
+      // simulate operator typing the reply in the compose, then sending
+      const input = $('#composeInput');
+      const text = t.text;
+      input.value = '';
+      $('#sendBtn').disabled = false;
+      for (let i=0; i<text.length; i++){
+        input.value = text.slice(0, i+1);
+        await wait(16);
+      }
+      await wait(280);
+      addMsg('user', text);
+      input.value = '';
+      $('#sendBtn').disabled = true;
+      await wait(380);
+    } else {
+      const node = addMsg('analyst','', true);
+      await wait(700);
+      await typeInto(node, t.text);
+      await wait(280);
+    }
+    window.scrollTo({top: document.body.scrollHeight, behavior:'smooth'});
+  }
+}
+
+/* ---------- wires ---------- */
+function wire(){
+  $('#fakeUpload').addEventListener('click', () => runArc());
+  $('#dropzone').addEventListener('dragover', (e)=>{ e.preventDefault(); $('#dropzone').classList.add('drag'); });
+  $('#dropzone').addEventListener('dragleave', ()=> $('#dropzone').classList.remove('drag'));
+  $('#dropzone').addEventListener('drop', (e)=>{ e.preventDefault(); $('#dropzone').classList.remove('drag'); runArc(); });
+  $('#dropzone').addEventListener('paste', () => runArc());
+  document.addEventListener('paste', (e) => {
+    if ($('#dropzone').classList.contains('hidden')) return;
+    runArc();
+  });
+  $('#openWebcam').addEventListener('click', () => {
+    $('#dropzone').classList.add('hidden');
+    $('#webcam').classList.remove('hidden');
+  });
+  $('#cancelCam').addEventListener('click', () => {
+    $('#webcam').classList.add('hidden');
+    $('#dropzone').classList.remove('hidden');
+  });
+  $('#shutter').addEventListener('click', () => runArc());
+  $('#resetBtn').addEventListener('click', reset);
+  $('#dReset').addEventListener('click', reset);
+  $('#dPlay').addEventListener('click', () => { reset(); setTimeout(runArc, 200); });
+
+  // compose: ghost typing → enabled state
+  const input = $('#composeInput'), send = $('#sendBtn');
+  input.addEventListener('input', () => {
+    send.disabled = !input.value.trim();
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+  send.addEventListener('click', () => {
+    if (!input.value.trim()) return;
+    addMsg('user', input.value);
+    input.value=''; send.disabled = true;
+  });
+}
+wire();
+</script>
+</body>
+</html>

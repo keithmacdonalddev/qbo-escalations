@@ -1,0 +1,1430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>QBO Escalations — Notion</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+/* ==========================================================================
+   Notion-voiced QBO Escalation
+   Warm neutrals, paper canvas, flat surfaces, zero chrome.
+   The page IS the case. It writes itself. Then someone says hello.
+   ========================================================================== */
+
+:root {
+  /* Notion warm palette */
+  --ink:           #37352F;
+  --ink-soft:      #5F5B53;
+  --ink-faint:     #9B9A97;
+  --ink-ghost:     #C9C6C0;
+
+  --paper:         #FFFFFF;
+  --paper-soft:    #FBFAF7;   /* page surround */
+  --paper-tint:    #F7F6F3;   /* sunken */
+  --paper-warm:    #F1EFEA;   /* hover/active */
+
+  --line:          #EDEBE5;
+  --line-strong:   #E0DDD5;
+
+  /* Notion content colors — flat tints + matching text */
+  --blue:          #487CA5;   --blue-bg:    #E9F3F7;
+  --orange:        #CC782F;   --orange-bg:  #F8ECDF;
+  --green:         #548164;   --green-bg:   #EEF3ED;
+  --red:           #C4554D;   --red-bg:     #FAECEC;
+  --yellow:        #C29343;   --yellow-bg:  #FAF3DD;
+  --purple:        #8A67AB;   --purple-bg:  #F6F3F8;
+  --brown:         #976D57;   --brown-bg:   #F3EEEE;
+  --gray-text:     #787774;   --gray-bg:    #F1F1EF;
+
+  --accent:        #2EAADC;   /* recessive blue */
+
+  --radius-sm:     4px;
+  --radius:        6px;
+  --radius-lg:     10px;
+
+  --shadow-flat:   0 1px 2px rgba(15,15,15,0.04);
+  --shadow-page:   0 1px 0 rgba(15,15,15,0.04), 0 24px 48px -16px rgba(15,15,15,0.06);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper-soft);
+  color: var(--ink);
+  font-family: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-feature-settings: "ss01", "cv11", "calt";
+  font-size: 15.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.003em;
+  min-height: 100vh;
+}
+
+/* --- Top bar: ultra-quiet, Notion topbar voice ---------------------------- */
+.topbar {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-soft);
+  position: sticky; top: 0; z-index: 20;
+  backdrop-filter: saturate(1.2);
+}
+.topbar .crumb { display: inline-flex; align-items: center; gap: 6px; }
+.topbar .crumb-sep { color: var(--ink-ghost); }
+.topbar .crumb-cur { color: var(--ink); font-weight: 500; }
+.topbar .pageicon {
+  width: 18px; height: 18px; border-radius: 4px; background: var(--paper-warm);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--ink-soft); font-size: 11px;
+}
+.topbar .topbar-actions { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.topbar .tbtn {
+  background: transparent; border: 0; color: var(--ink-soft); font-size: 13px;
+  padding: 4px 8px; border-radius: 4px; cursor: pointer;
+}
+.topbar .tbtn:hover { background: var(--paper-warm); color: var(--ink); }
+.topbar .demo-controls {
+  display: inline-flex; gap: 6px; align-items: center;
+  background: var(--paper-warm); padding: 3px 4px; border-radius: 6px;
+}
+.topbar .demo-controls button {
+  background: transparent; border: 0; font-size: 12px; padding: 3px 8px; border-radius: 4px;
+  color: var(--ink-soft); cursor: pointer; font-family: inherit;
+}
+.topbar .demo-controls button:hover { background: var(--paper); color: var(--ink); }
+.topbar .demo-controls .pill {
+  font-size: 11px; color: var(--ink-faint); padding: 0 6px;
+}
+
+/* --- Page wrapper: classic Notion centered column ------------------------- */
+.page {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 56px 64px 160px;
+  background: var(--paper-soft);
+  min-height: calc(100vh - 44px);
+}
+
+/* Notion-style page header */
+.page-header { margin-bottom: 24px; }
+.page-icon-lg {
+  width: 56px; height: 56px; border-radius: 8px;
+  background: var(--orange-bg); color: var(--orange);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 32px; margin-bottom: 12px;
+  transition: background 200ms ease;
+}
+.page-title {
+  font-size: 40px; font-weight: 700; letter-spacing: -0.018em;
+  line-height: 1.15; margin: 0 0 6px;
+  color: var(--ink);
+}
+.page-title .placeholder { color: var(--ink-ghost); font-weight: 700; }
+.page-meta {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 6px 18px; align-items: center;
+  color: var(--ink); font-size: 13px;
+  margin-top: 12px; min-height: 22px;
+}
+.page-meta.idle { display: block; color: var(--ink-ghost); }
+.page-meta .meta-row { display: inline-flex; gap: 8px; align-items: center; min-width: 0; }
+.page-meta .meta-key { color: var(--ink-faint); width: 84px; display: inline-block; flex: 0 0 84px; }
+.page-meta .badge-flat {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 3px; font-size: 12px; font-weight: 500;
+  background: var(--gray-bg); color: var(--gray-text);
+  font-family: inherit;
+}
+.page-meta .badge-flat.cat-payroll  { background: var(--orange-bg); color: var(--orange); }
+.page-meta .badge-flat.cat-bankfeeds{ background: var(--blue-bg);   color: var(--blue); }
+.page-meta .badge-flat.sev-p1       { background: var(--red-bg);    color: var(--red); }
+.page-meta .badge-flat.sev-p2       { background: var(--yellow-bg); color: var(--yellow); }
+.page-meta .badge-flat.sev-p3       { background: var(--blue-bg);   color: var(--blue); }
+.page-meta .conf {
+  font-size: 11px; color: var(--ink-faint); padding: 2px 6px; border-radius: 3px;
+  background: var(--paper-tint); margin-left: 4px;
+}
+
+/* --- Divider, the only line we'll allow -------------------------- */
+.page-divider { height: 1px; background: var(--line); margin: 24px 0; border: 0; }
+
+/* --- Blocks --------------------------------------------------------------- */
+.block { position: relative; padding: 4px 0; }
+.block-h2 {
+  font-size: 20px; font-weight: 600; letter-spacing: -0.012em;
+  margin: 28px 0 6px; color: var(--ink);
+  display: flex; align-items: center; gap: 8px;
+}
+.block-h2 .author-chip { margin-left: 6px; }
+.block-h2 .h2-action {
+  margin-left: auto; opacity: 0; transition: opacity 120ms ease;
+  font-size: 12px; color: var(--ink-faint);
+  display: inline-flex; gap: 6px; align-items: center;
+}
+.block-h2:hover .h2-action { opacity: 1; }
+
+.block-p {
+  color: var(--ink); margin: 4px 0; font-size: 15.5px;
+}
+.block-p.dim { color: var(--ink-soft); }
+
+/* Block hover handle (Notion's quiet "+ ⋮⋮") */
+.block-row { display: flex; align-items: flex-start; gap: 4px; padding: 1px 0; position: relative; }
+.block-row > .handle {
+  width: 18px; flex: 0 0 18px;
+  display: inline-flex; gap: 0; align-items: center; justify-content: center;
+  color: var(--ink-ghost); opacity: 0; transition: opacity 100ms ease;
+  font-size: 13px; cursor: grab; margin-top: 4px;
+}
+.block-row:hover > .handle { opacity: 1; }
+.block-row > .body { flex: 1; min-width: 0; }
+
+/* --- Author chip: who's writing this block? (quiet identity) -------------- */
+.author-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 500;
+  color: var(--ink-faint); background: var(--paper-tint);
+  padding: 2px 7px 2px 4px; border-radius: 10px;
+  vertical-align: middle;
+  letter-spacing: 0;
+}
+.author-chip .avatar {
+  width: 14px; height: 14px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 600; color: #fff;
+}
+.author-chip .avatar.parser { background: var(--brown); }
+.author-chip .avatar.inv    { background: var(--purple); }
+.author-chip .avatar.triage { background: var(--orange); }
+
+.author-chip .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-ghost); }
+.author-chip[data-state="working"] .status-dot { background: var(--yellow); animation: pulse 1.4s ease-in-out infinite; }
+.author-chip[data-state="done"]    .status-dot { background: var(--green); }
+@keyframes pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+
+/* --- Upload zone: pre-state, calm, paper-like ----------------------------- */
+.upload-zone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--paper);
+  padding: 48px 32px;
+  text-align: center;
+  transition: background 160ms ease, border-color 160ms ease;
+  cursor: pointer;
+}
+.upload-zone:hover { background: var(--paper-tint); border-color: var(--ink-faint); }
+.upload-zone.is-drag { background: var(--blue-bg); border-color: var(--blue); }
+.upload-zone .uz-icon {
+  font-size: 32px; color: var(--ink-faint); margin-bottom: 8px;
+}
+.upload-zone .uz-title {
+  font-size: 16px; font-weight: 500; color: var(--ink); margin-bottom: 4px;
+}
+.upload-zone .uz-sub {
+  font-size: 13px; color: var(--ink-faint);
+}
+.upload-zone .uz-actions {
+  display: inline-flex; gap: 8px; margin-top: 14px;
+}
+.upload-zone .uz-actions button {
+  font-family: inherit; font-size: 13px;
+  background: var(--paper); color: var(--ink-soft);
+  border: 1px solid var(--line-strong); padding: 6px 14px;
+  border-radius: var(--radius); cursor: pointer;
+  transition: background 120ms ease;
+}
+.upload-zone .uz-actions button:hover { background: var(--paper-tint); color: var(--ink); }
+.upload-zone .uz-actions button.primary {
+  background: var(--ink); color: var(--paper); border-color: var(--ink);
+}
+.upload-zone .uz-actions button.primary:hover { background: #1f1d19; }
+
+/* --- Image preview (after upload) ---------------------------------------- */
+.case-screenshot {
+  display: flex; gap: 12px; align-items: flex-start;
+  padding: 10px; background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); margin: 6px 0;
+  transition: opacity 240ms ease;
+}
+.case-screenshot .thumb {
+  width: 96px; height: 96px; border-radius: var(--radius);
+  background: linear-gradient(135deg, #2a2f36 0%, #1c1f24 100%);
+  display: flex; align-items: center; justify-content: center;
+  color: #d4dde6; font-size: 10px; font-family: ui-monospace, SFMono-Regular, monospace;
+  text-align: center; padding: 8px; line-height: 1.35;
+  flex: 0 0 96px;
+  position: relative; overflow: hidden;
+}
+.case-screenshot .thumb::after {
+  content: ""; position: absolute; inset: 6px; border: 1px solid rgba(255,255,255,0.08); border-radius: 3px;
+}
+.case-screenshot .meta {
+  flex: 1; min-width: 0; padding-top: 6px;
+}
+.case-screenshot .meta .fn {
+  font-size: 13px; color: var(--ink); font-weight: 500;
+}
+.case-screenshot .meta .fb {
+  font-size: 12px; color: var(--ink-faint); margin-top: 2px;
+}
+.case-screenshot .meta .actions {
+  margin-top: 10px; display: flex; gap: 4px;
+}
+.case-screenshot .meta .actions button {
+  background: transparent; border: 0; color: var(--ink-faint); font-size: 12px;
+  padding: 3px 6px; border-radius: 3px; cursor: pointer; font-family: inherit;
+}
+.case-screenshot .meta .actions button:hover { background: var(--paper-warm); color: var(--ink); }
+
+/* --- Parsed fields: rendered as a Notion "simple table" ------------------ */
+.fields-table {
+  border-top: 1px solid var(--line);
+  margin: 6px 0;
+}
+.fields-table .field-row {
+  display: flex; align-items: baseline; gap: 16px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  transition: background 100ms ease;
+}
+.fields-table .field-row:hover { background: var(--paper-tint); }
+.fields-table .fk {
+  flex: 0 0 168px;
+  font-size: 13px; color: var(--ink-faint); font-weight: 500;
+}
+.fields-table .fv {
+  flex: 1; min-width: 0; font-size: 14.5px; color: var(--ink); line-height: 1.45;
+}
+.fields-table .fv .typing { color: var(--ink-soft); }
+.fields-table .fv.empty { color: var(--ink-ghost); font-style: italic; font-size: 13.5px; }
+.fields-table .fv .caret {
+  display: inline-block; width: 6px; height: 14px; background: var(--ink); margin-left: 1px;
+  vertical-align: -2px; animation: caret 1s steps(1) infinite;
+}
+@keyframes caret { 50% { opacity: 0; } }
+
+/* --- Callout block (Notion's signature) — used for Triage + Analyst ----- */
+.callout {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: var(--paper-tint); border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 8px 0;
+  border: 1px solid transparent;
+  transition: background 240ms ease, transform 280ms cubic-bezier(.2,.7,.2,1), opacity 240ms ease, border-color 240ms ease;
+}
+.callout .cicon {
+  width: 28px; height: 28px; flex: 0 0 28px;
+  border-radius: 6px; background: var(--paper);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 15px; color: var(--ink-soft);
+}
+.callout .cbody { flex: 1; min-width: 0; }
+.callout .cbody p { margin: 0; }
+
+/* Triage callout — orange / warm, dominant */
+.callout.triage {
+  background: var(--orange-bg);
+  border-color: rgba(204,120,47,0.18);
+  padding: 18px 20px;
+}
+.callout.triage .cicon { background: var(--orange); color: #fff; }
+.callout.triage .ctitle {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--orange); font-weight: 600;
+  letter-spacing: 0.02em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.callout.triage .ctitle .author-chip {
+  background: rgba(204,120,47,0.10); color: var(--orange);
+}
+.callout.triage .ctitle .author-chip .status-dot { background: var(--orange); }
+.callout.triage .fast-read {
+  font-size: 18px; font-weight: 600; color: var(--ink);
+  letter-spacing: -0.011em; line-height: 1.4; margin: 0 0 12px;
+}
+.callout.triage .triage-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px 24px; margin-top: 6px;
+}
+.callout.triage .triage-grid .tk {
+  font-size: 11px; color: var(--orange); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+  margin-bottom: 3px;
+}
+.callout.triage .triage-grid .tv {
+  font-size: 14px; color: var(--ink); line-height: 1.45;
+}
+.callout.triage .triage-grid .tv strong { font-weight: 600; }
+.callout.triage .triage-foot {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid rgba(204,120,47,0.18);
+}
+.callout.triage .triage-foot .badge-flat { font-size: 12px; padding: 3px 10px; border-radius: 4px; }
+
+/* INV callout — quiet purple, supportive */
+.callout.inv {
+  background: var(--purple-bg);
+  border-color: rgba(138,103,171,0.14);
+}
+.callout.inv .cicon { background: var(--purple); color: #fff; }
+.callout.inv .inv-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--purple); font-weight: 600;
+  margin-bottom: 6px;
+}
+.callout.inv .inv-head .author-chip {
+  background: rgba(138,103,171,0.10); color: var(--purple);
+}
+.callout.inv .inv-head .author-chip .status-dot { background: var(--purple); }
+.callout.inv .inv-num {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px; font-weight: 600; color: var(--purple);
+}
+.callout.inv .inv-title { font-size: 14.5px; color: var(--ink); margin: 2px 0 6px; line-height: 1.4; }
+.callout.inv .inv-meta { font-size: 12px; color: var(--ink-faint); display: flex; gap: 12px; flex-wrap: wrap; }
+.callout.inv .inv-meta .dot { color: var(--ink-ghost); }
+.callout.inv .inv-open {
+  display: inline-flex; gap: 4px; align-items: center;
+  font-size: 12px; color: var(--purple); margin-top: 8px;
+  background: transparent; border: 0; cursor: pointer; padding: 2px 0;
+  font-family: inherit; font-weight: 500;
+}
+.callout.inv .inv-open:hover { text-decoration: underline; }
+
+/* Placeholder skeleton inside callouts (working state) */
+.cskel {
+  display: flex; flex-direction: column; gap: 8px; padding: 4px 0;
+}
+.cskel .line {
+  height: 10px; background: rgba(0,0,0,0.06); border-radius: 4px;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+.cskel .line.short { width: 40%; }
+.cskel .line.mid { width: 72%; }
+@keyframes shimmer { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.9; } }
+
+/* --- Quiet pipeline strip (top of page) --------------------------------- */
+.pipeline-strip {
+  display: flex; gap: 0; align-items: center;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 10px; margin: 10px 0 0;
+  font-size: 12px; color: var(--ink-soft);
+}
+.pipeline-strip .step {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px; border-radius: 3px;
+}
+.pipeline-strip .step .sd {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--ink-ghost); flex: 0 0 6px;
+}
+.pipeline-strip .step[data-state="working"] .sd { background: var(--yellow); animation: pulse 1.4s ease-in-out infinite; }
+.pipeline-strip .step[data-state="done"]    .sd { background: var(--green); }
+.pipeline-strip .step[data-state="working"] { color: var(--ink); }
+.pipeline-strip .step[data-state="done"]    { color: var(--ink-soft); }
+.pipeline-strip .arrow { color: var(--ink-ghost); padding: 0 2px; }
+.pipeline-strip .timing { margin-left: auto; font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; color: var(--ink-faint); }
+
+/* --- Joining row: the moment before someone arrives --------------------- */
+.joining-row {
+  display: flex; align-items: center; gap: 10px;
+  margin: 28px 0 4px;
+  padding: 8px 12px;
+  background: var(--paper);
+  border: 1px dashed var(--line-strong);
+  border-radius: 999px;
+  color: var(--ink-soft); font-size: 13px;
+  width: max-content;
+  max-width: 100%;
+}
+.joining-row strong { color: var(--ink); font-weight: 600; }
+.joining-avatar {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: linear-gradient(135deg, #B97A57, #8C5A3F); color: #fff;
+  font-size: 9px; font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.joining-dots { display: inline-flex; gap: 3px; margin-left: 2px; }
+.joining-dots span {
+  width: 4px; height: 4px; background: var(--ink-faint); border-radius: 50%;
+  animation: typebob 1.2s ease-in-out infinite;
+}
+.joining-dots span:nth-child(2) { animation-delay: 0.15s; }
+.joining-dots span:nth-child(3) { animation-delay: 0.30s; }
+
+/* --- Analyst arrival: human, warm, named -------------------------------- */
+.analyst-arrival {
+  margin: 28px 0 0;
+  padding: 0;
+  opacity: 0; transform: translateY(8px);
+  transition: opacity 480ms ease, transform 480ms cubic-bezier(.2,.7,.2,1);
+}
+.analyst-arrival.show { opacity: 1; transform: translateY(0); }
+
+.analyst-card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  display: flex; gap: 16px; align-items: flex-start;
+  box-shadow: var(--shadow-page);
+  position: relative;
+}
+.analyst-card::before {
+  /* a quiet warm halo so the page knows someone arrived */
+  content: ""; position: absolute; inset: -1px; border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(204,120,47,0.18), transparent 40%);
+  pointer-events: none; opacity: 0.7;
+  -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+  -webkit-mask-composite: xor; mask-composite: exclude; padding: 1px;
+}
+.analyst-avatar {
+  width: 48px; height: 48px; border-radius: 50%; flex: 0 0 48px;
+  background: linear-gradient(135deg, #B97A57, #8C5A3F);
+  color: #fff; font-weight: 600; font-size: 18px; letter-spacing: -0.01em;
+  display: inline-flex; align-items: center; justify-content: center;
+  position: relative;
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 4px rgba(204,120,47,0.18);
+}
+.analyst-avatar::after {
+  content: ""; position: absolute; right: -2px; bottom: -2px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--green); border: 2px solid var(--paper);
+}
+.analyst-info { flex: 1; min-width: 0; }
+.analyst-name {
+  font-size: 16px; font-weight: 600; color: var(--ink);
+  display: flex; align-items: center; gap: 8px;
+}
+.analyst-role { font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+.analyst-model {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--ink-faint);
+  padding: 1px 7px; background: var(--paper-tint); border-radius: 10px;
+  margin-left: 6px; font-weight: 500;
+}
+.analyst-model .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+.analyst-prep {
+  margin-top: 10px;
+  font-size: 13px; color: var(--ink-soft);
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+}
+.analyst-prep span { display: inline-flex; align-items: center; gap: 5px; }
+.analyst-prep .checked::before {
+  content: "✓"; color: var(--green); font-weight: 600; font-size: 12px;
+}
+
+/* --- Chat / conversation block ----------------------------------------- */
+.thread { margin-top: 18px; display: flex; flex-direction: column; gap: 14px; }
+.msg { display: flex; gap: 12px; align-items: flex-start; }
+.msg.you { justify-content: flex-end; }
+.msg .bubble {
+  max-width: 580px;
+  padding: 12px 16px;
+  font-size: 15px; line-height: 1.55;
+  border-radius: 10px;
+}
+.msg.analyst .bubble {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink);
+}
+.msg.you .bubble {
+  background: var(--orange-bg);
+  color: var(--ink);
+  border: 1px solid rgba(204,120,47,0.18);
+}
+.msg .avatar-sm {
+  width: 28px; height: 28px; flex: 0 0 28px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, #B97A57, #8C5A3F);
+}
+.msg.you .avatar-sm { background: var(--ink); order: 2; }
+.msg .meta { font-size: 11px; color: var(--ink-faint); margin-top: 4px; }
+.msg .bubble p { margin: 0; }
+.msg .bubble p + p { margin-top: 8px; }
+.msg .bubble strong { font-weight: 600; }
+.msg .bubble code {
+  font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px;
+  background: var(--paper-tint); padding: 1px 5px; border-radius: 3px;
+}
+.msg .bubble .caret {
+  display: inline-block; width: 6px; height: 14px; background: var(--ink); margin-left: 1px;
+  vertical-align: -2px; animation: caret 1s steps(1) infinite;
+}
+.msg .bubble ol.play-list {
+  margin: 8px 0; padding-left: 24px;
+}
+.msg .bubble ol.play-list li {
+  margin: 4px 0; padding-left: 4px;
+}
+.msg .bubble ol.play-list li::marker {
+  color: var(--orange); font-weight: 600;
+}
+
+.typing-row {
+  display: flex; align-items: center; gap: 8px;
+  color: var(--ink-faint); font-size: 12px; padding: 4px 4px;
+}
+.typing-row .dots { display: inline-flex; gap: 3px; }
+.typing-row .dots span {
+  width: 5px; height: 5px; background: var(--ink-faint); border-radius: 50%;
+  animation: typebob 1.2s ease-in-out infinite;
+}
+.typing-row .dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-row .dots span:nth-child(3) { animation-delay: 0.30s; }
+@keyframes typebob { 0%,80%,100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-3px); opacity: 1; } }
+
+/* --- Composer ----------------------------------------------------------- */
+.composer {
+  margin-top: 18px;
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 10px 12px 8px;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.composer:focus-within { border-color: var(--ink-soft); box-shadow: 0 0 0 3px rgba(55,53,47,0.04); }
+.composer .ce {
+  min-height: 22px; outline: none; font-size: 14.5px; color: var(--ink); padding: 4px 4px 6px;
+}
+.composer .ce[data-empty]::before {
+  content: attr(data-empty); color: var(--ink-ghost);
+}
+.composer .crow {
+  display: flex; align-items: center; gap: 4px; margin-top: 4px;
+}
+.composer .crow .ctip {
+  font-size: 11px; color: var(--ink-faint);
+  margin-right: auto;
+}
+.composer .crow .ctip code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px; padding: 0 4px; background: var(--paper-tint); border-radius: 3px;
+}
+.composer .crow .csend {
+  background: var(--ink); color: var(--paper); border: 0;
+  padding: 5px 12px; border-radius: 5px; font-size: 12.5px; font-weight: 500;
+  cursor: pointer; font-family: inherit;
+}
+.composer .crow .csend:disabled { background: var(--paper-warm); color: var(--ink-faint); cursor: not-allowed; }
+
+/* --- Webcam panel (calm; cancel always available) ---------------------- */
+.webcam-panel {
+  margin: 12px 0;
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  padding: 14px;
+}
+.webcam-panel .wc-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink); font-weight: 500; margin-bottom: 10px;
+}
+.webcam-panel .wc-back {
+  margin-left: auto; background: transparent; border: 0; color: var(--ink-soft);
+  font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 4px;
+  font-family: inherit;
+}
+.webcam-panel .wc-back:hover { background: var(--paper-tint); color: var(--ink); }
+.webcam-panel .wc-frame {
+  background: #1d1d1b; border-radius: 8px;
+  aspect-ratio: 16/10; display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.6); font-size: 12px; position: relative; overflow: hidden;
+}
+.webcam-panel .wc-frame::after {
+  content: ""; position: absolute; inset: 8px; border: 1px dashed rgba(255,255,255,0.15); border-radius: 4px;
+}
+.webcam-panel .wc-actions {
+  display: flex; gap: 8px; justify-content: center; margin-top: 12px;
+}
+.webcam-panel .wc-actions button {
+  font-family: inherit; font-size: 13px;
+  padding: 7px 16px; border-radius: 6px; cursor: pointer; border: 1px solid var(--line-strong);
+  background: var(--paper); color: var(--ink-soft);
+}
+.webcam-panel .wc-actions button:hover { background: var(--paper-tint); color: var(--ink); }
+.webcam-panel .wc-actions button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.webcam-panel .wc-actions button.primary:hover { background: #1f1d19; }
+
+/* --- Section reveal animations ---------------------------------------- */
+.reveal { opacity: 0; transform: translateY(6px); transition: opacity 320ms ease, transform 320ms ease; }
+.reveal.show { opacity: 1; transform: translateY(0); }
+
+/* --- Initial state visibility ----------------------------------------- */
+.h-stage-0 .stage-after-upload { display: none; }
+.stage-after-upload { display: block; }
+.h-uploaded .pre-upload { display: none; }
+
+/* --- Responsive tweaks ------------------------------------------------ */
+@media (max-width: 720px) {
+  .page { padding: 32px 20px 100px; }
+  .page-title { font-size: 30px; }
+  .fields-table .fk { flex-basis: 130px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============= TOPBAR ============= -->
+<div class="topbar">
+  <span class="crumb"><span class="pageicon">⚐</span> Escalations</span>
+  <span class="crumb-sep">/</span>
+  <span class="crumb crumb-cur" id="crumbCase">New case</span>
+
+  <div class="topbar-actions">
+    <div class="demo-controls" title="Demo controls">
+      <span class="pill">demo</span>
+      <button id="btnReset">Reset</button>
+      <button id="btnPlay">▶ Play</button>
+      <button id="btnStep1">1·upload</button>
+      <button id="btnStep2">2·parsed</button>
+      <button id="btnStep3">3·triage</button>
+      <button id="btnStep4">4·analyst</button>
+    </div>
+    <button class="tbtn" title="Share">Share</button>
+    <button class="tbtn" title="More">···</button>
+  </div>
+</div>
+
+<!-- ============= PAGE ============= -->
+<main class="page" id="page">
+
+  <header class="page-header">
+    <div class="page-icon-lg" id="pageIcon">⚑</div>
+    <h1 class="page-title" id="pageTitle"><span class="placeholder">New escalation</span></h1>
+
+    <div class="page-meta idle" id="pageMeta">
+      <span id="metaIdle">Empty page — drop a screenshot to begin</span>
+    </div>
+
+    <div class="pipeline-strip reveal" id="pipelineStrip" style="display:none">
+      <span class="step" data-state="idle" data-step="parser">
+        <span class="sd"></span> Parser
+      </span>
+      <span class="arrow">›</span>
+      <span class="step" data-state="idle" data-step="inv">
+        <span class="sd"></span> INV search
+      </span>
+      <span class="arrow">·</span>
+      <span class="step" data-state="idle" data-step="triage">
+        <span class="sd"></span> Triage
+      </span>
+      <span class="arrow">›</span>
+      <span class="step" data-state="idle" data-step="analyst">
+        <span class="sd"></span> Analyst
+      </span>
+      <span class="timing" id="pipelineTiming">—</span>
+    </div>
+  </header>
+
+  <hr class="page-divider" />
+
+  <!-- =================== PRE-UPLOAD =================== -->
+  <section class="pre-upload" id="preUpload">
+    <div class="block-row">
+      <span class="handle">⋮⋮</span>
+      <div class="body">
+        <div class="upload-zone" id="uploadZone">
+          <div class="uz-icon">⌂</div>
+          <div class="uz-title">Drop the phone agent's screenshot here</div>
+          <div class="uz-sub">PNG, JPG, or paste from clipboard · or use webcam</div>
+          <div class="uz-actions">
+            <button class="primary" id="btnSimulateUpload">Choose file</button>
+            <button id="btnUseWebcam">Use webcam</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Webcam panel (hidden until used) -->
+    <div class="webcam-panel reveal" id="webcamPanel" style="display:none">
+      <div class="wc-head">
+        <span>Webcam</span>
+        <span style="font-size:12px; color:var(--ink-faint); font-weight:400;">orientation auto-corrected</span>
+        <button class="wc-back" id="btnWebcamBack">← Back to upload</button>
+      </div>
+      <div class="wc-frame">camera preview</div>
+      <div class="wc-actions">
+        <button id="btnWebcamCancel">Cancel</button>
+        <button class="primary" id="btnWebcamCapture">Capture</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================== AFTER UPLOAD =================== -->
+  <section class="stage-after-upload" id="afterUpload" style="display:none">
+
+    <!-- Screenshot preview block -->
+    <div class="block-row reveal" id="screenshotBlock">
+      <span class="handle">⋮⋮</span>
+      <div class="body">
+        <div class="case-screenshot">
+          <div class="thumb">[QBO escalation<br/>template DM]</div>
+          <div class="meta">
+            <div class="fn">escalation-template_2026-05-16_14-08.png</div>
+            <div class="fb">412 KB · from Slack DM · pasted just now</div>
+            <div class="actions">
+              <button>Open</button>
+              <button>Replace</button>
+              <button>Remove</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- H2: Parsed fields, authored by Parser -->
+    <div class="block reveal" id="parsedBlock" style="display:none">
+      <h2 class="block-h2">
+        Parsed template
+        <span class="author-chip" id="parserChip" data-state="working">
+          <span class="avatar parser">P</span>
+          <span>Parser</span>
+          <span class="status-dot"></span>
+          <span style="font-weight:400; color:var(--ink-faint)">claude-haiku</span>
+        </span>
+        <span class="h2-action">⌃ collapse</span>
+      </h2>
+
+      <div class="fields-table" id="fieldsTable">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- INV callout (purple, quiet, supportive) -->
+    <div class="block reveal" id="invBlock" style="display:none">
+      <div class="block-row">
+        <span class="handle">⋮⋮</span>
+        <div class="body">
+          <div class="callout inv" id="invCallout">
+            <div class="cicon">⌕</div>
+            <div class="cbody">
+              <div class="inv-head">
+                <span>Related investigation</span>
+                <span class="author-chip" data-state="working">
+                  <span class="avatar inv">I</span><span>INV search</span><span class="status-dot"></span>
+                </span>
+              </div>
+              <div id="invBody">
+                <div class="cskel">
+                  <div class="line short"></div>
+                  <div class="line mid"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Triage callout (orange, dominant) -->
+    <div class="block reveal" id="triageBlock" style="display:none">
+      <div class="block-row">
+        <span class="handle">⋮⋮</span>
+        <div class="body">
+          <div class="callout triage" id="triageCallout">
+            <div class="cicon">▲</div>
+            <div class="cbody">
+              <div class="ctitle">
+                <span>Triage</span>
+                <span class="author-chip" data-state="working">
+                  <span class="avatar triage">T</span><span>Senior triage</span><span class="status-dot"></span>
+                  <span style="font-weight:400; color:rgba(204,120,47,0.7); margin-left:2px;">claude-sonnet</span>
+                </span>
+              </div>
+              <div id="triageBody">
+                <div class="cskel">
+                  <div class="line"></div>
+                  <div class="line mid"></div>
+                  <div class="line short"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Joining notice — the quiet handoff line BEFORE the expert lands -->
+    <div class="joining-row reveal" id="joiningRow" style="display:none">
+      <span class="joining-avatar">MR</span>
+      <span><strong>Maren Rao</strong> is reviewing the case…</span>
+      <span class="joining-dots"><span></span><span></span><span></span></span>
+    </div>
+
+    <!-- Analyst arrival -->
+    <div class="analyst-arrival" id="analystArrival">
+      <hr class="page-divider" />
+      <div class="analyst-card">
+        <div class="analyst-avatar">MR</div>
+        <div class="analyst-info">
+          <div class="analyst-name">
+            Maren Rao
+            <span class="analyst-model"><span class="dot"></span>claude-opus · main analyst</span>
+          </div>
+          <div class="analyst-role">Senior QBO escalation analyst · 9 yrs payroll · with you now</div>
+          <div class="analyst-prep">
+            <span class="checked">Read the screenshot</span>
+            <span class="checked">Reviewed all 9 parsed fields</span>
+            <span class="checked">Pulled INV-147914 for context</span>
+            <span class="checked">Agreed with Triage's P2 call</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="thread" id="thread"></div>
+
+      <div class="composer" id="composer">
+        <div class="ce" data-empty="Reply to Maren — type / for actions" contenteditable="true" id="composeInput"></div>
+        <div class="crow">
+          <span class="ctip">Press <code>Enter</code> to send · <code>/</code> for templates · <code>@</code> to mention a teammate</span>
+          <button class="csend" id="composeSend" disabled>Send</button>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+</main>
+
+<script>
+/* ==========================================================================
+   Demo orchestration — six moments, one continuous arc
+   ========================================================================== */
+
+const PARSED_FIELDS = [
+  ["Attempting to",   "Run unscheduled payroll for terminated employee in California"],
+  ["Expected outcome","Final cheque processes for pay-period dates of 04/16–04/30"],
+  ["Actual outcome",  "QBO blocks the run — error: \"Employee inactive on or after pay period start date.\""],
+  ["Customer",        "Pacific Loom Studio · QBO Payroll Premium · 14 employees · ID 4839-2201"],
+  ["Phone agent",     "Devon Marsh · agent #3041 · escalated 2:08 PM PT"],
+  ["Caller",          "Lila Park, payroll admin · direct phone on file"],
+  ["Steps tried",     "Reactivated employee → re-ran payroll → same block. Confirmed termination date 04/22."],
+  ["Urgency stated",  "Direct deposit cutoff is today 5:00 PM PT (≈2.5 hrs)"],
+  ["Attachments",     "Screenshot of the error modal (attached above)"],
+];
+
+const TRIAGE = {
+  category: "payroll",
+  severity: "P2",
+  fastRead: "Terminated employee's final cheque is blocked because the termination date (04/22) falls inside an active pay period (04/16–04/30) — QBO won't let payroll process for an inactive employee until the period is adjusted or the employee is briefly reactivated for that run only.",
+  nextStep: "Reactivate the employee with effective date 04/16, run payroll for the 04/16–04/30 period, then re-terminate effective 04/23 to preserve the COBRA timeline.",
+  missing: "Lila's COBRA election preference and whether final cheque should include accrued PTO payout (CA law requires it).",
+  confidence: "high",
+};
+
+const INV = {
+  num: "INV-147914",
+  title: "Final payroll blocked for terminated employee when termination date sits inside active pay period",
+  meta: ["Resolved", "12 prior occurrences", "Last seen 11 days ago", "Owner: J. Kapoor"],
+};
+
+const ANALYST_TURNS = [
+  { who: "analyst", text: "<p>Hi — I've read everything. The block is a <strong>termination-date-inside-pay-period</strong> case, and it shows up about once a month. With Lila's 5 PM deposit cutoff, we should move now.</p><p>Here's the play I'd recommend:</p><ol class='play-list'><li>Reactivate Pacific Loom's terminated employee with effective date <code>04/16</code>.</li><li>Run the <code>04/16–04/30</code> payroll — direct deposit cutoff still hits.</li><li>Re-terminate <code>04/23</code> so the COBRA clock stays correct.</li></ol><p>One thing Triage flagged worth confirming: California requires accrued PTO payout on final cheques — want me to draft the question to Lila now, or roll straight into the response for Devon?<span class='caret'></span></p>" },
+];
+
+const $ = (sel, el=document) => el.querySelector(sel);
+const $$ = (sel, el=document) => Array.from(el.querySelectorAll(sel));
+
+let timeline = []; // pending timeouts so we can reset
+let started = 0;
+
+function clearTimeline() {
+  timeline.forEach(t => clearTimeout(t));
+  timeline = [];
+}
+function delay(fn, ms) {
+  const id = setTimeout(fn, ms);
+  timeline.push(id);
+  return id;
+}
+
+function reset() {
+  clearTimeline();
+  // Reset DOM
+  $("#preUpload").style.display = "block";
+  $("#afterUpload").style.display = "none";
+  $("#parsedBlock").style.display = "none";
+  $("#invBlock").style.display = "none";
+  $("#triageBlock").style.display = "none";
+  $("#pipelineStrip").style.display = "none";
+  $("#webcamPanel").style.display = "none";
+
+  $("#parsedBlock").classList.remove("show");
+  $("#invBlock").classList.remove("show");
+  $("#triageBlock").classList.remove("show");
+  $("#analystArrival").classList.remove("show");
+  $("#screenshotBlock").classList.remove("show");
+  $("#pipelineStrip").classList.remove("show");
+  const jr = $("#joiningRow");
+  if (jr) { jr.style.display = "none"; jr.classList.remove("show"); }
+
+  $("#fieldsTable").innerHTML = "";
+  $("#thread").innerHTML = "";
+  $("#composeInput").innerHTML = "";
+  $("#composeSend").disabled = true;
+
+  $("#pageTitle").innerHTML = '<span class="placeholder">New escalation</span>';
+  $("#crumbCase").textContent = "New case";
+  $("#pageIcon").textContent = "⚑";
+  $("#pageIcon").style.background = "var(--paper-tint)";
+  $("#pageIcon").style.color = "var(--ink-faint)";
+  $("#pageMeta").className = "page-meta idle";
+  $("#pageMeta").innerHTML = '<span id="metaIdle">Empty page — drop a screenshot to begin</span>';
+
+  $$(".pipeline-strip .step").forEach(s => s.setAttribute("data-state", "idle"));
+  $("#pipelineTiming").textContent = "—";
+
+  // reset author chips
+  $("#parserChip").setAttribute("data-state", "working");
+  $$("#invCallout .author-chip").forEach(c => c.setAttribute("data-state", "working"));
+  $$("#triageCallout .author-chip").forEach(c => c.setAttribute("data-state", "working"));
+
+  $("#invBody").innerHTML = '<div class="cskel"><div class="line short"></div><div class="line mid"></div></div>';
+  $("#triageBody").innerHTML = '<div class="cskel"><div class="line"></div><div class="line mid"></div><div class="line short"></div></div>';
+}
+
+function setPipeline(step, state) {
+  const el = $(`.pipeline-strip .step[data-step="${step}"]`);
+  if (el) el.setAttribute("data-state", state);
+}
+
+function updateTiming(ms) {
+  $("#pipelineTiming").textContent = (ms/1000).toFixed(1) + "s elapsed";
+}
+
+/* --- Step 1: upload --- */
+function doUpload() {
+  reset();
+  $("#preUpload").style.display = "none";
+  $("#afterUpload").style.display = "block";
+  $("#pipelineStrip").style.display = "flex";
+  $("#crumbCase").textContent = "Pacific Loom Studio · payroll";
+
+  requestAnimationFrame(() => {
+    $("#screenshotBlock").classList.add("show");
+    $("#pipelineStrip").classList.add("show");
+  });
+
+  started = performance.now();
+  const tick = () => {
+    if (!started) return;
+    updateTiming(performance.now() - started);
+    timeline.push(setTimeout(tick, 200));
+  };
+  tick();
+
+  // immediately fire parser
+  delay(doParserStart, 350);
+}
+
+/* --- Step 2: parser running, then parsed --- */
+function doParserStart() {
+  $("#parsedBlock").style.display = "block";
+  requestAnimationFrame(() => $("#parsedBlock").classList.add("show"));
+  setPipeline("parser", "working");
+
+  // populate fields with skeletons
+  const tbl = $("#fieldsTable");
+  tbl.innerHTML = "";
+  PARSED_FIELDS.forEach((f, i) => {
+    const row = document.createElement("div");
+    row.className = "field-row";
+    row.innerHTML = `<div class="fk">${f[0]}</div><div class="fv empty" data-i="${i}">reading…</div>`;
+    tbl.appendChild(row);
+  });
+
+  // fill them one at a time with light typing
+  PARSED_FIELDS.forEach((f, i) => {
+    delay(() => fillField(i, f[1]), 280 + i * 220);
+  });
+
+  // parser done after all fields
+  delay(() => {
+    $("#parserChip").setAttribute("data-state", "done");
+    setPipeline("parser", "done");
+    // update page title to the actual case
+    $("#pageTitle").innerHTML = "Pacific Loom Studio — terminated employee can't be paid";
+    $("#pageIcon").textContent = "⚑";
+    $("#pageIcon").style.background = "var(--orange-bg)";
+    $("#pageIcon").style.color = "var(--orange)";
+    // partial meta — category will fill in when triage arrives
+    $("#pageMeta").className = "page-meta";
+    $("#pageMeta").innerHTML = `
+      <span class="meta-row"><span class="meta-key">Customer</span>Pacific Loom Studio</span>
+      <span class="meta-row"><span class="meta-key">Phone agent</span>Devon Marsh · #3041</span>
+      <span class="meta-row"><span class="meta-key">Caller</span>Lila Park, payroll admin</span>
+      <span class="meta-row"><span class="meta-key">Opened</span>2:08 PM PT · just now</span>
+    `;
+
+    // kick off INV + Triage in parallel — triage finishes FIRST intentionally
+    delay(doInvStart,    100);
+    delay(doTriageStart, 200);
+  }, 280 + PARSED_FIELDS.length * 220 + 100);
+}
+
+function fillField(i, text) {
+  const cell = $(`.field-row .fv[data-i="${i}"]`);
+  if (!cell) return;
+  cell.classList.remove("empty");
+  cell.textContent = "";
+  let pos = 0;
+  // fast type — char-by-char but quick
+  const step = () => {
+    pos += Math.max(2, Math.floor(text.length / 14));
+    if (pos >= text.length) {
+      cell.textContent = text;
+      return;
+    }
+    cell.innerHTML = `<span class="typing">${text.slice(0, pos)}</span><span class="caret"></span>`;
+    timeline.push(setTimeout(step, 22));
+  };
+  step();
+}
+
+/* --- Step 4a: INV search --- */
+function doInvStart() {
+  $("#invBlock").style.display = "block";
+  requestAnimationFrame(() => $("#invBlock").classList.add("show"));
+  setPipeline("inv", "working");
+
+  // INV finishes AFTER triage (~3.6s)
+  delay(doInvDone, 3600);
+}
+
+function doInvDone() {
+  setPipeline("inv", "done");
+  $$("#invCallout .author-chip").forEach(c => c.setAttribute("data-state", "done"));
+  $("#invBody").innerHTML = `
+    <span class="inv-num">${INV.num}</span>
+    <div class="inv-title">${INV.title}</div>
+    <div class="inv-meta">
+      ${INV.meta.map((m,i) => i === 0 ? `<span style="color:var(--green); font-weight:500;">${m}</span>` : `<span class="dot">·</span><span>${m}</span>`).join("")}
+    </div>
+    <button class="inv-open">Open INV-147914 →</button>
+  `;
+}
+
+/* --- Step 4b: Triage (PRIMARY) — arrives BEFORE INV --- */
+function doTriageStart() {
+  $("#triageBlock").style.display = "block";
+  requestAnimationFrame(() => $("#triageBlock").classList.add("show"));
+  setPipeline("triage", "working");
+
+  // triage arrives faster — ~1.8s after start
+  delay(doTriageDone, 1800);
+}
+
+function doTriageDone() {
+  setPipeline("triage", "done");
+  $$("#triageCallout .author-chip").forEach(c => c.setAttribute("data-state", "done"));
+  $("#triageBody").innerHTML = `
+    <div class="fast-read">${TRIAGE.fastRead}</div>
+    <div class="triage-grid">
+      <div>
+        <div class="tk">Immediate next step</div>
+        <div class="tv">${TRIAGE.nextStep}</div>
+      </div>
+      <div>
+        <div class="tk">Missing info to ask for</div>
+        <div class="tv">${TRIAGE.missing}</div>
+      </div>
+    </div>
+    <div class="triage-foot">
+      <span class="badge-flat cat-payroll">⬢ payroll</span>
+      <span class="badge-flat sev-p2">${TRIAGE.severity} · time-sensitive</span>
+      <span class="badge-flat" style="background:var(--green-bg); color:var(--green);">confidence: ${TRIAGE.confidence}</span>
+    </div>
+  `;
+
+  // promote category + severity into the page meta
+  $("#pageMeta").className = "page-meta";
+  $("#pageMeta").innerHTML = `
+    <span class="meta-row"><span class="meta-key">Category</span><span class="badge-flat cat-payroll">payroll</span></span>
+    <span class="meta-row"><span class="meta-key">Severity</span><span class="badge-flat sev-p2">P2 · time-sensitive</span></span>
+    <span class="meta-row"><span class="meta-key">Customer</span>Pacific Loom Studio</span>
+    <span class="meta-row"><span class="meta-key">Caller</span>Lila Park, payroll admin</span>
+    <span class="meta-row"><span class="meta-key">Phone agent</span>Devon Marsh · #3041</span>
+    <span class="meta-row"><span class="meta-key">Cutoff</span><span style="color:var(--red); font-weight:500;">today 5:00 PM PT</span></span>
+  `;
+
+  // analyst assembles after triage lands (regardless of INV) — but wait briefly for human pacing
+  delay(doAnalystArrive, 1100);
+}
+
+/* --- Step 5: Analyst arrives --- */
+function doAnalystArrive() {
+  setPipeline("analyst", "working");
+
+  // First — show the "Maren is reviewing the case…" pill (the warm pre-arrival)
+  const joining = $("#joiningRow");
+  joining.style.display = "inline-flex";
+  requestAnimationFrame(() => joining.classList.add("show"));
+
+  // Then she lands
+  delay(() => {
+    joining.style.display = "none";
+    $("#analystArrival").classList.add("show");
+    setPipeline("analyst", "done");
+    delay(doChatStream, 700);
+  }, 1400);
+}
+
+/* --- Step 6: Brief chat --- */
+function doChatStream() {
+  const thread = $("#thread");
+
+  // typing indicator first
+  const typing = document.createElement("div");
+  typing.className = "typing-row";
+  typing.innerHTML = `<span class="dots"><span></span><span></span><span></span></span> Maren is composing a response…`;
+  thread.appendChild(typing);
+
+  delay(() => {
+    typing.remove();
+
+    const turn = ANALYST_TURNS[0];
+    const msg = document.createElement("div");
+    msg.className = "msg analyst";
+    msg.innerHTML = `
+      <div class="avatar-sm">MR</div>
+      <div>
+        <div class="bubble"><div id="streamTarget"></div></div>
+        <div class="meta">Maren Rao · just now</div>
+      </div>
+    `;
+    thread.appendChild(msg);
+
+    // stream the content in word chunks
+    const target = $("#streamTarget");
+    streamHTML(target, turn.text, 14);
+
+    // stop the elapsed clock once chat is live
+    delay(() => { started = 0; }, 100);
+
+    // enable composer
+    delay(() => {
+      $("#composeSend").disabled = false;
+      // hint with prefilled draft
+      const ce = $("#composeInput");
+      ce.innerHTML = "Draft the response to Devon — include the reactivate / re-terminate steps and ask Lila about PTO payout.";
+      ce.removeAttribute("data-empty");
+    }, 3200);
+  }, 900);
+}
+
+function streamHTML(target, html, chunkSize) {
+  // Simple word-aware streaming on raw HTML — splits on spaces, preserving tags
+  const tokens = html.split(/(\s+)/);
+  let i = 0;
+  const tick = () => {
+    if (i >= tokens.length) { target.innerHTML = html; return; }
+    i = Math.min(i + chunkSize, tokens.length);
+    target.innerHTML = tokens.slice(0, i).join("");
+    timeline.push(setTimeout(tick, 40));
+  };
+  tick();
+}
+
+/* --- Bindings --- */
+$("#btnSimulateUpload").addEventListener("click", doUpload);
+$("#uploadZone").addEventListener("click", (e) => {
+  if (e.target.tagName === "BUTTON") return;
+  doUpload();
+});
+
+// Drag-drop visual
+const uz = $("#uploadZone");
+uz.addEventListener("dragover", (e) => { e.preventDefault(); uz.classList.add("is-drag"); });
+uz.addEventListener("dragleave", () => uz.classList.remove("is-drag"));
+uz.addEventListener("drop", (e) => { e.preventDefault(); uz.classList.remove("is-drag"); doUpload(); });
+
+// Paste support (paste anywhere triggers upload)
+window.addEventListener("paste", (e) => {
+  if ($("#preUpload").style.display === "none") return;
+  if (Array.from(e.clipboardData?.items || []).some(it => it.type.startsWith("image/"))) {
+    doUpload();
+  }
+});
+
+// Webcam
+$("#btnUseWebcam").addEventListener("click", () => {
+  $("#uploadZone").style.display = "none";
+  const wc = $("#webcamPanel");
+  wc.style.display = "block";
+  requestAnimationFrame(() => wc.classList.add("show"));
+});
+$("#btnWebcamBack").addEventListener("click", () => {
+  $("#webcamPanel").style.display = "none";
+  $("#uploadZone").style.display = "block";
+});
+$("#btnWebcamCancel").addEventListener("click", () => {
+  $("#webcamPanel").style.display = "none";
+  $("#uploadZone").style.display = "block";
+});
+$("#btnWebcamCapture").addEventListener("click", () => {
+  $("#webcamPanel").style.display = "none";
+  doUpload();
+});
+
+// Demo controls
+$("#btnReset").addEventListener("click", reset);
+$("#btnPlay").addEventListener("click", doUpload);
+
+// Composer
+const composeInput = $("#composeInput");
+composeInput.addEventListener("input", () => {
+  $("#composeSend").disabled = composeInput.textContent.trim().length === 0;
+});
+$("#composeSend").addEventListener("click", () => {
+  const txt = composeInput.textContent.trim();
+  if (!txt) return;
+  const thread = $("#thread");
+  const msg = document.createElement("div");
+  msg.className = "msg you";
+  msg.innerHTML = `
+    <div>
+      <div class="bubble"></div>
+      <div class="meta" style="text-align:right;">You · just now</div>
+    </div>
+    <div class="avatar-sm">YO</div>
+  `;
+  msg.querySelector(".bubble").textContent = txt;
+  thread.appendChild(msg);
+  composeInput.innerHTML = "";
+  composeInput.setAttribute("data-empty", "Reply to Maren — type / for actions");
+  $("#composeSend").disabled = true;
+
+  // analyst replies with a short ack
+  delay(() => {
+    const typing = document.createElement("div");
+    typing.className = "typing-row";
+    typing.innerHTML = `<span class="dots"><span></span><span></span><span></span></span> Maren`;
+    thread.appendChild(typing);
+    delay(() => {
+      typing.remove();
+      const r = document.createElement("div");
+      r.className = "msg analyst";
+      r.innerHTML = `
+        <div class="avatar-sm">MR</div>
+        <div>
+          <div class="bubble"><p>On it. Pulling the response template and the PTO payout check now — back in ~10 seconds.</p></div>
+          <div class="meta">Maren Rao · just now</div>
+        </div>
+      `;
+      thread.appendChild(r);
+    }, 900);
+  }, 500);
+});
+
+// Step buttons — jump-to-state for the judges
+function jumpToParsed() {
+  doUpload();
+}
+function jumpToTriage() {
+  reset();
+  doUpload();
+  // Speed-run to triage-done state
+  clearTimeline();
+  doParserStart_instant();
+  doTriageDoneOnly();
+}
+
+function doParserStart_instant() {
+  $("#parsedBlock").style.display = "block";
+  $("#parsedBlock").classList.add("show");
+  $("#invBlock").style.display = "block";
+  $("#invBlock").classList.add("show");
+  setPipeline("parser", "done");
+  setPipeline("inv", "working");
+  const tbl = $("#fieldsTable");
+  tbl.innerHTML = "";
+  PARSED_FIELDS.forEach((f) => {
+    const row = document.createElement("div");
+    row.className = "field-row";
+    row.innerHTML = `<div class="fk">${f[0]}</div><div class="fv">${f[1]}</div>`;
+    tbl.appendChild(row);
+  });
+  $("#parserChip").setAttribute("data-state", "done");
+  $("#pageTitle").innerHTML = "Pacific Loom Studio — terminated employee can't be paid";
+  $("#pageIcon").style.background = "var(--orange-bg)";
+  $("#pageIcon").style.color = "var(--orange)";
+}
+
+function doTriageDoneOnly() {
+  $("#triageBlock").style.display = "block";
+  $("#triageBlock").classList.add("show");
+  doTriageDone();
+}
+
+$("#btnStep1").addEventListener("click", () => {
+  reset();
+  // just show upload zone (it is the initial state)
+});
+$("#btnStep2").addEventListener("click", () => {
+  reset(); doUpload();
+});
+function jumpToTriageState() {
+  reset();
+  clearTimeline();
+  $("#preUpload").style.display = "none";
+  $("#afterUpload").style.display = "block";
+  $("#pipelineStrip").style.display = "flex";
+  $("#screenshotBlock").classList.add("show");
+  $("#pipelineStrip").classList.add("show");
+  $("#crumbCase").textContent = "Pacific Loom Studio · payroll";
+  doParserStart_instant();
+  // Render triage immediately without scheduling analyst
+  $("#triageBlock").style.display = "block";
+  $("#triageBlock").classList.add("show");
+  doTriageDoneJump();
+  setPipeline("inv", "done");
+  $$("#invCallout .author-chip").forEach(c => c.setAttribute("data-state", "done"));
+  doInvDone();
+}
+$("#btnStep3").addEventListener("click", jumpToTriageState);
+$("#btnStep4").addEventListener("click", () => {
+  jumpToTriageState();
+  delay(() => doAnalystArrive(), 250);
+});
+
+// Triage-done variant for jumps that does NOT auto-schedule analyst
+function doTriageDoneJump() {
+  setPipeline("triage", "done");
+  $$("#triageCallout .author-chip").forEach(c => c.setAttribute("data-state", "done"));
+  $("#triageBody").innerHTML = `
+    <div class="fast-read">${TRIAGE.fastRead}</div>
+    <div class="triage-grid">
+      <div>
+        <div class="tk">Immediate next step</div>
+        <div class="tv">${TRIAGE.nextStep}</div>
+      </div>
+      <div>
+        <div class="tk">Missing info to ask for</div>
+        <div class="tv">${TRIAGE.missing}</div>
+      </div>
+    </div>
+    <div class="triage-foot">
+      <span class="badge-flat cat-payroll">⬢ payroll</span>
+      <span class="badge-flat sev-p2">${TRIAGE.severity} · time-sensitive</span>
+      <span class="badge-flat" style="background:var(--green-bg); color:var(--green);">confidence: ${TRIAGE.confidence}</span>
+    </div>
+  `;
+  $("#pageMeta").className = "page-meta";
+  $("#pageMeta").innerHTML = `
+    <span class="meta-row"><span class="meta-key">Category</span><span class="badge-flat cat-payroll">payroll</span></span>
+    <span class="meta-row"><span class="meta-key">Severity</span><span class="badge-flat sev-p2">P2 · time-sensitive</span></span>
+    <span class="meta-row"><span class="meta-key">Customer</span>Pacific Loom Studio</span>
+    <span class="meta-row"><span class="meta-key">Caller</span>Lila Park, payroll admin</span>
+    <span class="meta-row"><span class="meta-key">Phone agent</span>Devon Marsh · #3041</span>
+    <span class="meta-row"><span class="meta-key">Cutoff</span><span style="color:var(--red); font-weight:500;">today 5:00 PM PT</span></span>
+  `;
+}
+</script>
+</body>
+</html>

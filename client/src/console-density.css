@@ -141,3 +141,65 @@ textarea:focus-visible,
     flex-basis: auto !important;
   }
 }
+
+.agent-panel-body .agent-dock--floating {
+  width: 100% !important;
+  max-width: none !important;
+  border-left: 0 !important;
+}
+
+.agent-panel-body .agent-dock--floating,
+.agent-panel-body .agent-dock--floating .agent-dock-body {
+  min-height: 0 !important;
+}
+
+.agent-panel-body .workspace-agent-panel {
+  width: 100% !important;
+  max-width: none !important;
+  flex-basis: auto !important;
+}
+
+.agent-modal-shell .agent-dock-tabs {
+  min-height: 34px !important;
+  padding: 4px 8px !important;
+  gap: 4px !important;
+}
+
+.agent-modal-shell .agent-dock-tab {
+  min-height: 25px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+}
+
+.agent-modal-shell .agent-dock-tabs-right {
+  display: none !important;
+}
+
+.agent-panel-body .workspace-agent-toolbar {
+  min-height: 35px !important;
+  padding: 4px 10px !important;
+  gap: 8px !important;
+}
+
+.agent-panel-body .workspace-agent-provider-btn {
+  min-height: 28px !important;
+  padding: 3px 9px !important;
+  border-radius: 7px !important;
+}
+
+.agent-panel-body .workspace-agent-provider-btn-kicker {
+  font-size: 9px !important;
+}
+
+.agent-panel-body .workspace-agent-toolbar-actions {
+  gap: 3px !important;
+}
+
+.agent-panel-body .workspace-agent-icon-btn {
+  width: 27px !important;
+  height: 27px !important;
+}
+
+.agent-panel-body .alert-heatmap {
+  display: none !important;
+}

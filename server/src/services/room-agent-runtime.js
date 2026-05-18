@@ -16,7 +16,7 @@ const FALLBACK_ROOM_AGENT_PROVIDERS = Object.freeze({
   chat: 'claude-opus-4-7',
   workspace: 'claude-opus-4-7',
   copilot: 'claude-opus-4-7',
-  'image-analyst': 'claude-sonnet-4-6',
+  'image-analyst': 'claude',
 });
 
 function normalizeRoomAgentRuntimeSelections(rawSelections = {}) {

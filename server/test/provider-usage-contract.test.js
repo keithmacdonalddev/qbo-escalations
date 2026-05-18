@@ -66,7 +66,7 @@ await t.test('claude chat() onDone receives usage as second argument', (t, done)
         assert.ok(usage, 'usage should not be null');
         assert.equal(usage.inputTokens, 10);
         assert.equal(usage.outputTokens, 25);
-        assert.equal(usage.model, 'claude-sonnet-4-6');
+        assert.equal(usage.model, 'claude-opus-4-7');
         done();
       },
       onError(err) { done(err); },
@@ -75,7 +75,7 @@ await t.test('claude chat() onDone receives usage as second argument', (t, done)
     emitLines(fakeChild, [
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hello there' }] } }),
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-sonnet-4-6',
+        type: 'result', result: '', model: 'claude-opus-4-7',
         usage: { input_tokens: 10, output_tokens: 25 },
       }),
     ]);
@@ -100,7 +100,7 @@ await t.test('claude chat() onError receives err._usage on CLI failure', (t, don
 
     emitLines(fakeChild, [
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-sonnet-4-6',
+        type: 'result', result: '', model: 'claude-opus-4-7',
         usage: { input_tokens: 5, output_tokens: 0 },
       }),
     ]);
@@ -121,7 +121,7 @@ await t.test('claude chat() cleanup() returns usage and partialResponse', (t, do
     emitLines(fakeChild, [
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial' }] } }),
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-sonnet-4-6',
+        type: 'result', result: '', model: 'claude-opus-4-7',
         usage: { input_tokens: 3, output_tokens: 7 },
       }),
     ]);
@@ -146,7 +146,7 @@ await t.test('claude parseEscalation() returns { fields, usage } wrapper', async
 
     const response = {
       type: 'result',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-7',
       usage: { input_tokens: 50, output_tokens: 30 },
       structured_output: {
         category: 'payroll',
@@ -168,7 +168,7 @@ await t.test('claude parseEscalation() returns { fields, usage } wrapper', async
   assert.equal(result.fields.category, 'payroll');
   assert.equal(result.usage.inputTokens, 50);
   assert.equal(result.usage.outputTokens, 30);
-  assert.equal(result.usage.model, 'claude-sonnet-4-6');
+  assert.equal(result.usage.model, 'claude-opus-4-7');
 });
 
 await t.test('claude parseEscalation() catch fallback extracts usage from non-canonical stdout', async () => {
@@ -180,7 +180,7 @@ await t.test('claude parseEscalation() catch fallback extracts usage from non-ca
     // JSON.parse(stdout) fails (multi-line, not a single JSON blob).
     // Catch path: line-by-line usage extraction + regex field extraction.
     const usageLine = JSON.stringify({
-      type: 'result', model: 'claude-sonnet-4-6',
+      type: 'result', model: 'claude-opus-4-7',
       usage: { input_tokens: 20, output_tokens: 15 }, result: '',
     });
     // Second line: plain text wrapping a JSON escalation object
@@ -198,7 +198,7 @@ await t.test('claude parseEscalation() catch fallback extracts usage from non-ca
   assert.ok(result.usage, 'usage should be extracted from line-by-line fallback');
   assert.equal(result.usage.inputTokens, 20);
   assert.equal(result.usage.outputTokens, 15);
-  assert.equal(result.usage.model, 'claude-sonnet-4-6');
+  assert.equal(result.usage.model, 'claude-opus-4-7');
 });
 
 // ============================================================
@@ -224,6 +224,37 @@ await t.test('codex chat() onDone receives usage as second argument', (t, done) 
     emitLines(fakeChild, [
       JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'Codex says hi' } }),
       JSON.stringify({ type: 'usage', prompt_tokens: 15, completion_tokens: 20, model: 'gpt-5.5' }),
+    ]);
+    closeChild(fakeChild, 0);
+  });
+});
+
+await t.test('codex chat() streams reasoning items through onThinkingChunk', (t, done) => {
+  withMock((fakeChild) => {
+    const codex = requireFresh('../src/services/codex');
+    let thinking = '';
+    codex.chat({
+      messages: [{ role: 'user', content: 'hello' }],
+      onThinkingChunk(chunk) { thinking += chunk; },
+      onChunk() {},
+      onDone(text) {
+        assert.match(thinking, /Checking repository state/);
+        assert.equal(text, 'Codex says hi');
+        done();
+      },
+      onError(err) { done(err); },
+    });
+
+    emitLines(fakeChild, [
+      JSON.stringify({
+        type: 'item.completed',
+        item: {
+          id: 'reasoning-1',
+          type: 'reasoning',
+          text: '**Checking repository state**\n\nI need to inspect the files before answering.',
+        },
+      }),
+      JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'Codex says hi' } }),
     ]);
     closeChild(fakeChild, 0);
   });

@@ -7,6 +7,7 @@ const {
   normalizeProvider,
   getProviderLabel,
 } = require('./providers/registry');
+const { sumCaseIntakeEvents } = require('./event-stats-service');
 
 function createServiceError(code, message, status = 500) {
   const error = new Error(message);
@@ -55,7 +56,10 @@ async function listConversations({ limit, skip, search, includeTotal }) {
     : {};
 
   try {
-    const listFields = 'title provider escalationId createdAt updatedAt messageCount lastMessagePreview forkedFrom forkMessageIndex';
+    // caseIntake.runs is a Mixed subdocument so Mongo can't project nested
+    // paths individually. Pull the whole array — sumCaseIntakeEvents only
+    // touches each run's eventCount/events.length, which is cheap.
+    const listFields = 'title provider escalationId createdAt updatedAt messageCount lastMessagePreview forkedFrom forkMessageIndex caseIntake.runs';
     const conversationsPromise = Conversation.find(filter)
       .select(listFields)
       .sort({ updatedAt: -1 })
@@ -70,6 +74,19 @@ async function listConversations({ limit, skip, search, includeTotal }) {
       conversationsPromise,
       totalPromise,
     ]);
+    const escalationIds = [...new Set(
+      conversations
+        .map((conversation) => conversation.escalationId)
+        .filter(Boolean)
+        .map((id) => id.toString())
+    )];
+    const escalationDocs = escalationIds.length > 0
+      ? await Escalation.find({ _id: { $in: escalationIds } })
+        .select('caseNumber coid agentName clientContact category status')
+        .lean()
+        .maxTimeMS(5000)
+      : [];
+    const escalationById = new Map(escalationDocs.map((escalation) => [escalation._id.toString(), escalation]));
 
     const items = conversations.map((conversation) => ({
       _id: conversation._id,
@@ -78,10 +95,14 @@ async function listConversations({ limit, skip, search, includeTotal }) {
       messageCount: conversation.messageCount || 0,
       lastMessage: conversation.lastMessagePreview || null,
       escalationId: conversation.escalationId,
+      escalation: conversation.escalationId
+        ? escalationById.get(conversation.escalationId.toString()) || null
+        : null,
       forkedFrom: conversation.forkedFrom || null,
       forkMessageIndex: conversation.forkMessageIndex != null ? conversation.forkMessageIndex : null,
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
+      totalEventCount: sumCaseIntakeEvents(conversation.caseIntake),
     }));
 
     return includeTotal

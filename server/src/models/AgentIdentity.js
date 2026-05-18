@@ -107,6 +107,9 @@ const runtimeSettingsSchema = new mongoose.Schema({
 
 const agentIdentitySchema = new mongoose.Schema({
   agentId: { type: String, required: true, unique: true },
+  enabled: { type: Boolean, default: true },
+  enabledUpdatedAt: { type: Date, default: null },
+  enabledUpdatedBy: { type: String, default: '' },
   profile: {
     displayName: { type: String, default: '' },
     roleTitle: { type: String, default: '' },
