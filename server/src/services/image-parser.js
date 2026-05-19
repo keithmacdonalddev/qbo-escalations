@@ -45,6 +45,7 @@ const LM_STUDIO_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_ST
 const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
 const LLM_GATEWAY_DEFAULT_MODEL = process.env.LLM_GATEWAY_DEFAULT_MODEL || 'auto';
 const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.4-mini';
+const OPENAI_PROVIDER_TEST_MAX_TOKENS = 64;
 const DEFAULT_TIMEOUT_MS = 120000;
 const KEYS_FILE = path.join(__dirname, '..', '..', 'data', 'image-parser-keys.json');
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
@@ -191,8 +192,8 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
     model: OPENAI_DEFAULT_IMAGE_MODEL,
     buildBody: (model) => JSON.stringify(applyOpenAiGenerationOptions({
       model,
-      messages: [{ role: 'user', content: 'hi' }],
-    }, model, 'none', 1)),
+      messages: [{ role: 'user', content: 'Reply with OK only.' }],
+    }, model, 'low', OPENAI_PROVIDER_TEST_MAX_TOKENS)),
     buildHeaders: (key) => ({
       'Authorization': `Bearer ${key}`,
       'Content-Type': 'application/json',

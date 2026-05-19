@@ -1239,6 +1239,25 @@ test('checkProviderAvailability reports openai available when key is set', async
   }
 });
 
+test('validateRemoteProvider uses a viable OpenAI GPT-5 health probe budget', async () => {
+  const captured = mockHttpsCapture({ choices: [{ message: { content: 'OK' } }] });
+  try {
+    const result = await validateRemoteProvider('openai', 'sk-openai-health-test');
+
+    assert.equal(result.ok, true);
+    assert.equal(result.available, true);
+    assert.equal(captured.options.hostname, 'api.openai.com');
+    assert.equal(captured.options.path, '/v1/chat/completions');
+    assert.equal(captured.body.model, 'gpt-5.4-mini');
+    assert.equal(captured.body.max_tokens, undefined);
+    assert.equal(captured.body.max_completion_tokens, 64);
+    assert.equal(captured.body.reasoning_effort, 'low');
+    assert.match(captured.body.messages[0].content, /OK only/);
+  } finally {
+    captured._restore();
+  }
+});
+
 test('checkProviderAvailability caches recent results until forced to refresh', async () => {
   mockHttpRequest(200, JSON.stringify({ data: [{ id: 'cached-model' }] }));
   const first = await checkProviderAvailability();

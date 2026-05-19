@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   createAgentIdentity,
   getAgentIdentity,
@@ -246,6 +246,7 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [parserTestResultsLoading, setParserTestResultsLoading] = useState(false);
   const [parserTestResultsError, setParserTestResultsError] = useState(null);
   const [parserResultPreview, setParserResultPreview] = useState(null);
+  const selectedAgentRequestRef = useRef(0);
 
   const loadAgents = useCallback(async () => {
     try {
@@ -273,13 +274,18 @@ function AgentsView({ agentIdFromRoute = null }) {
 
   const loadSelectedAgent = useCallback(
     async (agentId) => {
+      const requestId = selectedAgentRequestRef.current + 1;
+      selectedAgentRequestRef.current = requestId;
+
       if (!agentId) {
         setCurrentAgent(null);
         return;
       }
       try {
         setLoadingCurrent(true);
+        setCurrentAgent(null);
         const agent = await getAgentIdentity(agentId);
+        if (selectedAgentRequestRef.current !== requestId) return;
         setCurrentAgent(agent || null);
         if (agent?.agentId) {
           setRuntimeSelections((previous) => ({
@@ -290,9 +296,12 @@ function AgentsView({ agentIdFromRoute = null }) {
         }
         setError(null);
       } catch (err) {
+        if (selectedAgentRequestRef.current !== requestId) return;
         setError(err.message || 'Failed to load selected agent.');
       } finally {
-        setLoadingCurrent(false);
+        if (selectedAgentRequestRef.current === requestId) {
+          setLoadingCurrent(false);
+        }
       }
     },
     []
@@ -365,7 +374,9 @@ function AgentsView({ agentIdFromRoute = null }) {
     setProfileSummary('');
   }, [currentAgent]);
 
-  const selectedAgent = currentAgent || agents.find((agent) => agent.agentId === selectedAgentId) || null;
+  const selectedAgent = currentAgent?.agentId === selectedAgentId
+    ? currentAgent
+    : agents.find((agent) => agent.agentId === selectedAgentId) || null;
   const selectedRuntimeState = selectedAgent?.agentId ? runtimeSelections[selectedAgent.agentId] : null;
   const selectedRuntimeDefinition = selectedAgent?.agentId
     ? getAgentRuntimeDefinition(selectedAgent.agentId)

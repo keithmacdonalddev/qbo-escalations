@@ -79,6 +79,12 @@ function formatImageParserProviderLogLine(name, info) {
   return `  ${name}: ${tag}${model} - ${info.reason || (info.available ? 'Available' : 'Unavailable')}`;
 }
 
+function shouldWarnImageParserProviderDown(info) {
+  if (!info || typeof info !== 'object') return true;
+  if (info.available) return false;
+  return info.configured !== false;
+}
+
 function stopImageParserHealthCheck() {
   if (imageParserHealthTimer) {
     clearInterval(imageParserHealthTimer);
@@ -270,7 +276,7 @@ async function start(options = {}) {
             imageParserHealthTimer = setInterval(async () => {
               try {
                 const status = await checkProviderAvailability({ forceRefresh: true });
-                const down = Object.entries(status).filter(([, info]) => !info.available);
+                const down = Object.entries(status).filter(([, info]) => shouldWarnImageParserProviderDown(info));
                 if (down.length > 0) {
                   const names = down.map(([name, info]) => `${name} (${info.reason})`).join(', ');
                   console.warn(`[image-parser] Health check: ${down.length} provider(s) down — ${names}`);
