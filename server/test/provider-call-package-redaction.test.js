@@ -76,3 +76,41 @@ test('redactProviderCallPackage redacts headers and secret-like body fields with
   assert.ok(redacted.redaction.redactedBodyPaths.includes('request.bodyJson.accessToken'));
   assert.ok(redacted.redaction.notes.includes('request.bodyText regenerated after body secret redaction'));
 });
+
+test('redactProviderCallPackage redacts JSON string request bodies', () => {
+  const envelope = {
+    request: {
+      headers: {},
+      bodyKind: 'text',
+      bodyJson: null,
+      bodyText: JSON.stringify({ apiKey: 'sk-secret', prompt: 'keep prompt' }),
+      bodyByteLength: 45,
+      bodySha256: 'before',
+    },
+  };
+
+  const redacted = redactProviderCallPackage(envelope);
+
+  assert.equal(redacted.request.bodyText.includes('sk-secret'), false);
+  assert.equal(redacted.request.bodyText.includes('[REDACTED]'), true);
+  assert.equal(JSON.parse(redacted.request.bodyText).prompt, 'keep prompt');
+  assert.notEqual(redacted.request.bodySha256, 'before');
+  assert.ok(redacted.redaction.redactedBodyPaths.includes('request.bodyText.apiKey'));
+  assert.ok(redacted.redaction.notes.includes('request.bodyText JSON string redacted'));
+});
+
+test('redactProviderCallPackage redacts JSON string error raw bodies', () => {
+  const envelope = {
+    error: {
+      rawBody: JSON.stringify({ credential: 'provider-secret', message: 'bad request' }),
+    },
+  };
+
+  const redacted = redactProviderCallPackage(envelope);
+
+  assert.equal(redacted.error.rawBody.includes('provider-secret'), false);
+  assert.equal(JSON.parse(redacted.error.rawBody).credential, '[REDACTED]');
+  assert.equal(JSON.parse(redacted.error.rawBody).message, 'bad request');
+  assert.ok(redacted.redaction.redactedBodyPaths.includes('error.rawBody.credential'));
+  assert.ok(redacted.redaction.notes.includes('error.rawBody JSON string redacted'));
+});

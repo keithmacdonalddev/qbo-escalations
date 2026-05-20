@@ -78,6 +78,76 @@ test('buildHttpProviderCallPackage builds request, response, timing, and outcome
   assert.equal(envelope.outcome, 'success');
 });
 
+test('buildHttpProviderCallPackage emits full response shape for no-response errors', () => {
+  const error = new Error('socket hang up');
+  error.code = 'ECONNRESET';
+
+  const envelope = buildHttpProviderCallPackage({
+    method: 'POST',
+    baseUrl: 'https://api.moonshot.ai',
+    urlPath: '/v1/chat/completions',
+    body: { model: 'kimi-k2.5' },
+    headers: { Authorization: 'Bearer sk-test' },
+    captureContext: {
+      providerId: 'kimi',
+      providerPathType: 'direct-http',
+      callSite: 'test:kimi',
+      operation: 'chat',
+    },
+    error,
+  });
+
+  assert.equal(envelope.outcome, 'network_error');
+  assert.deepEqual(envelope.response, {
+    received: false,
+    statusCode: 0,
+    statusMessage: '',
+    httpVersion: '',
+    headers: {},
+    rawHeaders: [],
+    trailers: {},
+    rawTrailers: [],
+    bodyChunks: [],
+    bodyText: '',
+    bodyByteLength: 0,
+    bodySha256: null,
+    bodyPayloadRef: null,
+    parsedJson: null,
+    jsonParseError: null,
+  });
+});
+
+test('buildHttpProviderCallPackage classifies timeout and aborted outcomes', () => {
+  const timeoutError = new Error('Request timed out');
+  timeoutError.code = 'TIMEOUT';
+  const timeoutEnvelope = buildHttpProviderCallPackage({
+    captureContext: {
+      providerId: 'kimi',
+      providerPathType: 'direct-http',
+      callSite: 'test:timeout',
+      operation: 'chat',
+    },
+    error: timeoutError,
+  });
+
+  const abortError = new Error('Request aborted');
+  const abortEnvelope = buildHttpProviderCallPackage({
+    captureContext: {
+      providerId: 'kimi',
+      providerPathType: 'direct-http',
+      callSite: 'test:abort',
+      operation: 'chat',
+    },
+    error: abortError,
+    outcome: 'aborted',
+  });
+
+  assert.equal(timeoutEnvelope.outcome, 'timeout');
+  assert.equal(abortEnvelope.outcome, 'aborted');
+  assert.equal(timeoutEnvelope.response.statusCode, 0);
+  assert.equal(abortEnvelope.response.statusCode, 0);
+});
+
 test('recordProviderCallPackage skips when feature flag is disabled', async () => {
   const envelope = buildHttpProviderCallPackage({
     captureContext: {

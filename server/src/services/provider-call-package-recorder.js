@@ -9,6 +9,7 @@ const { externalizeProviderCallPackagePayloads, sha256 } = require('./provider-c
 
 const CAPTURE_VERSION = 'provider-harness-http-v0.1';
 const SCHEMA_VERSION = '0.1';
+let warnedMongooseNotConnected = false;
 
 function isProviderCallPackageCaptureEnabled() {
   return String(process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE || '').toLowerCase() === 'true';
@@ -83,6 +84,52 @@ function compactError(err) {
   };
 }
 
+function buildNoResponsePackage() {
+  return {
+    received: false,
+    statusCode: 0,
+    statusMessage: '',
+    httpVersion: '',
+    headers: {},
+    rawHeaders: [],
+    trailers: {},
+    rawTrailers: [],
+    bodyChunks: [],
+    bodyText: '',
+    bodyByteLength: 0,
+    bodySha256: null,
+    bodyPayloadRef: null,
+    parsedJson: null,
+    jsonParseError: null,
+  };
+}
+
+function buildResponsePackage(input, responseBodyText, parsedResult) {
+  if (!input.response && !input.statusCode) {
+    return buildNoResponsePackage();
+  }
+
+  return {
+    received: Boolean(input.response || input.statusCode),
+    statusCode: Number(input.response?.statusCode || input.statusCode || 0),
+    statusMessage: input.response?.statusMessage || '',
+    httpVersion: input.response?.httpVersion || '',
+    headers: input.response?.headers || {},
+    rawHeaders: input.response?.rawHeaders || [],
+    trailers: input.response?.trailers || {},
+    rawTrailers: input.response?.rawTrailers || [],
+    bodyChunks: Array.isArray(input.response?.bodyChunks) ? input.response.bodyChunks : [],
+    bodyText: responseBodyText,
+    bodyByteLength: Buffer.byteLength(responseBodyText, 'utf8'),
+    bodySha256: responseBodyText ? sha256(responseBodyText) : null,
+    bodyPayloadRef: null,
+    parsedJson: parsedResult.parsed,
+    jsonParseError: parsedResult.parseError
+      ? { name: parsedResult.parseError.name, message: parsedResult.parseError.message }
+      : null,
+  };
+}
+
 function buildHttpProviderCallPackage(input = {}) {
   const context = input.captureContext || input.context || {};
   const requestStartedAt = input.requestStartedAt || input.startedAt || nowIso();
@@ -128,30 +175,7 @@ function buildHttpProviderCallPackage(input = {}) {
       modelRequested: context.modelRequested || input.modelRequested || serializedBody.bodyJson?.model || '',
       timeoutMs: input.timeoutMs || context.timeoutMs || null,
     },
-    response: input.response || input.statusCode
-      ? {
-          received: Boolean(input.response || input.statusCode),
-          statusCode: Number(input.response?.statusCode || input.statusCode || 0),
-          statusMessage: input.response?.statusMessage || '',
-          httpVersion: input.response?.httpVersion || '',
-          headers: input.response?.headers || {},
-          rawHeaders: input.response?.rawHeaders || [],
-          trailers: input.response?.trailers || {},
-          rawTrailers: input.response?.rawTrailers || [],
-          bodyChunks: Array.isArray(input.response?.bodyChunks) ? input.response.bodyChunks : [],
-          bodyText: responseBodyText,
-          bodyByteLength: Buffer.byteLength(responseBodyText, 'utf8'),
-          bodySha256: responseBodyText ? sha256(responseBodyText) : null,
-          bodyPayloadRef: null,
-          parsedJson: parsedResult.parsed,
-          jsonParseError: parsedResult.parseError
-            ? { name: parsedResult.parseError.name, message: parsedResult.parseError.message }
-            : null,
-        }
-      : {
-          received: false,
-          bodyChunks: [],
-        },
+    response: buildResponsePackage(input, responseBodyText, parsedResult),
     timing: {
       requestStartedAt,
       requestWrittenAt: input.requestWrittenAt || null,
@@ -190,6 +214,10 @@ async function recordProviderCallPackage(envelope, options = {}) {
   }
 
   if (mongoose.connection.readyState !== 1) {
+    if (options.log !== false && !warnedMongooseNotConnected) {
+      warnedMongooseNotConnected = true;
+      console.warn('[provider-call-package-recorder] capture skipped: mongoose is not connected');
+    }
     return { ok: false, skipped: true, reason: 'mongoose_not_connected' };
   }
 

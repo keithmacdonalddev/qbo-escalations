@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
+const { EventEmitter } = require('events');
 
 const mongo = require('./_mongo-helper');
 const ProviderCallPackage = require('../src/models/ProviderCallPackage');
@@ -14,6 +15,40 @@ const {
   requestGeminiChat,
   requestKimiChat,
 } = remoteApiProviders._internal;
+
+function testCaptureContext(callSite) {
+  return {
+    providerId: 'kimi',
+    providerResearchId: 'kimi-api',
+    providerPathType: 'direct-http',
+    callSite,
+    operation: 'chat',
+    source: {
+      file: 'server/src/services/remote-api-providers.js',
+      functionName: 'jsonRequestCancelable',
+      helperName: 'jsonRequestCancelable',
+    },
+    modelRequested: 'kimi-k2.5',
+  };
+}
+
+async function withCaptureEnabled(fn) {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  try {
+    return await fn();
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+}
 
 test('registry exposes API-backed agent providers', () => {
   for (const providerId of ['llm-gateway', 'anthropic', 'openai', 'gemini', 'kimi']) {
@@ -343,4 +378,124 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
     });
     await mongo.disconnect();
   }
+});
+
+function installRequestErrorMock(mode) {
+  const originalRequest = http.request;
+  http.request = function mockedRequest(options, callback) {
+    const req = new EventEmitter();
+    req.write = () => {};
+    req.end = () => {
+      if (mode === 'network_error') {
+        process.nextTick(() => {
+          const err = new Error('socket hang up');
+          err.code = 'ECONNRESET';
+          req.emit('error', err);
+        });
+      } else if (mode === 'timeout') {
+        process.nextTick(() => req.emit('timeout'));
+      }
+    };
+    req.destroy = (err) => {
+      if (mode === 'aborted' && err) {
+        process.nextTick(() => req.emit('error', err));
+      }
+    };
+    return req;
+  };
+  return () => {
+    http.request = originalRequest;
+  };
+}
+
+test('jsonRequestCancelable captures network_error outcome when enabled', async () => {
+  await withCaptureEnabled(async () => {
+    const restore = installRequestErrorMock('network_error');
+    try {
+      const request = remoteApiProviders._internal.jsonRequestCancelable(
+        'POST',
+        'http://127.0.0.1:65530',
+        '/v1/chat/completions',
+        { model: 'kimi-k2.5' },
+        {},
+        5000,
+        testCaptureContext('remote-api-providers:network-error-test')
+      );
+
+      await assert.rejects(request.promise, /socket hang up/);
+      const saved = await ProviderCallPackage.findOne({
+        callSite: 'remote-api-providers:network-error-test',
+      }).lean();
+
+      assert.ok(saved);
+      assert.equal(saved.outcome, 'network_error');
+      assert.equal(saved.response.received, false);
+      assert.equal(saved.response.statusCode, 0);
+      assert.equal(saved.response.bodyText, '');
+      assert.equal(saved.error.code, 'ECONNRESET');
+    } finally {
+      restore();
+    }
+  });
+});
+
+test('jsonRequestCancelable captures timeout outcome when enabled', async () => {
+  await withCaptureEnabled(async () => {
+    const restore = installRequestErrorMock('timeout');
+    try {
+      const request = remoteApiProviders._internal.jsonRequestCancelable(
+        'POST',
+        'http://127.0.0.1:65530',
+        '/v1/chat/completions',
+        { model: 'kimi-k2.5' },
+        {},
+        25,
+        testCaptureContext('remote-api-providers:timeout-test')
+      );
+
+      await assert.rejects(request.promise, /Request timed out/);
+      const saved = await ProviderCallPackage.findOne({
+        callSite: 'remote-api-providers:timeout-test',
+      }).lean();
+
+      assert.ok(saved);
+      assert.equal(saved.outcome, 'timeout');
+      assert.equal(saved.response.received, false);
+      assert.equal(saved.response.statusCode, 0);
+      assert.equal(saved.error.code, 'TIMEOUT');
+    } finally {
+      restore();
+    }
+  });
+});
+
+test('jsonRequestCancelable captures aborted outcome when enabled', async () => {
+  await withCaptureEnabled(async () => {
+    const restore = installRequestErrorMock('aborted');
+    try {
+      const request = remoteApiProviders._internal.jsonRequestCancelable(
+        'POST',
+        'http://127.0.0.1:65530',
+        '/v1/chat/completions',
+        { model: 'kimi-k2.5' },
+        {},
+        5000,
+        testCaptureContext('remote-api-providers:aborted-test')
+      );
+
+      assert.equal(request.cancel('manual abort'), true);
+      await assert.rejects(request.promise, /manual abort/);
+      const saved = await ProviderCallPackage.findOne({
+        callSite: 'remote-api-providers:aborted-test',
+      }).lean();
+
+      assert.ok(saved);
+      assert.equal(saved.outcome, 'aborted');
+      assert.equal(saved.response.received, false);
+      assert.equal(saved.response.statusCode, 0);
+      assert.equal(saved.error.message, 'manual abort');
+    } finally {
+      restore();
+    }
+  });
 });

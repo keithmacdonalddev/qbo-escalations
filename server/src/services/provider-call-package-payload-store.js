@@ -37,12 +37,16 @@ function ensureStorage(envelope) {
   envelope.storage = {
     inline: true,
     externalPayloads: [],
+    notes: [],
     truncated: false,
     truncationReason: null,
     ...(envelope.storage && typeof envelope.storage === 'object' ? envelope.storage : {}),
   };
   if (!Array.isArray(envelope.storage.externalPayloads)) {
     envelope.storage.externalPayloads = [];
+  }
+  if (!Array.isArray(envelope.storage.notes)) {
+    envelope.storage.notes = [];
   }
   return envelope.storage;
 }
@@ -73,6 +77,11 @@ function attachPayloadRef(target, fieldPath, payloadRef) {
   if (parent && typeof parent === 'object') {
     parent[`${fieldName}PayloadRef`] = payloadRef;
   }
+}
+
+function addStorageNote(storage, note) {
+  if (!note || storage.notes.includes(note)) return;
+  storage.notes.push(note);
 }
 
 async function writeExternalPayload(envelope, fieldPath, text, options, fallbackKind = 'payload') {
@@ -185,8 +194,32 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
     'error.rawBody',
   ];
 
+  const requestBodyText = readPath(prepared, 'request.bodyText');
+  const requestBodyJson = readPath(prepared, 'request.bodyJson');
+  const requestBodyJsonText = requestBodyJson === null || requestBodyJson === undefined
+    ? null
+    : JSON.stringify(requestBodyJson);
+  const shouldDropDuplicateRequestBodyJson = typeof requestBodyText === 'string'
+    && requestBodyJsonText === requestBodyText
+    && byteLength(requestBodyText) > payloadOptions.maxInlineBytes;
+
   let externalized = false;
   for (const fieldPath of fields) {
+    if (fieldPath === 'request.bodyJson' && shouldDropDuplicateRequestBodyJson) {
+      const bodyTextRef = readPath(prepared, 'request.bodyTextPayloadRef');
+      if (bodyTextRef) {
+        writePath(prepared, 'request.bodyJson', null);
+        attachPayloadRef(prepared, 'request.bodyJson', {
+          ...bodyTextRef,
+          field: 'request.bodyJson',
+          kind: 'request_body_json',
+          derivedFrom: 'request.bodyText',
+        });
+        addStorageNote(storage, 'request.bodyJson omitted because it duplicates externalized request.bodyText');
+        externalized = true;
+        continue;
+      }
+    }
     externalized = await externalizeField(prepared, fieldPath, payloadOptions) || externalized;
   }
   externalized = await externalizeResponseChunks(prepared, payloadOptions) || externalized;

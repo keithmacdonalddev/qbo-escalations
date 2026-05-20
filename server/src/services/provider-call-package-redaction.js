@@ -137,6 +137,29 @@ function replaceJsonText(container, note, notes) {
   addUnique(notes, note);
 }
 
+function redactJsonTextField(container, fieldName, pathPrefix, redactedBodyPaths, notes, note) {
+  if (!container || typeof container !== 'object' || typeof container[fieldName] !== 'string') return;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(container[fieldName]);
+  } catch {
+    return;
+  }
+
+  const beforeCount = redactedBodyPaths.length;
+  const redactedJson = redactBodySecrets(parsed, pathPrefix, redactedBodyPaths);
+  if (redactedBodyPaths.length === beforeCount) return;
+
+  const text = JSON.stringify(redactedJson);
+  container[fieldName] = text;
+  if (fieldName === 'bodyText') {
+    container.bodyByteLength = Buffer.byteLength(text, 'utf8');
+    container.bodySha256 = sha256(text);
+  }
+  addUnique(notes, note);
+}
+
 function redactProviderCallPackage(envelope) {
   const redacted = cloneValue(envelope || {});
   const redactedHeaderNames = [];
@@ -170,6 +193,16 @@ function redactProviderCallPackage(envelope) {
       replaceJsonText(redacted.request, 'request.bodyText regenerated after body secret redaction', notes);
     }
   }
+  if (!redacted.request?.bodyJson) {
+    redactJsonTextField(
+      redacted.request,
+      'bodyText',
+      'request.bodyText',
+      redactedBodyPaths,
+      notes,
+      'request.bodyText JSON string redacted'
+    );
+  }
 
   if (redacted.response?.parsedJson) {
     const beforeCount = redactedBodyPaths.length;
@@ -182,6 +215,14 @@ function redactProviderCallPackage(envelope) {
   if (redacted.error?.object) {
     redacted.error.object = redactBodySecrets(redacted.error.object, 'error.object', redactedBodyPaths);
   }
+  redactJsonTextField(
+    redacted.error,
+    'rawBody',
+    'error.rawBody',
+    redactedBodyPaths,
+    notes,
+    'error.rawBody JSON string redacted'
+  );
 
   redacted.redaction = {
     ...(redacted.redaction && typeof redacted.redaction === 'object' ? redacted.redaction : {}),

@@ -54,6 +54,37 @@ test('externalizeProviderCallPackagePayloads writes large payloads to sidecar st
   assert.equal(await fs.readFile(savedPath, 'utf8'), largeText);
 });
 
+test('externalizeProviderCallPackagePayloads does not duplicate equivalent large request body JSON', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-call-packages-'));
+  const bodyJson = { model: 'kimi-k2.5', image: 'x'.repeat(64) };
+  const bodyText = JSON.stringify(bodyJson);
+  const envelope = {
+    request: {
+      bodyText,
+      bodyJson,
+    },
+  };
+
+  const result = await externalizeProviderCallPackagePayloads(envelope, {
+    packageId: 'pkg-duplicate-body',
+    payloadRoot: tempRoot,
+    maxInlineBytes: 16,
+    now: new Date('2026-05-20T12:00:00.000Z'),
+  });
+
+  assert.equal(result.request.bodyText, null);
+  assert.equal(result.request.bodyJson, null);
+  assert.equal(result.storage.inline, false);
+  assert.equal(result.storage.externalPayloads.length, 1);
+  assert.equal(result.storage.externalPayloads[0].field, 'request.bodyText');
+  assert.equal(result.request.bodyJsonPayloadRef.derivedFrom, 'request.bodyText');
+  assert.equal(result.request.bodyJsonPayloadRef.ref, result.request.bodyTextPayloadRef.ref);
+  assert.ok(result.storage.notes.includes('request.bodyJson omitted because it duplicates externalized request.bodyText'));
+
+  const files = await fs.readdir(path.join(tempRoot, '2026-05-20', 'pkg-duplicate-body'));
+  assert.deepEqual(files, ['request-bodyText.txt']);
+});
+
 test('externalizeProviderCallPackagePayloads externalizes response chunk text when chunks are too large', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-call-packages-'));
   const firstChunk = 'a'.repeat(12);
