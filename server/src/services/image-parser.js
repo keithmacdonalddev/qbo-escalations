@@ -27,10 +27,9 @@ const {
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
 
-// Structured-output backbone — Anthropic Agent SDK with json_schema enforcement.
-// Loaded lazily inside callAnthropicStructured so the ESM-only SDK is not
-// imported at module load time, and so test fixtures can substitute the export
-// via require.cache before the structured path is exercised.
+// Anthropic Agent SDK provider adapter. Loaded lazily so the ESM-only SDK is
+// not imported at module load time, and so test fixtures can substitute the
+// export via require.cache before the SDK path is exercised.
 function loadSdkImageParse() {
   // eslint-disable-next-line global-require
   return require('./sdk-image-parse');
@@ -1035,41 +1034,11 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
 }
 
 /**
- * Render structured-output fields (camelCase keys from sdk-image-parse) back
- * into the canonical 9-label escalation-template text. Doing this lets the
- * structured path produce the same downstream-visible shape as the prose path
- * (parseEscalationText / validateParsedEscalation / canonical-template
- * validator all consume the labelled text), so callers see one contract
- * regardless of which path produced the result.
+ * Anthropic SDK path — delegates provider-specific response handling to the
+ * Agent SDK adapter and returns the model's answer text. It does not decide
+ * whether the answer is a good parser result; downstream validation owns that.
  */
-function buildCanonicalTextFromStructuredFields(fields) {
-  const safe = (value) => (typeof value === 'string' ? value.trim() : '');
-  const f = fields && typeof fields === 'object' ? fields : {};
-  const coid = safe(f.coid);
-  const mid = safe(f.mid);
-  const coidMid = coid && mid ? `${coid} / ${mid}` : (coid || mid);
-  return [
-    ['COID/MID', coidMid],
-    ['CASE', safe(f.caseNumber)],
-    ['CLIENT/CONTACT', safe(f.clientContact)],
-    ['CX IS ATTEMPTING TO', safe(f.attemptingTo)],
-    ['EXPECTED OUTCOME', safe(f.expectedOutcome)],
-    ['ACTUAL OUTCOME', safe(f.actualOutcome)],
-    ['KB/TOOLS USED', safe(f.kbToolsUsed)],
-    ['TRIED TEST ACCOUNT', safe(f.triedTestAccount)],
-    ['TS STEPS', safe(f.tsSteps)],
-  ].map(([label, value]) => `${label}: ${value}`).join('\n');
-}
-
-/**
- * Anthropic structured-output path — delegates to the Agent SDK json_schema
- * call in services/sdk-image-parse.js. Adapts the SDK's {fields, usage}
- * return shape into {text, usage} so the rest of parseImage() (role detection,
- * canonical-template validation, parseFields extraction) flows unchanged.
- * On SDK failure (timeout, schema rejection, etc.) throws PROVIDER_ERROR so
- * the caller surfaces the failure rather than silently falling back to prose.
- */
-async function callAnthropicStructured(rawBase64, mediaType, model, reasoningEffort, timeoutMs) {
+async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, timeoutMs) {
   const apiKey = await resolveApiKey('anthropic');
   if (!apiKey) {
     const err = new Error('Anthropic API key not configured');
@@ -1090,14 +1059,13 @@ async function callAnthropicStructured(rawBase64, mediaType, model, reasoningEff
     timeoutMs,
   });
 
-  if (!sdkResult || !sdkResult.fields) {
-    const err = new Error('Anthropic structured-output parse failed — SDK returned no fields');
+  if (!sdkResult || typeof sdkResult.text !== 'string') {
+    const err = new Error('Anthropic SDK parse failed — SDK returned no answer text');
     err.code = 'PROVIDER_ERROR';
     throw err;
   }
 
-  const text = buildCanonicalTextFromStructuredFields(sdkResult.fields);
-  return { text, usage: sdkResult.usage || null };
+  return { text: sdkResult.text, usage: sdkResult.usage || null };
 }
 
 /**
@@ -1549,10 +1517,9 @@ function buildStructuredParseResult(text, role) {
  * @param {string} [options.model] - Model ID override
  * @param {string} [options.reasoningEffort] - Provider-specific reasoning effort override
  * @param {number} [options.timeoutMs=120000] - Request timeout
- * @param {boolean} [options.structured=true] - When provider is 'anthropic',
- *   force the SDK json_schema structured-output path. Default is true (the
- *   feature exists to be used). Set to false to opt out and run the legacy
- *   prose path; ignored for non-Anthropic providers in this iteration.
+ * @param {boolean} [options.structured=true] - Legacy option name. When
+ *   provider is 'anthropic', any value other than false uses the Anthropic SDK
+ *   provider adapter; false uses the direct Anthropic HTTP path.
  * @returns {Promise<{
  *   text: string,
  *   role: 'escalation'|'inv-list'|'unknown',
@@ -1564,10 +1531,9 @@ function buildStructuredParseResult(text, role) {
  */
 async function parseImage(imageBase64, options = {}) {
   const { provider, model, reasoningEffort, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus } = options;
-  // structured: opt-out flag for the Anthropic structured-output path. Default
-  // is ON (any value other than the literal boolean false keeps the SDK
-  // json_schema enforcement active). Non-Anthropic providers ignore this flag
-  // and continue to use the prose path.
+  // Legacy structured flag: false opts out of the Anthropic SDK adapter.
+  // The SDK adapter now returns provider answer text only; downstream parser
+  // validation owns all decisions about whether that text is useful.
   const useStructured = options.structured !== false;
   const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
   const systemPrompt = getRenderedAgentPrompt(promptId);
@@ -1638,22 +1604,16 @@ async function parseImage(imageBase64, options = {}) {
         result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         break;
       case 'anthropic':
-        // Structured-output path is the default for Anthropic (Decision D2b,
-        // 2026-05-19). The SDK json_schema call enforces the 9-label
-        // escalation shape at the model level. Pass structured: false in
-        // options to force the legacy prose path (used for sandbox A/B
-        // comparison).
         if (useStructured) {
-          eventBus?.emit('parser.structured_path_selected', {
+          eventBus?.emit('parser.sdk_path_selected', {
             provider,
             engine: 'anthropic-agent-sdk',
-            schema: 'escalation-template-9-label',
           });
-          result = await callAnthropicStructured(normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs);
+          result = await callAnthropicSdk(normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs);
         } else {
-          eventBus?.emit('parser.structured_path_skipped', {
+          eventBus?.emit('parser.sdk_path_skipped', {
             provider,
-            reason: 'opt_out_structured_false',
+            reason: 'opt_out_legacy_structured_false',
           });
           result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
         }

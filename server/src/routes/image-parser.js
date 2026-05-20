@@ -120,12 +120,10 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   // Request body shape:
   //   image, provider, model, reasoningEffort, timeoutMs, promptId,
   //   parserPromptId — standard parse fields (existing).
-  //   structured (optional boolean, default true) — when provider is
-  //   'anthropic', use the Agent SDK json_schema structured-output path
-  //   (the default behavior introduced in Decision D2b, 2026-05-19). Send
-  //   `structured: false` to opt out and force the legacy prose path. Any
-  //   other value (true, undefined, missing) keeps the structured default.
-  //   Non-Anthropic providers ignore this flag in this iteration.
+  //   structured (optional legacy boolean, default true) — when provider is
+  //   'anthropic', any value other than false uses the Agent SDK provider
+  //   adapter. Send `structured: false` to opt out and force the direct
+  //   Anthropic HTTP path. Both paths return the model answer as text.
   const { image, provider, model, reasoningEffort, timeoutMs, promptId, parserPromptId, structured } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
@@ -218,9 +216,8 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       timeoutMs: effectiveTimeout,
       promptId: effectivePromptId,
       eventBus: bus,
-      // Forward the structured opt-out down to parseImage. Only the literal
-      // boolean false disables the structured path; everything else (true,
-      // undefined, missing, non-boolean) keeps the default on.
+      // Forward the legacy SDK opt-out down to parseImage. Only the literal
+      // boolean false disables the SDK path; everything else keeps it on.
       structured: structured !== false,
     });
     const elapsedMs = Date.now() - startedAt;

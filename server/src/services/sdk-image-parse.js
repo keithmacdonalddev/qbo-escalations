@@ -11,40 +11,9 @@
 const { reportServerError } = require('../lib/server-error-pipeline');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 function getParsePrompt() {
   return getRenderedAgentPrompt('sdk-image-parse');
 }
-
-const OUTPUT_SCHEMA = {
-  type: 'object',
-  properties: {
-    coid:             { type: 'string' },
-    mid:              { type: 'string' },
-    caseNumber:       { type: 'string' },
-    clientContact:    { type: 'string' },
-    agentName:        { type: 'string' },
-    attemptingTo:     { type: 'string' },
-    expectedOutcome:  { type: 'string' },
-    actualOutcome:    { type: 'string' },
-    kbToolsUsed:      { type: 'string' },
-    tsSteps:          { type: 'string' },
-    triedTestAccount: { type: 'string', enum: ['yes', 'no', 'unknown'] },
-    category: {
-      type: 'string',
-      enum: [
-        'payroll', 'bank-feeds', 'reconciliation', 'permissions',
-        'billing', 'tax', 'invoicing', 'reporting', 'inventory',
-        'payments', 'integrations', 'general', 'unknown',
-        'technical',
-      ],
-    },
-  },
-  required: ['category'],
-};
 
 const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
 
@@ -111,16 +80,17 @@ function normalizeEffort(value) {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse an escalation image using the Claude Agent SDK with native base64
- * content blocks. Single-turn, no tool use, structured JSON output.
+ * Parse an image using the Claude Agent SDK with native base64 content blocks.
+ * This adapter intentionally returns the model's answer text only; parser
+ * correctness decisions belong to the downstream image-parser pipeline.
  *
  * @param {string} imageBase64 - Raw base64 or data-URI string
  * @param {Object} [options]
  * @param {number} [options.timeoutMs=120000] - Abort after this many ms
  * @param {string} [options.model] - Model override
  * @param {string} [options.reasoningEffort] - low | medium | high
- * @returns {Promise<{fields: Object, usage: Object|null}|null>}
- *   Parsed fields + usage, or null on failure (caller should fall back).
+ * @returns {Promise<{text: string, usage: Object|null}|null>}
+ *   Model answer text + usage, or null on failure (caller should fall back).
  */
 async function parseImageWithSDK(imageBase64, options = {}) {
   const { rawBase64, mediaType } = decodeBase64Input(imageBase64);
@@ -181,12 +151,8 @@ async function parseImageWithSDK(imageBase64, options = {}) {
       maxTurns: 2,
       disallowedTools: ['Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'Task'],
       abortController: ac,
-      outputFormat: {
-        type: 'json_schema',
-        schema: OUTPUT_SCHEMA,
-      },
       systemPrompt: 'You are an escalation image parser. ' +
-        'Return ONLY the structured JSON matching the output schema. ' +
+        'Return only your answer to the image-parser prompt. ' +
         'Do not use any tools.',
     };
 
@@ -210,7 +176,7 @@ async function parseImageWithSDK(imageBase64, options = {}) {
       }
     }
 
-    // --- Extract structured output and usage ----------------------------
+    // --- Extract model answer text and usage ----------------------------
     if (!resultMessage) {
       console.warn('[sdk-image-parse] No result message received from SDK');
       return null;
@@ -225,32 +191,19 @@ async function parseImageWithSDK(imageBase64, options = {}) {
       return null;
     }
 
-    // Prefer structured_output (from outputFormat / json_schema)
-    let fields = resultMessage.structured_output || null;
+    let text = typeof resultMessage.result === 'string' ? resultMessage.result : '';
 
-    // Fallback: try parsing the result text
-    if (!fields && resultMessage.result) {
-      try {
-        const jsonMatch = resultMessage.result.match(/\{[\s\S]*\}/);
-        if (jsonMatch) fields = JSON.parse(jsonMatch[0]);
-      } catch { /* ignore */ }
+    if (!text && assistantMessage && assistantMessage.message && Array.isArray(assistantMessage.message.content)) {
+      text = assistantMessage.message.content
+        .map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+        .filter(Boolean)
+        .join('\n');
     }
 
-    // Fallback: try extracting from assistant message content blocks
-    if (!fields && assistantMessage && assistantMessage.message && assistantMessage.message.content) {
-      for (const block of assistantMessage.message.content) {
-        if (block.type === 'text' && block.text) {
-          try {
-            const jsonMatch = block.text.match(/\{[\s\S]*\}/);
-            if (jsonMatch) { fields = JSON.parse(jsonMatch[0]); break; }
-          } catch { /* ignore */ }
-        }
-      }
-    }
-
-    if (!fields || typeof fields !== 'object') {
-      console.warn('[sdk-image-parse] Could not extract structured fields from SDK response');
-      return null;
+    if (!text && resultMessage.structured_output !== undefined) {
+      text = typeof resultMessage.structured_output === 'string'
+        ? resultMessage.structured_output
+        : JSON.stringify(resultMessage.structured_output);
     }
 
     // Build usage in the same format as the CLI path
@@ -266,7 +219,7 @@ async function parseImageWithSDK(imageBase64, options = {}) {
       cost: resultMessage.total_cost_usd || undefined,
     };
 
-    return { fields, usage };
+    return { text: String(text || '').trim(), usage };
   } catch (err) {
     // AbortError from timeout is expected — don't log as a server error
     if (err && err.name === 'AbortError') {

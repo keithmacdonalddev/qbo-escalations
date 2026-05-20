@@ -4,38 +4,12 @@ const fs = require('fs');
 const os = require('os');
 const { extractClaudeUsage } = require('../lib/usage-extractor');
 const { reportServerError } = require('../lib/server-error-pipeline');
-const { parseImageWithSDK } = require('./sdk-image-parse');
 const {
   isStubbed: isProvidersStubbed,
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
 const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
-
-// Concurrency limiter for SDK image parsing — only 1 at a time to prevent
-// memory pressure from parallel Claude Code subprocess spawns.
-let _sdkParseActive = false;
-const _sdkParseQueue = [];
-
-function acquireSdkSlot() {
-  return new Promise((resolve) => {
-    if (!_sdkParseActive) {
-      _sdkParseActive = true;
-      resolve();
-    } else {
-      _sdkParseQueue.push(resolve);
-    }
-  });
-}
-
-function releaseSdkSlot() {
-  if (_sdkParseQueue.length > 0) {
-    const next = _sdkParseQueue.shift();
-    next();
-  } else {
-    _sdkParseActive = false;
-  }
-}
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -510,29 +484,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
 
   // ---------- IMAGE PATH ----------
   if (isBase64Image) {
-    // Try SDK path first (native vision, single-pass, best quality).
-    // Concurrency-limited to 1 to prevent memory pressure from parallel subprocess spawns.
-    try {
-      await acquireSdkSlot();
-      try {
-        const sdkResult = await parseImageWithSDK(imageBase64OrText, {
-          timeoutMs: effectiveTimeoutMs,
-          model: modelOverride || undefined,
-          reasoningEffort: effortOverride || undefined,
-        });
-        if (sdkResult && sdkResult.fields) {
-          console.log('[parseEscalation] SDK path succeeded');
-          return sdkResult;
-        }
-        console.warn('[parseEscalation] SDK path returned null — falling back to CLI');
-      } finally {
-        releaseSdkSlot();
-      }
-    } catch (sdkErr) {
-      // releaseSdkSlot() already called by the inner finally — no double-release
-      console.warn('[parseEscalation] SDK path error, falling back to CLI:', sdkErr.message);
-    }
-
     // --- CLI fallback: two-step transcribe then parse ---
     let tmpPath;
     try {
