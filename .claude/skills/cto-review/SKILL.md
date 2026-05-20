@@ -7,7 +7,7 @@ context: fork
 agent: general-purpose
 ---
 
-<!-- Version: 0.4 — last edited 2026-04-19 -->
+<!-- Version: 0.5 — last edited 2026-05-20 -->
 
 # CTO Production Gate Review
 

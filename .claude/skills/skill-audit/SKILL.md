@@ -15,7 +15,7 @@ Audit the skill family across three modes. Each mode produces findings in a shar
 
 - **Corpus mode** (always): analyzes plans in `.claude/plans/` and reviews in `temp-reviews/` for patterns. Requires at least 3 complete features.
 - **Static mode** (always): reads each skill folder and checks against the best-practices checklist in `references/best-practices-checklist.md`. Runs regardless of corpus size.
-- **Research mode** (opt-in): fetches current Claude Code skill documentation, proposes updates to the static checklist, and flags skill-level findings where current docs contradict existing skill patterns.
+- **Research mode** (opt-in): fetches current Claude Code skill documentation, proposes updates to the static checklist, and flags skill-level findings where current docs contradict existing skill patterns. WebFetch is only invoked when research mode is enabled.
 
 This skill does NOT edit any other skills. It produces a report. Applying recommendations is a separate deliberate action by the user (see Step 7).
 
