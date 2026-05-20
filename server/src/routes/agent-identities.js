@@ -2,13 +2,17 @@
 
 const express = require('express');
 const {
+  createAgentLifecycleRun,
   createAgentIdentity,
+  finalizeAgentLifecycleRun,
   getAgentIdentity,
   importAgentIdentities,
   listAgentLifecycleStates,
   listAgentRuntimeDefaults,
   listAgentIdentities,
   recordAgentHarnessRun,
+  recordAgentLifecycleActivity,
+  recordAgentLifecycleStep,
   recordAgentReview,
   updateAgentIdentity,
   updateAgentEnabled,
@@ -36,6 +40,168 @@ function sendServiceError(res, err) {
     code: err?.code || 'REQUEST_FAILED',
     error: err?.message || 'Request failed',
   });
+}
+
+function cloneLifecycleRun(run) {
+  return run == null ? run : JSON.parse(JSON.stringify(run));
+}
+
+function streamLifecycleEvent(res, event) {
+  try {
+    res.write(`${JSON.stringify(event)}\n`);
+  } catch {
+    // The lifecycle operation should continue even if the browser closes the modal.
+  }
+}
+
+async function executeAgentLifecycleToggle({ agentId, enabled, summary = '', clientSteps = [], onStep = null }) {
+  const lifecycleRun = createAgentLifecycleRun({
+    agentId,
+    enabled,
+    actor: 'user',
+    summary,
+  });
+  const recordStep = (step) => {
+    const entry = recordAgentLifecycleStep(lifecycleRun, step);
+    if (entry && typeof onStep === 'function') {
+      onStep(entry, cloneLifecycleRun(lifecycleRun));
+    }
+    return entry;
+  };
+
+  try {
+    for (const step of Array.isArray(clientSteps) ? clientSteps.slice(0, 12) : []) {
+      recordStep({
+        name: step.name || 'Client lifecycle step',
+        functionName: step.functionName || 'client',
+        check: step.check || 'Client-side lifecycle action completed before the server request',
+        status: step.status || 'info',
+        summary: step.summary || 'Client-side lifecycle step completed.',
+        detail: step.detail || '',
+        startedAt: step.startedAt,
+        completedAt: step.completedAt,
+        durationMs: step.durationMs,
+        metadata: {
+          ...(step.metadata && typeof step.metadata === 'object' ? step.metadata : {}),
+          source: 'client',
+        },
+      });
+    }
+
+    recordStep({
+      name: 'Receive lifecycle toggle request',
+      functionName: 'PATCH /api/agent-identities/:id/enabled',
+      check: 'Route accepted the profile toggle request',
+      status: 'success',
+      summary: `Received ${lifecycleRun.direction} request for ${agentId}.`,
+      metadata: { agentId, requestedEnabled: enabled !== false },
+    });
+
+    recordStep({
+      name: 'Normalize request body',
+      functionName: 'agent-identities.enabled route',
+      check: 'Request body enabled flag and summary are normalized',
+      status: 'success',
+      summary: `Target enabled state normalized to ${enabled !== false}.`,
+      metadata: { hasSummary: Boolean(summary), enabled: enabled !== false },
+    });
+
+    const agent = await updateAgentEnabled(agentId, enabled !== false, {
+      actor: 'user',
+      summary,
+      lifecycleRun,
+    });
+    if (!agent) {
+      recordStep({
+        name: 'Resolve lifecycle target identity',
+        functionName: 'updateAgentEnabled',
+        check: 'Agent identity exists before health refresh',
+        status: 'error',
+        summary: 'Agent identity was not found, so lifecycle update cannot continue.',
+        metadata: { agentId },
+      });
+      finalizeAgentLifecycleRun(lifecycleRun, 'error');
+      return {
+        status: 404,
+        body: {
+          ok: false,
+          code: 'NOT_FOUND',
+          error: 'Agent identity not found',
+          lifecycleRun,
+        },
+      };
+    }
+
+    const healthStartedAt = new Date();
+    await refreshAgentHealth({
+      agentIds: [agentId],
+      forceRefresh: true,
+      trace: recordStep,
+    });
+    recordStep({
+      name: 'Refresh lifecycle health snapshot',
+      functionName: 'refreshAgentHealth',
+      check: 'Forced health refresh completed after lifecycle state change',
+      status: 'success',
+      summary: `Refreshed health snapshot for ${agentId}.`,
+      startedAt: healthStartedAt,
+      completedAt: new Date(),
+      metadata: { agentId, forceRefresh: true },
+    });
+
+    recordStep({
+      name: 'Prepare expandable activity row',
+      functionName: 'recordAgentLifecycleActivity',
+      check: 'Lifecycle run will be stored as one MongoDB activity entry',
+      status: 'info',
+      summary: 'Prepared one expandable Activity tab row with the full lifecycle stream.',
+      metadata: { lifecycleRunId: lifecycleRun.runId, stepCount: lifecycleRun.steps.length },
+    });
+    finalizeAgentLifecycleRun(lifecycleRun);
+
+    const agentWithActivity = await recordAgentLifecycleActivity(agentId, lifecycleRun, {
+      actor: 'user',
+      summary,
+    });
+
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        agent: agentWithActivity || agent,
+        enabled: (agentWithActivity || agent).enabled !== false,
+        lifecycleRun,
+      },
+    };
+  } catch (err) {
+    recordStep({
+      name: 'Lifecycle route failure',
+      functionName: 'PATCH /api/agent-identities/:id/enabled',
+      check: 'Unhandled lifecycle operation errors are surfaced to the caller',
+      status: 'error',
+      summary: err.message || 'Failed to update agent status.',
+      detail: err.stack || err.message || '',
+      metadata: { agentId },
+    });
+    finalizeAgentLifecycleRun(lifecycleRun, 'error');
+    try {
+      await recordAgentLifecycleActivity(agentId, lifecycleRun, {
+        actor: 'user',
+        summary,
+      });
+    } catch {
+      // If MongoDB is the failed dependency, there is nowhere reliable to store the run.
+    }
+    return {
+      status: Number(err?.status) || 500,
+      body: {
+        ok: false,
+        code: err?.code || 'AGENT_LIFECYCLE_FAILED',
+        error: err.message || 'Failed to update agent status.',
+        lifecycleRun,
+      },
+    };
+  }
 }
 
 router.get('/', async (_req, res) => {
@@ -135,7 +301,11 @@ router.get('/:id/history', async (req, res) => {
   if (!agent) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
   }
-  return res.json({ ok: true, history: agent.history.entries || [] });
+  return res.json({
+    ok: true,
+    history: agent.history?.entries || [],
+    activity: agent.activity?.entries || [],
+  });
 });
 
 router.get('/:id/reviews', async (req, res) => {
@@ -186,17 +356,45 @@ router.patch('/:id/runtime', async (req, res) => {
   return res.json({ ok: true, agent, runtime: agent.runtime || {} });
 });
 
+router.patch('/:id/enabled/stream', async (req, res) => {
+  const body = req.body || {};
+  const summary = typeof body.summary === 'string' ? body.summary : '';
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+
+  const result = await executeAgentLifecycleToggle({
+    agentId: req.params.id,
+    enabled: body.enabled !== false,
+    summary,
+    clientSteps: body.clientSteps,
+    onStep: (step, lifecycleRun) => {
+      streamLifecycleEvent(res, {
+        type: 'step',
+        step,
+        lifecycleRun,
+      });
+    },
+  });
+
+  streamLifecycleEvent(res, {
+    type: result.body.ok ? 'complete' : 'error',
+    ...result.body,
+  });
+  res.end();
+});
+
 router.patch('/:id/enabled', async (req, res) => {
   const body = req.body || {};
-  const agent = await updateAgentEnabled(req.params.id, body.enabled !== false, {
-    actor: 'user',
+  const result = await executeAgentLifecycleToggle({
+    agentId: req.params.id,
+    enabled: body.enabled !== false,
     summary: typeof body.summary === 'string' ? body.summary : '',
+    clientSteps: body.clientSteps,
   });
-  if (!agent) {
-    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
-  }
-  await refreshAgentHealth({ agentIds: [req.params.id], forceRefresh: true });
-  return res.json({ ok: true, agent, enabled: agent.enabled !== false });
+  return res.status(result.status).json(result.body);
 });
 
 router.patch('/:id', async (req, res) => {

@@ -322,6 +322,39 @@ function cloneProviderAvailability(providers) {
   );
 }
 
+function emitAvailabilityTrace(trace, step = {}) {
+  if (typeof trace !== 'function') return;
+  try {
+    trace(step);
+  } catch {
+    // Availability tracing should never change provider health behavior.
+  }
+}
+
+async function traceAvailabilityCall(trace, step, call) {
+  const startedAt = new Date();
+  try {
+    const result = typeof call === 'function' ? await call() : undefined;
+    emitAvailabilityTrace(trace, {
+      ...step,
+      status: step.status || 'success',
+      startedAt,
+      completedAt: new Date(),
+    });
+    return result;
+  } catch (err) {
+    emitAvailabilityTrace(trace, {
+      ...step,
+      status: 'error',
+      summary: err.message || step.summary || `${step.functionName || step.name} failed`,
+      detail: err.stack || err.message || '',
+      startedAt,
+      completedAt: new Date(),
+    });
+    throw err;
+  }
+}
+
 function getRemoteProviderLabel(provider) {
   switch (provider) {
     case 'llm-gateway':
@@ -1712,18 +1745,62 @@ async function parseImage(imageBase64, options = {}) {
  * Returns availability of each provider for the image parser.
  * @returns {Promise<Object>} { 'llm-gateway': { available, reason }, 'lm-studio': { ... }, anthropic: { ... }, openai: { ... } }
  */
-async function resolveProviderAvailability() {
+async function resolveProviderAvailability(trace = null) {
   const providers = {};
 
-  const gatewayKey = await resolveApiKey('llm-gateway');
-  providers['llm-gateway'] = await validateRemoteProvider('llm-gateway', gatewayKey);
+  const gatewayKey = await traceAvailabilityCall(trace, {
+    name: 'Resolve LLM Gateway API key',
+    functionName: 'resolveApiKey',
+    check: 'LLM Gateway key can be found in file, environment, or MongoDB key store',
+    summary: 'Resolved LLM Gateway API key state.',
+    metadata: { provider: 'llm-gateway' },
+  }, () => resolveApiKey('llm-gateway'));
+  emitAvailabilityTrace(trace, {
+    name: 'Check LLM Gateway key presence',
+    functionName: 'resolveProviderAvailability',
+    check: 'Resolved key is present before remote validation',
+    status: gatewayKey ? 'success' : 'warning',
+    summary: gatewayKey ? 'LLM Gateway API key is configured.' : 'LLM Gateway API key is not configured.',
+    metadata: { provider: 'llm-gateway', configured: Boolean(gatewayKey) },
+  });
+  providers['llm-gateway'] = await traceAvailabilityCall(trace, {
+    name: 'Validate LLM Gateway provider',
+    functionName: 'validateRemoteProvider',
+    check: 'LLM Gateway validation request completes with a provider status',
+    summary: 'LLM Gateway validation completed.',
+    metadata: { provider: 'llm-gateway' },
+  }, () => validateRemoteProvider('llm-gateway', gatewayKey));
+  emitAvailabilityTrace(trace, {
+    name: 'Evaluate LLM Gateway availability result',
+    functionName: 'resolveProviderAvailability',
+    check: 'LLM Gateway validation result is available or has a known unavailable reason',
+    status: providers['llm-gateway']?.available ? 'success' : 'warning',
+    summary: providers['llm-gateway']?.reason || 'LLM Gateway availability evaluated.',
+    metadata: {
+      provider: 'llm-gateway',
+      available: Boolean(providers['llm-gateway']?.available),
+      code: providers['llm-gateway']?.code || '',
+    },
+  });
 
   if (isProvidersStubbed()) {
     const stub = getProviderStub('lm-studio', 'providerAvailability');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'providerAvailability');
-    providers['lm-studio'] = await stub({ apiUrl: LM_STUDIO_API_URL });
+    providers['lm-studio'] = await traceAvailabilityCall(trace, {
+      name: 'Read LM Studio provider stub',
+      functionName: 'getProviderStub',
+      check: 'Provider availability stub returns an LM Studio status',
+      summary: 'LM Studio provider stub returned availability.',
+      metadata: { provider: 'lm-studio' },
+    }, () => stub({ apiUrl: LM_STUDIO_API_URL }));
   } else {
-    const lmStudioSnapshot = await getModelSnapshot(LM_STUDIO_API_URL, { timeoutMs: 3000 });
+    const lmStudioSnapshot = await traceAvailabilityCall(trace, {
+      name: 'Check LM Studio model snapshot',
+      functionName: 'getModelSnapshot',
+      check: 'LM Studio responds within the provider availability timeout',
+      summary: 'LM Studio model snapshot check completed.',
+      metadata: { provider: 'lm-studio', timeoutMs: 3000 },
+    }, () => getModelSnapshot(LM_STUDIO_API_URL, { timeoutMs: 3000 }));
     const lmStudioModel = lmStudioSnapshot.loadedModel || lmStudioSnapshot.availableModel || null;
     const lmStudioReason = lmStudioSnapshot.loadedModel
       ? `Model loaded: ${lmStudioSnapshot.loadedModel}`
@@ -1737,28 +1814,77 @@ async function resolveProviderAvailability() {
       model: lmStudioModel,
       reason: lmStudioReason,
     };
+    emitAvailabilityTrace(trace, {
+      name: 'Evaluate LM Studio model availability',
+      functionName: 'resolveProviderAvailability',
+      check: 'LM Studio has a loaded or available model',
+      status: lmStudioModel ? 'success' : 'warning',
+      summary: lmStudioReason,
+      metadata: { provider: 'lm-studio', model: lmStudioModel || '', status: lmStudioSnapshot.status || '' },
+    });
   }
 
-  const anthropicKey = await resolveApiKey('anthropic');
-  providers['anthropic'] = await validateRemoteProvider('anthropic', anthropicKey);
-
-  const openaiKey = await resolveApiKey('openai');
-  providers['openai'] = await validateRemoteProvider('openai', openaiKey);
-
-  const kimiKey = await resolveApiKey('kimi');
-  providers['kimi'] = await validateRemoteProvider('kimi', kimiKey);
-
-  const geminiKey = await resolveApiKey('gemini');
-  providers['gemini'] = await validateRemoteProvider('gemini', geminiKey);
+  for (const provider of ['anthropic', 'openai', 'kimi', 'gemini']) {
+    const providerKey = await traceAvailabilityCall(trace, {
+      name: `Resolve ${getRemoteProviderLabel(provider)} API key`,
+      functionName: 'resolveApiKey',
+      check: `${getRemoteProviderLabel(provider)} key can be found in file, environment, or MongoDB key store`,
+      summary: `Resolved ${getRemoteProviderLabel(provider)} API key state.`,
+      metadata: { provider },
+    }, () => resolveApiKey(provider));
+    emitAvailabilityTrace(trace, {
+      name: `Check ${getRemoteProviderLabel(provider)} key presence`,
+      functionName: 'resolveProviderAvailability',
+      check: 'Resolved key is present before remote validation',
+      status: providerKey ? 'success' : 'warning',
+      summary: providerKey
+        ? `${getRemoteProviderLabel(provider)} API key is configured.`
+        : `${getRemoteProviderLabel(provider)} API key is not configured.`,
+      metadata: { provider, configured: Boolean(providerKey) },
+    });
+    providers[provider] = await traceAvailabilityCall(trace, {
+      name: `Validate ${getRemoteProviderLabel(provider)} provider`,
+      functionName: 'validateRemoteProvider',
+      check: `${getRemoteProviderLabel(provider)} validation request completes with a provider status`,
+      summary: `${getRemoteProviderLabel(provider)} validation completed.`,
+      metadata: { provider },
+    }, () => validateRemoteProvider(provider, providerKey));
+    emitAvailabilityTrace(trace, {
+      name: `Evaluate ${getRemoteProviderLabel(provider)} availability result`,
+      functionName: 'resolveProviderAvailability',
+      check: `${getRemoteProviderLabel(provider)} validation result is available or has a known unavailable reason`,
+      status: providers[provider]?.available ? 'success' : 'warning',
+      summary: providers[provider]?.reason || `${getRemoteProviderLabel(provider)} availability evaluated.`,
+      metadata: {
+        provider,
+        available: Boolean(providers[provider]?.available),
+        code: providers[provider]?.code || '',
+      },
+    });
+  }
 
   const codexAvailability = CODEX_IMAGE_PARSER_PROVIDER_IDS.length
-    ? await checkCodexCliAvailability('')
+    ? await traceAvailabilityCall(trace, {
+      name: 'Check Codex image-provider CLI availability',
+      functionName: 'checkCodexCliAvailability',
+      check: 'codex --version completes before timeout',
+      summary: 'Codex image-provider CLI availability check completed.',
+      metadata: { providerCount: CODEX_IMAGE_PARSER_PROVIDER_IDS.length },
+    }, () => checkCodexCliAvailability(''))
     : null;
   for (const providerId of CODEX_IMAGE_PARSER_PROVIDER_IDS) {
     providers[providerId] = {
       ...codexAvailability,
       model: CODEX_IMAGE_PARSER_PROVIDER_MODELS[providerId] || providerId,
     };
+    emitAvailabilityTrace(trace, {
+      name: `Map Codex availability to ${providerId}`,
+      functionName: 'resolveProviderAvailability',
+      check: 'Codex availability result is assigned to configured Codex image parser provider ids',
+      status: codexAvailability?.available ? 'success' : 'warning',
+      summary: `${providerId} availability mapped from Codex CLI check.`,
+      metadata: { provider: providerId, available: Boolean(codexAvailability?.available) },
+    });
   }
 
   return providers;
@@ -1766,6 +1892,7 @@ async function resolveProviderAvailability() {
 
 async function checkProviderAvailability(options = {}) {
   const forceRefresh = Boolean(options && options.forceRefresh);
+  const trace = typeof options?.trace === 'function' ? options.trace : null;
   const ttlMs = Number.isFinite(options?.ttlMs) && options.ttlMs >= 0
     ? options.ttlMs
     : PROVIDER_AVAILABILITY_CACHE_TTL_MS;
@@ -1773,19 +1900,42 @@ async function checkProviderAvailability(options = {}) {
   const cacheVersion = _providerAvailabilityVersion;
 
   if (!forceRefresh && _providerAvailabilityCache && (now - _providerAvailabilityCachedAt) < ttlMs) {
+    emitAvailabilityTrace(trace, {
+      name: 'Read provider availability cache',
+      functionName: 'checkProviderAvailability',
+      check: 'Cached provider availability is fresh enough to reuse',
+      status: 'success',
+      summary: 'Provider availability cache reused.',
+      metadata: { ttlMs, cacheAgeMs: now - _providerAvailabilityCachedAt },
+    });
     return cloneProviderAvailability(_providerAvailabilityCache);
   }
 
   if (_providerAvailabilityInFlight) {
+    emitAvailabilityTrace(trace, {
+      name: 'Reuse in-flight provider availability check',
+      functionName: 'checkProviderAvailability',
+      check: 'Only one provider availability probe runs at a time',
+      status: 'info',
+      summary: 'Provider availability probe was already running, so this request reused it.',
+    });
     const shared = await _providerAvailabilityInFlight;
     return cloneProviderAvailability(shared);
   }
 
-  const availabilityPromise = resolveProviderAvailability()
+  const availabilityPromise = resolveProviderAvailability(trace)
     .then((providers) => {
       if (_providerAvailabilityVersion === cacheVersion) {
         _providerAvailabilityCache = providers;
         _providerAvailabilityCachedAt = Date.now();
+        emitAvailabilityTrace(trace, {
+          name: 'Update provider availability cache',
+          functionName: 'checkProviderAvailability',
+          check: 'Provider availability result cache version still matches',
+          status: 'success',
+          summary: 'Provider availability cache updated.',
+          metadata: { providerCount: Object.keys(providers || {}).length },
+        });
       }
       return providers;
     })

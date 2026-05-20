@@ -259,6 +259,7 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [parserSessions, setParserSessions] = useState([]);
   const [parserSessionsLoading, setParserSessionsLoading] = useState(false);
   const [parserSessionsError, setParserSessionsError] = useState(null);
+  const [lifecycleModal, setLifecycleModal] = useState(null);
   const selectedAgentRequestRef = useRef(0);
 
   const loadAgents = useCallback(async () => {
@@ -489,8 +490,8 @@ function AgentsView({ agentIdFromRoute = null }) {
     try {
       setHistoryLoading(true);
       setHistoryError(null);
-      const entries = await getAgentIdentityHistory(selectedAgent.agentId);
-      setHistory(buildIdentityHistoryState(entries));
+      const historyPayload = await getAgentIdentityHistory(selectedAgent.agentId);
+      setHistory(buildIdentityHistoryState(historyPayload));
     } catch (err) {
       setHistoryError(err.message || 'Failed to load identity history.');
     } finally {
@@ -575,16 +576,62 @@ function AgentsView({ agentIdFromRoute = null }) {
 
   async function handleToggleAgentEnabled(nextEnabled) {
     if (!selectedAgent?.agentId) return;
+    const agentLabel = selectedAgent.profile?.roleTitle || selectedAgent.agentId;
+    const startedAt = new Date().toISOString();
+    const clientLifecycleRun = {
+      runId: `client-agent-lifecycle-${Date.now()}`,
+      agentId: selectedAgent.agentId,
+      direction: nextEnabled ? 'startup' : 'shutdown',
+      targetEnabled: nextEnabled,
+      status: 'running',
+      startedAt,
+      completedAt: null,
+      durationMs: null,
+      counts: { success: 0, warning: 0, error: 0, info: 1 },
+      steps: [
+        {
+          stepId: `client-step-${Date.now()}`,
+          sequence: 1,
+          name: 'Receive profile toggle change',
+          functionName: 'AgentProfileDetailPage.onChange',
+          check: 'User changed the agent status control',
+          status: 'info',
+          summary: `${agentLabel} ${nextEnabled ? 'startup' : 'shutdown'} requested from the profile header.`,
+          detail: '',
+          startedAt,
+          completedAt: startedAt,
+          durationMs: 0,
+          metadata: { agentId: selectedAgent.agentId, targetEnabled: nextEnabled },
+        },
+      ],
+    };
+    setLifecycleModal({ run: clientLifecycleRun, agentName: agentLabel, requestState: 'running' });
     try {
       setEnabledSaving(true);
-      const updated = await updateAgentEnabled(
+      const result = await updateAgentEnabled(
         selectedAgent.agentId,
         nextEnabled,
-        `${nextEnabled ? 'Enabled' : 'Disabled'} ${selectedAgent.profile?.roleTitle || selectedAgent.agentId} globally.`
+        `${nextEnabled ? 'Enabled' : 'Disabled'} ${agentLabel} globally.`,
+        {
+          clientSteps: clientLifecycleRun.steps,
+          onLifecycleEvent: (event) => {
+            setLifecycleModal((previous) => mergeLifecycleStreamEvent(previous, event, agentLabel));
+          },
+        }
       );
+      const updated = result?.agent || result;
       applyUpdatedAgent(updated);
+      if (result?.lifecycleRun) {
+        setLifecycleModal({ run: result.lifecycleRun, agentName: agentLabel, requestState: 'complete' });
+      }
+      setHistory((previous) => mergeLifecycleRunIntoHistory(previous, result?.lifecycleRun));
       window.dispatchEvent(new CustomEvent('agent-health-refresh'));
     } catch (err) {
+      if (err.lifecycleRun) {
+        setLifecycleModal({ run: err.lifecycleRun, agentName: agentLabel, requestState: 'error' });
+      } else {
+        setLifecycleModal((previous) => completeClientLifecycleRun(previous, err.message || 'Failed to update agent status.'));
+      }
       setError(err.message || 'Failed to update agent status.');
     } finally {
       setEnabledSaving(false);
@@ -842,10 +889,10 @@ function AgentsView({ agentIdFromRoute = null }) {
     onProfileChange: handleProfileChange,
     onProfileSummaryChange: setProfileSummary,
     onProfileSave: handleSaveProfile,
-      onRuntimeSave: handleSaveRuntime,
-      onToggleAgentEnabled: handleToggleAgentEnabled,
-      enabledSaving,
-      onMarkReviewed: handleMarkReviewed,
+    onRuntimeSave: handleSaveRuntime,
+    onToggleAgentEnabled: handleToggleAgentEnabled,
+    enabledSaving,
+    onMarkReviewed: handleMarkReviewed,
     onRecordHarnessRun: handleRecordHarnessRun,
     onLoadParserTestResults: loadParserTestResults,
     onLoadParserEventStreams: loadParserEventStreams,
@@ -887,18 +934,37 @@ function AgentsView({ agentIdFromRoute = null }) {
   }
 
   return (
-          <AgentProfileDetailPage
-            error={error}
-            selectedAgent={selectedAgent}
-            selectedOperation={selectedOperation}
-            loadingCurrent={loadingCurrent}
-      activeProfileTab={activeProfileTab}
-      onTabChange={handleTabChange}
-      onOpenPrompt={() => handleTabChange('prompt')}
-      onOpenConfig={() => handleTabChange('configuration')}
-      onOpenHarness={() => handleTabChange('harness')}
-      workspaceProps={profileWorkspaceProps}
-    />
+    <>
+      <AgentProfileDetailPage
+        error={error}
+        selectedAgent={selectedAgent}
+        selectedOperation={selectedOperation}
+        loadingCurrent={loadingCurrent}
+        activeProfileTab={activeProfileTab}
+        onTabChange={handleTabChange}
+        onOpenPrompt={() => handleTabChange('prompt')}
+        onOpenConfig={() => handleTabChange('configuration')}
+        onOpenHarness={() => handleTabChange('harness')}
+        workspaceProps={profileWorkspaceProps}
+      />
+      {lifecycleModal && (
+        <AgentLifecycleRunModal
+          run={lifecycleModal.run}
+          agentName={lifecycleModal.agentName}
+          requestState={lifecycleModal.requestState}
+          onClose={() => setLifecycleModal(null)}
+        />
+      )}
+      {registryModalMode && (
+        <AgentRegistryModal
+          mode={registryModalMode}
+          saving={registrySaving}
+          onClose={() => setRegistryModalMode(null)}
+          onCreate={handleCreateAgent}
+          onImport={handleImportAgents}
+        />
+      )}
+    </>
   );
 }
 
@@ -1124,6 +1190,81 @@ function AgentRegistryModal({
   );
 }
 
+function AgentLifecycleRunModal({ run, agentName, requestState, onClose }) {
+  const [selectedStep, setSelectedStep] = useState(null);
+  const steps = Array.isArray(run?.steps) ? run.steps : [];
+  const directionLabel = run?.direction === 'startup' ? 'Startup' : 'Shutdown';
+  const status = normalizeLifecycleStatus(requestState === 'running' ? 'info' : run?.status);
+  const statusLabel = requestState === 'running' ? 'Running' : formatLifecycleStatus(run?.status);
+  const duration = run?.durationMs ? formatMs(run.durationMs) : 'In progress';
+  const counts = countLifecycleStepStatuses(steps);
+
+  function handleSelectStep(step) {
+    setSelectedStep(step);
+  }
+
+  function handleBackToStream() {
+    setSelectedStep(null);
+  }
+
+  return (
+    <div className="agent-modal-backdrop lifecycle-modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose?.();
+    }}>
+      <section className="agent-lifecycle-modal" role="dialog" aria-modal="true" aria-label={`${directionLabel} lifecycle stream`}>
+        <div className="lifecycle-modal-viewport">
+          <div className={`lifecycle-modal-track${selectedStep ? ' showing-detail' : ''}`}>
+            <div className="lifecycle-modal-pane" aria-hidden={selectedStep ? 'true' : undefined} inert={selectedStep ? true : undefined}>
+              <header>
+                <div>
+                  <span className="mission-kicker">Agent Lifecycle</span>
+                  <h2>{directionLabel} Stream</h2>
+                  <p>{agentName || run?.agentId || 'Agent'} lifecycle operation details.</p>
+                </div>
+                <button type="button" className="text-action" onClick={onClose}>
+                  Close
+                </button>
+              </header>
+
+              <div className="lifecycle-run-summary">
+                <LifecycleStatusPill status={status} label={statusLabel} />
+                <span>{steps.length} steps</span>
+                <span>{duration}</span>
+                <span>{counts.error} errors</span>
+                <span>{counts.warning} warnings</span>
+              </div>
+
+              <LifecycleStepList steps={steps} onStepSelect={handleSelectStep} />
+            </div>
+
+            <div className="lifecycle-modal-pane" aria-hidden={!selectedStep ? 'true' : undefined} inert={!selectedStep ? true : undefined}>
+              <header className="lifecycle-detail-header">
+                <button type="button" className="lifecycle-back-button" onClick={handleBackToStream}>
+                  <span aria-hidden="true">&lsaquo;</span>
+                  Back
+                </button>
+                <div className="lifecycle-detail-title">
+                  <h2>{selectedStep?.name || 'Lifecycle Item'}</h2>
+                  <p>{selectedStep?.functionName || 'Stored lifecycle step'}</p>
+                </div>
+                <button type="button" className="text-action" onClick={onClose}>
+                  Close
+                </button>
+              </header>
+
+              {selectedStep ? (
+                <LifecycleStepDetail step={selectedStep} />
+              ) : (
+                <EmptyState title="No item selected" copy="Choose a lifecycle card to view the stored shape." />
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
   return (
     <div className="agent-card-grid">
@@ -1191,11 +1332,14 @@ function AgentProfileDetailPage({
   workspaceProps,
 }) {
   const enabled = selectedAgent?.enabled !== false;
+  const profileTitle = formatAgentProfileTitle(selectedAgent);
   return (
     <div className="agent-profiles-page agent-profile-detail-page">
       <header className="profile-page-topbar">
         <div className="profile-page-title-row">
-          <a href="#/agents" className="back-link">Agent Mission Control</a>
+          <a href="#/agents" className="back-link" title="Back to Agent Profiles">
+            {profileTitle}
+          </a>
           {selectedAgent && (
             <label
               className={`agent-enabled-switch${enabled ? ' is-on' : ' is-off'}`}
@@ -1207,10 +1351,11 @@ function AgentProfileDetailPage({
                 disabled={workspaceProps.enabledSaving}
                 onChange={(event) => workspaceProps.onToggleAgentEnabled?.(event.target.checked)}
               />
+              <span className="agent-enabled-switch-caption">Agent status</span>
               <span className="agent-enabled-switch-track" aria-hidden="true">
                 <span className="agent-enabled-switch-thumb" />
               </span>
-              <span className="agent-enabled-switch-label">{enabled ? 'On' : 'Off'}</span>
+              <span className="agent-enabled-switch-label">{enabled ? 'Active' : 'Inactive'}</span>
             </label>
           )}
         </div>
@@ -2662,6 +2807,77 @@ function CompactItem({ title, meta, detail }) {
   );
 }
 
+function LifecycleStatusPill({ status, label }) {
+  const normalized = normalizeLifecycleStatus(status);
+  return (
+    <span className={`lifecycle-status-pill status-${normalized}`}>
+      <span aria-hidden="true" />
+      {label || formatLifecycleStatus(normalized)}
+    </span>
+  );
+}
+
+function LifecycleStepList({ steps = [], onStepSelect = null }) {
+  if (!steps.length) {
+    return <EmptyState title="No lifecycle steps yet" copy="The operation stream will appear here as soon as the server responds." />;
+  }
+
+  return (
+    <div className="lifecycle-step-list">
+      {steps.map((step, index) => {
+        const status = normalizeLifecycleStatus(step.status);
+        const selectable = typeof onStepSelect === 'function';
+        const handleKeyDown = (event) => {
+          if (!selectable) return;
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onStepSelect(step);
+          }
+        };
+        return (
+          <article
+            className={`lifecycle-step-row status-${status}${selectable ? ' is-clickable' : ''}`}
+            key={step.stepId || `${step.name}-${index}`}
+            role={selectable ? 'button' : undefined}
+            tabIndex={selectable ? 0 : undefined}
+            aria-label={selectable ? `View stored shape for ${step.name || step.functionName || 'lifecycle step'}` : undefined}
+            onClick={selectable ? () => onStepSelect(step) : undefined}
+            onKeyDown={handleKeyDown}
+          >
+            <div className="lifecycle-step-main">
+              <LifecycleStatusPill status={status} label={formatLifecycleStatus(status)} />
+              <div>
+                <strong>{step.name || step.functionName || 'Lifecycle step'}</strong>
+                <span className="lifecycle-step-function">{step.functionName || 'Function not recorded'}</span>
+              </div>
+            </div>
+            <div className="lifecycle-step-meta">
+              <span>{step.durationMs != null ? formatMs(step.durationMs) : ''}</span>
+              {step.completedAt && <span>{formatDate(step.completedAt)}</span>}
+            </div>
+            {step.check && <p><strong>Check:</strong> {step.check}</p>}
+            {(step.summary || step.detail) && <p>{step.summary || step.detail}</p>}
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function LifecycleStepDetail({ step }) {
+  const status = normalizeLifecycleStatus(step?.status);
+  return (
+    <div className="lifecycle-step-detail">
+      <div className="lifecycle-detail-summary">
+        <LifecycleStatusPill status={status} label={formatLifecycleStatus(status)} />
+        <span>Step {step?.sequence || 'not recorded'}</span>
+        {step?.durationMs != null && <span>{formatMs(step.durationMs)}</span>}
+      </div>
+      <pre className="lifecycle-step-json">{JSON.stringify(step, null, 2)}</pre>
+    </div>
+  );
+}
+
 function FormField({ label, value, onChange, type = 'text', placeholder = '' }) {
   return (
     <label className="form-field">
@@ -2690,15 +2906,43 @@ function TimelineList({ entries, fallback }) {
 
   return (
     <div className="timeline-list">
-      {entries.map((entry) => (
-        <CompactItem
-          key={timelineEntryKey(entry)}
-          title={entry.event || entry.type || 'Activity'}
-          meta={formatDate(entry.createdAt || entry.timestamp)}
-          detail={entry.summary || entry.detail || entry.actor || 'Agent activity recorded.'}
-        />
-      ))}
+      {entries.map((entry) => {
+        const lifecycleRun = getLifecycleRunFromEntry(entry);
+        if (lifecycleRun) {
+          return <LifecycleActivityItem key={timelineEntryKey(entry)} entry={entry} run={lifecycleRun} />;
+        }
+        return (
+          <CompactItem
+            key={timelineEntryKey(entry)}
+            title={entry.event || entry.type || 'Activity'}
+            meta={formatDate(entry.createdAt || entry.timestamp)}
+            detail={entry.summary || entry.detail || entry.actor || 'Agent activity recorded.'}
+          />
+        );
+      })}
     </div>
+  );
+}
+
+function LifecycleActivityItem({ entry, run }) {
+  const steps = Array.isArray(run?.steps) ? run.steps : [];
+  const directionLabel = run?.direction === 'startup' ? 'Startup' : 'Shutdown';
+  return (
+    <details className="compact-item lifecycle-activity-item">
+      <summary>
+        <div>
+          <strong>{entry.summary || `${directionLabel} lifecycle run`}</strong>
+          <span>{formatDate(entry.createdAt || run.completedAt || run.startedAt)}</span>
+        </div>
+        <p>{entry.detail || `${steps.length} lifecycle function calls and checks recorded.`}</p>
+        <div className="lifecycle-activity-meta">
+          <LifecycleStatusPill status={run.status || entry.status} label={formatLifecycleStatus(run.status || entry.status)} />
+          <span>{steps.length} steps</span>
+          {run.durationMs != null && <span>{formatMs(run.durationMs)}</span>}
+        </div>
+      </summary>
+      <LifecycleStepList steps={steps} />
+    </details>
   );
 }
 
@@ -2767,9 +3011,16 @@ function FitBars({ score }) {
   );
 }
 
-function buildIdentityHistoryState(entries) {
-  const activity = Array.isArray(entries) ? entries : [];
-  const versions = activity
+function buildIdentityHistoryState(payload) {
+  const historyEntries = Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.history)
+      ? payload.history
+      : [];
+  const activity = Array.isArray(payload?.activity)
+    ? payload.activity
+    : historyEntries;
+  const versions = historyEntries
     .filter((entry) => /profile|prompt|version|restore/i.test(`${entry.type || ''} ${entry.summary || ''}`))
     .map((entry, index) => ({
       versionId: entry.id || entry.versionId || `${entry.createdAt || index}`,
@@ -2779,6 +3030,107 @@ function buildIdentityHistoryState(entries) {
     }));
 
   return { activity, versions };
+}
+
+function getLifecycleRunFromEntry(entry) {
+  return entry?.metadata?.lifecycleRun || null;
+}
+
+function buildLifecycleRunActivityEntry(run) {
+  if (!run?.runId) return null;
+  const directionLabel = run.direction === 'startup' ? 'Started' : 'Shut down';
+  const counts = countLifecycleStepStatuses(run.steps || []);
+  const issueSummary = counts.error
+    ? `${counts.error} errors`
+    : counts.warning
+      ? `${counts.warning} warnings`
+      : 'all checks completed';
+  return {
+    type: 'agent-lifecycle-run',
+    phase: run.direction || 'lifecycle',
+    surface: run.source || 'agent-profiles',
+    summary: `${directionLabel} agent lifecycle: ${(run.steps || []).length} steps, ${issueSummary}.`,
+    detail: 'Expand to view the full lifecycle function and check stream.',
+    status: run.status || 'success',
+    createdAt: run.completedAt || run.startedAt || new Date().toISOString(),
+    metadata: {
+      lifecycleRunId: run.runId,
+      lifecycleRun: run,
+      enabled: run.targetEnabled !== false,
+    },
+  };
+}
+
+function mergeLifecycleRunIntoHistory(previous, run) {
+  const entry = buildLifecycleRunActivityEntry(run);
+  if (!entry) return previous;
+  const previousActivity = Array.isArray(previous?.activity) ? previous.activity : [];
+  const nextActivity = [
+    entry,
+    ...previousActivity.filter((item) => item?.metadata?.lifecycleRunId !== run.runId),
+  ];
+  return {
+    activity: nextActivity,
+    versions: Array.isArray(previous?.versions) ? previous.versions : [],
+  };
+}
+
+function mergeLifecycleStreamEvent(previous, event, agentName) {
+  if (!event?.lifecycleRun) return previous;
+  const requestState = event.type === 'complete'
+    ? 'complete'
+    : event.type === 'error'
+      ? 'error'
+      : 'running';
+  return {
+    run: event.lifecycleRun,
+    agentName: previous?.agentName || agentName,
+    requestState,
+  };
+}
+
+function countLifecycleStepStatuses(steps = []) {
+  return steps.reduce((acc, step) => {
+    const status = normalizeLifecycleStatus(step?.status);
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, { success: 0, warning: 0, error: 0, info: 0 });
+}
+
+function completeClientLifecycleRun(previous, message) {
+  if (!previous?.run) return previous;
+  const completedAt = new Date().toISOString();
+  const startedAtMs = Date.parse(previous.run.startedAt || completedAt);
+  const steps = [
+    ...(previous.run.steps || []),
+    {
+      stepId: `client-step-error-${Date.now()}`,
+      sequence: (previous.run.steps || []).length + 1,
+      name: 'Surface lifecycle request failure',
+      functionName: 'handleToggleAgentEnabled',
+      check: 'Failed API response is shown in the lifecycle modal',
+      status: 'error',
+      summary: message || 'Failed to update agent status.',
+      detail: '',
+      startedAt: completedAt,
+      completedAt,
+      durationMs: 0,
+      metadata: {},
+    },
+  ];
+  const counts = countLifecycleStepStatuses(steps);
+  return {
+    ...previous,
+    requestState: 'error',
+    run: {
+      ...previous.run,
+      status: 'error',
+      completedAt,
+      durationMs: Number.isNaN(startedAtMs) ? 0 : Math.max(0, Date.parse(completedAt) - startedAtMs),
+      counts,
+      steps,
+    },
+  };
 }
 
 function buildPromptState(payload, versions) {
@@ -3263,9 +3615,26 @@ function agentSearchText(agent, operation) {
 }
 
 function timelineEntryKey(entry) {
-  return [entry.id, entry.versionId, entry.createdAt, entry.timestamp, entry.event, entry.summary]
+  return [
+    entry.id,
+    entry.versionId,
+    entry.metadata?.lifecycleRunId,
+    entry.createdAt,
+    entry.timestamp,
+    entry.event,
+    entry.summary,
+  ]
     .filter(Boolean)
     .join(':');
+}
+
+function formatAgentProfileTitle(agent) {
+  const agentName = agent?.profile?.roleTitle || agent?.profile?.displayName || labelAgent(agent?.agentId);
+  if (!agentName) {
+    return 'Agent Profile';
+  }
+
+  return `${agentName}'s Profile`;
 }
 
 function labelAgent(agentId = '') {
@@ -3291,6 +3660,23 @@ function formatDate(value) {
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+}
+
+function normalizeLifecycleStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'warn') return 'warning';
+  if (normalized === 'fail' || normalized === 'failed') return 'error';
+  if (['success', 'error', 'warning', 'info'].includes(normalized)) return normalized;
+  if (normalized === 'enabled' || normalized === 'disabled' || normalized === 'configured') return 'success';
+  return 'info';
+}
+
+function formatLifecycleStatus(value) {
+  const status = normalizeLifecycleStatus(value);
+  if (status === 'success') return 'Success';
+  if (status === 'error') return 'Error';
+  if (status === 'warning') return 'Warning';
+  return 'Info';
 }
 
 function formatMs(value) {

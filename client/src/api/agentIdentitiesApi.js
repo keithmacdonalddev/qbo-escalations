@@ -1,4 +1,4 @@
-import { apiFetchJson } from './http.js';
+import { apiFetch, apiFetchJson, readApiResponse } from './http.js';
 
 const BASE = '/api/agent-identities';
 
@@ -56,13 +56,81 @@ export async function listProviderStrategyHealthLogs(options = {}) {
   return data.logs || [];
 }
 
-export async function updateAgentEnabled(id, enabled, summary) {
+export async function updateAgentEnabled(id, enabled, summary, options = {}) {
+  if (typeof options.onLifecycleEvent === 'function') {
+    return updateAgentEnabledStream(id, enabled, summary, options);
+  }
   const data = await apiFetchJson(`${BASE}/${encodeURIComponent(id)}/enabled`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: enabled !== false, summary }),
+    body: JSON.stringify({ enabled: enabled !== false, summary, clientSteps: options.clientSteps }),
   }, 'Failed to update agent status');
-  return data.agent;
+  return data;
+}
+
+async function updateAgentEnabledStream(id, enabled, summary, options = {}) {
+  const onLifecycleEvent = options.onLifecycleEvent;
+  const res = await apiFetch(`${BASE}/${encodeURIComponent(id)}/enabled/stream`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled: enabled !== false, summary, clientSteps: options.clientSteps }),
+    noRetry: true,
+    timeout: 90_000,
+  });
+
+  if (!res.body?.getReader) {
+    return readApiResponse(res, 'Failed to update agent status');
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalPayload = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const event = parseLifecycleStreamLine(line);
+      if (!event) continue;
+      onLifecycleEvent(event);
+      if (event.type === 'complete' || event.type === 'error') {
+        finalPayload = event;
+      }
+    }
+  }
+
+  buffer += decoder.decode();
+  const trailingEvent = parseLifecycleStreamLine(buffer);
+  if (trailingEvent) {
+    onLifecycleEvent(trailingEvent);
+    if (trailingEvent.type === 'complete' || trailingEvent.type === 'error') {
+      finalPayload = trailingEvent;
+    }
+  }
+
+  if (!finalPayload) {
+    throw Object.assign(new Error('Lifecycle stream ended before completion.'), {
+      code: 'LIFECYCLE_STREAM_INCOMPLETE',
+    });
+  }
+  if (finalPayload.ok === false || finalPayload.type === 'error') {
+    throw Object.assign(new Error(finalPayload.error || 'Failed to update agent status.'), finalPayload);
+  }
+  return finalPayload;
+}
+
+function parseLifecycleStreamLine(line) {
+  const trimmed = typeof line === 'string' ? line.trim() : '';
+  if (!trimmed) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
 }
 
 export async function updateAgentIdentity(id, profile, summary) {
@@ -85,7 +153,10 @@ export async function updateAgentRuntime(id, runtime, summary) {
 
 export async function getAgentIdentityHistory(id) {
   const data = await apiFetchJson(`${BASE}/${encodeURIComponent(id)}/history`, {}, 'Failed to load agent history');
-  return data.history;
+  return {
+    history: data.history || [],
+    activity: data.activity || data.history || [],
+  };
 }
 
 export async function createAgentIdentity(payload) {

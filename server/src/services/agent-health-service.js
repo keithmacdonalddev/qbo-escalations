@@ -63,6 +63,39 @@ function clone(value) {
   return value ? JSON.parse(JSON.stringify(value)) : value;
 }
 
+function emitTrace(trace, step = {}) {
+  if (typeof trace !== 'function') return;
+  try {
+    trace(step);
+  } catch {
+    // Lifecycle trace failures should never change the health result.
+  }
+}
+
+async function traceHealthCall(trace, step, call) {
+  const startedAt = new Date();
+  try {
+    const result = typeof call === 'function' ? await call() : undefined;
+    emitTrace(trace, {
+      ...step,
+      status: step.status || 'success',
+      startedAt,
+      completedAt: new Date(),
+    });
+    return result;
+  } catch (err) {
+    emitTrace(trace, {
+      ...step,
+      status: 'error',
+      summary: err.message || step.summary || `${step.functionName || step.name} failed`,
+      detail: err.stack || err.message || '',
+      startedAt,
+      completedAt: new Date(),
+    });
+    throw err;
+  }
+}
+
 function resolveAgentIds(agentIds = []) {
   const requested = (Array.isArray(agentIds) ? agentIds : [])
     .map((agentId) => safeText(agentId))
@@ -184,13 +217,27 @@ function checkCli(command, args = ['--version'], timeoutMs = 3000) {
   });
 }
 
-async function checkRuntimeProvider(runtime, availabilityByProvider) {
+async function checkRuntimeProvider(runtime, availabilityByProvider, trace = null) {
   const provider = normalizeProvider(runtime?.provider || getDefaultProvider());
   const transport = getProviderTransport(provider);
   const model = safeText(runtime?.model) || getProviderModelId(provider) || provider;
+  emitTrace(trace, {
+    name: 'Resolve runtime provider transport',
+    functionName: 'checkRuntimeProvider',
+    check: 'normalizeProvider and getProviderTransport returned a provider transport',
+    status: 'info',
+    summary: `${provider} uses ${transport || 'unknown'} transport.`,
+    metadata: { provider, transport, model },
+  });
 
   if (transport === 'codex') {
-    const cli = await checkCli('codex');
+    const cli = await traceHealthCall(trace, {
+      name: 'Check Codex CLI availability',
+      functionName: 'checkCli',
+      check: 'codex --version completes before timeout',
+      summary: 'Codex CLI availability check completed.',
+      metadata: { provider, command: 'codex --version' },
+    }, () => checkCli('codex'));
     return {
       provider,
       providerLabel: getProviderLabel(provider),
@@ -202,7 +249,13 @@ async function checkRuntimeProvider(runtime, availabilityByProvider) {
   }
 
   if (transport === 'claude') {
-    const cli = await checkCli('claude');
+    const cli = await traceHealthCall(trace, {
+      name: 'Check Claude CLI availability',
+      functionName: 'checkCli',
+      check: 'claude --version completes before timeout',
+      summary: 'Claude CLI availability check completed.',
+      metadata: { provider, command: 'claude --version' },
+    }, () => checkCli('claude'));
     return {
       provider,
       providerLabel: getProviderLabel(provider),
@@ -214,6 +267,16 @@ async function checkRuntimeProvider(runtime, availabilityByProvider) {
   }
 
   const status = availabilityByProvider?.[provider] || null;
+  emitTrace(trace, {
+    name: 'Read shared provider availability',
+    functionName: 'checkRuntimeProvider',
+    check: 'Shared provider availability map includes the selected provider',
+    status: status ? (status.available ? 'success' : 'warning') : 'warning',
+    summary: status
+      ? `${getProviderLabel(provider)} shared availability is ${status.available ? 'available' : 'unavailable'}.`
+      : `${getProviderLabel(provider)} did not have a shared availability result.`,
+    metadata: { provider, code: status?.code || '', available: Boolean(status?.available) },
+  });
   return {
     provider,
     providerLabel: getProviderLabel(provider),
@@ -604,14 +667,46 @@ async function checkProviderStrategyHealth(rawStrategy = {}, options = {}) {
   };
 }
 
-async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides = {}) {
-  const identity = await getAgentIdentity(agentId);
+async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides = {}, trace = null) {
+  const identity = await traceHealthCall(trace, {
+    name: 'Load agent identity for health',
+    functionName: 'getAgentIdentity',
+    check: 'Health refresh can read the current merged agent identity',
+    summary: `Loaded identity for health refresh: ${agentId}.`,
+    metadata: { agentId },
+  }, () => getAgentIdentity(agentId));
   const profile = identity?.profile || DEFAULT_PROFILES[agentId] || {};
   const enabled = identity?.enabled !== false;
   const runtime = getRuntimeForAgent(agentId, runtimeDefaults, runtimeOverrides);
   const checkedAt = new Date().toISOString();
+  emitTrace(trace, {
+    name: 'Evaluate lifecycle enabled flag',
+    functionName: 'buildAgentHealth',
+    check: 'identity.enabled !== false',
+    status: 'success',
+    summary: `${agentId} is ${enabled ? 'enabled' : 'disabled'} after lifecycle update.`,
+    metadata: { agentId, enabled },
+  });
+  emitTrace(trace, {
+    name: 'Resolve runtime settings for health',
+    functionName: 'getRuntimeForAgent',
+    check: 'Saved runtime, override runtime, or default runtime can be normalized',
+    status: runtime?.configured === false && IMAGE_AGENT_IDS.has(agentId) ? 'warning' : 'success',
+    summary: runtime?.provider
+      ? `${agentId} runtime provider resolved to ${runtime.provider}.`
+      : `${agentId} does not have a runtime provider configured.`,
+    metadata: { agentId, provider: runtime?.provider || '', configured: runtime?.configured !== false },
+  });
 
   if (!enabled) {
+    emitTrace(trace, {
+      name: 'Build disabled health entry',
+      functionName: 'buildAgentHealth',
+      check: 'Disabled agents are marked inactive without provider probes',
+      status: 'success',
+      summary: `${agentId} health is disabled and inactive.`,
+      metadata: { agentId, status: 'disabled' },
+    });
     return {
       agentId,
       label: profile.displayName || profile.roleTitle || agentId,
@@ -628,6 +723,14 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
   }
 
   if (IMAGE_AGENT_IDS.has(agentId) && !runtime.provider) {
+    emitTrace(trace, {
+      name: 'Check image parser runtime provider',
+      functionName: 'buildAgentHealth',
+      check: 'Image-capable agents require a configured runtime provider when enabled',
+      status: 'warning',
+      summary: `${agentId} is enabled but has no image parser provider configured.`,
+      metadata: { agentId },
+    });
     return {
       agentId,
       label: profile.displayName || profile.roleTitle || agentId,
@@ -643,8 +746,23 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
     };
   }
 
-  const providerStatus = await checkRuntimeProvider(runtime, availabilityByProvider);
+  const providerStatus = await checkRuntimeProvider(runtime, availabilityByProvider, trace);
   const online = Boolean(providerStatus.available);
+  emitTrace(trace, {
+    name: 'Build active provider health entry',
+    functionName: 'buildAgentHealth',
+    check: 'Provider status determines active/offline health result',
+    status: online ? 'success' : 'warning',
+    summary: online
+      ? `${agentId} provider health is online.`
+      : `${agentId} provider health is offline.`,
+    metadata: {
+      agentId,
+      provider: providerStatus.provider,
+      code: providerStatus.code || '',
+      available: online,
+    },
+  });
   return {
     agentId,
     label: profile.displayName || profile.roleTitle || agentId,
@@ -665,20 +783,71 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
 }
 
 async function refreshAgentHealth(options = {}) {
-  if (inFlightRefresh) return inFlightRefresh;
+  const trace = typeof options.trace === 'function' ? options.trace : null;
+  if (inFlightRefresh) {
+    emitTrace(trace, {
+      name: 'Reuse in-flight health refresh',
+      functionName: 'refreshAgentHealth',
+      check: 'Only one health refresh runs at a time',
+      status: 'info',
+      summary: 'A health refresh was already running, so this request reused it.',
+    });
+    return inFlightRefresh;
+  }
 
   inFlightRefresh = (async () => {
     const agentIds = resolveAgentIds(options.agentIds);
+    emitTrace(trace, {
+      name: 'Resolve health refresh agent ids',
+      functionName: 'resolveAgentIds',
+      check: 'Requested health ids are normalized',
+      status: 'success',
+      summary: `Health refresh will check ${agentIds.length} agent${agentIds.length === 1 ? '' : 's'}.`,
+      metadata: { agentIds },
+    });
     const forceRefresh = options.forceRefresh === true;
-    const runtimeDefaults = await listAgentRuntimeDefaults(agentIds);
+    const runtimeDefaults = await traceHealthCall(trace, {
+      name: 'Load runtime defaults for health',
+      functionName: 'listAgentRuntimeDefaults',
+      check: 'MongoDB runtime defaults are readable',
+      summary: 'Loaded runtime defaults for health refresh.',
+      metadata: { agentIds },
+    }, () => listAgentRuntimeDefaults(agentIds));
     const runtimeOverrides = options.runtimeOverrides && typeof options.runtimeOverrides === 'object'
       ? options.runtimeOverrides
       : {};
-    const availabilityByProvider = needsSharedProviderAvailability(agentIds, runtimeDefaults, runtimeOverrides)
-      ? await checkProviderAvailability({ forceRefresh })
+    emitTrace(trace, {
+      name: 'Normalize runtime overrides',
+      functionName: 'refreshAgentHealth',
+      check: 'Runtime overrides are optional and must be an object',
+      status: 'info',
+      summary: Object.keys(runtimeOverrides).length
+        ? 'Runtime overrides were included in the health refresh.'
+        : 'No runtime overrides were included in the health refresh.',
+      metadata: { overrideCount: Object.keys(runtimeOverrides).length },
+    });
+    const requiresSharedAvailability = needsSharedProviderAvailability(agentIds, runtimeDefaults, runtimeOverrides);
+    emitTrace(trace, {
+      name: 'Check shared provider availability requirement',
+      functionName: 'needsSharedProviderAvailability',
+      check: 'Non-CLI providers need shared availability probes',
+      status: 'success',
+      summary: requiresSharedAvailability
+        ? 'Shared provider availability probes are required.'
+        : 'Shared provider availability probes are not required for this refresh.',
+      metadata: { requiresSharedAvailability },
+    });
+    const availabilityByProvider = requiresSharedAvailability
+      ? await traceHealthCall(trace, {
+        name: 'Check shared provider availability',
+        functionName: 'checkProviderAvailability',
+        check: 'Configured non-CLI providers respond or report a known unavailable state',
+        summary: 'Shared provider availability check completed.',
+        metadata: { forceRefresh },
+      }, () => checkProviderAvailability({ forceRefresh, trace }))
       : {};
     const entries = await Promise.all(
-      agentIds.map((agentId) => buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides))
+      agentIds.map((agentId) => buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides, trace))
     );
 
     const checkedAt = new Date().toISOString();
@@ -686,6 +855,14 @@ async function refreshAgentHealth(options = {}) {
       healthByAgentId.set(entry.agentId, entry);
     }
     lastCheckedAt = checkedAt;
+    emitTrace(trace, {
+      name: 'Update in-memory health cache',
+      functionName: 'refreshAgentHealth',
+      check: 'Health snapshot cache is updated with latest entries',
+      status: 'success',
+      summary: `Cached ${entries.length} health entr${entries.length === 1 ? 'y' : 'ies'}.`,
+      metadata: { checkedAt, agentIds: entries.map((entry) => entry.agentId) },
+    });
     return {
       checkedAt,
       agents: Object.fromEntries(entries.map((entry) => [entry.agentId, clone(entry)])),

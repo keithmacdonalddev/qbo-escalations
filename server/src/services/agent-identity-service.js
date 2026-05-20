@@ -154,6 +154,127 @@ function makeEntryId(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function normalizeLifecycleStepStatus(value) {
+  const normalized = safeText(value).toLowerCase();
+  if (normalized === 'warn') return 'warning';
+  if (normalized === 'fail' || normalized === 'failed') return 'error';
+  if (['success', 'error', 'warning', 'info'].includes(normalized)) {
+    return normalized;
+  }
+  return 'info';
+}
+
+function createAgentLifecycleRun({ agentId, enabled, actor = 'user', summary = '', source = 'agent-profiles' } = {}) {
+  const targetEnabled = enabled !== false;
+  const startedAt = new Date().toISOString();
+  return {
+    runId: makeEntryId('agent-lifecycle-run'),
+    agentId: safeText(agentId),
+    direction: targetEnabled ? 'startup' : 'shutdown',
+    targetEnabled,
+    actor: safeText(actor) || 'user',
+    source: safeText(source) || 'agent-profiles',
+    summary: safeText(summary) || `${targetEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
+    status: 'running',
+    startedAt,
+    completedAt: null,
+    durationMs: null,
+    counts: {
+      success: 0,
+      warning: 0,
+      error: 0,
+      info: 0,
+    },
+    steps: [],
+  };
+}
+
+function recordAgentLifecycleStep(run, step = {}) {
+  if (!run || !Array.isArray(run.steps)) {
+    return null;
+  }
+
+  const startedAt = step.startedAt ? new Date(step.startedAt) : new Date();
+  const completedAt = step.completedAt ? new Date(step.completedAt) : new Date();
+  const durationMs = Number.isFinite(Number(step.durationMs))
+    ? Math.max(0, Math.round(Number(step.durationMs)))
+    : Math.max(0, completedAt.getTime() - startedAt.getTime());
+  const status = normalizeLifecycleStepStatus(step.status || step.level);
+  const entry = {
+    stepId: makeEntryId('agent-lifecycle-step'),
+    sequence: run.steps.length + 1,
+    name: safeText(step.name || step.functionName || step.check) || 'Lifecycle step',
+    functionName: safeText(step.functionName || step.fn || step.name) || 'unknown',
+    check: safeText(step.check),
+    status,
+    summary: compact(step.summary || step.detail || step.message || status, 300),
+    detail: compact(step.detail || step.message || step.summary || '', 800),
+    startedAt: startedAt.toISOString(),
+    completedAt: completedAt.toISOString(),
+    durationMs,
+    metadata: clone(step.metadata || {}),
+  };
+
+  run.steps.push(entry);
+  return entry;
+}
+
+async function traceAgentLifecycleCall(run, step, call) {
+  const startedAt = new Date();
+  try {
+    const result = typeof call === 'function' ? await call() : undefined;
+    recordAgentLifecycleStep(run, {
+      ...step,
+      status: step.status || 'success',
+      startedAt,
+      completedAt: new Date(),
+    });
+    return result;
+  } catch (err) {
+    recordAgentLifecycleStep(run, {
+      ...step,
+      status: 'error',
+      summary: err.message || step.summary || `${step.functionName || step.name} failed`,
+      detail: err.stack || err.message || '',
+      startedAt,
+      completedAt: new Date(),
+    });
+    throw err;
+  }
+}
+
+function finalizeAgentLifecycleRun(run, statusOverride = '') {
+  if (!run || !Array.isArray(run.steps)) {
+    return run;
+  }
+
+  const counts = run.steps.reduce((acc, step) => {
+    const status = normalizeLifecycleStepStatus(step.status);
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, { success: 0, warning: 0, error: 0, info: 0 });
+  const completedAt = new Date();
+  run.completedAt = completedAt.toISOString();
+  run.durationMs = Math.max(0, completedAt.getTime() - Date.parse(run.startedAt || completedAt.toISOString()));
+  run.counts = counts;
+  run.status = safeText(statusOverride)
+    || (counts.error > 0 ? 'error' : counts.warning > 0 ? 'warning' : 'success');
+  return run;
+}
+
+function buildLifecycleRunSummary(run, fallbackSummary = '') {
+  const action = run?.direction === 'startup' ? 'Started' : 'Shut down';
+  const count = Array.isArray(run?.steps) ? run.steps.length : 0;
+  const warnings = Number(run?.counts?.warning) || 0;
+  const errors = Number(run?.counts?.error) || 0;
+  const suffix = errors
+    ? `${errors} errors`
+    : warnings
+      ? `${warnings} warnings`
+      : 'all checks completed';
+  return safeText(fallbackSummary) || `${action} agent lifecycle: ${count} steps, ${suffix}.`;
+}
+
 function buildMemoryKey(agentId, kind, content) {
   return `${agentId}:${kind}:${normalizeKey(content)}`;
 }
@@ -527,19 +648,66 @@ async function ensureIdentity(agentId) {
   }
 }
 
-async function updateIdentityWithRetry(agentId, mutate, maxAttempts = 3) {
+async function updateIdentityWithRetry(agentId, mutate, maxAttempts = 3, options = {}) {
   let lastError = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const doc = await ensureIdentity(agentId);
-    await mutate(doc);
+    const doc = await traceAgentLifecycleCall(options.lifecycleRun, {
+      name: `Load identity document attempt ${attempt}`,
+      functionName: 'ensureIdentity',
+      check: 'AgentIdentity document exists or can be created',
+      summary: `Loaded MongoDB identity document for ${agentId}.`,
+      metadata: { agentId, attempt, maxAttempts },
+    }, () => ensureIdentity(agentId));
+
+    await traceAgentLifecycleCall(options.lifecycleRun, {
+      name: `Apply identity mutation attempt ${attempt}`,
+      functionName: 'updateIdentityWithRetry.mutate',
+      check: 'Lifecycle state mutation can be applied to the document',
+      summary: `Applied lifecycle mutation to ${agentId}.`,
+      metadata: { agentId, attempt, maxAttempts },
+    }, () => mutate(doc));
+
+    const saveStartedAt = new Date();
     try {
       await doc.save();
+      recordAgentLifecycleStep(options.lifecycleRun, {
+        name: `Save identity document attempt ${attempt}`,
+        functionName: 'AgentIdentity.save',
+        check: 'MongoDB accepts the lifecycle state update',
+        status: 'success',
+        summary: `Saved lifecycle state for ${agentId} to MongoDB.`,
+        startedAt: saveStartedAt,
+        completedAt: new Date(),
+        metadata: { agentId, attempt, maxAttempts },
+      });
       return doc;
     } catch (err) {
       lastError = err;
       if (err?.name !== 'VersionError' && err?.code !== 11000) {
+        recordAgentLifecycleStep(options.lifecycleRun, {
+          name: `Save identity document attempt ${attempt}`,
+          functionName: 'AgentIdentity.save',
+          check: 'MongoDB accepts the lifecycle state update',
+          status: 'error',
+          summary: err.message || `Failed to save lifecycle state for ${agentId}.`,
+          detail: err.stack || err.message || '',
+          startedAt: saveStartedAt,
+          completedAt: new Date(),
+          metadata: { agentId, attempt, maxAttempts, errorName: err?.name || '', errorCode: err?.code || '' },
+        });
         throw err;
       }
+      recordAgentLifecycleStep(options.lifecycleRun, {
+        name: `Retry identity update attempt ${attempt}`,
+        functionName: 'updateIdentityWithRetry',
+        check: 'MongoDB optimistic concurrency retry is allowed',
+        status: 'warning',
+        summary: `Retrying lifecycle state save for ${agentId}.`,
+        detail: err.message || 'MongoDB write conflict.',
+        startedAt: saveStartedAt,
+        completedAt: new Date(),
+        metadata: { agentId, attempt, maxAttempts, errorName: err?.name || '', errorCode: err?.code || '' },
+      });
     }
   }
   throw lastError || new Error(`Failed to update agent identity for ${agentId}`);
@@ -798,10 +966,49 @@ async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summ
   return getAgentIdentity(agentId);
 }
 
-async function updateAgentEnabled(agentId, enabled, { actor = 'user', summary = '' } = {}) {
-  if (!(await canMutateIdentity(agentId))) return null;
+async function updateAgentEnabled(agentId, enabled, { actor = 'user', summary = '', lifecycleRun = null } = {}) {
+  const normalizedAgentId = safeText(agentId);
+  recordAgentLifecycleStep(lifecycleRun, {
+    name: 'Normalize lifecycle toggle input',
+    functionName: 'updateAgentEnabled',
+    check: 'Requested agent id and enabled flag are usable',
+    status: normalizedAgentId ? 'success' : 'error',
+    summary: normalizedAgentId
+      ? `Lifecycle toggle requested for ${normalizedAgentId}.`
+      : 'Lifecycle toggle request did not include an agent id.',
+    metadata: { agentId: normalizedAgentId, requestedEnabled: enabled !== false },
+  });
+
+  const mutable = await traceAgentLifecycleCall(lifecycleRun, {
+    name: 'Check identity mutation permission',
+    functionName: 'canMutateIdentity',
+    check: 'Built-in identities can be materialized and custom identities must already exist',
+    summary: `Checked whether ${normalizedAgentId || agentId} can be updated.`,
+    metadata: { agentId: normalizedAgentId || agentId },
+  }, () => canMutateIdentity(agentId));
+
+  recordAgentLifecycleStep(lifecycleRun, {
+    name: 'Evaluate identity mutation permission',
+    functionName: 'updateAgentEnabled',
+    check: 'canMutateIdentity returned true',
+    status: mutable ? 'success' : 'warning',
+    summary: mutable
+      ? `${normalizedAgentId || agentId} can be updated.`
+      : `${normalizedAgentId || agentId} is not a known mutable agent identity.`,
+    metadata: { agentId: normalizedAgentId || agentId, mutable },
+  });
+  if (!mutable) return null;
+
   const nextEnabled = enabled !== false;
   const updatedAt = new Date();
+  recordAgentLifecycleStep(lifecycleRun, {
+    name: 'Resolve target lifecycle state',
+    functionName: 'updateAgentEnabled',
+    check: 'Enabled flag maps to a startup or shutdown action',
+    status: 'info',
+    summary: `${normalizedAgentId || agentId} target state is ${nextEnabled ? 'active' : 'inactive'}.`,
+    metadata: { agentId: normalizedAgentId || agentId, enabled: nextEnabled },
+  });
 
   await updateIdentityWithRetry(agentId, async (doc) => {
     doc.enabled = nextEnabled;
@@ -812,20 +1019,65 @@ async function updateAgentEnabled(agentId, enabled, { actor = 'user', summary = 
         type: 'agent-lifecycle',
         summary: safeText(summary) || `${nextEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
         actor,
-        metadata: { enabled: nextEnabled },
+        metadata: {
+          enabled: nextEnabled,
+          lifecycleRunId: lifecycleRun?.runId || null,
+        },
         createdAt: updatedAt,
       },
       ...(doc.history?.entries || []),
     ]);
+    if (!lifecycleRun) {
+      doc.activity = doc.activity || {};
+      doc.activity.entries = pruneActivity([
+        {
+          type: 'lifecycle',
+          phase: 'global-toggle',
+          surface: 'agent-profiles',
+          summary: safeText(summary) || `${nextEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
+          status: nextEnabled ? 'enabled' : 'disabled',
+          metadata: { enabled: nextEnabled },
+          createdAt: updatedAt,
+        },
+        ...(doc.activity?.entries || []),
+      ]);
+    }
+  }, 3, { lifecycleRun });
+
+  return traceAgentLifecycleCall(lifecycleRun, {
+    name: 'Load merged identity after lifecycle update',
+    functionName: 'getAgentIdentity',
+    check: 'Updated MongoDB document can be merged with default profile metadata',
+    summary: `Loaded updated identity for ${normalizedAgentId || agentId}.`,
+    metadata: { agentId: normalizedAgentId || agentId },
+  }, () => getAgentIdentity(agentId));
+}
+
+async function recordAgentLifecycleActivity(agentId, lifecycleRun, { actor = 'user', summary = '' } = {}) {
+  if (!lifecycleRun) {
+    return getAgentIdentity(agentId);
+  }
+
+  const updatedAt = new Date();
+  const runSummary = buildLifecycleRunSummary(lifecycleRun, summary);
+  const runStatus = lifecycleRun.status || 'info';
+
+  await updateIdentityWithRetry(agentId, async (doc) => {
     doc.activity = doc.activity || {};
     doc.activity.entries = pruneActivity([
       {
-        type: 'lifecycle',
-        phase: 'global-toggle',
-        surface: 'agent-profiles',
-        summary: safeText(summary) || `${nextEnabled ? 'Enabled' : 'Disabled'} agent globally.`,
-        status: nextEnabled ? 'enabled' : 'disabled',
-        metadata: { enabled: nextEnabled },
+        type: 'agent-lifecycle-run',
+        phase: lifecycleRun.direction || 'lifecycle',
+        surface: lifecycleRun.source || 'agent-profiles',
+        summary: runSummary,
+        detail: 'Expand to view the full lifecycle function and check stream.',
+        status: runStatus,
+        metadata: {
+          enabled: lifecycleRun.targetEnabled !== false,
+          lifecycleRunId: lifecycleRun.runId,
+          lifecycleRun: clone(lifecycleRun),
+        },
+        actor,
         createdAt: updatedAt,
       },
       ...(doc.activity?.entries || []),
@@ -1808,6 +2060,8 @@ module.exports = {
   buildCommunityProfilesContext,
   buildIdentityMemoryContext,
   buildRelationshipCoordinationContext,
+  createAgentLifecycleRun,
+  finalizeAgentLifecycleRun,
   createAgentIdentity,
   getAgentIdForPrompt,
   getAgentIdentity,
@@ -1820,6 +2074,8 @@ module.exports = {
   normalizeAgentRuntimeState,
   recordAgentNudge,
   recordAgentActivity,
+  recordAgentLifecycleActivity,
+  recordAgentLifecycleStep,
   recordAgentHarnessRun,
   recordAgentReview,
   recordAgentToolUsage,
