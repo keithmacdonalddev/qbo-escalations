@@ -8,6 +8,11 @@ const {
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
+const {
+  buildResponseChunk,
+  isProviderCallPackageCaptureEnabled,
+  recordHttpProviderCallPackage,
+} = require('./provider-call-package-recorder');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -46,6 +51,34 @@ const PROVIDER_CONFIG = Object.freeze({
   }),
 });
 
+const PROVIDER_RESEARCH_IDS = Object.freeze({
+  'llm-gateway': 'llm-gateway',
+  anthropic: 'anthropic-api',
+  openai: 'openai-api',
+  gemini: 'gemini-api',
+  kimi: 'kimi-api',
+});
+
+function getProviderPathType(providerId) {
+  return providerId === 'llm-gateway' ? 'gateway-http' : 'direct-http';
+}
+
+function buildRemoteChatCaptureContext(providerId, functionName, modelRequested) {
+  return {
+    providerId,
+    providerResearchId: PROVIDER_RESEARCH_IDS[providerId] || '',
+    providerPathType: getProviderPathType(providerId),
+    callSite: `remote-api-providers:${functionName}`,
+    operation: 'chat',
+    source: {
+      file: 'server/src/services/remote-api-providers.js',
+      functionName,
+      helperName: 'jsonRequestCancelable',
+    },
+    modelRequested,
+  };
+}
+
 function normalizeOpenAiReasoningEffort(value) {
   const requested = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return OPENAI_REASONING_EFFORTS.has(requested) ? requested : '';
@@ -78,15 +111,25 @@ function resolveTransport(baseUrl) {
   };
 }
 
-function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutMs) {
+async function recordCapturedHttpPackage(captureInput) {
+  await recordHttpProviderCallPackage(captureInput);
+}
+
+function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutMs, captureContext = null) {
   let req = null;
   let settled = false;
+  let cancelReason = '';
 
   const promise = new Promise((resolve, reject) => {
     const { transport, hostname, port } = resolveTransport(baseUrl);
     const payload = body == null
       ? null
       : (typeof body === 'string' ? body : JSON.stringify(body));
+    const captureEnabled = Boolean(captureContext) && isProviderCallPackageCaptureEnabled();
+    const requestStartedAt = captureEnabled ? new Date().toISOString() : null;
+    let requestWrittenAt = null;
+    let responseHeadersAt = null;
+    let responseChunks = [];
 
     const options = {
       hostname,
@@ -105,34 +148,82 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
       options.headers['Content-Length'] = Buffer.byteLength(payload);
     }
 
+    const capture = async ({ response = null, error = null, outcome = null }) => {
+      if (!captureEnabled) return;
+      await recordCapturedHttpPackage({
+        method,
+        baseUrl,
+        urlPath,
+        body,
+        headers: options.headers,
+        timeoutMs: options.timeout,
+        captureContext,
+        requestStartedAt,
+        requestWrittenAt,
+        responseHeadersAt,
+        responseCompletedAt: new Date().toISOString(),
+        response,
+        error,
+        outcome,
+      });
+    };
+
     req = transport.request(options, (res) => {
       let data = '';
+      if (captureEnabled) {
+        responseHeadersAt = new Date().toISOString();
+      }
       res.on('data', (chunk) => {
         data += chunk;
+        if (captureEnabled) {
+          responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
+        }
       });
-      res.on('end', () => {
+      res.on('end', async () => {
         if (settled) return;
         settled = true;
+        const response = {
+          statusCode: res.statusCode || 0,
+          statusMessage: res.statusMessage || '',
+          httpVersion: res.httpVersion || '',
+          headers: res.headers || {},
+          rawHeaders: res.rawHeaders || [],
+          trailers: res.trailers || {},
+          rawTrailers: res.rawTrailers || [],
+          bodyChunks: responseChunks,
+          bodyText: data,
+        };
+        await capture({ response });
         resolve({ statusCode: res.statusCode || 0, body: data });
       });
     });
 
-    req.on('error', (err) => {
+    req.on('error', async (err) => {
       if (settled) return;
       settled = true;
+      await capture({
+        error: err,
+        outcome: cancelReason ? 'aborted' : null,
+      });
       reject(err);
     });
 
-    req.on('timeout', () => {
+    req.on('timeout', async () => {
       if (settled) return;
       settled = true;
       req.destroy();
       const err = new Error('Request timed out');
       err.code = 'TIMEOUT';
+      await capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
 
-    if (payload) req.write(payload);
+    if (payload) {
+      req.write(payload);
+    }
+    if (captureEnabled) {
+      requestWrittenAt = new Date().toISOString();
+    }
     req.end();
   });
 
@@ -140,6 +231,7 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
     promise,
     cancel(reason = 'Request aborted') {
       if (!req || settled) return false;
+      cancelReason = reason;
       req.destroy(new Error(reason));
       return true;
     },
@@ -348,7 +440,8 @@ function requestAnthropicChat({
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
       },
-      timeoutMs
+      timeoutMs,
+      buildRemoteChatCaptureContext('anthropic', 'requestAnthropicChat', effectiveModel)
     );
     setCancel(request.cancel);
 
@@ -388,6 +481,7 @@ function requestOpenAiLikeChat({
   reasoningEffort,
   timeoutMs,
   requestFn = jsonRequestCancelable,
+  captureContext = null,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel }) => {
     const effectiveModel = model || PROVIDER_CONFIG[providerId].defaultModel;
@@ -408,7 +502,8 @@ function requestOpenAiLikeChat({
       '/v1/chat/completions',
       body,
       apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      timeoutMs
+      timeoutMs,
+      captureContext
     );
     setCancel(request.cancel);
 
@@ -465,6 +560,11 @@ function requestLlmGatewayChat({
       model,
       timeoutMs,
       requestFn,
+      captureContext: buildRemoteChatCaptureContext(
+        'llm-gateway',
+        'requestLlmGatewayChat',
+        model || PROVIDER_CONFIG['llm-gateway'].defaultModel
+      ),
     });
     setCancel(request.cancel);
     return request.promise;
@@ -499,6 +599,11 @@ function requestOpenAiChat({
       reasoningEffort,
       timeoutMs,
       requestFn,
+      captureContext: buildRemoteChatCaptureContext(
+        'openai',
+        'requestOpenAiChat',
+        model || PROVIDER_CONFIG.openai.defaultModel
+      ),
     });
     setCancel(request.cancel);
     return request.promise;
@@ -522,15 +627,17 @@ function requestKimiChat({
       throw toAbortError(getCancelReason());
     }
 
+    const effectiveModel = model || PROVIDER_CONFIG.kimi.defaultModel;
     const request = requestOpenAiLikeChat({
       providerId: 'kimi',
       baseUrl: PROVIDER_CONFIG.kimi.baseUrl,
       apiKey,
       messages,
       systemPrompt,
-      model,
+      model: effectiveModel,
       timeoutMs,
       requestFn,
+      captureContext: buildRemoteChatCaptureContext('kimi', 'requestKimiChat', effectiveModel),
     });
     setCancel(request.cancel);
     return request.promise;
@@ -576,7 +683,8 @@ function requestGeminiChat({
       {
         'x-goog-api-key': apiKey,
       },
-      timeoutMs
+      timeoutMs,
+      buildRemoteChatCaptureContext('gemini', 'requestGeminiChat', effectiveModel)
     );
     setCancel(request.cancel);
 

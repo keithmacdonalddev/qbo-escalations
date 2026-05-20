@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const { EventEmitter } = require('events');
+const mongo = require('./_mongo-helper');
+const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 
 const SERVICE_PATH = require.resolve('../src/services/lm-studio');
 const origRequest = http.request;
@@ -175,4 +177,62 @@ test('LM Studio requests include Authorization when LM_STUDIO_API_TOKEN is confi
   await getModelSnapshot('http://127.0.0.1:1234');
 
   assert.equal(seenRequests[0]?.headers?.Authorization, 'Bearer lm-token-test');
+});
+
+test('parseEscalation captures non-streaming LM Studio provider package when enabled', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  queueHttpResponses([
+    {
+      path: '/api/v1/models',
+      statusCode: 200,
+      body: {
+        models: [
+          {
+            type: 'llm',
+            key: 'google/gemma-4-26b-a4b',
+            loaded_instances: []
+          }
+        ]
+      }
+    },
+    {
+      path: '/v1/chat/completions',
+      statusCode: 200,
+      body: {
+        model: 'google/gemma-4-26b-a4b',
+        choices: [{ message: { content: '{"caseNumber":"CS-123","category":"technical"}' } }],
+        usage: { prompt_tokens: 12, completion_tokens: 6 },
+      }
+    }
+  ]);
+
+  try {
+    const { parseEscalation, clearModelCache } = loadService();
+    clearModelCache();
+
+    const result = await parseEscalation('CASE: CS-123', { timeoutMs: 5000 });
+    const saved = await ProviderCallPackage.findOne({ callSite: 'lm-studio:parseEscalation' }).lean();
+
+    assert.equal(result.fields.caseNumber, 'CS-123');
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'lm-studio');
+    assert.equal(saved.providerResearchId, 'lm-studio-openai-compatible');
+    assert.equal(saved.providerPathType, 'local-http');
+    assert.equal(saved.operation, 'parse-escalation');
+    assert.equal(saved.request.modelRequested, 'google/gemma-4-26b-a4b');
+    assert.equal(saved.response.statusCode, 200);
+    assert.equal(saved.response.parsedJson.model, 'google/gemma-4-26b-a4b');
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
 });

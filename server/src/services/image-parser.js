@@ -26,6 +26,11 @@ const {
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
+const {
+  buildResponseChunk,
+  isProviderCallPackageCaptureEnabled,
+  recordHttpProviderCallPackage,
+} = require('./provider-call-package-recorder');
 
 // Anthropic Agent SDK provider adapter. Loaded lazily so the ESM-only SDK is
 // not imported at module load time, and so test fixtures can substitute the
@@ -784,10 +789,20 @@ function resolveTransport(baseUrl) {
   };
 }
 
-function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs) {
+async function recordCapturedHttpPackage(captureInput) {
+  await recordHttpProviderCallPackage(captureInput);
+}
+
+function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, captureContext = null) {
   return new Promise((resolve, reject) => {
     const { transport, hostname, port } = resolveTransport(baseUrl);
     const payload = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+    const captureEnabled = Boolean(captureContext) && isProviderCallPackageCaptureEnabled();
+    const requestStartedAt = captureEnabled ? new Date().toISOString() : null;
+    let requestWrittenAt = null;
+    let responseHeadersAt = null;
+    let responseChunks = [];
+    let settled = false;
 
     const options = {
       hostname,
@@ -799,19 +814,76 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs) {
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
 
+    const capture = async ({ response = null, error = null, outcome = null }) => {
+      if (!captureEnabled) return;
+      await recordCapturedHttpPackage({
+        method,
+        baseUrl,
+        urlPath,
+        body,
+        headers: options.headers,
+        timeoutMs: options.timeout,
+        captureContext,
+        requestStartedAt,
+        requestWrittenAt,
+        responseHeadersAt,
+        responseCompletedAt: new Date().toISOString(),
+        response,
+        error,
+        outcome,
+      });
+    };
+
     const req = transport.request(options, (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+      if (captureEnabled) {
+        responseHeadersAt = new Date().toISOString();
+      }
+      res.on('data', (chunk) => {
+        data += chunk;
+        if (captureEnabled) {
+          responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
+        }
+      });
+      res.on('end', async () => {
+        if (settled) return;
+        settled = true;
+        const response = {
+          statusCode: res.statusCode || 0,
+          statusMessage: res.statusMessage || '',
+          httpVersion: res.httpVersion || '',
+          headers: res.headers || {},
+          rawHeaders: res.rawHeaders || [],
+          trailers: res.trailers || {},
+          rawTrailers: res.rawTrailers || [],
+          bodyChunks: responseChunks,
+          bodyText: data,
+        };
+        await capture({ response });
+        resolve({ statusCode: res.statusCode, body: data });
+      });
     });
-    req.on('error', reject);
-    req.on('timeout', () => {
+    req.on('error', async (err) => {
+      if (settled) return;
+      settled = true;
+      await capture({ error: err });
+      reject(err);
+    });
+    req.on('timeout', async () => {
+      if (settled) return;
+      settled = true;
       req.destroy();
       const err = new Error('Request timed out');
       err.code = 'TIMEOUT';
+      await capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
-    if (payload) req.write(payload);
+    if (payload) {
+      req.write(payload);
+    }
+    if (captureEnabled) {
+      requestWrittenAt = new Date().toISOString();
+    }
     req.end();
   });
 }
@@ -986,7 +1058,19 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     temperature: 0.1,
     max_tokens: 4096,
     chat_template_kwargs: { enable_thinking: false },
-  }, LM_STUDIO_API_TOKEN ? { Authorization: `Bearer ${LM_STUDIO_API_TOKEN}` } : {}, timeoutMs);
+  }, LM_STUDIO_API_TOKEN ? { Authorization: `Bearer ${LM_STUDIO_API_TOKEN}` } : {}, timeoutMs, {
+    providerId: 'lm-studio',
+    providerResearchId: 'lm-studio-openai-compatible',
+    providerPathType: 'local-http',
+    callSite: 'image-parser:callLmStudio',
+    operation: 'image-parse',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'callLmStudio',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`LM Studio error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1042,7 +1126,19 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
   const res = await jsonRequest('POST', 'https://api.anthropic.com', '/v1/messages', body, {
     'x-api-key': apiKey,
     'anthropic-version': '2023-06-01',
-  }, timeoutMs);
+  }, timeoutMs, {
+    providerId: 'anthropic',
+    providerResearchId: 'anthropic-api',
+    providerPathType: 'direct-http',
+    callSite: 'image-parser:callAnthropic',
+    operation: 'image-parse',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'callAnthropic',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`Anthropic API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1130,7 +1226,19 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
 
   const res = await jsonRequest('POST', 'https://api.openai.com', '/v1/chat/completions', body, {
     'Authorization': `Bearer ${apiKey}`,
-  }, timeoutMs);
+  }, timeoutMs, {
+    providerId: 'openai',
+    providerResearchId: 'openai-api',
+    providerPathType: 'direct-http',
+    callSite: 'image-parser:callOpenAI',
+    operation: 'image-parse',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'callOpenAI',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`OpenAI API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1180,7 +1288,19 @@ async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
   };
 
   const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-  const res = await jsonRequest('POST', LLM_GATEWAY_API_URL, '/v1/chat/completions', body, headers, timeoutMs);
+  const res = await jsonRequest('POST', LLM_GATEWAY_API_URL, '/v1/chat/completions', body, headers, timeoutMs, {
+    providerId: 'llm-gateway',
+    providerResearchId: 'llm-gateway',
+    providerPathType: 'gateway-http',
+    callSite: 'image-parser:callLlmGateway',
+    operation: 'image-parse',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'callLlmGateway',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     if ((res.statusCode === 401 || res.statusCode === 403) && !apiKey) {
@@ -1251,7 +1371,20 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
     `/v1beta/models/${encodeURIComponent(effectiveModel)}:generateContent`,
     body,
     { 'x-goog-api-key': apiKey },
-    timeoutMs
+    timeoutMs,
+    {
+      providerId: 'gemini',
+      providerResearchId: 'gemini-api',
+      providerPathType: 'direct-http',
+      callSite: 'image-parser:callGemini',
+      operation: 'image-parse',
+      source: {
+        file: 'server/src/services/image-parser.js',
+        functionName: 'callGemini',
+        helperName: 'jsonRequest',
+      },
+      modelRequested: effectiveModel,
+    }
   );
 
   if (res.statusCode !== 200) {
@@ -1337,7 +1470,19 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
 
   const res = await jsonRequest('POST', 'https://api.moonshot.ai', '/v1/chat/completions', body, {
     'Authorization': `Bearer ${apiKey}`,
-  }, timeoutMs);
+  }, timeoutMs, {
+    providerId: 'kimi',
+    providerResearchId: 'kimi-api',
+    providerPathType: 'direct-http',
+    callSite: 'image-parser:callKimi',
+    operation: 'image-parse',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'callKimi',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   verboseLog('[image-parser-debug] callKimi response:', {
     statusCode: res.statusCode,

@@ -1243,9 +1243,8 @@ function AgentLifecycleRunModal({ run, agentName, requestState, onClose }) {
                   <span aria-hidden="true">&lsaquo;</span>
                   Back
                 </button>
-                <div className="lifecycle-detail-title">
+                <div className="lifecycle-detail-heading">
                   <h2>{selectedStep?.name || 'Lifecycle Item'}</h2>
-                  <p>{selectedStep?.functionName || 'Stored lifecycle step'}</p>
                 </div>
                 <button type="button" className="text-action" onClick={onClose}>
                   Close
@@ -2865,17 +2864,85 @@ function LifecycleStepList({ steps = [], onStepSelect = null }) {
 }
 
 function LifecycleStepDetail({ step }) {
-  const status = normalizeLifecycleStatus(step?.status);
+  const json = JSON.stringify(step, null, 2);
+
   return (
     <div className="lifecycle-step-detail">
-      <div className="lifecycle-detail-summary">
-        <LifecycleStatusPill status={status} label={formatLifecycleStatus(status)} />
-        <span>Step {step?.sequence || 'not recorded'}</span>
-        {step?.durationMs != null && <span>{formatMs(step.durationMs)}</span>}
-      </div>
-      <pre className="lifecycle-step-json">{JSON.stringify(step, null, 2)}</pre>
+      <LifecycleJsonEditor value={json} />
     </div>
   );
+}
+
+function LifecycleJsonEditor({ value }) {
+  const lines = value.split('\n');
+
+  return (
+    <section className="lifecycle-code-editor" aria-label="Stored lifecycle JSON">
+      <div className="lifecycle-editor-toolbar">
+        <div className="lifecycle-window-controls" aria-hidden="true">
+          <span className="lifecycle-window-dot dot-red" />
+          <span className="lifecycle-window-dot dot-amber" />
+          <span className="lifecycle-window-dot dot-green" />
+        </div>
+        <span className="lifecycle-editor-title">lifecycle-step.json</span>
+        <span className="lifecycle-editor-badge">JSON</span>
+      </div>
+      <pre className="lifecycle-step-json">
+        <code>
+          {lines.map((line, index) => (
+            <span className="lifecycle-code-line" key={`${index}-${line}`}>
+              <span className="lifecycle-code-gutter">{index + 1}</span>
+              <span className="lifecycle-code-text">{renderJsonLine(line)}</span>
+            </span>
+          ))}
+        </code>
+      </pre>
+      <div className="lifecycle-editor-statusbar">
+        <span>{lines.length} lines</span>
+        <span>read-only</span>
+      </div>
+    </section>
+  );
+}
+
+function renderJsonLine(line) {
+  const tokenPattern = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],:]/g;
+  const parts = [];
+  let cursor = 0;
+
+  for (const match of line.matchAll(tokenPattern)) {
+    const index = match.index ?? 0;
+    const token = match[0];
+
+    if (index > cursor) {
+      parts.push(line.slice(cursor, index));
+    }
+
+    parts.push(
+      <span className={`json-token ${getJsonTokenClass(line, index, token)}`} key={`${index}-${token}`}>
+        {token}
+      </span>
+    );
+    cursor = index + token.length;
+  }
+
+  if (cursor < line.length) {
+    parts.push(line.slice(cursor));
+  }
+
+  return parts.length ? parts : ' ';
+}
+
+function getJsonTokenClass(line, index, token) {
+  if (/^[{}\[\],:]$/.test(token)) return 'token-punctuation';
+  if (/^-?\d/.test(token)) return 'token-number';
+  if (token === 'true' || token === 'false') return 'token-boolean';
+  if (token === 'null') return 'token-null';
+
+  const rest = line.slice(index + token.length);
+  if (token.startsWith('"') && /^\s*:/.test(rest)) return 'token-key';
+  if (token.startsWith('"')) return 'token-string';
+  return 'token-plain';
 }
 
 function FormField({ label, value, onChange, type = 'text', placeholder = '' }) {

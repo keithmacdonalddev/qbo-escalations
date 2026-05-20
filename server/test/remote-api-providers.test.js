@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('http');
 
+const mongo = require('./_mongo-helper');
+const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 const { isValidProvider, getProvider } = require('../src/services/providers/registry');
 const remoteApiProviders = require('../src/services/remote-api-providers');
 
@@ -29,8 +32,8 @@ test('LLM Gateway request builder uses OpenAI-compatible payload and optional au
     systemPrompt: 'Be brief.',
     model: 'auto',
     getApiKeyFn: async () => '',
-    requestFn: (method, baseUrl, urlPath, body, headers) => {
-      captured = { method, baseUrl, urlPath, body, headers };
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
       return {
         promise: Promise.resolve({
           statusCode: 200,
@@ -54,6 +57,10 @@ test('LLM Gateway request builder uses OpenAI-compatible payload and optional au
   assert.equal(captured.body.messages[0].role, 'system');
   assert.equal(captured.body.messages[1].role, 'user');
   assert.deepStrictEqual(captured.headers, {});
+  assert.equal(captured.captureContext.providerId, 'llm-gateway');
+  assert.equal(captured.captureContext.providerResearchId, 'llm-gateway');
+  assert.equal(captured.captureContext.providerPathType, 'gateway-http');
+  assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestLlmGatewayChat');
   assert.equal(result.text, 'Gateway reply');
   assert.deepStrictEqual(result.usage, {
     model: 'gateway-model',
@@ -70,8 +77,8 @@ test('OpenAI request builder uses chat completions payload and parses usage', as
     model: 'gpt-4o-mini',
     timeoutMs: 12345,
     getApiKeyFn: async () => 'sk-test',
-    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs) => {
-      captured = { method, baseUrl, urlPath, body, headers, timeoutMs };
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
       return {
         promise: Promise.resolve({
           statusCode: 200,
@@ -98,6 +105,10 @@ test('OpenAI request builder uses chat completions payload and parses usage', as
   assert.equal(captured.body.messages[0].content, 'You are concise.');
   assert.equal(captured.body.messages[1].role, 'user');
   assert.equal(captured.body.messages[1].content, 'Summarize this');
+  assert.equal(captured.captureContext.providerId, 'openai');
+  assert.equal(captured.captureContext.providerResearchId, 'openai-api');
+  assert.equal(captured.captureContext.providerPathType, 'direct-http');
+  assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestOpenAiChat');
   assert.equal(result.text, 'Done.');
   assert.deepStrictEqual(result.usage, {
     model: 'gpt-4o-mini',
@@ -116,8 +127,8 @@ test('Anthropic request builder sends system separately and parses usage', async
     ],
     systemPrompt: 'Act like an analyst.',
     getApiKeyFn: async () => 'sk-ant-test',
-    requestFn: (method, baseUrl, urlPath, body, headers) => {
-      captured = { method, baseUrl, urlPath, body, headers };
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
       return {
         promise: Promise.resolve({
           statusCode: 200,
@@ -144,6 +155,10 @@ test('Anthropic request builder sends system separately and parses usage', async
     { role: 'assistant', content: 'First answer' },
     { role: 'user', content: 'Second question' },
   ]);
+  assert.equal(captured.captureContext.providerId, 'anthropic');
+  assert.equal(captured.captureContext.providerResearchId, 'anthropic-api');
+  assert.equal(captured.captureContext.providerPathType, 'direct-http');
+  assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestAnthropicChat');
   assert.equal(result.text, 'Here is the answer.');
   assert.deepStrictEqual(result.usage, {
     model: 'claude-sonnet-4-20250514',
@@ -162,8 +177,8 @@ test('Gemini request builder uses native generateContent payload and parses usag
     systemPrompt: 'Be precise.',
     model: 'gemini-3-flash-preview',
     getApiKeyFn: async () => 'AIza-test',
-    requestFn: (method, baseUrl, urlPath, body, headers) => {
-      captured = { method, baseUrl, urlPath, body, headers };
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
       return {
         promise: Promise.resolve({
           statusCode: 200,
@@ -189,6 +204,10 @@ test('Gemini request builder uses native generateContent payload and parses usag
   assert.equal(captured.body.contents[0].parts[0].text, 'What happened?');
   assert.equal(captured.body.contents[1].role, 'model');
   assert.equal(captured.body.contents[1].parts[0].text, 'Here is the draft answer.');
+  assert.equal(captured.captureContext.providerId, 'gemini');
+  assert.equal(captured.captureContext.providerResearchId, 'gemini-api');
+  assert.equal(captured.captureContext.providerPathType, 'direct-http');
+  assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestGeminiChat');
   assert.equal(result.text, 'Gemini reply');
   assert.deepStrictEqual(result.usage, {
     model: 'gemini-3-flash-preview',
@@ -203,8 +222,8 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
     messages: [{ role: 'user', content: 'Say hello' }],
     model: 'kimi-k2.5',
     getApiKeyFn: async () => 'sk-moonshot',
-    requestFn: (method, baseUrl, urlPath, body, headers) => {
-      captured = { method, baseUrl, urlPath, body, headers };
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
       return {
         promise: Promise.resolve({
           statusCode: 200,
@@ -225,10 +244,103 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
   assert.equal(captured.urlPath, '/v1/chat/completions');
   assert.equal(captured.headers.Authorization, 'Bearer sk-moonshot');
   assert.equal(captured.body.model, 'kimi-k2.5');
+  assert.deepEqual(captured.captureContext, {
+    providerId: 'kimi',
+    providerResearchId: 'kimi-api',
+    providerPathType: 'direct-http',
+    callSite: 'remote-api-providers:requestKimiChat',
+    operation: 'chat',
+    source: {
+      file: 'server/src/services/remote-api-providers.js',
+      functionName: 'requestKimiChat',
+      helperName: 'jsonRequestCancelable',
+    },
+    modelRequested: 'kimi-k2.5',
+  });
   assert.equal(result.text, 'Hello from Kimi');
   assert.deepStrictEqual(result.usage, {
     model: 'kimi-k2.5',
     inputTokens: 5,
     outputTokens: 4,
   });
+});
+
+test('jsonRequestCancelable captures HTTP package when enabled', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  let server = null;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  try {
+    server = http.createServer((req, res) => {
+      req.resume();
+      res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.setHeader('content-type', 'application/json');
+      res.setHeader('x-request-id', 'req-kimi-test');
+      res.end(JSON.stringify({
+        model: 'kimi-k2.5',
+        choices: [{ message: { content: 'captured' } }],
+      }));
+    });
+
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = server.address().port;
+
+    const request = remoteApiProviders._internal.jsonRequestCancelable(
+      'POST',
+      `http://127.0.0.1:${port}`,
+      '/v1/chat/completions',
+      { model: 'kimi-k2.5', accessToken: 'secret-token' },
+      { Authorization: 'Bearer sk-test' },
+      5000,
+      {
+        providerId: 'kimi',
+        providerResearchId: 'kimi-api',
+        providerPathType: 'direct-http',
+        callSite: 'remote-api-providers:requestKimiChat',
+        operation: 'chat',
+        source: {
+          file: 'server/src/services/remote-api-providers.js',
+          functionName: 'requestKimiChat',
+          helperName: 'jsonRequestCancelable',
+        },
+        modelRequested: 'kimi-k2.5',
+      }
+    );
+
+    const response = await request.promise;
+    const saved = await ProviderCallPackage.findOne({
+      callSite: 'remote-api-providers:requestKimiChat',
+    }).lean();
+
+    assert.equal(response.statusCode, 200);
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'kimi');
+    assert.equal(saved.providerResearchId, 'kimi-api');
+    assert.equal(saved.providerPathType, 'direct-http');
+    assert.equal(saved.operation, 'chat');
+    assert.equal(saved.outcome, 'success');
+    assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
+    assert.equal(saved.request.bodyJson.accessToken, '[REDACTED]');
+    assert.equal(saved.request.bodyText.includes('secret-token'), false);
+    assert.equal(saved.response.statusCode, 200);
+    assert.equal(saved.response.parsedJson.model, 'kimi-k2.5');
+    assert.equal(saved.response.bodyChunks.length, 1);
+    assert.equal(saved.storage.inline, true);
+  } finally {
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await new Promise((resolve) => {
+      if (!server) return resolve();
+      server.close(() => resolve());
+    });
+    await mongo.disconnect();
+  }
 });

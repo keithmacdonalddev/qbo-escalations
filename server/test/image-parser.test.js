@@ -6,6 +6,8 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const { EventEmitter } = require('events');
+const mongo = require('./_mongo-helper');
+const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 
 // ---------------------------------------------------------------------------
 // HTTP mock helpers — intercept http.request to avoid real network calls
@@ -547,6 +549,79 @@ test('parseImage routes to kimi and returns parsed result', async () => {
     fs.readFileSync = origRead;
     if (origKey !== undefined) process.env.MOONSHOT_API_KEY = origKey;
     else delete process.env.MOONSHOT_API_KEY;
+  }
+});
+
+test('parseImage captures Kimi provider package when capture flag is enabled', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const origKey = process.env.MOONSHOT_API_KEY;
+  const origRead = fs.readFileSync;
+  const origHttps = https.request;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  process.env.MOONSHOT_API_KEY = 'mk-test-key';
+  fs.readFileSync = function mockRead(filePath) {
+    if (filePath === KEYS_FILE) throw new Error('ENOENT');
+    return origRead.apply(this, arguments);
+  };
+
+  https.request = function captureRequest(options, callback) {
+    const req = new EventEmitter();
+    req.write = () => {};
+    req.end = () => {
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.headers = { 'content-type': 'application/json', 'x-request-id': 'kimi-image-test' };
+      res.rawHeaders = ['content-type', 'application/json', 'x-request-id', 'kimi-image-test'];
+      if (typeof callback === 'function') {
+        process.nextTick(() => {
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', JSON.stringify({
+              choices: [{ message: { content: 'COID/MID: 456\nCASE: CS-002' } }],
+              model: 'kimi-k2.5',
+              usage: { prompt_tokens: 80, completion_tokens: 40 },
+            }));
+            res.emit('end');
+          });
+        });
+      }
+      return req;
+    };
+    req.destroy = () => {};
+    return req;
+  };
+
+  try {
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+    const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callKimi' }).lean();
+
+    assert.equal(result.text, 'COID/MID: 456\nCASE: CS-002');
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'kimi');
+    assert.equal(saved.providerResearchId, 'kimi-api');
+    assert.equal(saved.providerPathType, 'direct-http');
+    assert.equal(saved.operation, 'image-parse');
+    assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
+    assert.equal(saved.request.modelRequested, 'kimi-k2.5');
+    assert.equal(saved.response.statusCode, 200);
+    assert.equal(saved.response.headers['x-request-id'], 'kimi-image-test');
+    assert.equal(saved.response.parsedJson.model, 'kimi-k2.5');
+  } finally {
+    https.request = origHttps;
+    fs.readFileSync = origRead;
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    if (origKey !== undefined) process.env.MOONSHOT_API_KEY = origKey;
+    else delete process.env.MOONSHOT_API_KEY;
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
   }
 });
 

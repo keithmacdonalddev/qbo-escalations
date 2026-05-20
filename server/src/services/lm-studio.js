@@ -9,6 +9,11 @@ const {
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
+const {
+  buildResponseChunk,
+  isProviderCallPackageCaptureEnabled,
+  recordHttpProviderCallPackage,
+} = require('./provider-call-package-recorder');
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -46,10 +51,20 @@ function buildDefaultHeaders(extraHeaders = {}) {
   return headers;
 }
 
-function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}) {
+async function recordCapturedHttpPackage(captureInput) {
+  await recordHttpProviderCallPackage(captureInput);
+}
+
+function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}, captureContext = null) {
   return new Promise((resolve, reject) => {
     const { transport, hostname, port } = resolveTransport(baseUrl);
     const payload = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : null;
+    const captureEnabled = Boolean(captureContext) && isProviderCallPackageCaptureEnabled();
+    const requestStartedAt = captureEnabled ? new Date().toISOString() : null;
+    let requestWrittenAt = null;
+    let responseHeadersAt = null;
+    let responseChunks = [];
+    let settled = false;
 
     const options = {
       hostname,
@@ -65,14 +80,75 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
 
+    const capture = async ({ response = null, error = null, outcome = null }) => {
+      if (!captureEnabled) return;
+      await recordCapturedHttpPackage({
+        method,
+        baseUrl,
+        urlPath,
+        body,
+        headers: options.headers,
+        timeoutMs: options.timeout,
+        captureContext,
+        requestStartedAt,
+        requestWrittenAt,
+        responseHeadersAt,
+        responseCompletedAt: new Date().toISOString(),
+        response,
+        error,
+        outcome,
+      });
+    };
+
     const req = transport.request(options, (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
+      if (captureEnabled) {
+        responseHeadersAt = new Date().toISOString();
+      }
+      res.on('data', (chunk) => {
+        data += chunk;
+        if (captureEnabled) {
+          responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
+        }
+      });
+      res.on('end', async () => {
+        if (settled) return;
+        settled = true;
+        const response = {
+          statusCode: res.statusCode || 0,
+          statusMessage: res.statusMessage || '',
+          httpVersion: res.httpVersion || '',
+          headers: res.headers || {},
+          rawHeaders: res.rawHeaders || [],
+          trailers: res.trailers || {},
+          rawTrailers: res.rawTrailers || [],
+          bodyChunks: responseChunks,
+          bodyText: data,
+        };
+        await capture({ response });
+        resolve({ statusCode: res.statusCode, body: data });
+      });
     });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('LM Studio request timed out')); });
-    if (payload) req.write(payload);
+    req.on('error', async (err) => {
+      if (settled) return;
+      settled = true;
+      await capture({ error: err });
+      reject(err);
+    });
+    req.on('timeout', async () => {
+      if (settled) return;
+      settled = true;
+      req.destroy();
+      const err = new Error('LM Studio request timed out');
+      await capture({ error: err, outcome: 'timeout' });
+      reject(err);
+    });
+    if (payload) {
+      req.write(payload);
+    }
+    if (captureEnabled) {
+      requestWrittenAt = new Date().toISOString();
+    }
     req.end();
   });
 }
@@ -106,8 +182,8 @@ function rawGet(baseUrl, urlPath, timeoutMs, extraHeaders = {}) {
   });
 }
 
-function jsonRequest(method, urlPath, body, timeoutMs, extraHeaders) {
-  return rawRequest(DEFAULT_API_URL, method, urlPath, body, timeoutMs, extraHeaders);
+function jsonRequest(method, urlPath, body, timeoutMs, extraHeaders, captureContext = null) {
+  return rawRequest(DEFAULT_API_URL, method, urlPath, body, timeoutMs, extraHeaders, captureContext);
 }
 
 function parseNativeModelsSnapshot(json) {
@@ -528,7 +604,19 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     temperature: 0.1,
     max_tokens: 2048,
     chat_template_kwargs: { enable_thinking: false },
-  }, effectiveTimeoutMs);
+  }, effectiveTimeoutMs, undefined, {
+    providerId: 'lm-studio',
+    providerResearchId: 'lm-studio-openai-compatible',
+    providerPathType: 'local-http',
+    callSite: 'lm-studio:parseEscalation',
+    operation: 'parse-escalation',
+    source: {
+      file: 'server/src/services/lm-studio.js',
+      functionName: 'parseEscalation',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     throw new Error(`LM Studio parse error ${res.statusCode}: ${(res.body || '').slice(0, 500)}`);
@@ -605,7 +693,19 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     temperature: 0.1,
     max_tokens: 4096,
     chat_template_kwargs: { enable_thinking: false },
-  }, effectiveTimeoutMs);
+  }, effectiveTimeoutMs, undefined, {
+    providerId: 'lm-studio',
+    providerResearchId: 'lm-studio-openai-compatible',
+    providerPathType: 'local-http',
+    callSite: 'lm-studio:transcribeImage',
+    operation: 'transcribe-image',
+    source: {
+      file: 'server/src/services/lm-studio.js',
+      functionName: 'transcribeImage',
+      helperName: 'jsonRequest',
+    },
+    modelRequested: effectiveModel,
+  });
 
   if (res.statusCode !== 200) {
     throw new Error(`LM Studio transcribe error ${res.statusCode}: ${(res.body || '').slice(0, 500)}`);

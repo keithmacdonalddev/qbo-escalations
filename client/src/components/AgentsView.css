@@ -1996,7 +1996,7 @@
   align-items: start;
 }
 
-.lifecycle-detail-title {
+.lifecycle-detail-heading {
   min-width: 0;
   text-align: center;
   background: none !important;
@@ -2006,21 +2006,12 @@
   animation: none !important;
 }
 
-.lifecycle-detail-title h2 {
+.lifecycle-detail-heading h2 {
   background: none !important;
   -webkit-background-clip: initial !important;
   -webkit-text-fill-color: var(--agent-text) !important;
   background-clip: initial !important;
   color: var(--agent-text) !important;
-  animation: none !important;
-}
-
-.lifecycle-detail-title p {
-  background: none !important;
-  -webkit-background-clip: initial !important;
-  -webkit-text-fill-color: var(--agent-muted) !important;
-  background-clip: initial !important;
-  color: var(--agent-muted) !important;
   animation: none !important;
 }
 
@@ -2226,37 +2217,157 @@
   gap: 12px;
 }
 
-.lifecycle-detail-summary {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid rgba(151, 171, 205, 0.18);
+.lifecycle-code-editor {
+  overflow: hidden;
+  border: 1px solid rgba(137, 167, 216, 0.22);
   border-radius: 8px;
-  background: rgba(8, 17, 30, 0.72);
+  background: #050b13;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 18px 48px rgba(0, 0, 0, 0.32);
 }
 
-.lifecycle-detail-summary > span:not(.lifecycle-status-pill) {
-  color: var(--agent-muted);
-  font-size: 0.78rem;
+.lifecycle-editor-toolbar,
+.lifecycle-editor-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+.lifecycle-editor-toolbar {
+  min-height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(137, 167, 216, 0.16);
+  background: #101826;
+}
+
+.lifecycle-window-controls {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.lifecycle-window-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  box-shadow: 0 0 12px currentColor;
+}
+
+.lifecycle-window-dot.dot-red {
+  color: #ff6b7a;
+  background: #ff6b7a;
+}
+
+.lifecycle-window-dot.dot-amber {
+  color: #f0b45b;
+  background: #f0b45b;
+}
+
+.lifecycle-window-dot.dot-green {
+  color: #5edc96;
+  background: #5edc96;
+}
+
+.lifecycle-editor-title {
+  min-width: 0;
+  overflow: hidden;
+  color: #cbd7ea;
+  font-size: 0.76rem;
   font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lifecycle-editor-badge {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 1px solid rgba(122, 166, 255, 0.28);
+  border-radius: 6px;
+  background: rgba(28, 67, 138, 0.24);
+  color: #98bdff;
+  font-size: 0.68rem;
+  font-weight: 900;
 }
 
 .lifecycle-step-json {
   max-height: min(620px, calc(100vh - 210px));
   margin: 0;
-  padding: 12px;
   overflow: auto;
-  border: 1px solid rgba(151, 171, 205, 0.18);
-  border-radius: 8px;
-  background: rgba(3, 8, 15, 0.82);
-  color: #dce8ff;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.025) 50%, transparent 50%) 0 0 / 100% 3.1em,
+    #07111d;
+  color: #d8e4f7;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 0.75rem;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  white-space: pre;
+  word-break: normal;
+}
+
+.lifecycle-step-json code {
+  display: block;
+  min-width: max-content;
+  padding: 12px 0;
+}
+
+.lifecycle-code-line {
+  display: flex;
+  min-height: 1.55em;
+}
+
+.lifecycle-code-line:hover {
+  background: rgba(122, 166, 255, 0.08);
+}
+
+.lifecycle-code-gutter {
+  position: sticky;
+  left: 0;
+  flex: 0 0 44px;
+  padding-right: 12px;
+  border-right: 1px solid rgba(137, 167, 216, 0.14);
+  background: #07111d;
+  color: #61718a;
+  text-align: right;
+  user-select: none;
+}
+
+.lifecycle-code-text {
+  display: inline-block;
+  padding: 0 18px 0 14px;
+}
+
+.json-token.token-key {
+  color: #8fc7ff;
+}
+
+.json-token.token-string {
+  color: #b9f0cb;
+}
+
+.json-token.token-number {
+  color: #ffbd7a;
+}
+
+.json-token.token-boolean,
+.json-token.token-null {
+  color: #c4a7ff;
+}
+
+.json-token.token-punctuation {
+  color: #7f91aa;
+}
+
+.lifecycle-editor-statusbar {
+  min-height: 28px;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-top: 1px solid rgba(137, 167, 216, 0.16);
+  background: #0c1420;
+  color: #8090a7;
+  font-size: 0.7rem;
+  font-weight: 750;
 }
 
 .lifecycle-activity-item {
