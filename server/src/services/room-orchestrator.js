@@ -302,6 +302,25 @@ function shouldSuppressForQuality(agentId, qualityState, { mentions = [], candid
   return qualityState.roomIsLooping || qualityState.uniqueAssistantVoices.size <= 2;
 }
 
+function getIdentityDisplayName(identity, fallback = '') {
+  const profile = identity?.profile || {};
+  return profile.roleTitle || profile.displayName || fallback || identity?.agentId || 'Agent';
+}
+
+function withIdentityProfile(agent, identityById) {
+  if (!agent?.id) return agent;
+  const identity = identityById?.get(agent.id);
+  if (!identity) return agent;
+  const displayName = getIdentityDisplayName(identity, agent.name);
+  return {
+    ...agent,
+    name: displayName,
+    shortName: identity.profile?.displayName || agent.shortName || displayName,
+    description: identity.profile?.headline || agent.description,
+    profile: identity.profile || agent.profile,
+  };
+}
+
 function chooseNudgePlans({ selectedAgents, activeAgentIds, recentMessages, identityById }) {
   const selectedIds = new Set(selectedAgents.map((agent) => agent.id));
   const quietAgentIds = activeAgentIds.filter((id) => !selectedIds.has(id));
@@ -320,7 +339,7 @@ function chooseNudgePlans({ selectedAgents, activeAgentIds, recentMessages, iden
   return quietAgentIds.map((quietAgentId, index) => {
     const sender = sortedSenders[index % sortedSenders.length];
     const senderName = sender?.name || sender?.id || 'Another agent';
-    const quietName = getAgent(quietAgentId)?.name || quietAgentId;
+    const quietName = getIdentityDisplayName(identityById?.get(quietAgentId), getAgent(quietAgentId)?.name || quietAgentId);
     return {
       fromAgentId: sender.id,
       toAgentId: quietAgentId,
@@ -491,7 +510,7 @@ function startRoomOrchestration({
         for (const id of mentions) {
           const agent = getAgent(id);
           if (agent && !agent.internal && activeAgentIds.includes(id)) {
-            selectedAgents.push(agent);
+            selectedAgents.push(withIdentityProfile(agent, identityById));
           }
         }
       }
@@ -528,11 +547,14 @@ function startRoomOrchestration({
           if (cancelled) return;
           selectedAgents = routerResult
             .map(id => getAgent(id))
-            .filter(a => a && !a.internal);
+            .filter(a => a && !a.internal)
+            .map((agent) => withIdentityProfile(agent, identityById));
           // Ensure at least one agent
-          if (selectedAgents.length === 0) selectedAgents = candidates;
+          if (selectedAgents.length === 0) {
+            selectedAgents = candidates.map((agent) => withIdentityProfile(agent, identityById));
+          }
         } else {
-          selectedAgents = candidates;
+          selectedAgents = candidates.map((agent) => withIdentityProfile(agent, identityById));
         }
       }
 

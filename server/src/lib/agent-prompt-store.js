@@ -51,15 +51,6 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
     visible: false,
   },
   {
-    id: 'image-parser',
-    order: 30,
-    name: 'Image Parser',
-    promptType: 'system',
-    usedBy: 'Escalation screenshot and INV parsing',
-    description: 'Primary parser prompt for screenshots and investigation lists.',
-    filePath: path.join(AGENT_PROMPTS_ROOT, 'image-parser.md'),
-  },
-  {
     id: 'escalation-template-parser',
     order: 20,
     name: 'Image Parser',

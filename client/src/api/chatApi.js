@@ -206,6 +206,18 @@ export async function getEventStats() {
   };
 }
 
+/** List saved per-stage stream events from conversation case intake records */
+export async function listConversationStageEvents(stage = 'parser', limit = 50) {
+  const params = new URLSearchParams({ stage, limit });
+  const data = await apiFetchJson(`${BASE}/conversations/stage-events?${params}`, {}, 'Failed to load stage events');
+  return {
+    stage: data.stage || stage,
+    phase: data.phase || '',
+    sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    events: Array.isArray(data.events) ? data.events : [],
+  };
+}
+
 /** List conversations (with optional search) */
 export async function listConversations(limit = 50, skip = 0, search = '') {
   const params = new URLSearchParams({ limit, skip });

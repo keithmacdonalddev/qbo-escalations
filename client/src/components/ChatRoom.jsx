@@ -85,7 +85,7 @@ function buildRoomTranscript(room, messages, agents) {
   const agentNameById = new Map(
     (agents || []).map((agent) => [
       agent.id || agent._id || agent.agentId,
-      agent.name || agent.profile?.displayName || agent.id || agent._id || agent.agentId || 'Agent',
+      getAgentDisplayName(agent),
     ])
   );
   const lines = [`Room: ${title}`, ''];
@@ -105,6 +105,16 @@ function buildRoomTranscript(room, messages, agents) {
   }
 
   return lines.join('\n').trim();
+}
+
+function getAgentDisplayName(agent) {
+  return agent?.profile?.roleTitle
+    || agent?.profile?.displayName
+    || agent?.name
+    || agent?.id
+    || agent?._id
+    || agent?.agentId
+    || 'Agent';
 }
 
 // ---------------------------------------------------------------------------
@@ -218,7 +228,7 @@ function RoomCreateDialog({ agents, onClose, onCreateRoom }) {
                       className="room-create-agent-checkbox"
                     />
                     <AgentAvatar agent={agent} size={20} interactive={false} />
-                    <span className="room-create-agent-name">{agent.name}</span>
+                    <span className="room-create-agent-name">{getAgentDisplayName(agent)}</span>
                   </label>
                 );
               })}
@@ -615,7 +625,7 @@ function RoomStatusSidebar({
                   const presence = agentPresence?.[agentId] || {};
                   const state = activeSet.has(agentId) ? 'responding' : (presence.state || 'idle');
                   const tone = getPresenceTone(state);
-                  const displayName = agent.shortName || agent.name || agentId;
+                  const displayName = getAgentDisplayName(agent) || agent.shortName || agentId;
                   const note = formatPresenceNote(state, presence.note);
 
                   return (

@@ -1206,6 +1206,7 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
             type="button"
             className={savedStatus === 'pass' ? 'is-pass' : ''}
             disabled={Boolean(markingStatus)}
+            aria-label="Mark this parser test result as a pass"
             onClick={() => markResult('pass')}
           >
             Pass
@@ -1214,6 +1215,7 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
             type="button"
             className={savedStatus === 'fail' ? 'is-fail' : ''}
             disabled={Boolean(markingStatus)}
+            aria-label="Mark this parser test result as a fail"
             onClick={() => markResult('fail')}
           >
             Fail
@@ -1721,7 +1723,7 @@ function AnalystWorkbench({
   );
 }
 
-export default function ChatV5Container() {
+export default function ChatV5Container({ isActive = true }) {
   const {
     imageCaptured,
     captureImage,
@@ -2221,7 +2223,7 @@ export default function ChatV5Container() {
         onClose={() => setParserPopupOpen(false)}
         onParsed={() => {}}
       />
-      {typeof document !== 'undefined' && createPortal(
+      {isActive && typeof document !== 'undefined' && createPortal(
         <button
           type="button"
           className={`v5-evidence-dock__fab${dockCollapsed ? ' is-collapsed' : ' is-expanded'}`}

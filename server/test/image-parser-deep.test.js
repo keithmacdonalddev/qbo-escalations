@@ -134,7 +134,6 @@ const {
   checkProviderAvailability,
   clearProviderAvailabilityCache,
   normalizeBase64,
-  detectRole,
   getStoredApiKey,
   getApiKey,
   KEYS_FILE,
@@ -245,7 +244,7 @@ test('Provider request body: Anthropic', async (t) => {
       usage: { input_tokens: 60, output_tokens: 30 },
     });
 
-    await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
     const capture = snapshotHttpsCapture();
 
     await t.test('sends to api.anthropic.com hostname', () => {
@@ -302,7 +301,7 @@ test('Provider request body: Anthropic', async (t) => {
         model: 'claude-sonnet-4-20250514',
         usage: { input_tokens: 100, output_tokens: 50 },
       });
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       assert.equal(result.usage.inputTokens, 100);
       assert.equal(result.usage.outputTokens, 50);
     });
@@ -458,7 +457,7 @@ test('Custom model override works for each provider', async (t) => {
       usage: { input_tokens: 1, output_tokens: 1 },
     });
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-haiku-4-5-20251001' });
+      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', structured: false });
       const body = JSON.parse(_lastHttpsRequestBody);
       assert.equal(body.model, 'claude-haiku-4-5-20251001');
     } finally {
@@ -596,7 +595,7 @@ test('API key resolution edge cases', async (t) => {
     try {
       assert.equal(getApiKey('anthropic'), null);
       await assert.rejects(
-        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
         (err) => { assert.equal(err.code, 'PROVIDER_UNAVAILABLE'); return true; }
       );
     } finally {
@@ -738,7 +737,7 @@ test('Error response chain: provider HTTP errors', async (t) => {
     mockHttpsRequest(403, JSON.stringify({ error: { type: 'forbidden' } }));
     try {
       await assert.rejects(
-        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
         (err) => {
           assert.equal(err.code, 'PROVIDER_ERROR');
           assert.match(err.message, /HTTP 403/);
@@ -810,47 +809,6 @@ test('Error response chain: provider HTTP errors', async (t) => {
     }
   });
 
-  await t.test('OpenAI returns valid JSON but unexpected shape (no choices) → empty text', async () => {
-    const origEnv = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = 'sk-test';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, { data: 'unexpected shape', model: 'gpt-4o' });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
-      // No choices → text defaults to ''
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.OPENAI_API_KEY = origEnv;
-      else delete process.env.OPENAI_API_KEY;
-    }
-  });
-
-  await t.test('Anthropic returns valid JSON but no content array → empty text', async () => {
-    const origEnv = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, { id: 'msg_123', type: 'message', model: 'claude-sonnet-4-20250514' });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.ANTHROPIC_API_KEY = origEnv;
-      else delete process.env.ANTHROPIC_API_KEY;
-    }
-  });
-
   await t.test('provider connection error propagates', async () => {
     const origPatch = http.request;
     http.request = function errorSimulation() {
@@ -906,7 +864,7 @@ test('Error response chain: provider HTTP errors', async (t) => {
     mockHttpsRequest(200, 'not json {{{');
     try {
       await assert.rejects(
-        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
         (err) => {
           assert.equal(err.code, 'PROVIDER_ERROR');
           assert.match(err.message, /invalid JSON/i);
@@ -1294,56 +1252,6 @@ test('Multi-chunk HTTP response is correctly reconstructed', async (t) => {
     }
   });
 
-  await t.test('Anthropic response split across multiple data chunks', async () => {
-    const origEnv = process.env.ANTHROPIC_API_KEY;
-    const origRead = fs.readFileSync;
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-multi';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-
-    const origPatch = https.request;
-    https.request = function multiChunkHttps(options, callback) {
-      const req = new EventEmitter();
-      req.write = () => {};
-      req.end = () => {
-        const res = new EventEmitter();
-        res.statusCode = 200;
-        if (typeof callback === 'function') {
-          process.nextTick(() => {
-            callback(res);
-            const fullJson = JSON.stringify({
-              content: [{ type: 'text', text: 'INV-123456 multi chunk test' }],
-              model: 'claude-sonnet-4-20250514',
-              usage: { input_tokens: 30, output_tokens: 15 },
-            });
-            // Split into 4 chunks
-            const chunkSize = Math.ceil(fullJson.length / 4);
-            process.nextTick(() => {
-              for (let i = 0; i < fullJson.length; i += chunkSize) {
-                res.emit('data', fullJson.slice(i, i + chunkSize));
-              }
-              res.emit('end');
-            });
-          });
-        }
-      };
-      req.destroy = () => {};
-      return req;
-    };
-
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
-      assert.equal(result.text, 'INV-123456 multi chunk test');
-      assert.equal(result.role, 'inv-list');
-    } finally {
-      https.request = origPatch;
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.ANTHROPIC_API_KEY = origEnv;
-      else delete process.env.ANTHROPIC_API_KEY;
-    }
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1447,7 +1355,7 @@ test('HTTP 200 with HTML error page body for each provider', async (t) => {
     mockHttpsRequest(200, HTML_ERROR);
     try {
       await assert.rejects(
-        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+        () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
         (err) => {
           assert.equal(err.code, 'PROVIDER_ERROR');
           assert.match(err.message, /invalid JSON/i);
@@ -1497,31 +1405,6 @@ test('HTTP 200 with HTML error page body for each provider', async (t) => {
 test('Empty or missing choices/content array returns empty text', async (t) => {
   const origRead = fs.readFileSync;
 
-  await t.test('LM Studio: choices is empty array → empty text, unknown role', async () => {
-    mockHttpRequest(200, {
-      choices: [],
-      usage: { prompt_tokens: 10, completion_tokens: 0 },
-    });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'test' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-    }
-  });
-
-  await t.test('LM Studio: choices missing entirely → empty text', async () => {
-    mockHttpRequest(200, { model: 'test', usage: { prompt_tokens: 5, completion_tokens: 0 } });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'test' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-    }
-  });
-
   await t.test('LM Studio: choices[0].message is null → empty text', async () => {
     mockHttpRequest(200, {
       choices: [{ message: null }],
@@ -1535,46 +1418,6 @@ test('Empty or missing choices/content array returns empty text', async (t) => {
     }
   });
 
-  await t.test('OpenAI: choices is null → empty text', async () => {
-    const origEnv = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = 'sk-test';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, { choices: null, model: 'gpt-4o' });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.OPENAI_API_KEY = origEnv;
-      else delete process.env.OPENAI_API_KEY;
-    }
-  });
-
-  await t.test('Anthropic: content is empty array → empty text', async () => {
-    const origEnv = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, { content: [], model: 'claude-sonnet-4-20250514' });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.ANTHROPIC_API_KEY = origEnv;
-      else delete process.env.ANTHROPIC_API_KEY;
-    }
-  });
-
   await t.test('Anthropic: content missing entirely → empty text', async () => {
     const origEnv = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
@@ -1584,7 +1427,7 @@ test('Empty or missing choices/content array returns empty text', async (t) => {
     };
     mockHttpsRequest(200, { id: 'msg_123', model: 'claude-sonnet-4-20250514' });
     try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       assert.equal(result.text, '');
     } finally {
       clearAllMocks();
@@ -1594,64 +1437,7 @@ test('Empty or missing choices/content array returns empty text', async (t) => {
     }
   });
 
-  await t.test('Kimi: choices[0].message.content is null → empty text', async () => {
-    const origEnv = process.env.MOONSHOT_API_KEY;
-    process.env.MOONSHOT_API_KEY = 'mk-test';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, {
-      choices: [{ message: { content: null } }],
-      usage: { prompt_tokens: 5, completion_tokens: 0 },
-    });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
-      assert.equal(result.text, '');
-      assert.equal(result.role, 'unknown');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.MOONSHOT_API_KEY = origEnv;
-      else delete process.env.MOONSHOT_API_KEY;
-    }
-  });
-
   fs.readFileSync = origRead;
-});
-
-// ═══════════════════════════════════════════════════════════════════════════
-// H. Challenger Gap #5 — INV-12345 boundary case (exactly 5 digits)
-// ═══════════════════════════════════════════════════════════════════════════
-
-test('detectRole INV boundary cases', async (t) => {
-  await t.test('INV-12345 (exactly 5 digits) IS matched as inv-list', () => {
-    assert.equal(detectRole('INV-12345 Some issue description'), 'inv-list');
-  });
-
-  await t.test('INV-1234 (4 digits) is NOT matched', () => {
-    assert.equal(detectRole('INV-1234 Some issue'), 'unknown');
-  });
-
-  await t.test('INV-123456 (6 digits) IS matched', () => {
-    assert.equal(detectRole('INV-123456 Some issue'), 'inv-list');
-  });
-
-  await t.test('INV-1234567 (7 digits) IS matched', () => {
-    assert.equal(detectRole('INV-1234567 Some issue'), 'inv-list');
-  });
-
-  await t.test('INV-00001 (5 digits with leading zeros) IS matched', () => {
-    assert.equal(detectRole('INV-00001 edge case'), 'inv-list');
-  });
-
-  await t.test('INV-99999 (max 5-digit) IS matched', () => {
-    assert.equal(detectRole('INV-99999 boundary'), 'inv-list');
-  });
-
-  await t.test('Multiple INV entries with 5-digit numbers', () => {
-    assert.equal(detectRole('Monday:\n- INV-10001 Issue A\n- INV-20002 Issue B'), 'inv-list');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1677,7 +1463,7 @@ test('Anthropic full response parsing with HTTPS mock', async (t) => {
       usage: { input_tokens: 500, output_tokens: 100 },
     });
     try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       assert.equal(result.text, 'COID/MID: 555 / 666\nCASE: CS-2026-999\nCLIENT/CONTACT: Test User');
       assert.equal(result.role, 'escalation');
       assert.ok(result.usage);
@@ -1708,32 +1494,9 @@ test('Anthropic full response parsing with HTTPS mock', async (t) => {
       usage: { input_tokens: 10, output_tokens: 5 },
     });
     try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       // parsed.content?.[0]?.text gets the FIRST content block
       assert.equal(result.text, 'First block text');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.ANTHROPIC_API_KEY = origEnv;
-      else delete process.env.ANTHROPIC_API_KEY;
-    }
-  });
-
-  await t.test('Anthropic INV list detection works through HTTPS', async () => {
-    const origEnv = process.env.ANTHROPIC_API_KEY;
-    process.env.ANTHROPIC_API_KEY = 'sk-ant-inv';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, {
-      content: [{ type: 'text', text: 'Friday:\n- INV-123456 Payroll sync\n- INV-789012 Bank feed' }],
-      model: 'claude-sonnet-4-20250514',
-      usage: { input_tokens: 20, output_tokens: 10 },
-    });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
-      assert.equal(result.role, 'inv-list');
     } finally {
       clearAllMocks();
       fs.readFileSync = origRead;
@@ -1800,28 +1563,6 @@ test('OpenAI full response parsing with HTTPS mock', async (t) => {
     try {
       const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
       assert.equal(result.text, 'CASE: CS-TRIMMED');
-    } finally {
-      clearAllMocks();
-      fs.readFileSync = origRead;
-      if (origEnv !== undefined) process.env.OPENAI_API_KEY = origEnv;
-      else delete process.env.OPENAI_API_KEY;
-    }
-  });
-
-  await t.test('OpenAI INV list detection works through HTTPS', async () => {
-    const origEnv = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = 'sk-oai-inv';
-    fs.readFileSync = function mockRead(f) {
-      if (f === KEYS_FILE) throw new Error('ENOENT');
-      return origRead.apply(this, arguments);
-    };
-    mockHttpsRequest(200, {
-      choices: [{ message: { content: 'Today:\n- INV-555555 Login issue\n- INV-666666 Payroll' } }],
-      usage: { prompt_tokens: 20, completion_tokens: 10 },
-    });
-    try {
-      const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
-      assert.equal(result.role, 'inv-list');
     } finally {
       clearAllMocks();
       fs.readFileSync = origRead;

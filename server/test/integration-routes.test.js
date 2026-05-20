@@ -771,37 +771,11 @@ await t.test('link route rejects accidental duplicate conversation links unless 
   assert.equal(String(conversationAfter.escalationId), second.body.escalation._id);
 });
 
-await t.test('parse with conversationId reuses the existing linked escalation on retry', async () => {
-  const conversation = await Conversation.create({
-    title: 'Parse retry guard',
-    messages: [{ role: 'user', content: 'Need help', timestamp: new Date() }],
-    provider: 'claude',
-  });
-  const text = [
-    'COID/MID: 12345 / 67890',
-    'CASE: CS-2026-004321',
-    'CLIENT/CONTACT: Example Client',
-    'CX IS ATTEMPTING TO: Run payroll',
-    'EXPECTED OUTCOME: Payroll should submit',
-    'ACTUAL OUTCOME: Submission fails',
-    'TRIED TEST ACCOUNT: unknown',
-    'TS STEPS: Cleared cache',
-  ].join('\n');
-
-  const first = await agent
-    .post('/api/escalations/parse')
-    .send({ conversationId: conversation._id.toString(), text, mode: 'quick' });
-  assert.equal(first.status, 201);
-
-  const second = await agent
-    .post('/api/escalations/parse')
-    .send({ conversationId: conversation._id.toString(), text, mode: 'quick' });
-  assert.equal(second.status, 200);
-  assert.equal(second.body.duplicateSafety.reusedExisting, true);
-  assert.equal(second.body.escalation._id, first.body.escalation._id);
-
-  assert.equal(await Escalation.countDocuments({ conversationId: conversation._id }), 1);
-});
+// The 'parse with conversationId reuses the existing linked escalation on
+// retry' test was removed 2026-05-19 (parser-harness-hardening DECISIONS.md
+// D7) when POST /api/escalations/parse was retired. The same dedup behaviour
+// (createLinkedEscalationFromConversation) is already covered by the
+// 'from-conversation is idempotent for the same conversation' test above.
 
 await t.test('deleting escalation unlinks linked conversation', async () => {
   const conversation = await Conversation.create({
@@ -1352,17 +1326,12 @@ await t.test('P5: conversation persists new provider IDs', async () => {
   assert.equal(conv.provider, 'claude-opus-4-7');
 });
 
-await t.test('P5: escalation parse accepts new provider IDs', async () => {
-  const res = await agent
-    .post('/api/escalations/parse')
-    .send({
-      text: 'P5 parse test',
-      provider: 'gpt-5.4-mini',
-    });
-
-  assert.ok([200, 201].includes(res.status));
-  assert.equal(res.body.ok, true);
-});
+// The 'P5: escalation parse accepts new provider IDs' test was removed
+// 2026-05-19 (parser-harness-hardening DECISIONS.md D7) when POST
+// /api/escalations/parse was retired. Provider-id validation is still
+// exercised by 'P5: chat accepts new provider IDs' (above) and 'P5: chat
+// retry accepts new provider IDs' (below), which hit /api/chat and
+// /api/chat/retry respectively — same isValidProvider gate, same registry.
 
 await t.test('P5: chat retry accepts new provider IDs', async () => {
   // Create a conversation first

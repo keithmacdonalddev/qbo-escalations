@@ -9,6 +9,7 @@ const {
   getConversation,
   getConversationMeta,
   getForkTree,
+  listConversationStageEvents,
   listConversations,
   updateConversation,
 } = require('../../services/chat-conversation-service');
@@ -69,6 +70,21 @@ router.get('/event-stats', async (req, res) => {
     return res.json({ ok: true, ...stats });
   } catch (err) {
     return sendConversationError(res, err, 'EVENT_STATS_FAILED', 'Failed to load event stats');
+  }
+});
+
+router.get('/stage-events', async (req, res) => {
+  const parsedLimit = Number.parseInt(safeString(req.query.limit, ''), 10);
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(Math.max(parsedLimit, 1), 200)
+    : 50;
+  const stage = typeof req.query.stage === 'string' ? req.query.stage.trim() : 'parser';
+
+  try {
+    const result = await listConversationStageEvents({ stage, limit });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return sendConversationError(res, err, 'STAGE_EVENTS_FAILED', 'Failed to load stage events');
   }
 });
 

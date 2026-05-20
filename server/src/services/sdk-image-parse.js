@@ -30,6 +30,7 @@ const OUTPUT_SCHEMA = {
     attemptingTo:     { type: 'string' },
     expectedOutcome:  { type: 'string' },
     actualOutcome:    { type: 'string' },
+    kbToolsUsed:      { type: 'string' },
     tsSteps:          { type: 'string' },
     triedTestAccount: { type: 'string', enum: ['yes', 'no', 'unknown'] },
     category: {
@@ -165,10 +166,11 @@ async function parseImageWithSDK(imageBase64, options = {}) {
   // --- AbortController for timeout ------------------------------------
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
+  let savedClaudeCode;
 
   try {
     // Prevent nested-session crash when server was started from Claude Code
-    const savedClaudeCode = process.env.CLAUDECODE;
+    savedClaudeCode = process.env.CLAUDECODE;
     delete process.env.CLAUDECODE;
 
     const sdk = await getSDK();
@@ -207,9 +209,6 @@ async function parseImageWithSDK(imageBase64, options = {}) {
         assistantMessage = msg;
       }
     }
-
-    clearTimeout(timer);
-    if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
 
     // --- Extract structured output and usage ----------------------------
     if (!resultMessage) {
@@ -269,9 +268,6 @@ async function parseImageWithSDK(imageBase64, options = {}) {
 
     return { fields, usage };
   } catch (err) {
-    clearTimeout(timer);
-    if (savedClaudeCode !== undefined) process.env.CLAUDECODE = savedClaudeCode;
-
     // AbortError from timeout is expected — don't log as a server error
     if (err && err.name === 'AbortError') {
       console.warn(`[sdk-image-parse] Timed out after ${timeoutMs}ms`);
@@ -286,6 +282,13 @@ async function parseImageWithSDK(imageBase64, options = {}) {
       category: 'runtime-error',
     });
     return null;
+  } finally {
+    clearTimeout(timer);
+    if (savedClaudeCode !== undefined) {
+      process.env.CLAUDECODE = savedClaudeCode;
+    } else {
+      delete process.env.CLAUDECODE;
+    }
   }
 }
 

@@ -146,3 +146,13 @@ export async function updateImageParserTestResult(id, payload) {
   }, 'Failed to update image parser test result');
   return data.result;
 }
+
+export async function listImageParserHistory(options = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.page) params.set('page', String(options.page));
+  if (options.provider) params.set('provider', options.provider);
+  if (options.status) params.set('status', options.status);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return apiFetchJson(`/api/image-parser/history${query}`, {}, 'Failed to load image parser history');
+}

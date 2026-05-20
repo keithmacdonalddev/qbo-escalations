@@ -10,8 +10,9 @@ const {
 test('normalizeImageParsePromptId only allows known parser prompts', () => {
   assert.equal(normalizeImageParsePromptId('escalation-template-parser'), 'escalation-template-parser');
   assert.equal(normalizeImageParsePromptId('follow-up-chat-parser'), 'follow-up-chat-parser');
-  assert.equal(normalizeImageParsePromptId('sdk-image-parse'), 'image-parser');
-  assert.equal(normalizeImageParsePromptId(''), 'image-parser');
+  assert.equal(normalizeImageParsePromptId('sdk-image-parse'), 'escalation-template-parser');
+  assert.equal(normalizeImageParsePromptId('image-parser'), 'escalation-template-parser');
+  assert.equal(normalizeImageParsePromptId(''), 'escalation-template-parser');
 });
 
 test('detectRole respects strict parser prompt hints', () => {

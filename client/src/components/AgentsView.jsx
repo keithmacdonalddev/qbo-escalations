@@ -5,6 +5,7 @@ import {
   getAgentIdentityHistory,
   importAgentIdentities,
   listImageParserTestResults,
+  listImageParserHistory,
   listAgentIdentities,
   recordAgentHarnessRun,
   recordAgentReview,
@@ -19,6 +20,10 @@ import {
   listAgentPromptVersions,
   updateAgentPrompt,
 } from '../api/agentPromptsApi.js';
+import {
+  getEventStats,
+  listConversationStageEvents,
+} from '../api/chatApi.js';
 import {
   dispatchAgentRuntimeDefaultsApplied,
   getAgentRuntimeDefinition,
@@ -39,7 +44,8 @@ import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import './AgentsView.css';
 
 const PROFILE_FIELDS = [
-  { key: 'roleTitle', label: 'Role title', type: 'text' },
+  { key: 'roleTitle', label: 'Agent name', type: 'text' },
+  { key: 'displayName', label: 'Short display alias', type: 'text' },
   { key: 'headline', label: 'Headline', type: 'textarea' },
   { key: 'tone', label: 'Tone', type: 'text' },
   { key: 'conversationalStyle', label: 'Conversation style', type: 'textarea' },
@@ -60,6 +66,8 @@ const PROFILE_TABS = [
   { id: 'configuration', label: 'Configuration' },
   { id: 'prompt', label: 'Prompt' },
   { id: 'harness', label: 'Harness' },
+  { id: 'memory', label: 'Memory' },
+  { id: 'monitoring', label: 'Monitoring' },
   { id: 'workflows', label: 'Workflows' },
   { id: 'activity', label: 'Activity' },
   { id: 'versions', label: 'Versions' },
@@ -68,6 +76,8 @@ const PROFILE_TABS = [
 const IMAGE_PARSER_PROFILE_TABS = [
   ...PROFILE_TABS.slice(0, 4),
   { id: 'test-results', label: 'Test Results' },
+  { id: 'event-streams', label: 'Event Streams' },
+  { id: 'chat-sessions', label: 'Chat Sessions' },
   ...PROFILE_TABS.slice(4),
 ];
 
@@ -212,11 +222,6 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [selectedAgentId, setSelectedAgentId] = useState(agentIdFromRoute);
   const [currentAgent, setCurrentAgent] = useState(null);
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
-  const [riskFilter, setRiskFilter] = useState('all');
-  const [reviewFilter, setReviewFilter] = useState('all');
-  const [agentViewMode, setAgentViewMode] = useState('grid');
   const [loadingAgents, setLoadingAgents] = useState(true);
   const [loadingCurrent, setLoadingCurrent] = useState(false);
   const [error, setError] = useState(null);
@@ -246,6 +251,14 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [parserTestResultsLoading, setParserTestResultsLoading] = useState(false);
   const [parserTestResultsError, setParserTestResultsError] = useState(null);
   const [parserResultPreview, setParserResultPreview] = useState(null);
+  const [parserHistory, setParserHistory] = useState({ results: [], total: 0 });
+  const [parserSavedEvents, setParserSavedEvents] = useState([]);
+  const [parserHistoryLoading, setParserHistoryLoading] = useState(false);
+  const [parserHistoryError, setParserHistoryError] = useState(null);
+  const [parserEventStats, setParserEventStats] = useState(null);
+  const [parserSessions, setParserSessions] = useState([]);
+  const [parserSessionsLoading, setParserSessionsLoading] = useState(false);
+  const [parserSessionsError, setParserSessionsError] = useState(null);
   const selectedAgentRequestRef = useRef(0);
 
   const loadAgents = useCallback(async () => {
@@ -324,6 +337,42 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }, []);
 
+  const loadParserEventStreams = useCallback(async () => {
+    try {
+      setParserHistoryLoading(true);
+      setParserHistoryError(null);
+      const [historyData, eventStats, stageEvents] = await Promise.all([
+        listImageParserHistory({ limit: 25 }),
+        getEventStats(),
+        listConversationStageEvents('parser', 100),
+      ]);
+      setParserHistory({
+        results: Array.isArray(historyData?.results) ? historyData.results : [],
+        total: historyData?.total || 0,
+      });
+      setParserSavedEvents(buildParserSavedEvents(stageEvents?.events || []));
+      setParserSessions(stageEvents?.sessions || []);
+      setParserEventStats(eventStats || null);
+    } catch (err) {
+      setParserHistoryError(err.message || 'Failed to load image parser event streams.');
+    } finally {
+      setParserHistoryLoading(false);
+    }
+  }, []);
+
+  const loadParserChatSessions = useCallback(async () => {
+    try {
+      setParserSessionsLoading(true);
+      setParserSessionsError(null);
+      const stageEvents = await listConversationStageEvents('parser', 100);
+      setParserSessions((stageEvents?.sessions || []).slice(0, 25));
+    } catch (err) {
+      setParserSessionsError(err.message || 'Failed to load image parser chat sessions.');
+    } finally {
+      setParserSessionsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadAgents();
   }, [loadAgents]);
@@ -341,6 +390,15 @@ function AgentsView({ agentIdFromRoute = null }) {
   }, [activeProfileTab, selectedAgentId]);
 
   useEffect(() => {
+    if (
+      selectedAgentId !== 'escalation-template-parser'
+      && (activeProfileTab === 'event-streams' || activeProfileTab === 'chat-sessions')
+    ) {
+      setActiveProfileTab('overview');
+    }
+  }, [activeProfileTab, selectedAgentId]);
+
+  useEffect(() => {
     if (selectedAgentId) {
       loadSelectedAgent(selectedAgentId);
     }
@@ -351,6 +409,18 @@ function AgentsView({ agentIdFromRoute = null }) {
       loadParserTestResults();
     }
   }, [activeProfileTab, loadParserTestResults, selectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId === 'escalation-template-parser' && activeProfileTab === 'event-streams') {
+      loadParserEventStreams();
+    }
+  }, [activeProfileTab, loadParserEventStreams, selectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId === 'escalation-template-parser' && activeProfileTab === 'chat-sessions') {
+      loadParserChatSessions();
+    }
+  }, [activeProfileTab, loadParserChatSessions, selectedAgentId]);
 
   useEffect(() => {
     setHistory(null);
@@ -403,44 +473,14 @@ function AgentsView({ agentIdFromRoute = null }) {
     return buildOperationalProfile(selectedAgent, selectedRuntimeState);
   }, [selectedAgent, selectedRuntimeState]);
 
-  const missionStats = useMemo(
-    () => buildMissionStats(operationalProfiles),
-    [operationalProfiles]
-  );
-
-  const departmentOptions = useMemo(() => {
-    const departments = Array.from(
-      new Set(operationalProfiles.map((operation) => operation.department).filter(Boolean))
-    );
-    return departments.sort((a, b) => a.localeCompare(b));
-  }, [operationalProfiles]);
-
-  const riskOptions = useMemo(() => {
-    const risks = Array.from(
-      new Set(operationalProfiles.map((operation) => operation.risk).filter(Boolean))
-    );
-    return risks.sort((a, b) => a.localeCompare(b));
-  }, [operationalProfiles]);
-
-  const reviewOptions = useMemo(() => {
-    const reviews = Array.from(
-      new Set(operationalProfiles.map((operation) => operation.reviewStatus).filter(Boolean))
-    );
-    return reviews.sort((a, b) => a.localeCompare(b));
-  }, [operationalProfiles]);
-
   const filteredAgents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return agents.filter((agent) => {
       const operation = operationById.get(agent.agentId);
       const matchesQuery = !normalizedQuery || agentSearchText(agent, operation).includes(normalizedQuery);
-      const matchesStatus = statusFilter === 'all' || operation?.status === statusFilter;
-      const matchesDepartment = departmentFilter === 'all' || operation?.department === departmentFilter;
-      const matchesRisk = riskFilter === 'all' || operation?.risk === riskFilter;
-      const matchesReview = reviewFilter === 'all' || operation?.reviewStatus === reviewFilter;
-      return matchesQuery && matchesStatus && matchesDepartment && matchesRisk && matchesReview;
+      return matchesQuery;
     });
-  }, [agents, departmentFilter, operationById, query, reviewFilter, riskFilter, statusFilter]);
+  }, [agents, operationById, query]);
 
   async function loadHistoryForSelectedAgent() {
     if (!selectedAgent?.agentId) {
@@ -698,8 +738,10 @@ function AgentsView({ agentIdFromRoute = null }) {
         results: (prev.results || []).map((entry) => (entry.id === result.id ? result : entry)),
       }));
       loadParserTestResults();
+      return result;
     } catch (err) {
       setParserTestResultsError(err.message || 'Failed to update parser test result.');
+      throw err;
     }
   }
 
@@ -727,6 +769,12 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
     if (tabId === 'test-results') {
       loadParserTestResults();
+    }
+    if (tabId === 'event-streams') {
+      loadParserEventStreams();
+    }
+    if (tabId === 'chat-sessions') {
+      loadParserChatSessions();
     }
   }
 
@@ -778,6 +826,14 @@ function AgentsView({ agentIdFromRoute = null }) {
     parserTestResultsLoading,
     parserTestResultsError,
     parserResultPreview,
+    parserHistory,
+    parserSavedEvents,
+    parserHistoryLoading,
+    parserHistoryError,
+    parserEventStats,
+    parserSessions,
+    parserSessionsLoading,
+    parserSessionsError,
     onPromptDraftChange: setPromptDraft,
     onPromptSummaryChange: setPromptSummary,
     onPromptSave: handleSavePrompt,
@@ -792,6 +848,8 @@ function AgentsView({ agentIdFromRoute = null }) {
       onMarkReviewed: handleMarkReviewed,
     onRecordHarnessRun: handleRecordHarnessRun,
     onLoadParserTestResults: loadParserTestResults,
+    onLoadParserEventStreams: loadParserEventStreams,
+    onLoadParserChatSessions: loadParserChatSessions,
     onUpdateParserTestResult: handleUpdateParserTestResult,
     onPreviewParserResult: setParserResultPreview,
     onCloseParserResultPreview: () => setParserResultPreview(null),
@@ -805,22 +863,8 @@ function AgentsView({ agentIdFromRoute = null }) {
         agents={filteredAgents}
         loading={loadingAgents}
         error={error}
-        stats={missionStats}
         query={query}
         onQueryChange={setQuery}
-        statusFilter={statusFilter}
-        onStatusFilterChange={setStatusFilter}
-        departmentFilter={departmentFilter}
-        onDepartmentFilterChange={setDepartmentFilter}
-        departmentOptions={departmentOptions}
-        riskFilter={riskFilter}
-        onRiskFilterChange={setRiskFilter}
-        riskOptions={riskOptions}
-        reviewFilter={reviewFilter}
-        onReviewFilterChange={setReviewFilter}
-        reviewOptions={reviewOptions}
-        viewMode={agentViewMode}
-        onViewModeChange={setAgentViewMode}
         operationalProfiles={operationalProfiles}
         operationById={operationById}
         onSelectAgent={handleSelectAgent}
@@ -843,11 +887,11 @@ function AgentsView({ agentIdFromRoute = null }) {
   }
 
   return (
-    <AgentProfileDetailPage
-      error={error}
-      selectedAgent={selectedAgent}
-      selectedOperation={selectedOperation}
-      loadingCurrent={loadingCurrent}
+          <AgentProfileDetailPage
+            error={error}
+            selectedAgent={selectedAgent}
+            selectedOperation={selectedOperation}
+            loadingCurrent={loadingCurrent}
       activeProfileTab={activeProfileTab}
       onTabChange={handleTabChange}
       onOpenPrompt={() => handleTabChange('prompt')}
@@ -862,22 +906,8 @@ function AgentsMissionControlPage({
   agents,
   loading,
   error,
-  stats,
   query,
   onQueryChange,
-  statusFilter,
-  onStatusFilterChange,
-  departmentFilter,
-  onDepartmentFilterChange,
-  departmentOptions,
-  riskFilter,
-  onRiskFilterChange,
-  riskOptions,
-  reviewFilter,
-  onReviewFilterChange,
-  reviewOptions,
-  viewMode,
-  onViewModeChange,
   operationalProfiles,
   operationById,
   onSelectAgent,
@@ -890,76 +920,47 @@ function AgentsMissionControlPage({
   onCreateAgent,
   onImportAgents,
 }) {
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const attentionItems = useMemo(
+    () => buildAttentionItems(operationalProfiles),
+    [operationalProfiles]
+  );
+
   return (
     <div className="agent-profiles-page agents-index-page">
-      <MissionControlHeader
-        mode="index"
-        stats={stats}
-        onOpenCreate={onOpenCreate}
-        onOpenImport={onOpenImport}
-      />
-
       {error && <div className="agent-alert">{error}</div>}
       {registryMessage && <div className="agent-info-alert">{registryMessage}</div>}
-
-      <MissionStats stats={stats} />
-
-      <AgentCommandToolbar
-        query={query}
-        onQueryChange={onQueryChange}
-        statusFilter={statusFilter}
-        onStatusFilterChange={onStatusFilterChange}
-        departmentFilter={departmentFilter}
-        onDepartmentFilterChange={onDepartmentFilterChange}
-        departmentOptions={departmentOptions}
-        riskFilter={riskFilter}
-        onRiskFilterChange={onRiskFilterChange}
-        riskOptions={riskOptions}
-        reviewFilter={reviewFilter}
-        onReviewFilterChange={onReviewFilterChange}
-        reviewOptions={reviewOptions}
-      />
 
       <section className="mission-control-layout">
         <main className="agent-grid-panel">
           <div className="agent-grid-heading">
             <div>
-              <span className="mission-kicker">Agent Network</span>
-              <h2>Agents</h2>
-              <span className="agent-grid-count">{agents.length} visible</span>
+              <h2>Agent Profiles</h2>
             </div>
-            <div className="agent-grid-view-toggle" aria-label="Agent view mode">
-              <button
-                type="button"
-                className={viewMode === 'grid' ? 'active' : ''}
-                onClick={() => onViewModeChange('grid')}
-              >
-                List
-              </button>
-              <button
-                type="button"
-                className={viewMode === 'map' ? 'active' : ''}
-                onClick={() => onViewModeChange('map')}
-              >
-                Map
+            <AgentCommandToolbar
+              query={query}
+              onQueryChange={onQueryChange}
+            />
+            <div className="agent-grid-header-actions">
+              <AgentAttentionMenu
+                items={attentionItems}
+                open={attentionOpen}
+                onToggle={() => setAttentionOpen((previous) => !previous)}
+                onClose={() => setAttentionOpen(false)}
+                onSelectAgent={onSelectAgent}
+              />
+              <button type="button" className="agent-add-button" onClick={onOpenCreate}>
+                Add Agent
               </button>
             </div>
           </div>
 
           {loading ? (
             <InlineLoading label="Loading agents..." />
-          ) : agents.length && viewMode === 'grid' ? (
+          ) : agents.length ? (
             <AgentMissionGrid
               agents={agents}
               operationById={operationById}
-              onSelectAgent={onSelectAgent}
-              onOpenCreate={onOpenCreate}
-            />
-          ) : agents.length && viewMode === 'map' ? (
-            <AgentNetworkMap
-              agents={agents}
-              operationById={operationById}
-              operationalProfiles={operationalProfiles}
               onSelectAgent={onSelectAgent}
             />
           ) : (
@@ -1123,13 +1124,7 @@ function AgentRegistryModal({
   );
 }
 
-function AgentMissionGrid({ agents, operationById, onSelectAgent, onOpenCreate }) {
-  function handleOpenCreate(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    onOpenCreate?.();
-  }
-
+function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
   return (
     <div className="agent-card-grid">
       {agents.map((agent, index) => (
@@ -1141,11 +1136,6 @@ function AgentMissionGrid({ agents, operationById, onSelectAgent, onOpenCreate }
           onSelect={() => onSelectAgent(agent.agentId)}
         />
       ))}
-      <button type="button" className="agent-create-card" onClick={handleOpenCreate}>
-        <span>+</span>
-        <strong>Add New Agent</strong>
-        <small>Register a new profile with a role, prompt surface, and review trail.</small>
-      </button>
     </div>
   );
 }
@@ -1159,17 +1149,14 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
     >
       <header>
         <span className="rank-pill">{rank}</span>
-        <span className={`status-badge status-${operation?.status || 'idle'}`}>
-          <span className={`status-dot status-dot-${operation?.status || 'idle'}`} />
-          {STATUS_LABELS[operation?.status] || 'Idle'}
-        </span>
+        <span
+          className={`status-dot status-dot-${operation?.status || 'idle'} agent-row-status-dot`}
+          title={STATUS_LABELS[operation?.status] || 'Idle'}
+          aria-label={STATUS_LABELS[operation?.status] || 'Idle'}
+        />
       </header>
       <div className="agent-mission-card-title">
-        <AgentAvatar agent={agent} size="medium" />
-        <div>
-          <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
-          <small>{operation?.department || agent.profile?.headline || agent.agentId}</small>
-        </div>
+        <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
       </div>
       <p>{agent.profile?.headline || operation?.promptSummary?.goals}</p>
       <div className="agent-card-chip-row">
@@ -1191,52 +1178,6 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
   );
 }
 
-function AgentNetworkMap({ agents, operationById, onSelectAgent }) {
-  return (
-    <section className="agent-network-map" aria-label="Agent workflow dependency map">
-      <div className="map-lane map-lane-input">
-        <span>Input Workflows</span>
-        {agents.slice(0, 4).map((agent) => {
-          const operation = operationById.get(agent.agentId);
-          return operation?.workflowInputs?.slice(0, 1).map((workflow) => (
-            <button type="button" key={`${agent.agentId}-${workflow}`} onClick={() => onSelectAgent(agent.agentId)}>
-              {workflow}
-            </button>
-          ));
-        })}
-      </div>
-      <div className="map-agent-cluster">
-        {agents.map((agent, index) => {
-          const operation = operationById.get(agent.agentId);
-          return (
-            <button
-              type="button"
-              className={`map-agent-node map-node-${index % 4} status-${operation?.status || 'idle'}`}
-              key={agent.agentId}
-              onClick={() => onSelectAgent(agent.agentId)}
-            >
-              <AgentAvatar agent={agent} size="small" />
-              <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
-              <small>{operation?.department}</small>
-            </button>
-          );
-        })}
-      </div>
-      <div className="map-lane map-lane-output">
-        <span>Output Workflows</span>
-        {agents.slice(0, 4).map((agent) => {
-          const operation = operationById.get(agent.agentId);
-          return operation?.workflowOutputs?.slice(0, 1).map((workflow) => (
-            <button type="button" key={`${agent.agentId}-${workflow}`} onClick={() => onSelectAgent(agent.agentId)}>
-              {workflow}
-            </button>
-          ));
-        })}
-      </div>
-    </section>
-  );
-}
-
 function AgentProfileDetailPage({
   error,
   selectedAgent,
@@ -1249,31 +1190,37 @@ function AgentProfileDetailPage({
   onOpenHarness,
   workspaceProps,
 }) {
+  const enabled = selectedAgent?.enabled !== false;
   return (
     <div className="agent-profiles-page agent-profile-detail-page">
       <header className="profile-page-topbar">
-        <a href="#/agents" className="back-link">Agent Mission Control</a>
-        <div className="system-status-pill">
-          <span className="status-dot status-dot-active" />
-          System Status: Operational
+        <div className="profile-page-title-row">
+          <a href="#/agents" className="back-link">Agent Mission Control</a>
+          {selectedAgent && (
+            <label
+              className={`agent-enabled-switch${enabled ? ' is-on' : ' is-off'}`}
+              aria-label={`${enabled ? 'Disable' : 'Enable'} ${selectedAgent.profile?.roleTitle || selectedAgent.agentId}`}
+            >
+              <input
+                type="checkbox"
+                checked={enabled}
+                disabled={workspaceProps.enabledSaving}
+                onChange={(event) => workspaceProps.onToggleAgentEnabled?.(event.target.checked)}
+              />
+              <span className="agent-enabled-switch-track" aria-hidden="true">
+                <span className="agent-enabled-switch-thumb" />
+              </span>
+              <span className="agent-enabled-switch-label">{enabled ? 'On' : 'Off'}</span>
+            </label>
+          )}
         </div>
+        {loadingCurrent && <InlineLoading label="Refreshing profile..." />}
       </header>
 
       {error && <div className="agent-alert">{error}</div>}
 
       {selectedAgent ? (
         <main className="profile-detail-shell">
-          <AgentProfileHero
-            agent={selectedAgent}
-            operation={selectedOperation}
-            loading={loadingCurrent}
-            enabledSaving={workspaceProps.enabledSaving}
-            onToggleEnabled={workspaceProps.onToggleAgentEnabled}
-            onOpenPrompt={onOpenPrompt}
-            onOpenConfig={onOpenConfig}
-            onOpenHarness={onOpenHarness}
-          />
-
           <AgentProfileTabs
             tabs={selectedAgent.agentId === 'escalation-template-parser' ? IMAGE_PARSER_PROFILE_TABS : PROFILE_TABS}
             activeTab={activeProfileTab}
@@ -1293,7 +1240,6 @@ function MissionControlHeader({
   mode = 'profile',
   selectedAgent,
   selectedOperation,
-  stats,
   onOpenPrompt,
   onOpenConfig,
   onOpenCreate,
@@ -1320,7 +1266,7 @@ function MissionControlHeader({
               <AgentAvatar agent={selectedAgent} size="small" />
               <span>
                 <strong>{selectedAgent?.profile?.roleTitle || selectedAgent?.agentId || 'Select agent'}</strong>
-                <small>{selectedOperation?.department || `${stats.totalAgents} configured agents`}</small>
+                <small>{selectedOperation?.department || 'Agent profile'}</small>
               </span>
             </div>
             <button type="button" className="secondary-action" onClick={onOpenConfig}>
@@ -1345,198 +1291,82 @@ function MissionControlHeader({
   );
 }
 
-function MissionStats({ stats }) {
-  const cards = [
-    {
-      label: 'Total Agents',
-      value: stats.totalAgents,
-      detail: `${stats.withPrompts} with editable prompt surfaces`,
-      tone: 'blue',
-      spark: [24, 31, 30, 38, 41, 49, 55],
-    },
-    {
-      label: 'Active in Workflows',
-      value: stats.activeAgents,
-      detail: `${stats.workflowCoverage}% workflow coverage`,
-      tone: 'green',
-      spark: [32, 38, 42, 41, 47, 54, 60],
-    },
-    {
-      label: 'Human Reviewed',
-      value: `${stats.humanReviewed}%`,
-      detail: 'Review status across active profiles',
-      tone: 'violet',
-      spark: [45, 49, 52, 58, 60, 68, 73],
-    },
-    {
-      label: 'Needs Attention',
-      value: stats.needsAttention,
-      detail: 'Review, degraded, or incomplete setup',
-      tone: 'orange',
-      spark: [18, 22, 29, 26, 34, 39, 44],
-    },
-    {
-      label: 'Avg. Trust Score',
-      value: `${stats.averageTrust} / 5`,
-      detail: 'Composite from profile, tools, prompt, and activity',
-      tone: 'teal',
-      spark: [40, 45, 44, 51, 56, 61, 68],
-    },
-  ];
+function AgentAttentionMenu({
+  items,
+  open,
+  onToggle,
+  onClose,
+  onSelectAgent,
+}) {
+  const count = items.length;
+  const displayCount = count > 9 ? '9+' : String(count);
 
   return (
-    <section className="mission-stats-grid" aria-label="Agent profile health summary">
-      {cards.map((card) => (
-        <div className={`mission-stat-card tone-${card.tone}`} key={card.label}>
-          <span>{card.label}</span>
-          <strong>{card.value}</strong>
-          <small>{card.detail}</small>
-          <MiniSparkline points={card.spark} tone={card.tone} />
+    <>
+      <button
+        type="button"
+        className={`agent-attention-button${open ? ' is-open' : ''}${count > 0 ? ' has-items' : ''}`}
+        onClick={onToggle}
+        aria-label={count > 0 ? `${count} agents need attention` : 'No agents need attention'}
+        aria-expanded={open}
+        title={count > 0 ? `${count} agents need attention` : 'No agents need attention'}
+      >
+        <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+          <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+        </svg>
+        {count > 0 && <span className="agent-attention-count">{displayCount}</span>}
+      </button>
+
+      {open && (
+        <div className="agent-attention-popover" role="menu">
+          <header>
+            <strong>Needs Attention</strong>
+            <span>{count} {count === 1 ? 'agent' : 'agents'}</span>
+          </header>
+          {count > 0 ? (
+            <div className="agent-attention-list">
+              {items.map((item) => (
+                <a
+                  key={item.agentId}
+                  href={`#/agents/${encodeURIComponent(item.agentId)}`}
+                  role="menuitem"
+                  className="agent-attention-item"
+                  onClick={() => {
+                    onSelectAgent?.(item.agentId);
+                    onClose?.();
+                  }}
+                >
+                  <span className={`status-dot status-dot-${item.status || 'review'}`} />
+                  <span>
+                    <strong>{item.name}</strong>
+                    <small>{item.reason}</small>
+                  </span>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <div className="agent-attention-empty">No agents need attention.</div>
+          )}
         </div>
-      ))}
-    </section>
+      )}
+    </>
   );
 }
 
 function AgentCommandToolbar({
   query,
   onQueryChange,
-  statusFilter,
-  onStatusFilterChange,
-  departmentFilter,
-  onDepartmentFilterChange,
-  departmentOptions,
-  riskFilter,
-  onRiskFilterChange,
-  riskOptions,
-  reviewFilter,
-  onReviewFilterChange,
-  reviewOptions,
 }) {
   return (
-    <section className="agent-command-toolbar" aria-label="Agent directory filters">
+    <section className="agent-command-toolbar" aria-label="Agent directory search">
       <label className="agent-search-box">
-        <span>Search</span>
         <input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="Search agents by name, role, tool, workflow, or model..."
         />
       </label>
-
-      <label>
-        <span>Status</span>
-        <select value={statusFilter} onChange={(event) => onStatusFilterChange(event.target.value)}>
-          <option value="all">All statuses</option>
-          <option value="active">Active</option>
-          <option value="idle">Idle</option>
-          <option value="review">Needs attention</option>
-          <option value="degraded">Degraded</option>
-        </select>
-      </label>
-
-      <label>
-        <span>Department</span>
-        <select
-          value={departmentFilter}
-          onChange={(event) => onDepartmentFilterChange(event.target.value)}
-        >
-          <option value="all">All departments</option>
-          {departmentOptions.map((department) => (
-            <option value={department} key={department}>
-              {department}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label>
-        <span>Risk</span>
-        <select value={riskFilter} onChange={(event) => onRiskFilterChange(event.target.value)}>
-          <option value="all">All risks</option>
-          {riskOptions.map((risk) => (
-            <option value={risk} key={risk}>
-              {risk}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label>
-        <span>Review</span>
-        <select value={reviewFilter} onChange={(event) => onReviewFilterChange(event.target.value)}>
-          <option value="all">All reviews</option>
-          {reviewOptions.map((review) => (
-            <option value={review} key={review}>
-              {review}
-            </option>
-          ))}
-        </select>
-      </label>
-    </section>
-  );
-}
-
-function AgentProfileHero({
-  agent,
-  operation,
-  loading,
-  enabledSaving,
-  onToggleEnabled,
-  onOpenPrompt,
-  onOpenConfig,
-  onOpenHarness,
-}) {
-  const enabled = agent?.enabled !== false;
-  return (
-    <section className="agent-profile-hero">
-      <div className="profile-identity">
-        <AgentAvatar agent={agent} size="large" />
-        <div>
-          <div className="profile-title-line">
-            <h2>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</h2>
-            <span className={`status-badge status-${operation?.status || 'idle'}`}>
-              <span className={`status-dot status-dot-${operation?.status || 'idle'}`} />
-              {STATUS_LABELS[operation?.status] || 'Idle'}
-            </span>
-          </div>
-          <p>{agent.profile?.headline || operation?.mission || 'Agent profile and operating context.'}</p>
-          <div className="profile-chip-row">
-            <Badge>{operation?.department}</Badge>
-            <Badge>{operation?.modelLabel}</Badge>
-            <Badge>{operation?.reviewStatus}</Badge>
-            <Badge>{operation?.risk} risk</Badge>
-          </div>
-        </div>
-      </div>
-
-      <div className="profile-ownership">
-        <Definition label="Owner">{operation?.owner}</Definition>
-        <Definition label="Team">{operation?.team}</Definition>
-        <Definition label="Last updated">{formatDate(operation?.lastUpdatedAt)}</Definition>
-      </div>
-
-      <div className="profile-actions">
-        {loading && <InlineLoading label="Refreshing profile..." />}
-        <label className={`agent-enabled-toggle${enabled ? ' is-on' : ' is-off'}`}>
-          <input
-            type="checkbox"
-            checked={enabled}
-            disabled={enabledSaving}
-            onChange={(event) => onToggleEnabled?.(event.target.checked)}
-          />
-          <span>{enabled ? 'On' : 'Off'}</span>
-        </label>
-        <button type="button" className="secondary-action" onClick={onOpenConfig}>
-          Edit
-        </button>
-        <button type="button" className="secondary-action" onClick={onOpenHarness}>
-          Harness
-        </button>
-        <button type="button" className="primary-action" onClick={onOpenPrompt}>
-          Prompt
-        </button>
-      </div>
     </section>
   );
 }
@@ -1573,6 +1403,18 @@ function AgentProfileWorkspace(props) {
   if (activeTab === 'test-results') {
     return <ImageParserTestResultsTab {...props} />;
   }
+  if (activeTab === 'event-streams') {
+    return <ImageParserEventStreamsTab {...props} />;
+  }
+  if (activeTab === 'chat-sessions') {
+    return <ImageParserChatSessionsTab {...props} />;
+  }
+  if (activeTab === 'memory') {
+    return <AgentMemoryTab {...props} />;
+  }
+  if (activeTab === 'monitoring') {
+    return <AgentMonitoringTab {...props} />;
+  }
   if (activeTab === 'workflows') {
     return <AgentWorkflowsTab {...props} />;
   }
@@ -1596,7 +1438,10 @@ function AgentOverviewTab({
     <section className="agent-tab-content overview-layout">
       <Panel title="Overview" actions={<span className="panel-status-text">{operation?.workflowCount} workflows</span>}>
         <div className="overview-definition-grid">
-          <Definition label="Role">{agent.profile?.roleTitle || labelAgent(agent.agentId)}</Definition>
+          <Definition label="Agent name">{agent.profile?.roleTitle || agent.profile?.displayName || labelAgent(agent.agentId)}</Definition>
+          <Definition label="Agent ID">{agent.agentId}</Definition>
+          <Definition label="Code identity">{agent.agentId}</Definition>
+          <Definition label="Prompt ID">{agent.promptId || 'No prompt registered'}</Definition>
           <Definition label="Department">{operation?.department}</Definition>
           <Definition label="Model">{operation?.modelLabel}</Definition>
           <Definition label="Tools">{operation?.toolSummary}</Definition>
@@ -1614,6 +1459,8 @@ function AgentOverviewTab({
       <PromptContractPanel agent={agent} operation={operation} />
 
       <HarnessSummaryPanel operation={operation} />
+
+      <ProfileSourceOfTruthPanel agent={agent} operation={operation} />
 
       <ReviewWorkflowPanel
         agent={agent}
@@ -1689,6 +1536,36 @@ function HarnessSummaryPanel({ operation }) {
       </div>
       <div className="coverage-bar" aria-label={`Test coverage ${operation?.testCoverage}%`}>
         <span style={{ width: `${operation?.testCoverage || 0}%` }} />
+      </div>
+    </Panel>
+  );
+}
+
+function ProfileSourceOfTruthPanel({ agent, operation }) {
+  const coverage = [
+    ['Identity', Boolean(agent?.agentId && agent?.profile?.roleTitle), agent?.agentId],
+    ['Prompt', Boolean(agent?.promptId), agent?.promptId || 'Missing prompt link'],
+    ['Runtime', Boolean(agent?.runtime), operation?.modelLabel || 'Runtime not loaded'],
+    ['Memory', Boolean(agent?.memory), `${agent?.memory?.notes?.length || 0} notes`],
+    ['History', Boolean(agent?.history), `${agent?.history?.entries?.length || 0} entries`],
+    ['Harness', Boolean(agent?.harness), `${agent?.harness?.runs?.length || 0} runs`],
+    ['Activity', Boolean(agent?.activity), `${agent?.activity?.entries?.length || 0} entries`],
+    ['Relationships', Boolean(agent?.relationships), `${agent?.relationships?.notes?.length || 0} notes`],
+    ['Issues / tasks', false, 'No first-class agent issue/task ledger yet'],
+    ['Monitoring', Boolean(agent?.lifecycle), agent?.enabled === false ? 'Disabled' : 'Enabled'],
+  ];
+
+  return (
+    <Panel title="Profile Source of Truth" actions={<span className="panel-status-text">Canonical profile</span>}>
+      <div className="compact-list">
+        {coverage.map(([label, ready, detail]) => (
+          <CompactItem
+            key={label}
+            title={label}
+            meta={ready ? 'Available from agent profile' : 'Gap'}
+            detail={detail}
+          />
+        ))}
       </div>
     </Panel>
   );
@@ -2127,11 +2004,11 @@ function ImageParserTestResultsTab({
                   </div>
                   <pre>{result.parsedText || 'No parser output saved.'}</pre>
                 </div>
-                <div className="parser-result-actions">
-                  <button type="button" className={result.status === 'pass' ? 'is-pass' : ''} onClick={() => onUpdateParserTestResult(result.id, 'pass')}>Pass</button>
-                  <button type="button" className={result.status === 'fail' ? 'is-fail' : ''} onClick={() => onUpdateParserTestResult(result.id, 'fail')}>Fail</button>
-                  <span>{result.status || 'pending-review'}</span>
-                </div>
+                <ParserResultActions
+                  resultId={result.id}
+                  currentStatus={result.status}
+                  onUpdate={onUpdateParserTestResult}
+                />
               </article>
             ))}
           </div>
@@ -2144,6 +2021,63 @@ function ImageParserTestResultsTab({
         <ImageParserResultPreviewModal result={parserResultPreview} onClose={onCloseParserResultPreview} />
       )}
     </section>
+  );
+}
+
+function ParserResultActions({ resultId, currentStatus, onUpdate }) {
+  // Single-click Pass / Fail grading for a parser test result row.
+  // Behavior mirrors the chat-area `ParserOutput` review buttons in ChatV5Container.jsx:
+  // - One click PATCHes /api/pipeline-tests/parser-results/:id
+  // - Both buttons disable while the save is in flight
+  // - The active button keeps its is-pass / is-fail color after the save lands
+  // - A status line below the buttons announces "Saving...", "Recorded: pass/fail", or "Pending review"
+  const [pendingStatus, setPendingStatus] = useState('');
+  const status = currentStatus || 'pending-review';
+  const isSaving = Boolean(pendingStatus);
+
+  async function handleClick(nextStatus) {
+    if (isSaving) return;
+    setPendingStatus(nextStatus);
+    try {
+      await onUpdate(resultId, nextStatus);
+    } catch (_err) {
+      // Parent surfaces the error via setParserTestResultsError; no extra handling needed here.
+    } finally {
+      setPendingStatus('');
+    }
+  }
+
+  let statusLine;
+  if (isSaving) {
+    statusLine = 'Saving...';
+  } else if (status === 'pass' || status === 'fail') {
+    statusLine = `Recorded: ${status}`;
+  } else {
+    statusLine = 'Pending review';
+  }
+
+  return (
+    <div className="parser-result-actions" aria-label="Record parser test result">
+      <button
+        type="button"
+        className={status === 'pass' ? 'is-pass' : ''}
+        disabled={isSaving}
+        aria-label="Mark this parser test result as a pass"
+        onClick={() => handleClick('pass')}
+      >
+        Pass
+      </button>
+      <button
+        type="button"
+        className={status === 'fail' ? 'is-fail' : ''}
+        disabled={isSaving}
+        aria-label="Mark this parser test result as a fail"
+        onClick={() => handleClick('fail')}
+      >
+        Fail
+      </button>
+      <span>{statusLine}</span>
+    </div>
   );
 }
 
@@ -2212,6 +2146,147 @@ function ImageParserResultPreviewModal({ result, onClose }) {
   );
 }
 
+function ImageParserEventStreamsTab({
+  parserHistory,
+  parserSavedEvents,
+  parserHistoryLoading,
+  parserHistoryError,
+  parserEventStats,
+  onLoadParserEventStreams,
+}) {
+  const results = parserHistory?.results || [];
+  const events = parserSavedEvents || [];
+  const parserStats = parserEventStats?.byStage?.parser || {};
+  const totals = parserEventStats?.totals || {};
+
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel
+        title="Image Parser Event Streams"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadParserEventStreams}>
+            Refresh
+          </button>
+        }
+      >
+        {parserHistoryLoading ? (
+          <InlineLoading label="Loading parser event streams..." />
+        ) : parserHistoryError ? (
+          <EmptyState title="Event streams unavailable" copy={parserHistoryError} />
+        ) : events.length ? (
+          <div className="compact-list">
+            {events.map((event) => (
+              <CompactItem
+                key={event.key}
+                title={event.kind || 'parser event'}
+                meta={`${formatDate(event.ts)} · ${event.conversationTitle || 'Conversation'} · ${event.runStatus || 'parser run'}`}
+                detail={event.detail || 'Saved parser event'}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No parser events yet" copy="Run the Image Parser from Chat to populate this stream." />
+        )}
+      </Panel>
+      <Panel title="Stream Source">
+        <div className="overview-definition-grid">
+          <Definition label="Recent parser runs">{parserHistory?.total || results.length}</Definition>
+          <Definition label="Saved parser events">{events.length}</Definition>
+          <Definition label="Parser event average">{parserStats.avg ? `${parserStats.avg} per run` : 'No parser average yet'}</Definition>
+          <Definition label="Pipeline events total">{totals.allTime || 0}</Definition>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function ImageParserChatSessionsTab({
+  parserSessions,
+  parserSessionsLoading,
+  parserSessionsError,
+  onLoadParserChatSessions,
+}) {
+  const sessions = parserSessions || [];
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel
+        title="Image Parser Chat Sessions"
+        actions={
+          <button type="button" className="text-action" onClick={onLoadParserChatSessions}>
+            Refresh
+          </button>
+        }
+      >
+        {parserSessionsLoading ? (
+          <InlineLoading label="Loading chat session activity..." />
+        ) : parserSessionsError ? (
+          <EmptyState title="Chat sessions unavailable" copy={parserSessionsError} />
+        ) : sessions.length ? (
+          <div className="compact-list">
+            {sessions.map((conversation) => (
+              <a
+                key={conversation._id}
+                href={`#/chat/${conversation._id}`}
+                className="compact-item compact-item-link"
+              >
+                <strong>{conversation.title || 'Untitled conversation'}</strong>
+                <span>
+                  {formatDate(conversation.updatedAt || conversation.createdAt)}
+                  {' · '}
+                  {conversation.totalEventCount || 0} pipeline events
+                  {conversation.messageCount ? ` · ${conversation.messageCount} messages` : ''}
+                </span>
+                <small>{conversation.lastMessage?.preview || conversation.provider || 'Open chat session'}</small>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="No image parser chat sessions yet"
+            copy="Chat sessions with saved pipeline events will appear here after the Image Parser runs."
+          />
+        )}
+      </Panel>
+    </section>
+  );
+}
+
+function buildParserSavedEvents(events) {
+  return (Array.isArray(events) ? events : [])
+    .map((event, index) => ({
+      key: event.key || `${event.conversationId || 'conversation'}-${event.seq ?? index}-${event.kind || 'event'}`,
+      kind: event.kind || 'parser event',
+      ts: event.ts,
+      runStatus: event.runStatus || '',
+      conversationTitle: event.conversationTitle || 'Untitled conversation',
+      detail: formatParserEventDetail(event),
+    }))
+    .sort((a, b) => timestampValue(b.ts) - timestampValue(a.ts))
+    .slice(0, 80);
+}
+
+function timestampValue(value) {
+  if (value === null || value === undefined) return 0;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatParserEventDetail(event) {
+  const data = event?.data && typeof event.data === 'object' ? event.data : {};
+  const parts = [];
+  if (event?.category) parts.push(event.category);
+  if (data.provider) parts.push(`provider=${data.provider}`);
+  if (data.model) parts.push(`model=${data.model}`);
+  if (data.elapsedMs != null) parts.push(`elapsed=${formatMs(data.elapsedMs)}`);
+  if (data.durationMs != null) parts.push(`duration=${formatMs(data.durationMs)}`);
+  if (data.textChars != null) parts.push(`chars=${data.textChars}`);
+  if (data.error) parts.push(`error=${data.error}`);
+  if (data.status) parts.push(`status=${data.status}`);
+  return parts.join(' · ') || 'Saved event from conversation case intake.';
+}
+
 function AgentWorkflowsTab({ agent, operation }) {
   return (
     <section className="agent-tab-content workflows-layout">
@@ -2227,6 +2302,67 @@ function AgentWorkflowsTab({ agent, operation }) {
               <FitBars score={Math.max(0.45, operation.workflowFit - index * 0.04)} />
             </div>
           ))}
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AgentMemoryTab({ agent }) {
+  const notes = agent?.memory?.notes || [];
+  const relationships = agent?.relationships?.notes || [];
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel title="Agent Memory" actions={<span className="panel-status-text">{notes.length} notes</span>}>
+        {notes.length ? (
+          <div className="compact-list">
+            {notes.map((note) => (
+              <CompactItem
+                key={note.key || `${note.kind}-${note.updatedAt}`}
+                title={note.kind || 'Memory'}
+                meta={formatDate(note.updatedAt)}
+                detail={note.content}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No memory notes yet" copy="Agent-specific learned notes will appear here." />
+        )}
+      </Panel>
+      <Panel title="Agent Relationships" actions={<span className="panel-status-text">{relationships.length} notes</span>}>
+        {relationships.length ? (
+          <div className="compact-list">
+            {relationships.map((note) => (
+              <CompactItem
+                key={`${note.otherAgentId}-${note.updatedAt}-${note.summary}`}
+                title={note.otherAgentId || 'Related agent'}
+                meta={`${note.strength || 'relationship'} · confidence ${note.confidence ?? 'unknown'}`}
+                detail={note.summary}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No relationship notes yet" copy="Agent-to-agent memory and coordination notes will appear here." />
+        )}
+      </Panel>
+    </section>
+  );
+}
+
+function AgentMonitoringTab({ agent, operation, runtimeState }) {
+  const latestHarness = latestEntryByDate(agent?.harness?.runs || [], ['completedAt', 'createdAt']);
+  const latestActivity = latestEntryByDate(agent?.activity?.entries || [], ['createdAt']);
+  const runtimeSummary = getAgentRuntimeSummary(runtimeState || agent?.runtime || {});
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <Panel title="Monitoring Snapshot" actions={<span className="panel-status-text">{agent?.enabled === false ? 'Disabled' : 'Enabled'}</span>}>
+        <div className="overview-definition-grid">
+          <Definition label="Lifecycle">{agent?.enabled === false ? 'Disabled' : 'Enabled'}</Definition>
+          <Definition label="Runtime">{runtimeSummary || operation?.modelLabel}</Definition>
+          <Definition label="Prompt">{agent?.promptId || 'No prompt registered'}</Definition>
+          <Definition label="Latest harness">{latestHarness ? formatDate(latestHarness.completedAt || latestHarness.createdAt) : 'No harness runs'}</Definition>
+          <Definition label="Latest activity">{latestActivity ? formatDate(latestActivity.createdAt) : 'No activity recorded'}</Definition>
+          <Definition label="Open gaps">Issues/tasks ledger, live log stream, and alert history are not first-class profile sections yet.</Definition>
         </div>
       </Panel>
     </section>
@@ -2944,33 +3080,21 @@ function buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessR
   ];
 }
 
-function buildMissionStats(operations) {
-  const totalAgents = operations.length;
-  const activeAgents = operations.filter((operation) => operation.status === 'active').length;
-  const needsAttention = operations.filter((operation) => operation.status === 'review' || operation.status === 'degraded').length;
-  const withPrompts = operations.filter((operation) => operation.promptReady).length;
-  const humanReviewedCount = operations.filter((operation) =>
-    /human-reviewed|deterministic/i.test(operation.reviewStatus || '')
-  ).length;
-  const averageTrust = totalAgents
-    ? (operations.reduce((sum, operation) => sum + operation.trust, 0) / totalAgents).toFixed(1)
-    : '0.0';
-  const workflowCoverage = totalAgents
-    ? Math.round((activeAgents / totalAgents) * 100)
-    : 0;
-  const humanReviewed = totalAgents
-    ? Math.round((humanReviewedCount / totalAgents) * 100)
-    : 0;
-
-  return {
-    totalAgents,
-    activeAgents,
-    needsAttention,
-    withPrompts,
-    averageTrust,
-    workflowCoverage,
-    humanReviewed,
-  };
+function buildAttentionItems(operations) {
+  return operations
+    .filter((operation) => (
+      operation.status === 'review'
+      || operation.status === 'degraded'
+      || /review overdue|needs attention|degraded|incomplete/i.test(operation.reviewStatus || '')
+    ))
+    .map((operation) => ({
+      agentId: operation.agentId,
+      name: operation.name || operation.role || operation.agentId,
+      status: operation.status || 'review',
+      reason: operation.status === 'degraded'
+        ? 'Degraded setup or runtime state'
+        : operation.reviewStatus || 'Review required',
+    }));
 }
 
 function buildHarnessChecks(agent, status, promptReady, toolCount, relationshipCount, memoryCount) {
@@ -3015,6 +3139,20 @@ function latestAgentHarnessRun(agent) {
   return runs
     .slice()
     .sort((a, b) => new Date(b.completedAt || b.createdAt || 0).getTime() - new Date(a.completedAt || a.createdAt || 0).getTime())[0] || null;
+}
+
+function latestEntryByDate(entries, fields) {
+  return (Array.isArray(entries) ? entries : [])
+    .slice()
+    .sort((a, b) => {
+      const aTime = fields
+        .map((field) => new Date(a?.[field] || 0).getTime())
+        .find((time) => Number.isFinite(time) && time > 0) || 0;
+      const bTime = fields
+        .map((field) => new Date(b?.[field] || 0).getTime())
+        .find((time) => Number.isFinite(time) && time > 0) || 0;
+      return bTime - aTime;
+    })[0] || null;
 }
 
 function resolveReviewStatus(meta, latestReview) {

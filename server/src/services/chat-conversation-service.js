@@ -9,6 +9,13 @@ const {
 } = require('./providers/registry');
 const { sumCaseIntakeEvents } = require('./event-stats-service');
 
+const PHASE_BY_STAGE = {
+  parser: 'parse-template',
+  inv: 'known-issue-search',
+  triage: 'triage',
+  main: 'analyst',
+};
+
 function createServiceError(code, message, status = 500) {
   const error = new Error(message);
   error.code = code;
@@ -134,6 +141,94 @@ async function getConversation(id) {
     throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
   }
   return conversation;
+}
+
+async function listConversationStageEvents({ stage = 'parser', limit = 50 } = {}) {
+  if (mongoose.connection.readyState !== 1) {
+    throw createServiceError('DB_UNAVAILABLE', 'Database is not available', 503);
+  }
+
+  const phase = PHASE_BY_STAGE[stage];
+  if (!phase) {
+    throw createServiceError('INVALID_STAGE', 'Unsupported conversation event stage', 400);
+  }
+
+  const safeLimit = Number.isFinite(Number(limit))
+    ? Math.min(Math.max(Number(limit), 1), 200)
+    : 50;
+
+  const conversations = await Conversation.find({
+    caseIntake: { $exists: true },
+    'caseIntake.runs': {
+      $elemMatch: {
+        phase,
+        'events.0': { $exists: true },
+      },
+    },
+  })
+    .select('title provider createdAt updatedAt messageCount lastMessagePreview caseIntake.runs')
+    .sort({ updatedAt: -1 })
+    .limit(safeLimit)
+    .lean()
+    .maxTimeMS(8000);
+
+  const sessions = [];
+  const events = [];
+
+  for (const conversation of conversations) {
+    const runs = Array.isArray(conversation.caseIntake?.runs)
+      ? conversation.caseIntake.runs
+      : [];
+    const run = runs.find((candidate) => candidate && candidate.phase === phase);
+    const runEvents = Array.isArray(run?.events) ? run.events : [];
+    if (!runEvents.length) continue;
+
+    const conversationId = conversation._id?.toString();
+    sessions.push({
+      _id: conversation._id,
+      title: normalizeConversationListTitle(conversation.title, conversation.lastMessagePreview?.preview),
+      provider: normalizeProvider(conversation.provider),
+      messageCount: conversation.messageCount || 0,
+      lastMessage: conversation.lastMessagePreview || null,
+      createdAt: conversation.createdAt,
+      updatedAt: conversation.updatedAt,
+      totalEventCount: runEvents.length,
+      runStatus: run.status || '',
+      runStartedAt: run.startedAt || null,
+      runFinishedAt: run.finishedAt || null,
+    });
+
+    runEvents.forEach((event, index) => {
+      events.push({
+        key: `${conversationId || 'conversation'}-${event.seq ?? index}-${event.kind || 'event'}`,
+        conversationId,
+        conversationTitle: normalizeConversationListTitle(conversation.title, conversation.lastMessagePreview?.preview),
+        runStatus: run.status || '',
+        runStartedAt: run.startedAt || null,
+        runFinishedAt: run.finishedAt || null,
+        seq: event.seq ?? index,
+        ts: event.ts || run.finishedAt || run.startedAt || conversation.updatedAt,
+        kind: event.kind || 'parser event',
+        category: event.category || '',
+        stageId: event.stageId || stage,
+        data: event.data || {},
+      });
+    });
+  }
+
+  events.sort((a, b) => {
+    const bTime = Number(new Date(b.ts).getTime()) || Number(b.ts) || 0;
+    const aTime = Number(new Date(a.ts).getTime()) || Number(a.ts) || 0;
+    if (bTime !== aTime) return bTime - aTime;
+    return Number(b.seq || 0) - Number(a.seq || 0);
+  });
+
+  return {
+    stage,
+    phase,
+    sessions,
+    events,
+  };
 }
 
 async function updateConversation(id, { title, escalationId }) {
@@ -334,6 +429,7 @@ module.exports = {
   getConversation,
   getConversationMeta,
   getForkTree,
+  listConversationStageEvents,
   listConversations,
   updateConversation,
 };

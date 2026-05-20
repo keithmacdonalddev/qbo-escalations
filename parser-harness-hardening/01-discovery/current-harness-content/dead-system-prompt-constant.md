@@ -1,4 +1,16 @@
-You are an image parser for a QBO (QuickBooks Online) escalation support tool. You receive a single screenshot and must output structured text. You have exactly two roles, and you must auto-detect which one applies based on the image content.
+# Dead `SYSTEM_PROMPT` constant — drift profile
+
+There is a 350-line `SYSTEM_PROMPT` template-literal constant at `server/src/services/image-parser.js:664-733` that is **not used by the runtime parse path**. The runtime path uses `getRenderedAgentPrompt(promptId)` which reads markdown from disk (`services/image-parser.js:1521`).
+
+`SYSTEM_PROMPT` is exported (`services/image-parser.js:1795`) but only consumed by:
+- `server/test/image-parser-comprehensive.test.js:281, 1546-1560` — uses the constant in assertions to verify the prompt's text contains expected phrases.
+
+Verified by grep: `SYSTEM_PROMPT` appears in `services/image-parser.js`, the test file, and one unrelated `ENRICHMENT_SYSTEM_PROMPT` in `routes/escalations.js`. Nothing else.
+
+## Verbatim content of the dead constant
+
+```javascript
+const SYSTEM_PROMPT = `You are an image parser for a QBO (QuickBooks Online) escalation support tool. You receive a single screenshot and must output structured text. You have exactly two roles, and you must auto-detect which one applies based on the image content.
 
 ## ROLE DETECTION
 
@@ -67,4 +79,18 @@ Rules for Role 2:
 2. Read the image with extreme precision. Every character matters.
 3. Do not hallucinate or fill in information that is not visible in the image.
 4. If the image is unclear, blurry, or partially cut off, extract what you can see and skip what you cannot.
-5. Do not wrap output in markdown code blocks or any other formatting.
+5. Do not wrap output in markdown code blocks or any other formatting.`;
+```
+
+## Diff vs. the live `prompts/agents/image-parser.md`
+
+**They are identical, byte-for-byte, at the time of discovery.** Both encode the same dual-role auto-detect prompt with the same role detection, the same Role 1 / Role 2 specs, and the same Critical Rules. Verified by reading both side-by-side.
+
+## Why this matters
+
+- The test file asserts against the constant. Edits to `prompts/agents/image-parser.md` via the UI Prompt tab will NOT update the constant.
+- If the markdown file ever diverges from the constant (next harness change), tests will continue to pass against the old constant while the runtime sends the new prompt to the model. **Silent drift risk.**
+- For the byte-fidelity goal, this matters because the test suite would not catch a regression introduced via the UI editor — the constant is the source of truth for the tests, the file is the source of truth for production.
+- Fix categories (not proposing actual fixes here): (a) delete the constant and have tests read from disk via `getRenderedAgentPrompt('image-parser')`; (b) auto-generate the constant from the file at build time; (c) replace test assertions with structural checks that do not depend on text equality.
+
+Last updated: 2026-05-19

@@ -14,3 +14,8 @@ server/.playwright-mcp/
 review-screenshots/
 stress-testing/reports/**/*.json
 stress-testing/reports/**/artifacts/
+.claude-state/
+.claude/agent-memory/
+claude.cmd
+claude.ps1
+.a-MY-IDEAS/

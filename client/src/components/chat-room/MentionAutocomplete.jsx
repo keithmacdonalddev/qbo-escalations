@@ -3,6 +3,14 @@ import AgentAvatar from './AgentAvatar.jsx';
 
 const MAX_VISIBLE = 5;
 
+function getAgentDisplayName(agent) {
+  return agent?.profile?.roleTitle
+    || agent?.profile?.displayName
+    || agent?.name
+    || agent?.id
+    || 'Agent';
+}
+
 const MentionAutocomplete = forwardRef(function MentionAutocomplete(
   { agents = [], filter = '', onSelect, onClose, visible = false, position },
   ref,
@@ -14,6 +22,7 @@ const MentionAutocomplete = forwardRef(function MentionAutocomplete(
     const q = filter.toLowerCase();
     return agents.filter(
       (a) =>
+        (getAgentDisplayName(a).toLowerCase().includes(q)) ||
         (a.name && a.name.toLowerCase().includes(q)) ||
         (a.id && a.id.toLowerCase().includes(q)) ||
         (a.shortName && a.shortName.toLowerCase().includes(q)),
@@ -90,7 +99,7 @@ const MentionAutocomplete = forwardRef(function MentionAutocomplete(
               onMouseEnter={() => setHighlightIndex(i)}
             >
               <AgentAvatar agent={agent} size={20} interactive={false} />
-              <span className="mention-autocomplete-name">{agent.name}</span>
+              <span className="mention-autocomplete-name">{getAgentDisplayName(agent)}</span>
               {agent.description && (
                 <span className="mention-autocomplete-desc">{agent.description}</span>
               )}

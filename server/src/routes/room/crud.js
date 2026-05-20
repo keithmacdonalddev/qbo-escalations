@@ -60,16 +60,20 @@ router.get('/', async (req, res) => {
 router.get('/agents', async (_req, res) => {
   const agents = await Promise.all(getAllAgents().map(async (a) => {
     const identity = await getAgentIdentity(a.id);
+    const profile = identity?.profile || a.profile || null;
+    const displayName = profile?.roleTitle || profile?.displayName || a.name || a.id;
     return {
-    id: a.id,
-    name: a.name,
-    shortName: a.shortName,
-    icon: a.icon,
-    color: a.color,
-    description: a.description,
-    profile: identity?.profile || a.profile || null,
-    memory: identity?.memory || { notes: [] },
-    history: identity?.history || { entries: [] },
+      id: a.id,
+      agentId: a.id,
+      name: displayName,
+      shortName: profile?.displayName || a.shortName || displayName,
+      codeIdentity: a.id,
+      icon: a.icon,
+      color: a.color,
+      description: profile?.headline || a.description,
+      profile,
+      memory: identity?.memory || { notes: [] },
+      history: identity?.history || { entries: [] },
     };
   }));
   return res.json({ ok: true, agents });

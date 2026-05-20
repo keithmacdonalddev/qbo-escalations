@@ -1421,6 +1421,11 @@
   color: #ffafb5;
 }
 
+.v5-parser-review-actions button:disabled {
+  cursor: progress;
+  opacity: 0.55;
+}
+
 .v5-parser-review-actions span {
   grid-column: 1 / -1;
   color: var(--v5-muted);

@@ -16,6 +16,13 @@ function getAgent(agents, agentId) {
   return agents.find((a) => a.id === agentId) || null;
 }
 
+function getAgentDisplayName(agent, fallback = 'Agent') {
+  return agent?.profile?.roleTitle
+    || agent?.profile?.displayName
+    || agent?.name
+    || fallback;
+}
+
 function getActionStatus(result) {
   return result?.status || (result?.error ? 'error' : (result?.result !== undefined ? 'success' : 'unknown'));
 }
@@ -189,7 +196,7 @@ function ChatRoomThread({
                     />
                   )}
                   <span className="chat-room-sender-label">
-                    {agent?.name || group.agentId || 'Agent'}
+                    {getAgentDisplayName(agent, group.agentId || 'Agent')}
                   </span>
                   {firstMsg.provider && (
                     <span className="chat-room-provider-badge">{firstMsg.provider}</span>

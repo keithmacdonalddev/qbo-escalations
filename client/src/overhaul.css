@@ -7456,8 +7456,15 @@ body,
 
 .sidebar.is-collapsed .sidebar-nav-item:has(.sidebar-nav-short-label),
 .sidebar.is-collapsed .sidebar-nav-item {
-  min-height: 34px !important;
-  padding: 4px 3px !important;
+  min-height: 30px !important;
+  padding: 3px 3px !important;
+  gap: 1px !important;
+  line-height: 1 !important;
+}
+
+.sidebar.is-collapsed .sidebar-nav-item .sidebar-nav-short-label {
+  margin-top: 0 !important;
+  line-height: 0.95 !important;
 }
 
 .sidebar.is-collapsed.is-hover-expanded .sidebar-header,

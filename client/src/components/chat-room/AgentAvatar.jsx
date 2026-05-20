@@ -5,7 +5,7 @@ function getAgentId(agent) {
 }
 
 function getAgentName(agent) {
-  return agent?.name || agent?.profile?.displayName || getAgentId(agent) || 'Agent';
+  return agent?.profile?.roleTitle || agent?.profile?.displayName || agent?.name || getAgentId(agent) || 'Agent';
 }
 
 function getAgentProfile(agent) {

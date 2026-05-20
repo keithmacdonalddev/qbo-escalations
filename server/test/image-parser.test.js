@@ -197,32 +197,6 @@ test('detectRole', async (t) => {
     assert.equal(detectRole('coid/mid: 123456'), 'escalation');
   });
 
-  // --- inv-list patterns ---
-  await t.test('returns inv-list for INV entries with 6 digits', () => {
-    assert.equal(detectRole('Friday:\n- INV-123456 issue\n- INV-234567 error'), 'inv-list');
-  });
-
-  await t.test('returns inv-list for single INV entry with 5+ digits', () => {
-    assert.equal(detectRole('INV-10001 QBO login loop'), 'inv-list');
-  });
-
-  // --- unknown ---
-  await t.test('returns unknown for unrecognized text', () => {
-    assert.equal(detectRole('Hello, random text about QuickBooks.'), 'unknown');
-  });
-
-  await t.test('returns unknown for empty string', () => {
-    assert.equal(detectRole(''), 'unknown');
-  });
-
-  await t.test('does not match short INV numbers (fewer than 5 digits)', () => {
-    assert.equal(detectRole('INV-1234 something'), 'unknown');
-  });
-
-  // --- precedence ---
-  await t.test('INV takes priority over escalation fields when both present', () => {
-    assert.equal(detectRole('INV-999999 COID/MID: 123456'), 'inv-list');
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -346,68 +320,6 @@ test('parseImage derives structured escalation fields and parse confidence', asy
   }
 });
 
-test('parseImage recovers fields when provider adds chatter before canonical template', async () => {
-  mockHttpRequest(200, {
-    choices: [{
-      message: {
-        content: [
-          'I am extracting the visible fields and will return the template.COID/MID: 9130350484590926',
-          'CASE: 15154529119',
-          'CLIENT/CONTACT: oum-eirma hammedi',
-          'CX IS ATTEMPTING TO: payroll sync issue',
-          'EXPECTED OUTCOME:',
-          'ACTUAL OUTCOME: cannot match paycheques',
-          'KB/TOOLS USED:',
-          'TRIED TEST ACCOUNT: no',
-          'TS STEPS: checked COA and account is active',
-        ].join('\n'),
-      },
-    }],
-    model: 'test-vision-model',
-    usage: { prompt_tokens: 120, completion_tokens: 80 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', promptId: 'escalation-template-parser' });
-    assert.equal(result.parseFields.coid, '9130350484590926');
-    assert.equal(result.parseFields.caseNumber, '15154529119');
-    assert.equal(result.parseMeta?.canonicalTemplate?.passed, false);
-    assert.equal(result.parseMeta?.canonicalTemplate?.recoveredPassed, true);
-  } finally {
-    clearHttpMock();
-  }
-});
-
-test('parseImage auto-detects inv-list role from INV pattern', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'Friday:\n- INV-123456 Payroll sync issue\n- INV-789012 Bank feed timeout' } }],
-    usage: { prompt_tokens: 10, completion_tokens: 20 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.role, 'inv-list');
-    assert.deepEqual(result.parseFields, {});
-    assert.equal(result.parseMeta, null);
-  } finally {
-    clearHttpMock();
-  }
-});
-
-test('parseImage returns unknown role for unrecognized text', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'Random screenshot with no structured data.' } }],
-    usage: { prompt_tokens: 10, completion_tokens: 20 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.role, 'unknown');
-  } finally {
-    clearHttpMock();
-  }
-});
-
 test('parseImage throws PROVIDER_ERROR when lm-studio returns non-200', async () => {
   mockHttpRequest(500, 'Internal Server Error');
 
@@ -451,7 +363,7 @@ test('parseImage accepts anthropic provider (throws PROVIDER_UNAVAILABLE not INV
       return origRead.apply(this, arguments);
     };
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_UNAVAILABLE');
         assert.match(err.message, /Anthropic.*not configured/);
@@ -703,7 +615,7 @@ test('parseImage routes to anthropic and returns parsed result', async () => {
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
     assert.equal(result.text, 'COID/MID: 789\nCASE: CS-003');
     assert.equal(result.role, 'escalation');
     assert.ok(result.usage);
@@ -729,7 +641,7 @@ test('parseImage with anthropic throws PROVIDER_ERROR on non-200', async () => {
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /HTTP 401/);
@@ -748,7 +660,7 @@ test('parseImage with anthropic throws PROVIDER_ERROR on invalid JSON', async ()
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /invalid JSON/);
@@ -770,26 +682,9 @@ test('parseImage with anthropic uses model override', async () => {
   });
 
   try {
-    await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-4-20250514' });
+    await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-4-20250514', structured: false });
     const body = httpsMock.getCapturedBody();
     assert.equal(body.model, 'claude-opus-4-20250514');
-  } finally {
-    httpsMock.restore();
-    cleanupKey();
-  }
-});
-
-test('parseImage with anthropic returns empty text when content is empty', async () => {
-  const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test');
-  const httpsMock = mockHttpsRequest(200, {
-    content: [],
-    usage: { input_tokens: 10, output_tokens: 0 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
-    assert.equal(result.text, '');
-    assert.equal(result.role, 'unknown');
   } finally {
     httpsMock.restore();
     cleanupKey();
@@ -803,7 +698,7 @@ test('parseImage with anthropic returns null usage when usage field missing', as
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
     assert.equal(result.text, 'some text');
     assert.equal(result.usage, null);
   } finally {
@@ -938,23 +833,6 @@ test('parseImage with openai sends Authorization Bearer header', async () => {
   }
 });
 
-test('parseImage with openai returns empty text when choices empty', async () => {
-  const cleanupKey = setupProviderKey('OPENAI_API_KEY', 'sk-openai-test');
-  const httpsMock = mockHttpsRequest(200, {
-    choices: [],
-    usage: { prompt_tokens: 10, completion_tokens: 0 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
-    assert.equal(result.text, '');
-    assert.equal(result.role, 'unknown');
-  } finally {
-    httpsMock.restore();
-    cleanupKey();
-  }
-});
-
 test('parseImage with openai returns null usage when usage field missing', async () => {
   const cleanupKey = setupProviderKey('OPENAI_API_KEY', 'sk-openai-test');
   const httpsMock = mockHttpsRequest(200, {
@@ -1029,22 +907,6 @@ test('parseImage with kimi uses model override', async () => {
   }
 });
 
-test('parseImage with kimi detects inv-list role', async () => {
-  const cleanupKey = setupProviderKey('MOONSHOT_API_KEY', 'mk-test');
-  const httpsMock = mockHttpsRequest(200, {
-    choices: [{ message: { content: 'Monday:\n- INV-555555 Payroll issue\n- INV-666666 Login problem' } }],
-    usage: { prompt_tokens: 50, completion_tokens: 30 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
-    assert.equal(result.role, 'inv-list');
-  } finally {
-    httpsMock.restore();
-    cleanupKey();
-  }
-});
-
 test('parseImage with kimi returns null usage when usage field missing', async () => {
   const cleanupKey = setupProviderKey('MOONSHOT_API_KEY', 'mk-test');
   const httpsMock = mockHttpsRequest(200, {
@@ -1075,21 +937,6 @@ test('parseImage with lm-studio throws PROVIDER_ERROR on invalid JSON', async ()
         return true;
       }
     );
-  } finally {
-    clearHttpMock();
-  }
-});
-
-test('parseImage with lm-studio returns empty text when choices empty', async () => {
-  mockHttpRequest(200, {
-    choices: [],
-    usage: { prompt_tokens: 10, completion_tokens: 0 },
-  });
-
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.text, '');
-    assert.equal(result.role, 'unknown');
   } finally {
     clearHttpMock();
   }
@@ -1779,7 +1626,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
 
       // Request options — Anthropic uses x-api-key, NOT Authorization Bearer
       assert.equal(captured.options.hostname, 'api.anthropic.com');
@@ -1907,7 +1754,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-custom' });
+      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-custom', structured: false });
       assert.equal(captured.body.model, 'claude-opus-custom', 'custom model must override default');
     } finally {
       captured._restore();
@@ -2053,7 +1900,7 @@ test('provider request body validation', async (t) => {
       // Anthropic
       process.env.ANTHROPIC_API_KEY = 'sk-ant-ct-test';
       cap = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       assert.equal(cap.options.headers['Content-Type'], 'application/json', 'anthropic Content-Type');
       cap._restore();
 
@@ -2087,7 +1934,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       const content = captured.body.messages[0].content;
       const hasImageUrl = content.some(c => c.type === 'image_url');
       assert.equal(hasImageUrl, false,

@@ -99,48 +99,11 @@ export async function linkEscalation(id, conversationId) {
   return data.escalation;
 }
 
-/** Parse escalation from image/text and persist it */
-export async function parseEscalation({
-  image,
-  text,
-  conversationId,
-  traceId,
-  mode,
-  provider,
-  primaryProvider,
-  fallbackProvider,
-  reasoningEffort,
-  timeoutMs,
-} = {}) {
-  const body = {
-    image,
-    text,
-    conversationId,
-    traceId,
-    mode,
-    provider,
-    primaryProvider,
-    fallbackProvider,
-    reasoningEffort,
-    timeoutMs,
-  };
-  return apiFetchJson(`${BASE}/parse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: await serializeJsonRequestBody(body, {
-      offThread: typeof image === 'string' && image.length > 0,
-    }),
-  }, 'Failed to parse escalation');
-}
-
-/** Regex-only quick parse (does not persist record) */
-export async function quickParseEscalation(text) {
-  return apiFetchJson(`${BASE}/quick-parse`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
-  }, 'Failed to quick-parse escalation');
-}
+// parseEscalation and quickParseEscalation wrappers were removed 2026-05-19
+// (parser-harness-hardening DECISIONS.md D7) along with their server routes
+// POST /api/escalations/parse and POST /api/escalations/quick-parse. No live
+// client code imported them. The active chat-v5 image parse path goes through
+// POST /api/image-parser/parse (see client/src/api/imageParserApi.js).
 
 /** Create escalation directly from a chat conversation */
 export async function createEscalationFromConversation(conversationId, fields) {
