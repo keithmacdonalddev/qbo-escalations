@@ -1999,14 +1999,29 @@
 .lifecycle-detail-title {
   min-width: 0;
   text-align: center;
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: inherit !important;
+  background-clip: initial !important;
+  animation: none !important;
 }
 
 .lifecycle-detail-title h2 {
-  color: var(--agent-text);
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: var(--agent-text) !important;
+  background-clip: initial !important;
+  color: var(--agent-text) !important;
+  animation: none !important;
 }
 
 .lifecycle-detail-title p {
-  color: var(--agent-muted);
+  background: none !important;
+  -webkit-background-clip: initial !important;
+  -webkit-text-fill-color: var(--agent-muted) !important;
+  background-clip: initial !important;
+  color: var(--agent-muted) !important;
+  animation: none !important;
 }
 
 .lifecycle-detail-header > .text-action {
