@@ -16,6 +16,7 @@ const providerCallPackageSchema = new mongoose.Schema({
 
   request: { type: mongoose.Schema.Types.Mixed, default: null },
   response: { type: mongoose.Schema.Types.Mixed, default: null },
+  cli: { type: mongoose.Schema.Types.Mixed, default: null },
   timing: { type: mongoose.Schema.Types.Mixed, default: null },
   outcome: { type: String, required: true, index: true },
   error: { type: mongoose.Schema.Types.Mixed, default: null },

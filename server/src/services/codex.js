@@ -3,11 +3,16 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { extractCodexUsage } = require('../lib/usage-extractor');
+const { providerHarnessTrace } = require('../lib/provider-harness-trace');
 const {
   isStubbed: isProvidersStubbed,
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
+const {
+  isProviderCallPackageCaptureEnabled,
+  recordCliProviderCallPackageInBackground,
+} = require('./provider-call-package-recorder');
 
 const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.5';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
@@ -516,41 +521,227 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   }
   args.push('-');
 
+  const captureEnabled = isProviderCallPackageCaptureEnabled();
+  const requestStartedAt = new Date().toISOString();
+  const captureContext = {
+    providerId: 'codex',
+    providerResearchId: 'openai-cli',
+    providerPathType: 'cli',
+    callSite: 'codex:transcribeImage',
+    operation: 'image-transcribe',
+    modelRequested: effectiveModel,
+    reasoningEffort: effectiveReasoningEffort,
+    source: {
+      file: 'server/src/services/codex.js',
+      functionName: 'transcribeImage',
+      spawnSite: 'codex.transcribeImage',
+    },
+  };
+
+  providerHarnessTrace('codex.cli.transcribeImage.enter', {
+    providerId: captureContext.providerId,
+    providerResearchId: captureContext.providerResearchId,
+    providerPathType: captureContext.providerPathType,
+    callSite: captureContext.callSite,
+    operation: captureContext.operation,
+    modelRequested: effectiveModel,
+    reasoningEffort: effectiveReasoningEffort,
+    timeoutMs,
+    captureEnabled,
+    imagePathCount: imagePaths.length,
+    stdinBytes: Buffer.byteLength(transcribePrompt, 'utf8'),
+  });
+
   return new Promise((resolve, reject) => {
+    providerHarnessTrace('codex.cli.transcribeImage.spawn.start', {
+      providerId: captureContext.providerId,
+      callSite: captureContext.callSite,
+      command: 'codex',
+      argCount: args.length,
+      modelRequested: effectiveModel,
+    });
     const child = spawn('codex', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: true,
       env: { ...process.env, CLAUDECODE: undefined },
     });
+    providerHarnessTrace('codex.cli.transcribeImage.spawn.done', {
+      providerId: captureContext.providerId,
+      callSite: captureContext.callSite,
+      pid: child.pid || null,
+      command: 'codex',
+    });
 
     let settled = false;
     let stdoutBuffer = '';
+    let stdoutText = '';
     let stderrOutput = '';
+    let firstStdoutAt = null;
+    let firstStderrAt = null;
+    let stdinWrittenAt = null;
+    let stdoutFinalBuffer = '';
+    let cliCaptureQueued = false;
     let fullResponse = '';
     let capturedUsage = null;
+    const stdoutLines = [];
+    const stdoutJsonlEvents = [];
+    const malformedStdoutLines = [];
+    const stdoutChunks = [];
+    const stderrChunks = [];
     const seenAgentTextByItem = new Map();
 
-    function finishOk(text) {
+    function queueCliCapture(meta = {}) {
+      if (!captureEnabled || cliCaptureQueued) return;
+      cliCaptureQueued = true;
+      const responseCompletedAt = new Date().toISOString();
+      const durationMs = Math.max(new Date(responseCompletedAt).getTime() - new Date(requestStartedAt).getTime(), 0);
+      providerHarnessTrace('codex.cli.transcribeImage.package.assembled', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        outcome: meta.outcome || '',
+        exitCode: meta.exitCode,
+        signal: meta.signal || '',
+        stdoutBytes: Buffer.byteLength(stdoutText, 'utf8'),
+        stdoutLineCount: stdoutLines.length,
+        jsonlEventCount: stdoutJsonlEvents.length,
+        malformedLineCount: malformedStdoutLines.length,
+        stderrBytes: Buffer.byteLength(stderrOutput, 'utf8'),
+        durationMs,
+      });
+      recordCliProviderCallPackageInBackground({
+        captureContext,
+        command: 'codex',
+        args,
+        spawnOptions: {
+          shell: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          envOverrides: {
+            CLAUDECODE: '[unset]',
+          },
+        },
+        env: {
+          capturedKeys: ['CLAUDECODE'],
+          notes: ['CLAUDECODE is unset for Codex subprocess isolation'],
+        },
+        stdinText: transcribePrompt,
+        stdoutText,
+        stdoutLines,
+        stdoutJsonlEvents,
+        malformedStdoutLines,
+        stdoutFinalBuffer,
+        stdoutChunks,
+        stderrText: stderrOutput,
+        stderrChunks,
+        pid: child.pid || null,
+        exitCode: Number.isFinite(meta.exitCode) ? meta.exitCode : null,
+        signal: meta.signal || null,
+        spawned: true,
+        closed: Boolean(meta.closed),
+        killed: Boolean(meta.killed),
+        killSignal: meta.killSignal || null,
+        timeout: {
+          timeoutMs,
+          fired: Boolean(meta.timeoutFired),
+        },
+        requestStartedAt,
+        stdinWrittenAt,
+        firstStdoutAt,
+        firstStderrAt,
+        processClosedAt: meta.closed ? responseCompletedAt : null,
+        responseCompletedAt,
+        durationMs,
+        error: meta.error || null,
+        outcome: meta.outcome || null,
+        modelRequested: effectiveModel,
+        reasoningEffort: effectiveReasoningEffort,
+        expectsJsonl: true,
+      }, { log: true });
+      providerHarnessTrace('codex.cli.transcribeImage.recorder.queued', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        outcome: meta.outcome || '',
+      });
+    }
+
+    function finishOk(text, meta = {}) {
       if (settled) return;
       settled = true;
       cleanupTempFiles(tempFiles);
-      resolve({ text: String(text || '').trim(), usage: capturedUsage });
+      const result = { text: String(text || '').trim(), usage: capturedUsage };
+      resolve(result);
+      providerHarnessTrace('codex.cli.transcribeImage.provider.returned', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        outcome: 'success',
+        textLength: result.text.length,
+        hasUsage: Boolean(capturedUsage),
+      });
+      queueCliCapture({ ...meta, outcome: meta.outcome || 'success' });
     }
 
-    function finishErr(err) {
+    function finishErr(err, meta = {}) {
       if (settled) return;
       settled = true;
       cleanupTempFiles(tempFiles);
       const error = err instanceof Error ? err : new Error(String(err));
       error._usage = capturedUsage || null;
       reject(error);
+      providerHarnessTrace('codex.cli.transcribeImage.provider.returned', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        outcome: meta.outcome || '',
+        errorName: error.name || 'Error',
+        errorCode: error.code || '',
+        errorMessage: error.message || '',
+        hasUsage: Boolean(capturedUsage),
+      });
+      queueCliCapture({ ...meta, error, outcome: meta.outcome || null });
+    }
+
+    function handleStdoutLine(line) {
+      stdoutLines.push(line);
+      let event = null;
+      try {
+        event = JSON.parse(line);
+        stdoutJsonlEvents.push(event);
+        providerHarnessTrace('codex.cli.transcribeImage.stdout.jsonl_event', {
+          providerId: captureContext.providerId,
+          callSite: captureContext.callSite,
+          eventType: event?.type || '',
+          itemType: event?.item?.type || '',
+          jsonlEventCount: stdoutJsonlEvents.length,
+        });
+        const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
+        if (usage) capturedUsage = usage;
+      } catch {
+        malformedStdoutLines.push(line);
+        providerHarnessTrace('codex.cli.transcribeImage.stdout.malformed_line', {
+          providerId: captureContext.providerId,
+          callSite: captureContext.callSite,
+          malformedLineCount: malformedStdoutLines.length,
+          byteLength: Buffer.byteLength(line, 'utf8'),
+        });
+      }
+      const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
+      if (delta) fullResponse += delta;
     }
 
     try {
+      providerHarnessTrace('codex.cli.transcribeImage.stdin.write.start', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        stdinBytes: Buffer.byteLength(transcribePrompt, 'utf8'),
+      });
       child.stdin.write(transcribePrompt);
       child.stdin.end();
+      stdinWrittenAt = new Date().toISOString();
+      providerHarnessTrace('codex.cli.transcribeImage.stdin.write.done', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        stdinBytes: Buffer.byteLength(transcribePrompt, 'utf8'),
+      });
     } catch (err) {
-      finishErr(err);
+      finishErr(err, { outcome: 'process_error' });
       return;
     }
 
@@ -559,54 +750,123 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
       const timeoutErr = new Error('Codex CLI transcription timed out after ' + timeoutMs + 'ms');
       timeoutErr.code = 'TIMEOUT';
-      finishErr(timeoutErr);
+      providerHarnessTrace('codex.cli.transcribeImage.timeout', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        timeoutMs,
+      });
+      finishErr(timeoutErr, {
+        outcome: 'timeout',
+        timeoutFired: true,
+        killed: true,
+        killSignal: 'SIGTERM',
+      });
     }, timeoutMs);
 
     child.stdout.on('data', (data) => {
       if (settled) return;
-      stdoutBuffer += data.toString();
+      const chunkText = data.toString();
+      const receivedAt = new Date().toISOString();
+      if (!firstStdoutAt) firstStdoutAt = receivedAt;
+      stdoutChunks.push({ seq: stdoutChunks.length, receivedAt, text: chunkText });
+      stdoutText += chunkText;
+      providerHarnessTrace('codex.cli.transcribeImage.stdout.data', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        seq: stdoutChunks.length - 1,
+        byteLength: Buffer.byteLength(chunkText, 'utf8'),
+      });
+      stdoutBuffer += chunkText;
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() || '';
       for (const line of lines) {
-        try {
-          const event = JSON.parse(line);
-          const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
-          if (usage) capturedUsage = usage;
-        } catch { /* ignore non-JSON lines */ }
-        const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
-        if (delta) fullResponse += delta;
+        handleStdoutLine(line);
       }
     });
 
     child.stderr.on('data', (data) => {
       if (settled) return;
-      if (stderrOutput.length < 10240) stderrOutput += data.toString();
+      const chunkText = data.toString();
+      const receivedAt = new Date().toISOString();
+      if (!firstStderrAt) firstStderrAt = receivedAt;
+      stderrChunks.push({ seq: stderrChunks.length, receivedAt, text: chunkText });
+      if (stderrOutput.length < 10240) stderrOutput += chunkText;
+      providerHarnessTrace('codex.cli.transcribeImage.stderr.data', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        seq: stderrChunks.length - 1,
+        byteLength: Buffer.byteLength(chunkText, 'utf8'),
+      });
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timeout);
       if (settled) return;
+      stdoutFinalBuffer = stdoutBuffer;
+      providerHarnessTrace('codex.cli.transcribeImage.close', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        exitCode: code,
+        signal: signal || '',
+        finalBufferBytes: Buffer.byteLength(stdoutFinalBuffer, 'utf8'),
+      });
 
-      try {
-        const event = JSON.parse(stdoutBuffer);
-        const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
-        if (usage) capturedUsage = usage;
-      } catch { /* ignore */ }
+      if (stdoutFinalBuffer) {
+        let event = null;
+        try {
+          event = JSON.parse(stdoutFinalBuffer);
+          stdoutJsonlEvents.push(event);
+          const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
+          if (usage) capturedUsage = usage;
+          providerHarnessTrace('codex.cli.transcribeImage.stdout.final_jsonl_event', {
+            providerId: captureContext.providerId,
+            callSite: captureContext.callSite,
+            eventType: event?.type || '',
+            itemType: event?.item?.type || '',
+            jsonlEventCount: stdoutJsonlEvents.length,
+          });
+        } catch {
+          malformedStdoutLines.push(stdoutFinalBuffer);
+          providerHarnessTrace('codex.cli.transcribeImage.stdout.final_malformed_line', {
+            providerId: captureContext.providerId,
+            callSite: captureContext.callSite,
+            malformedLineCount: malformedStdoutLines.length,
+            byteLength: Buffer.byteLength(stdoutFinalBuffer, 'utf8'),
+          });
+        }
 
-      const tailDelta = extractDeltaFromEventLine(stdoutBuffer, seenAgentTextByItem);
-      if (tailDelta) fullResponse += tailDelta;
+        const tailDelta = extractDeltaFromEventLine(stdoutFinalBuffer, seenAgentTextByItem);
+        if (tailDelta) fullResponse += tailDelta;
+      }
 
       if (code !== 0 && !fullResponse.trim()) {
-        finishErr(new Error(formatCliFailure(code, stderrOutput)));
+        finishErr(new Error(formatCliFailure(code, stderrOutput)), {
+          outcome: 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+        });
         return;
       }
 
-      finishOk(fullResponse);
+      finishOk(fullResponse, {
+        outcome: code === 0 ? 'success' : 'process_error',
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+      });
     });
 
     child.on('error', (err) => {
       clearTimeout(timeout);
-      finishErr(err);
+      providerHarnessTrace('codex.cli.transcribeImage.process.error', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        errorName: err.name || 'Error',
+        errorCode: err.code || '',
+        errorMessage: err.message || '',
+      });
+      finishErr(err, { outcome: 'process_error' });
     });
   });
 }

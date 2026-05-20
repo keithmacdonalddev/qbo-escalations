@@ -179,6 +179,36 @@ async function externalizeResponseChunks(envelope, options) {
   return true;
 }
 
+async function externalizeCliTextChunks(envelope, streamName, options) {
+  const chunks = envelope.cli?.[streamName]?.chunks;
+  if (!Array.isArray(chunks) || chunks.length === 0) return false;
+
+  const textChunks = chunks
+    .map((chunk, index) => ({ chunk, index, text: typeof chunk?.text === 'string' ? chunk.text : null }))
+    .filter((entry) => entry.text !== null);
+  if (textChunks.length === 0) return false;
+
+  const totalBytes = textChunks.reduce((sum, entry) => sum + byteLength(entry.text), 0);
+  const hasOversizedChunk = textChunks.some((entry) => byteLength(entry.text) > options.maxInlineBytes);
+  if (totalBytes <= options.maxInlineBytes && !hasOversizedChunk) return false;
+
+  for (const entry of textChunks) {
+    const seq = Number.isInteger(entry.chunk.seq) ? entry.chunk.seq : entry.index;
+    const fieldPath = `cli.${streamName}.chunks[${seq}].text`;
+    const payloadRef = await writeExternalPayload(
+      envelope,
+      fieldPath,
+      entry.text,
+      options,
+      `cli_${streamName}_chunk`
+    );
+    entry.chunk.text = null;
+    entry.chunk.textPayloadRef = payloadRef;
+  }
+
+  return true;
+}
+
 async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   const prepared = envelope || {};
   const storage = ensureStorage(prepared);
@@ -253,6 +283,8 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
     externalized = await externalizeField(prepared, fieldPath, payloadOptions) || externalized;
   }
   externalized = await externalizeResponseChunks(prepared, payloadOptions) || externalized;
+  externalized = await externalizeCliTextChunks(prepared, 'stdout', payloadOptions) || externalized;
+  externalized = await externalizeCliTextChunks(prepared, 'stderr', payloadOptions) || externalized;
 
   storage.inline = !externalized && storage.externalPayloads.length === 0;
   storage.truncated = false;
