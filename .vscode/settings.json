@@ -1,0 +1,9 @@
+{
+  // Enables Copilot's dedicated skill tool, which is the precondition for
+  // `context: fork` in Claude Code SKILL.md frontmatter. Setting this to true
+  // satisfies the validator in
+  // src/vs/workbench/contrib/chat/common/promptSyntax/languageProviders/promptValidator.ts
+  // and silences the "context: fork attribute requires the skill tool to be
+  // enabled" hint on .claude/skills/*/SKILL.md files.
+  "github.copilot.chat.skillTool.enabled": true
+}

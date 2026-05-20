@@ -38,6 +38,25 @@ npm run build        # Vite production build (client only)
 npm start            # Production server
 ```
 
+## Runtime Ownership And Server Control
+
+The user owns local runtime control. Agents must not start, stop, restart, reload, or replace the app server, client dev server, gateway, MongoDB process, or any long-running local service unless the user explicitly asks for that runtime action in the current conversation.
+
+This includes `npm run dev`, `npm run dev:server`, `npm --prefix server run dev`, `npm start`, `nodemon` restarts, typing `rs`, `Stop-Process`, `taskkill`, killing port owners, or launching hidden/background server processes.
+
+Allowed without changing runtime state:
+
+- Check ports and process owners.
+- Read logs.
+- Call health endpoints.
+- Explain what needs to be restarted.
+
+If a config/code change requires a restart, make the change and tell the user exactly what to restart. Do not perform the restart unless asked.
+
+If a port conflict such as `EADDRINUSE` occurs, first identify the current port owner and whether it is serving the app. Preserve a healthy live instance by default. Ask before killing or replacing it unless the user has already explicitly said to close that process.
+
+Test commands may run their own short-lived isolated test servers when that is part of the test runner, but do not leave persistent dev or production services running after verification.
+
 ## Key Files
 
 | File                            | Purpose                                            |

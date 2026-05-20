@@ -5,6 +5,7 @@ import ImageParserPopup from '../chat/ImageParserPopup.jsx';
 import '../chat/ImageParserPopup.css';
 import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
+import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
 import { apiFetchJson } from '../../api/http.js';
 import { getEventStats } from '../../api/chatApi.js';
 import {
@@ -12,6 +13,7 @@ import {
   getAgentRuntimeProviderLabel,
 } from '../../lib/agentRuntimeSettings.js';
 import { getProviderMeta } from '../../lib/providerCatalog.js';
+import { AGENT_PROFILE_UPDATED_EVENT } from '../../lib/agentIdentityEvents.js';
 import {
   readPipelineProfileRuntimeStates,
   readPipelineRuntimeStatesSync,
@@ -26,6 +28,7 @@ const WORKFLOW_STEPS = [
   { key: 'triage', number: 4, label: 'Triage Agent', runtimeId: 'triage-agent', agentId: 'triage-agent' },
   { key: 'main', number: 5, label: 'QBO Assistant', runtimeId: 'chat', agentId: 'chat' },
 ];
+const WORKFLOW_AGENT_IDS = new Set(WORKFLOW_STEPS.map((step) => step.agentId));
 
 const TEMPLATE_FIELDS = [
   {
@@ -248,6 +251,82 @@ function cleanValue(value) {
   if (typeof value === 'string') return value.trim();
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+function getProfileAgentLabel(agent, fallbackLabel) {
+  return cleanValue(agent?.profile?.roleTitle)
+    || cleanValue(agent?.profile?.displayName)
+    || fallbackLabel;
+}
+
+function buildStageLabels(steps) {
+  return Object.fromEntries(steps.map((step) => [step.key, step.label]));
+}
+
+function usePipelineAgentLabels() {
+  const [labelsByAgentId, setLabelsByAgentId] = useState({});
+
+  const applyAgentLabel = useCallback((agent) => {
+    const matchingStep = WORKFLOW_STEPS.find((step) => step.agentId === agent?.agentId);
+    if (!matchingStep) return;
+
+    const nextLabel = getProfileAgentLabel(agent, matchingStep.label);
+    setLabelsByAgentId((previous) => (
+      previous[matchingStep.agentId] === nextLabel
+        ? previous
+        : { ...previous, [matchingStep.agentId]: nextLabel }
+    ));
+  }, []);
+
+  const refreshAgentLabels = useCallback(async () => {
+    try {
+      const agents = await listAgentIdentities();
+      const nextLabels = {};
+      for (const agent of Array.isArray(agents) ? agents : []) {
+        if (!WORKFLOW_AGENT_IDS.has(agent?.agentId)) continue;
+        const matchingStep = WORKFLOW_STEPS.find((step) => step.agentId === agent.agentId);
+        if (matchingStep) {
+          nextLabels[agent.agentId] = getProfileAgentLabel(agent, matchingStep.label);
+        }
+      }
+      setLabelsByAgentId(nextLabels);
+    } catch {
+      // Static workflow labels remain usable if the profile roster cannot load.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshAgentLabels();
+
+    const handleProfileUpdated = (event) => {
+      const agentId = event?.detail?.agentId;
+      if (!WORKFLOW_AGENT_IDS.has(agentId)) return;
+
+      if (event.detail?.agent) {
+        applyAgentLabel(event.detail.agent);
+      } else {
+        refreshAgentLabels();
+      }
+    };
+
+    window.addEventListener(AGENT_PROFILE_UPDATED_EVENT, handleProfileUpdated);
+    return () => {
+      window.removeEventListener(AGENT_PROFILE_UPDATED_EVENT, handleProfileUpdated);
+    };
+  }, [applyAgentLabel, refreshAgentLabels]);
+
+  const workflowSteps = useMemo(
+    () => WORKFLOW_STEPS.map((step) => ({
+      ...step,
+      label: labelsByAgentId[step.agentId] || step.label,
+    })),
+    [labelsByAgentId]
+  );
+
+  return useMemo(() => ({
+    workflowSteps,
+    stageLabels: buildStageLabels(workflowSteps),
+  }), [workflowSteps]);
 }
 
 function fieldsByKey(parsedFields) {
@@ -929,6 +1008,7 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
 }
 
 function WorkflowLane({
+  workflowSteps = WORKFLOW_STEPS,
   imageCaptured,
   capturedImageSrc,
   onCapture,
@@ -967,7 +1047,7 @@ function WorkflowLane({
           <PipelineConnector active={imageCaptured} />
         </>
       )}
-      {WORKFLOW_STEPS.map((step, index) => (
+      {workflowSteps.map((step, index) => (
         <div className="v5-workflow-lane__group" key={step.key}>
           <WorkflowCard
             step={step}
@@ -984,7 +1064,7 @@ function WorkflowLane({
             eventCount={liveEventCounts?.[step.key] || 0}
             estimatedEvents={eventEstimates?.byStage?.[step.key]?.avg || 0}
           />
-          {index < WORKFLOW_STEPS.length - 1 && (
+          {index < workflowSteps.length - 1 && (
             <PipelineConnector
               active={
                 (step.key === 'parser' && parserDone)
@@ -1071,7 +1151,7 @@ function DockSection({ id, icon, title, open, onToggle, onCollapseAll, onSolo, o
   );
 }
 
-function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, onMarkTestResult }) {
+function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, onMarkTestResult, agentLabel = 'Image Parser' }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewZoom, setPreviewZoom] = useState(100);
   const [markingStatus, setMarkingStatus] = useState('');
@@ -1175,7 +1255,7 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
   return (
     <div className="v5-template-output" data-status={status}>
       {previewModal}
-      <TestBanner run={testRun} agentLabel="Image Parser" onClear={onClearTest} />
+      <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
       {testRun && testRun.status !== 'idle' && (
         <div className={`v5-dock-inline-status${canonicalValidation?.passed === false ? ' is-warning' : ''}`}>
           {testFixture?.name
@@ -1256,7 +1336,7 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
   );
 }
 
-function TriageOutput({ stage, card, testRun, onClearTest }) {
+function TriageOutput({ stage, card, testRun, onClearTest, agentLabel = 'Triage Agent' }) {
   const viewStage = testStageFromRun(testRun, stage);
   const testCard = testRun?.data?.triageCard || null;
   const displayCard = testCard || card;
@@ -1276,7 +1356,7 @@ function TriageOutput({ stage, card, testRun, onClearTest }) {
   if (isFailed) {
     return (
       <div className="v5-output-stack">
-        <TestBanner run={testRun} agentLabel="Triage Agent" onClear={onClearTest} />
+        <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
         <div className="v5-empty-state v5-empty-state--error">
           <Icon name="alert" size={44} />
           <span>{viewStage?.error || 'Triage failed.'}</span>
@@ -1288,7 +1368,7 @@ function TriageOutput({ stage, card, testRun, onClearTest }) {
   if (!isDone || !displayCard) {
     return (
       <div className="v5-output-stack">
-        <TestBanner run={testRun} agentLabel="Triage Agent" onClear={onClearTest} />
+        <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
         <div className="v5-empty-state">
           {isRunning ? <span className="v5-empty-state__spinner" /> : <Icon name="clipboard" size={45} />}
           <span>
@@ -1303,7 +1383,7 @@ function TriageOutput({ stage, card, testRun, onClearTest }) {
 
   return (
     <div className="v5-triage-panel">
-      <TestBanner run={testRun} agentLabel="Triage Agent" onClear={onClearTest} />
+      <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
       <div className="v5-triage-panel__meta">
         <span className={`v5-severity v5-severity--${severity.toLowerCase()}`}>{severity}</span>
         {category && <span className="v5-triage-panel__category">{category}</span>}
@@ -1342,7 +1422,7 @@ function TriageOutput({ stage, card, testRun, onClearTest }) {
   );
 }
 
-function InvOutput({ stage, invMatches, testRun, onClearTest }) {
+function InvOutput({ stage, invMatches, testRun, onClearTest, agentLabel = 'INV Search Agent' }) {
   const viewStage = testStageFromRun(testRun, stage);
   const status = viewStage?.status || 'pending';
   const matches = Array.isArray(testRun?.data?.matches) ? testRun.data.matches : (Array.isArray(invMatches) ? invMatches : []);
@@ -1350,7 +1430,7 @@ function InvOutput({ stage, invMatches, testRun, onClearTest }) {
   if (status === 'failed') {
     return (
       <div className="v5-output-stack">
-        <TestBanner run={testRun} agentLabel="INV Search Agent" onClear={onClearTest} />
+        <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
         <div className="v5-empty-state v5-empty-state--error">
           <Icon name="alert" size={44} />
           <span>{viewStage?.error || 'INV search failed.'}</span>
@@ -1362,7 +1442,7 @@ function InvOutput({ stage, invMatches, testRun, onClearTest }) {
   if (status !== 'done') {
     return (
       <div className="v5-output-stack">
-        <TestBanner run={testRun} agentLabel="INV Search Agent" onClear={onClearTest} />
+        <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
         <div className="v5-empty-state">
           {status === 'running' ? <span className="v5-empty-state__spinner" /> : <Icon name="search" size={54} />}
           <span>{status === 'running' ? 'Searching for matching INV cases.' : 'Matching INV cases will appear here.'}</span>
@@ -1374,7 +1454,7 @@ function InvOutput({ stage, invMatches, testRun, onClearTest }) {
   if (matches.length === 0) {
     return (
       <div className="v5-output-stack">
-        <TestBanner run={testRun} agentLabel="INV Search Agent" onClear={onClearTest} />
+        <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
         <div className="v5-empty-state">
           <Icon name="search" size={54} />
           <span>No INV matches were found.</span>
@@ -1385,7 +1465,7 @@ function InvOutput({ stage, invMatches, testRun, onClearTest }) {
 
   return (
     <div className="v5-inv-results">
-      <TestBanner run={testRun} agentLabel="INV Search Agent" onClear={onClearTest} />
+      <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
       {matches.map((match) => (
         <article className={`v5-inv-result${match.best ? ' is-best' : ''}`} key={match.id}>
           <header>
@@ -1404,7 +1484,19 @@ function InvOutput({ stage, invMatches, testRun, onClearTest }) {
   );
 }
 
-function EvidenceDock({ caseIntake, parsedFields, triageCard, invMatches, stageState, testRuns, onClearStageTest, onMarkParserTestResult, parserThumbnail, onParserThumbnailClick }) {
+function EvidenceDock({
+  caseIntake,
+  parsedFields,
+  triageCard,
+  invMatches,
+  stageState,
+  testRuns,
+  onClearStageTest,
+  onMarkParserTestResult,
+  parserThumbnail,
+  onParserThumbnailClick,
+  stageLabels = buildStageLabels(WORKFLOW_STEPS),
+}) {
   const [openSections, setOpenSections] = useState({
     template: true,
     triage: true,
@@ -1428,7 +1520,7 @@ function EvidenceDock({ caseIntake, parsedFields, triageCard, invMatches, stageS
       <DockSection
         id="template"
         icon="clipboard"
-        title="Image Parser"
+        title={stageLabels.parser || 'Image Parser'}
         open={openSections.template}
         onToggle={() => toggle('template')}
         onCollapseAll={collapseAll}
@@ -1453,13 +1545,14 @@ function EvidenceDock({ caseIntake, parsedFields, triageCard, invMatches, stageS
           testRun={testRuns?.parser}
           onClearTest={() => onClearStageTest('parser')}
           onMarkTestResult={onMarkParserTestResult}
+          agentLabel={stageLabels.parser || 'Image Parser'}
         />
       </DockSection>
 
       <DockSection
         id="triage"
         icon="shield"
-        title="Triage Agent"
+        title={stageLabels.triage || 'Triage Agent'}
         open={openSections.triage}
         onToggle={() => toggle('triage')}
         onCollapseAll={collapseAll}
@@ -1471,13 +1564,14 @@ function EvidenceDock({ caseIntake, parsedFields, triageCard, invMatches, stageS
           card={card}
           testRun={testRuns?.triage}
           onClearTest={() => onClearStageTest('triage')}
+          agentLabel={stageLabels.triage || 'Triage Agent'}
         />
       </DockSection>
 
       <DockSection
         id="inv"
         icon="search"
-        title="INV Search Agent"
+        title={stageLabels.inv || 'INV Search Agent'}
         open={openSections.inv}
         onToggle={() => toggle('inv')}
         onCollapseAll={collapseAll}
@@ -1489,13 +1583,14 @@ function EvidenceDock({ caseIntake, parsedFields, triageCard, invMatches, stageS
           invMatches={invMatches}
           testRun={testRuns?.inv}
           onClearTest={() => onClearStageTest('inv')}
+          agentLabel={stageLabels.inv || 'INV Search Agent'}
         />
       </DockSection>
     </aside>
   );
 }
 
-function AnalystBubble({ role, text, isStreaming }) {
+function AnalystBubble({ role, text, isStreaming, agentLabel = 'QBO Assistant' }) {
   const isOperator = role === 'operator';
   const lines = cleanValue(text).split('\n');
 
@@ -1503,7 +1598,7 @@ function AnalystBubble({ role, text, isStreaming }) {
     <article className={`v5-analyst-message${isOperator ? ' is-operator' : ''}`}>
       <div className="v5-analyst-message__avatar">{isOperator ? 'AD' : 'QA'}</div>
       <div className="v5-analyst-message__content">
-        {!isOperator && <span className="v5-analyst-message__name">QBO Assistant</span>}
+        {!isOperator && <span className="v5-analyst-message__name">{agentLabel}</span>}
         <div className="v5-analyst-message__bubble">
           {lines.filter((line, index) => line || index === 0).map((line, index) => (
             <p key={`${line}-${index}`}>{line || ' '}</p>
@@ -1516,6 +1611,8 @@ function AnalystBubble({ role, text, isStreaming }) {
 }
 
 function AnalystWorkbench({
+  workflowSteps = WORKFLOW_STEPS,
+  stageLabels = buildStageLabels(WORKFLOW_STEPS),
   stageState,
   analyst,
   chatLog,
@@ -1568,12 +1665,13 @@ function AnalystWorkbench({
   };
 
   const mainTabActive = activeTabId === 'main';
+  const mainAgentLabel = stageLabels.main || 'QBO Assistant';
   const activeStageLogStep = !mainTabActive
-    ? WORKFLOW_STEPS.find((s) => s.key === activeTabId)
+    ? workflowSteps.find((s) => s.key === activeTabId)
     : null;
 
   return (
-    <section className="v5-analyst-workbench" aria-label="QBO Assistant response">
+    <section className="v5-analyst-workbench" aria-label={`${mainAgentLabel} response`}>
       <header className="v5-analyst-workbench__header">
         <div className="v5-workbench-tabs" role="tablist" aria-label="Workbench tabs">
           <button
@@ -1583,11 +1681,11 @@ function AnalystWorkbench({
             className={`v5-workbench-tab v5-workbench-tab--accent-main${mainTabActive ? ' is-active' : ''}`}
             onClick={() => onTabActivate?.('main')}
           >
-            <span className="v5-workbench-tab__label">QBO Assistant</span>
+            <span className="v5-workbench-tab__label">{mainAgentLabel}</span>
           </button>
           {openStageTabs.map((stageKey) => {
-            const step = WORKFLOW_STEPS.find((s) => s.key === stageKey);
-            const label = step?.label || stageKey;
+            const step = workflowSteps.find((s) => s.key === stageKey);
+            const label = stageLabels[stageKey] || step?.label || stageKey;
             const isActive = activeTabId === stageKey;
             return (
               <button
@@ -1646,22 +1744,22 @@ function AnalystWorkbench({
         <>
           <div className="v5-analyst-workbench__thread" ref={threadRef}>
             {hasTestRun && (
-              <TestBanner run={testRun} agentLabel="QBO Assistant" onClear={onClearTest} />
+              <TestBanner run={testRun} agentLabel={mainAgentLabel} onClear={onClearTest} />
             )}
             {testRunning && (
               <div className="v5-analyst-waiting">
                 <span className="v5-empty-state__spinner" />
-                Running QBO Assistant test with the fixture escalation.
+                Running {mainAgentLabel} test with the fixture escalation.
               </div>
             )}
             {testFailed && (
               <div className="v5-dock-alert">
                 <Icon name="alert" size={16} />
-                {cleanValue(testRun.error?.message || testRun.error) || 'QBO Assistant test failed.'}
+                {cleanValue(testRun.error?.message || testRun.error) || `${mainAgentLabel} test failed.`}
               </div>
             )}
             {testDone && cleanValue(testRun.data?.text) && (
-              <AnalystBubble role="analyst-stream" text={testRun.data.text} isStreaming={false} />
+              <AnalystBubble role="analyst-stream" text={testRun.data.text} isStreaming={false} agentLabel={mainAgentLabel} />
             )}
             {messages.map((entry, index) => (
               <AnalystBubble
@@ -1669,6 +1767,7 @@ function AnalystWorkbench({
                 role={entry.role}
                 text={entry.text}
                 isStreaming={entry.isStreaming}
+                agentLabel={mainAgentLabel}
               />
             ))}
             {mainStatus === 'running' && messages.length === 0 && (
@@ -1680,12 +1779,12 @@ function AnalystWorkbench({
             {(mainStatus === 'failed' || requestError) && messages.length === 0 && (
               <div className="v5-dock-alert">
                 <Icon name="alert" size={16} />
-                {stageState.main.error || requestError?.message || 'QBO Assistant failed.'}
+                {stageState.main.error || requestError?.message || `${mainAgentLabel} failed.`}
               </div>
             )}
             {!hasTestRun && !isBusy && messages.length === 0 && !requestError && (
               <div className="v5-analyst-waiting">
-                QBO Assistant is ready.
+                {mainAgentLabel} is ready.
               </div>
             )}
           </div>
@@ -1700,7 +1799,7 @@ function AnalystWorkbench({
                   send();
                 }
               }}
-              placeholder={canReply ? 'Message QBO Assistant' : 'QBO Assistant is still running'}
+              placeholder={canReply ? `Message ${mainAgentLabel}` : `${mainAgentLabel} is still running`}
               disabled={!canReply}
               rows={2}
             />
@@ -1717,6 +1816,7 @@ function AnalystWorkbench({
           liveEvents={stageEvents}
           eventCount={liveEventCounts?.[activeStageLogStep?.key || activeTabId] || 0}
           estimatedEvents={eventEstimates?.byStage?.[activeStageLogStep?.key || activeTabId]?.avg || 0}
+          stageLabels={stageLabels}
         />
       )}
     </section>
@@ -1742,6 +1842,7 @@ export default function ChatV5Container({ isActive = true }) {
     sendOperatorMessage,
     requestError,
   } = useStageOrchestrator();
+  const { workflowSteps, stageLabels } = usePipelineAgentLabels();
   // Moving-average denominator per stage, fetched once on mount and refreshed
   // after each completed pipeline run so the bar tracks recent reality. The
   // server response is cheap (capped scan + projection) so this stays light.
@@ -2127,6 +2228,7 @@ export default function ChatV5Container({ isActive = true }) {
     <div className={`v5-shell${started ? ' is-started' : ''}${dockCollapsed ? ' is-dock-collapsed' : ''}${isState4 ? ' is-state-4' : ''}`}>
       <main className="v5-console">
         <WorkflowLane
+          workflowSteps={workflowSteps}
           imageCaptured={imageCaptured}
           capturedImageSrc={capturedImageSrc}
           onCapture={captureImage}
@@ -2146,6 +2248,8 @@ export default function ChatV5Container({ isActive = true }) {
           eventEstimates={eventEstimates}
         />
         <AnalystWorkbench
+          workflowSteps={workflowSteps}
+          stageLabels={stageLabels}
           stageState={stageState}
           analyst={analyst}
           chatLog={chatLog}
@@ -2166,6 +2270,7 @@ export default function ChatV5Container({ isActive = true }) {
       </main>
       <div className={`v5-evidence-dock-wrap${dockCollapsed ? ' is-leaving' : ''}`} aria-hidden={dockCollapsed}>
         <EvidenceDock
+          stageLabels={stageLabels}
           caseIntake={caseIntake}
           parsedFields={parsedFields}
           triageCard={triageCard}

@@ -371,6 +371,7 @@ export default function StageEventLogPanel({
   liveEvents,
   eventCount = 0,
   estimatedEvents = 0,
+  stageLabels = {},
 }) {
   const [autoScroll, setAutoScroll] = useState(true);
   const threadRef = useRef(null);
@@ -392,7 +393,7 @@ export default function StageEventLogPanel({
     : (savedList.length > 0 ? 'saved' : 'session');
   const showSourceBadge = !(isParserStage && liveList.length > 0);
   const statusLabel = deriveStatusLabel(stageId, events, conversation?.caseIntake);
-  const resolvedLabel = STAGE_LABELS[stageId] || stageId;
+  const resolvedLabel = stageLabels[stageId] || STAGE_LABELS[stageId] || stageId;
 
   // Counter + progress bar. Counts only `run`-category events — UI events
   // (popup open/close, replay-skipped) are still rendered in the thread for

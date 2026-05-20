@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const path = require('path');
+const { providerHarnessTrace } = require('../lib/provider-harness-trace');
 
 const DEFAULT_INLINE_TEXT_MAX_BYTES = 512 * 1024;
 
@@ -106,6 +107,15 @@ async function writeExternalPayload(envelope, fieldPath, text, options, fallback
   };
 
   envelope.storage.externalPayloads.push(payloadRef);
+  providerHarnessTrace('provider-call-package.payload_store.writeExternalPayload.done', {
+    providerId: envelope?.providerId || '',
+    callSite: envelope?.callSite || '',
+    packageId: String(options.packageId || ''),
+    fieldPath,
+    kind: payloadRef.kind,
+    byteLength: size,
+    ref,
+  });
   return payloadRef;
 }
 
@@ -129,6 +139,13 @@ async function externalizeField(envelope, fieldPath, options) {
 
   writePath(envelope, fieldPath, null);
   attachPayloadRef(envelope, fieldPath, payloadRef);
+  providerHarnessTrace('provider-call-package.payload_store.externalizeField.done', {
+    providerId: envelope?.providerId || '',
+    callSite: envelope?.callSite || '',
+    fieldPath,
+    byteLength: size,
+    kind: payloadRef.kind,
+  });
   return true;
 }
 
@@ -185,6 +202,13 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   if (!payloadOptions.packageId) {
     throw new Error('packageId is required for provider call package payload storage');
   }
+  providerHarnessTrace('provider-call-package.payload_store.enter', {
+    providerId: prepared?.providerId || '',
+    callSite: prepared?.callSite || '',
+    packageId: String(payloadOptions.packageId),
+    payloadRoot: payloadOptions.payloadRoot,
+    maxInlineBytes: payloadOptions.maxInlineBytes,
+  });
 
   const fields = options.fields || [
     'request.bodyText',
@@ -216,6 +240,12 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
           derivedFrom: 'request.bodyText',
         });
         addStorageNote(storage, 'request.bodyJson omitted because it duplicates externalized request.bodyText');
+        providerHarnessTrace('provider-call-package.payload_store.duplicate_request_body_json.omitted', {
+          providerId: prepared?.providerId || '',
+          callSite: prepared?.callSite || '',
+          packageId: String(payloadOptions.packageId),
+          derivedFrom: 'request.bodyText',
+        });
         externalized = true;
         continue;
       }
@@ -227,6 +257,14 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   storage.inline = !externalized && storage.externalPayloads.length === 0;
   storage.truncated = false;
   storage.truncationReason = null;
+  providerHarnessTrace('provider-call-package.payload_store.done', {
+    providerId: prepared?.providerId || '',
+    callSite: prepared?.callSite || '',
+    packageId: String(payloadOptions.packageId),
+    inline: Boolean(storage.inline),
+    externalPayloadCount: storage.externalPayloads.length,
+    notes: storage.notes,
+  });
   return prepared;
 }
 

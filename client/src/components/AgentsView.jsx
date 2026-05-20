@@ -34,6 +34,7 @@ import {
   readAgentRuntimeState,
   writeAgentRuntimeState,
 } from '../lib/agentRuntimeSettings.js';
+import { dispatchAgentProfileUpdated } from '../lib/agentIdentityEvents.js';
 import {
   IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserReasoningEffortOptions,
@@ -537,6 +538,7 @@ function AgentsView({ agentIdFromRoute = null }) {
         setAgents((previous) =>
           previous.map((agent) => (agent.agentId === updated.agentId ? updated : agent))
         );
+        dispatchAgentProfileUpdated(updated);
       }
       setProfileSummary('');
     } catch (err) {
@@ -1237,7 +1239,7 @@ function AgentLifecycleRunModal({ run, agentName, requestState, onClose }) {
               <LifecycleStepList steps={steps} onStepSelect={handleSelectStep} />
             </div>
 
-            <div className="lifecycle-modal-pane" aria-hidden={!selectedStep ? 'true' : undefined} inert={!selectedStep ? true : undefined}>
+            <div className="lifecycle-modal-pane lifecycle-detail-pane" aria-hidden={!selectedStep ? 'true' : undefined} inert={!selectedStep ? true : undefined}>
               <header className="lifecycle-detail-header">
                 <button type="button" className="lifecycle-back-button" onClick={handleBackToStream}>
                   <span aria-hidden="true">&lsaquo;</span>
@@ -2875,6 +2877,42 @@ function LifecycleStepDetail({ step }) {
 
 function LifecycleJsonEditor({ value }) {
   const lines = value.split('\n');
+  const viewportRef = useRef(null);
+  const codeRef = useRef(null);
+  const [visibleLineCount, setVisibleLineCount] = useState(lines.length);
+  const displayLineCount = Math.max(lines.length, visibleLineCount);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    const code = codeRef.current;
+    if (!viewport || !code) return undefined;
+
+    const updateVisibleLineCount = () => {
+      const viewportStyle = window.getComputedStyle(viewport);
+      const codeStyle = window.getComputedStyle(code);
+      const lineHeight = parseFloat(viewportStyle.lineHeight) || 18;
+      const verticalPadding =
+        (parseFloat(codeStyle.paddingTop) || 0) + (parseFloat(codeStyle.paddingBottom) || 0);
+      const availableHeight = Math.max(0, viewport.clientHeight - verticalPadding);
+      const nextLineCount = Math.max(lines.length, Math.ceil(availableHeight / lineHeight));
+      setVisibleLineCount((current) => (current === nextLineCount ? current : nextLineCount));
+    };
+
+    updateVisibleLineCount();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateVisibleLineCount);
+      return () => window.removeEventListener('resize', updateVisibleLineCount);
+    }
+
+    const resizeObserver = new ResizeObserver(updateVisibleLineCount);
+    resizeObserver.observe(viewport);
+    window.addEventListener('resize', updateVisibleLineCount);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateVisibleLineCount);
+    };
+  }, [lines.length]);
 
   return (
     <section className="lifecycle-code-editor" aria-label="Stored lifecycle JSON">
@@ -2887,14 +2925,22 @@ function LifecycleJsonEditor({ value }) {
         <span className="lifecycle-editor-title">lifecycle-step.json</span>
         <span className="lifecycle-editor-badge">JSON</span>
       </div>
-      <pre className="lifecycle-step-json">
-        <code>
-          {lines.map((line, index) => (
-            <span className="lifecycle-code-line" key={`${index}-${line}`}>
-              <span className="lifecycle-code-gutter">{index + 1}</span>
-              <span className="lifecycle-code-text">{renderJsonLine(line)}</span>
-            </span>
-          ))}
+      <pre className="lifecycle-step-json" ref={viewportRef}>
+        <code ref={codeRef}>
+          {Array.from({ length: displayLineCount }, (_, index) => {
+            const line = lines[index] ?? '';
+            const isFillerLine = index >= lines.length;
+
+            return (
+              <span
+                className={`lifecycle-code-line${isFillerLine ? ' is-filler' : ''}`}
+                key={`${index}-${isFillerLine ? 'filler' : line}`}
+              >
+                <span className="lifecycle-code-gutter">{index + 1}</span>
+                <span className="lifecycle-code-text">{isFillerLine ? ' ' : renderJsonLine(line)}</span>
+              </span>
+            );
+          })}
         </code>
       </pre>
       <div className="lifecycle-editor-statusbar">

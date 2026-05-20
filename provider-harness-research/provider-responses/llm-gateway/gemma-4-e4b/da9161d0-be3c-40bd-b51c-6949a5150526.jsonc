@@ -1,0 +1,210 @@
+//   Provider package record:
+
+//   ProviderCallPackage ID: 6a0dd20ffad882ae9170dbb8
+//   ImageParseResult ID:   6a0dd20ffad882ae9170dbbb
+//   Provider:             llm-gateway
+//   Model returned:        google/gemma-4-e4b
+//   Outcome:              success
+//   HTTP status:           200 OK
+//   Captured at:           2026-05-20T15:23:59.608Z
+//   Provider duration:     31.665s
+
+//   This is the full provider response package that landed in MongoDB. The raw provider body is in response.bodyText; Mongo also stored
+//   the parsed copy in response.parsedJson.
+
+  {
+    "response": {
+      "received": true,
+      "statusCode": 200,
+      "statusMessage": "OK",
+      "httpVersion": "1.1",
+      "headers": {
+        "x-request-id": "da9161d0-be3c-40bd-b51c-6949a5150526",
+        "content-type": "application/json; charset=utf-8",
+        "content-length": "3499",
+        "etag": "W/\"dab-jqOsqGSftuZfEvefMNl3AiQVYw4\"",
+        "date": "Wed, 20 May 2026 15:23:59 GMT",
+        "connection": "keep-alive",
+        "keep-alive": "timeout=5"
+      },
+      "rawHeaders": [
+        "X-Request-Id",
+        "da9161d0-be3c-40bd-b51c-6949a5150526",
+        "Content-Type",
+        "application/json; charset=utf-8",
+        "Content-Length",
+        "3499",
+        "ETag",
+        "W/\"dab-jqOsqGSftuZfEvefMNl3AiQVYw4\"",
+        "Date",
+        "Wed, 20 May 2026 15:23:59 GMT",
+        "Connection",
+        "keep-alive",
+        "Keep-Alive",
+        "timeout=5"
+      ],
+      "trailers": {},
+      "rawTrailers": [],
+      "bodyChunks": [
+        {
+          "seq": 0,
+          "receivedAt": "2026-05-20T15:23:59.537Z",
+          "byteLength": 3499,
+          "sha256": "1ca9824cf98dac1f92f5460d64934963841caa85132a12a13a440a12c21874a1",
+          "text": "{\"id\":\"chatcmpl-jbw9bvnbeaojwkfis70q7\",\"object\":\"chat.completion\",\"created\":1779290608,\"model\":\"google/
+  gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The user wants me to act as an Image Parser
+  for the QBO escalation workflow.\\nI need to extract specific fields from the provided screenshot based on a strict template and
+  rules.\\n\\nFields to output (in order):\\nCOID/MID:\\nCASE:\\nCLIENT/CONTACT:\\nCX IS ATTEMPTING TO:\\nEXPECTED OUTCOME:\\nACTUAL
+  OUTCOME:\\nKB/TOOLS USED:\\nTRIED TEST ACCOUNT:\\nTS STEPS:\\n\\nRules check:\\n- Output no commentary, no markdown, no bullets, and
+  no extra headings.\\n- Read every visible value exactly as written.\\n- Preserve spelling, capitalization, punctuation, identifiers,
+  and line breaks.\\n- If a value is missing, hidden, blank, or unreadable, leave the value blank after the label.\\n- Do not include
+  AGENT, CATEGORY, SEVERITY, OPERATOR NOTE, or any other non-canonical field.\\n- Do not diagnose, summarize, rewrite, or infer what
+  the customer means.\\n- If COID and MID are both visible, include both in COID/MID separated by a slash.\\n- TS STEPS may be multi-
+  line and should preserve visible line breaks.\\n\\nScanning the image for data:\\n\\nCOID/MID: Visible as \\\"COID/MID:
+  934152/1974835\\\" (Assuming COID is 934152 and MID is 1974835, or reading what's visible). The image shows \\\"COID/MID:
+  934152/1974835\\\".\\nCASE: Visible as \\\"CASE: 15154392\\\".\\nCLIENT/CONTACT: Visible as \\\"CLIENT/CONTACT: Doug McKensie\\\".\
+  \nCX IS ATTEMPTING TO: Visible as \\\"CX IS ATTEMPTING TO: have the XMI for his T4 but for some reason it's failing to download the
+  XMI\\\".\\nEXPECTED OUTCOME: Visible as \\\"EXPECTED OUTCOME: I'm able to download the T4 summary when he's done with the XMI\\\".
+  (This seems slightly truncated/misread, let's re-examine the text block). The visible text is: \\\"EXPECTED OUTCOME: I'm able to
+  download the T4 summary when he's done with the XMI\\\".\\nACTUAL OUTCOME: Visible as \\\"ACTUAL OUTCOME: It's failing to download
+  the XMI\\\". (The full context suggests failure, but reading exactly what's there). The visible text is: \\\"ACTUAL OUTCOME: It's
+  failing to download the XMI\\\".\\nKB/TOOLS USED: Visible as \\\"KB/TOOLS USED: KB ARTICLES\\\".\\nTRIED TEST ACCOUNT: Visible as \\
+  \"TRIED TEST ACCOUNT: T4 summary\\\". (This seems like a placeholder or description, reading exactly). The visible text is: \\\"TRIED
+  TEST ACCOUNT: T4 summary\\\".\\nTS STEPS: Visible as a multi-line block.\\n\\nConstructing the output based on findings and
+  rules.<channel|>COID/MID: 934152/1974835\\nCASE: 15154392\\nCLIENT/CONTACT: Doug McKensie\\nCX IS ATTEMPTING TO: have the XMI for his
+  T4 but for some reason it's failing to download the XMI\\nEXPECTED OUTCOME: I'm able to download the T4 summary when he's done with
+  the XMI\\nACTUAL OUTCOME: It's failing to download the XMI\\nKB/TOOLS USED: KB ARTICLES\\nTRIED TEST ACCOUNT: T4 summary\\nTS STEPS:
+  \",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":567,
+  \"completion_tokens\":785,\"total_tokens\":1352,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},
+  \"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":567,\"completion_tokens\":785,
+  \"total_tokens\":1352},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.002835,\"completion_cost_usd\":0.019625,
+  \"total_cost_usd\":0.02246,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},
+  \"credits\":{\"balance_usd\":10097.54187,\"total_granted_usd\":10100,\"total_charged_usd\":2.45813}}}",
+          "textPayloadRef": null
+        }
+      ],
+      "bodyText": "{\"id\":\"chatcmpl-jbw9bvnbeaojwkfis70q7\",\"object\":\"chat.completion\",\"created\":1779290608,\"model\":\"google/
+  gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The user wants me to act as an Image Parser
+  for the QBO escalation workflow.\\nI need to extract specific fields from the provided screenshot based on a strict template and
+  rules.\\n\\nFields to output (in order):\\nCOID/MID:\\nCASE:\\nCLIENT/CONTACT:\\nCX IS ATTEMPTING TO:\\nEXPECTED OUTCOME:\\nACTUAL
+  OUTCOME:\\nKB/TOOLS USED:\\nTRIED TEST ACCOUNT:\\nTS STEPS:\\n\\nRules check:\\n- Output no commentary, no markdown, no bullets, and
+  no extra headings.\\n- Read every visible value exactly as written.\\n- Preserve spelling, capitalization, punctuation, identifiers,
+  and line breaks.\\n- If a value is missing, hidden, blank, or unreadable, leave the value blank after the label.\\n- Do not include
+  AGENT, CATEGORY, SEVERITY, OPERATOR NOTE, or any other non-canonical field.\\n- Do not diagnose, summarize, rewrite, or infer what
+  the customer means.\\n- If COID and MID are both visible, include both in COID/MID separated by a slash.\\n- TS STEPS may be multi-
+  line and should preserve visible line breaks.\\n\\nScanning the image for data:\\n\\nCOID/MID: Visible as \\\"COID/MID:
+  934152/1974835\\\" (Assuming COID is 934152 and MID is 1974835, or reading what's visible). The image shows \\\"COID/MID:
+  934152/1974835\\\".\\nCASE: Visible as \\\"CASE: 15154392\\\".\\nCLIENT/CONTACT: Visible as \\\"CLIENT/CONTACT: Doug McKensie\\\".\
+  \nCX IS ATTEMPTING TO: Visible as \\\"CX IS ATTEMPTING TO: have the XMI for his T4 but for some reason it's failing to download the
+  XMI\\\".\\nEXPECTED OUTCOME: Visible as \\\"EXPECTED OUTCOME: I'm able to download the T4 summary when he's done with the XMI\\\".
+  (This seems slightly truncated/misread, let's re-examine the text block). The visible text is: \\\"EXPECTED OUTCOME: I'm able to
+  download the T4 summary when he's done with the XMI\\\".\\nACTUAL OUTCOME: Visible as \\\"ACTUAL OUTCOME: It's failing to download
+  the XMI\\\". (The full context suggests failure, but reading exactly what's there). The visible text is: \\\"ACTUAL OUTCOME: It's
+  failing to download the XMI\\\".\\nKB/TOOLS USED: Visible as \\\"KB/TOOLS USED: KB ARTICLES\\\".\\nTRIED TEST ACCOUNT: Visible as \\
+  \"TRIED TEST ACCOUNT: T4 summary\\\". (This seems like a placeholder or description, reading exactly). The visible text is: \\\"TRIED
+  TEST ACCOUNT: T4 summary\\\".\\nTS STEPS: Visible as a multi-line block.\\n\\nConstructing the output based on findings and
+  rules.<channel|>COID/MID: 934152/1974835\\nCASE: 15154392\\nCLIENT/CONTACT: Doug McKensie\\nCX IS ATTEMPTING TO: have the XMI for his
+  T4 but for some reason it's failing to download the XMI\\nEXPECTED OUTCOME: I'm able to download the T4 summary when he's done with
+  the XMI\\nACTUAL OUTCOME: It's failing to download the XMI\\nKB/TOOLS USED: KB ARTICLES\\nTRIED TEST ACCOUNT: T4 summary\\nTS STEPS:
+  \",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":567,
+  \"completion_tokens\":785,\"total_tokens\":1352,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},
+  \"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":567,\"completion_tokens\":785,
+  \"total_tokens\":1352},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.002835,\"completion_cost_usd\":0.019625,
+  \"total_cost_usd\":0.02246,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},
+  \"credits\":{\"balance_usd\":10097.54187,\"total_granted_usd\":10100,\"total_charged_usd\":2.45813}}}",
+      "bodyByteLength": 3499,
+      "bodySha256": "1ca9824cf98dac1f92f5460d64934963841caa85132a12a13a440a12c21874a1",
+      "bodyPayloadRef": null,
+      "parsedJson": {
+        "id": "chatcmpl-jbw9bvnbeaojwkfis70q7",
+        "object": "chat.completion",
+        "created": 1779290608,
+        "model": "google/gemma-4-e4b",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "The user wants me to act as an Image Parser for the QBO escalation workflow.\nI need to extract specific
+  fields from the provided screenshot based on a strict template and rules.\n\nFields to output (in order):\nCOID/MID:\nCASE:\nCLIENT/
+  CONTACT:\nCX IS ATTEMPTING TO:\nEXPECTED OUTCOME:\nACTUAL OUTCOME:\nKB/TOOLS USED:\nTRIED TEST ACCOUNT:\nTS STEPS:\n\nRules check:\n-
+  Output no commentary, no markdown, no bullets, and no extra headings.\n- Read every visible value exactly as written.\n- Preserve
+  spelling, capitalization, punctuation, identifiers, and line breaks.\n- If a value is missing, hidden, blank, or unreadable, leave
+  the value blank after the label.\n- Do not include AGENT, CATEGORY, SEVERITY, OPERATOR NOTE, or any other non-canonical field.\n- Do
+  not diagnose, summarize, rewrite, or infer what the customer means.\n- If COID and MID are both visible, include both in COID/MID
+  separated by a slash.\n- TS STEPS may be multi-line and should preserve visible line breaks.\n\nScanning the image for data:\n\nCOID/
+  MID: Visible as \"COID/MID: 934152/1974835\" (Assuming COID is 934152 and MID is 1974835, or reading what's visible). The image shows
+  \"COID/MID: 934152/1974835\".\nCASE: Visible as \"CASE: 15154392\".\nCLIENT/CONTACT: Visible as \"CLIENT/CONTACT: Doug McKensie\".
+  \nCX IS ATTEMPTING TO: Visible as \"CX IS ATTEMPTING TO: have the XMI for his T4 but for some reason it's failing to download the
+  XMI\".\nEXPECTED OUTCOME: Visible as \"EXPECTED OUTCOME: I'm able to download the T4 summary when he's done with the XMI\". (This
+  seems slightly truncated/misread, let's re-examine the text block). The visible text is: \"EXPECTED OUTCOME: I'm able to download the
+  T4 summary when he's done with the XMI\".\nACTUAL OUTCOME: Visible as \"ACTUAL OUTCOME: It's failing to download the XMI\". (The full
+  context suggests failure, but reading exactly what's there). The visible text is: \"ACTUAL OUTCOME: It's failing to download the
+  XMI\".\nKB/TOOLS USED: Visible as \"KB/TOOLS USED: KB ARTICLES\".\nTRIED TEST ACCOUNT: Visible as \"TRIED TEST ACCOUNT: T4 summary\".
+  (This seems like a placeholder or description, reading exactly). The visible text is: \"TRIED TEST ACCOUNT: T4 summary\".\nTS STEPS:
+  Visible as a multi-line block.\n\nConstructing the output based on findings and rules.<channel|>COID/MID: 934152/1974835\nCASE:
+  15154392\nCLIENT/CONTACT: Doug McKensie\nCX IS ATTEMPTING TO: have the XMI for his T4 but for some reason it's failing to download
+  the XMI\nEXPECTED OUTCOME: I'm able to download the T4 summary when he's done with the XMI\nACTUAL OUTCOME: It's failing to download
+  the XMI\nKB/TOOLS USED: KB ARTICLES\nTRIED TEST ACCOUNT: T4 summary\nTS STEPS:",
+              "reasoning_content": "",
+              "tool_calls": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 567,
+          "completion_tokens": 785,
+          "total_tokens": 1352,
+          "completion_tokens_details": {
+            "reasoning_tokens": 0
+          }
+        },
+        "stats": {},
+        "system_fingerprint": "google/gemma-4-e4b",
+        "gateway": {
+          "usage": {
+            "prompt_tokens": 567,
+            "completion_tokens": 785,
+            "total_tokens": 1352
+          },
+          "cost": {
+            "currency": "USD",
+            "prompt_cost_usd": 0.002835,
+            "completion_cost_usd": 0.019625,
+            "total_cost_usd": 0.02246,
+            "prompt_cost_per_1m_usd": 5,
+            "completion_cost_per_1m_usd": 25,
+            "pricing_source": "default"
+          },
+          "credits": {
+            "balance_usd": 10097.54187,
+            "total_granted_usd": 10100,
+            "total_charged_usd": 2.45813
+          }
+        }
+      },
+      "jsonParseError": null,
+      "redactedHeaderNames": []
+    },
+    "timing": {
+      "requestStartedAt": "2026-05-20T15:23:27.873Z",
+      "requestWrittenAt": "2026-05-20T15:23:27.883Z",
+      "responseHeadersAt": "2026-05-20T15:23:59.536Z",
+      "responseCompletedAt": "2026-05-20T15:23:59.538Z",
+      "durationMs": 31665
+    },
+    "outcome": "success",
+    "error": null
+  }
+
+//   A few important details:
+
+//   - The provider response body was stored inline in Mongo.
+//   - The response body was not externalized because it was only 3,499 bytes.
+//   - The request image/body was large, so that request payload was externalized to:
+//   C:\Projects\qbo-escalations\server\data\provider-call-packages\2026-05-20\6a0dd20ffad882ae9170dbb8\request-bodyText.txt
+//   - The raw response hash stored in Mongo is:
+
+//   1ca9824cf98dac1f92f5460d64934963841caa85132a12a13a440a12c21874a1

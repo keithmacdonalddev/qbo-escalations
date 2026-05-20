@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
+const { providerHarnessTrace } = require('../lib/provider-harness-trace');
 
 const SECRET_HEADER_MARKERS = [
   'api-key',
@@ -161,6 +162,18 @@ function redactJsonTextField(container, fieldName, pathPrefix, redactedBodyPaths
 }
 
 function redactProviderCallPackage(envelope) {
+  providerHarnessTrace('provider-call-package.redaction.enter', {
+    providerId: envelope?.providerId || '',
+    providerResearchId: envelope?.providerResearchId || '',
+    callSite: envelope?.callSite || '',
+    hasRequestHeaders: Boolean(envelope?.request?.headers),
+    hasResponseHeaders: Boolean(envelope?.response?.headers),
+    hasRequestBodyJson: Boolean(envelope?.request?.bodyJson),
+    hasRequestBodyText: typeof envelope?.request?.bodyText === 'string',
+    hasResponseParsedJson: Boolean(envelope?.response?.parsedJson),
+    hasErrorObject: Boolean(envelope?.error?.object),
+    hasErrorRawBody: typeof envelope?.error?.rawBody === 'string',
+  });
   const redacted = cloneValue(envelope || {});
   const redactedHeaderNames = [];
   const redactedBodyPaths = [];
@@ -232,6 +245,13 @@ function redactProviderCallPackage(envelope) {
     notes,
   };
 
+  providerHarnessTrace('provider-call-package.redaction.done', {
+    providerId: redacted?.providerId || '',
+    callSite: redacted?.callSite || '',
+    headerCount: redactedHeaderNames.length,
+    bodyPathCount: redactedBodyPaths.length,
+    notes,
+  });
   return redacted;
 }
 

@@ -1982,6 +1982,14 @@
   padding: 18px;
 }
 
+.lifecycle-detail-pane {
+  display: flex;
+  flex-direction: column;
+  height: min(820px, calc(100vh - 48px));
+  min-height: 0;
+  overflow: hidden;
+}
+
 .lifecycle-modal-pane > header {
   display: flex;
   align-items: flex-start;
@@ -2213,46 +2221,53 @@
 }
 
 .lifecycle-step-detail {
-  display: grid;
-  gap: 12px;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .lifecycle-code-editor {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
   overflow: hidden;
-  border: 1px solid rgba(137, 167, 216, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
-  background: #050b13;
+  background: #030506;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 18px 48px rgba(0, 0, 0, 0.32);
+    inset 0 1px 0 rgba(255, 255, 255, 0.035),
+    0 18px 48px rgba(0, 0, 0, 0.36);
 }
 
 .lifecycle-editor-toolbar,
 .lifecycle-editor-statusbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
 }
 
 .lifecycle-editor-toolbar {
-  min-height: 36px;
-  padding: 0 12px;
-  border-bottom: 1px solid rgba(137, 167, 216, 0.16);
-  background: #101826;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #07090b;
 }
 
 .lifecycle-window-controls {
   display: inline-flex;
   flex: 0 0 auto;
-  gap: 6px;
+  gap: 5px;
 }
 
 .lifecycle-window-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 999px;
-  box-shadow: 0 0 12px currentColor;
+  box-shadow: 0 0 10px currentColor;
 }
 
 .lifecycle-window-dot.dot-red {
@@ -2273,8 +2288,8 @@
 .lifecycle-editor-title {
   min-width: 0;
   overflow: hidden;
-  color: #cbd7ea;
-  font-size: 0.76rem;
+  color: #e7e0cc;
+  font-size: 0.7rem;
   font-weight: 850;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2282,26 +2297,31 @@
 
 .lifecycle-editor-badge {
   margin-left: auto;
-  padding: 3px 7px;
-  border: 1px solid rgba(122, 166, 255, 0.28);
+  padding: 2px 6px;
+  border: 1px solid rgba(226, 190, 94, 0.42);
   border-radius: 6px;
-  background: rgba(28, 67, 138, 0.24);
-  color: #98bdff;
-  font-size: 0.68rem;
+  background: rgba(226, 190, 94, 0.1);
+  color: #f0d57a;
+  font-size: 0.62rem;
   font-weight: 900;
 }
 
 .lifecycle-step-json {
-  max-height: min(620px, calc(100vh - 210px));
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
   margin: 0;
   overflow: auto;
-  background:
-    linear-gradient(rgba(255, 255, 255, 0.025) 50%, transparent 50%) 0 0 / 100% 3.1em,
-    #07111d;
-  color: #d8e4f7;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: #010203 !important;
+  background-image: none !important;
+  background-position: initial !important;
+  background-size: auto !important;
+  color: #eee7d2 !important;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: 0.76rem;
-  line-height: 1.55;
+  font-size: 0.7rem;
+  line-height: 1.38;
   white-space: pre;
   word-break: normal;
 }
@@ -2309,64 +2329,72 @@
 .lifecycle-step-json code {
   display: block;
   min-width: max-content;
-  padding: 12px 0;
+  padding: 5px 0 0;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: inherit !important;
 }
 
 .lifecycle-code-line {
   display: flex;
-  min-height: 1.55em;
+  min-height: 1.38em;
 }
 
 .lifecycle-code-line:hover {
-  background: rgba(122, 166, 255, 0.08);
+  background: rgba(226, 190, 94, 0.1);
+}
+
+.lifecycle-code-line.is-filler .lifecycle-code-text {
+  color: transparent;
 }
 
 .lifecycle-code-gutter {
   position: sticky;
   left: 0;
-  flex: 0 0 44px;
-  padding-right: 12px;
-  border-right: 1px solid rgba(137, 167, 216, 0.14);
-  background: #07111d;
-  color: #61718a;
+  flex: 0 0 36px;
+  padding-right: 8px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: #030506;
+  color: #666b68;
   text-align: right;
   user-select: none;
 }
 
 .lifecycle-code-text {
   display: inline-block;
-  padding: 0 18px 0 14px;
+  padding: 0 14px 0 10px;
 }
 
 .json-token.token-key {
-  color: #8fc7ff;
+  color: #ff5365;
 }
 
 .json-token.token-string {
-  color: #b9f0cb;
+  color: #c8f59b;
 }
 
 .json-token.token-number {
-  color: #ffbd7a;
+  color: #f0d57a;
 }
 
 .json-token.token-boolean,
 .json-token.token-null {
-  color: #c4a7ff;
+  color: #65d8ef;
 }
 
 .json-token.token-punctuation {
-  color: #7f91aa;
+  color: #bcb39e;
 }
 
 .lifecycle-editor-statusbar {
-  min-height: 28px;
+  min-height: 22px;
   justify-content: space-between;
-  padding: 0 12px;
-  border-top: 1px solid rgba(137, 167, 216, 0.16);
-  background: #0c1420;
-  color: #8090a7;
-  font-size: 0.7rem;
+  padding: 0 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: #07090b;
+  color: #8e897c;
+  font-size: 0.64rem;
   font-weight: 750;
 }
 
