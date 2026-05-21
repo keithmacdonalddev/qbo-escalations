@@ -31,10 +31,6 @@ const {
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
 } = require('./provider-call-package-recorder');
-const {
-  providerHarnessTrace,
-  summarizeHttpBody,
-} = require('../lib/provider-harness-trace');
 
 // Anthropic Agent SDK provider adapter. Loaded lazily so the ESM-only SDK is
 // not imported at module load time, and so test fixtures can substitute the
@@ -794,23 +790,7 @@ function resolveTransport(baseUrl) {
 }
 
 async function recordCapturedHttpPackage(captureInput) {
-  providerHarnessTrace('image-parser.recordCapturedHttpPackage.enter', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    operation: captureInput?.captureContext?.operation || '',
-    statusCode: captureInput?.response?.statusCode || 0,
-    outcome: captureInput?.outcome || '',
-    hasError: Boolean(captureInput?.error),
-  });
   const result = await recordHttpProviderCallPackage(captureInput);
-  providerHarnessTrace('image-parser.recordCapturedHttpPackage.done', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    ok: Boolean(result?.ok),
-    id: result?.id || '',
-    skipped: Boolean(result?.skipped),
-    reason: result?.reason || '',
-  });
   return result;
 }
 
@@ -834,27 +814,9 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
       timeout: timeoutMs || 30000,
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
-    providerHarnessTrace('image-parser.jsonRequest.enter', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      method,
-      baseUrl,
-      urlPath,
-      timeoutMs: options.timeout,
-      captureEnabled,
-      requestBody: summarizeHttpBody(body),
-      headerNames: Object.keys(options.headers || {}),
-    });
 
     const capture = async ({ response = null, error = null, outcome = null }) => {
       if (!captureEnabled) return;
-      providerHarnessTrace('image-parser.jsonRequest.capture.start', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: response?.statusCode || 0,
-        outcome: outcome || '',
-        hasError: Boolean(error),
-      });
       await recordCapturedHttpPackage({
         method,
         baseUrl,
@@ -871,10 +833,6 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
         error,
         outcome,
       });
-      providerHarnessTrace('image-parser.jsonRequest.capture.done', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-      });
     };
 
     const req = transport.request(options, (res) => {
@@ -882,35 +840,15 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
       if (captureEnabled) {
         responseHeadersAt = new Date().toISOString();
       }
-      providerHarnessTrace('image-parser.jsonRequest.response.headers', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: res.statusCode || 0,
-        statusMessage: res.statusMessage || '',
-        headerNames: Object.keys(res.headers || {}),
-      });
       res.on('data', (chunk) => {
         data += chunk;
         if (captureEnabled) {
           responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
         }
-        providerHarnessTrace('image-parser.jsonRequest.response.chunk', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          seq: responseChunks.length,
-          byteLength: Buffer.byteLength(chunk),
-        });
       });
       res.on('end', async () => {
         if (settled) return;
         settled = true;
-        providerHarnessTrace('image-parser.jsonRequest.response.end', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          statusCode: res.statusCode || 0,
-          bodyBytes: Buffer.byteLength(data, 'utf8'),
-          capturedChunks: responseChunks.length,
-        });
         const response = {
           statusCode: res.statusCode || 0,
           statusMessage: res.statusMessage || '',
@@ -929,13 +867,6 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
     req.on('error', async (err) => {
       if (settled) return;
       settled = true;
-      providerHarnessTrace('image-parser.jsonRequest.error', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        errorName: err.name || 'Error',
-        errorCode: err.code || '',
-        errorMessage: err.message || '',
-      });
       await capture({ error: err });
       reject(err);
     });
@@ -945,11 +876,6 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
       req.destroy();
       const err = new Error('Request timed out');
       err.code = 'TIMEOUT';
-      providerHarnessTrace('image-parser.jsonRequest.timeout', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        timeoutMs: options.timeout,
-      });
       await capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
@@ -959,11 +885,6 @@ function jsonRequest(method, baseUrl, urlPath, body, headers, timeoutMs, capture
     if (captureEnabled) {
       requestWrittenAt = new Date().toISOString();
     }
-    providerHarnessTrace('image-parser.jsonRequest.request.written', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      payloadBytes: payload ? Buffer.byteLength(payload, 'utf8') : 0,
-    });
     req.end();
   });
 }
@@ -1081,14 +1002,6 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
  */
 async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus) {
   const effectiveModel = model || await getLoadedModel(LM_STUDIO_API_URL);
-  providerHarnessTrace('image-parser.callLmStudio.enter', {
-    providerId: 'lm-studio',
-    modelRequested: model || '',
-    effectiveModel,
-    mediaType,
-    imageChars: typeof imageBase64 === 'string' ? imageBase64.length : 0,
-    timeoutMs,
-  });
 
   // llama.cpp (LM Studio backend) only supports PNG and JPEG — convert others
   const needsConversion = mediaType === 'image/webp' || mediaType === 'image/gif';
@@ -1161,11 +1074,6 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('image-parser.callLmStudio.http_response', {
-    providerId: 'lm-studio',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`LM Studio error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1189,13 +1097,6 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
     : null;
 
-  providerHarnessTrace('image-parser.callLmStudio.done', {
-    providerId: 'lm-studio',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-    wasConverted: Boolean(conversionStats.wasConverted),
-  });
   return { text: text.trim(), usage, conversionStats };
 }
 
@@ -1203,19 +1104,8 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
 async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  providerHarnessTrace('image-parser.callAnthropic.enter', {
-    providerId: 'anthropic',
-    modelRequested: model || '',
-    mediaType,
-    imageChars: typeof rawBase64 === 'string' ? rawBase64.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('anthropic');
   if (!apiKey) {
-    providerHarnessTrace('image-parser.callAnthropic.unavailable', {
-      providerId: 'anthropic',
-      reason: 'missing_api_key',
-    });
     const err = new Error('Anthropic API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
     throw err;
@@ -1252,11 +1142,6 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('image-parser.callAnthropic.http_response', {
-    providerId: 'anthropic',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`Anthropic API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1277,12 +1162,6 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
     ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.input_tokens || 0, outputTokens: parsed.usage.output_tokens || 0 }
     : null;
 
-  providerHarnessTrace('image-parser.callAnthropic.done', {
-    providerId: 'anthropic',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
   return { text: text.trim(), usage };
 }
 
@@ -1292,22 +1171,8 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
  * whether the answer is a good parser result; downstream validation owns that.
  */
 async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, timeoutMs) {
-  providerHarnessTrace('image-parser.callAnthropicSdk.enter', {
-    providerId: 'anthropic',
-    providerPathType: 'sdk',
-    modelRequested: model || '',
-    reasoningEffort: reasoningEffort || '',
-    mediaType,
-    imageChars: typeof rawBase64 === 'string' ? rawBase64.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('anthropic');
   if (!apiKey) {
-    providerHarnessTrace('image-parser.callAnthropicSdk.unavailable', {
-      providerId: 'anthropic',
-      providerPathType: 'sdk',
-      reason: 'missing_api_key',
-    });
     const err = new Error('Anthropic API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
     throw err;
@@ -1325,13 +1190,6 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
     reasoningEffort,
     timeoutMs,
   });
-  providerHarnessTrace('image-parser.callAnthropicSdk.sdk_response', {
-    providerId: 'anthropic',
-    providerPathType: 'sdk',
-    hasText: typeof sdkResult?.text === 'string',
-    textLength: typeof sdkResult?.text === 'string' ? sdkResult.text.length : 0,
-    hasUsage: Boolean(sdkResult?.usage),
-  });
 
   if (!sdkResult || typeof sdkResult.text !== 'string') {
     const err = new Error('Anthropic SDK parse failed — SDK returned no answer text');
@@ -1346,19 +1204,8 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
 async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs) {
-  providerHarnessTrace('image-parser.callOpenAI.enter', {
-    providerId: 'openai',
-    modelRequested: model || '',
-    reasoningEffort: reasoningEffort || '',
-    imageChars: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
-    providerHarnessTrace('image-parser.callOpenAI.unavailable', {
-      providerId: 'openai',
-      reason: 'missing_api_key',
-    });
     const err = new Error('OpenAI API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
     throw err;
@@ -1395,11 +1242,6 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('image-parser.callOpenAI.http_response', {
-    providerId: 'openai',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`OpenAI API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1420,12 +1262,6 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
     ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
     : null;
 
-  providerHarnessTrace('image-parser.callOpenAI.done', {
-    providerId: 'openai',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
   return { text: text.trim(), usage };
 }
 
@@ -1433,12 +1269,6 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
  * LLM Gateway API — OpenAI-compatible POST to your local/custom gateway.
  */
 async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
-  providerHarnessTrace('image-parser.callLlmGateway.enter', {
-    providerId: 'llm-gateway',
-    modelRequested: model || '',
-    imageChars: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('llm-gateway');
 
   const effectiveModel = model || LLM_GATEWAY_DEFAULT_MODEL;
@@ -1474,12 +1304,6 @@ async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('image-parser.callLlmGateway.http_response', {
-    providerId: 'llm-gateway',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-    apiKeyConfigured: Boolean(apiKey),
-  });
 
   if (res.statusCode !== 200) {
     if ((res.statusCode === 401 || res.statusCode === 403) && !apiKey) {
@@ -1507,12 +1331,6 @@ async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
     ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
     : null;
 
-  providerHarnessTrace('image-parser.callLlmGateway.done', {
-    providerId: 'llm-gateway',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
   return { text: text.trim(), usage };
 }
 
@@ -1520,19 +1338,8 @@ async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
 async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  providerHarnessTrace('image-parser.callGemini.enter', {
-    providerId: 'gemini',
-    modelRequested: model || '',
-    mediaType,
-    imageChars: typeof rawBase64 === 'string' ? rawBase64.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('gemini');
   if (!apiKey) {
-    providerHarnessTrace('image-parser.callGemini.unavailable', {
-      providerId: 'gemini',
-      reason: 'missing_api_key',
-    });
     const err = new Error('Gemini API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
     throw err;
@@ -1582,11 +1389,6 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
       modelRequested: effectiveModel,
     }
   );
-  providerHarnessTrace('image-parser.callGemini.http_response', {
-    providerId: 'gemini',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     const err = new Error(`Gemini API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
@@ -1618,12 +1420,6 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
       }
     : null;
 
-  providerHarnessTrace('image-parser.callGemini.done', {
-    providerId: 'gemini',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
   return { text: text.trim(), usage };
 }
 
@@ -1631,18 +1427,8 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
 async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
-  providerHarnessTrace('image-parser.callKimi.enter', {
-    providerId: 'kimi',
-    modelRequested: model || '',
-    imageChars: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
-    timeoutMs,
-  });
   const apiKey = await resolveApiKey('kimi');
   if (!apiKey) {
-    providerHarnessTrace('image-parser.callKimi.unavailable', {
-      providerId: 'kimi',
-      reason: 'missing_api_key',
-    });
     const err = new Error('Moonshot API key not configured');
     err.code = 'PROVIDER_UNAVAILABLE';
     throw err;
@@ -1704,11 +1490,6 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     statusCode: res.statusCode,
     bodyLength: (res.body || '').length,
   });
-  providerHarnessTrace('image-parser.callKimi.http_response', {
-    providerId: 'kimi',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     verboseError('[image-parser] Kimi API error:', res.statusCode, 'bodyLength:', (res.body || '').length);
@@ -1741,26 +1522,11 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
     ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
     : null;
 
-  providerHarnessTrace('image-parser.callKimi.done', {
-    providerId: 'kimi',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
   return { text: text.trim(), usage };
 }
 
 async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus) {
   const effectiveModel = getCodexImageParserModel(provider, model);
-  providerHarnessTrace('image-parser.callCodex.enter', {
-    providerId: provider,
-    providerPathType: 'cli',
-    modelRequested: model || '',
-    effectiveModel: effectiveModel || '',
-    reasoningEffort: reasoningEffort || process.env.CODEX_PARSE_REASONING_EFFORT || '',
-    imageChars: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
-    timeoutMs,
-  });
 
   return new Promise((resolve, reject) => {
     let streamedText = '';
@@ -1777,13 +1543,6 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
       if (settled) return;
       settled = true;
       coalescer.flush();
-      providerHarnessTrace('image-parser.callCodex.done', {
-        providerId: provider,
-        providerPathType: 'cli',
-        model: usage?.model || effectiveModel || '',
-        textLength: String(text || streamedText || '').length,
-        hasUsage: Boolean(usage),
-      });
       resolve({
         text: String(text || streamedText || '').trim(),
         usage: usage || (effectiveModel ? { model: effectiveModel } : null),
@@ -1796,13 +1555,6 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
       coalescer.flush();
       const error = err instanceof Error ? err : new Error(String(err));
       if (!error.code) error.code = 'PROVIDER_ERROR';
-      providerHarnessTrace('image-parser.callCodex.failed', {
-        providerId: provider,
-        providerPathType: 'cli',
-        errorName: error.name || 'Error',
-        errorCode: error.code || '',
-        errorMessage: error.message || '',
-      });
       reject(error);
     }
 
@@ -1963,15 +1715,6 @@ async function parseImage(imageBase64, options = {}) {
   const useStructured = options.structured !== false;
   const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
   const systemPrompt = getRenderedAgentPrompt(promptId);
-  providerHarnessTrace('image-parser.parseImage.enter', {
-    provider,
-    model: model || '',
-    reasoningEffort: reasoningEffort || '',
-    timeoutMs,
-    promptId,
-    structured: useStructured,
-    imageChars: typeof imageBase64 === 'string' ? imageBase64.length : 0,
-  });
   eventBus?.emit('parser.prompt_resolved', {
     promptId,
     promptLength: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
@@ -1992,12 +1735,6 @@ async function parseImage(imageBase64, options = {}) {
 
   // Compute original image size for stats
   const originalSizeBytes = Buffer.byteLength(normalized.rawBase64, 'base64');
-  providerHarnessTrace('image-parser.parseImage.normalized', {
-    provider,
-    mediaType: normalized.mediaType || '',
-    originalSizeBytes,
-    isDataUrl: typeof imageBase64 === 'string' && imageBase64.startsWith('data:'),
-  });
   eventBus?.emit('parser.image_normalized', {
     sizeBytes: originalSizeBytes,
     mediaType: normalized.mediaType || '',
@@ -2023,11 +1760,6 @@ async function parseImage(imageBase64, options = {}) {
     reasoningEffort: reasoningEffort || '',
   });
   if (isProvidersStubbed()) {
-    providerHarnessTrace('image-parser.parseImage.dispatch', {
-      provider,
-      providerPathType: 'stub',
-      model: model || '',
-    });
     const stub = getProviderStub(provider, 'parseImage');
     if (!stub) throw new MissingProviderStubError(provider, 'parseImage');
     result = await stub({
@@ -2040,28 +1772,13 @@ async function parseImage(imageBase64, options = {}) {
       timeoutMs,
     });
   } else if (isCodexImageParserProvider(provider)) {
-    providerHarnessTrace('image-parser.parseImage.dispatch', {
-      provider,
-      providerPathType: 'cli',
-      model: getCodexImageParserModel(provider, model) || '',
-    });
     result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus);
   } else {
     switch (provider) {
       case 'llm-gateway':
-        providerHarnessTrace('image-parser.parseImage.dispatch', {
-          provider,
-          providerPathType: 'gateway-http',
-          model: model || '',
-        });
         result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
         break;
       case 'lm-studio':
-        providerHarnessTrace('image-parser.parseImage.dispatch', {
-          provider,
-          providerPathType: 'local-http',
-          model: model || '',
-        });
         result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         break;
       case 'anthropic':
@@ -2070,47 +1787,22 @@ async function parseImage(imageBase64, options = {}) {
             provider,
             engine: 'anthropic-agent-sdk',
           });
-          providerHarnessTrace('image-parser.parseImage.dispatch', {
-            provider,
-            providerPathType: 'sdk',
-            model: model || '',
-          });
           result = await callAnthropicSdk(normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs);
         } else {
           eventBus?.emit('parser.sdk_path_skipped', {
             provider,
             reason: 'opt_out_legacy_structured_false',
           });
-          providerHarnessTrace('image-parser.parseImage.dispatch', {
-            provider,
-            providerPathType: 'direct-http',
-            model: model || '',
-          });
           result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
         }
         break;
       case 'openai':
-        providerHarnessTrace('image-parser.parseImage.dispatch', {
-          provider,
-          providerPathType: 'direct-http',
-          model: model || '',
-        });
         result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs);
         break;
       case 'gemini':
-        providerHarnessTrace('image-parser.parseImage.dispatch', {
-          provider,
-          providerPathType: 'direct-http',
-          model: model || '',
-        });
         result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
         break;
       case 'kimi':
-        providerHarnessTrace('image-parser.parseImage.dispatch', {
-          provider,
-          providerPathType: 'direct-http',
-          model: model || '',
-        });
         result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
         break;
       default: {
@@ -2121,13 +1813,6 @@ async function parseImage(imageBase64, options = {}) {
     }
   }
   const providerLatencyMs = Date.now() - providerStartTime;
-  providerHarnessTrace('image-parser.parseImage.provider_result', {
-    provider,
-    model: result?.usage?.model || model || '',
-    providerLatencyMs,
-    textLength: (result?.text || '').length,
-    hasUsage: Boolean(result?.usage),
-  });
   eventBus?.emit('parser.generation_completed', {
     provider,
     model: result?.usage?.model || model || '',
@@ -2155,11 +1840,6 @@ async function parseImage(imageBase64, options = {}) {
   };
 
   const role = detectRole(result.text, { promptId });
-  providerHarnessTrace('image-parser.parseImage.role_detected', {
-    provider,
-    role,
-    promptId,
-  });
   eventBus?.emit('parser.role_detected', {
     role,
     promptId,
@@ -2173,12 +1853,6 @@ async function parseImage(imageBase64, options = {}) {
     });
   }
   const { parseFields, parseMeta } = buildStructuredParseResult(result.text, role);
-  providerHarnessTrace('image-parser.parseImage.structured_result_built', {
-    provider,
-    role,
-    fieldCount: parseFields ? Object.keys(parseFields).length : 0,
-    hasParseMeta: Boolean(parseMeta),
-  });
   eventBus?.emit('parser.fields_extracted', {
     fieldCount: parseFields ? Object.keys(parseFields).length : 0,
     fields: parseFields ? Object.keys(parseFields) : [],

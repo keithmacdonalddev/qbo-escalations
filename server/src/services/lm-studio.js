@@ -14,10 +14,6 @@ const {
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
 } = require('./provider-call-package-recorder');
-const {
-  providerHarnessTrace,
-  summarizeHttpBody,
-} = require('../lib/provider-harness-trace');
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -56,23 +52,7 @@ function buildDefaultHeaders(extraHeaders = {}) {
 }
 
 async function recordCapturedHttpPackage(captureInput) {
-  providerHarnessTrace('lm-studio.recordCapturedHttpPackage.enter', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    operation: captureInput?.captureContext?.operation || '',
-    statusCode: captureInput?.response?.statusCode || 0,
-    outcome: captureInput?.outcome || '',
-    hasError: Boolean(captureInput?.error),
-  });
   const result = await recordHttpProviderCallPackage(captureInput);
-  providerHarnessTrace('lm-studio.recordCapturedHttpPackage.done', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    ok: Boolean(result?.ok),
-    id: result?.id || '',
-    skipped: Boolean(result?.skipped),
-    reason: result?.reason || '',
-  });
   return result;
 }
 
@@ -100,27 +80,9 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
       timeout: timeoutMs || 30000,
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
-    providerHarnessTrace('lm-studio.rawRequest.enter', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      method,
-      baseUrl,
-      urlPath,
-      timeoutMs: options.timeout,
-      captureEnabled,
-      requestBody: summarizeHttpBody(body),
-      headerNames: Object.keys(options.headers || {}),
-    });
 
     const capture = async ({ response = null, error = null, outcome = null }) => {
       if (!captureEnabled) return;
-      providerHarnessTrace('lm-studio.rawRequest.capture.start', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: response?.statusCode || 0,
-        outcome: outcome || '',
-        hasError: Boolean(error),
-      });
       await recordCapturedHttpPackage({
         method,
         baseUrl,
@@ -137,10 +99,6 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
         error,
         outcome,
       });
-      providerHarnessTrace('lm-studio.rawRequest.capture.done', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-      });
     };
 
     const req = transport.request(options, (res) => {
@@ -148,35 +106,15 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
       if (captureEnabled) {
         responseHeadersAt = new Date().toISOString();
       }
-      providerHarnessTrace('lm-studio.rawRequest.response.headers', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: res.statusCode || 0,
-        statusMessage: res.statusMessage || '',
-        headerNames: Object.keys(res.headers || {}),
-      });
       res.on('data', (chunk) => {
         data += chunk;
         if (captureEnabled) {
           responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
         }
-        providerHarnessTrace('lm-studio.rawRequest.response.chunk', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          seq: responseChunks.length,
-          byteLength: Buffer.byteLength(chunk),
-        });
       });
       res.on('end', async () => {
         if (settled) return;
         settled = true;
-        providerHarnessTrace('lm-studio.rawRequest.response.end', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          statusCode: res.statusCode || 0,
-          bodyBytes: Buffer.byteLength(data, 'utf8'),
-          capturedChunks: responseChunks.length,
-        });
         const response = {
           statusCode: res.statusCode || 0,
           statusMessage: res.statusMessage || '',
@@ -195,13 +133,6 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
     req.on('error', async (err) => {
       if (settled) return;
       settled = true;
-      providerHarnessTrace('lm-studio.rawRequest.error', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        errorName: err.name || 'Error',
-        errorCode: err.code || '',
-        errorMessage: err.message || '',
-      });
       await capture({ error: err });
       reject(err);
     });
@@ -210,11 +141,6 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
       settled = true;
       req.destroy();
       const err = new Error('LM Studio request timed out');
-      providerHarnessTrace('lm-studio.rawRequest.timeout', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        timeoutMs: options.timeout,
-      });
       await capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
@@ -224,11 +150,6 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
     if (captureEnabled) {
       requestWrittenAt = new Date().toISOString();
     }
-    providerHarnessTrace('lm-studio.rawRequest.request.written', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      payloadBytes: payload ? Buffer.byteLength(payload, 'utf8') : 0,
-    });
     req.end();
   });
 }
@@ -634,16 +555,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
 // parseEscalation() — non-streaming JSON extraction from image or text
 // ---------------------------------------------------------------------------
 async function parseEscalation(imageBase64OrText, options = {}) {
-  providerHarnessTrace('lm-studio.parseEscalation.enter', {
-    providerId: 'lm-studio',
-    modelRequested: options.model || '',
-    timeoutMs: options.timeoutMs || null,
-    inputChars: typeof imageBase64OrText === 'string' ? imageBase64OrText.length : 0,
-  });
   if (isProvidersStubbed()) {
-    providerHarnessTrace('lm-studio.parseEscalation.stub_dispatch', {
-      providerId: 'lm-studio',
-    });
     const stub = getProviderStub('lm-studio', 'parseEscalation');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'parseEscalation');
     return stub(imageBase64OrText, options);
@@ -652,12 +564,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   const isBase64Image = input.startsWith('data:image') || /^[A-Za-z0-9+/=]{100,}$/.test(input);
   const effectiveTimeoutMs = parsePositiveInt(options.timeoutMs, PARSE_TIMEOUT_MS);
   const effectiveModel = options.model || await getLoadedModel(DEFAULT_API_URL);
-  providerHarnessTrace('lm-studio.parseEscalation.resolved', {
-    providerId: 'lm-studio',
-    effectiveModel,
-    effectiveTimeoutMs,
-    isBase64Image,
-  });
 
   const schemaExample = JSON.stringify({
     coid: '', mid: '', caseNumber: '', clientContact: '', agentName: '',
@@ -712,11 +618,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('lm-studio.parseEscalation.http_response', {
-    providerId: 'lm-studio',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     throw new Error(`LM Studio parse error ${res.statusCode}: ${(res.body || '').slice(0, 500)}`);
@@ -729,13 +630,6 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   const msg = parsed.choices?.[0]?.message || {};
   const rawContent = msg.content || msg.reasoning_content || '';
   const fields = extractJSONObject(rawContent);
-  providerHarnessTrace('lm-studio.parseEscalation.done', {
-    providerId: 'lm-studio',
-    model: usage?.model || effectiveModel,
-    rawContentLength: rawContent.length,
-    hasFields: Boolean(fields),
-    hasUsage: Boolean(usage),
-  });
 
   return {
     fields: fields || { category: 'unknown', attemptingTo: rawContent.slice(0, 800) },
@@ -747,16 +641,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
 // transcribeImage() — extract visible text from an image
 // ---------------------------------------------------------------------------
 async function transcribeImage(imageBase64OrPath, options = {}) {
-  providerHarnessTrace('lm-studio.transcribeImage.enter', {
-    providerId: 'lm-studio',
-    modelRequested: options.model || '',
-    timeoutMs: options.timeoutMs || null,
-    inputChars: typeof imageBase64OrPath === 'string' ? imageBase64OrPath.length : 0,
-  });
   if (isProvidersStubbed()) {
-    providerHarnessTrace('lm-studio.transcribeImage.stub_dispatch', {
-      providerId: 'lm-studio',
-    });
     const stub = getProviderStub('lm-studio', 'transcribeImage');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'transcribeImage');
     return stub(imageBase64OrPath, options);
@@ -766,11 +651,6 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
 
   const effectiveModel = options.model || await getLoadedModel(DEFAULT_API_URL);
   const effectiveTimeoutMs = parsePositiveInt(options.timeoutMs, PARSE_TIMEOUT_MS);
-  providerHarnessTrace('lm-studio.transcribeImage.resolved', {
-    providerId: 'lm-studio',
-    effectiveModel,
-    effectiveTimeoutMs,
-  });
 
   const transcribePrompt = [
     'Transcribe ALL text visible in this image exactly as written.',
@@ -797,12 +677,6 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
       : ext === 'gif' ? 'image/gif'
       : 'image/png';
     base64Input = `data:${mime};base64,${buffer.toString('base64')}`;
-    providerHarnessTrace('lm-studio.transcribeImage.file_encoded', {
-      providerId: 'lm-studio',
-      extension: ext,
-      mime,
-      byteLength: buffer.length,
-    });
   }
 
   const imgPart = base64ToImageUrl(base64Input);
@@ -833,11 +707,6 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     },
     modelRequested: effectiveModel,
   });
-  providerHarnessTrace('lm-studio.transcribeImage.http_response', {
-    providerId: 'lm-studio',
-    statusCode: res.statusCode || 0,
-    bodyBytes: Buffer.byteLength(res.body || '', 'utf8'),
-  });
 
   if (res.statusCode !== 200) {
     throw new Error(`LM Studio transcribe error ${res.statusCode}: ${(res.body || '').slice(0, 500)}`);
@@ -848,12 +717,6 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   // Reasoning models may return empty content with reasoning_content
   const tmsg = parsed.choices?.[0]?.message || {};
   const text = tmsg.content || tmsg.reasoning_content || '';
-  providerHarnessTrace('lm-studio.transcribeImage.done', {
-    providerId: 'lm-studio',
-    model: usage?.model || effectiveModel,
-    textLength: text.length,
-    hasUsage: Boolean(usage),
-  });
 
   return { text: text.trim(), usage };
 }

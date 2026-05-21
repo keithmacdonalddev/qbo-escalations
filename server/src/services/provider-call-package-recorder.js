@@ -6,12 +6,10 @@ const mongoose = require('mongoose');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { redactProviderCallPackage } = require('./provider-call-package-redaction');
 const { externalizeProviderCallPackagePayloads, sha256 } = require('./provider-call-package-payload-store');
-const { colorProviderHarnessLine, providerHarnessTrace } = require('../lib/provider-harness-trace');
 
 const CAPTURE_VERSION = 'provider-harness-http-v0.1';
 const CLI_CAPTURE_VERSION = 'provider-harness-cli-v0.2';
 const SCHEMA_VERSION = '0.1';
-let warnedMongooseNotConnected = false;
 const inFlightBackgroundRecords = new Set();
 
 function isProviderCallPackageCaptureEnabled() {
@@ -388,62 +386,18 @@ function buildHttpProviderCallPackage(input = {}) {
 }
 
 async function recordProviderCallPackage(envelope, options = {}) {
-  providerHarnessTrace('provider-call-package.recordProviderCallPackage.enter', {
-    providerId: envelope?.providerId || '',
-    providerResearchId: envelope?.providerResearchId || '',
-    providerPathType: envelope?.providerPathType || '',
-    callSite: envelope?.callSite || '',
-    operation: envelope?.operation || '',
-    outcome: envelope?.outcome || '',
-    captureEnabled: isProviderCallPackageCaptureEnabled(),
-    force: Boolean(options.force),
-  });
   if (!options.force && !isProviderCallPackageCaptureEnabled()) {
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.skipped', {
-      providerId: envelope?.providerId || '',
-      callSite: envelope?.callSite || '',
-      reason: 'disabled',
-    });
     return { ok: false, skipped: true, reason: 'disabled' };
   }
 
   if (mongoose.connection.readyState !== 1) {
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.skipped', {
-      providerId: envelope?.providerId || '',
-      callSite: envelope?.callSite || '',
-      reason: 'mongoose_not_connected',
-      readyState: mongoose.connection.readyState,
-    });
-    if (options.log !== false && !warnedMongooseNotConnected) {
-      warnedMongooseNotConnected = true;
-      console.warn(colorProviderHarnessLine('[provider-call-package-recorder] capture skipped: mongoose is not connected'));
-    }
     return { ok: false, skipped: true, reason: 'mongoose_not_connected' };
   }
 
   try {
     const packageId = options.packageId || new mongoose.Types.ObjectId();
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.redaction.start', {
-      providerId: envelope?.providerId || '',
-      callSite: envelope?.callSite || '',
-      packageId: String(packageId),
-    });
     const redacted = redactProviderCallPackage(envelope);
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.redaction.done', {
-      providerId: redacted?.providerId || '',
-      callSite: redacted?.callSite || '',
-      packageId: String(packageId),
-      redactedHeaderNames: redacted?.redaction?.redactedHeaderNames || [],
-      redactedBodyPathCount: Array.isArray(redacted?.redaction?.redactedBodyPaths)
-        ? redacted.redaction.redactedBodyPaths.length
-        : 0,
-    });
     redacted._id = packageId;
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.payload_store.start', {
-      providerId: redacted?.providerId || '',
-      callSite: redacted?.callSite || '',
-      packageId: String(packageId),
-    });
     const prepared = await externalizeProviderCallPackagePayloads(redacted, {
       packageId,
       maxInlineBytes: options.maxInlineBytes,
@@ -452,39 +406,10 @@ async function recordProviderCallPackage(envelope, options = {}) {
       fields: options.fields,
       kindByField: options.kindByField,
     });
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.payload_store.done', {
-      providerId: prepared?.providerId || '',
-      callSite: prepared?.callSite || '',
-      packageId: String(packageId),
-      inline: Boolean(prepared?.storage?.inline),
-      externalPayloadCount: Array.isArray(prepared?.storage?.externalPayloads)
-        ? prepared.storage.externalPayloads.length
-        : 0,
-    });
 
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.mongo.insert.start', {
-      providerId: prepared?.providerId || '',
-      callSite: prepared?.callSite || '',
-      packageId: String(packageId),
-    });
     const doc = await ProviderCallPackage.create(prepared);
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.mongo.insert.done', {
-      providerId: prepared?.providerId || '',
-      callSite: prepared?.callSite || '',
-      id: String(doc._id),
-    });
     return { ok: true, id: String(doc._id) };
   } catch (err) {
-    providerHarnessTrace('provider-call-package.recordProviderCallPackage.failed', {
-      providerId: envelope?.providerId || '',
-      callSite: envelope?.callSite || '',
-      errorName: err.name || 'Error',
-      errorCode: err.code || '',
-      errorMessage: err.message || '',
-    });
-    if (options.log !== false) {
-      console.warn(colorProviderHarnessLine(`[provider-call-package-recorder] record failed: ${err.message}`));
-    }
     return {
       ok: false,
       error: {
@@ -498,38 +423,9 @@ async function recordProviderCallPackage(envelope, options = {}) {
 
 async function recordHttpProviderCallPackage(input, options = {}) {
   try {
-    providerHarnessTrace('provider-call-package.recordHttpProviderCallPackage.enter', {
-      providerId: input?.captureContext?.providerId || input?.providerId || '',
-      callSite: input?.captureContext?.callSite || input?.callSite || '',
-      method: input?.method || '',
-      baseUrl: input?.baseUrl || '',
-      urlPath: input?.urlPath || '',
-      statusCode: input?.response?.statusCode || 0,
-      hasError: Boolean(input?.error),
-      outcome: input?.outcome || '',
-    });
     const envelope = buildHttpProviderCallPackage(input);
-    providerHarnessTrace('provider-call-package.recordHttpProviderCallPackage.envelope_built', {
-      providerId: envelope?.providerId || '',
-      providerResearchId: envelope?.providerResearchId || '',
-      providerPathType: envelope?.providerPathType || '',
-      callSite: envelope?.callSite || '',
-      operation: envelope?.operation || '',
-      outcome: envelope?.outcome || '',
-      statusCode: envelope?.response?.statusCode || 0,
-      requestBodyBytes: envelope?.request?.bodyByteLength || 0,
-      responseBodyBytes: envelope?.response?.bodyByteLength || 0,
-    });
     return await recordProviderCallPackage(envelope, options);
   } catch (err) {
-    providerHarnessTrace('provider-call-package.recordHttpProviderCallPackage.failed', {
-      errorName: err.name || 'Error',
-      errorCode: err.code || '',
-      errorMessage: err.message || '',
-    });
-    if (options.log !== false) {
-      console.warn(colorProviderHarnessLine(`[provider-call-package-recorder] capture failed: ${err.message}`));
-    }
     return {
       ok: false,
       error: {
@@ -568,44 +464,9 @@ function cliPayloadOptions(options = {}) {
 
 async function recordCliProviderCallPackage(input, options = {}) {
   try {
-    providerHarnessTrace('provider-call-package.recordCliProviderCallPackage.enter', {
-      providerId: input?.captureContext?.providerId || input?.providerId || '',
-      providerResearchId: input?.captureContext?.providerResearchId || input?.providerResearchId || '',
-      callSite: input?.captureContext?.callSite || input?.callSite || '',
-      operation: input?.captureContext?.operation || input?.operation || '',
-      command: input?.command || '',
-      outcome: input?.outcome || '',
-      exitCode: input?.exitCode,
-      signal: input?.signal || '',
-      stdoutBytes: Buffer.byteLength(normalizeString(input?.stdoutText), 'utf8'),
-      stderrBytes: Buffer.byteLength(normalizeString(input?.stderrText), 'utf8'),
-      hasError: Boolean(input?.error),
-    });
     const envelope = buildCliProviderCallPackage(input);
-    providerHarnessTrace('provider-call-package.recordCliProviderCallPackage.envelope_built', {
-      providerId: envelope?.providerId || '',
-      providerResearchId: envelope?.providerResearchId || '',
-      providerPathType: envelope?.providerPathType || '',
-      callSite: envelope?.callSite || '',
-      operation: envelope?.operation || '',
-      command: envelope?.cli?.command || '',
-      outcome: envelope?.outcome || '',
-      stdoutBytes: envelope?.cli?.stdout?.byteLength || 0,
-      stdoutLineCount: Array.isArray(envelope?.cli?.stdout?.lines) ? envelope.cli.stdout.lines.length : 0,
-      jsonlEventCount: Array.isArray(envelope?.cli?.stdout?.jsonlEvents) ? envelope.cli.stdout.jsonlEvents.length : 0,
-      malformedLineCount: Array.isArray(envelope?.cli?.stdout?.malformedLines) ? envelope.cli.stdout.malformedLines.length : 0,
-      stderrBytes: envelope?.cli?.stderr?.byteLength || 0,
-    });
     return await recordProviderCallPackage(envelope, cliPayloadOptions(options));
   } catch (err) {
-    providerHarnessTrace('provider-call-package.recordCliProviderCallPackage.failed', {
-      errorName: err.name || 'Error',
-      errorCode: err.code || '',
-      errorMessage: err.message || '',
-    });
-    if (options.log !== false) {
-      console.warn(colorProviderHarnessLine(`[provider-call-package-recorder] CLI capture failed: ${err.message}`));
-    }
     return {
       ok: false,
       error: {
@@ -636,12 +497,6 @@ function recordProviderCallPackageInBackground(envelope, options = {}) {
 }
 
 function recordCliProviderCallPackageInBackground(input, options = {}) {
-  providerHarnessTrace('provider-call-package.recordCliProviderCallPackage.background_queued', {
-    providerId: input?.captureContext?.providerId || input?.providerId || '',
-    callSite: input?.captureContext?.callSite || input?.callSite || '',
-    operation: input?.captureContext?.operation || input?.operation || '',
-    command: input?.command || '',
-  });
   const promise = Promise.resolve()
     .then(() => recordCliProviderCallPackage(input, options))
     .catch((err) => ({

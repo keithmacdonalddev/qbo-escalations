@@ -106,6 +106,109 @@ const cliPackageSchema = new mongoose.Schema({
   timeout: { type: cliTimeoutSchema, required: true },
 }, strictSubdocumentOptions);
 
+const lmStudioJsonParseErrorSchema = new mongoose.Schema({
+  name: { type: String, default: 'SyntaxError' },
+  message: { type: String, default: '' },
+}, strictSubdocumentOptions);
+
+const lmStudioTextChunkSchema = new mongoose.Schema({
+  seq: { type: Number, required: true },
+  receivedAt: { type: String, required: true },
+  byteLength: { type: Number, required: true },
+  sha256: { type: String, default: null },
+  text: { type: String, default: null },
+  textPayloadRef: { type: payloadRefSchema, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioRequestSchema = new mongoose.Schema({
+  method: { type: String, required: true },
+  baseUrl: { type: String, default: '' },
+  url: { type: String, default: '' },
+  protocol: { type: String, default: '' },
+  hostname: { type: String, default: '' },
+  port: { type: Number, default: null },
+  path: { type: String, default: '' },
+  urlPath: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  bodyKind: { type: String, enum: ['none', 'text', 'json'], default: 'none' },
+  bodyText: { type: String, default: null },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  bodyJsonPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  modelRequested: { type: String, default: '' },
+  stream: { type: Boolean, default: false },
+  timeoutMs: { type: Number, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioResponseSchema = new mongoose.Schema({
+  received: { type: Boolean, default: false },
+  statusCode: { type: Number, default: 0 },
+  statusMessage: { type: String, default: '' },
+  httpVersion: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  rawHeaders: { type: [String], default: [] },
+  trailers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  rawTrailers: { type: [String], default: [] },
+  bodyChunks: { type: [lmStudioTextChunkSchema], default: [] },
+  bodyText: { type: String, default: '' },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  parsedJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  parsedJsonPayloadRef: { type: payloadRefSchema, default: null },
+  jsonParseError: { type: lmStudioJsonParseErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioSseFrameSchema = new mongoose.Schema({
+  seq: { type: Number, required: true },
+  receivedAt: { type: String, required: true },
+  rawLine: { type: String, default: '' },
+  rawLinePayloadRef: { type: payloadRefSchema, default: null },
+  data: { type: String, default: null },
+  dataPayloadRef: { type: payloadRefSchema, default: null },
+  eventType: { type: String, default: 'unknown' },
+  parsedJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  parseError: { type: lmStudioJsonParseErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioStreamSchema = new mongoose.Schema({
+  frames: { type: [lmStudioSseFrameSchema], default: [] },
+  parsedChunks: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  parsedChunksPayloadRef: { type: payloadRefSchema, default: null },
+  doneSeen: { type: Boolean, default: false },
+  terminator: { type: String, default: '' },
+  finalBuffer: { type: String, default: '' },
+  finalBufferPayloadRef: { type: payloadRefSchema, default: null },
+  fullResponse: { type: String, default: '' },
+  fullResponsePayloadRef: { type: payloadRefSchema, default: null },
+  fullResponseByteLength: { type: Number, default: 0 },
+  fullResponseSha256: { type: String, default: null },
+  usage: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioProviderErrorSchema = new mongoose.Schema({
+  name: { type: String, default: 'Error' },
+  message: { type: String, default: '' },
+  code: { type: String, default: '' },
+  stack: { type: String, default: '' },
+  statusCode: { type: Number, default: null },
+  rawBody: { type: String, default: null },
+  rawBodyPayloadRef: { type: payloadRefSchema, default: null },
+  object: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const lmStudioPackageSchema = new mongoose.Schema({
+  mode: { type: String, enum: ['non-stream', 'stream'], required: true },
+  request: { type: lmStudioRequestSchema, required: true },
+  response: { type: lmStudioResponseSchema, required: true },
+  stream: { type: lmStudioStreamSchema, default: null },
+  error: { type: lmStudioProviderErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
 const timingSchema = new mongoose.Schema({
   requestStartedAt: { type: String, default: null },
   requestWrittenAt: { type: String, default: null },
@@ -157,6 +260,7 @@ const providerCallPackageSchema = new mongoose.Schema({
   request: { type: mongoose.Schema.Types.Mixed, default: null },
   response: { type: mongoose.Schema.Types.Mixed, default: null },
   cli: { type: cliPackageSchema, default: null },
+  lmStudio: { type: lmStudioPackageSchema, default: null },
   timing: { type: timingSchema, default: null },
   outcome: { type: String, required: true, index: true },
   error: { type: providerErrorSchema, default: null },

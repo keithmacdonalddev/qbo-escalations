@@ -21,7 +21,6 @@ const {
   getParserImageFile,
 } = require('../lib/image-parser-archive');
 const { createApiError, sendApiError } = require('../lib/api-errors');
-const { providerHarnessTrace } = require('../lib/provider-harness-trace');
 
 const router = express.Router();
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
@@ -59,42 +58,14 @@ function verboseError(...args) {
 }
 
 function persistParseResult(record, sourceImage, onArchived) {
-  providerHarnessTrace('image-parser.persistParseResult.enter', {
-    provider: record?.provider || '',
-    model: record?.model || record?.modelRequested || '',
-    status: record?.status || '',
-    hasSourceImage: typeof sourceImage === 'string' && sourceImage.length > 0,
-    sourceImageChars: typeof sourceImage === 'string' ? sourceImage.length : 0,
-    textLength: record?.textLength || 0,
-  });
   return (async () => {
     if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
-      providerHarnessTrace('image-parser.persistParseResult.mongo.skipped', {
-        reason: 'mongoose_not_connected',
-        readyState: ImageParseResult.db?.readyState ?? null,
-      });
       return;
     }
     try {
-      providerHarnessTrace('image-parser.persistParseResult.mongo.insert.start', {
-        provider: record?.provider || '',
-        status: record?.status || '',
-      });
       const saved = await ImageParseResult.create(record);
-      providerHarnessTrace('image-parser.persistParseResult.mongo.insert.done', {
-        id: saved?._id ? String(saved._id) : '',
-        provider: record?.provider || '',
-        status: record?.status || '',
-      });
-      providerHarnessTrace('image-parser.persistParseResult.archive.start', {
-        id: saved?._id ? String(saved._id) : '',
-      });
       const archived = archiveParserImage(saved._id, sourceImage);
       if (!archived.ok) {
-        providerHarnessTrace('image-parser.persistParseResult.archive.failed', {
-          id: saved?._id ? String(saved._id) : '',
-          error: archived.error || 'archive_failed',
-        });
         verboseWarn('[image-parser-save] Source image archive failed:', archived.error);
         if (typeof onArchived === 'function') {
           try { onArchived({ ok: false, error: archived.error || 'archive_failed' }); } catch { /* noop */ }
@@ -107,11 +78,6 @@ function persistParseResult(record, sourceImage, onArchived) {
       saved.set('image.sourceSizeBytes', archived.sizeBytes);
       saved.set('image.sourceStoredAt', new Date());
       await saved.save();
-      providerHarnessTrace('image-parser.persistParseResult.archive.done', {
-        id: saved?._id ? String(saved._id) : '',
-        sizeBytes: archived.sizeBytes || 0,
-        contentType: archived.contentType || '',
-      });
       if (typeof onArchived === 'function') {
         try {
           onArchived({
@@ -123,11 +89,6 @@ function persistParseResult(record, sourceImage, onArchived) {
         } catch { /* noop */ }
       }
     } catch (err) {
-      providerHarnessTrace('image-parser.persistParseResult.failed', {
-        errorName: err.name || 'Error',
-        errorCode: err.code || '',
-        errorMessage: err.message || '',
-      });
       verboseError('[image-parser-save] FAILED to save:', err.message);
       if (typeof onArchived === 'function') {
         try { onArchived({ ok: false, error: err.message || 'save_failed' }); } catch { /* noop */ }
@@ -166,15 +127,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   const { image, provider, model, reasoningEffort, timeoutMs, promptId, parserPromptId, structured } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
-  providerHarnessTrace('image-parser.route.parse.received', {
-    runId,
-    provider: typeof provider === 'string' ? provider : '',
-    model: typeof model === 'string' ? model : '',
-    streamMode,
-    structured: structured !== false,
-    hasImage: typeof image === 'string' && image.length > 0,
-    imageChars: typeof image === 'string' ? image.length : 0,
-  });
 
   // SSE writer — set headers once, then push framed events. Falls back to a
   // no-op writer for the JSON path so the bus call sites can stay uniform.
@@ -201,16 +153,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     : createNoopStageEventBus();
 
   function respondJson(status, body) {
-    providerHarnessTrace('image-parser.route.client.respondJson', {
-      runId,
-      status,
-      streamMode,
-      ok: Boolean(body?.ok),
-      code: body?.code || '',
-      provider: typeof provider === 'string' ? provider : '',
-      textLength: typeof body?.text === 'string' ? body.text.length : 0,
-      elapsedMs: Number.isFinite(body?.elapsedMs) ? body.elapsedMs : null,
-    });
     if (!streamMode) {
       return res.status(status).json(body);
     }
@@ -224,12 +166,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   }
 
   bus.emit('parser.server_request_received', {
-    provider: typeof provider === 'string' ? provider : '',
-    model: typeof model === 'string' ? model : '',
-    streamMode,
-  });
-  providerHarnessTrace('image-parser.route.stage.server_request_received', {
-    runId,
     provider: typeof provider === 'string' ? provider : '',
     model: typeof model === 'string' ? model : '',
     streamMode,
@@ -253,13 +189,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     reasoningEffort: reasoningEffort || '',
     imageBytes: typeof image === 'string' ? image.length : 0,
   });
-  providerHarnessTrace('image-parser.route.request_validated', {
-    runId,
-    provider,
-    model: model || '',
-    reasoningEffort: reasoningEffort || '',
-    imageChars: typeof image === 'string' ? image.length : 0,
-  });
 
   // Default to the full parser ceiling; Codex vision runs can finish just
   // past 60s on larger screenshots. Keep the cap at 120s and give the
@@ -280,14 +209,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   const effectivePromptId = normalizeImageParsePromptId(promptId || parserPromptId);
 
   try {
-    providerHarnessTrace('image-parser.route.parseImage.start', {
-      runId,
-      provider,
-      model: model || '',
-      promptId: effectivePromptId,
-      timeoutMs: effectiveTimeout,
-      streamMode,
-    });
     const result = await parseImage(image, {
       provider,
       model,
@@ -300,15 +221,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       structured: structured !== false,
     });
     const elapsedMs = Date.now() - startedAt;
-    providerHarnessTrace('image-parser.route.parseImage.done', {
-      runId,
-      provider,
-      model: result?.usage?.model || model || '',
-      elapsedMs,
-      providerLatencyMs: result?.stats?.providerLatencyMs || 0,
-      textLength: (result?.text || '').length,
-      role: result?.role || '',
-    });
 
     const responseBody = {
       ok: true,
@@ -328,12 +240,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
 
     // Fire-and-forget save to MongoDB + on-disk image archive
     bus.emit('parser.result_save_started', {
-      provider,
-      model: result.usage?.model || model || '',
-      role: result.role || '',
-    });
-    providerHarnessTrace('image-parser.route.persist.success.start', {
-      runId,
       provider,
       model: result.usage?.model || model || '',
       role: result.role || '',
@@ -379,15 +285,6 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       return respondJson(200, responseBody);
     }
 
-    providerHarnessTrace('image-parser.route.client.response_sent', {
-      runId,
-      status: 200,
-      streamMode: false,
-      provider,
-      elapsedMs,
-      textLength: (responseBody.text || '').length,
-      role: responseBody.role || '',
-    });
     res.json(responseBody);
     bus.emit('parser.response_sent', {
       elapsedMs,
@@ -405,24 +302,8 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       code: err.code || 'PARSE_FAILED',
       message: err.message || 'Image parse failed',
     });
-    providerHarnessTrace('image-parser.route.parse.failed', {
-      runId,
-      provider,
-      model: model || '',
-      status,
-      elapsedMs,
-      errorName: err.name || 'Error',
-      errorCode: err.code || '',
-      errorMessage: err.message || '',
-    });
 
     // Fire-and-forget save error to MongoDB + on-disk image archive
-    providerHarnessTrace('image-parser.route.persist.error.start', {
-      runId,
-      provider,
-      model: model || '',
-      status,
-    });
     persistParseResult({
       provider,
       modelRequested: model || '',

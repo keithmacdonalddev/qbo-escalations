@@ -18,7 +18,6 @@ const { redactProviderCallPackage } = require('../src/services/provider-call-pac
 const originalSpawn = childProcess.spawn;
 const originalEnv = {
   ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE: process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE,
-  PROVIDER_HARNESS_CONSOLE_TRACE: process.env.PROVIDER_HARNESS_CONSOLE_TRACE,
 };
 
 function restoreEnv() {
@@ -26,11 +25,6 @@ function restoreEnv() {
     delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
   } else {
     process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = originalEnv.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
-  }
-  if (originalEnv.PROVIDER_HARNESS_CONSOLE_TRACE === undefined) {
-    delete process.env.PROVIDER_HARNESS_CONSOLE_TRACE;
-  } else {
-    process.env.PROVIDER_HARNESS_CONSOLE_TRACE = originalEnv.PROVIDER_HARNESS_CONSOLE_TRACE;
   }
 }
 
@@ -95,7 +89,6 @@ test.after(async () => {
 test.beforeEach(async () => {
   childProcess.spawn = originalSpawn;
   restoreEnv();
-  delete process.env.PROVIDER_HARNESS_CONSOLE_TRACE;
   await ProviderCallPackage.deleteMany({});
 });
 
@@ -477,13 +470,8 @@ test('codex transcribeImage still returns when background recorder insert fails'
   process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
   const spawnCalls = installSpawnMock();
   const originalCreate = ProviderCallPackage.create;
-  const originalWarn = console.warn;
-  const warnings = [];
   ProviderCallPackage.create = async function failingCreate() {
     throw new Error('mongo insert failed');
-  };
-  console.warn = (...args) => {
-    warnings.push(args.join(' '));
   };
 
   try {
@@ -499,43 +487,7 @@ test('codex transcribeImage still returns when background recorder insert fails'
     await __waitForProviderPackageRecorderSettled();
     assert.equal(result.text, 'RESULT DESPITE RECORDER ERROR');
     assert.equal(await ProviderCallPackage.countDocuments({}), 0);
-    assert.equal(warnings.some((line) => line.includes('record failed: mongo insert failed')), true);
   } finally {
     ProviderCallPackage.create = originalCreate;
-    console.warn = originalWarn;
-  }
-});
-
-test('codex transcribeImage trace output uses stage metadata without raw prompt or stream text', async () => {
-  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
-  process.env.PROVIDER_HARNESS_CONSOLE_TRACE = 'true';
-  const spawnCalls = installSpawnMock();
-  const originalLog = console.log;
-  const logs = [];
-  console.log = (...args) => {
-    logs.push(args.join(' '));
-  };
-
-  try {
-    const codex = requireFresh('../src/services/codex');
-    const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
-    const { child } = spawnCalls[0];
-    emitStdoutLines(child, [
-      JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'TRACE RAW OUTPUT' } }),
-    ]);
-    child.stderr.emit('data', Buffer.from('TRACE RAW STDERR'));
-    closeChild(child, 0);
-
-    await promise;
-    await __waitForProviderPackageRecorderSettled();
-    const joined = logs.join('\n');
-    assert.equal(joined.includes('codex.cli.transcribeImage.enter'), true);
-    assert.equal(joined.includes('codex.cli.transcribeImage.stdout.data'), true);
-    assert.equal(joined.includes('codex.cli.transcribeImage.recorder.queued'), true);
-    assert.equal(joined.includes('Transcribe ALL text visible'), false);
-    assert.equal(joined.includes('TRACE RAW OUTPUT'), false);
-    assert.equal(joined.includes('TRACE RAW STDERR'), false);
-  } finally {
-    console.log = originalLog;
   }
 });

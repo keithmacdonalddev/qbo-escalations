@@ -13,10 +13,6 @@ const {
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
 } = require('./provider-call-package-recorder');
-const {
-  providerHarnessTrace,
-  summarizeHttpBody,
-} = require('../lib/provider-harness-trace');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -116,23 +112,7 @@ function resolveTransport(baseUrl) {
 }
 
 async function recordCapturedHttpPackage(captureInput) {
-  providerHarnessTrace('remote-api-providers.recordCapturedHttpPackage.enter', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    operation: captureInput?.captureContext?.operation || '',
-    statusCode: captureInput?.response?.statusCode || 0,
-    outcome: captureInput?.outcome || '',
-    hasError: Boolean(captureInput?.error),
-  });
   const result = await recordHttpProviderCallPackage(captureInput);
-  providerHarnessTrace('remote-api-providers.recordCapturedHttpPackage.done', {
-    providerId: captureInput?.captureContext?.providerId || '',
-    callSite: captureInput?.captureContext?.callSite || '',
-    ok: Boolean(result?.ok),
-    id: result?.id || '',
-    skipped: Boolean(result?.skipped),
-    reason: result?.reason || '',
-  });
   return result;
 }
 
@@ -168,27 +148,9 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
     if (payload) {
       options.headers['Content-Length'] = Buffer.byteLength(payload);
     }
-    providerHarnessTrace('remote-api-providers.jsonRequestCancelable.enter', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      method,
-      baseUrl,
-      urlPath,
-      timeoutMs: options.timeout,
-      captureEnabled,
-      requestBody: summarizeHttpBody(body),
-      headerNames: Object.keys(options.headers || {}),
-    });
 
     const capture = async ({ response = null, error = null, outcome = null }) => {
       if (!captureEnabled) return;
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.capture.start', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: response?.statusCode || 0,
-        outcome: outcome || '',
-        hasError: Boolean(error),
-      });
       await recordCapturedHttpPackage({
         method,
         baseUrl,
@@ -205,10 +167,6 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
         error,
         outcome,
       });
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.capture.done', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-      });
     };
 
     req = transport.request(options, (res) => {
@@ -216,35 +174,15 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
       if (captureEnabled) {
         responseHeadersAt = new Date().toISOString();
       }
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.response.headers', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        statusCode: res.statusCode || 0,
-        statusMessage: res.statusMessage || '',
-        headerNames: Object.keys(res.headers || {}),
-      });
       res.on('data', (chunk) => {
         data += chunk;
         if (captureEnabled) {
           responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
         }
-        providerHarnessTrace('remote-api-providers.jsonRequestCancelable.response.chunk', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          seq: responseChunks.length,
-          byteLength: Buffer.byteLength(chunk),
-        });
       });
       res.on('end', async () => {
         if (settled) return;
         settled = true;
-        providerHarnessTrace('remote-api-providers.jsonRequestCancelable.response.end', {
-          providerId: captureContext?.providerId || '',
-          callSite: captureContext?.callSite || '',
-          statusCode: res.statusCode || 0,
-          bodyBytes: Buffer.byteLength(data, 'utf8'),
-          capturedChunks: responseChunks.length,
-        });
         const response = {
           statusCode: res.statusCode || 0,
           statusMessage: res.statusMessage || '',
@@ -264,14 +202,6 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
     req.on('error', async (err) => {
       if (settled) return;
       settled = true;
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.error', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        outcome: cancelReason ? 'aborted' : '',
-        errorName: err.name || 'Error',
-        errorCode: err.code || '',
-        errorMessage: err.message || '',
-      });
       await capture({
         error: err,
         outcome: cancelReason ? 'aborted' : null,
@@ -285,11 +215,6 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
       req.destroy();
       const err = new Error('Request timed out');
       err.code = 'TIMEOUT';
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.timeout', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        timeoutMs: options.timeout,
-      });
       await capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
@@ -300,11 +225,6 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
     if (captureEnabled) {
       requestWrittenAt = new Date().toISOString();
     }
-    providerHarnessTrace('remote-api-providers.jsonRequestCancelable.request.written', {
-      providerId: captureContext?.providerId || '',
-      callSite: captureContext?.callSite || '',
-      payloadBytes: payload ? Buffer.byteLength(payload, 'utf8') : 0,
-    });
     req.end();
   });
 
@@ -313,11 +233,6 @@ function jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutM
     cancel(reason = 'Request aborted') {
       if (!req || settled) return false;
       cancelReason = reason;
-      providerHarnessTrace('remote-api-providers.jsonRequestCancelable.cancel', {
-        providerId: captureContext?.providerId || '',
-        callSite: captureContext?.callSite || '',
-        reason,
-      });
       req.destroy(new Error(reason));
       return true;
     },
@@ -501,19 +416,8 @@ function requestAnthropicChat({
   getApiKeyFn = getApiKey,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel, isCancelled, getCancelReason }) => {
-    providerHarnessTrace('remote-api-providers.requestAnthropicChat.enter', {
-      providerId: 'anthropic',
-      modelRequested: model || '',
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    });
     const apiKey = await getApiKeyFn('anthropic');
     if (!apiKey) {
-      providerHarnessTrace('remote-api-providers.requestAnthropicChat.unavailable', {
-        providerId: 'anthropic',
-        reason: 'missing_api_key',
-      });
       throw toUnavailableError('Anthropic API key not configured');
     }
     if (isCancelled()) {
@@ -543,11 +447,6 @@ function requestAnthropicChat({
     setCancel(request.cancel);
 
     const response = await request.promise;
-    providerHarnessTrace('remote-api-providers.requestAnthropicChat.http_response', {
-      providerId: 'anthropic',
-      statusCode: response.statusCode || 0,
-      bodyBytes: Buffer.byteLength(response.body || '', 'utf8'),
-    });
     if (response.statusCode !== 200) {
       throw toStatusError('anthropic', response.statusCode, response.body);
     }
@@ -567,12 +466,6 @@ function requestAnthropicChat({
           outputTokens: parsed.usage.output_tokens || 0,
         }
       : null;
-    providerHarnessTrace('remote-api-providers.requestAnthropicChat.done', {
-      providerId: 'anthropic',
-      model: usage?.model || effectiveModel,
-      textLength: text.length,
-      hasUsage: Boolean(usage),
-    });
     return {
       text,
       usage,
@@ -595,16 +488,6 @@ function requestOpenAiLikeChat({
 }) {
   return createDeferredCancelableRequest(async ({ setCancel }) => {
     const effectiveModel = model || PROVIDER_CONFIG[providerId].defaultModel;
-    providerHarnessTrace('remote-api-providers.requestOpenAiLikeChat.enter', {
-      providerId,
-      modelRequested: model || '',
-      effectiveModel,
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-      apiKeyConfigured: Boolean(apiKey),
-      apiKeyOptional,
-    });
     const body = {
       model: effectiveModel,
       messages: buildOpenAiMessages(messages, systemPrompt),
@@ -628,11 +511,6 @@ function requestOpenAiLikeChat({
     setCancel(request.cancel);
 
     const response = await request.promise;
-    providerHarnessTrace('remote-api-providers.requestOpenAiLikeChat.http_response', {
-      providerId,
-      statusCode: response.statusCode || 0,
-      bodyBytes: Buffer.byteLength(response.body || '', 'utf8'),
-    });
     if (response.statusCode !== 200) {
       if ((response.statusCode === 401 || response.statusCode === 403) && !apiKey && apiKeyOptional) {
         throw toUnavailableError('LLM Gateway requires an API key');
@@ -655,12 +533,6 @@ function requestOpenAiLikeChat({
           outputTokens: parsed.usage.completion_tokens || 0,
         }
       : null;
-    providerHarnessTrace('remote-api-providers.requestOpenAiLikeChat.done', {
-      providerId,
-      model: usage?.model || effectiveModel,
-      textLength: text.length,
-      hasUsage: Boolean(usage),
-    });
     return { text, usage };
   });
 }
@@ -675,13 +547,6 @@ function requestLlmGatewayChat({
   getApiKeyFn = getApiKey,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel, isCancelled, getCancelReason }) => {
-    providerHarnessTrace('remote-api-providers.requestLlmGatewayChat.enter', {
-      providerId: 'llm-gateway',
-      modelRequested: model || '',
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    });
     const apiKey = await getApiKeyFn('llm-gateway');
     if (isCancelled()) {
       throw toAbortError(getCancelReason());
@@ -718,20 +583,8 @@ function requestOpenAiChat({
   getApiKeyFn = getApiKey,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel, isCancelled, getCancelReason }) => {
-    providerHarnessTrace('remote-api-providers.requestOpenAiChat.enter', {
-      providerId: 'openai',
-      modelRequested: model || '',
-      reasoningEffort: reasoningEffort || '',
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    });
     const apiKey = await getApiKeyFn('openai');
     if (!apiKey) {
-      providerHarnessTrace('remote-api-providers.requestOpenAiChat.unavailable', {
-        providerId: 'openai',
-        reason: 'missing_api_key',
-      });
       throw toUnavailableError('OpenAI API key not configured');
     }
     if (isCancelled()) {
@@ -768,19 +621,8 @@ function requestKimiChat({
   getApiKeyFn = getApiKey,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel, isCancelled, getCancelReason }) => {
-    providerHarnessTrace('remote-api-providers.requestKimiChat.enter', {
-      providerId: 'kimi',
-      modelRequested: model || '',
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    });
     const apiKey = await getApiKeyFn('kimi');
     if (!apiKey) {
-      providerHarnessTrace('remote-api-providers.requestKimiChat.unavailable', {
-        providerId: 'kimi',
-        reason: 'missing_api_key',
-      });
       throw toUnavailableError('Moonshot API key not configured');
     }
     if (isCancelled()) {
@@ -813,19 +655,8 @@ function requestGeminiChat({
   getApiKeyFn = getApiKey,
 }) {
   return createDeferredCancelableRequest(async ({ setCancel, isCancelled, getCancelReason }) => {
-    providerHarnessTrace('remote-api-providers.requestGeminiChat.enter', {
-      providerId: 'gemini',
-      modelRequested: model || '',
-      timeoutMs,
-      messageCount: Array.isArray(messages) ? messages.length : 0,
-      systemPromptChars: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
-    });
     const apiKey = await getApiKeyFn('gemini');
     if (!apiKey) {
-      providerHarnessTrace('remote-api-providers.requestGeminiChat.unavailable', {
-        providerId: 'gemini',
-        reason: 'missing_api_key',
-      });
       throw toUnavailableError('Gemini API key not configured');
     }
     if (isCancelled()) {
@@ -860,11 +691,6 @@ function requestGeminiChat({
     setCancel(request.cancel);
 
     const response = await request.promise;
-    providerHarnessTrace('remote-api-providers.requestGeminiChat.http_response', {
-      providerId: 'gemini',
-      statusCode: response.statusCode || 0,
-      bodyBytes: Buffer.byteLength(response.body || '', 'utf8'),
-    });
     if (response.statusCode !== 200) {
       throw toStatusError('gemini', response.statusCode, response.body);
     }
@@ -887,30 +713,13 @@ function requestGeminiChat({
             : Math.max((usageMeta.totalTokenCount || 0) - (usageMeta.promptTokenCount || 0), 0),
         }
       : null;
-    providerHarnessTrace('remote-api-providers.requestGeminiChat.done', {
-      providerId: 'gemini',
-      model: usage?.model || effectiveModel,
-      textLength: text.length,
-      hasUsage: Boolean(usage),
-    });
     return { text, usage };
   });
 }
 
 function createBufferedChatProvider(providerId, requestHandler) {
   return function chat(args) {
-    providerHarnessTrace('remote-api-providers.bufferedChat.enter', {
-      providerId,
-      modelRequested: args?.model || '',
-      reasoningEffort: args?.reasoningEffort || '',
-      timeoutMs: args?.timeoutMs,
-      messageCount: Array.isArray(args?.messages) ? args.messages.length : 0,
-      systemPromptChars: typeof args?.systemPrompt === 'string' ? args.systemPrompt.length : 0,
-    });
     if (isProvidersStubbed()) {
-      providerHarnessTrace('remote-api-providers.bufferedChat.stub_dispatch', {
-        providerId,
-      });
       const stub = getProviderStub(providerId, 'chat');
       if (!stub) throw new MissingProviderStubError(providerId, 'chat');
       return stub(args);
@@ -946,30 +755,16 @@ function createBufferedChatProvider(providerId, requestHandler) {
     request.promise
       .then((result) => {
         if (cancelled) return;
-        providerHarnessTrace('remote-api-providers.bufferedChat.done', {
-          providerId,
-          textLength: typeof result?.text === 'string' ? result.text.length : 0,
-          hasUsage: Boolean(result?.usage),
-        });
         if (result?.text) onChunk(result.text);
         onDone(result?.text || '', result?.usage || null);
       })
       .catch((err) => {
         if (cancelled) return;
-        providerHarnessTrace('remote-api-providers.bufferedChat.failed', {
-          providerId,
-          errorName: err.name || 'Error',
-          errorCode: err.code || '',
-          errorMessage: err.message || '',
-        });
         onError(err);
       });
 
     return () => {
       cancelled = true;
-      providerHarnessTrace('remote-api-providers.bufferedChat.cancel', {
-        providerId,
-      });
       if (cancelRequest) {
         try { cancelRequest(`${providerId} request aborted`); } catch { /* ignore */ }
       }
