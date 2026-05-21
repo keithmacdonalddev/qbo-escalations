@@ -47,6 +47,45 @@ const TEMPLATE_FIELDS = [
 
 const TRIAGE_CONFIDENCE_DOTS = { high: 3, medium: 2, low: 1 };
 const PIPELINE_TEST_STAGES = ['parser', 'inv', 'triage', 'main'];
+const IMAGE_FILE_NAME_RE = /\.(png|jpe?g|gif|webp|bmp|heic|heif|tiff?)$/i;
+
+function isImageFile(file) {
+  if (!file) return false;
+  return file.type?.startsWith('image/') || IMAGE_FILE_NAME_RE.test(file.name || '');
+}
+
+function getFirstImageFile(files) {
+  return Array.from(files || []).find(isImageFile) || null;
+}
+
+function getClipboardImageFile(clipboardData) {
+  const item = Array.from(clipboardData?.items || []).find((entry) => entry.type?.startsWith('image/'));
+  const file = item?.getAsFile();
+  return isImageFile(file) ? file : null;
+}
+
+function hasFileTransfer(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []);
+  if (items.length > 0) return items.some((item) => item.kind === 'file');
+  return Array.from(dataTransfer?.types || []).includes('Files');
+}
+
+function readImageFileForCapture(file, onCapture) {
+  if (!isImageFile(file)) return false;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    const dataUrl = typeof event.target?.result === 'string' ? event.target.result : '';
+    if (dataUrl) {
+      onCapture(dataUrl, {
+        name: file.name,
+        size: file.size,
+        type: file.type,
+      });
+    }
+  };
+  reader.readAsDataURL(file);
+  return true;
+}
 
 function Icon({ name, size = 18 }) {
   const common = {
@@ -251,6 +290,11 @@ function cleanValue(value) {
   if (typeof value === 'string') return value.trim();
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+function getAgentProfileHref(agentId) {
+  const value = cleanValue(agentId);
+  return value ? `#/agents/${encodeURIComponent(value)}` : '#/agents';
 }
 
 function getProfileAgentLabel(agent, fallbackLabel) {
@@ -662,19 +706,7 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
   const fileInputRef = useRef(null);
 
   const submitFile = useCallback((file) => {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = typeof event.target?.result === 'string' ? event.target.result : '';
-      if (dataUrl) {
-        onCapture(dataUrl, {
-          name: file.name,
-          size: file.size,
-          type: file.type,
-        });
-      }
-    };
-    reader.readAsDataURL(file);
+    readImageFileForCapture(file, onCapture);
   }, [onCapture]);
 
   const handleWebcamCapture = useCallback((dataUrl) => {
@@ -698,13 +730,15 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
   const onDrop = (event) => {
     event.preventDefault();
     setDragOver(false);
-    submitFile(event.dataTransfer.files?.[0]);
+    submitFile(getFirstImageFile(event.dataTransfer.files));
   };
 
   const onPaste = (event) => {
-    const item = Array.from(event.clipboardData?.items || []).find((entry) => entry.type.startsWith('image/'));
-    const file = item?.getAsFile();
-    if (file) submitFile(file);
+    const file = getClipboardImageFile(event.clipboardData);
+    if (file) {
+      event.preventDefault();
+      submitFile(file);
+    }
   };
 
   const openPicker = () => fileInputRef.current?.click();
@@ -756,7 +790,10 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
         ref={fileInputRef}
         type="file"
         accept="image/*"
-        onChange={(event) => submitFile(event.target.files?.[0])}
+        onChange={(event) => {
+          submitFile(getFirstImageFile(event.target.files));
+          event.target.value = '';
+        }}
         hidden
       />
       {showWebcam && (
@@ -907,16 +944,22 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
   // initial empty pipeline before a user uploads anything.
   const clickable = Boolean(onOpenLog && (hasEvents || (status && status !== 'pending')));
 
+  const isNestedControl = (target) => (
+    target
+    && typeof target.closest === 'function'
+    && target.closest('.v5-workflow-card__profile-link, .v5-workflow-card__actions')
+  );
+
   const handleCardClick = (event) => {
     if (!clickable) return;
-    // Don't hijack clicks on the kebab menu or its popover.
-    const t = event.target;
-    if (t && typeof t.closest === 'function' && t.closest('.v5-workflow-card__actions')) return;
+    // Don't hijack clicks meant for the profile link, kebab menu, or its popover.
+    if (isNestedControl(event.target)) return;
     onOpenLog(step.key);
   };
 
   const handleCardKey = (event) => {
     if (!clickable) return;
+    if (isNestedControl(event.target)) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       onOpenLog(step.key);
@@ -936,7 +979,15 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
     >
       <div className="v5-workflow-card__header">
         <span className="v5-step-index v5-step-index--inline">{step.number}</span>
-        <h2>{step.label}</h2>
+        <h2>
+          <a
+            className="v5-workflow-card__profile-link"
+            href={getAgentProfileHref(step.agentId)}
+            title={`Open ${step.label} profile`}
+          >
+            {step.label}
+          </a>
+        </h2>
       </div>
       <WorkflowCardMenu
         step={step}
@@ -1613,6 +1664,8 @@ function AnalystBubble({ role, text, isStreaming, agentLabel = 'QBO Assistant' }
 function AnalystWorkbench({
   workflowSteps = WORKFLOW_STEPS,
   stageLabels = buildStageLabels(WORKFLOW_STEPS),
+  imageCaptured,
+  onCaptureImage,
   stageState,
   analyst,
   chatLog,
@@ -1631,6 +1684,7 @@ function AnalystWorkbench({
   eventEstimates,
 }) {
   const [input, setInput] = useState('');
+  const [workbenchDragOver, setWorkbenchDragOver] = useState(false);
   const threadRef = useRef(null);
   const mainStatus = stageState.main.status;
   const hasTestRun = testRun && testRun.status !== 'idle';
@@ -1657,21 +1711,75 @@ function AnalystWorkbench({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, testRun?.data?.text, testRun?.status]);
 
-  const send = () => {
-    const text = input.trim();
-    if (!text || !canReply) return;
-    onSendOperatorMessage(text);
-    setInput('');
-  };
-
   const mainTabActive = activeTabId === 'main';
   const mainAgentLabel = stageLabels.main || 'QBO Assistant';
   const activeStageLogStep = !mainTabActive
     ? workflowSteps.find((s) => s.key === activeTabId)
     : null;
+  const emptyMainThread = !hasTestRun && !isBusy && messages.length === 0 && !requestError;
+  const imageIntakeReady = mainTabActive
+    && emptyMainThread
+    && mainStatus === 'pending'
+    && !imageCaptured
+    && typeof onCaptureImage === 'function';
+  const workbenchOwnerLabel = imageIntakeReady ? 'Image intake' : mainAgentLabel;
+  const workbenchAriaLabel = imageIntakeReady
+    ? 'Image intake, drop or paste an escalation image to start'
+    : `${mainAgentLabel} response`;
+
+  const send = () => {
+    const text = input.trim();
+    if (!text || !canReply || imageIntakeReady) return;
+    onSendOperatorMessage(text);
+    setInput('');
+  };
+
+  useEffect(() => {
+    if (!imageIntakeReady && workbenchDragOver) setWorkbenchDragOver(false);
+  }, [imageIntakeReady, workbenchDragOver]);
+
+  const handleWorkbenchDragOver = useCallback((event) => {
+    if (!hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = imageIntakeReady ? 'copy' : 'none';
+    if (imageIntakeReady) setWorkbenchDragOver(true);
+  }, [imageIntakeReady]);
+
+  const handleWorkbenchDragLeave = useCallback((event) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+      setWorkbenchDragOver(false);
+    }
+  }, []);
+
+  const handleWorkbenchDrop = useCallback((event) => {
+    if (!hasFileTransfer(event.dataTransfer)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setWorkbenchDragOver(false);
+    if (!imageIntakeReady) return;
+
+    const file = getFirstImageFile(event.dataTransfer.files);
+    readImageFileForCapture(file, onCaptureImage);
+  }, [imageIntakeReady, onCaptureImage]);
+
+  const handleWorkbenchPaste = useCallback((event) => {
+    if (!imageIntakeReady) return;
+    const file = getClipboardImageFile(event.clipboardData);
+    if (readImageFileForCapture(file, onCaptureImage)) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, [imageIntakeReady, onCaptureImage]);
 
   return (
-    <section className="v5-analyst-workbench" aria-label={`${mainAgentLabel} response`}>
+    <section
+      className={`v5-analyst-workbench${imageIntakeReady ? ' is-intake-ready' : ''}${workbenchDragOver ? ' is-drop-over' : ''}`}
+      aria-label={workbenchAriaLabel}
+      onDragOver={handleWorkbenchDragOver}
+      onDragLeave={handleWorkbenchDragLeave}
+      onDrop={handleWorkbenchDrop}
+      onPaste={handleWorkbenchPaste}
+    >
       <header className="v5-analyst-workbench__header">
         <div className="v5-workbench-tabs" role="tablist" aria-label="Workbench tabs">
           <button
@@ -1681,7 +1789,7 @@ function AnalystWorkbench({
             className={`v5-workbench-tab v5-workbench-tab--accent-main${mainTabActive ? ' is-active' : ''}`}
             onClick={() => onTabActivate?.('main')}
           >
-            <span className="v5-workbench-tab__label">{mainAgentLabel}</span>
+            <span className="v5-workbench-tab__label">{workbenchOwnerLabel}</span>
           </button>
           {openStageTabs.map((stageKey) => {
             const step = workflowSteps.find((s) => s.key === stageKey);
@@ -1782,10 +1890,20 @@ function AnalystWorkbench({
                 {stageState.main.error || requestError?.message || `${mainAgentLabel} failed.`}
               </div>
             )}
-            {!hasTestRun && !isBusy && messages.length === 0 && !requestError && (
-              <div className="v5-analyst-waiting">
-                {mainAgentLabel} is ready.
-              </div>
+            {emptyMainThread && (
+              imageIntakeReady ? (
+                <div className="v5-analyst-intake-prompt">
+                  <span className="v5-analyst-intake-prompt__icon" aria-hidden="true">
+                    <Icon name="upload" size={24} />
+                  </span>
+                  <strong>Drop image here</strong>
+                  <span>Paste an image into this chat</span>
+                </div>
+              ) : (
+                <div className="v5-analyst-waiting">
+                  {mainAgentLabel} is ready.
+                </div>
+              )
             )}
           </div>
 
@@ -1799,11 +1917,13 @@ function AnalystWorkbench({
                   send();
                 }
               }}
-              placeholder={canReply ? `Message ${mainAgentLabel}` : `${mainAgentLabel} is still running`}
+              placeholder={imageIntakeReady
+                ? 'Drop or paste an image to start'
+                : canReply ? `Message ${mainAgentLabel}` : `${mainAgentLabel} is still running`}
               disabled={!canReply}
               rows={2}
             />
-            <button type="button" onClick={send} disabled={!canReply || !input.trim()} aria-label="Send reply">
+            <button type="button" onClick={send} disabled={imageIntakeReady || !canReply || !input.trim()} aria-label="Send reply">
               <Icon name="send" size={16} />
             </button>
           </footer>
@@ -2250,6 +2370,8 @@ export default function ChatV5Container({ isActive = true }) {
         <AnalystWorkbench
           workflowSteps={workflowSteps}
           stageLabels={stageLabels}
+          imageCaptured={imageCaptured}
+          onCaptureImage={captureImage}
           stageState={stageState}
           analyst={analyst}
           chatLog={chatLog}

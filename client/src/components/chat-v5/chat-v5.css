@@ -203,12 +203,65 @@
   margin: 0;
   min-width: 0;
   overflow: hidden;
-  color: var(--v5-ink);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.v5-workflow-card__profile-link {
+  position: relative;
+  display: block;
+  min-width: 0;
+  margin: -2px -5px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: transparent;
+  overflow: hidden;
+  color: var(--v5-ink);
+  cursor: pointer;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 140ms var(--ease-standard),
+    box-shadow 140ms var(--ease-standard),
+    color 140ms var(--ease-standard),
+    text-shadow 140ms var(--ease-standard);
+}
+
+.v5-workflow-card__profile-link::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  bottom: 1px;
+  height: 1px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0;
+  transform: scaleX(0.35);
+  transform-origin: left center;
+  transition:
+    opacity 140ms var(--ease-standard),
+    transform 160ms var(--ease-standard);
+}
+
+.v5-workflow-card__profile-link:hover,
+.v5-workflow-card__profile-link:focus-visible {
+  color: #ffffff;
+  background: rgba(65, 132, 255, 0.14);
+  box-shadow: 0 0 0 1px rgba(96, 153, 255, 0.38) inset;
+  text-decoration: none;
+  text-shadow: 0 0 12px rgba(80, 145, 255, 0.44);
+  outline: none;
+}
+
+.v5-workflow-card__profile-link:hover::after,
+.v5-workflow-card__profile-link:focus-visible::after {
+  opacity: 0.9;
+  transform: scaleX(1);
 }
 
 .v5-workflow-card__test {
@@ -799,6 +852,20 @@
   border-radius: 8px;
   background: rgba(9, 14, 22, 0.68);
   box-shadow: var(--v5-shadow);
+  transition: border-color 160ms var(--ease-standard), background 160ms var(--ease-standard), box-shadow 160ms var(--ease-standard);
+}
+
+.v5-analyst-workbench.is-intake-ready {
+  border-color: color-mix(in srgb, var(--v5-border) 76%, var(--v5-blue));
+}
+
+.v5-analyst-workbench.is-drop-over {
+  border-color: color-mix(in srgb, var(--v5-blue) 78%, white);
+  background: color-mix(in srgb, rgba(9, 14, 22, 0.68) 78%, var(--accent-muted));
+  box-shadow:
+    0 0 0 1px rgba(52, 120, 246, 0.36) inset,
+    0 0 0 4px rgba(52, 120, 246, 0.1),
+    var(--v5-shadow);
 }
 
 .v5-analyst-workbench__header {
@@ -1006,6 +1073,41 @@
   gap: 10px;
   color: var(--v5-muted);
   font-size: 13px;
+}
+
+.v5-analyst-intake-prompt {
+  margin: auto;
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  color: var(--v5-muted);
+  text-align: center;
+  pointer-events: none;
+}
+
+.v5-analyst-intake-prompt__icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: var(--v5-ink);
+}
+
+.v5-analyst-workbench.is-drop-over .v5-analyst-intake-prompt__icon {
+  color: var(--v5-blue);
+}
+
+.v5-analyst-intake-prompt strong {
+  color: var(--v5-ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.v5-analyst-intake-prompt span:last-child {
+  color: var(--v5-muted);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .v5-analyst-composer {

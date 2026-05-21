@@ -232,6 +232,47 @@ test('recordCliProviderCallPackage persists CLI package when enabled', async () 
   assert.equal(saved.outcome, 'success');
 });
 
+test('ProviderCallPackage enforces the Codex CLI package shape', async () => {
+  await assert.rejects(
+    ProviderCallPackage.create({
+      schemaVersion: '0.1',
+      captureVersion: 'provider-harness-cli-v0.2',
+      providerId: 'codex',
+      providerResearchId: 'openai-cli',
+      providerPathType: 'cli',
+      callSite: 'codex:transcribeImage',
+      operation: 'image-transcribe',
+      source: {
+        file: 'server/src/services/codex.js',
+        functionName: 'transcribeImage',
+        spawnSite: 'codex.transcribeImage',
+      },
+      request: null,
+      response: null,
+      cli: {
+        command: 'codex',
+        args: ['exec', '--json', '-'],
+        stdin: { text: 'prompt', byteLength: 6, sha256: 'abc' },
+        stdout: { text: '', byteLength: 0, sha256: null },
+        stderr: { text: '', byteLength: 0, sha256: null },
+        process: { spawned: true, closed: true, exitCode: 0 },
+        timeout: { timeoutMs: 1000, fired: false },
+        unexpectedProviderField: 'must not be accepted',
+      },
+      timing: {
+        requestStartedAt: '2026-05-20T12:00:00.000Z',
+        responseCompletedAt: '2026-05-20T12:00:01.000Z',
+        durationMs: 1000,
+      },
+      outcome: 'success',
+      error: null,
+      redaction: { applied: false, redactedHeaderNames: [], redactedBodyPaths: [], notes: [] },
+      storage: { inline: true, externalPayloads: [], notes: [], truncated: false, truncationReason: null },
+    }),
+    /unexpectedProviderField/
+  );
+});
+
 test('codex transcribeImage writes one background CLI package record on success', async () => {
   process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
   const spawnCalls = installSpawnMock();
@@ -340,5 +381,161 @@ test('codex transcribeImage does not wait for background Mongo insert', async ()
     assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'codex:transcribeImage' }), 1);
   } finally {
     ProviderCallPackage.create = originalCreate;
+  }
+});
+
+test('codex transcribeImage preserves malformed stdout lines in the wired provider package', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+  const { child } = spawnCalls[0];
+  emitStdoutLines(child, [
+    'this is not json',
+    JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'VISIBLE AFTER BAD LINE' } }),
+  ]);
+  closeChild(child, 0);
+
+  const result = await promise;
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:transcribeImage' }).lean();
+  assert.equal(result.text, 'VISIBLE AFTER BAD LINE');
+  assert.equal(saved.outcome, 'success');
+  assert.deepEqual(saved.cli.stdout.malformedLines, ['this is not json']);
+  assert.equal(saved.cli.stdout.jsonlEvents.length, 1);
+});
+
+test('codex transcribeImage preserves nonzero exit facts in the wired provider package', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+  const { child } = spawnCalls[0];
+  child.stderr.emit('data', Buffer.from('codex failed before output'));
+  closeChild(child, 1);
+
+  await assert.rejects(promise, /Codex CLI exited with code 1/);
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:transcribeImage' }).lean();
+  assert.equal(saved.outcome, 'process_error');
+  assert.equal(saved.cli.process.exitCode, 1);
+  assert.equal(saved.cli.process.closed, true);
+  assert.equal(saved.cli.stderr.text, 'codex failed before output');
+});
+
+test('codex transcribeImage waits for close facts before recording timeout package', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 5 });
+  const { child } = spawnCalls[0];
+
+  await assert.rejects(promise, /timed out/);
+  assert.equal(await ProviderCallPackage.countDocuments({}), 0);
+
+  const finalEvent = JSON.stringify({ item: { type: 'agent_message', id: 'late', text: 'LATE TEXT' } });
+  child.stdout.emit('data', Buffer.from(finalEvent));
+  child.stderr.emit('data', Buffer.from('late stderr before close'));
+  closeChild(child, null, 'SIGTERM');
+
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:transcribeImage' }).lean();
+  assert.equal(saved.outcome, 'timeout');
+  assert.equal(saved.cli.timeout.fired, true);
+  assert.equal(saved.cli.process.killed, true);
+  assert.equal(saved.cli.process.killSignal, 'SIGTERM');
+  assert.equal(saved.cli.process.closed, true);
+  assert.equal(saved.cli.process.signal, 'SIGTERM');
+  assert.equal(saved.cli.stdout.finalBuffer, finalEvent);
+  assert.equal(saved.cli.stdout.jsonlEvents[0].item.text, 'LATE TEXT');
+  assert.equal(saved.cli.stderr.text, 'late stderr before close');
+});
+
+test('codex transcribeImage records spawn errors as spawn_error', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+  const { child } = spawnCalls[0];
+  child.emit('error', Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' }));
+  closeChild(child, null, null);
+
+  await assert.rejects(promise, /spawn codex ENOENT/);
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:transcribeImage' }).lean();
+  assert.equal(saved.outcome, 'spawn_error');
+  assert.equal(saved.error.code, 'ENOENT');
+  assert.equal(saved.cli.process.spawned, false);
+  assert.equal(saved.cli.process.closed, true);
+});
+
+test('codex transcribeImage still returns when background recorder insert fails', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const originalCreate = ProviderCallPackage.create;
+  const originalWarn = console.warn;
+  const warnings = [];
+  ProviderCallPackage.create = async function failingCreate() {
+    throw new Error('mongo insert failed');
+  };
+  console.warn = (...args) => {
+    warnings.push(args.join(' '));
+  };
+
+  try {
+    const codex = requireFresh('../src/services/codex');
+    const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+    const { child } = spawnCalls[0];
+    emitStdoutLines(child, [
+      JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'RESULT DESPITE RECORDER ERROR' } }),
+    ]);
+    closeChild(child, 0);
+
+    const result = await promise;
+    await __waitForProviderPackageRecorderSettled();
+    assert.equal(result.text, 'RESULT DESPITE RECORDER ERROR');
+    assert.equal(await ProviderCallPackage.countDocuments({}), 0);
+    assert.equal(warnings.some((line) => line.includes('record failed: mongo insert failed')), true);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    console.warn = originalWarn;
+  }
+});
+
+test('codex transcribeImage trace output uses stage metadata without raw prompt or stream text', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  process.env.PROVIDER_HARNESS_CONSOLE_TRACE = 'true';
+  const spawnCalls = installSpawnMock();
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => {
+    logs.push(args.join(' '));
+  };
+
+  try {
+    const codex = requireFresh('../src/services/codex');
+    const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+    const { child } = spawnCalls[0];
+    emitStdoutLines(child, [
+      JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'TRACE RAW OUTPUT' } }),
+    ]);
+    child.stderr.emit('data', Buffer.from('TRACE RAW STDERR'));
+    closeChild(child, 0);
+
+    await promise;
+    await __waitForProviderPackageRecorderSettled();
+    const joined = logs.join('\n');
+    assert.equal(joined.includes('codex.cli.transcribeImage.enter'), true);
+    assert.equal(joined.includes('codex.cli.transcribeImage.stdout.data'), true);
+    assert.equal(joined.includes('codex.cli.transcribeImage.recorder.queued'), true);
+    assert.equal(joined.includes('Transcribe ALL text visible'), false);
+    assert.equal(joined.includes('TRACE RAW OUTPUT'), false);
+    assert.equal(joined.includes('TRACE RAW STDERR'), false);
+  } finally {
+    console.log = originalLog;
   }
 });

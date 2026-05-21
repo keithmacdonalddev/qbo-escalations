@@ -35,6 +35,7 @@ const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CODEX_CHAT_TIMEOUT_MS, 1800
 const PARSE_MODEL = process.env.CODEX_PARSE_MODEL || DEFAULT_MODEL;
 const PARSE_REASONING_EFFORT = process.env.CODEX_PARSE_REASONING_EFFORT || DEFAULT_REASONING_EFFORT;
 const PARSE_TIMEOUT_MS = parsePositiveInt(process.env.CODEX_PARSE_TIMEOUT_MS, 120000);
+const CLI_CAPTURE_CLOSE_WAIT_MS = 250;
 
 function createImagePayloadError(detail) {
   const err = new Error(detail || 'Invalid image payload');
@@ -92,6 +93,15 @@ function formatCliFailure(code, stderr) {
     return 'Codex CLI command not found. Ensure `codex` is installed and available on PATH.';
   }
   return 'Codex CLI exited with code ' + code + ': ' + preview;
+}
+
+function isCodexSpawnFailure(err) {
+  const code = String(err?.code || '').toUpperCase();
+  const message = String(err?.message || '');
+  return code === 'ENOENT'
+    || code === 'EACCES'
+    || code === 'SPAWN_ERROR'
+    || /spawn .* (ENOENT|EACCES)/i.test(message);
 }
 
 /**
@@ -581,6 +591,9 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     let stdinWrittenAt = null;
     let stdoutFinalBuffer = '';
     let cliCaptureQueued = false;
+    let closeObserved = false;
+    let pendingCaptureMeta = null;
+    let captureCloseWaitTimer = null;
     let fullResponse = '';
     let capturedUsage = null;
     const stdoutLines = [];
@@ -593,6 +606,10 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     function queueCliCapture(meta = {}) {
       if (!captureEnabled || cliCaptureQueued) return;
       cliCaptureQueued = true;
+      if (captureCloseWaitTimer) {
+        clearTimeout(captureCloseWaitTimer);
+        captureCloseWaitTimer = null;
+      }
       const responseCompletedAt = new Date().toISOString();
       const durationMs = Math.max(new Date(responseCompletedAt).getTime() - new Date(requestStartedAt).getTime(), 0);
       providerHarnessTrace('codex.cli.transcribeImage.package.assembled', {
@@ -635,7 +652,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         pid: child.pid || null,
         exitCode: Number.isFinite(meta.exitCode) ? meta.exitCode : null,
         signal: meta.signal || null,
-        spawned: true,
+        spawned: meta.spawned === false ? false : true,
         closed: Boolean(meta.closed),
         killed: Boolean(meta.killed),
         killSignal: meta.killSignal || null,
@@ -647,7 +664,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         stdinWrittenAt,
         firstStdoutAt,
         firstStderrAt,
-        processClosedAt: meta.closed ? responseCompletedAt : null,
+        processClosedAt: meta.processClosedAt || (meta.closed ? responseCompletedAt : null),
         responseCompletedAt,
         durationMs,
         error: meta.error || null,
@@ -661,6 +678,41 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         callSite: captureContext.callSite,
         outcome: meta.outcome || '',
       });
+    }
+
+    function deferCliCaptureUntilClose(meta = {}) {
+      if (!captureEnabled || cliCaptureQueued) return;
+      pendingCaptureMeta = {
+        ...(pendingCaptureMeta || {}),
+        ...meta,
+      };
+      providerHarnessTrace('codex.cli.transcribeImage.recorder.defer_until_close', {
+        providerId: captureContext.providerId,
+        callSite: captureContext.callSite,
+        outcome: pendingCaptureMeta.outcome || '',
+        closeObserved,
+      });
+      if (closeObserved) {
+        queueCliCapture(pendingCaptureMeta);
+        pendingCaptureMeta = null;
+        return;
+      }
+      if (!captureCloseWaitTimer) {
+        captureCloseWaitTimer = setTimeout(() => {
+          if (!pendingCaptureMeta || cliCaptureQueued) return;
+          providerHarnessTrace('codex.cli.transcribeImage.recorder.defer_close_timeout', {
+            providerId: captureContext.providerId,
+            callSite: captureContext.callSite,
+            outcome: pendingCaptureMeta.outcome || '',
+            waitMs: CLI_CAPTURE_CLOSE_WAIT_MS,
+          });
+          queueCliCapture(pendingCaptureMeta);
+          pendingCaptureMeta = null;
+        }, CLI_CAPTURE_CLOSE_WAIT_MS);
+        if (typeof captureCloseWaitTimer.unref === 'function') {
+          captureCloseWaitTimer.unref();
+        }
+      }
     }
 
     function finishOk(text, meta = {}) {
@@ -679,7 +731,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
       queueCliCapture({ ...meta, outcome: meta.outcome || 'success' });
     }
 
-    function finishErr(err, meta = {}) {
+    function finishErr(err, meta = {}, options = {}) {
       if (settled) return;
       settled = true;
       cleanupTempFiles(tempFiles);
@@ -695,7 +747,12 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         errorMessage: error.message || '',
         hasUsage: Boolean(capturedUsage),
       });
-      queueCliCapture({ ...meta, error, outcome: meta.outcome || null });
+      const captureMeta = { ...meta, error, outcome: meta.outcome || null };
+      if (options.deferCaptureUntilClose) {
+        deferCliCaptureUntilClose(captureMeta);
+      } else {
+        queueCliCapture(captureMeta);
+      }
     }
 
     function handleStdoutLine(line) {
@@ -760,11 +817,13 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         timeoutFired: true,
         killed: true,
         killSignal: 'SIGTERM',
+      }, {
+        deferCaptureUntilClose: true,
       });
     }, timeoutMs);
 
     child.stdout.on('data', (data) => {
-      if (settled) return;
+      if (cliCaptureQueued) return;
       const chunkText = data.toString();
       const receivedAt = new Date().toISOString();
       if (!firstStdoutAt) firstStdoutAt = receivedAt;
@@ -785,7 +844,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     });
 
     child.stderr.on('data', (data) => {
-      if (settled) return;
+      if (cliCaptureQueued) return;
       const chunkText = data.toString();
       const receivedAt = new Date().toISOString();
       if (!firstStderrAt) firstStderrAt = receivedAt;
@@ -801,7 +860,8 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
 
     child.on('close', (code, signal) => {
       clearTimeout(timeout);
-      if (settled) return;
+      closeObserved = true;
+      const processClosedAt = new Date().toISOString();
       stdoutFinalBuffer = stdoutBuffer;
       providerHarnessTrace('codex.cli.transcribeImage.close', {
         providerId: captureContext.providerId,
@@ -839,12 +899,27 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         if (tailDelta) fullResponse += tailDelta;
       }
 
+      if (pendingCaptureMeta) {
+        queueCliCapture({
+          ...pendingCaptureMeta,
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
+        pendingCaptureMeta = null;
+        return;
+      }
+
+      if (settled) return;
+
       if (code !== 0 && !fullResponse.trim()) {
         finishErr(new Error(formatCliFailure(code, stderrOutput)), {
           outcome: 'process_error',
           exitCode: code,
           signal: signal || null,
           closed: true,
+          processClosedAt,
         });
         return;
       }
@@ -854,6 +929,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         exitCode: code,
         signal: signal || null,
         closed: true,
+        processClosedAt,
       });
     });
 
@@ -866,7 +942,13 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         errorCode: err.code || '',
         errorMessage: err.message || '',
       });
-      finishErr(err, { outcome: 'process_error' });
+      const spawnFailure = isCodexSpawnFailure(err);
+      finishErr(err, {
+        outcome: spawnFailure ? 'spawn_error' : 'process_error',
+        spawned: !spawnFailure,
+      }, {
+        deferCaptureUntilClose: true,
+      });
     });
   });
 }
