@@ -186,6 +186,25 @@ function redactStringArray(values, path, redactedBodyPaths, notes) {
   ));
 }
 
+function redactTextChunkArray(values, path, redactedBodyPaths, notes, options = {}) {
+  if (!Array.isArray(values)) return values;
+  return values.map((chunk, index) => {
+    const next = cloneValue(chunk);
+    if (typeof next?.text === 'string') {
+      next.text = redactCliText(
+        next.text,
+        `${path}[${index}].text`,
+        redactedBodyPaths,
+        notes,
+        options
+      );
+      next.byteLength = Buffer.byteLength(next.text, 'utf8');
+      next.sha256 = next.text ? sha256(next.text) : null;
+    }
+    return next;
+  });
+}
+
 function mergeUnique(a = [], b = []) {
   const output = [];
   for (const value of [...a, ...b]) addUnique(output, value);
@@ -393,6 +412,149 @@ function redactProviderCallPackage(envelope) {
     notes,
     'error.rawBody JSON string redacted'
   );
+
+  if (redacted.lmStudio && typeof redacted.lmStudio === 'object') {
+    if (redacted.lmStudio.request?.headers) {
+      const result = redactHeaders(redacted.lmStudio.request.headers);
+      redacted.lmStudio.request.headers = result.headers;
+      redacted.lmStudio.request.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+
+    if (redacted.lmStudio.request?.bodyJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.lmStudio.request.bodyJson = redactBodySecrets(
+        redacted.lmStudio.request.bodyJson,
+        'lmStudio.request.bodyJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.lmStudio.request, 'lmStudio.request.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (!redacted.lmStudio.request?.bodyJson) {
+      redactJsonTextField(
+        redacted.lmStudio.request,
+        'bodyText',
+        'lmStudio.request.bodyText',
+        redactedBodyPaths,
+        notes,
+        'lmStudio.request.bodyText JSON string redacted'
+      );
+    }
+
+    if (redacted.lmStudio.response?.headers) {
+      const result = redactHeaders(redacted.lmStudio.response.headers);
+      redacted.lmStudio.response.headers = result.headers;
+      redacted.lmStudio.response.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.lmStudio.response?.rawHeaders) {
+      const result = redactRawHeaders(redacted.lmStudio.response.rawHeaders);
+      redacted.lmStudio.response.rawHeaders = result.rawHeaders;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.lmStudio.response?.parsedJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.lmStudio.response.parsedJson = redactBodySecrets(
+        redacted.lmStudio.response.parsedJson,
+        'lmStudio.response.parsedJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.lmStudio.response, 'lmStudio.response.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (Array.isArray(redacted.lmStudio.response?.bodyChunks)) {
+      redacted.lmStudio.response.bodyChunks = redactTextChunkArray(
+        redacted.lmStudio.response.bodyChunks,
+        'lmStudio.response.bodyChunks',
+        redactedBodyPaths,
+        notes
+      );
+    }
+
+    if (Array.isArray(redacted.lmStudio.stream?.rawChunks)) {
+      redacted.lmStudio.stream.rawChunks = redactTextChunkArray(
+        redacted.lmStudio.stream.rawChunks,
+        'lmStudio.stream.rawChunks',
+        redactedBodyPaths,
+        notes
+      );
+    }
+    if (Array.isArray(redacted.lmStudio.stream?.frames)) {
+      redacted.lmStudio.stream.frames = redacted.lmStudio.stream.frames.map((frame, index) => {
+        const next = cloneValue(frame);
+        if (typeof next.rawLine === 'string') {
+          next.rawLine = redactPlainTextSecrets(
+            next.rawLine,
+            `lmStudio.stream.frames[${index}].rawLine`,
+            redactedBodyPaths,
+            notes
+          );
+        }
+        if (typeof next.data === 'string') {
+          next.data = redactPlainTextSecrets(
+            next.data,
+            `lmStudio.stream.frames[${index}].data`,
+            redactedBodyPaths,
+            notes
+          );
+        }
+        if (next.parsedJson) {
+          next.parsedJson = redactBodySecrets(
+            next.parsedJson,
+            `lmStudio.stream.frames[${index}].parsedJson`,
+            redactedBodyPaths
+          );
+        }
+        return next;
+      });
+    }
+    if (Array.isArray(redacted.lmStudio.stream?.parsedChunks)) {
+      redacted.lmStudio.stream.parsedChunks = redactBodySecrets(
+        redacted.lmStudio.stream.parsedChunks,
+        'lmStudio.stream.parsedChunks',
+        redactedBodyPaths
+      );
+    }
+    if (typeof redacted.lmStudio.stream?.finalBuffer === 'string') {
+      redacted.lmStudio.stream.finalBuffer = redactPlainTextSecrets(
+        redacted.lmStudio.stream.finalBuffer,
+        'lmStudio.stream.finalBuffer',
+        redactedBodyPaths,
+        notes
+      );
+    }
+    if (typeof redacted.lmStudio.stream?.fullResponse === 'string') {
+      redacted.lmStudio.stream.fullResponse = redactPlainTextSecrets(
+        redacted.lmStudio.stream.fullResponse,
+        'lmStudio.stream.fullResponse',
+        redactedBodyPaths,
+        notes
+      );
+      redacted.lmStudio.stream.fullResponseByteLength = Buffer.byteLength(redacted.lmStudio.stream.fullResponse, 'utf8');
+      redacted.lmStudio.stream.fullResponseSha256 = redacted.lmStudio.stream.fullResponse
+        ? sha256(redacted.lmStudio.stream.fullResponse)
+        : null;
+    }
+
+    if (redacted.lmStudio.error?.object) {
+      redacted.lmStudio.error.object = redactBodySecrets(
+        redacted.lmStudio.error.object,
+        'lmStudio.error.object',
+        redactedBodyPaths
+      );
+    }
+    redactJsonTextField(
+      redacted.lmStudio.error,
+      'rawBody',
+      'lmStudio.error.rawBody',
+      redactedBodyPaths,
+      notes,
+      'lmStudio.error.rawBody JSON string redacted'
+    );
+  }
 
   redacted.redaction = {
     ...(redacted.redaction && typeof redacted.redaction === 'object' ? redacted.redaction : {}),

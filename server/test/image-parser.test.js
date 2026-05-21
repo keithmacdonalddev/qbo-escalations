@@ -8,6 +8,9 @@ const fs = require('fs');
 const { EventEmitter } = require('events');
 const mongo = require('./_mongo-helper');
 const ProviderCallPackage = require('../src/models/ProviderCallPackage');
+const {
+  __waitForProviderPackageRecorderSettled,
+} = require('../src/services/provider-call-package-recorder');
 
 // ---------------------------------------------------------------------------
 // HTTP mock helpers — intercept http.request to avoid real network calls
@@ -620,6 +623,142 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
     }
     if (origKey !== undefined) process.env.MOONSHOT_API_KEY = origKey;
     else delete process.env.MOONSHOT_API_KEY;
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage captures LM Studio image-parser package in LM Studio-specific shape', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: 789\nCASE: CS-LM-001' } }],
+    model: 'local-vision-model',
+    usage: { prompt_tokens: 70, completion_tokens: 20 },
+    provider_extra_top_level: { preserved: true },
+  });
+
+  try {
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model' });
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callLmStudio' }).lean();
+
+    assert.equal(result.text, 'COID/MID: 789\nCASE: CS-LM-001');
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'lm-studio');
+    assert.equal(saved.providerResearchId, 'lm-studio-openai-compatible');
+    assert.equal(saved.providerPathType, 'lm-studio-http-nonstream');
+    assert.equal(saved.operation, 'image-parse');
+    assert.equal(saved.request, null);
+    assert.equal(saved.response, null);
+    assert.equal(saved.lmStudio.mode, 'non-stream');
+    assert.equal(saved.lmStudio.request.modelRequested, 'local-vision-model');
+    assert.equal(saved.lmStudio.request.stream, false);
+    assert.equal(saved.lmStudio.request.bodyJson.messages[1].content[1].image_url.url.startsWith('data:image/png;base64,'), true);
+    assert.equal(saved.lmStudio.response.statusCode, 200);
+    assert.equal(saved.lmStudio.response.parsedJson.provider_extra_top_level.preserved, true);
+    assert.equal(saved.lmStudio.response.parsedJson.choices[0].message.content, 'COID/MID: 789\nCASE: CS-LM-001');
+    assert.equal(saved.outcome, 'success');
+  } finally {
+    clearHttpMock();
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage captures full LM Studio image-parser non-200 body in LM Studio package', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const fullErrorBody = JSON.stringify({
+    error: {
+      message: `lm studio image parse failed ${'x'.repeat(700)}`,
+      type: 'server_error',
+    },
+  });
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  mockHttpRequest(500, fullErrorBody);
+
+  try {
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model' }),
+      /LM Studio error \(HTTP 500\)/
+    );
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callLmStudio' }).lean();
+
+    assert.ok(saved);
+    assert.equal(saved.outcome, 'http_error');
+    assert.equal(saved.providerPathType, 'lm-studio-http-nonstream');
+    assert.equal(saved.lmStudio.response.statusCode, 500);
+    assert.equal(saved.lmStudio.response.bodyText, fullErrorBody);
+    assert.equal(saved.lmStudio.response.parsedJson.error.type, 'server_error');
+  } finally {
+    clearHttpMock();
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage does not wait for background LM Studio image-parser package insert', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const originalCreate = ProviderCallPackage.create;
+  let releaseCreate;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  ProviderCallPackage.create = async function delayedCreate(...args) {
+    await new Promise((resolve) => { releaseCreate = resolve; });
+    return originalCreate.apply(this, args);
+  };
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: FAST\nCASE: CS-LM-FAST' } }],
+    model: 'local-vision-model',
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  });
+
+  try {
+    const result = await Promise.race([
+      parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('parseImage waited for recorder')), 250)),
+    ]);
+    assert.equal(result.text, 'COID/MID: FAST\nCASE: CS-LM-FAST');
+
+    while (!releaseCreate) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    releaseCreate();
+    await __waitForProviderPackageRecorderSettled();
+    assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'image-parser:callLmStudio' }), 1);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    clearHttpMock();
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
+    await __waitForProviderPackageRecorderSettled();
     await ProviderCallPackage.deleteMany({}).catch(() => {});
     await mongo.disconnect();
   }

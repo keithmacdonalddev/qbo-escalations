@@ -192,6 +192,115 @@ async function externalizeCliTextChunks(envelope, streamName, options) {
   return true;
 }
 
+async function externalizeTextChunks(chunks, rootFieldPath, fallbackKind, envelope, options) {
+  if (!Array.isArray(chunks) || chunks.length === 0) return false;
+
+  const textChunks = chunks
+    .map((chunk, index) => ({ chunk, index, text: typeof chunk?.text === 'string' ? chunk.text : null }))
+    .filter((entry) => entry.text !== null);
+  if (textChunks.length === 0) return false;
+
+  const totalBytes = textChunks.reduce((sum, entry) => sum + byteLength(entry.text), 0);
+  const hasOversizedChunk = textChunks.some((entry) => byteLength(entry.text) > options.maxInlineBytes);
+  if (totalBytes <= options.maxInlineBytes && !hasOversizedChunk) return false;
+
+  for (const entry of textChunks) {
+    const seq = Number.isInteger(entry.chunk.seq) ? entry.chunk.seq : entry.index;
+    const fieldPath = `${rootFieldPath}[${seq}].text`;
+    const payloadRef = await writeExternalPayload(
+      envelope,
+      fieldPath,
+      entry.text,
+      options,
+      fallbackKind
+    );
+    entry.chunk.text = null;
+    entry.chunk.textPayloadRef = payloadRef;
+  }
+
+  return true;
+}
+
+async function externalizeLmStudioTextChunks(envelope, options) {
+  let externalized = false;
+  externalized = await externalizeTextChunks(
+    envelope.lmStudio?.response?.bodyChunks,
+    'lmStudio.response.bodyChunks',
+    'lm_studio_response_body_chunk',
+    envelope,
+    options
+  ) || externalized;
+  externalized = await externalizeTextChunks(
+    envelope.lmStudio?.stream?.rawChunks,
+    'lmStudio.stream.rawChunks',
+    'lm_studio_stream_raw_chunk',
+    envelope,
+    options
+  ) || externalized;
+  return externalized;
+}
+
+async function externalizeLmStudioFrames(envelope, options) {
+  const frames = envelope.lmStudio?.stream?.frames;
+  if (!Array.isArray(frames) || frames.length === 0) return false;
+
+  const entries = [];
+  frames.forEach((frame, index) => {
+    if (typeof frame?.rawLine === 'string') {
+      entries.push({ frame, index, fieldName: 'rawLine', text: frame.rawLine });
+    }
+    if (typeof frame?.data === 'string') {
+      entries.push({ frame, index, fieldName: 'data', text: frame.data });
+    }
+  });
+  if (entries.length === 0) return false;
+
+  const totalBytes = entries.reduce((sum, entry) => sum + byteLength(entry.text), 0);
+  const hasOversizedEntry = entries.some((entry) => byteLength(entry.text) > options.maxInlineBytes);
+  if (totalBytes <= options.maxInlineBytes && !hasOversizedEntry) return false;
+
+  for (const entry of entries) {
+    const seq = Number.isInteger(entry.frame.seq) ? entry.frame.seq : entry.index;
+    const fieldPath = `lmStudio.stream.frames[${seq}].${entry.fieldName}`;
+    const payloadRef = await writeExternalPayload(
+      envelope,
+      fieldPath,
+      entry.text,
+      options,
+      entry.fieldName === 'rawLine' ? 'lm_studio_stream_frame_raw_line' : 'lm_studio_stream_frame_data'
+    );
+    entry.frame[entry.fieldName] = null;
+    entry.frame[`${entry.fieldName}PayloadRef`] = payloadRef;
+  }
+
+  return true;
+}
+
+function duplicateJsonMatchesText(envelope, textPath, jsonPath, options) {
+  const bodyText = readPath(envelope, textPath);
+  const bodyJson = readPath(envelope, jsonPath);
+  const bodyJsonText = bodyJson === null || bodyJson === undefined
+    ? null
+    : JSON.stringify(bodyJson);
+  return typeof bodyText === 'string'
+    && bodyJsonText === bodyText
+    && byteLength(bodyText) > options.maxInlineBytes;
+}
+
+function omitDuplicateJsonFromExternalizedText(envelope, storage, textPath, jsonPath, note) {
+  const bodyTextRef = readPath(envelope, `${textPath}PayloadRef`);
+  if (!bodyTextRef) return false;
+  writePath(envelope, jsonPath, null);
+  attachPayloadRef(envelope, jsonPath, {
+    ...bodyTextRef,
+    field: jsonPath,
+    kind: `${bodyTextRef.kind}_json`,
+    derivedFrom: textPath,
+  });
+  addStorageNote(storage, note);
+  return true;
+}
+
 async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   const prepared = envelope || {};
   const storage = ensureStorage(prepared);
@@ -232,6 +341,12 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   const shouldDropDuplicateRequestBodyJson = typeof requestBodyText === 'string'
     && requestBodyJsonText === requestBodyText
     && byteLength(requestBodyText) > payloadOptions.maxInlineBytes;
+  const shouldDropDuplicateLmStudioRequestBodyJson = duplicateJsonMatchesText(
+    prepared,
+    'lmStudio.request.bodyText',
+    'lmStudio.request.bodyJson',
+    payloadOptions
+  );
 
   let externalized = false;
   for (const fieldPath of fields) {
@@ -250,11 +365,25 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
         continue;
       }
     }
+    if (fieldPath === 'lmStudio.request.bodyJson' && shouldDropDuplicateLmStudioRequestBodyJson) {
+      if (omitDuplicateJsonFromExternalizedText(
+        prepared,
+        storage,
+        'lmStudio.request.bodyText',
+        'lmStudio.request.bodyJson',
+        'lmStudio.request.bodyJson omitted because it duplicates externalized lmStudio.request.bodyText'
+      )) {
+        externalized = true;
+        continue;
+      }
+    }
     externalized = await externalizeField(prepared, fieldPath, payloadOptions) || externalized;
   }
   externalized = await externalizeResponseChunks(prepared, payloadOptions) || externalized;
   externalized = await externalizeCliTextChunks(prepared, 'stdout', payloadOptions) || externalized;
   externalized = await externalizeCliTextChunks(prepared, 'stderr', payloadOptions) || externalized;
+  externalized = await externalizeLmStudioTextChunks(prepared, payloadOptions) || externalized;
+  externalized = await externalizeLmStudioFrames(prepared, payloadOptions) || externalized;
 
   storage.inline = !externalized && storage.externalPayloads.length === 0;
   storage.truncated = false;

@@ -12,7 +12,7 @@ const {
 const {
   buildResponseChunk,
   isProviderCallPackageCaptureEnabled,
-  recordHttpProviderCallPackage,
+  recordLmStudioProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
 
 // ---------------------------------------------------------------------------
@@ -51,9 +51,8 @@ function buildDefaultHeaders(extraHeaders = {}) {
   return headers;
 }
 
-async function recordCapturedHttpPackage(captureInput) {
-  const result = await recordHttpProviderCallPackage(captureInput);
-  return result;
+function recordCapturedLmStudioPackage(captureInput) {
+  return recordLmStudioProviderCallPackageInBackground(captureInput);
 }
 
 function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}, captureContext = null) {
@@ -81,9 +80,10 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
     };
     if (payload) options.headers['Content-Length'] = Buffer.byteLength(payload);
 
-    const capture = async ({ response = null, error = null, outcome = null }) => {
+    const capture = ({ response = null, error = null, outcome = null }) => {
       if (!captureEnabled) return;
-      await recordCapturedHttpPackage({
+      recordCapturedLmStudioPackage({
+        mode: 'non-stream',
         method,
         baseUrl,
         urlPath,
@@ -126,14 +126,14 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
           bodyChunks: responseChunks,
           bodyText: data,
         };
-        await capture({ response });
+        capture({ response });
         resolve({ statusCode: res.statusCode, body: data });
       });
     });
     req.on('error', async (err) => {
       if (settled) return;
       settled = true;
-      await capture({ error: err });
+      capture({ error: err });
       reject(err);
     });
     req.on('timeout', async () => {
@@ -141,7 +141,8 @@ function rawRequest(baseUrl, method, urlPath, body, timeoutMs, extraHeaders = {}
       settled = true;
       req.destroy();
       const err = new Error('LM Studio request timed out');
-      await capture({ error: err, outcome: 'timeout' });
+      err.code = 'TIMEOUT';
+      capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
     if (payload) {
@@ -407,18 +408,82 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
   let settled = false;
   let capturedUsage = null;
   let req = null;
+  let captureEnabled = false;
+  let captureQueued = false;
+  let captureContext = null;
+  let requestStartedAt = null;
+  let requestWrittenAt = null;
+  let responseHeadersAt = null;
+  let requestBodyJson = null;
+  let requestBody = null;
+  let requestHeaders = {};
+  let responseMeta = null;
+  let responseChunks = [];
+  let sseFrames = [];
+  let parsedChunks = [];
+  let doneSeen = false;
+  let streamTerminator = '';
+  let finalSseBuffer = '';
 
-  function finishWithError(err) {
+  function queueStreamCapture({ error = null, outcome = null, terminator = null, errorRawBody = null } = {}) {
+    if (!captureEnabled || captureQueued) return;
+    captureQueued = true;
+
+    const responseCompletedAt = new Date().toISOString();
+    const bodyText = responseChunks.map((chunk) => chunk.text || '').join('');
+    const resolvedTerminator = terminator
+      || streamTerminator
+      || (doneSeen ? 'done_sentinel' : (error ? 'network_error' : 'end_without_done'));
+
+    recordCapturedLmStudioPackage({
+      mode: 'stream',
+      method: 'POST',
+      baseUrl,
+      urlPath: '/v1/chat/completions',
+      body: requestBodyJson || requestBody,
+      headers: requestHeaders,
+      timeoutMs: effectiveTimeoutMs,
+      captureContext,
+      requestStartedAt,
+      requestWrittenAt,
+      responseHeadersAt,
+      responseCompletedAt,
+      response: responseMeta
+        ? {
+            ...responseMeta,
+            bodyChunks: responseChunks,
+            bodyText,
+          }
+        : null,
+      stream: {
+        rawChunks: responseChunks,
+        frames: sseFrames,
+        parsedChunks,
+        doneSeen,
+        terminator: resolvedTerminator,
+        finalBuffer: finalSseBuffer,
+        fullResponse,
+        usage: capturedUsage || null,
+      },
+      error,
+      errorRawBody,
+      outcome,
+    });
+  }
+
+  function finishWithError(err, capture = null) {
     if (settled || killed) return;
     settled = true;
+    if (capture) queueStreamCapture(capture);
     const error = err instanceof Error ? err : new Error(String(err));
     error._usage = capturedUsage || null;
     onError(error);
   }
 
-  function finishWithSuccess(text) {
+  function finishWithSuccess(text, capture = null) {
     if (settled || killed) return;
     settled = true;
+    queueStreamCapture(capture || { outcome: 'success' });
     onDone(text, capturedUsage || null);
   }
 
@@ -427,7 +492,8 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     if (req) try { req.destroy(); } catch { /* ignore */ }
     const timeoutErr = new Error('LM Studio request timed out after ' + effectiveTimeoutMs + 'ms');
     timeoutErr.code = 'TIMEOUT';
-    finishWithError(timeoutErr);
+    streamTerminator = 'timeout';
+    finishWithError(timeoutErr, { error: timeoutErr, outcome: 'timeout', terminator: 'timeout' });
   }, effectiveTimeoutMs);
 
   // Auto-detect model then start streaming
@@ -437,34 +503,85 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     const effectiveModel = (model && model !== 'local') ? model : detectedModel;
     const openaiMessages = buildOpenAIMessages(messages, systemPrompt, images);
 
-    const body = JSON.stringify({
+    requestBodyJson = {
       model: effectiveModel,
       messages: openaiMessages,
       stream: true,
       temperature: reasoningEffort === 'low' ? 0.3 : reasoningEffort === 'high' ? 0.8 : 0.5,
-    });
+    };
+    requestBody = JSON.stringify(requestBodyJson);
+    captureEnabled = isProviderCallPackageCaptureEnabled();
+    requestStartedAt = captureEnabled ? new Date().toISOString() : null;
+    captureContext = captureEnabled
+      ? {
+          providerId: 'lm-studio',
+          providerResearchId: 'lm-studio-openai-compatible',
+          providerPathType: 'lm-studio-http-stream',
+          callSite: 'lm-studio:chat',
+          operation: 'chat',
+          modelRequested: effectiveModel,
+          source: {
+            file: 'server/src/services/lm-studio.js',
+            functionName: 'chat',
+            helperName: 'http.request',
+          },
+        }
+      : null;
 
     const url = new URL('/v1/chat/completions', baseUrl);
     const transport = url.protocol === 'https:' ? https : http;
+    requestHeaders = {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(requestBody),
+      ...buildDefaultHeaders(),
+    };
 
     req = transport.request({
       method: 'POST',
       hostname: url.hostname,
       port: url.port,
       path: url.pathname,
-      headers: {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(body),
-        ...buildDefaultHeaders(),
-      },
+      headers: requestHeaders,
       timeout: effectiveTimeoutMs,
     }, (res) => {
+      responseHeadersAt = captureEnabled ? new Date().toISOString() : null;
+      responseMeta = {
+        statusCode: res.statusCode || 0,
+        statusMessage: res.statusMessage || '',
+        httpVersion: res.httpVersion || '',
+        headers: res.headers || {},
+        rawHeaders: res.rawHeaders || [],
+        trailers: res.trailers || {},
+        rawTrailers: res.rawTrailers || [],
+      };
+
       if (res.statusCode !== 200) {
         let errBody = '';
-        res.on('data', (chunk) => { errBody += chunk; });
+        res.on('data', (chunk) => {
+          const receivedAt = new Date().toISOString();
+          errBody += chunk;
+          if (captureEnabled) {
+            responseChunks.push(buildResponseChunk(responseChunks.length, chunk, receivedAt));
+          }
+        });
         res.on('end', () => {
           clearTimeout(timeout);
-          finishWithError(new Error(`LM Studio API error (HTTP ${res.statusCode}): ${errBody.slice(0, 500)}`));
+          const err = new Error(`LM Studio API error (HTTP ${res.statusCode}): ${errBody.slice(0, 500)}`);
+          err.statusCode = res.statusCode || 0;
+          err.rawBody = errBody;
+          try {
+            err.object = JSON.parse(errBody);
+            responseMeta = responseMeta
+              ? { ...responseMeta, parsedJson: err.object }
+              : responseMeta;
+          } catch { /* keep unparseable error body as raw text only */ }
+          streamTerminator = 'http_error';
+          finishWithError(err, {
+            error: err,
+            outcome: 'http_error',
+            terminator: 'http_error',
+            errorRawBody: errBody,
+          });
         });
         return;
       }
@@ -473,23 +590,55 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
 
       res.on('data', (chunk) => {
         if (settled || killed) return;
+        const receivedAt = new Date().toISOString();
+        if (captureEnabled) {
+          responseChunks.push(buildResponseChunk(responseChunks.length, chunk, receivedAt));
+        }
         sseBuffer += chunk.toString();
         const lines = sseBuffer.split('\n');
         sseBuffer = lines.pop() || '';
+        finalSseBuffer = sseBuffer;
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith(':')) continue;
 
           if (trimmed === 'data: [DONE]') {
+            doneSeen = true;
+            streamTerminator = 'done_sentinel';
+            if (captureEnabled) {
+              sseFrames.push({
+                seq: sseFrames.length,
+                receivedAt,
+                rawLine: trimmed,
+                data: '[DONE]',
+                eventType: 'done',
+                parsedJson: null,
+                parseError: null,
+              });
+            }
             clearTimeout(timeout);
-            finishWithSuccess(fullResponse);
+            finishWithSuccess(fullResponse, { outcome: 'success', terminator: 'done_sentinel' });
             return;
           }
 
           if (trimmed.startsWith('data: ')) {
+            const data = trimmed.slice(6);
+            const frame = {
+              seq: sseFrames.length,
+              receivedAt,
+              rawLine: trimmed,
+              data,
+              eventType: 'data',
+              parsedJson: null,
+              parseError: null,
+            };
             try {
-              const json = JSON.parse(trimmed.slice(6));
+              const json = JSON.parse(data);
+              frame.parsedJson = json;
+              if (captureEnabled) {
+                parsedChunks.push(json);
+              }
               const usage = buildUsageObject(json, effectiveModel);
               if (usage) capturedUsage = usage;
 
@@ -502,30 +651,55 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
                 fullResponse += delta;
                 try { onChunk(delta); } catch { /* ignore callback errors */ }
               }
-            } catch { /* skip malformed JSON */ }
+            } catch (err) {
+              frame.eventType = 'malformed_json';
+              frame.parseError = {
+                name: err.name || 'SyntaxError',
+                message: err.message || String(err),
+              };
+            }
+            if (captureEnabled) {
+              sseFrames.push(frame);
+            }
           }
         }
       });
 
       res.on('end', () => {
         clearTimeout(timeout);
-        if (!settled && !killed) finishWithSuccess(fullResponse);
+        responseMeta = responseMeta
+          ? {
+              ...responseMeta,
+              trailers: res.trailers || {},
+              rawTrailers: res.rawTrailers || [],
+            }
+          : responseMeta;
+        finalSseBuffer = sseBuffer;
+        if (!settled && !killed) {
+          streamTerminator = doneSeen ? 'done_sentinel' : 'end_without_done';
+          finishWithSuccess(fullResponse, {
+            outcome: doneSeen ? 'success' : 'stream_end_without_done',
+            terminator: streamTerminator,
+          });
+        }
       });
 
       res.on('error', (err) => {
         clearTimeout(timeout);
-        finishWithError(err);
+        streamTerminator = 'network_error';
+        finishWithError(err, { error: err, outcome: 'network_error', terminator: 'network_error' });
       });
     });
 
     req.on('error', (err) => {
       clearTimeout(timeout);
+      streamTerminator = 'network_error';
       if (err.code === 'ECONNREFUSED') {
         finishWithError(new Error(
           `Cannot connect to LM Studio at ${baseUrl}. Is LM Studio running with the local server enabled?`
-        ));
+        ), { error: err, outcome: 'network_error', terminator: 'network_error' });
       } else {
-        finishWithError(err);
+        finishWithError(err, { error: err, outcome: 'network_error', terminator: 'network_error' });
       }
     });
 
@@ -533,10 +707,12 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       req.destroy();
       const timeoutErr = new Error('LM Studio connection timed out');
       timeoutErr.code = 'TIMEOUT';
-      finishWithError(timeoutErr);
+      streamTerminator = 'timeout';
+      finishWithError(timeoutErr, { error: timeoutErr, outcome: 'timeout', terminator: 'timeout' });
     });
 
-    req.write(body);
+    req.write(requestBody);
+    requestWrittenAt = captureEnabled ? new Date().toISOString() : null;
     req.end();
   }).catch((err) => {
     clearTimeout(timeout);
@@ -544,6 +720,12 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
   });
 
   return function cleanup() {
+    if (!settled && !killed) {
+      const abortErr = new Error('LM Studio request aborted by cleanup');
+      abortErr.code = 'ABORT_ERR';
+      streamTerminator = 'aborted';
+      queueStreamCapture({ error: abortErr, outcome: 'aborted', terminator: 'aborted' });
+    }
     killed = true;
     clearTimeout(timeout);
     if (req) try { req.destroy(); } catch { /* ignore */ }
@@ -608,7 +790,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   }, effectiveTimeoutMs, undefined, {
     providerId: 'lm-studio',
     providerResearchId: 'lm-studio-openai-compatible',
-    providerPathType: 'local-http',
+    providerPathType: 'lm-studio-http-nonstream',
     callSite: 'lm-studio:parseEscalation',
     operation: 'parse-escalation',
     source: {
@@ -697,7 +879,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   }, effectiveTimeoutMs, undefined, {
     providerId: 'lm-studio',
     providerResearchId: 'lm-studio-openai-compatible',
-    providerPathType: 'local-http',
+    providerPathType: 'lm-studio-http-nonstream',
     callSite: 'lm-studio:transcribeImage',
     operation: 'transcribe-image',
     source: {

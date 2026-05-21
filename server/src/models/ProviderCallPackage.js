@@ -176,6 +176,7 @@ const lmStudioSseFrameSchema = new mongoose.Schema({
 }, strictSubdocumentOptions);
 
 const lmStudioStreamSchema = new mongoose.Schema({
+  rawChunks: { type: [lmStudioTextChunkSchema], default: [] },
   frames: { type: [lmStudioSseFrameSchema], default: [] },
   parsedChunks: { type: [mongoose.Schema.Types.Mixed], default: [] },
   parsedChunksPayloadRef: { type: payloadRefSchema, default: null },

@@ -30,6 +30,7 @@ const {
   buildResponseChunk,
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
+  recordLmStudioProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
 
 // Anthropic Agent SDK provider adapter. Loaded lazily so the ESM-only SDK is
@@ -790,6 +791,12 @@ function resolveTransport(baseUrl) {
 }
 
 async function recordCapturedHttpPackage(captureInput) {
+  if (captureInput?.captureContext?.providerId === 'lm-studio') {
+    return recordLmStudioProviderCallPackageInBackground({
+      ...captureInput,
+      mode: 'non-stream',
+    });
+  }
   const result = await recordHttpProviderCallPackage(captureInput);
   return result;
 }
@@ -1064,7 +1071,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
   }, LM_STUDIO_API_TOKEN ? { Authorization: `Bearer ${LM_STUDIO_API_TOKEN}` } : {}, timeoutMs, {
     providerId: 'lm-studio',
     providerResearchId: 'lm-studio-openai-compatible',
-    providerPathType: 'local-http',
+    providerPathType: 'lm-studio-http-nonstream',
     callSite: 'image-parser:callLmStudio',
     operation: 'image-parse',
     source: {

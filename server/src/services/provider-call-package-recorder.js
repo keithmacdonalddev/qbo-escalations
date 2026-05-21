@@ -9,6 +9,7 @@ const { externalizeProviderCallPackagePayloads, sha256 } = require('./provider-c
 
 const CAPTURE_VERSION = 'provider-harness-http-v0.1';
 const CLI_CAPTURE_VERSION = 'provider-harness-cli-v0.2';
+const LM_STUDIO_CAPTURE_VERSION = 'provider-harness-lm-studio-v0.1';
 const SCHEMA_VERSION = '0.1';
 const inFlightBackgroundRecords = new Set();
 
@@ -307,6 +308,243 @@ function buildResponsePackage(input, responseBodyText, parsedResult) {
   };
 }
 
+function buildLmStudioNoResponsePackage() {
+  return {
+    received: false,
+    statusCode: 0,
+    statusMessage: '',
+    httpVersion: '',
+    headers: {},
+    redactedHeaderNames: [],
+    rawHeaders: [],
+    trailers: {},
+    rawTrailers: [],
+    bodyChunks: [],
+    bodyText: '',
+    bodyTextPayloadRef: null,
+    bodyByteLength: 0,
+    bodySha256: null,
+    parsedJson: null,
+    parsedJsonPayloadRef: null,
+    jsonParseError: null,
+  };
+}
+
+function normalizeLmStudioParseError(err) {
+  if (!err) return null;
+  return {
+    name: err.name || 'SyntaxError',
+    message: err.message || String(err),
+  };
+}
+
+function normalizeLmStudioTextChunks(chunks = []) {
+  return normalizeCliTextChunks(chunks);
+}
+
+function normalizeLmStudioFrames(frames = []) {
+  if (!Array.isArray(frames)) return [];
+  return frames.map((frame, index) => ({
+    seq: Number.isInteger(frame?.seq) ? frame.seq : index,
+    receivedAt: frame?.receivedAt || nowIso(),
+    rawLine: normalizeString(frame?.rawLine ?? frame?.line ?? ''),
+    rawLinePayloadRef: frame?.rawLinePayloadRef || null,
+    data: frame?.data === null || frame?.data === undefined ? null : normalizeString(frame.data),
+    dataPayloadRef: frame?.dataPayloadRef || null,
+    eventType: frame?.eventType || 'unknown',
+    parsedJson: frame?.parsedJson === undefined ? null : cloneJsonSafe(frame.parsedJson),
+    parseError: normalizeLmStudioParseError(frame?.parseError),
+  }));
+}
+
+function inferLmStudioMode(input, context) {
+  if (input.mode === 'stream' || input.mode === 'non-stream') return input.mode;
+  if (context.mode === 'stream' || context.mode === 'non-stream') return context.mode;
+  const streamFlag = input.body?.stream ?? context.stream;
+  return streamFlag ? 'stream' : 'non-stream';
+}
+
+function normalizeLmStudioRequest(input, context, mode) {
+  const baseUrl = input.baseUrl || context.baseUrl || 'http://localhost';
+  const urlPath = input.urlPath || input.path || '/v1/chat/completions';
+  const url = new URL(urlPath, baseUrl);
+  const serializedBody = serializeBody(input.body);
+  return {
+    method: input.method || context.method || 'POST',
+    baseUrl,
+    url: url.toString(),
+    protocol: url.protocol,
+    hostname: url.hostname,
+    port: normalizePort(url),
+    path: `${url.pathname}${url.search}`,
+    urlPath,
+    headers: input.headers || {},
+    redactedHeaderNames: [],
+    ...serializedBody,
+    bodyTextPayloadRef: null,
+    bodyJsonPayloadRef: null,
+    modelRequested: context.modelRequested || input.modelRequested || serializedBody.bodyJson?.model || '',
+    stream: mode === 'stream',
+    timeoutMs: input.timeoutMs || context.timeoutMs || null,
+  };
+}
+
+function normalizeLmStudioResponse(input, mode) {
+  if (!input.response && !input.statusCode) {
+    return buildLmStudioNoResponsePackage();
+  }
+
+  const bodyText = typeof input.response?.bodyText === 'string'
+    ? input.response.bodyText
+    : (typeof input.response?.body === 'string' ? input.response.body : '');
+  const parsedResult = mode === 'stream'
+    ? {
+        parsed: input.response?.parsedJson === undefined ? null : cloneJsonSafe(input.response.parsedJson),
+        parseError: null,
+        parseable: true,
+      }
+    : (input.response?.parsedJson !== undefined
+        ? { parsed: cloneJsonSafe(input.response.parsedJson), parseError: null, parseable: true }
+        : safeJsonParse(bodyText));
+
+  return {
+    received: Boolean(input.response || input.statusCode),
+    statusCode: Number(input.response?.statusCode || input.statusCode || 0),
+    statusMessage: input.response?.statusMessage || '',
+    httpVersion: input.response?.httpVersion || '',
+    headers: input.response?.headers || {},
+    redactedHeaderNames: [],
+    rawHeaders: input.response?.rawHeaders || [],
+    trailers: input.response?.trailers || {},
+    rawTrailers: input.response?.rawTrailers || [],
+    bodyChunks: normalizeLmStudioTextChunks(input.response?.bodyChunks),
+    bodyText,
+    bodyTextPayloadRef: null,
+    bodyByteLength: Buffer.byteLength(bodyText, 'utf8'),
+    bodySha256: bodyText ? sha256(bodyText) : null,
+    parsedJson: parsedResult.parsed,
+    parsedJsonPayloadRef: null,
+    jsonParseError: normalizeLmStudioParseError(parsedResult.parseError),
+  };
+}
+
+function normalizeLmStudioStream(input = {}) {
+  const stream = input.stream || input.streaming || null;
+  if (!stream) return null;
+  const fullResponse = normalizeString(stream.fullResponse);
+  return {
+    rawChunks: normalizeLmStudioTextChunks(stream.rawChunks || stream.chunks),
+    frames: normalizeLmStudioFrames(stream.frames),
+    parsedChunks: Array.isArray(stream.parsedChunks) ? cloneJsonSafe(stream.parsedChunks) : [],
+    parsedChunksPayloadRef: null,
+    doneSeen: Boolean(stream.doneSeen),
+    terminator: stream.terminator || '',
+    finalBuffer: normalizeString(stream.finalBuffer),
+    finalBufferPayloadRef: null,
+    fullResponse,
+    fullResponsePayloadRef: null,
+    fullResponseByteLength: Buffer.byteLength(fullResponse, 'utf8'),
+    fullResponseSha256: fullResponse ? sha256(fullResponse) : null,
+    usage: stream.usage === undefined ? null : cloneJsonSafe(stream.usage),
+  };
+}
+
+function normalizeLmStudioError(input, response) {
+  const err = input.error;
+  if (!err && !input.errorRawBody) return null;
+  const rawBody = input.errorRawBody || err?.rawBody || null;
+  return {
+    ...compactError(err || new Error('LM Studio provider error')),
+    statusCode: Number(err?.statusCode || input.statusCode || response?.statusCode || 0) || null,
+    rawBody,
+    rawBodyPayloadRef: null,
+    object: err?.object === undefined ? null : cloneJsonSafe(err.object),
+  };
+}
+
+function classifyLmStudioOutcome(input, response, stream) {
+  if (input.outcome) return input.outcome;
+  if (input.error) {
+    const code = String(input.error.code || '').toUpperCase();
+    if (code === 'TIMEOUT' || /timed out/i.test(input.error.message || '')) return 'timeout';
+    if (code === 'ABORT_ERR' || /aborted|abort/i.test(input.error.message || '')) return 'aborted';
+    return 'network_error';
+  }
+  if (response.statusCode >= 400) return 'http_error';
+  if (stream?.terminator === 'timeout') return 'timeout';
+  if (stream?.terminator === 'aborted') return 'aborted';
+  if (stream?.terminator === 'network_error') return 'network_error';
+  if (stream?.terminator === 'end_without_done') return 'stream_end_without_done';
+  const hasMalformedFrame = Array.isArray(stream?.frames) && stream.frames.some((frame) => frame.parseError);
+  if (hasMalformedFrame && !stream?.doneSeen) return 'malformed_sse';
+  if (!stream && response.bodyText && response.jsonParseError) return 'invalid_json';
+  return 'success';
+}
+
+function buildLmStudioProviderCallPackage(input = {}) {
+  const context = input.captureContext || input.context || {};
+  const mode = inferLmStudioMode(input, context);
+  const requestStartedAt = input.requestStartedAt || input.startedAt || nowIso();
+  const responseCompletedAt = input.responseCompletedAt || input.completedAt || nowIso();
+  const request = normalizeLmStudioRequest(input, context, mode);
+  const response = normalizeLmStudioResponse(input, mode);
+  const stream = mode === 'stream' ? normalizeLmStudioStream(input) : null;
+  const outcome = classifyLmStudioOutcome(input, response, stream);
+
+  return {
+    schemaVersion: SCHEMA_VERSION,
+    captureVersion: input.captureVersion || context.captureVersion || LM_STUDIO_CAPTURE_VERSION,
+    providerId: context.providerId || input.providerId || 'lm-studio',
+    providerResearchId: context.providerResearchId || input.providerResearchId || 'lm-studio-openai-compatible',
+    providerPathType: context.providerPathType || input.providerPathType || (mode === 'stream'
+      ? 'lm-studio-http-stream'
+      : 'lm-studio-http-nonstream'),
+    callSite: context.callSite || input.callSite || '',
+    operation: context.operation || input.operation || '',
+    source: context.source || input.source || null,
+    request: null,
+    response: null,
+    cli: null,
+    lmStudio: {
+      mode,
+      request,
+      response,
+      stream,
+      error: normalizeLmStudioError(input, response),
+    },
+    timing: {
+      requestStartedAt,
+      requestWrittenAt: input.requestWrittenAt || null,
+      responseHeadersAt: input.responseHeadersAt || null,
+      responseCompletedAt,
+      durationMs: Number.isFinite(input.durationMs)
+        ? input.durationMs
+        : Math.max(new Date(responseCompletedAt).getTime() - new Date(requestStartedAt).getTime(), 0),
+    },
+    outcome,
+    error: input.error
+      ? {
+          ...compactError(input.error),
+          rawBody: input.error.rawBody || input.errorRawBody || null,
+          object: input.error.object === undefined ? null : cloneJsonSafe(input.error.object),
+        }
+      : null,
+    redaction: {
+      applied: false,
+      redactedHeaderNames: [],
+      redactedBodyPaths: [],
+      notes: [],
+    },
+    storage: {
+      inline: true,
+      externalPayloads: [],
+      notes: [],
+      truncated: false,
+      truncationReason: null,
+    },
+  };
+}
+
 function buildHttpProviderCallPackage(input = {}) {
   const context = input.captureContext || input.context || {};
   const requestStartedAt = input.requestStartedAt || input.startedAt || nowIso();
@@ -478,6 +716,49 @@ async function recordCliProviderCallPackage(input, options = {}) {
   }
 }
 
+function lmStudioPayloadOptions(options = {}) {
+  return {
+    ...options,
+    fields: options.fields || [
+      'lmStudio.request.bodyText',
+      'lmStudio.request.bodyJson',
+      'lmStudio.response.bodyText',
+      'lmStudio.response.parsedJson',
+      'lmStudio.stream.parsedChunks',
+      'lmStudio.stream.finalBuffer',
+      'lmStudio.stream.fullResponse',
+      'lmStudio.error.rawBody',
+    ],
+    kindByField: {
+      'lmStudio.request.bodyText': 'lm_studio_request_body',
+      'lmStudio.request.bodyJson': 'lm_studio_request_body_json',
+      'lmStudio.response.bodyText': 'lm_studio_response_body',
+      'lmStudio.response.parsedJson': 'lm_studio_response_parsed_json',
+      'lmStudio.stream.parsedChunks': 'lm_studio_stream_parsed_chunks',
+      'lmStudio.stream.finalBuffer': 'lm_studio_stream_final_buffer',
+      'lmStudio.stream.fullResponse': 'lm_studio_stream_full_response',
+      'lmStudio.error.rawBody': 'lm_studio_error_raw_body',
+      ...(options.kindByField || {}),
+    },
+  };
+}
+
+async function recordLmStudioProviderCallPackage(input, options = {}) {
+  try {
+    const envelope = buildLmStudioProviderCallPackage(input);
+    return await recordProviderCallPackage(envelope, lmStudioPayloadOptions(options));
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        name: err.name || 'Error',
+        message: err.message || String(err),
+        code: err.code || '',
+      },
+    };
+  }
+}
+
 function recordProviderCallPackageInBackground(envelope, options = {}) {
   const promise = Promise.resolve()
     .then(() => recordProviderCallPackage(envelope, options))
@@ -499,6 +780,24 @@ function recordProviderCallPackageInBackground(envelope, options = {}) {
 function recordCliProviderCallPackageInBackground(input, options = {}) {
   const promise = Promise.resolve()
     .then(() => recordCliProviderCallPackage(input, options))
+    .catch((err) => ({
+      ok: false,
+      error: {
+        name: err.name || 'Error',
+        message: err.message || String(err),
+        code: err.code || '',
+      },
+    }));
+  inFlightBackgroundRecords.add(promise);
+  promise.finally(() => {
+    inFlightBackgroundRecords.delete(promise);
+  });
+  return { queued: true, promise };
+}
+
+function recordLmStudioProviderCallPackageInBackground(input, options = {}) {
+  const promise = Promise.resolve()
+    .then(() => recordLmStudioProviderCallPackage(input, options))
     .catch((err) => ({
       ok: false,
       error: {
@@ -538,15 +837,19 @@ function buildResponseChunk(seq, chunk, receivedAt = new Date()) {
 module.exports = {
   CAPTURE_VERSION,
   CLI_CAPTURE_VERSION,
+  LM_STUDIO_CAPTURE_VERSION,
   SCHEMA_VERSION,
   buildCliProviderCallPackage,
   buildHttpProviderCallPackage,
+  buildLmStudioProviderCallPackage,
   buildResponseChunk,
   __waitForProviderPackageRecorderSettled,
   isProviderCallPackageCaptureEnabled,
   recordCliProviderCallPackage,
   recordCliProviderCallPackageInBackground,
   recordHttpProviderCallPackage,
+  recordLmStudioProviderCallPackage,
+  recordLmStudioProviderCallPackageInBackground,
   recordProviderCallPackage,
   recordProviderCallPackageInBackground,
 };

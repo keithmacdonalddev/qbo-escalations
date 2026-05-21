@@ -33,27 +33,27 @@ Do not mark this complete because generic HTTP capture exists. This checklist is
 
 - `[x]` LM Studio provider research document exists.
 - `[x]` LM Studio end-to-end plan exists.
-- `[~]` Generic HTTP capture exists for some LM Studio non-streaming paths.
-- `[~]` A partial `lmStudio` schema exists in `server/src/models/ProviderCallPackage.js`.
-- `[ ]` LM Studio-specific recorder functions exist.
-- `[ ]` LM Studio streaming chat capture exists.
-- `[ ]` `image-parser.js` `callLmStudio` writes the LM Studio-specific package shape.
-- `[ ]` Targeted LM Studio end-to-end tests pass.
-- `[ ]` Real LM Studio runtime verification is complete.
+- `[x]` LM Studio-specific capture exists for `lm-studio.js` non-streaming paths.
+- `[x]` A strict `lmStudio` schema exists in `server/src/models/ProviderCallPackage.js`.
+- `[x]` LM Studio-specific recorder functions exist.
+- `[x]` LM Studio streaming chat capture exists.
+- `[x]` `image-parser.js` `callLmStudio` writes the LM Studio-specific package shape.
+- `[x]` Targeted LM Studio schema, recorder, non-streaming service, streaming service, and image-parser tests pass.
+- `[x]` Real LM Studio runtime verification is complete.
 
 ## Phase 0: Reconcile Current Worktree
 
-- `[ ]` Run `git status --short`.
-- `[ ]` Identify unrelated modified files before implementation starts.
-- `[ ]` Review current diff for `server/src/models/ProviderCallPackage.js`.
-- `[ ]` Decide whether to keep, replace, or revise the partial `lmStudio` schema.
-- `[ ]` Confirm no unrelated client/UI files are included in the LM Studio implementation diff.
-- `[ ]` Confirm `server/src/lib/provider-harness-trace.js` state before relying on any harness tracing imports.
-- `[ ]` Confirm the implementation starts from a known baseline.
+- `[x]` Run `git status --short`.
+- `[x]` Identify unrelated modified files before implementation starts.
+- `[x]` Review current diff for `server/src/models/ProviderCallPackage.js`.
+- `[x]` Decide whether to keep, replace, or revise the partial `lmStudio` schema.
+- `[x]` Confirm no unrelated client/UI files are included in the LM Studio implementation diff.
+- `[x]` Confirm `server/src/lib/provider-harness-trace.js` state before relying on any harness tracing imports.
+- `[x]` Confirm the implementation starts from a known baseline.
 
 Exit gate:
 
-- `[ ]` Worktree state is understood and the LM Studio implementation files are clearly separated from unrelated changes.
+- `[x]` Worktree state is understood and the LM Studio implementation files are clearly separated from unrelated changes.
 
 ## Phase 1: Strict LM Studio Storage Shape
 
@@ -64,69 +64,69 @@ Files:
 
 Schema checklist:
 
-- `[ ]` Add or finalize strict `lmStudio` subdocument.
-- `[ ]` Add strict LM Studio request schema.
-- `[ ]` Add strict LM Studio response schema.
-- `[ ]` Add strict LM Studio stream schema.
-- `[ ]` Add strict LM Studio raw chunk schema.
-- `[ ]` Add strict LM Studio SSE frame schema.
-- `[ ]` Add strict LM Studio JSON parse error schema.
-- `[ ]` Add strict LM Studio provider error schema.
-- `[ ]` Confirm `ProviderCallPackage.lmStudio` is accepted by the top-level schema.
-- `[ ]` Keep provider-returned JSON flexible enough to preserve arbitrary LM Studio/OpenAI-compatible fields.
+- `[x]` Add or finalize strict `lmStudio` subdocument.
+- `[x]` Add strict LM Studio request schema.
+- `[x]` Add strict LM Studio response schema.
+- `[x]` Add strict LM Studio stream schema.
+- `[x]` Add strict LM Studio raw chunk schema.
+- `[x]` Add strict LM Studio SSE frame schema.
+- `[x]` Add strict LM Studio JSON parse error schema.
+- `[x]` Add strict LM Studio provider error schema.
+- `[x]` Confirm `ProviderCallPackage.lmStudio` is accepted by the top-level schema.
+- `[x]` Keep provider-returned JSON flexible enough to preserve arbitrary LM Studio/OpenAI-compatible fields.
 
 Required fields checklist:
 
-- `[ ]` `lmStudio.mode`
-- `[ ]` `lmStudio.request.method`
-- `[ ]` `lmStudio.request.baseUrl`
-- `[ ]` `lmStudio.request.url`
-- `[ ]` `lmStudio.request.headers`
-- `[ ]` `lmStudio.request.bodyText`
-- `[ ]` `lmStudio.request.bodyJson`
-- `[ ]` `lmStudio.request.bodyByteLength`
-- `[ ]` `lmStudio.request.bodySha256`
-- `[ ]` `lmStudio.request.modelRequested`
-- `[ ]` `lmStudio.request.stream`
-- `[ ]` `lmStudio.request.timeoutMs`
-- `[ ]` `lmStudio.response.received`
-- `[ ]` `lmStudio.response.statusCode`
-- `[ ]` `lmStudio.response.statusMessage`
-- `[ ]` `lmStudio.response.httpVersion`
-- `[ ]` `lmStudio.response.headers`
-- `[ ]` `lmStudio.response.rawHeaders`
-- `[ ]` `lmStudio.response.trailers`
-- `[ ]` `lmStudio.response.rawTrailers`
-- `[ ]` `lmStudio.response.bodyChunks`
-- `[ ]` `lmStudio.response.bodyText`
-- `[ ]` `lmStudio.response.bodyByteLength`
-- `[ ]` `lmStudio.response.bodySha256`
-- `[ ]` `lmStudio.response.parsedJson`
-- `[ ]` `lmStudio.response.jsonParseError`
-- `[ ]` `lmStudio.stream.rawChunks` or equivalent ordered raw stream chunk storage
-- `[ ]` `lmStudio.stream.frames`
-- `[ ]` `lmStudio.stream.parsedChunks`
-- `[ ]` `lmStudio.stream.doneSeen`
-- `[ ]` `lmStudio.stream.terminator`
-- `[ ]` `lmStudio.stream.finalBuffer`
-- `[ ]` `lmStudio.stream.fullResponse`
-- `[ ]` `lmStudio.stream.usage`
-- `[ ]` `lmStudio.error.rawBody`
-- `[ ]` `lmStudio.error.object`
+- `[x]` `lmStudio.mode`
+- `[x]` `lmStudio.request.method`
+- `[x]` `lmStudio.request.baseUrl`
+- `[x]` `lmStudio.request.url`
+- `[x]` `lmStudio.request.headers`
+- `[x]` `lmStudio.request.bodyText`
+- `[x]` `lmStudio.request.bodyJson`
+- `[x]` `lmStudio.request.bodyByteLength`
+- `[x]` `lmStudio.request.bodySha256`
+- `[x]` `lmStudio.request.modelRequested`
+- `[x]` `lmStudio.request.stream`
+- `[x]` `lmStudio.request.timeoutMs`
+- `[x]` `lmStudio.response.received`
+- `[x]` `lmStudio.response.statusCode`
+- `[x]` `lmStudio.response.statusMessage`
+- `[x]` `lmStudio.response.httpVersion`
+- `[x]` `lmStudio.response.headers`
+- `[x]` `lmStudio.response.rawHeaders`
+- `[x]` `lmStudio.response.trailers`
+- `[x]` `lmStudio.response.rawTrailers`
+- `[x]` `lmStudio.response.bodyChunks`
+- `[x]` `lmStudio.response.bodyText`
+- `[x]` `lmStudio.response.bodyByteLength`
+- `[x]` `lmStudio.response.bodySha256`
+- `[x]` `lmStudio.response.parsedJson`
+- `[x]` `lmStudio.response.jsonParseError`
+- `[x]` `lmStudio.stream.rawChunks` or equivalent ordered raw stream chunk storage
+- `[x]` `lmStudio.stream.frames`
+- `[x]` `lmStudio.stream.parsedChunks`
+- `[x]` `lmStudio.stream.doneSeen`
+- `[x]` `lmStudio.stream.terminator`
+- `[x]` `lmStudio.stream.finalBuffer`
+- `[x]` `lmStudio.stream.fullResponse`
+- `[x]` `lmStudio.stream.usage`
+- `[x]` `lmStudio.error.rawBody`
+- `[x]` `lmStudio.error.object`
 
 Tests:
 
-- `[ ]` Valid LM Studio non-stream package saves.
-- `[ ]` Valid LM Studio stream package saves.
-- `[ ]` Unknown field inside strict LM Studio request schema is rejected.
-- `[ ]` Unknown field inside strict LM Studio response schema is rejected.
-- `[ ]` Unknown field inside strict LM Studio stream schema is rejected.
-- `[ ]` Arbitrary provider JSON inside `parsedJson` is preserved.
-- `[ ]` Arbitrary provider JSON inside `parsedChunks` is preserved.
+- `[x]` Valid LM Studio non-stream package saves.
+- `[x]` Valid LM Studio stream package saves.
+- `[x]` Unknown field inside strict LM Studio request schema is rejected.
+- `[x]` Unknown field inside strict LM Studio response schema is rejected.
+- `[x]` Unknown field inside strict LM Studio stream schema is rejected.
+- `[x]` Arbitrary provider JSON inside `parsedJson` is preserved.
+- `[x]` Arbitrary provider JSON inside `parsedChunks` is preserved.
 
 Exit gate:
 
-- `[ ]` Strict LM Studio schema tests pass.
+- `[x]` Strict LM Studio schema tests pass.
 
 ## Phase 2: LM Studio Recorder Builder
 
@@ -139,79 +139,79 @@ Files:
 
 Recorder API:
 
-- `[ ]` Add `buildLmStudioProviderCallPackage(input)`.
-- `[ ]` Add `recordLmStudioProviderCallPackage(input, options)`.
-- `[ ]` Add `recordLmStudioProviderCallPackageInBackground(input, options)`.
-- `[ ]` Export LM Studio recorder functions.
-- `[ ]` Use the existing test-only recorder settled hook for background assertions.
+- `[x]` Add `buildLmStudioProviderCallPackage(input)`.
+- `[x]` Add `recordLmStudioProviderCallPackage(input, options)`.
+- `[x]` Add `recordLmStudioProviderCallPackageInBackground(input, options)`.
+- `[x]` Export LM Studio recorder functions.
+- `[x]` Use the existing test-only recorder settled hook for background assertions.
 
 Builder requirements:
 
-- `[ ]` Builds `providerId: 'lm-studio'`.
-- `[ ]` Builds `providerResearchId: 'lm-studio-openai-compatible'`.
-- `[ ]` Builds `providerPathType: 'lm-studio-http-nonstream'` for non-stream calls.
-- `[ ]` Builds `providerPathType: 'lm-studio-http-stream'` for streaming calls.
-- `[ ]` Builds correct `callSite`.
-- `[ ]` Builds correct `operation`.
-- `[ ]` Builds top-level `timing`.
-- `[ ]` Builds top-level `outcome`.
-- `[ ]` Builds top-level `error` when applicable.
-- `[ ]` Builds strict `lmStudio` package.
-- `[ ]` Leaves `cli` null for LM Studio packages.
+- `[x]` Builds `providerId: 'lm-studio'`.
+- `[x]` Builds `providerResearchId: 'lm-studio-openai-compatible'`.
+- `[x]` Builds `providerPathType: 'lm-studio-http-nonstream'` for non-stream calls.
+- `[x]` Builds `providerPathType: 'lm-studio-http-stream'` for streaming calls.
+- `[x]` Builds correct `callSite`.
+- `[x]` Builds correct `operation`.
+- `[x]` Builds top-level `timing`.
+- `[x]` Builds top-level `outcome`.
+- `[x]` Builds top-level `error` when applicable.
+- `[x]` Builds strict `lmStudio` package.
+- `[x]` Leaves `cli` null for LM Studio packages.
 
 Outcome classification:
 
-- `[ ]` `success`
-- `[ ]` `http_error`
-- `[ ]` `network_error`
-- `[ ]` `timeout`
-- `[ ]` `aborted`
-- `[ ]` `invalid_json`
-- `[ ]` `malformed_sse`
-- `[ ]` `stream_end_without_done` or equivalent terminator metadata preserving current behavior
+- `[x]` `success`
+- `[x]` `http_error`
+- `[x]` `network_error`
+- `[x]` `timeout`
+- `[x]` `aborted`
+- `[x]` `invalid_json`
+- `[x]` `malformed_sse`
+- `[x]` `stream_end_without_done` or equivalent terminator metadata preserving current behavior
 
 Redaction:
 
-- `[ ]` Outgoing `Authorization` header is redacted.
-- `[ ]` Outgoing `Proxy-Authorization` is redacted if present.
-- `[ ]` Cookie-like outgoing headers are redacted if present.
-- `[ ]` Secret-like request body keys are redacted.
-- `[ ]` Redaction notes record redacted paths.
-- `[ ]` Provider output is not cleaned or summarized.
+- `[x]` Outgoing `Authorization` header is redacted.
+- `[x]` Outgoing `Proxy-Authorization` is redacted if present.
+- `[x]` Cookie-like outgoing headers are redacted if present.
+- `[x]` Secret-like request body keys are redacted.
+- `[x]` Redaction notes record redacted paths.
+- `[x]` Provider output is not cleaned or summarized.
 
 Payload externalization:
 
-- `[ ]` `lmStudio.request.bodyText` can externalize.
-- `[ ]` `lmStudio.request.bodyJson` can externalize.
-- `[ ]` `lmStudio.response.bodyText` can externalize.
-- `[ ]` `lmStudio.response.parsedJson` can externalize.
-- `[ ]` `lmStudio.response.bodyChunks[].text` can externalize.
-- `[ ]` `lmStudio.stream.rawChunks[].text` or equivalent can externalize.
-- `[ ]` `lmStudio.stream.frames[].rawLine` can externalize.
-- `[ ]` `lmStudio.stream.frames[].data` can externalize.
-- `[ ]` `lmStudio.stream.parsedChunks` can externalize.
-- `[ ]` `lmStudio.stream.finalBuffer` can externalize.
-- `[ ]` `lmStudio.stream.fullResponse` can externalize.
-- `[ ]` `lmStudio.error.rawBody` can externalize.
-- `[ ]` Duplicate huge body text/body JSON is not stored twice when equivalent.
-- `[ ]` No silent truncation.
+- `[x]` `lmStudio.request.bodyText` can externalize.
+- `[x]` `lmStudio.request.bodyJson` can externalize.
+- `[x]` `lmStudio.response.bodyText` can externalize.
+- `[x]` `lmStudio.response.parsedJson` can externalize.
+- `[x]` `lmStudio.response.bodyChunks[].text` can externalize.
+- `[x]` `lmStudio.stream.rawChunks[].text` or equivalent can externalize.
+- `[x]` `lmStudio.stream.frames[].rawLine` can externalize.
+- `[x]` `lmStudio.stream.frames[].data` can externalize.
+- `[x]` `lmStudio.stream.parsedChunks` can externalize.
+- `[x]` `lmStudio.stream.finalBuffer` can externalize.
+- `[x]` `lmStudio.stream.fullResponse` can externalize.
+- `[x]` `lmStudio.error.rawBody` can externalize.
+- `[x]` Duplicate huge body text/body JSON is not stored twice when equivalent.
+- `[x]` No silent truncation.
 
 Tests:
 
-- `[ ]` Builder creates complete non-stream package.
-- `[ ]` Builder creates complete stream package.
-- `[ ]` Builder classifies HTTP error.
-- `[ ]` Builder classifies network error.
-- `[ ]` Builder classifies timeout.
-- `[ ]` Builder classifies invalid JSON.
-- `[ ]` Redaction removes outgoing Authorization.
-- `[ ]` Large LM Studio payloads externalize without truncation.
-- `[ ]` Background recorder does not block provider return.
-- `[ ]` Recorder failure does not fail caller.
+- `[x]` Builder creates complete non-stream package.
+- `[x]` Builder creates complete stream package.
+- `[x]` Builder classifies HTTP error.
+- `[x]` Builder classifies network error.
+- `[x]` Builder classifies timeout.
+- `[x]` Builder classifies invalid JSON.
+- `[x]` Redaction removes outgoing Authorization.
+- `[x]` Large LM Studio payloads externalize without truncation.
+- `[x]` Background recorder does not block provider return.
+- `[x]` Recorder failure does not fail caller.
 
 Exit gate:
 
-- `[ ]` Recorder, redaction, and payload tests pass for LM Studio-specific packages.
+- `[x]` Recorder, redaction, and payload tests pass for LM Studio-specific packages.
 
 ## Phase 3: `lm-studio.js` Non-Streaming Paths
 
@@ -222,44 +222,44 @@ Files:
 
 Paths:
 
-- `[ ]` Wire `parseEscalation`.
-- `[ ]` Wire `transcribeImage`.
+- `[x]` Wire `parseEscalation`.
+- `[x]` Wire `transcribeImage`.
 
 Implementation requirements:
 
-- `[ ]` Capture request package before/when request is written.
-- `[ ]` Capture response headers immediately when Node `IncomingMessage` arrives.
-- `[ ]` Capture status code and status message.
-- `[ ]` Capture HTTP version.
-- `[ ]` Capture response headers and raw headers.
-- `[ ]` Capture trailers and raw trailers.
-- `[ ]` Capture ordered body chunks.
-- `[ ]` Capture full body text.
-- `[ ]` Capture parsed JSON when parseable.
-- `[ ]` Capture parse error when not parseable.
-- `[ ]` Capture non-200 body in full.
-- `[ ]` Capture network error facts when no HTTP response exists.
-- `[ ]` Capture timeout facts.
-- `[ ]` Queue recorder in background.
-- `[ ]` Do not await recorder writes before returning provider result.
-- `[ ]` Keep `parseEscalation` return shape unchanged.
-- `[ ]` Keep `transcribeImage` return shape unchanged.
+- `[x]` Capture request package before/when request is written.
+- `[x]` Capture response headers immediately when Node `IncomingMessage` arrives.
+- `[x]` Capture status code and status message.
+- `[x]` Capture HTTP version.
+- `[x]` Capture response headers and raw headers.
+- `[x]` Capture trailers and raw trailers.
+- `[x]` Capture ordered body chunks.
+- `[x]` Capture full body text.
+- `[x]` Capture parsed JSON when parseable.
+- `[x]` Capture parse error when not parseable.
+- `[x]` Capture non-200 body in full.
+- `[x]` Capture network error facts when no HTTP response exists.
+- `[x]` Capture timeout facts.
+- `[x]` Queue recorder in background.
+- `[x]` Do not await recorder writes before returning provider result.
+- `[x]` Keep `parseEscalation` return shape unchanged.
+- `[x]` Keep `transcribeImage` return shape unchanged.
 
 Tests:
 
-- `[ ]` `parseEscalation` success writes exactly one LM Studio-specific record.
-- `[ ]` `transcribeImage` success writes exactly one LM Studio-specific record.
-- `[ ]` Non-200 response preserves full error body.
-- `[ ]` Invalid JSON response preserves raw body and parse error.
-- `[ ]` Network error records package when possible.
-- `[ ]` Timeout records timeout facts when possible.
-- `[ ]` Provider return shape remains unchanged.
-- `[ ]` Recorder failure does not fail the provider call.
-- `[ ]` Capture disabled writes no record.
+- `[x]` `parseEscalation` success writes exactly one LM Studio-specific record.
+- `[x]` `transcribeImage` success writes exactly one LM Studio-specific record.
+- `[x]` Non-200 response preserves full error body.
+- `[x]` Invalid JSON response preserves raw body and parse error.
+- `[x]` Network error records package when possible.
+- `[x]` Timeout records timeout facts when possible.
+- `[x]` Provider return shape remains unchanged.
+- `[x]` Recorder failure does not fail the provider call.
+- `[x]` Capture disabled writes no record.
 
 Exit gate:
 
-- `[ ]` `lm-studio.js` non-streaming tests pass.
+- `[x]` `lm-studio.js` non-streaming tests pass.
 
 ## Phase 4: `lm-studio.js` Streaming Chat
 
@@ -270,51 +270,51 @@ Files:
 
 Path:
 
-- `[ ]` Wire `chat`.
+- `[x]` Wire `chat`.
 
 Implementation requirements:
 
-- `[ ]` Capture request package before `req.end()`.
-- `[ ]` Capture response headers immediately in response callback.
-- `[ ]` Capture non-200 streaming response body in full.
-- `[ ]` Capture every raw network chunk in order.
-- `[ ]` Capture every complete SSE frame in order.
-- `[ ]` Capture `data: [DONE]` frame.
-- `[ ]` Capture parsed JSON chunk object before extracting `delta.content`.
-- `[ ]` Preserve fields not forwarded to UI, including `reasoning_content` when present.
-- `[ ]` Preserve malformed frame text and parse error.
-- `[ ]` Preserve final incomplete `sseBuffer`.
-- `[ ]` Preserve end-without-`[DONE]` terminator.
-- `[ ]` Preserve timeout facts.
-- `[ ]` Preserve network error facts.
-- `[ ]` Preserve app-visible `fullResponse` as a derived field.
-- `[ ]` Preserve usage chunk/object if present.
-- `[ ]` Queue recorder in background after terminal stream event.
-- `[ ]` Keep `onChunk(delta.content)` behavior unchanged.
-- `[ ]` Keep `onDone(fullResponse, usage)` behavior unchanged.
-- `[ ]` Keep `onError(error)` behavior unchanged.
-- `[ ]` Cleanup still aborts/destroys request as before.
+- `[x]` Capture request package before `req.end()`.
+- `[x]` Capture response headers immediately in response callback.
+- `[x]` Capture non-200 streaming response body in full.
+- `[x]` Capture every raw network chunk in order.
+- `[x]` Capture every complete SSE frame in order.
+- `[x]` Capture `data: [DONE]` frame.
+- `[x]` Capture parsed JSON chunk object before extracting `delta.content`.
+- `[x]` Preserve fields not forwarded to UI, including `reasoning_content` when present.
+- `[x]` Preserve malformed frame text and parse error.
+- `[x]` Preserve final incomplete `sseBuffer`.
+- `[x]` Preserve end-without-`[DONE]` terminator.
+- `[x]` Preserve timeout facts.
+- `[x]` Preserve network error facts.
+- `[x]` Preserve app-visible `fullResponse` as a derived field.
+- `[x]` Preserve usage chunk/object if present.
+- `[x]` Queue recorder in background after terminal stream event.
+- `[x]` Keep `onChunk(delta.content)` behavior unchanged.
+- `[x]` Keep `onDone(fullResponse, usage)` behavior unchanged.
+- `[x]` Keep `onError(error)` behavior unchanged.
+- `[x]` Cleanup still aborts/destroys request as before.
 
 Tests:
 
-- `[ ]` Streaming success with `[DONE]` writes exactly one LM Studio stream record.
-- `[ ]` Record contains ordered raw chunks.
-- `[ ]` Record contains ordered SSE frames.
-- `[ ]` Record contains parsed chunk JSON.
-- `[ ]` Record preserves fields not forwarded to UI.
-- `[ ]` `delta.reasoning_content` is preserved when present.
-- `[ ]` `[DONE]` is preserved.
-- `[ ]` End without `[DONE]` is preserved.
-- `[ ]` Non-200 streaming error preserves full error body.
-- `[ ]` Malformed SSE JSON frame is preserved with parse error.
-- `[ ]` Timeout preserves timeout facts.
-- `[ ]` Recorder failure does not fail chat callbacks.
-- `[ ]` Provider callback behavior remains unchanged.
-- `[ ]` Capture disabled writes no record.
+- `[x]` Streaming success with `[DONE]` writes exactly one LM Studio stream record.
+- `[x]` Record contains ordered raw chunks.
+- `[x]` Record contains ordered SSE frames.
+- `[x]` Record contains parsed chunk JSON.
+- `[x]` Record preserves fields not forwarded to UI.
+- `[x]` `delta.reasoning_content` is preserved when present.
+- `[x]` `[DONE]` is preserved.
+- `[x]` End without `[DONE]` is preserved.
+- `[x]` Non-200 streaming error preserves full error body.
+- `[x]` Malformed SSE JSON frame is preserved with parse error.
+- `[x]` Timeout preserves timeout facts.
+- `[x]` Recorder failure does not fail chat callbacks.
+- `[x]` Provider callback behavior remains unchanged.
+- `[x]` Capture disabled writes no record.
 
 Exit gate:
 
-- `[ ]` LM Studio streaming chat tests pass.
+- `[x]` LM Studio streaming chat tests pass.
 
 ## Phase 5: `image-parser.js` `callLmStudio`
 
@@ -325,149 +325,149 @@ Files:
 
 Path:
 
-- `[ ]` Wire only `callLmStudio`.
+- `[x]` Wire only `callLmStudio`.
 
 Implementation requirements:
 
-- `[ ]` Do not alter other image-parser provider branches.
-- `[ ]` Preserve existing image-parser behavior.
-- `[ ]` Route LM Studio capture context to LM Studio-specific recorder.
-- `[ ]` Preserve exact request body sent after image conversion.
-- `[ ]` Preserve conversion stats if already available without broad refactor.
-- `[ ]` Preserve full LM Studio response body or external reference.
-- `[ ]` Preserve parsed JSON view when parseable.
-- `[ ]` Preserve non-200 body in full.
-- `[ ]` Queue recorder in background.
-- `[ ]` Do not await recorder writes before returning provider result.
+- `[x]` Do not alter other image-parser provider branches.
+- `[x]` Preserve existing image-parser behavior.
+- `[x]` Route LM Studio capture context to LM Studio-specific recorder.
+- `[x]` Preserve exact request body sent after image conversion.
+- `[~]` Preserve conversion stats if already available without broad refactor. Exact post-conversion request body is preserved; conversion telemetry is app-side metadata and was not added to the provider package.
+- `[x]` Preserve full LM Studio response body or external reference.
+- `[x]` Preserve parsed JSON view when parseable.
+- `[x]` Preserve non-200 body in full.
+- `[x]` Queue recorder in background.
+- `[x]` Do not await recorder writes before returning provider result.
 
 Tests:
 
-- `[ ]` `callLmStudio` success writes exactly one LM Studio-specific record.
-- `[ ]` Record includes `providerId: 'lm-studio'`.
-- `[ ]` Record includes `providerResearchId: 'lm-studio-openai-compatible'`.
-- `[ ]` Record includes `providerPathType: 'lm-studio-http-nonstream'`.
-- `[ ]` Record includes `operation: 'image-parse'`.
-- `[ ]` Record includes `callSite: 'image-parser:callLmStudio'`.
-- `[ ]` Record includes full raw response body or external reference.
-- `[ ]` Record includes parsed JSON view.
-- `[ ]` Non-200 body is preserved.
-- `[ ]` Image conversion stats are preserved if available.
-- `[ ]` Other image-parser provider tests still pass.
+- `[x]` `callLmStudio` success writes exactly one LM Studio-specific record.
+- `[x]` Record includes `providerId: 'lm-studio'`.
+- `[x]` Record includes `providerResearchId: 'lm-studio-openai-compatible'`.
+- `[x]` Record includes `providerPathType: 'lm-studio-http-nonstream'`.
+- `[x]` Record includes `operation: 'image-parse'`.
+- `[x]` Record includes `callSite: 'image-parser:callLmStudio'`.
+- `[x]` Record includes full raw response body or external reference.
+- `[x]` Record includes parsed JSON view.
+- `[x]` Non-200 body is preserved.
+- `[~]` Image conversion stats are preserved if available. The provider package preserves the exact converted request body; separate conversion telemetry remains outside this provider package.
+- `[x]` Other image-parser provider tests still pass.
 
 Exit gate:
 
-- `[ ]` `image-parser.js` `callLmStudio` tests pass.
+- `[x]` `image-parser.js` `callLmStudio` tests pass.
 
 ## Phase 6: Provider-Level End-To-End Tests
 
 Automated mocked workflow tests:
 
-- `[ ]` `lm-studio.js parseEscalation`
-- `[ ]` `lm-studio.js transcribeImage`
-- `[ ]` `lm-studio.js chat` streaming
-- `[ ]` `image-parser.js callLmStudio`
+- `[x]` `lm-studio.js parseEscalation`
+- `[x]` `lm-studio.js transcribeImage`
+- `[x]` `lm-studio.js chat` streaming
+- `[x]` `image-parser.js callLmStudio`
 
 Each workflow test asserts:
 
-- `[ ]` Existing app result is unchanged.
-- `[ ]` Exactly one provider package record is created per LM Studio provider attempt.
-- `[ ]` `providerId === 'lm-studio'`.
-- `[ ]` `providerResearchId === 'lm-studio-openai-compatible'`.
-- `[ ]` Correct `providerPathType`.
-- `[ ]` Correct `callSite`.
-- `[ ]` Correct `operation`.
-- `[ ]` `lmStudio` package exists.
-- `[ ]` Raw provider response exists inline or by payload reference.
-- `[ ]` Parsed provider view exists when parseable.
-- `[ ]` Headers/status/timing are preserved.
-- `[ ]` No full raw provider body is printed to terminal output by new code.
+- `[x]` Existing app result is unchanged.
+- `[x]` Exactly one provider package record is created per LM Studio provider attempt.
+- `[x]` `providerId === 'lm-studio'`.
+- `[x]` `providerResearchId === 'lm-studio-openai-compatible'`.
+- `[x]` Correct `providerPathType`.
+- `[x]` Correct `callSite`.
+- `[x]` Correct `operation`.
+- `[x]` `lmStudio` package exists.
+- `[x]` Raw provider response exists inline or by payload reference.
+- `[x]` Parsed provider view exists when parseable.
+- `[x]` Headers/status/timing are preserved.
+- `[x]` No full raw provider body is printed to terminal output by new code.
 
 Targeted command checklist:
 
-- `[ ]` `npm --prefix server test -- test/lm-studio.test.js`
-- `[ ]` `npm --prefix server test -- test/image-parser.test.js`
-- `[ ]` `npm --prefix server test -- test/provider-call-package-recorder.test.js`
-- `[ ]` `npm --prefix server test -- test/provider-call-package-redaction.test.js`
-- `[ ]` `npm --prefix server test -- test/provider-call-package-payload-store.test.js`
+- `[x]` `npm --prefix server test -- test/lm-studio.test.js`
+- `[x]` `npm --prefix server test -- test/image-parser.test.js`
+- `[x]` `npm --prefix server test -- test/provider-call-package-recorder.test.js`
+- `[x]` `npm --prefix server test -- test/provider-call-package-redaction.test.js`
+- `[x]` `npm --prefix server test -- test/provider-call-package-payload-store.test.js`
 
 Full verification:
 
-- `[ ]` `npm --prefix server test`
-- `[ ]` `git diff --check`
+- `[x]` `npm --prefix server test`
+- `[x]` `git diff --check`
 
 Exit gate:
 
-- `[ ]` Targeted tests and full server tests pass.
+- `[x]` Targeted tests and full server tests pass.
 
 ## Phase 7: Real LM Studio Runtime Verification
 
 Prerequisites:
 
-- `[ ]` LM Studio is running locally.
-- `[ ]` LM Studio local server is enabled.
-- `[ ]` `LM_STUDIO_API_URL` points to the correct local server.
-- `[ ]` At least one chat-capable model is loaded or available.
-- `[ ]` MongoDB is connected.
-- `[ ]` `ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=true`.
+- `[x]` LM Studio is running locally.
+- `[x]` LM Studio local server is enabled.
+- `[x]` `LM_STUDIO_API_URL` points to the correct local server.
+- `[x]` At least one chat-capable model is loaded or available.
+- `[x]` MongoDB is connected.
+- `[x]` `ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=true`.
 
 Manual verification targets:
 
-- `[ ]` Non-stream parse attempt.
-- `[ ]` Non-stream image parse attempt.
-- `[ ]` Streaming chat attempt.
+- `[x]` Non-stream parse attempt.
+- `[x]` Non-stream image parse attempt.
+- `[x]` Streaming chat attempt.
 
 For each real attempt:
 
-- `[ ]` Provider call succeeds from app perspective.
-- `[ ]` Mongo contains one LM Studio package record for the attempt.
-- `[ ]` Record contains full provider response package inline or by external payload refs.
-- `[ ]` Record contains request body inline or by external payload refs.
-- `[ ]` Record contains response headers/status/timing.
-- `[ ]` Streaming record contains stream frames.
-- `[ ]` Streaming record contains parsed chunk objects.
-- `[ ]` Non-200/manual failure test preserves full error body if performed.
-- `[ ]` No provider response is silently truncated.
-- `[ ]` Existing parser/chat behavior remains unchanged.
+- `[x]` Provider call succeeds from app perspective.
+- `[x]` Mongo contains one LM Studio package record for the attempt.
+- `[x]` Record contains full provider response package inline or by external payload refs.
+- `[x]` Record contains request body inline or by external payload refs.
+- `[x]` Record contains response headers/status/timing.
+- `[x]` Streaming record contains stream frames.
+- `[x]` Streaming record contains parsed chunk objects.
+- `[~]` Non-200/manual failure test preserves full error body if performed. Not repeated against live LM Studio; automated non-200 coverage passed for LM Studio stream and non-stream paths.
+- `[x]` No provider response is silently truncated.
+- `[x]` Existing parser/chat behavior remains unchanged.
 
 Exit gate:
 
-- `[ ]` Real runtime verification is complete or explicitly deferred with reason.
+- `[x]` Real runtime verification is complete.
 
 ## Final Done Checklist
 
 Do not call LM Studio end-to-end complete until all of these are true:
 
-- `[ ]` Strict LM Studio Mongo shape exists and is tested.
-- `[ ]` LM Studio recorder builder exists and is tested.
-- `[ ]` LM Studio redaction support exists and is tested.
-- `[ ]` LM Studio payload externalization exists and is tested.
-- `[ ]` `parseEscalation` writes a complete LM Studio non-stream package.
-- `[ ]` `transcribeImage` writes a complete LM Studio non-stream package.
-- `[ ]` `chat` writes a complete LM Studio stream package.
-- `[ ]` `callLmStudio` writes a complete LM Studio image-parser package.
-- `[ ]` Full provider response bodies are preserved inline or by explicit payload reference.
-- `[ ]` Full streaming frames/chunks are preserved inline or by explicit payload reference.
-- `[ ]` Non-200 error bodies are preserved beyond current 500-character error messages.
-- `[ ]` Malformed JSON/SSE facts are preserved.
-- `[ ]` Provider calls do not wait for Mongo/file recording.
-- `[ ]` Recorder failures do not fail provider calls.
-- `[ ]` Existing provider return/callback behavior is unchanged.
-- `[ ]` Parser logic is unchanged.
-- `[ ]` Prompt text is unchanged.
-- `[ ]` Fallback behavior is unchanged.
-- `[ ]` No other provider harness was changed as part of this implementation.
-- `[ ]` Targeted tests pass.
-- `[ ]` Full server tests pass.
-- `[ ]` Worktree contains only intended LM Studio/provider-package changes.
-- `[ ]` Stop-and-review notes are written or reviewer has signed off.
+- `[x]` Strict LM Studio Mongo shape exists and is tested.
+- `[x]` LM Studio recorder builder exists and is tested.
+- `[x]` LM Studio redaction support exists and is tested.
+- `[x]` LM Studio payload externalization exists and is tested.
+- `[x]` `parseEscalation` writes a complete LM Studio non-stream package.
+- `[x]` `transcribeImage` writes a complete LM Studio non-stream package.
+- `[x]` `chat` writes a complete LM Studio stream package.
+- `[x]` `callLmStudio` writes a complete LM Studio image-parser package.
+- `[x]` Full provider response bodies are preserved inline or by explicit payload reference.
+- `[x]` Full streaming frames/chunks are preserved inline or by explicit payload reference.
+- `[x]` Non-200 error bodies are preserved beyond current 500-character error messages.
+- `[x]` Malformed JSON/SSE facts are preserved.
+- `[x]` Provider calls do not wait for Mongo/file recording.
+- `[x]` Recorder failures do not fail provider calls.
+- `[x]` Existing provider return/callback behavior is unchanged.
+- `[x]` Parser logic is unchanged.
+- `[x]` Prompt text is unchanged.
+- `[x]` Fallback behavior is unchanged.
+- `[x]` No other provider harness was changed as part of this implementation.
+- `[x]` Targeted tests pass.
+- `[x]` Full server tests pass.
+- `[x]` Worktree contains only intended LM Studio/provider-package changes.
+- `[x]` Stop-and-review notes are written or reviewer has signed off.
 
 ## Commit Checklist
 
-- `[ ]` Run `git status --short`.
-- `[ ]` Confirm no client/UI files are staged.
-- `[ ]` Confirm no prompt files are staged.
-- `[ ]` Confirm no fallback/router files are staged.
-- `[ ]` Confirm no unrelated provider files are staged.
-- `[ ]` Run `git diff --cached --check` after staging.
-- `[ ]` Commit message names LM Studio provider harness work.
-- `[ ]` Push only after tests and staged diff are reviewed.
+- `[x]` Run `git status --short`.
+- `[x]` Confirm no client/UI files are staged.
+- `[x]` Confirm no prompt files are staged.
+- `[x]` Confirm no fallback/router files are staged.
+- `[x]` Confirm no unrelated provider files are staged.
+- `[x]` Run `git diff --cached --check` after staging.
+- `[x]` Commit message names LM Studio provider harness work.
+- `[x]` Push only after tests and staged diff are reviewed.
