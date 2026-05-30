@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { formatImageParserElapsedPair } from '../../lib/imageParserStageToasts.js';
+import { normalizeProviderHandoffStatus } from '../../lib/providerHandoffStatus.js';
 import './StageEventLogPanel.css';
 
 // Mirror of server/src/lib/stage-events.js UI_EVENT_KINDS. Events with these
@@ -85,6 +86,8 @@ const KIND_TONE = {
   'parser.provider_package_load_retry': 'cyan',
   'parser.provider_package_load_failed': 'red',
   'parser.provider_package_content_found': 'green',
+  'parser.provider_package_loaded': 'green',
+  'parser.provider_trace_received': 'dim-cyan',
   'parser.provider_content_sending_to_client': 'green',
   'parser.provider_content_received_client': 'green',
   'parser.completed_result_posted': 'green',
@@ -130,6 +133,10 @@ function summarizeData(kind, data) {
   if (data === null || data === undefined) return '';
   if (typeof data === 'string') return data;
   if (typeof data === 'number' || typeof data === 'boolean') return String(data);
+  const normalizedStatus = normalizeProviderHandoffStatus(kind, data);
+  if (normalizedStatus?.summary) {
+    return normalizedStatus.summary;
+  }
   if (typeof data.displayMessage === 'string' && data.displayMessage.trim()) {
     return data.displayMessage.trim();
   }
@@ -348,6 +355,8 @@ function deriveStatusLabel(stageId, events, caseIntake) {
     const ev = events[i];
     const kind = ev?.kind || '';
     if (kind === 'error') return 'failed';
+    const normalizedStatus = normalizeProviderHandoffStatus(ev);
+    if (normalizedStatus?.level === 'error') return 'failed';
     if (kind === 'stage.completed') return ev?.data?.status === 'failed' ? 'failed' : 'completed';
     if (kind === 'parser.completed_result_posted' || kind === 'parser.response_sent') {
       return 'completed';
@@ -572,6 +581,8 @@ export default function StageEventLogPanel({
               );
             }
             let tone = KIND_TONE[event?.kind] || 'dim';
+            const normalizedStatus = normalizeProviderHandoffStatus(event);
+            if (normalizedStatus?.tone) tone = normalizedStatus.tone;
             if (event?.kind === 'stage.completed' && event?.data?.status === 'failed') tone = 'red';
             const summary = summarizeData(event?.kind, event?.data);
             const uiClass = isUiEvent(event) ? ' v5-stage-log-panel__line--ui' : '';

@@ -107,10 +107,10 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
 /**
  * Retry last assistant response for a conversation and consume SSE stream.
  * @param {{ conversationId: string, provider?: string, mode?: string, fallbackProvider?: string, parallelProviders?: string[], settings?: object }} body
- * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function }} handlers
+ * @param {{ onInit: Function, onChunk: Function, onThinking?: Function, onDone: Function, onError: Function, onProviderError?: Function, onFallback?: Function, onStatus?: Function, onTriageCard?: Function, onInvMatches?: Function, onLocalStage?: Function, onStageEvent?: Function }} handlers
  * @returns {{ abort: Function }}
  */
-export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage }) {
+export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, onError, onProviderError, onFallback, onStatus, onTriageCard, onCaseIntake, onInvMatches, onLocalStage, onStageEvent }) {
   const controller = new AbortController();
   const url = `${BASE}/chat/retry`;
 
@@ -146,6 +146,7 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
         else if (eventType === 'triage_card') onTriageCard?.(data);
         else if (eventType === 'case_intake') onCaseIntake?.(data);
         else if (eventType === 'inv_matches') onInvMatches?.(data);
+        else if (eventType === 'stage_event') onStageEvent?.(data);
         else if (eventType === 'thinking') onThinking?.(data);
         else if (eventType === 'chunk') onChunk?.(data);
         else if (eventType === 'provider_error') onProviderError?.(data);

@@ -103,6 +103,10 @@ async function withProviderPackageStore(fn) {
   }
 }
 
+async function parseImageWithProviderPackageStore(image, options) {
+  return withProviderPackageStore(() => parseImage(image, options));
+}
+
 test('LLM Gateway harness returns only a package trace while full response is saved in Mongo', async () => {
   await mongo.connect();
   await ProviderCallPackage.deleteMany({});
@@ -600,12 +604,19 @@ test('parseImage routes to kimi and returns parsed result', async () => {
   // callKimi calls jsonRequest with https://api.moonshot.ai, which uses https.request
   let capturedBody = null;
   const origHttps = https.request;
-  https.request = function captureRequest(options, callback) {
+  https.request = function captureRequest(...args) {
+    const callback = getRequestCallback(args);
     const req = new EventEmitter();
     req.write = (data) => { capturedBody = data; };
     req.end = () => {
       const res = new EventEmitter();
       res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.httpVersion = '1.1';
+      res.headers = {};
+      res.rawHeaders = [];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
@@ -626,7 +637,7 @@ test('parseImage routes to kimi and returns parsed result', async () => {
   };
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
     assert.equal(result.text, 'COID/MID: 456\nCASE: CS-002');
     assert.equal(result.role, 'escalation');
     assert.ok(result.usage);
@@ -660,15 +671,19 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
     return origRead.apply(this, arguments);
   };
 
-  https.request = function captureRequest(options, callback) {
+  https.request = function captureRequest(...args) {
+    const callback = getRequestCallback(args);
     const req = new EventEmitter();
     req.write = () => {};
     req.end = () => {
       const res = new EventEmitter();
       res.statusCode = 200;
       res.statusMessage = 'OK';
+      res.httpVersion = '1.1';
       res.headers = { 'content-type': 'application/json', 'x-request-id': 'kimi-image-test' };
       res.rawHeaders = ['content-type', 'application/json', 'x-request-id', 'kimi-image-test'];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
@@ -1536,7 +1551,7 @@ test('parseImage routes to anthropic and returns parsed result', async () => {
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
     assert.equal(result.text, 'COID/MID: 789\nCASE: CS-003');
     assert.equal(result.role, 'escalation');
     assert.ok(result.usage);
@@ -1562,7 +1577,7 @@ test('parseImage with anthropic throws PROVIDER_ERROR on non-200', async () => {
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /HTTP 401/);
@@ -1581,7 +1596,7 @@ test('parseImage with anthropic throws PROVIDER_ERROR on invalid JSON', async ()
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /invalid JSON/);
@@ -1603,7 +1618,7 @@ test('parseImage with anthropic uses model override', async () => {
   });
 
   try {
-    await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-4-20250514', structured: false });
+    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-4-20250514', structured: false });
     const body = httpsMock.getCapturedBody();
     assert.equal(body.model, 'claude-opus-4-20250514');
   } finally {
@@ -1619,7 +1634,7 @@ test('parseImage with anthropic returns null usage when usage field missing', as
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
     assert.equal(result.text, 'some text');
     assert.equal(result.usage, null);
   } finally {
@@ -1640,7 +1655,7 @@ test('parseImage routes to openai and returns parsed result', async () => {
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' });
     assert.equal(result.text, 'COID/MID: 999\nCASE: CS-004');
     assert.equal(result.role, 'escalation');
     assert.ok(result.usage);
@@ -1665,7 +1680,7 @@ test('parseImage with openai throws PROVIDER_ERROR on non-200', async () => {
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'openai' }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /HTTP 429/);
@@ -1684,7 +1699,7 @@ test('parseImage with openai throws PROVIDER_ERROR on invalid JSON', async () =>
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'openai' }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /invalid JSON/);
@@ -1706,7 +1721,7 @@ test('parseImage with openai uses model override', async () => {
   });
 
   try {
-    await parseImage(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4o-mini' });
+    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4o-mini' });
     const body = httpsMock.getCapturedBody();
     assert.equal(body.model, 'gpt-4o-mini');
   } finally {
@@ -1719,13 +1734,20 @@ test('parseImage with openai sends Authorization Bearer header', async () => {
   const cleanupKey = setupProviderKey('OPENAI_API_KEY', 'sk-openai-test-header');
   const origHttps = https.request;
   let capturedOptions = null;
-  https.request = function captureOptions(options, callback) {
-    capturedOptions = options;
+  https.request = function captureOptions(...args) {
+    const callback = getRequestCallback(args);
+    capturedOptions = normalizeCapturedRequestOptions(args);
     const req = new EventEmitter();
     req.write = () => {};
     req.end = () => {
       const res = new EventEmitter();
       res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.httpVersion = '1.1';
+      res.headers = {};
+      res.rawHeaders = [];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
@@ -1745,7 +1767,7 @@ test('parseImage with openai sends Authorization Bearer header', async () => {
   };
 
   try {
-    await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' });
     assert.ok(capturedOptions);
     assert.equal(capturedOptions.headers['Authorization'], 'Bearer sk-openai-test-header');
   } finally {
@@ -1761,7 +1783,7 @@ test('parseImage with openai returns null usage when usage field missing', async
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' });
     assert.equal(result.usage, null);
   } finally {
     httpsMock.restore();
@@ -1778,7 +1800,7 @@ test('parseImage with kimi throws PROVIDER_ERROR on non-200', async () => {
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'kimi' }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /HTTP 503/);
@@ -1797,7 +1819,7 @@ test('parseImage with kimi throws PROVIDER_ERROR on invalid JSON', async () => {
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'kimi' }),
+      () => parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /invalid JSON/);
@@ -1819,7 +1841,7 @@ test('parseImage with kimi uses model override', async () => {
   });
 
   try {
-    await parseImage(TINY_PNG_BASE64, { provider: 'kimi', model: 'kimi-latest' });
+    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'kimi-latest' });
     const body = httpsMock.getCapturedBody();
     assert.equal(body.model, 'kimi-latest');
   } finally {
@@ -1835,7 +1857,7 @@ test('parseImage with kimi returns null usage when usage field missing', async (
   });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+    const result = await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
     assert.equal(result.usage, null);
   } finally {
     httpsMock.restore();
@@ -2497,7 +2519,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
 
       // Request options
       assert.equal(captured.options.hostname, 'api.moonshot.ai', 'hostname must be api.moonshot.ai');
@@ -2544,7 +2566,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' });
 
       // Request options
       assert.equal(captured.options.hostname, 'api.openai.com', 'hostname must be api.openai.com');
@@ -2588,7 +2610,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
 
       // Request options — Anthropic uses x-api-key, NOT Authorization Bearer
       assert.equal(captured.options.hostname, 'api.anthropic.com');
@@ -2676,7 +2698,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'kimi', model: 'my-custom-model' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'my-custom-model' });
       assert.equal(captured.body.model, 'my-custom-model', 'custom model must override default kimi-k2.5');
     } finally {
       captured._restore();
@@ -2697,7 +2719,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4-turbo-custom' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4-turbo-custom' });
       assert.equal(captured.body.model, 'gpt-4-turbo-custom', 'custom model must override default gpt-5.4-mini');
     } finally {
       captured._restore();
@@ -2718,7 +2740,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-custom', structured: false });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', model: 'claude-opus-custom', structured: false });
       assert.equal(captured.body.model, 'claude-opus-custom', 'custom model must override default');
     } finally {
       captured._restore();
@@ -2745,7 +2767,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(largeBase64, { provider: 'kimi' });
+      await parseImageWithProviderPackageStore(largeBase64, { provider: 'kimi' });
 
       // The Content-Length header must match the byte length of the serialized payload
       const actualByteLength = Buffer.byteLength(captured.rawPayload);
@@ -2775,7 +2797,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'openai', timeoutMs: 12345 });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai', timeoutMs: 12345 });
       assert.equal(captured.options.timeout, 12345, 'timeout option must propagate from timeoutMs');
     } finally {
       captured._restore();
@@ -2796,7 +2818,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
       assert.equal(captured.options.timeout, 120000, 'default timeout should be 120000ms');
     } finally {
       captured._restore();
@@ -2820,7 +2842,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
       assert.notEqual(captured.body.temperature, 0.1,
         'REGRESSION: Kimi rejects temperature !== 1. This was the actual production bug.');
       assert.equal(captured.body.temperature, 1);
@@ -2850,21 +2872,21 @@ test('provider request body validation', async (t) => {
       // Kimi
       process.env.MOONSHOT_API_KEY = 'mk-ct-test';
       let cap = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
-      await parseImage(TINY_PNG_BASE64, { provider: 'kimi' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
       assert.equal(cap.options.headers['Content-Type'], 'application/json', 'kimi Content-Type');
       cap._restore();
 
       // OpenAI
       process.env.OPENAI_API_KEY = 'sk-ct-test';
       cap = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
-      await parseImage(TINY_PNG_BASE64, { provider: 'openai' });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai' });
       assert.equal(cap.options.headers['Content-Type'], 'application/json', 'openai Content-Type');
       cap._restore();
 
       // Anthropic
       process.env.ANTHROPIC_API_KEY = 'sk-ant-ct-test';
       cap = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       assert.equal(cap.options.headers['Content-Type'], 'application/json', 'anthropic Content-Type');
       cap._restore();
 
@@ -2903,7 +2925,7 @@ test('provider request body validation', async (t) => {
 
     const captured = mockHttpsCapture(MINIMAL_ANTHROPIC_RESPONSE);
     try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+      await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
       const content = captured.body.messages[0].content;
       const hasImageUrl = content.some(c => c.type === 'image_url');
       assert.equal(hasImageUrl, false,

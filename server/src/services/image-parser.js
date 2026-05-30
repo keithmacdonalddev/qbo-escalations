@@ -18,8 +18,17 @@ const {
   sendGeminiGenerateContent,
 } = require('./providers/gemini-api-provider-harness');
 const {
+  sendKimiChatCompletion,
+} = require('./providers/kimi-api-provider-harness');
+const {
+  sendAnthropicMessages,
+} = require('./providers/anthropic-provider-harness');
+const {
   sendLmStudioChatCompletion,
 } = require('./providers/lm-studio-provider-harness');
+const {
+  sendOpenAiChatCompletion,
+} = require('./providers/openai-api-provider-harness');
 const ImageParserApiKey = require('../models/ImageParserApiKey');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
@@ -1256,14 +1265,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
 /**
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
-async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  const apiKey = await resolveApiKey('anthropic');
-  if (!apiKey) {
-    const err = new Error('Anthropic API key not configured');
-    err.code = 'PROVIDER_UNAVAILABLE';
-    throw err;
-  }
-
+async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null) {
   const effectiveModel = model || 'claude-sonnet-4-20250514';
 
   const body = {
@@ -1279,43 +1281,74 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
     }],
   };
 
-  const res = await jsonRequest('POST', 'https://api.anthropic.com', '/v1/messages', body, {
-    'x-api-key': apiKey,
-    'anthropic-version': '2023-06-01',
-  }, timeoutMs, {
-    providerId: 'anthropic',
-    providerResearchId: 'anthropic-api',
-    providerPathType: 'direct-http',
-    callSite: 'image-parser:callAnthropic',
-    operation: 'image-parse',
-    source: {
-      file: 'server/src/services/image-parser.js',
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.agent_handoff_to_provider',
+    'Escalation image parsing agent hand off payload to Anthropic Agent',
+    'started',
+    { provider: 'anthropic', model: effectiveModel || '' }
+  );
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_payload_received',
+    'anthropic provider harness received payload',
+    'received',
+    {
+      provider: 'anthropic',
+      operation: 'image-parse',
+      model: effectiveModel,
+    }
+  );
+
+  const result = await sendAnthropicMessages({
+    body,
+    model: effectiveModel,
+    timeoutMs,
+    getApiKey: () => resolveApiKey('anthropic'),
+    captureContext: {
+      callSite: 'image-parser:callAnthropic',
+      operation: 'image-parse',
       functionName: 'callAnthropic',
-      helperName: 'jsonRequest',
+      forceCapture: true,
+      modelRequested: effectiveModel,
+      source: {
+        file: 'server/src/services/image-parser.js',
+        functionName: 'callAnthropic',
+        helperName: 'sendAnthropicMessages',
+      },
+      metadata: {
+        imageMediaType: mediaType,
+        imageSizeBytes: Buffer.byteLength(rawBase64 || '', 'base64'),
+      },
     },
-    modelRequested: effectiveModel,
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
   });
 
-  if (res.statusCode !== 200) {
-    const err = new Error(`Anthropic API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'Anthropic API provider harness handed off payload to Escalation image parsing agent',
+    'complete',
+    {
+      provider: 'anthropic',
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
+    }
+  );
 
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`Anthropic returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-  const text = parsed.content?.[0]?.text || '';
-  const usage = parsed.usage
-    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.input_tokens || 0, outputTokens: parsed.usage.output_tokens || 0 }
-    : null;
+  const payloadResult = await buildAnthropicImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
+  });
 
-  return { text: text.trim(), usage };
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
 }
 
 /**
@@ -1356,7 +1389,7 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
 /**
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
-async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs) {
+async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null) {
   const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
     const err = new Error('OpenAI API key not configured');
@@ -1380,42 +1413,68 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
     ],
   }, effectiveModel, reasoningEffort);
 
-  const res = await jsonRequest('POST', 'https://api.openai.com', '/v1/chat/completions', body, {
-    'Authorization': `Bearer ${apiKey}`,
-  }, timeoutMs, {
-    providerId: 'openai',
-    providerResearchId: 'openai-api',
-    providerPathType: 'direct-http',
-    callSite: 'image-parser:callOpenAI',
-    operation: 'image-parse',
-    source: {
-      file: 'server/src/services/image-parser.js',
-      functionName: 'callOpenAI',
-      helperName: 'jsonRequest',
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.agent_handoff_to_provider',
+    'Escalation image parsing agent hand off payload to OpenAI Agent',
+    'started',
+    { provider: 'openai', model: effectiveModel || '' }
+  );
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_payload_received',
+    'OpenAI provider harness received payload',
+    'received',
+    {
+      provider: 'openai',
+      operation: 'image-parse',
+      model: effectiveModel,
     },
-    modelRequested: effectiveModel,
+  );
+
+  const result = await sendOpenAiChatCompletion({
+    body,
+    model: effectiveModel,
+    timeoutMs,
+    getApiKey: () => apiKey,
+    captureContext: {
+      callSite: 'image-parser:callOpenAI',
+      operation: 'image-parse',
+      functionName: 'callOpenAI',
+      forceCapture: true,
+      modelRequested: effectiveModel,
+      metadata: {
+        imageDataUrlBytes: Buffer.byteLength(imageDataUrl || '', 'utf8'),
+      },
+    },
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
   });
 
-  if (res.statusCode !== 200) {
-    const err = new Error(`OpenAI API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'OpenAI API provider harness handed off payload to Escalation image parsing agent',
+    'complete',
+    {
+      provider: 'openai',
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
+    }
+  );
 
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`OpenAI returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-  const text = parsed.choices?.[0]?.message?.content || '';
-  const usage = parsed.usage
-    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
-    : null;
+  const payloadResult = await buildOpenAiImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
+  });
 
-  return { text: text.trim(), usage };
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
 }
 
 /**
@@ -1494,16 +1553,8 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, 
 /**
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
-async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
-  const apiKey = await resolveApiKey('kimi');
-  if (!apiKey) {
-    const err = new Error('Moonshot API key not configured');
-    err.code = 'PROVIDER_UNAVAILABLE';
-    throw err;
-  }
-
+async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus = null) {
   const effectiveModel = model || 'kimi-k2.5';
-
   const body = {
     model: effectiveModel,
     max_tokens: 4096,
@@ -1532,65 +1583,55 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
       contentType: typeof m.content,
       contentLength: typeof m.content === 'string' ? m.content.length : JSON.stringify(m.content).length,
     }))),
-    apiKeyConfigured: Boolean(apiKey),
     timeoutMs,
   });
   const payloadSize = JSON.stringify(body).length;
   verboseLog('[image-parser-debug] callKimi payload size:', payloadSize, 'bytes');
 
-  const res = await jsonRequest('POST', 'https://api.moonshot.ai', '/v1/chat/completions', body, {
-    'Authorization': `Bearer ${apiKey}`,
-  }, timeoutMs, {
-    providerId: 'kimi',
-    providerResearchId: 'kimi-api',
-    providerPathType: 'direct-http',
-    callSite: 'image-parser:callKimi',
-    operation: 'image-parse',
-    source: {
-      file: 'server/src/services/image-parser.js',
+  const result = await sendKimiChatCompletion({
+    body,
+    model: effectiveModel,
+    timeoutMs,
+    getApiKey: () => resolveApiKey('kimi'),
+    captureContext: {
+      callSite: 'image-parser:callKimi',
+      operation: 'image-parse',
       functionName: 'callKimi',
-      helperName: 'jsonRequest',
+      forceCapture: true,
+      modelRequested: effectiveModel,
+      metadata: {
+        imageDataUrlBytes: Buffer.byteLength(imageDataUrl || '', 'utf8'),
+        requestPayloadBytes: payloadSize,
+      },
     },
-    modelRequested: effectiveModel,
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
   });
 
-  verboseLog('[image-parser-debug] callKimi response:', {
-    statusCode: res.statusCode,
-    bodyLength: (res.body || '').length,
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'Kimi API provider harness handed off payload to Escalation image parsing agent',
+    'complete',
+    {
+      provider: 'kimi',
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
+    }
+  );
+
+  const payloadResult = await buildKimiImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
   });
 
-  if (res.statusCode !== 200) {
-    verboseError('[image-parser] Kimi API error:', res.statusCode, 'bodyLength:', (res.body || '').length);
-    const err = new Error(`Kimi API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`Kimi returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  verboseLog('[image-parser-debug] callKimi parsed response:', {
-    id: parsed.id,
-    model: parsed.model,
-    choicesCount: parsed.choices?.length,
-    finishReason: parsed.choices?.[0]?.finish_reason,
-    contentLength: (parsed.choices?.[0]?.message?.content || '').length,
-    reasoningContent: parsed.choices?.[0]?.message?.reasoning_content ? 'PRESENT (length: ' + parsed.choices[0].message.reasoning_content.length + ')' : 'absent',
-    usage: parsed.usage,
-  });
-
-  const text = parsed.choices?.[0]?.message?.content || '';
-  const usage = parsed.usage
-    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
-    : null;
-
-  return { text: text.trim(), usage };
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
 }
 
 async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus) {
@@ -1825,6 +1866,27 @@ async function loadLlmGatewayParsedJsonFromPackage(providerPackage) {
   }
 }
 
+async function loadOpenAiParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyPayloadRef);
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('OpenAI provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`OpenAI provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
 async function loadLmStudioParsedJsonFromPackage(providerPackage) {
   const response = providerPackage?.lmStudio?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
@@ -1879,6 +1941,60 @@ async function loadGeminiParsedJsonFromPackage(providerPackage) {
   }
 }
 
+async function loadAnthropicParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyTextPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyTextPayloadRef);
+  }
+  if (!bodyText && response.bodyPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyPayloadRef);
+  }
+  if (!bodyText && response.parsedJsonPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(response.parsedJsonPayloadRef);
+    if (payload) {
+      return JSON.parse(payload);
+    }
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('Anthropic provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`Anthropic provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
+async function loadKimiParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyTextPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyTextPayloadRef);
+  }
+  if (!bodyText && response.bodyPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyPayloadRef);
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('Kimi provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`Kimi provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
 function buildUsageFromOpenAiCompatibleJson(parsed, modelFallback = '') {
   return parsed?.usage
     ? {
@@ -1886,6 +2002,26 @@ function buildUsageFromOpenAiCompatibleJson(parsed, modelFallback = '') {
         inputTokens: parsed.usage.prompt_tokens || 0,
         outputTokens: parsed.usage.completion_tokens || 0,
         totalTokens: parsed.usage.total_tokens || 0,
+      }
+    : null;
+}
+
+function buildUsageFromOpenAiJson(parsed, modelFallback = '') {
+  return parsed?.usage
+    ? {
+        model: parsed.model || modelFallback || '',
+        inputTokens: parsed.usage.prompt_tokens || 0,
+        outputTokens: parsed.usage.completion_tokens || 0,
+      }
+    : null;
+}
+
+function buildUsageFromAnthropicJson(parsed, modelFallback = '') {
+  return parsed?.usage
+    ? {
+        model: parsed.model || modelFallback || '',
+        inputTokens: parsed.usage.input_tokens || 0,
+        outputTokens: parsed.usage.output_tokens || 0,
       }
     : null;
 }
@@ -2153,6 +2289,39 @@ async function buildImageParserResultFromProviderPackage(providerTrace, { eventB
   };
 }
 
+async function buildOpenAiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'openai' && providerPackage.providerResearchId !== 'openai-api') {
+    throw createProviderPackageError(`Unsupported provider package for OpenAI image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadOpenAiParsedJsonFromPackage(providerPackage);
+  const message = parsed?.choices?.[0]?.message || {};
+  const text = (typeof message.content === 'string' ? message.content : '').trim();
+  const usage = buildUsageFromOpenAiJson(parsed, providerTrace?.model || model);
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+  const sourcePath = 'response.parsedJson.choices[0].message.content';
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath,
+      role: message.role || '',
+    },
+  };
+}
+
 async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
   const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
   if (providerPackage.providerId !== 'lm-studio' && providerPackage.providerResearchId !== 'lm-studio-openai-compatible') {
@@ -2220,6 +2389,88 @@ async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { 
       sourcePath,
       responseId: parsed?.responseId || '',
       modelVersion: parsed?.modelVersion || '',
+    },
+  };
+}
+
+async function buildAnthropicImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'anthropic' && providerPackage.providerResearchId !== 'anthropic-api') {
+    throw createProviderPackageError(`Unsupported provider package for Anthropic image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadAnthropicParsedJsonFromPackage(providerPackage);
+  const text = (typeof parsed?.content?.[0]?.text === 'string' ? parsed.content[0].text : '').trim();
+  const usage = buildUsageFromAnthropicJson(parsed, providerTrace?.model || model);
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+  const sourcePath = 'response.parsedJson.content[0].text';
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath,
+      responseId: parsed?.id || '',
+      type: parsed?.type || '',
+    },
+  };
+}
+
+async function buildKimiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'kimi' && providerPackage.providerResearchId !== 'kimi-api') {
+    throw createProviderPackageError(`Unsupported provider package for Kimi image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadKimiParsedJsonFromPackage(providerPackage);
+  const message = parsed?.choices?.[0]?.message || {};
+  const content = typeof message.content === 'string' ? message.content : '';
+  const reasoningContent = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
+  const text = (content || reasoningContent || '').trim();
+  const usage = buildUsageFromOpenAiCompatibleJson(parsed, providerTrace?.model || model);
+  const sourcePath = content
+    ? 'response.parsedJson.choices[0].message.content'
+    : 'response.parsedJson.choices[0].message.reasoning_content';
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+
+  verboseLog('[image-parser-debug] callKimi package payload:', {
+    providerPackageId,
+    id: parsed.id,
+    model: parsed.model,
+    choicesCount: parsed.choices?.length,
+    finishReason: parsed.choices?.[0]?.finish_reason,
+    contentLength: content.length,
+    reasoningContent: reasoningContent ? 'PRESENT (length: ' + reasoningContent.length + ')' : 'absent',
+    usage: parsed.usage,
+  });
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath,
+      role: message.role || '',
+      usedReasoningContent: !content && Boolean(reasoningContent),
     },
   };
 }
@@ -2448,17 +2699,17 @@ async function parseImage(imageBase64, options = {}) {
             provider,
             reason: 'opt_out_legacy_structured_false',
           });
-          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         }
         break;
       case 'openai':
-        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs);
+        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus);
         break;
       case 'gemini':
         result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         break;
       case 'kimi':
-        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs, eventBus);
         break;
       default: {
         const err = new Error(`Invalid provider: ${provider}. Must be one of: ${VALID_IMAGE_PARSER_PROVIDERS.join(', ')}`);
@@ -2477,6 +2728,7 @@ async function parseImage(imageBase64, options = {}) {
     providerPackageId: result?.providerTrace?.providerPackageId || null,
     captureEnabled: result?.providerTrace?.captureEnabled ?? null,
     packageCaptureQueued: result?.providerTrace?.packageCaptureQueued ?? null,
+    packageCaptureStatus: result?.providerTrace?.packageCaptureStatus ?? null,
   });
   if (result?.providerTrace) {
     eventBus?.emit('parser.provider_trace_received', {
@@ -2489,6 +2741,7 @@ async function parseImage(imageBase64, options = {}) {
       durationMs: result.providerTrace.durationMs ?? null,
       captureEnabled: result.providerTrace.captureEnabled ?? null,
       packageCaptureQueued: result.providerTrace.packageCaptureQueued ?? null,
+      packageCaptureStatus: result.providerTrace.packageCaptureStatus ?? null,
     });
   }
   if (result?.usage) {

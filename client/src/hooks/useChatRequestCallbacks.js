@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { getConversation } from '../api/chatApi.js';
 import { normalizeError } from '../utils/normalizeError.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
@@ -7,6 +7,7 @@ import {
   buildRequestSeedEvent,
   mapLocalStageEventToProcessEvent,
 } from '../lib/chatRequestEvents.js';
+import { normalizeProviderHandoffStatus } from '../lib/providerHandoffStatus.js';
 import {
   createRequestTerminalHandlers,
   normalizeProvider,
@@ -133,6 +134,14 @@ export default function useChatRequestCallbacks({
   streamingTextRef,
   thinkingTextRef,
 }) {
+  // Monotonic per-request token. Each createHandlers() call (one per request)
+  // claims the next token, so the most recent request always owns the latest
+  // value. Async handlers (onError's stream-recovery fetch) snapshot the token
+  // at handler-creation time and re-check it after awaiting, mirroring the
+  // tokenRef guard in useStageOrchestrator.js. If a newer request has started
+  // mid-await, the stale recovery bails instead of clobbering the new state.
+  const requestTokenRef = useRef(0);
+
   const finalizeSuccess = useCallback((
     data,
     selectedModeForRequest,
@@ -276,7 +285,11 @@ export default function useChatRequestCallbacks({
     selectedSuccessMessage,
     selectedFailureTitle,
     selectedFailureTelMessage,
-  }) => ({
+  }) => {
+    // Claim this request's token. The latest request wins; any earlier
+    // request's async recovery (onError) will see a mismatched token and bail.
+    const requestToken = ++requestTokenRef.current;
+    return {
     onInit: (data) => {
       setConversationId(data.conversationId);
       if (conversationIdRef) {
@@ -416,6 +429,19 @@ export default function useChatRequestCallbacks({
       const processEvent = mapLocalStageEventToProcessEvent(stageEvent);
       if (processEvent) pushProcessEvent(processEvent);
     },
+    onStageEvent: (stageEvent) => {
+      const status = normalizeProviderHandoffStatus(stageEvent);
+      if (!status) return;
+      const data = stageEvent?.data || {};
+      pushProcessEvent({
+        level: ['info', 'warning', 'error', 'success'].includes(status.level) ? status.level : 'info',
+        title: status.title || 'Provider handoff status',
+        message: status.summary || data.displayMessage || stageEvent?.kind || 'Provider handoff status changed.',
+        code: stageEvent?.kind || 'STAGE_EVENT',
+        provider: data.provider || data.providerId || undefined,
+        detail: data.detail || data.errorDetail || '',
+      });
+    },
     ...createRequestTerminalHandlers({
       clearScheduledStreamFlush,
       finalizeSuccess,
@@ -439,6 +465,11 @@ export default function useChatRequestCallbacks({
       if (conversationIdRef?.current && shouldAttemptStreamRecovery(normalized)) {
         try {
           const conversation = await getConversation(conversationIdRef.current);
+          // Superseded-request guard: if a newer request started while this
+          // recovery fetch was in flight, the newer request now owns all chat
+          // state. Bail out entirely — applying recovered state (or even the
+          // terminal cleanup below) would clobber the newer request's stream.
+          if (requestTokenRef.current !== requestToken) return;
           const { conversationProvider, normalizedMessages } = normalizeConversationMessages(conversation);
           const latestAssistant = [...normalizedMessages].reverse().find((message) => message?.role === 'assistant');
 
@@ -518,7 +549,8 @@ export default function useChatRequestCallbacks({
       isThinkingRef.current = false;
       setThinkingStartTime(null);
     },
-  }), [
+    };
+  }, [
     clearScheduledStreamFlush,
     chunkStartedProvidersRef,
     conversationIdRef,

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sendChatMessage } from '../../api/chatApi.js';
 import { apiFetch } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
+import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
+import { useToast } from '../../hooks/useToast.jsx';
 import { normalizeError } from '../../utils/normalizeError.js';
 import {
   readImageParserProfileRuntime,
@@ -181,30 +183,42 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
   const isSse = wantsStream && contentType.includes('text/event-stream');
 
   let data;
+  let sawFailureStageEvent = false;
   if (isSse) {
+    // The /parse SSE route delivers every terminal outcome — success AND
+    // failure — as a single `parse_complete` frame ({ ok:false, code, error }
+    // on failure). It never emits a top-level `error` frame (bus.emit('error')
+    // is sent as a `stage_event` with kind:'error'). So `parse_complete` is the
+    // sole terminal; the only fallback is a stream that closed early.
     let completed = null;
-    let errorPayload = null;
     await consumeSSEStream(res, (eventType, payload) => {
       if (eventType === 'stage_event') {
+        if (
+          payload?.kind === 'error'
+          || /fail|error|timeout/i.test(String(payload?.data?.status || ''))
+        ) {
+          sawFailureStageEvent = true;
+        }
         try { onStageEvent(payload); } catch { /* noop */ }
       } else if (eventType === 'parse_complete') {
         completed = payload;
-      } else if (eventType === 'error') {
-        errorPayload = payload;
       }
     });
-    if (errorPayload && !completed) {
-      data = { ok: false, error: errorPayload.error || errorPayload.message || 'Parse failed', code: errorPayload.code };
-    } else {
-      data = completed || { ok: false, error: 'Parse stream ended without a result.' };
-    }
+    data = completed || { ok: false, error: 'Parse stream ended without a result.', code: 'STREAM_INCOMPLETE' };
   } else {
     data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
   }
 
   if (!data?.ok || (!isSse && !res.ok)) {
     const msg = data?.error || `Parse failed (HTTP ${res.status})`;
-    throw Object.assign(new Error(msg), { code: data?.code || 'PARSE_FAILED' });
+    throw Object.assign(new Error(msg), {
+      code: data?.code || 'PARSE_FAILED',
+      detail: data?.detail || '',
+      status: res.status,
+      statusText: res.statusText || '',
+      providerTrace: data?.providerTrace || null,
+      stageEventAlreadyEmitted: sawFailureStageEvent,
+    });
   }
   return {
     text: data.text || data.sourceText || '',
@@ -212,11 +226,13 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
     providerUsed: data.providerUsed || cfg.provider,
     modelUsed: data.modelUsed || data.usage?.model || cfg.model || '',
     reasoningEffortUsed: cfg.reasoningEffort || '',
+    providerTrace: data.providerTrace || null,
     elapsedMs: Date.now() - start,
   };
 }
 
 export function useStageOrchestrator() {
+  const toast = useToast();
   const [imageCaptured, setImageCaptured] = useState(false);
   const [activeWidget, setActiveWidget] = useState('image');
   const [splitView, setSplitView] = useState(false);
@@ -242,6 +258,11 @@ export function useStageOrchestrator() {
   const parseAbortRef = useRef(null);
   const tokenRef = useRef(0);
   const streamingTextRef = useRef('');
+  const toastedStageKeysRef = useRef(new Set());
+  // Deferred widget-switch timer scheduled in captureImage(). Tracked so it can
+  // be cleared on reset() and unmount — otherwise it can fire setActiveWidget
+  // after the pipeline was reset or the component unmounted.
+  const widgetSwitchTimerRef = useRef(null);
 
   const reset = useCallback(() => {
     tokenRef.current += 1;
@@ -253,7 +274,12 @@ export function useStageOrchestrator() {
       try { parseAbortRef.current.abort(); } catch { /* noop */ }
       parseAbortRef.current = null;
     }
+    if (widgetSwitchTimerRef.current) {
+      clearTimeout(widgetSwitchTimerRef.current);
+      widgetSwitchTimerRef.current = null;
+    }
     streamingTextRef.current = '';
+    toastedStageKeysRef.current.clear();
     setImageCaptured(false);
     setActiveWidget('image');
     setSplitView(false);
@@ -384,13 +410,26 @@ export function useStageOrchestrator() {
     if (!data || typeof data !== 'object') return;
     const stageId = typeof data.stageId === 'string' ? data.stageId : '';
     if (!stageId) return;
+    const toastKey = [
+      data.runId || '',
+      data.stageId || '',
+      data.kind || '',
+      data.seq ?? '',
+      data?.data?.providerPackageId || '',
+      data?.data?.displayMessage || '',
+    ].join(':');
+    if (!toastedStageKeysRef.current.has(toastKey)) {
+      if (showImageParserStageToast(toast, data)) {
+        toastedStageKeysRef.current.add(toastKey);
+      }
+    }
     setStageEvents((prev) => {
       const list = Array.isArray(prev[stageId]) ? prev[stageId] : [];
       // Cap live buffer at ~250 to mirror server-side persistence cap.
       const next = list.length >= 250 ? list.slice(-249) : list;
       return { ...prev, [stageId]: [...next, data] };
     });
-  }, []);
+  }, [toast]);
 
   // Local sequence counter so client-side emits interleave cleanly with the
   // server-side stream when sorted by (ts, seq). The popout's sort already
@@ -549,6 +588,9 @@ export function useStageOrchestrator() {
       provider: runtimeByStage.parser?.provider || '',
       model: runtimeByStage.parser?.model || '',
       imageBytes: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
+      status: 'sent',
+      surfaceToUser: true,
+      displayMessage: 'payload sent to server - sent',
     });
     let parseResult;
     try {
@@ -566,6 +608,18 @@ export function useStageOrchestrator() {
       // If we aborted because of a cancel, reset() already cleared state — bail.
       if (parseAbort.signal.aborted) return;
       const normalized = normalizeError(err);
+      if (!err?.stageEventAlreadyEmitted) {
+        pushLocalStageEvent('parser', 'error', {
+          code: normalized.code || 'PARSE_FAILED',
+          message: normalized.message || 'Image parser failed',
+          detail: normalized.detail || '',
+          status: 'error',
+          providerPackageId: err?.providerTrace?.providerPackageId || null,
+          providerHarness: err?.providerTrace?.providerHarness || null,
+          surfaceToUser: true,
+          displayMessage: normalized.message || 'Image parser failed',
+        });
+      }
       setRequestError(normalized);
       setStageState((prev) => {
         const now = Date.now();
@@ -584,14 +638,35 @@ export function useStageOrchestrator() {
     }
 
     if (tokenRef.current !== token) return;
+    const providerPackageId = parseResult?.providerTrace?.providerPackageId || '';
+    if (providerPackageId) {
+      pushLocalStageEvent('parser', 'parser.provider_content_received_client', {
+        provider: parseResult?.providerUsed || '',
+        providerPackageId,
+        status: 'received',
+        surfaceToUser: true,
+        displayMessage: `providerPackageId: ${providerPackageId} content received in client - received`,
+      });
+    }
     pushLocalStageEvent('parser', 'parser.client_result_received', {
       provider: parseResult?.providerUsed || '',
       model: parseResult?.modelUsed || '',
       textLength: (parseResult?.text || '').length,
       elapsedMs: parseResult?.elapsedMs ?? 0,
+      providerPackageId: providerPackageId || null,
     });
     if (!parseResult.sourceText && !parseResult.text) {
       const normalized = normalizeError({ message: 'Image parser returned no text.' });
+      pushLocalStageEvent('parser', 'error', {
+        code: 'PARSER_EMPTY_RESULT',
+        message: normalized.message,
+        status: 'error',
+        provider: parseResult?.providerUsed || '',
+        model: parseResult?.modelUsed || '',
+        providerPackageId: providerPackageId || null,
+        surfaceToUser: true,
+        displayMessage: normalized.message,
+      });
       setRequestError(normalized);
       setStageState((prev) => {
         const now = Date.now();
@@ -677,7 +752,11 @@ export function useStageOrchestrator() {
       dataUrlLength: typeof imageDataUrl === 'string' ? imageDataUrl.length : 0,
       isDataUrl: typeof imageDataUrl === 'string' && imageDataUrl.startsWith('data:'),
     });
-    setTimeout(() => setActiveWidget('parser'), 320);
+    if (widgetSwitchTimerRef.current) clearTimeout(widgetSwitchTimerRef.current);
+    widgetSwitchTimerRef.current = setTimeout(() => {
+      widgetSwitchTimerRef.current = null;
+      setActiveWidget('parser');
+    }, 320);
     startRequestWithImage(imageDataUrl);
   }, [imageCaptured, pushLocalStageEvent, startRequestWithImage]);
 
@@ -830,6 +909,16 @@ export function useStageOrchestrator() {
       try { abortRef.current(); } catch { /* noop */ }
       abortRef.current = null;
     }
+    // Also cancel any in-flight image parse so its SSE consumer can't call
+    // setState after this component unmounts.
+    if (parseAbortRef.current) {
+      try { parseAbortRef.current.abort(); } catch { /* noop */ }
+      parseAbortRef.current = null;
+    }
+    if (widgetSwitchTimerRef.current) {
+      clearTimeout(widgetSwitchTimerRef.current);
+      widgetSwitchTimerRef.current = null;
+    }
   }, []);
 
   const showWidget = useCallback((name) => {
@@ -897,6 +986,7 @@ export function useStageOrchestrator() {
     stageState,
     stageEvents,
     liveEventCounts,
+    ingestStageEvent: handleStageEvent,
     pushLocalStageEvent,
     allDone,
     capturedImageSrc,

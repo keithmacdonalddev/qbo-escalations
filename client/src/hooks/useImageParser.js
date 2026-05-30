@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { apiFetch } from '../api/http.js';
+import { consumeSSEStream } from '../api/sse.js';
 import { resolveImageParserSelection } from '../lib/imageParserCatalog.js';
 
 const IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
@@ -34,6 +35,8 @@ export default function useImageParser() {
     setParsing(true);
     setError(null);
     setResult(null);
+    const wantsStream = typeof overrides.onStageEvent === 'function';
+    let sawFailureStageEvent = false;
     try {
       const config = readStoredConfig();
       const provider = overrides.provider || config.provider;
@@ -44,7 +47,10 @@ export default function useImageParser() {
 
       const res = await apiFetch('/api/image-parser/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(wantsStream ? { Accept: 'text/event-stream' } : {}),
+        },
         body: JSON.stringify({
           image: imageBase64,
           provider,
@@ -57,15 +63,76 @@ export default function useImageParser() {
         noRetry: true,     // never retry vision inference (wastes tokens + time)
       });
 
-      const data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      const isSse = wantsStream && contentType.includes('text/event-stream');
+      let data;
+      if (isSse) {
+        // The /parse SSE route delivers every terminal outcome — success AND
+        // failure — as a single `parse_complete` frame ({ ok:false, code, error }
+        // on failure). It never emits a top-level `error` frame (bus.emit('error')
+        // is sent as a `stage_event` with kind:'error'). So `parse_complete` is
+        // the sole terminal; the only fallback is a stream that closed early.
+        let completed = null;
+        await consumeSSEStream(res, (eventType, payload) => {
+          if (eventType === 'stage_event') {
+            if (
+              payload?.kind === 'error'
+              || /fail|error|timeout/i.test(String(payload?.data?.status || ''))
+            ) {
+              sawFailureStageEvent = true;
+            }
+            try { overrides.onStageEvent(payload); } catch { /* noop */ }
+          } else if (eventType === 'parse_complete') {
+            completed = payload;
+          }
+        });
+        data = completed || {
+          ok: false,
+          error: 'Parse stream ended without a result.',
+          code: 'STREAM_INCOMPLETE',
+        };
+      } else {
+        data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
+      }
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || `Parse failed (HTTP ${res.status})`);
+        throw Object.assign(new Error(data.error || `Parse failed (HTTP ${res.status})`), {
+          code: data.code || 'PARSE_FAILED',
+          detail: data.detail || '',
+          status: res.status,
+          statusText: res.statusText || '',
+          providerTrace: data.providerTrace || null,
+          stageEventAlreadyEmitted: sawFailureStageEvent,
+        });
       }
 
       setResult(data);
       return data;
     } catch (err) {
       const message = err.message || 'Parse failed';
+      if (wantsStream && !err.stageEventAlreadyEmitted) {
+        try {
+          overrides.onStageEvent({
+            stageId: 'parser',
+            runId: '',
+            ts: Date.now(),
+            seq: 0,
+            kind: 'error',
+            category: 'run',
+            source: 'client',
+            data: {
+              code: err.code || 'PARSE_FAILED',
+              message,
+              detail: err.detail || '',
+              status: 'error',
+              statusCode: err.status || null,
+              providerPackageId: err.providerTrace?.providerPackageId || null,
+              providerHarness: err.providerTrace?.providerHarness || null,
+              surfaceToUser: true,
+              displayMessage: message,
+            },
+          });
+        } catch { /* noop */ }
+      }
       setError(message);
       return null;
     } finally {

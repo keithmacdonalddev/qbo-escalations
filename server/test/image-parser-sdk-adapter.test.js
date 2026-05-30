@@ -6,9 +6,16 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const { EventEmitter } = require('events');
+
+const mongo = require('./_mongo-helper');
+const ProviderCallPackage = require('../src/models/ProviderCallPackage');
+const {
+  __waitForProviderPackageRecorderSettled,
+} = require('../src/services/provider-call-package-recorder');
 
 const sdkModulePath = require.resolve('../src/services/sdk-image-parse');
 const sdkModule = require('../src/services/sdk-image-parse');
@@ -76,6 +83,33 @@ function setupProviderKey(envVar, testKey, keysFile) {
   };
 }
 
+function startServer(handler) {
+  const server = http.createServer(handler);
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({
+        baseUrl: `http://127.0.0.1:${port}`,
+        close: () => new Promise((closeResolve) => server.close(closeResolve)),
+      });
+    });
+  });
+}
+
+async function withAnthropicServer(handler, fn) {
+  const priorUrl = process.env.ANTHROPIC_API_URL;
+  const server = await startServer(handler);
+  process.env.ANTHROPIC_API_URL = server.baseUrl;
+  try {
+    return await fn(server);
+  } finally {
+    if (priorUrl === undefined) delete process.env.ANTHROPIC_API_URL;
+    else process.env.ANTHROPIC_API_URL = priorUrl;
+    await server.close();
+  }
+}
+
 const { parseImage, KEYS_FILE } = require('../src/services/image-parser');
 
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -91,12 +125,24 @@ const ANSWER_TEXT = [
   'TS STEPS: 1) Cleared cache 2) Retried with backup admin',
 ].join('\n');
 
-test.beforeEach(() => {
+test.before(async () => {
+  await mongo.connect();
+});
+
+test.after(async () => {
+  await mongo.disconnect();
+});
+
+test.beforeEach(async () => {
+  await ProviderCallPackage.deleteMany({});
   if (sdkSpyState) uninstallSdkSpy();
 });
 
-test.afterEach(() => {
+test.afterEach(async () => {
   if (sdkSpyState) uninstallSdkSpy();
+  await __waitForProviderPackageRecorderSettled();
+  await ProviderCallPackage.deleteMany({}).catch(() => {});
+  delete process.env.ANTHROPIC_API_URL;
 });
 
 test('parseImage with provider=anthropic uses SDK adapter and forwards answer text', async () => {
@@ -147,22 +193,30 @@ test('parseImage with provider=anthropic and structured=false still uses direct 
   installSdkSpy(async () => {
     throw new Error('SDK path must not be invoked when structured=false');
   });
-  const httpsMock = mockHttpsRequest(200, {
-    content: [{ type: 'text', text: ANSWER_TEXT }],
-    model: 'claude-sonnet-4-20250514',
-    usage: { input_tokens: 50, output_tokens: 20 },
-  });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
+    await withAnthropicServer((req, res) => {
+      assert.equal(req.url, '/v1/messages');
+      assert.equal(req.headers['x-api-key'], 'sk-ant-test-prose');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'msg_sdk_adapter_direct',
+        type: 'message',
+        content: [{ type: 'text', text: ANSWER_TEXT }],
+        model: 'claude-sonnet-4-20250514',
+        usage: { input_tokens: 50, output_tokens: 20 },
+      }));
+    }, async () => {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
 
-    assert.equal(sdkSpyState.calls.length, 0, 'parseImageWithSDK must not run when structured=false');
-    assert.equal(httpsMock.getCallCount(), 1, 'direct Anthropic path must call https.request once');
-    assert.equal(result.text, ANSWER_TEXT);
-    assert.equal(result.usage.inputTokens, 50);
-    assert.equal(result.usage.outputTokens, 20);
+      assert.equal(sdkSpyState.calls.length, 0, 'parseImageWithSDK must not run when structured=false');
+      assert.equal(result.text, ANSWER_TEXT);
+      assert.equal(result.usage.inputTokens, 50);
+      assert.equal(result.usage.outputTokens, 20);
+      assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
+      assert.ok(result.providerTrace.providerPackageId);
+    });
   } finally {
-    httpsMock.restore();
     cleanupKey();
   }
 });
