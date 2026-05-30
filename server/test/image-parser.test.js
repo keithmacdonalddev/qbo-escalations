@@ -91,6 +91,18 @@ test.beforeEach(() => {
   clearHttpMock();
 });
 
+async function withProviderPackageStore(fn) {
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  try {
+    return await fn();
+  } finally {
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+}
+
 test('LLM Gateway harness returns only a package trace while full response is saved in Mongo', async () => {
   await mongo.connect();
   await ProviderCallPackage.deleteMany({});
@@ -329,97 +341,105 @@ test('parseImage validation', async (t) => {
 // parseImage — provider dispatch (lm-studio via HTTP mock)
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseImage routes to lm-studio and returns parsed result', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'COID/MID: 123\nCASE: CS-001' } }],
-    model: 'test-vision-model',
-    usage: { prompt_tokens: 100, completion_tokens: 50 },
-  });
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'COID/MID: 123\nCASE: CS-001' } }],
+      model: 'test-vision-model',
+      usage: { prompt_tokens: 100, completion_tokens: 50 },
+    });
 
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.text, 'COID/MID: 123\nCASE: CS-001');
-    assert.equal(result.role, 'escalation');
-    assert.ok(result.usage);
-    assert.equal(result.usage.inputTokens, 100);
-    assert.equal(result.usage.outputTokens, 50);
-    assert.equal(result.parseFields.coid, '123');
-    assert.equal(result.parseFields.caseNumber, 'CS-001');
-    assert.equal(result.parseMeta?.fieldsFound, 2);
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(result.text, 'COID/MID: 123\nCASE: CS-001');
+      assert.equal(result.role, 'escalation');
+      assert.ok(result.usage);
+      assert.equal(result.usage.inputTokens, 100);
+      assert.equal(result.usage.outputTokens, 50);
+      assert.equal(result.parseFields.coid, '123');
+      assert.equal(result.parseFields.caseNumber, 'CS-001');
+      assert.equal(result.parseMeta?.fieldsFound, 2);
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 test('parseImage derives structured escalation fields and parse confidence', async () => {
-  mockHttpRequest(200, {
-    choices: [{
-      message: {
-        content: [
-          'COID/MID: 12345 / 67890',
-          'CASE: CS-2026-001',
-          'CLIENT/CONTACT: Jane Smith',
-          'CX IS ATTEMPTING TO: submit payroll',
-          'EXPECTED OUTCOME: payroll should submit successfully',
-          'ACTUAL OUTCOME: QBO shows a payroll tax calculation error',
-          'KB/TOOLS USED: payroll help article',
-          'TRIED TEST ACCOUNT: yes',
-          'TS STEPS: cleared cache and retried in incognito',
-        ].join('\n'),
-      },
-    }],
-    model: 'test-vision-model',
-    usage: { prompt_tokens: 120, completion_tokens: 80 },
-  });
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{
+        message: {
+          content: [
+            'COID/MID: 12345 / 67890',
+            'CASE: CS-2026-001',
+            'CLIENT/CONTACT: Jane Smith',
+            'CX IS ATTEMPTING TO: submit payroll',
+            'EXPECTED OUTCOME: payroll should submit successfully',
+            'ACTUAL OUTCOME: QBO shows a payroll tax calculation error',
+            'KB/TOOLS USED: payroll help article',
+            'TRIED TEST ACCOUNT: yes',
+            'TS STEPS: cleared cache and retried in incognito',
+          ].join('\n'),
+        },
+      }],
+      model: 'test-vision-model',
+      usage: { prompt_tokens: 120, completion_tokens: 80 },
+    });
 
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.role, 'escalation');
-    assert.equal(result.parseFields.coid, '12345');
-    assert.equal(result.parseFields.mid, '67890');
-    assert.equal(result.parseFields.caseNumber, 'CS-2026-001');
-    assert.equal(result.parseFields.clientContact, 'Jane Smith');
-    assert.equal(result.parseFields.kbToolsUsed, 'payroll help article');
-    assert.equal(result.parseFields.category, 'payroll');
-    assert.equal(result.parseMeta?.passed, true);
-    assert.equal(result.parseMeta?.confidence, 'high');
-    assert.equal(result.parseMeta?.canonicalTemplate?.passed, true);
-    assert.ok(Array.isArray(result.parseMeta?.issues));
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(result.role, 'escalation');
+      assert.equal(result.parseFields.coid, '12345');
+      assert.equal(result.parseFields.mid, '67890');
+      assert.equal(result.parseFields.caseNumber, 'CS-2026-001');
+      assert.equal(result.parseFields.clientContact, 'Jane Smith');
+      assert.equal(result.parseFields.kbToolsUsed, 'payroll help article');
+      assert.equal(result.parseFields.category, 'payroll');
+      assert.equal(result.parseMeta?.passed, true);
+      assert.equal(result.parseMeta?.confidence, 'high');
+      assert.equal(result.parseMeta?.canonicalTemplate?.passed, true);
+      assert.ok(Array.isArray(result.parseMeta?.issues));
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 test('parseImage throws PROVIDER_ERROR when lm-studio returns non-200', async () => {
-  mockHttpRequest(500, 'Internal Server Error');
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(500, 'Internal Server Error');
 
-  try {
-    await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
-      (err) => {
-        assert.equal(err.code, 'PROVIDER_ERROR');
-        assert.match(err.message, /HTTP 500/);
-        return true;
-      }
-    );
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      await assert.rejects(
+        () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
+        (err) => {
+          assert.equal(err.code, 'PROVIDER_ERROR');
+          assert.match(err.message, /HTTP 500/);
+          return true;
+        }
+      );
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
 // parseImage — accepts all 4 valid providers
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseImage accepts lm-studio provider', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'test' } }],
-    usage: { prompt_tokens: 1, completion_tokens: 1 },
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'test' } }],
+      usage: { prompt_tokens: 1, completion_tokens: 1 },
+    });
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(typeof result.text, 'string');
+    } finally {
+      clearHttpMock();
+    }
   });
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(typeof result.text, 'string');
-  } finally {
-    clearHttpMock();
-  }
 });
 
 test('parseImage accepts anthropic provider (throws PROVIDER_UNAVAILABLE not INVALID_PROVIDER)', async () => {
@@ -519,43 +539,49 @@ test('parseImage accepts gemini provider (throws PROVIDER_UNAVAILABLE not INVALI
 // parseImage — base64 format acceptance
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseImage accepts raw base64 without data URI prefix', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'CASE: CS-001' } }],
-    usage: { prompt_tokens: 5, completion_tokens: 5 },
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'CASE: CS-001' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    });
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(typeof result.text, 'string');
+      assert.ok(result.text.length > 0);
+    } finally {
+      clearHttpMock();
+    }
   });
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(typeof result.text, 'string');
-    assert.ok(result.text.length > 0);
-  } finally {
-    clearHttpMock();
-  }
 });
 
 test('parseImage accepts data URI with image/png prefix', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'CASE: CS-002' } }],
-    usage: { prompt_tokens: 5, completion_tokens: 5 },
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'CASE: CS-002' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    });
+    try {
+      const result = await parseImage(TINY_PNG_DATA_URI, { provider: 'lm-studio' });
+      assert.equal(typeof result.text, 'string');
+    } finally {
+      clearHttpMock();
+    }
   });
-  try {
-    const result = await parseImage(TINY_PNG_DATA_URI, { provider: 'lm-studio' });
-    assert.equal(typeof result.text, 'string');
-  } finally {
-    clearHttpMock();
-  }
 });
 
 test('parseImage accepts data URI with image/jpeg prefix', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'CASE: CS-003' } }],
-    usage: { prompt_tokens: 5, completion_tokens: 5 },
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'CASE: CS-003' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    });
+    try {
+      const result = await parseImage(TINY_JPEG_DATA_URI, { provider: 'lm-studio' });
+      assert.equal(typeof result.text, 'string');
+    } finally {
+      clearHttpMock();
+    }
   });
-  try {
-    const result = await parseImage(TINY_JPEG_DATA_URI, { provider: 'lm-studio' });
-    assert.equal(typeof result.text, 'string');
-  } finally {
-    clearHttpMock();
-  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -697,7 +723,7 @@ test('parseImage captures LM Studio image-parser package in LM Studio-specific s
 
   await mongo.connect();
   await ProviderCallPackage.deleteMany({});
-  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
 
   mockHttpRequest(200, {
     choices: [{ message: { content: 'COID/MID: 789\nCASE: CS-LM-001' } }],
@@ -712,6 +738,9 @@ test('parseImage captures LM Studio image-parser package in LM Studio-specific s
     const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callLmStudio' }).lean();
 
     assert.equal(result.text, 'COID/MID: 789\nCASE: CS-LM-001');
+    assert.equal(result.providerTrace?.providerHarness, 'lm-studio-openai-compatible');
+    assert.equal(result.providerTrace?.providerPackageId, String(saved?._id));
+    assert.equal(result.providerTrace?.packageCaptureQueued, true);
     assert.ok(saved);
     assert.equal(saved.providerId, 'lm-studio');
     assert.equal(saved.providerResearchId, 'lm-studio-openai-compatible');
@@ -782,14 +811,14 @@ test('parseImage captures full LM Studio image-parser non-200 body in LM Studio 
   }
 });
 
-test('parseImage does not wait for background LM Studio image-parser package insert', async () => {
+test('parseImage waits for LM Studio provider package before extracting parser text', async () => {
   const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
   const originalCreate = ProviderCallPackage.create;
   let releaseCreate;
 
   await mongo.connect();
   await ProviderCallPackage.deleteMany({});
-  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
   ProviderCallPackage.create = async function delayedCreate(...args) {
     await new Promise((resolve) => { releaseCreate = resolve; });
     return originalCreate.apply(this, args);
@@ -802,16 +831,23 @@ test('parseImage does not wait for background LM Studio image-parser package ins
   });
 
   try {
-    const result = await Promise.race([
-      parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model' }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('parseImage waited for recorder')), 250)),
-    ]);
-    assert.equal(result.text, 'COID/MID: FAST\nCASE: CS-LM-FAST');
+    let parseResolved = false;
+    const parsePromise = parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model' })
+      .then((value) => {
+        parseResolved = true;
+        return value;
+      });
 
     while (!releaseCreate) {
       await new Promise((resolve) => setImmediate(resolve));
     }
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(parseResolved, false);
+
     releaseCreate();
+    const result = await parsePromise;
+    assert.equal(result.text, 'COID/MID: FAST\nCASE: CS-LM-FAST');
+
     await __waitForProviderPackageRecorderSettled();
     assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'image-parser:callLmStudio' }), 1);
   } finally {
@@ -1096,6 +1132,57 @@ test('parseImage waits for LLM Gateway provider package before extracting parser
     else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
     if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
     else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage fails LM Studio when required provider package capture cannot save', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const originalCreate = ProviderCallPackage.create;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  ProviderCallPackage.create = async function failingCreate() {
+    throw new Error('mongo write failed');
+  };
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: FAIL\nCASE: CS-LM-CAPTURE' } }],
+    model: 'local-vision-model',
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'local-vision-model', eventBus }),
+      (err) => {
+        assert.equal(err.code, 'PROVIDER_PACKAGE_CAPTURE_FAILED');
+        assert.match(err.message, /failed to save to MongoDB/i);
+        assert.equal(err.providerTrace?.providerHarness, 'lm-studio-openai-compatible');
+        assert.equal(err.providerTrace?.packageCaptureStatus, 'failed');
+        assert.equal(err.providerTrace?.outcome, 'package_capture_failed');
+        assert.ok(err.providerTrace?.providerPackageId);
+        return true;
+      }
+    );
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_started'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_queued'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_failed'));
+    assert.ok(!events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'image-parser:callLmStudio' }), 0);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    clearHttpMock();
+    if (previousFlag === undefined) {
+      delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    } else {
+      process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    }
     await __waitForProviderPackageRecorderSettled();
     await ProviderCallPackage.deleteMany({}).catch(() => {});
     await mongo.disconnect();
@@ -1760,64 +1847,72 @@ test('parseImage with kimi returns null usage when usage field missing', async (
 // parseImage — LM Studio additional error handling
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseImage with lm-studio throws PROVIDER_ERROR on invalid JSON', async () => {
-  mockHttpRequest(200, 'this is not json');
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, 'this is not json');
 
-  try {
-    await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
-      (err) => {
-        assert.equal(err.code, 'PROVIDER_ERROR');
-        assert.match(err.message, /invalid JSON/);
-        return true;
-      }
-    );
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      await assert.rejects(
+        () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
+        (err) => {
+          assert.equal(err.code, 'PROVIDER_ERROR');
+          assert.match(err.message, /invalid JSON/);
+          return true;
+        }
+      );
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 test('parseImage with lm-studio returns null usage when usage field missing', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: 'some text' } }],
-  });
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: 'some text' } }],
+    });
 
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.usage, null);
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(result.usage, null);
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 test('parseImage with lm-studio trims whitespace from response text', async () => {
-  mockHttpRequest(200, {
-    choices: [{ message: { content: '  CASE: CS-007  \n  ' } }],
-    usage: { prompt_tokens: 5, completion_tokens: 5 },
-  });
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(200, {
+      choices: [{ message: { content: '  CASE: CS-007  \n  ' } }],
+      usage: { prompt_tokens: 5, completion_tokens: 5 },
+    });
 
-  try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-    assert.equal(result.text, 'CASE: CS-007');
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+      assert.equal(result.text, 'CASE: CS-007');
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 test('parseImage with lm-studio HTTP 400 error', async () => {
-  mockHttpRequest(400, '{"error":"Bad request: model not loaded"}');
+  return withProviderPackageStore(async () => {
+    mockHttpRequest(400, '{"error":"Bad request: model not loaded"}');
 
-  try {
-    await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
-      (err) => {
-        assert.equal(err.code, 'PROVIDER_ERROR');
-        assert.match(err.message, /HTTP 400/);
-        return true;
-      }
-    );
-  } finally {
-    clearHttpMock();
-  }
+    try {
+      await assert.rejects(
+        () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' }),
+        (err) => {
+          assert.equal(err.code, 'PROVIDER_ERROR');
+          assert.match(err.message, /HTTP 400/);
+          return true;
+        }
+      );
+    } finally {
+      clearHttpMock();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2007,27 +2102,31 @@ test('clearProviderAvailabilityCache prevents stale in-flight refresh from overw
 // parseImage — timeout handling
 // ═══════════════════════════════════════════════════════════════════════════
 test('parseImage rejects with TIMEOUT code when request times out', async () => {
-  const origPatched = http.request;
-  http.request = function timeoutSimulation() {
-    const req = new EventEmitter();
-    req.write = () => {};
-    req.end = () => { process.nextTick(() => req.emit('timeout')); };
-    req.destroy = () => {};
-    return req;
-  };
+  return withProviderPackageStore(async () => {
+    const origPatched = http.request;
+    http.request = function timeoutSimulation() {
+      const req = new EventEmitter();
+      req.write = () => {};
+      req.end = () => { process.nextTick(() => req.emit('timeout')); };
+      req.destroy = () => {};
+      return req;
+    };
 
-  try {
-    await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', timeoutMs: 100 }),
-      (err) => {
-        assert.equal(err.code, 'TIMEOUT');
-        assert.match(err.message, /timed out/i);
-        return true;
-      }
-    );
-  } finally {
-    http.request = origPatched;
-  }
+    try {
+      await assert.rejects(
+        () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', timeoutMs: 100 }),
+        (err) => {
+          assert.equal(err.code, 'PROVIDER_TIMEOUT');
+          assert.match(err.message, /timed out/i);
+          assert.equal(err.providerTrace?.packageCaptureStatus, 'saved');
+          return true;
+        }
+      );
+      assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'image-parser:callLmStudio' }), 1);
+    } finally {
+      http.request = origPatched;
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2319,8 +2418,24 @@ function mockHttpCapture(responseBody) {
   const captured = { options: null, body: null, rawPayload: null };
   const origHttp = http.request;
 
-  http.request = function captureHttp(options, callback) {
-    captured.options = options;
+  http.request = function captureHttp(...args) {
+    const urlArg = args[0];
+    const requestOptions = args.find((arg, index) => index > 0 && arg && typeof arg === 'object' && !(arg instanceof EventEmitter)) || {};
+    const callback = args.find((arg) => typeof arg === 'function');
+    if (urlArg instanceof URL) {
+      captured.options = {
+        protocol: urlArg.protocol,
+        hostname: urlArg.hostname,
+        port: urlArg.port,
+        path: `${urlArg.pathname}${urlArg.search || ''}`,
+        ...requestOptions,
+      };
+    } else {
+      captured.options = {
+        ...(urlArg || {}),
+        ...requestOptions,
+      };
+    }
     const req = new EventEmitter();
     const chunks = [];
     req.write = (data) => { chunks.push(data); };
@@ -2329,6 +2444,12 @@ function mockHttpCapture(responseBody) {
       try { captured.body = JSON.parse(captured.rawPayload); } catch { captured.body = captured.rawPayload; }
       const res = new EventEmitter();
       res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.httpVersion = '1.1';
+      res.headers = { 'content-type': 'application/json' };
+      res.rawHeaders = ['content-type', 'application/json'];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
@@ -2511,32 +2632,34 @@ test('provider request body validation', async (t) => {
   // 4. LM Studio request body shape (http, not https)
   // ---------------------------------------------------------------------------
   await t.test('lm-studio: sends correct request body shape via HTTP (not HTTPS)', async () => {
-    const captured = mockHttpCapture(MINIMAL_OPENAI_RESPONSE);
-    try {
-      await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+    return withProviderPackageStore(async () => {
+      const captured = mockHttpCapture(MINIMAL_OPENAI_RESPONSE);
+      try {
+        await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
 
-      // Request options — LM Studio uses plain HTTP
-      assert.ok(captured.options, 'HTTP request should have been captured');
-      assert.equal(captured.options.method, 'POST');
-      assert.equal(captured.options.path, '/v1/chat/completions');
+        // Request options - LM Studio uses plain HTTP
+        assert.ok(captured.options, 'HTTP request should have been captured');
+        assert.equal(captured.options.method, 'POST');
+        assert.equal(captured.options.path, '/v1/chat/completions');
 
-      // Body shape
-      const body = captured.body;
-      assert.equal(body.temperature, 0.1);
-      assert.equal(body.max_tokens, 4096);
-      assert.equal(body.stream, false, 'LM Studio requests must be non-streaming');
+        // Body shape
+        const body = captured.body;
+        assert.equal(body.temperature, 0.1);
+        assert.equal(body.max_tokens, 4096);
+        assert.equal(body.stream, false, 'LM Studio requests must be non-streaming');
 
-      // Image format — uses image_url content block with data URL
-      assert.equal(body.messages[0].role, 'system');
-      assert.equal(body.messages[1].role, 'user');
-      const userContent = body.messages[1].content;
-      assert.ok(Array.isArray(userContent));
-      const imgPart = userContent.find(c => c.type === 'image_url');
-      assert.ok(imgPart, 'must have image_url content part');
-      assert.ok(imgPart.image_url.url.startsWith('data:image/'), 'url must be a data URI');
-    } finally {
-      captured._restore();
-    }
+        // Image format - uses image_url content block with data URL
+        assert.equal(body.messages[0].role, 'system');
+        assert.equal(body.messages[1].role, 'user');
+        const userContent = body.messages[1].content;
+        assert.ok(Array.isArray(userContent));
+        const imgPart = userContent.find(c => c.type === 'image_url');
+        assert.ok(imgPart, 'must have image_url content part');
+        assert.ok(imgPart.image_url.url.startsWith('data:image/'), 'url must be a data URI');
+      } finally {
+        captured._restore();
+      }
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -2746,10 +2869,15 @@ test('provider request body validation', async (t) => {
       cap._restore();
 
       // LM Studio
-      cap = mockHttpCapture(MINIMAL_OPENAI_RESPONSE);
-      await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
-      assert.equal(cap.options.headers['Content-Type'], 'application/json', 'lm-studio Content-Type');
-      cap._restore();
+      await withProviderPackageStore(async () => {
+        cap = mockHttpCapture(MINIMAL_OPENAI_RESPONSE);
+        try {
+          await parseImage(TINY_PNG_BASE64, { provider: 'lm-studio' });
+          assert.equal(cap.options.headers['Content-Type'], 'application/json', 'lm-studio Content-Type');
+        } finally {
+          cap._restore();
+        }
+      });
     } finally {
       fs.readFileSync = origRead;
       if (origMoonshot !== undefined) process.env.MOONSHOT_API_KEY = origMoonshot;

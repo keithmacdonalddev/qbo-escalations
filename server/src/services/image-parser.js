@@ -17,6 +17,9 @@ const {
 const {
   sendGeminiGenerateContent,
 } = require('./providers/gemini-api-provider-harness');
+const {
+  sendLmStudioChatCompletion,
+} = require('./providers/lm-studio-provider-harness');
 const ImageParserApiKey = require('../models/ImageParserApiKey');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
@@ -65,7 +68,6 @@ try {
 // Configuration
 // ---------------------------------------------------------------------------
 const LM_STUDIO_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
-const LM_STUDIO_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_STUDIO_API_KEY || null;
 const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
 const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.4-mini';
 const OPENAI_PROVIDER_TEST_MAX_TOKENS = 64;
@@ -1178,50 +1180,77 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
     },
   ];
 
-  const res = await jsonRequest('POST', LM_STUDIO_API_URL, '/v1/chat/completions', {
+  const requestBody = {
     model: effectiveModel,
     messages,
     stream: false,
     temperature: 0.1,
     max_tokens: 4096,
     chat_template_kwargs: { enable_thinking: false },
-  }, LM_STUDIO_API_TOKEN ? { Authorization: `Bearer ${LM_STUDIO_API_TOKEN}` } : {}, timeoutMs, {
-    providerId: 'lm-studio',
-    providerResearchId: 'lm-studio-openai-compatible',
-    providerPathType: 'lm-studio-http-nonstream',
-    callSite: 'image-parser:callLmStudio',
-    operation: 'image-parse',
-    source: {
-      file: 'server/src/services/image-parser.js',
+  };
+
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.agent_handoff_to_provider',
+    'Escalation image parsing agent hand off payload to lm-studio Agent',
+    'started',
+    { provider: 'lm-studio', model: effectiveModel || '' }
+  );
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_payload_received',
+    'lm-studio provider harness received payload',
+    'received',
+    {
+      provider: 'lm-studio',
+      operation: 'image-parse',
+      model: effectiveModel,
+    }
+  );
+
+  const result = await sendLmStudioChatCompletion({
+    body: requestBody,
+    model: effectiveModel,
+    timeoutMs,
+    captureContext: {
+      callSite: 'image-parser:callLmStudio',
+      operation: 'image-parse',
       functionName: 'callLmStudio',
-      helperName: 'jsonRequest',
+      forceCapture: true,
+      modelRequested: effectiveModel,
+      metadata: {
+        imageMediaType: mediaType,
+        imageSizeBytes: Buffer.byteLength(imageBase64 || '', 'base64'),
+      },
     },
-    modelRequested: effectiveModel,
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+  });
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'lm-studio agent hand off to Escalation image parsing agent',
+    'complete',
+    {
+      provider: 'lm-studio',
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
+    }
+  );
+
+  const payloadResult = await buildLmStudioImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
   });
 
-  if (res.statusCode !== 200) {
-    const err = new Error(`LM Studio error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`LM Studio returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-  // Reasoning models (Qwen3 etc.) may return empty content with the actual
-  // response in reasoning_content — fall back gracefully
-  const msg = parsed.choices?.[0]?.message || {};
-  const text = msg.content || msg.reasoning_content || '';
-  const usage = parsed.usage
-    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
-    : null;
-
-  return { text: text.trim(), usage, conversionStats };
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    conversionStats,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
 }
 
 /**
@@ -1796,6 +1825,33 @@ async function loadLlmGatewayParsedJsonFromPackage(providerPackage) {
   }
 }
 
+async function loadLmStudioParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.lmStudio?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyTextPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyTextPayloadRef);
+  }
+  if (!bodyText && response.parsedJsonPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(response.parsedJsonPayloadRef);
+    if (payload) {
+      return JSON.parse(payload);
+    }
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('LM Studio provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`LM Studio provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
 async function loadGeminiParsedJsonFromPackage(providerPackage) {
   const response = providerPackage?.geminiApi?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
@@ -2090,6 +2146,44 @@ async function buildImageParserResultFromProviderPackage(providerTrace, { eventB
     providerPackage,
     providerPayloadTrace: {
       providerPackageId: String(providerPackage._id || providerTrace.providerPackageId),
+      sourcePath,
+      role: message.role || '',
+      usedReasoningContent: !content && Boolean(reasoningContent),
+    },
+  };
+}
+
+async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'lm-studio' && providerPackage.providerResearchId !== 'lm-studio-openai-compatible') {
+    throw createProviderPackageError(`Unsupported provider package for LM Studio image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadLmStudioParsedJsonFromPackage(providerPackage);
+  const message = parsed?.choices?.[0]?.message || {};
+  const content = typeof message.content === 'string' ? message.content : '';
+  const reasoningContent = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
+  const text = (content || reasoningContent || '').trim();
+  const usage = buildUsageFromOpenAiCompatibleJson(parsed, providerTrace?.model || model);
+  const sourcePath = content
+    ? 'lmStudio.response.parsedJson.choices[0].message.content'
+    : 'lmStudio.response.parsedJson.choices[0].message.reasoning_content';
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
       sourcePath,
       role: message.role || '',
       usedReasoningContent: !content && Boolean(reasoningContent),
