@@ -4,7 +4,10 @@ import { apiFetch } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import { prepareImageForChat } from '../../lib/chatImagePrep.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
-import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
+import {
+  summarizeImageParserValidationFailure,
+  summarizeProviderPackageCaptureFailure,
+} from '../../lib/imageParserValidation.js';
 import { useToast } from '../../hooks/useToast.jsx';
 
 const MAX_CHARS = 50000;
@@ -242,7 +245,13 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
       }
 
       if (!res.ok || !data.ok) {
-        throw new Error(data.error || 'Image parse failed');
+        const err = Object.assign(new Error(data.error || 'Image parse failed'), {
+          code: data.code || 'PARSE_FAILED',
+          providerTrace: data.providerTrace || null,
+          captureMode: data.captureMode || data.providerTrace?.captureMode || null,
+          providerPackageId: data.providerTrace?.providerPackageId || null,
+        });
+        throw err;
       }
       const providerPackageId = data?.providerTrace?.providerPackageId || '';
       if (providerPackageId) {
@@ -322,7 +331,8 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
       setRetryImageFile(null);
     } catch (err) {
       setRetryImageFile(file);
-      setImageParseError(err.message || 'Image parse failed');
+      const captureFailure = summarizeProviderPackageCaptureFailure(err);
+      setImageParseError(captureFailure?.message || err.message || 'Image parse failed');
     } finally {
       setImageParsing(false);
     }

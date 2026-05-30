@@ -21,6 +21,20 @@ test('normalizes package capture lifecycle statuses', () => {
   assert.equal(saved.level, 'success');
   assert.equal(saved.toast, true);
 
+  const readRetry = normalizeProviderHandoffStatus({
+    kind: 'provider.package_capture_read_retry',
+    data: { providerId: 'llm-gateway', providerPackageId: 'pkg-2', attempt: 1 },
+  });
+  assert.equal(readRetry.level, 'warning');
+  assert.match(readRetry.summary, /readback retry/i);
+
+  const readConfirmed = normalizeProviderHandoffStatus({
+    kind: 'provider.package_capture_read_confirmed',
+    data: { providerId: 'llm-gateway', providerPackageId: 'pkg-2', status: 'complete' },
+  });
+  assert.equal(readConfirmed.level, 'success');
+  assert.equal(readConfirmed.toast, true);
+
   const failed = normalizeProviderHandoffStatus({
     kind: 'provider.package_capture_failed',
     data: { providerId: 'gemini', providerPackageId: 'pkg-3', reason: 'Mongo write failed' },

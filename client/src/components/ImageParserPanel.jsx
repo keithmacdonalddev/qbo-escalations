@@ -436,6 +436,9 @@ export default function ImageParserPanel() {
     ? getImageParserStatusBadgeText(provider, providerStatus)
     : 'Unknown';
   const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
+  const packageStoreNotice = availability?.packageStore?.available === false
+    ? `Provider package storage is unavailable: ${availability.packageStore.reason || availability.packageStore.code || 'Mongo read/write check failed'}.`
+    : '';
 
   const renderedOutput = result?.text ? renderMarkdown(result.text) : null;
 
@@ -613,6 +616,9 @@ export default function ImageParserPanel() {
         {/* Error */}
         {error && (
           <div className="image-parser-error">{error}</div>
+        )}
+        {packageStoreNotice && (
+          <div className="image-parser-error">{packageStoreNotice}</div>
         )}
         {validationFailure && (
           <div className="image-parser-recovery" role="alert">

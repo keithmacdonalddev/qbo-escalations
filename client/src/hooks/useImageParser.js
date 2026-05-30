@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { apiFetch } from '../api/http.js';
 import { consumeSSEStream } from '../api/sse.js';
 import { resolveImageParserSelection } from '../lib/imageParserCatalog.js';
+import { summarizeProviderPackageCaptureFailure } from '../lib/imageParserValidation.js';
 
 const IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
 const IMAGE_PARSER_MODEL_KEY = 'qbo-image-parser-model';
@@ -108,7 +109,8 @@ export default function useImageParser() {
       setResult(data);
       return data;
     } catch (err) {
-      const message = err.message || 'Parse failed';
+      const captureFailure = summarizeProviderPackageCaptureFailure(err);
+      const message = captureFailure?.message || err.message || 'Parse failed';
       if (wantsStream && !err.stageEventAlreadyEmitted) {
         try {
           overrides.onStageEvent({
@@ -127,6 +129,7 @@ export default function useImageParser() {
               statusCode: err.status || null,
               providerPackageId: err.providerTrace?.providerPackageId || null,
               providerHarness: err.providerTrace?.providerHarness || null,
+              captureMode: err.captureMode || err.providerTrace?.captureMode || null,
               surfaceToUser: true,
               displayMessage: message,
             },

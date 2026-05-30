@@ -38,3 +38,29 @@ export function summarizeImageParserValidationFailure(parseMeta, options = {}) {
 export function isImageParserValidationFailure(parseMeta) {
   return Boolean(summarizeImageParserValidationFailure(parseMeta));
 }
+
+export function summarizeProviderPackageCaptureFailure(errorLike = {}) {
+  const code = cleanString(errorLike.code || errorLike.errorCode).toUpperCase();
+  const trace = errorLike.providerTrace && typeof errorLike.providerTrace === 'object'
+    ? errorLike.providerTrace
+    : {};
+  const outcome = cleanString(trace.outcome).toLowerCase();
+  if (code !== 'PROVIDER_PACKAGE_CAPTURE_FAILED' && outcome !== 'package_capture_failed') {
+    return null;
+  }
+
+  const providerPackageId = cleanString(errorLike.providerPackageId || trace.providerPackageId);
+  const provider = cleanString(errorLike.provider || trace.providerId || trace.provider || trace.providerHarness);
+  const message = cleanString(errorLike.message || errorLike.error || trace.packageCaptureReason || trace.packageReadbackReason);
+  return {
+    code: 'PROVIDER_PACKAGE_CAPTURE_FAILED',
+    provider,
+    providerPackageId,
+    captureMode: cleanString(errorLike.captureMode || trace.captureMode) || 'required',
+    message: [
+      'The model returned a response, but the app could not save/read the required provider package from MongoDB.',
+      providerPackageId ? `Package: ${providerPackageId}.` : '',
+      message ? `Detail: ${message}` : '',
+    ].filter(Boolean).join(' '),
+  };
+}

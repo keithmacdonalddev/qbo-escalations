@@ -1601,19 +1601,30 @@ async function buildChatImageAugmentation({
         }
       } catch (err) {
         parserError = err || null;
+        const captureFailed = err?.code === 'PROVIDER_PACKAGE_CAPTURE_FAILED';
+        const fallbackMessage = captureFailed
+          ? 'Image Parser provider responded, but required Mongo provider-package capture failed. Falling back to generic image transcription.'
+          : 'Image Parser failed. Falling back to generic image transcription.';
         parserEventBus?.emit('error', {
           code: err?.code || 'IMAGE_PARSER_FAILED',
-          message: err?.message || 'Image Parser failed.',
+          message: err?.message || fallbackMessage,
+          providerPackageId: err?.providerTrace?.providerPackageId || null,
+          providerHarness: err?.providerTrace?.providerHarness || null,
+          captureMode: err?.captureMode || err?.providerTrace?.captureMode || null,
         });
         if (IMAGE_PARSER_VERBOSE_LOGS) {
           console.warn('[chat] Dedicated image parser failed; falling back to standard image transcription:', err.message);
         }
         await sendStatus({
           level: 'warning',
-          message: 'Image Parser failed. Falling back to generic image transcription.',
-          code: 'IMAGE_PARSER_FALLBACK',
+          message: fallbackMessage,
+          code: captureFailed ? 'IMAGE_PARSER_PACKAGE_CAPTURE_FALLBACK' : 'IMAGE_PARSER_FALLBACK',
           provider: imageParserConfig.provider,
           model: imageParserConfig.model || '',
+          providerPackageId: err?.providerTrace?.providerPackageId || null,
+          captureMode: err?.captureMode || err?.providerTrace?.captureMode || null,
+          fallbackUsed: true,
+          fallbackFrom: captureFailed ? 'provider-package-capture' : 'image-parser-error',
         });
         imageTranscription = await runChatImageTranscriptionFallback({
           normalizedImages,
@@ -1626,6 +1637,7 @@ async function buildChatImageAugmentation({
           status: 'failed',
           durationMs: Date.now() - parserStartedAt,
           fallbackUsed: true,
+          fallbackFrom: captureFailed ? 'provider-package-capture' : 'image-parser-error',
         });
       }
       await callOptional(onTranscriptionComplete, imageTranscription);

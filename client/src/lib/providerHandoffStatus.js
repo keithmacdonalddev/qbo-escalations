@@ -146,6 +146,28 @@ function captureStatus(kind, data = {}) {
       toast: true,
     };
   }
+  if (kind === 'provider.package_capture_read_retry') {
+    return {
+      tone: 'amber',
+      level: 'warning',
+      title: 'Package readback retry',
+      summary: joinBits([
+        'Package readback retry.',
+        provider && `provider=${provider}`,
+        pkg,
+        data.attempt != null && `attempt=${data.attempt}`,
+      ]),
+    };
+  }
+  if (kind === 'provider.package_capture_read_confirmed') {
+    return {
+      tone: 'green',
+      level: 'success',
+      title: 'Package readback confirmed',
+      summary: joinBits(['Package readback confirmed.', provider && `provider=${provider}`, pkg, statusText(data)]),
+      toast: true,
+    };
+  }
   if (kind === 'provider.package_capture_wait_started') {
     return {
       tone: 'cyan',

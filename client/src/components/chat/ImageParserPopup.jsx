@@ -435,6 +435,9 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const isProviderOnline = providerStatus?.available;
   const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
   const validationError = validationFailure?.message || '';
+  const packageStoreNotice = availability?.packageStore?.available === false
+    ? `Provider package storage is unavailable: ${availability.packageStore.reason || availability.packageStore.code || 'Mongo read/write check failed'}.`
+    : '';
 
   if (!open) return null;
 
@@ -586,6 +589,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
           {/* Error */}
           {runtimeNotice && <div className="ip-popup-warning">{runtimeNotice}</div>}
+          {packageStoreNotice && <div className="ip-popup-warning">{packageStoreNotice}</div>}
           {error && <div className="ip-popup-error">{error}</div>}
           {validationFailure && (
             <div className="ip-popup-recovery" role="alert">

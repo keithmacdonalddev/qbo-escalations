@@ -6,6 +6,7 @@ const { createRateLimiter } = require('../middleware/rate-limit');
 const {
   parseImage,
   checkProviderAvailability,
+  checkProviderPackageStoreHealth,
   clearProviderAvailabilityCache,
   normalizeImageParsePromptId,
   resolveApiKey,
@@ -329,6 +330,11 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       message: err.message || 'Image parse failed',
       providerPackageId: err.providerTrace?.providerPackageId || null,
       providerHarness: err.providerTrace?.providerHarness || null,
+      captureMode: err.captureMode || err.providerTrace?.captureMode || null,
+      packageCaptureStatus: err.providerTrace?.packageCaptureStatus || null,
+      packageReadbackStatus: err.providerTrace?.packageReadbackStatus || null,
+      surfaceToUser: true,
+      displayMessage: err.message || 'Image parse failed',
     });
 
     // Fire-and-forget save error to MongoDB + on-disk image archive
@@ -356,6 +362,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       ok: false,
       code: err.code || 'PARSE_FAILED',
       error: err.message || 'Image parse failed',
+      captureMode: err.captureMode || err.providerTrace?.captureMode || null,
       providerTrace: err.providerTrace || null,
     });
   }
@@ -367,8 +374,11 @@ router.post('/parse', parseRateLimit, async (req, res) => {
 router.get('/status', async (req, res) => {
   const refreshRaw = String(req.query?.refresh || req.query?.forceRefresh || '').toLowerCase();
   const forceRefresh = refreshRaw === '1' || refreshRaw === 'true' || refreshRaw === 'yes';
-  const providers = await checkProviderAvailability({ forceRefresh });
-  res.json({ ok: true, providers });
+  const [providers, packageStore] = await Promise.all([
+    checkProviderAvailability({ forceRefresh }),
+    checkProviderPackageStoreHealth(),
+  ]);
+  res.json({ ok: true, providers, packageStore });
 });
 
 // ---------------------------------------------------------------------------

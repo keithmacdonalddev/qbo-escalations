@@ -3,7 +3,10 @@ import { sendChatMessage } from '../../api/chatApi.js';
 import { apiFetch } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
-import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
+import {
+  summarizeImageParserValidationFailure,
+  summarizeProviderPackageCaptureFailure,
+} from '../../lib/imageParserValidation.js';
 import { useToast } from '../../hooks/useToast.jsx';
 import { normalizeError } from '../../utils/normalizeError.js';
 import {
@@ -211,13 +214,16 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
   }
 
   if (!data?.ok || (!isSse && !res.ok)) {
-    const msg = data?.error || `Parse failed (HTTP ${res.status})`;
+    const captureFailure = summarizeProviderPackageCaptureFailure(data || {});
+    const msg = captureFailure?.message || data?.error || `Parse failed (HTTP ${res.status})`;
     throw Object.assign(new Error(msg), {
       code: data?.code || 'PARSE_FAILED',
       detail: data?.detail || '',
       status: res.status,
       statusText: res.statusText || '',
       providerTrace: data?.providerTrace || null,
+      captureMode: data?.captureMode || data?.providerTrace?.captureMode || null,
+      providerPackageId: data?.providerTrace?.providerPackageId || null,
       stageEventAlreadyEmitted: sawFailureStageEvent,
     });
   }

@@ -245,6 +245,51 @@ test('OpenAI provider harness surfaces Mongo capture failure before parser extra
   }
 });
 
+test('OpenAI provider harness fails when required package capture is not readable after save', async () => {
+  const originalExists = ProviderCallPackage.exists;
+  const previousAttempts = process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_ATTEMPTS;
+  const previousDelay = process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_DELAY_MS;
+  process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_ATTEMPTS = '2';
+  process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_DELAY_MS = '1';
+  ProviderCallPackage.exists = async function missingReadback() {
+    return null;
+  };
+
+  try {
+    await withHttpServer((req, res) => {
+      req.resume();
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({
+        model: 'gpt-5.4-mini',
+        choices: [{ message: { content: 'would otherwise parse' } }],
+      }));
+    }, async (baseUrl) => {
+      const events = [];
+      await assert.rejects(
+        () => sendHarnessRequest({ baseUrl, callSite: 'test:openai-readback-failure', events }),
+        (err) => {
+          assert.equal(err.code, 'PROVIDER_PACKAGE_CAPTURE_FAILED');
+          assert.equal(err.captureMode, 'required');
+          assert.equal(err.providerTrace.outcome, 'package_capture_failed');
+          assert.equal(err.providerTrace.packageCaptureStatus, 'failed');
+          assert.equal(err.providerTrace.packageReadbackStatus, 'failed');
+          assert.equal(err.providerTrace.packageReadbackAttempts, 2);
+          assert.match(err.message, /readback confirmation failed/i);
+          return true;
+        }
+      );
+      assert.ok(events.some((event) => event.eventType === 'provider.package_capture_read_retry'));
+    });
+  } finally {
+    ProviderCallPackage.exists = originalExists;
+    if (previousAttempts === undefined) delete process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_ATTEMPTS;
+    else process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_ATTEMPTS = previousAttempts;
+    if (previousDelay === undefined) delete process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_DELAY_MS;
+    else process.env.PROVIDER_PACKAGE_CAPTURE_READBACK_DELAY_MS = previousDelay;
+  }
+});
+
 function installHttpsOpenAiMock(handler) {
   const originalRequest = https.request;
   https.request = function mockedHttpsRequest(...args) {

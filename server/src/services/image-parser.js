@@ -359,6 +359,91 @@ function cloneProviderAvailability(providers) {
   );
 }
 
+async function checkProviderPackageStoreHealth() {
+  if (!ProviderCallPackage.db || ProviderCallPackage.db.readyState !== 1) {
+    return {
+      ok: false,
+      available: false,
+      code: 'PROVIDER_PACKAGE_MONGO_UNAVAILABLE',
+      reason: 'MongoDB is not connected.',
+    };
+  }
+
+  const startedAt = Date.now();
+  let doc = null;
+  try {
+    doc = await ProviderCallPackage.create({
+      schemaVersion: '0.1',
+      captureVersion: 'provider-package-health-v0.1',
+      providerId: 'health-check',
+      providerResearchId: 'health-check',
+      providerPathType: 'mongo-readwrite',
+      callSite: 'image-parser:provider-package-store-health',
+      operation: 'provider-package-store-health',
+      source: {
+        file: 'server/src/services/image-parser.js',
+        functionName: 'checkProviderPackageStoreHealth',
+      },
+      request: null,
+      response: null,
+      cli: null,
+      lmStudio: null,
+      llmGateway: null,
+      geminiApi: null,
+      timing: {
+        requestStartedAt: new Date(startedAt).toISOString(),
+        responseCompletedAt: new Date().toISOString(),
+        durationMs: 0,
+      },
+      outcome: 'success',
+      error: null,
+      redaction: {
+        applied: false,
+        redactedHeaderNames: [],
+        redactedBodyPaths: [],
+        notes: ['ephemeral health check'],
+      },
+      storage: {
+        inline: true,
+        externalPayloads: [],
+        notes: ['ephemeral health check'],
+        truncated: false,
+        truncationReason: null,
+      },
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+    });
+    const readable = await ProviderCallPackage.exists({ _id: doc._id });
+    if (!readable) {
+      return {
+        ok: false,
+        available: false,
+        code: 'PROVIDER_PACKAGE_READBACK_FAILED',
+        reason: 'Provider package health record was written but not readable.',
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+    return {
+      ok: true,
+      available: true,
+      code: 'OK',
+      reason: 'Provider package store is writable and readable.',
+      latencyMs: Date.now() - startedAt,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      available: false,
+      code: 'PROVIDER_PACKAGE_STORE_FAILED',
+      reason: err.message || 'Provider package store health check failed.',
+      latencyMs: Date.now() - startedAt,
+    };
+  } finally {
+    if (doc?._id) {
+      await ProviderCallPackage.deleteOne({ _id: doc._id }).catch(() => {});
+    }
+  }
+}
+
 function emitAvailabilityTrace(trace, step = {}) {
   if (typeof trace !== 'function') return;
   try {
@@ -3156,6 +3241,7 @@ async function checkProviderAvailability(options = {}) {
 module.exports = {
   parseImage,
   checkProviderAvailability,
+  checkProviderPackageStoreHealth,
   clearProviderAvailabilityCache,
   VALID_IMAGE_PARSER_PROVIDERS,
   normalizeBase64,
