@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { formatImageParserElapsedPair } from '../../lib/imageParserStageToasts.js';
 import './StageEventLogPanel.css';
 
 // Mirror of server/src/lib/stage-events.js UI_EVENT_KINDS. Events with these
@@ -47,6 +48,14 @@ const KIND_TONE = {
   'inv.matches_found': 'amber',
   'triage.context_built': 'amber',
   'triage.decision': 'amber',
+  // Triage test route emits these via /api/triage-tests/run when the operator
+  // runs Stage 4 from the workflow card's three-dot menu. Tones mirror the
+  // parser equivalents so the event log reads consistently.
+  'triage.server_request_received': 'dim-cyan',
+  'triage.client_request_started': 'cyan',
+  'triage.client_result_received': 'green',
+  'triage.provider_content_sending_to_client': 'green',
+  'triage.response_sent': 'green',
   'chunk.first_token': 'amber',
   'chunk.complete': 'amber',
   'buffer.overflow': 'amber',
@@ -59,6 +68,25 @@ const KIND_TONE = {
   'parser.parse_requested': 'cyan',
   'parser.client_request_started': 'cyan',
   'parser.client_result_received': 'green',
+  'parser.agent_handoff_to_provider': 'cyan',
+  'provider.agent_payload_received': 'cyan',
+  'provider.agent_payload_sent_to_provider': 'cyan',
+  'provider.agent_payload_received_from_provider': 'green',
+  'provider.package_capture_started': 'cyan',
+  'provider.agent_payload_sent_to_database': 'cyan',
+  'provider.package_capture_queued': 'cyan',
+  'provider.package_capture_wait_started': 'cyan',
+  'provider.package_capture_saved': 'green',
+  'provider.package_capture_confirmed': 'green',
+  'provider.package_capture_failed': 'red',
+  'provider.database_save_completed': 'green',
+  'provider.agent_handoff_to_parser': 'green',
+  'parser.provider_package_retrieval_started': 'cyan',
+  'parser.provider_package_load_retry': 'cyan',
+  'parser.provider_package_load_failed': 'red',
+  'parser.provider_package_content_found': 'green',
+  'parser.provider_content_sending_to_client': 'green',
+  'parser.provider_content_received_client': 'green',
   'parser.completed_result_posted': 'green',
   'parser.server_request_received': 'dim-cyan',
   'parser.request_validated': 'cyan',
@@ -102,6 +130,9 @@ function summarizeData(kind, data) {
   if (data === null || data === undefined) return '';
   if (typeof data === 'string') return data;
   if (typeof data === 'number' || typeof data === 'boolean') return String(data);
+  if (typeof data.displayMessage === 'string' && data.displayMessage.trim()) {
+    return data.displayMessage.trim();
+  }
 
   const bits = [];
   if (kind === 'stage.completed') {
@@ -337,6 +368,7 @@ function groupEvents(events) {
           _stageId: event.stageId,
           ts: event.ts,
           seq: event.seq,
+          _timing: event._timing || null,
           deltas: [],
           count: 0,
           lastTs: event.ts,
@@ -365,6 +397,35 @@ function sortEvents(events) {
   });
 }
 
+function finiteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function annotateEventTimings(events) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  let startTs = null;
+  let previousTs = null;
+  return events.map((event) => {
+    const ts = finiteNumber(event?.ts) ?? previousTs ?? startTs ?? Date.now();
+    const imageAddedAt = finiteNumber(event?.data?.imageAddedAt);
+    if (event?.kind === 'parser.image_received') {
+      startTs = ts;
+    } else if (startTs === null && imageAddedAt !== null) {
+      startTs = imageAddedAt;
+    } else if (startTs === null) {
+      startTs = ts;
+    }
+    const totalMs = Math.max(0, Math.round(ts - startTs));
+    const deltaMs = Math.max(0, Math.round(ts - (previousTs ?? startTs)));
+    previousTs = ts;
+    return {
+      ...event,
+      _timing: { totalMs, deltaMs },
+    };
+  });
+}
+
 export default function StageEventLogPanel({
   stageId,
   conversation,
@@ -388,6 +449,7 @@ export default function StageEventLogPanel({
   const events = liveList.length > 0
     ? liveList
     : (savedList.length > 0 ? savedList : liveList);
+  const timedEvents = useMemo(() => annotateEventTimings(events), [events]);
   const sourceLabel = liveList.length > 0
     ? (isParserStage ? 'session' : 'live')
     : (savedList.length > 0 ? 'saved' : 'session');
@@ -400,7 +462,7 @@ export default function StageEventLogPanel({
   // debugging but are excluded from the header counter and the denominator.
   // `eventCount` from props is a tie-breaker for the rare case where the
   // parent has a fresher figure (e.g., bounded buffer slicing on saved runs).
-  const runEventCount = events.filter((ev) => !isUiEvent(ev)).length;
+  const runEventCount = timedEvents.filter((ev) => !isUiEvent(ev)).length;
   const uiEventCount = events.length - runEventCount;
   const liveTotal = Math.max(runEventCount, Math.max(0, Number(eventCount) || 0));
   const isRunning = statusLabel === 'running' || statusLabel === 'pending';
@@ -424,7 +486,7 @@ export default function StageEventLogPanel({
     if (!autoScroll) return;
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events, autoScroll]);
+  }, [timedEvents, autoScroll]);
 
   // Reset autoScroll + jump to bottom when switching between tabs (stageId
   // changes). Otherwise the previous tab's scroll position carries over.
@@ -474,7 +536,7 @@ export default function StageEventLogPanel({
         <span style={indeterminate ? undefined : { width: `${progressPercent}%` }} />
       </div>
 
-      {events.length === 0 ? (
+      {timedEvents.length === 0 ? (
         <div className="v5-stage-log-panel__empty">No events recorded for this run.</div>
       ) : (
         <div
@@ -484,7 +546,7 @@ export default function StageEventLogPanel({
           role="log"
           aria-live="polite"
         >
-          {groupEvents(events).map((event, idx) => {
+          {groupEvents(timedEvents).map((event, idx) => {
             if (event?._kind === 'llm.thinking-group') {
               const joined = event.deltas.join('');
               const charCount = joined.length;
@@ -496,6 +558,9 @@ export default function StageEventLogPanel({
                 >
                   <summary>
                     <span className="v5-stage-log-panel__time">[{formatClock(event.ts)}]</span>
+                    {event?._timing && (
+                      <span className="v5-stage-log-panel__elapsed">[{formatImageParserElapsedPair(event._timing)}]</span>
+                    )}
                     <span className="v5-stage-log-panel__kind">llm.thinking</span>
                     <span className="v5-stage-log-panel__sep">:</span>
                     <span className="v5-stage-log-panel__msg">
@@ -517,6 +582,9 @@ export default function StageEventLogPanel({
                 key={`${event?.ts || idx}-${event?.seq || idx}`}
               >
                 <span className="v5-stage-log-panel__time">[{formatClock(event?.ts)}]</span>
+                {event?._timing && (
+                  <span className="v5-stage-log-panel__elapsed">[{formatImageParserElapsedPair(event._timing)}]</span>
+                )}
                 <span className="v5-stage-log-panel__kind">{event?.kind || 'event'}</span>
                 {summary && (
                   <>
@@ -537,7 +605,7 @@ export default function StageEventLogPanel({
             + {uiEventCount} ui
           </span>
         )}
-        {!autoScroll && events.length > 0 && (
+        {!autoScroll && timedEvents.length > 0 && (
           <button
             type="button"
             className="v5-stage-log-panel__jump"

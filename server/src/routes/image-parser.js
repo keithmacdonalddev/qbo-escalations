@@ -118,13 +118,13 @@ function clientWantsSse(req) {
 // ---------------------------------------------------------------------------
 router.post('/parse', parseRateLimit, async (req, res) => {
   // Request body shape:
-  //   image, provider, model, reasoningEffort, timeoutMs, promptId,
+  //   image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId,
   //   parserPromptId — standard parse fields (existing).
   //   structured (optional legacy boolean, default true) — when provider is
   //   'anthropic', any value other than false uses the Agent SDK provider
   //   adapter. Send `structured: false` to opt out and force the direct
   //   Anthropic HTTP path. Both paths return the model answer as text.
-  const { image, provider, model, reasoningEffort, timeoutMs, promptId, parserPromptId, structured } = req.body || {};
+  const { image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId, parserPromptId, structured } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
 
@@ -187,6 +187,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     provider,
     model: model || '',
     reasoningEffort: reasoningEffort || '',
+    serviceTier: serviceTier || '',
     imageBytes: typeof image === 'string' ? image.length : 0,
   });
 
@@ -213,6 +214,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       provider,
       model,
       reasoningEffort,
+      serviceTier,
       timeoutMs: effectiveTimeout,
       promptId: effectivePromptId,
       eventBus: bus,
@@ -236,6 +238,8 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       textLength: (result.text || '').length,
       role: result.role || '',
       parseFieldCount: result.parseFields ? Object.keys(result.parseFields).length : 0,
+      providerPackageId: result.providerTrace?.providerPackageId || null,
+      providerHarness: result.providerTrace?.providerHarness || null,
     });
 
     // Fire-and-forget save to MongoDB + on-disk image archive
@@ -261,6 +265,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parsedText: result.text || '',
       textLength: (result.text || '').length,
       source: 'panel',
+      providerTrace: result.providerTrace || null,
     }, image, (archived) => {
       if (archived?.ok) {
         bus.emit('parser.source_image_archived', {
@@ -277,6 +282,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     });
 
     if (streamMode) {
+      if (result.providerTrace?.providerPackageId) {
+        bus.emit('parser.provider_content_sending_to_client', {
+          provider,
+          providerPackageId: result.providerTrace.providerPackageId,
+          status: 'sent',
+          surfaceToUser: true,
+          displayMessage: `Sending providerPackageId: ${result.providerTrace.providerPackageId} content to client - sent`,
+        });
+      }
       bus.emit('parser.response_sent', {
         elapsedMs,
         bytes: 0,
@@ -285,6 +299,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       return respondJson(200, responseBody);
     }
 
+    if (result.providerTrace?.providerPackageId) {
+      bus.emit('parser.provider_content_sending_to_client', {
+        provider,
+        providerPackageId: result.providerTrace.providerPackageId,
+        status: 'sent',
+        surfaceToUser: true,
+        displayMessage: `Sending providerPackageId: ${result.providerTrace.providerPackageId} content to client - sent`,
+      });
+    }
     res.json(responseBody);
     bus.emit('parser.response_sent', {
       elapsedMs,
@@ -295,12 +318,17 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   } catch (err) {
     const elapsedMs = Date.now() - startedAt;
     const status = err.code === 'PROVIDER_UNAVAILABLE' ? 503
-      : err.code === 'TIMEOUT' ? 504
+      : err.code === 'TIMEOUT' || err.code === 'PROVIDER_TIMEOUT' ? 504
+      : err.code === 'PROVIDER_PACKAGE_LOAD_TIMEOUT' ? 504
+      : err.code === 'PROVIDER_PACKAGE_MONGO_UNAVAILABLE' ? 503
+      : err.code === 'PROVIDER_PACKAGE_CAPTURE_FAILED' ? 502
       : err.code === 'PROVIDER_ERROR' ? 422
       : 422;
     bus.emit('error', {
       code: err.code || 'PARSE_FAILED',
       message: err.message || 'Image parse failed',
+      providerPackageId: err.providerTrace?.providerPackageId || null,
+      providerHarness: err.providerTrace?.providerHarness || null,
     });
 
     // Fire-and-forget save error to MongoDB + on-disk image archive
@@ -313,6 +341,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       errorCode: err.code || 'UNKNOWN',
       errorMsg: err.message || '',
       source: 'panel',
+      providerTrace: err.providerTrace || null,
     }, image, (archived) => {
       if (archived?.ok) {
         bus.emit('parser.source_image_archived', {
@@ -323,7 +352,12 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       }
     });
 
-    return respondJson(status, { ok: false, code: err.code || 'PARSE_FAILED', error: err.message || 'Image parse failed' });
+    return respondJson(status, {
+      ok: false,
+      code: err.code || 'PARSE_FAILED',
+      error: err.message || 'Image parse failed',
+      providerTrace: err.providerTrace || null,
+    });
   }
 });
 

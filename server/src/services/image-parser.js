@@ -11,7 +11,14 @@ const {
   getCodexProviderIds,
   getProviderModelId,
 } = require('./providers/catalog');
+const {
+  sendLlmGatewayChatCompletion,
+} = require('./providers/llm-gateway-provider-harness');
+const {
+  sendGeminiGenerateContent,
+} = require('./providers/gemini-api-provider-harness');
 const ImageParserApiKey = require('../models/ImageParserApiKey');
+const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
@@ -21,6 +28,7 @@ const {
 } = require('../lib/escalation-template-contract');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const { validateParsedEscalation } = require('../lib/parse-validation');
+const { extractCodexUsage } = require('../lib/usage-extractor');
 const {
   isStubbed: isProvidersStubbed,
   getProviderStub,
@@ -30,6 +38,8 @@ const {
   buildResponseChunk,
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
+  recordGeminiApiProviderCallPackageInBackground,
+  recordLlmGatewayProviderCallPackageInBackground,
   recordLmStudioProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
 
@@ -57,7 +67,6 @@ try {
 const LM_STUDIO_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
 const LM_STUDIO_API_TOKEN = process.env.LM_STUDIO_API_TOKEN || process.env.LM_STUDIO_API_KEY || null;
 const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
-const LLM_GATEWAY_DEFAULT_MODEL = process.env.LLM_GATEWAY_DEFAULT_MODEL || 'auto';
 const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.4-mini';
 const OPENAI_PROVIDER_TEST_MAX_TOKENS = 64;
 const DEFAULT_TIMEOUT_MS = 120000;
@@ -115,6 +124,15 @@ function verboseError(...args) {
   if (IMAGE_PARSER_VERBOSE_LOGS) {
     console.error(...args);
   }
+}
+
+function emitUserVisibleStatus(eventBus, kind, message, status, data = {}) {
+  eventBus?.emit(kind, {
+    ...data,
+    status,
+    displayMessage: `${message} - ${status}`,
+    surfaceToUser: true,
+  });
 }
 
 function normalizeImageParsePromptId(value) {
@@ -259,7 +277,8 @@ async function resolveApiKey(provider) {
 
   if (isMongoKeyStoreReady()) {
     try {
-      const doc = await ImageParserApiKey.findOne({ provider }).lean();
+      // key is select:false on the model — opt it in explicitly for this read.
+      const doc = await ImageParserApiKey.findOne({ provider }).select('+key').lean();
       if (doc && typeof doc.key === 'string' && doc.key.trim()) {
         return doc.key.trim();
       }
@@ -277,7 +296,8 @@ async function getAllStoredKeys() {
 
   if (isMongoKeyStoreReady()) {
     try {
-      const docs = await ImageParserApiKey.find({}).lean();
+      // key is select:false on the model — opt it in explicitly for this read.
+      const docs = await ImageParserApiKey.find({}).select('+key').lean();
       for (const doc of docs) {
         const hasFileKey = typeof result[doc.provider] === 'string' && result[doc.provider].trim();
         if (!hasFileKey && typeof doc.key === 'string' && doc.key.trim()) {
@@ -506,7 +526,28 @@ function getGatewayUnavailableReason(errorCode, detail) {
   return 'Gateway authenticated, upstream unavailable';
 }
 
-function testRemoteProviderKey(provider, apiKey) {
+function buildProviderStatusCaptureContext(provider, modelRequested = '') {
+  const isGateway = provider === 'llm-gateway';
+  return {
+    providerId: provider,
+    providerResearchId: isGateway ? 'llm-gateway' : `${provider}-api`,
+    providerPathType: isGateway ? 'gateway-http' : 'direct-http',
+    callSite: `image-parser:validateRemoteProvider:${provider}`,
+    operation: 'provider-status',
+    source: {
+      file: 'server/src/services/image-parser.js',
+      functionName: 'validateRemoteProvider',
+      helperName: 'testRemoteProviderKey',
+    },
+    modelRequested,
+  };
+}
+
+function buildGatewayProviderStatusCaptureContext(modelRequested = '') {
+  return buildProviderStatusCaptureContext('llm-gateway', modelRequested);
+}
+
+function testRemoteProviderKey(provider, apiKey, captureContext = null) {
   const cfg = REMOTE_PROVIDER_TEST_CONFIGS[provider];
   if (!cfg) {
     const err = new Error(`Unsupported provider: ${provider}`);
@@ -528,26 +569,90 @@ function testRemoteProviderKey(provider, apiKey) {
   const method = cfg.method || 'POST';
 
   return new Promise((resolve, reject) => {
+    const captureEnabled = Boolean(captureContext) && isProviderCallPackageCaptureEnabled();
+    const requestStartedAt = captureEnabled ? new Date().toISOString() : null;
+    let requestWrittenAt = null;
+    let responseHeadersAt = null;
+    let responseChunks = [];
+    let settled = false;
+    const baseUrl = targetUrl
+      ? `${targetUrl.protocol}//${targetUrl.host}`
+      : `https://${hostname}`;
+    const capture = ({ response = null, error = null, outcome = null }) => {
+      if (!captureEnabled) return;
+      void recordCapturedHttpPackage({
+        method,
+        baseUrl,
+        urlPath: pathName,
+        body: payload || null,
+        headers,
+        timeoutMs: 3_000,
+        captureContext,
+        requestStartedAt,
+        requestWrittenAt,
+        responseHeadersAt,
+        responseCompletedAt: new Date().toISOString(),
+        response,
+        error,
+        outcome,
+      });
+    };
+
     const req = requestLib.request({
       hostname,
       port,
       path: pathName,
       method,
       headers,
-      timeout: 10_000,
+      timeout: 3_000,
     }, (res) => {
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
-      res.on('end', () => resolve({ statusCode: res.statusCode, body: data, model: cfg.model }));
+      if (captureEnabled) {
+        responseHeadersAt = new Date().toISOString();
+      }
+      res.on('data', (chunk) => {
+        data += chunk;
+        if (captureEnabled) {
+          responseChunks.push(buildResponseChunk(responseChunks.length, chunk, new Date()));
+        }
+      });
+      res.on('end', () => {
+        if (settled) return;
+        settled = true;
+        const response = {
+          statusCode: res.statusCode || 0,
+          statusMessage: res.statusMessage || '',
+          httpVersion: res.httpVersion || '',
+          headers: res.headers || {},
+          rawHeaders: res.rawHeaders || [],
+          trailers: res.trailers || {},
+          rawTrailers: res.rawTrailers || [],
+          bodyChunks: responseChunks,
+          bodyText: data,
+        };
+        capture({ response });
+        resolve({ statusCode: res.statusCode, body: data, model: cfg.model });
+      });
     });
-    req.on('error', reject);
+    req.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      capture({ error: err });
+      reject(err);
+    });
     req.on('timeout', () => {
+      if (settled) return;
+      settled = true;
       req.destroy();
       const err = new Error('Request timed out');
       err.code = 'TIMEOUT';
+      capture({ error: err, outcome: 'timeout' });
       reject(err);
     });
     if (payload) req.write(payload);
+    if (captureEnabled) {
+      requestWrittenAt = new Date().toISOString();
+    }
     req.end();
   });
 }
@@ -574,7 +679,13 @@ async function validateRemoteProvider(provider, apiKey) {
     }
 
     try {
-      const result = await testRemoteProviderKey(provider, trimmedKey);
+      const result = await testRemoteProviderKey(
+        provider,
+        trimmedKey,
+        provider === 'llm-gateway' || provider === 'gemini'
+          ? buildProviderStatusCaptureContext(provider, REMOTE_PROVIDER_TEST_CONFIGS[provider]?.model || '')
+          : null
+      );
       const parsedBody = parseProviderJson(result.body);
       if (provider === 'llm-gateway') {
         if (result.statusCode >= 200 && result.statusCode < 300) {
@@ -796,6 +907,12 @@ async function recordCapturedHttpPackage(captureInput) {
       ...captureInput,
       mode: 'non-stream',
     });
+  }
+  if (captureInput?.captureContext?.providerId === 'llm-gateway') {
+    return recordLlmGatewayProviderCallPackageInBackground(captureInput);
+  }
+  if (captureInput?.captureContext?.providerId === 'gemini') {
+    return recordGeminiApiProviderCallPackageInBackground(captureInput);
   }
   const result = await recordHttpProviderCallPackage(captureInput);
   return result;
@@ -1273,85 +1390,9 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
 }
 
 /**
- * LLM Gateway API — OpenAI-compatible POST to your local/custom gateway.
- */
-async function callLlmGateway(systemPrompt, imageDataUrl, model, timeoutMs) {
-  const apiKey = await resolveApiKey('llm-gateway');
-
-  const effectiveModel = model || LLM_GATEWAY_DEFAULT_MODEL;
-
-  const body = {
-    model: effectiveModel,
-    max_tokens: 4096,
-    temperature: 0.1,
-    messages: [
-      { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: 'Parse this image.' },
-          { type: 'image_url', image_url: { url: imageDataUrl } },
-        ],
-      },
-    ],
-    chat_template_kwargs: { enable_thinking: false },
-  };
-
-  const headers = apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
-  const res = await jsonRequest('POST', LLM_GATEWAY_API_URL, '/v1/chat/completions', body, headers, timeoutMs, {
-    providerId: 'llm-gateway',
-    providerResearchId: 'llm-gateway',
-    providerPathType: 'gateway-http',
-    callSite: 'image-parser:callLlmGateway',
-    operation: 'image-parse',
-    source: {
-      file: 'server/src/services/image-parser.js',
-      functionName: 'callLlmGateway',
-      helperName: 'jsonRequest',
-    },
-    modelRequested: effectiveModel,
-  });
-
-  if (res.statusCode !== 200) {
-    if ((res.statusCode === 401 || res.statusCode === 403) && !apiKey) {
-      const err = new Error('LLM Gateway requires an API key');
-      err.code = 'PROVIDER_UNAVAILABLE';
-      throw err;
-    }
-    const err = new Error(`LLM Gateway API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`LLM Gateway returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  const msg = parsed.choices?.[0]?.message || {};
-  const text = msg.content || msg.reasoning_content || '';
-  const usage = parsed.usage
-    ? { model: parsed.model || effectiveModel, inputTokens: parsed.usage.prompt_tokens || 0, outputTokens: parsed.usage.completion_tokens || 0 }
-    : null;
-
-  return { text: text.trim(), usage };
-}
-
-/**
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
-async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) {
-  const apiKey = await resolveApiKey('gemini');
-  if (!apiKey) {
-    const err = new Error('Gemini API key not configured');
-    err.code = 'PROVIDER_UNAVAILABLE';
-    throw err;
-  }
-
+async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null) {
   const effectiveModel = model || 'gemini-3-flash-preview';
   const body = {
     system_instruction: {
@@ -1375,59 +1416,50 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs) 
     },
   };
 
-  const res = await jsonRequest(
-    'POST',
-    'https://generativelanguage.googleapis.com',
-    `/v1beta/models/${encodeURIComponent(effectiveModel)}:generateContent`,
+  const result = await sendGeminiGenerateContent({
     body,
-    { 'x-goog-api-key': apiKey },
+    model: effectiveModel,
     timeoutMs,
-    {
-      providerId: 'gemini',
-      providerResearchId: 'gemini-api',
-      providerPathType: 'direct-http',
+    getApiKey: () => resolveApiKey('gemini'),
+    captureContext: {
       callSite: 'image-parser:callGemini',
       operation: 'image-parse',
-      source: {
-        file: 'server/src/services/image-parser.js',
-        functionName: 'callGemini',
-        helperName: 'jsonRequest',
-      },
+      functionName: 'callGemini',
+      forceCapture: true,
       modelRequested: effectiveModel,
+      metadata: {
+        imageMediaType: mediaType,
+        imageSizeBytes: Buffer.byteLength(rawBase64 || '', 'base64'),
+      },
+    },
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+  });
+
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'Gemini API provider harness handed off payload to Escalation image parsing agent',
+    'complete',
+    {
+      provider: 'gemini',
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
     }
   );
 
-  if (res.statusCode !== 200) {
-    const err = new Error(`Gemini API error (HTTP ${res.statusCode}): ${(res.body || '').slice(0, 500)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
+  const payloadResult = await buildGeminiImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
+  });
 
-  let parsed;
-  try {
-    parsed = JSON.parse(res.body);
-  } catch {
-    const err = new Error(`Gemini returned invalid JSON: ${(res.body || '').slice(0, 200)}`);
-    err.code = 'PROVIDER_ERROR';
-    throw err;
-  }
-
-  const text = (parsed.candidates?.[0]?.content?.parts || [])
-    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
-    .join('\n');
-
-  const usageMeta = parsed.usageMetadata;
-  const usage = usageMeta
-    ? {
-        model: parsed.modelVersion || effectiveModel,
-        inputTokens: usageMeta.promptTokenCount || 0,
-        outputTokens: usageMeta.candidatesTokenCount != null
-          ? usageMeta.candidatesTokenCount
-          : Math.max((usageMeta.totalTokenCount || 0) - (usageMeta.promptTokenCount || 0), 0),
-      }
-    : null;
-
-  return { text: text.trim(), usage };
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
 }
 
 /**
@@ -1532,7 +1564,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs) {
   return { text: text.trim(), usage };
 }
 
-async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus) {
+async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus) {
   const effectiveModel = getCodexImageParserModel(provider, model);
 
   return new Promise((resolve, reject) => {
@@ -1546,13 +1578,14 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
       });
     });
 
-    function finishOk(text, usage) {
+    function finishOk(text, usage, providerTrace) {
       if (settled) return;
       settled = true;
       coalescer.flush();
       resolve({
         text: String(text || streamedText || '').trim(),
         usage: usage || (effectiveModel ? { model: effectiveModel } : null),
+        providerTrace: providerTrace || null,
       });
     }
 
@@ -1577,7 +1610,24 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
         images: [imageDataUrl],
         model: effectiveModel,
         reasoningEffort: reasoningEffort || process.env.CODEX_PARSE_REASONING_EFFORT,
+        serviceTier,
         timeoutMs,
+        captureContext: {
+          providerId: provider || 'codex',
+          providerResearchId: 'openai-cli',
+          providerPathType: 'cli',
+          callSite: 'image-parser:callCodex',
+          operation: 'image-parse',
+          forceCapture: true,
+          modelRequested: effectiveModel,
+          reasoningEffort: reasoningEffort || process.env.CODEX_PARSE_REASONING_EFFORT,
+          source: {
+            file: 'server/src/services/image-parser.js',
+            functionName: 'callCodex',
+            helperName: 'codex.chat',
+            spawnSite: 'codex.chat',
+          },
+        },
         onChunk: (chunk) => { streamedText += chunk || ''; },
         onThinkingChunk: (delta) => { coalescer.push(typeof delta === 'string' ? delta : ''); },
         onDone: finishOk,
@@ -1691,6 +1741,395 @@ function buildStructuredParseResult(text, role) {
   };
 }
 
+function providerPackageWaitMs() {
+  const raw = Number.parseInt(process.env.IMAGE_PARSER_PROVIDER_PACKAGE_WAIT_MS, 10);
+  return Number.isFinite(raw) && raw > 0 ? Math.min(raw, 60_000) : 30_000;
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createProviderPackageError(message, code = 'PROVIDER_ERROR') {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+async function loadProviderCallPackagePayloadRef(ref) {
+  if (!ref || typeof ref.ref !== 'string' || !ref.ref.trim()) {
+    return null;
+  }
+
+  const fullPath = path.resolve(__dirname, '..', '..', '..', ref.ref);
+  try {
+    return await fs.promises.readFile(fullPath, 'utf8');
+  } catch (err) {
+    throw createProviderPackageError(`Failed to read provider package payload ref ${ref.ref}: ${err.message}`);
+  }
+}
+
+async function loadLlmGatewayParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.llmGateway?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyTextPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyTextPayloadRef);
+  }
+  if (!bodyText && response.parsedJsonPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(response.parsedJsonPayloadRef);
+    if (payload) {
+      return JSON.parse(payload);
+    }
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('LLM Gateway provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`LLM Gateway provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
+async function loadGeminiParsedJsonFromPackage(providerPackage) {
+  const response = providerPackage?.geminiApi?.response || {};
+  if (response.parsedJson && typeof response.parsedJson === 'object') {
+    return response.parsedJson;
+  }
+
+  let bodyText = typeof response.bodyText === 'string' ? response.bodyText : '';
+  if (!bodyText && response.bodyTextPayloadRef) {
+    bodyText = await loadProviderCallPackagePayloadRef(response.bodyTextPayloadRef);
+  }
+  if (!bodyText && response.parsedJsonPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(response.parsedJsonPayloadRef);
+    if (payload) {
+      return JSON.parse(payload);
+    }
+  }
+  if (!bodyText) {
+    throw createProviderPackageError('Gemini provider package did not include a response body for the image parser to inspect');
+  }
+
+  try {
+    return JSON.parse(bodyText);
+  } catch (err) {
+    throw createProviderPackageError(`Gemini provider package response body is not valid JSON: ${err.message}`);
+  }
+}
+
+function buildUsageFromOpenAiCompatibleJson(parsed, modelFallback = '') {
+  return parsed?.usage
+    ? {
+        model: parsed.model || modelFallback || '',
+        inputTokens: parsed.usage.prompt_tokens || 0,
+        outputTokens: parsed.usage.completion_tokens || 0,
+        totalTokens: parsed.usage.total_tokens || 0,
+      }
+    : null;
+}
+
+function extractGeminiTextFromJson(parsed) {
+  return (parsed?.candidates?.[0]?.content?.parts || [])
+    .map((part) => (typeof part?.text === 'string' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function buildUsageFromGeminiJson(parsed, modelFallback = '') {
+  const usageMeta = parsed?.usageMetadata;
+  if (!usageMeta) return null;
+  const inputTokens = usageMeta.promptTokenCount || 0;
+  const outputTokens = usageMeta.candidatesTokenCount != null
+    ? usageMeta.candidatesTokenCount
+    : Math.max((usageMeta.totalTokenCount || 0) - inputTokens, 0);
+  return {
+    model: parsed?.modelVersion || modelFallback || '',
+    inputTokens,
+    outputTokens,
+    totalTokens: usageMeta.totalTokenCount || inputTokens + outputTokens,
+  };
+}
+
+async function loadCodexStdoutJsonlEventsFromPackage(providerPackage) {
+  const stdout = providerPackage?.cli?.stdout || {};
+  if (Array.isArray(stdout.jsonlEvents) && stdout.jsonlEvents.length) {
+    return stdout.jsonlEvents;
+  }
+
+  if (stdout.jsonlEventsPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(stdout.jsonlEventsPayloadRef);
+    if (payload) {
+      const parsed = JSON.parse(payload);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  let lines = Array.isArray(stdout.lines) ? stdout.lines : [];
+  if ((!lines || lines.length === 0) && stdout.linesPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(stdout.linesPayloadRef);
+    if (payload) {
+      try {
+        const parsed = JSON.parse(payload);
+        lines = Array.isArray(parsed) ? parsed : String(payload).split(/\r?\n/);
+      } catch {
+        lines = String(payload).split(/\r?\n/);
+      }
+    }
+  }
+
+  if ((!lines || lines.length === 0) && typeof stdout.text === 'string' && stdout.text.trim()) {
+    lines = stdout.text.split(/\r?\n/);
+  }
+  if ((!lines || lines.length === 0) && stdout.textPayloadRef) {
+    const payload = await loadProviderCallPackagePayloadRef(stdout.textPayloadRef);
+    if (payload) {
+      lines = payload.split(/\r?\n/);
+    }
+  }
+
+  return (lines || [])
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function extractCodexVisibleTextFromEvent(event, seenAgentTextByItem) {
+  if (!event || typeof event !== 'object') return '';
+
+  if (event.item && event.item.type === 'agent_message' && typeof event.item.text === 'string') {
+    const id = event.item.id || '__default__';
+    const prevText = seenAgentTextByItem.get(id) || '';
+    const nextText = event.item.text;
+
+    seenAgentTextByItem.set(id, nextText);
+    if (nextText.startsWith(prevText)) {
+      return nextText.slice(prevText.length);
+    }
+    return nextText;
+  }
+
+  if (typeof event.delta === 'string') {
+    return event.delta;
+  }
+  if (event.delta && typeof event.delta.text === 'string') {
+    return event.delta.text;
+  }
+  if (typeof event.text === 'string' && event.type && event.type.includes('delta')) {
+    return event.text;
+  }
+
+  return '';
+}
+
+function buildCodexPayloadFromEvents(events, modelFallback = '') {
+  const seenAgentTextByItem = new Map();
+  let text = '';
+  let usage = null;
+  for (const event of events || []) {
+    const nextUsage = extractCodexUsage(event, { fallbackModel: modelFallback });
+    if (nextUsage) usage = nextUsage;
+    text += extractCodexVisibleTextFromEvent(event, seenAgentTextByItem);
+  }
+  return { text: text.trim(), usage };
+}
+
+async function waitForProviderPackage(providerTrace, eventBus = null) {
+  const providerPackageId = providerTrace?.providerPackageId;
+  if (!providerPackageId) {
+    throw createProviderPackageError(
+      'Provider package id is required before the image parser can inspect provider output',
+      'PROVIDER_PACKAGE_MISSING_ID'
+    );
+  }
+  if (!ProviderCallPackage.db || ProviderCallPackage.db.readyState !== 1) {
+    throw createProviderPackageError(
+      'MongoDB must be connected before the image parser can inspect provider output',
+      'PROVIDER_PACKAGE_MONGO_UNAVAILABLE'
+    );
+  }
+
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.provider_package_retrieval_started',
+    `Escalation image parsing agent retrieving content from providerPackageId: ${providerPackageId}`,
+    'started',
+    { providerPackageId }
+  );
+
+  const timeoutMs = providerPackageWaitMs();
+  const startedAt = Date.now();
+  let attempt = 0;
+  while (Date.now() - startedAt <= timeoutMs) {
+    attempt += 1;
+    const providerPackage = await ProviderCallPackage.findById(providerPackageId).lean();
+    if (providerPackage) {
+      emitUserVisibleStatus(
+        eventBus,
+        'provider.database_save_completed',
+        'Saving payload to database complete',
+        'complete',
+        {
+          providerId: providerPackage.providerId || '',
+          providerPackageId,
+        }
+      );
+      emitUserVisibleStatus(
+        eventBus,
+        'parser.provider_package_content_found',
+        `providerPackageId: ${providerPackageId} content found`,
+        'found',
+        {
+          providerId: providerPackage.providerId || '',
+          providerPackageId,
+          attempts: attempt,
+        }
+      );
+      eventBus?.emit('parser.provider_package_loaded', {
+        providerPackageId,
+        providerId: providerPackage.providerId || '',
+        providerPathType: providerPackage.providerPathType || '',
+        outcome: providerPackage.outcome || '',
+        attempts: attempt,
+      });
+      return providerPackage;
+    }
+    eventBus?.emit('parser.provider_package_load_retry', {
+      providerPackageId,
+      attempt,
+      elapsedMs: Date.now() - startedAt,
+      timeoutMs,
+      status: 'retrying',
+    });
+    await delay(Math.min(25 + attempt * 10, 250));
+  }
+
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.provider_package_load_failed',
+    `Provider package ${providerPackageId} was not readable from MongoDB after ${timeoutMs}ms`,
+    'error',
+    { providerPackageId, attempts: attempt, timeoutMs }
+  );
+  throw createProviderPackageError(
+    `Provider package ${providerPackageId} was not readable from MongoDB after ${timeoutMs}ms`,
+    'PROVIDER_PACKAGE_LOAD_TIMEOUT'
+  );
+}
+
+async function buildCodexImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerResearchId !== 'openai-cli' && providerPackage.providerPathType !== 'cli') {
+    throw createProviderPackageError(`Unsupported provider package for Codex image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const events = await loadCodexStdoutJsonlEventsFromPackage(providerPackage);
+  const payload = buildCodexPayloadFromEvents(events, providerTrace?.model || model);
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath: 'cli.stdout.jsonlEvents[item.type=agent_message]',
+    textLength: payload.text.length,
+    usagePresent: Boolean(payload.usage),
+  });
+
+  return {
+    text: payload.text,
+    usage: payload.usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath: 'cli.stdout.jsonlEvents[item.type=agent_message]',
+      eventCount: events.length,
+    },
+  };
+}
+
+async function buildImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'llm-gateway') {
+    throw createProviderPackageError(`Unsupported provider package for image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadLlmGatewayParsedJsonFromPackage(providerPackage);
+  const message = parsed?.choices?.[0]?.message || {};
+  const content = typeof message.content === 'string' ? message.content : '';
+  const reasoningContent = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
+  const text = (content || reasoningContent || '').trim();
+  const usage = buildUsageFromOpenAiCompatibleJson(parsed, providerTrace?.model || model);
+  const sourcePath = content
+    ? 'llmGateway.response.parsedJson.choices[0].message.content'
+    : 'llmGateway.response.parsedJson.choices[0].message.reasoning_content';
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId: String(providerPackage._id || providerTrace.providerPackageId),
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId: String(providerPackage._id || providerTrace.providerPackageId),
+      sourcePath,
+      role: message.role || '',
+      usedReasoningContent: !content && Boolean(reasoningContent),
+    },
+  };
+}
+
+async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+  if (providerPackage.providerId !== 'gemini' && providerPackage.providerResearchId !== 'gemini-api') {
+    throw createProviderPackageError(`Unsupported provider package for Gemini image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const parsed = await loadGeminiParsedJsonFromPackage(providerPackage);
+  const text = extractGeminiTextFromJson(parsed);
+  const usage = buildUsageFromGeminiJson(parsed, providerTrace?.model || model);
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+  const sourcePath = 'geminiApi.response.parsedJson.candidates[0].content.parts[text]';
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: text.length,
+    usagePresent: Boolean(usage),
+  });
+
+  return {
+    text,
+    usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath,
+      responseId: parsed?.responseId || '',
+      modelVersion: parsed?.modelVersion || '',
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main entry — parseImage()
 // ---------------------------------------------------------------------------
@@ -1715,7 +2154,7 @@ function buildStructuredParseResult(text, role) {
  * }>}
  */
 async function parseImage(imageBase64, options = {}) {
-  const { provider, model, reasoningEffort, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus } = options;
+  const { provider, model, reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus } = options;
   // Legacy structured flag: false opts out of the Anthropic SDK adapter.
   // The SDK adapter now returns provider answer text only; downstream parser
   // validation owns all decisions about whether that text is useful.
@@ -1732,6 +2171,12 @@ async function parseImage(imageBase64, options = {}) {
     err.code = 'MISSING_IMAGE';
     throw err;
   }
+
+  // Reject unsafe model overrides before they can reach a CLI spawn (Codex
+  // path) or be persisted. Mirrors the chat orchestrator's INVALID_MODEL guard.
+  // Lazily required to avoid load-time coupling with the chat orchestrator.
+  // eslint-disable-next-line global-require
+  require('./chat-orchestrator').assertModelAllowed(model, 'model');
 
   const normalized = normalizeBase64(imageBase64);
   if (!normalized) {
@@ -1755,6 +2200,7 @@ async function parseImage(imageBase64, options = {}) {
     provider,
     model: model || '',
     reasoningEffort: reasoningEffort || '',
+    serviceTier: serviceTier || '',
     promptId,
     timeoutMs,
   });
@@ -1765,6 +2211,7 @@ async function parseImage(imageBase64, options = {}) {
     provider,
     model: model || '',
     reasoningEffort: reasoningEffort || '',
+    serviceTier: serviceTier || '',
   });
   if (isProvidersStubbed()) {
     const stub = getProviderStub(provider, 'parseImage');
@@ -1776,14 +2223,121 @@ async function parseImage(imageBase64, options = {}) {
       systemPrompt,
       model,
       reasoningEffort,
+      serviceTier,
       timeoutMs,
     });
   } else if (isCodexImageParserProvider(provider)) {
-    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus);
+    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus);
+    const payloadResult = await buildCodexImageParserResultFromProviderPackage(result.providerTrace, {
+      eventBus,
+      model,
+    });
+    result = {
+      ...result,
+      text: payloadResult.text,
+      usage: payloadResult.usage || result.usage || null,
+      providerTrace: {
+        ...(result.providerTrace || {}),
+        providerPayload: payloadResult.providerPayloadTrace,
+      },
+    };
   } else {
     switch (provider) {
       case 'llm-gateway':
-        result = await callLlmGateway(systemPrompt, normalized.dataUrl, model, timeoutMs);
+        {
+          const gatewayBody = {
+            model: model || process.env.LLM_GATEWAY_DEFAULT_MODEL || process.env.LLM_GATEWAY_MODEL || 'auto',
+            max_tokens: 4096,
+            temperature: 0.1,
+            messages: [
+              {
+                role: 'system',
+                content: systemPrompt,
+              },
+              {
+                role: 'user',
+                content: [
+                  { type: 'text', text: 'Parse this image.' },
+                  {
+                    type: 'image_url',
+                    image_url: {
+                      url: normalized.dataUrl,
+                    },
+                  },
+                ],
+              },
+            ],
+            chat_template_kwargs: {
+              enable_thinking: false,
+            },
+          };
+          const effectiveGatewayModel = gatewayBody.model;
+
+          emitUserVisibleStatus(
+            eventBus,
+            'parser.agent_handoff_to_provider',
+            `Escalation image parsing agent hand off payload to ${provider} Agent`,
+            'started',
+            { provider, model: effectiveGatewayModel || '' }
+          );
+          emitUserVisibleStatus(
+            eventBus,
+            'provider.agent_payload_received',
+            'llm-gateway provider harness received payload',
+            'received',
+            {
+              provider,
+              operation: 'image-parse',
+              model: effectiveGatewayModel,
+              sourceAgent: promptId,
+            }
+          );
+          result = await sendLlmGatewayChatCompletion({
+            body: gatewayBody,
+            model: effectiveGatewayModel,
+            timeoutMs,
+            getApiKey: () => resolveApiKey('llm-gateway'),
+            captureContext: {
+              callSite: 'image-parser:callLlmGateway',
+              operation: 'image-parse',
+              functionName: 'callLlmGateway',
+              forceCapture: true,
+              agent: promptId,
+              modelRequested: effectiveGatewayModel,
+              metadata: {
+                sourceAgent: promptId,
+                imageMediaType: normalized.mediaType,
+                imageSizeBytes: originalSizeBytes,
+              },
+            },
+            onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+          });
+          emitUserVisibleStatus(
+            eventBus,
+            'provider.agent_handoff_to_parser',
+            `${provider} agent hand off to Escalation image parsing agent`,
+            'complete',
+            {
+              provider,
+              providerPackageId: result?.providerTrace?.providerPackageId || null,
+            }
+          );
+          {
+            const payloadResult = await buildImageParserResultFromProviderPackage(result.providerTrace, {
+              eventBus,
+              model,
+            });
+            result = {
+              ...result,
+              text: payloadResult.text,
+              usage: payloadResult.usage || result.providerTrace?.usage || null,
+              providerTrace: {
+                ...(result.providerTrace || {}),
+                providerPayload: payloadResult.providerPayloadTrace,
+              },
+            };
+          }
+        }
         break;
       case 'lm-studio':
         result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
@@ -1807,7 +2361,7 @@ async function parseImage(imageBase64, options = {}) {
         result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs);
         break;
       case 'gemini':
-        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs);
+        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
         break;
       case 'kimi':
         result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs);
@@ -1825,7 +2379,24 @@ async function parseImage(imageBase64, options = {}) {
     model: result?.usage?.model || model || '',
     providerLatencyMs,
     textLength: (result?.text || '').length,
+    providerHarness: result?.providerTrace?.providerHarness || null,
+    providerPackageId: result?.providerTrace?.providerPackageId || null,
+    captureEnabled: result?.providerTrace?.captureEnabled ?? null,
+    packageCaptureQueued: result?.providerTrace?.packageCaptureQueued ?? null,
   });
+  if (result?.providerTrace) {
+    eventBus?.emit('parser.provider_trace_received', {
+      provider,
+      providerHarness: result.providerTrace.providerHarness || null,
+      providerPackageId: result.providerTrace.providerPackageId || null,
+      callSite: result.providerTrace.callSite || null,
+      outcome: result.providerTrace.outcome || null,
+      statusCode: result.providerTrace.statusCode ?? null,
+      durationMs: result.providerTrace.durationMs ?? null,
+      captureEnabled: result.providerTrace.captureEnabled ?? null,
+      packageCaptureQueued: result.providerTrace.packageCaptureQueued ?? null,
+    });
+  }
   if (result?.usage) {
     eventBus?.emit('parser.usage_recorded', {
       inputTokens: result.usage.inputTokens ?? null,
@@ -1880,6 +2451,7 @@ async function parseImage(imageBase64, options = {}) {
     role,
     promptId,
     usage: result.usage,
+    providerTrace: result.providerTrace || null,
     parseFields,
     parseMeta,
     stats: {
@@ -1897,55 +2469,75 @@ async function parseImage(imageBase64, options = {}) {
  * Returns availability of each provider for the image parser.
  * @returns {Promise<Object>} { 'llm-gateway': { available, reason }, 'lm-studio': { ... }, anthropic: { ... }, openai: { ... } }
  */
+// Hard ceiling for the entire provider-availability batch. Individual probes
+// declare their own (~3s) timeouts and correctly destroy their sockets, but
+// downstream failure modes (slow DNS, half-open sockets, OS-level routing
+// stalls) can still keep one of them pending past its declared budget. This
+// outer race guarantees `resolveProviderAvailability` returns within
+// PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS even when an individual probe
+// silently exceeds its own timeout — every still-pending provider is marked
+// `OUTER_TIMEOUT` so the agent-health endpoint never hangs.
+const PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS = 5_000;
+
 async function resolveProviderAvailability(trace = null) {
-  const providers = {};
+  const remoteProviderNames = ['anthropic', 'openai', 'kimi', 'gemini'];
+  const codexProviderIds = [...CODEX_IMAGE_PARSER_PROVIDER_IDS];
 
-  const gatewayKey = await traceAvailabilityCall(trace, {
-    name: 'Resolve LLM Gateway API key',
-    functionName: 'resolveApiKey',
-    check: 'LLM Gateway key can be found in file, environment, or MongoDB key store',
-    summary: 'Resolved LLM Gateway API key state.',
-    metadata: { provider: 'llm-gateway' },
-  }, () => resolveApiKey('llm-gateway'));
-  emitAvailabilityTrace(trace, {
-    name: 'Check LLM Gateway key presence',
-    functionName: 'resolveProviderAvailability',
-    check: 'Resolved key is present before remote validation',
-    status: gatewayKey ? 'success' : 'warning',
-    summary: gatewayKey ? 'LLM Gateway API key is configured.' : 'LLM Gateway API key is not configured.',
-    metadata: { provider: 'llm-gateway', configured: Boolean(gatewayKey) },
-  });
-  providers['llm-gateway'] = await traceAvailabilityCall(trace, {
-    name: 'Validate LLM Gateway provider',
-    functionName: 'validateRemoteProvider',
-    check: 'LLM Gateway validation request completes with a provider status',
-    summary: 'LLM Gateway validation completed.',
-    metadata: { provider: 'llm-gateway' },
-  }, () => validateRemoteProvider('llm-gateway', gatewayKey));
-  emitAvailabilityTrace(trace, {
-    name: 'Evaluate LLM Gateway availability result',
-    functionName: 'resolveProviderAvailability',
-    check: 'LLM Gateway validation result is available or has a known unavailable reason',
-    status: providers['llm-gateway']?.available ? 'success' : 'warning',
-    summary: providers['llm-gateway']?.reason || 'LLM Gateway availability evaluated.',
-    metadata: {
-      provider: 'llm-gateway',
-      available: Boolean(providers['llm-gateway']?.available),
-      code: providers['llm-gateway']?.code || '',
-    },
-  });
+  // Kick everything off concurrently. Each probe resolves to a tuple of
+  // `[providerKey, providerStatusObject]` so we can assemble the final shape
+  // without coordinating index positions across heterogeneous probe types.
 
-  if (isProvidersStubbed()) {
-    const stub = getProviderStub('lm-studio', 'providerAvailability');
-    if (!stub) throw new MissingProviderStubError('lm-studio', 'providerAvailability');
-    providers['lm-studio'] = await traceAvailabilityCall(trace, {
-      name: 'Read LM Studio provider stub',
-      functionName: 'getProviderStub',
-      check: 'Provider availability stub returns an LM Studio status',
-      summary: 'LM Studio provider stub returned availability.',
-      metadata: { provider: 'lm-studio' },
-    }, () => stub({ apiUrl: LM_STUDIO_API_URL }));
-  } else {
+  const llmGatewayProbe = (async () => {
+    const gatewayKey = await traceAvailabilityCall(trace, {
+      name: 'Resolve LLM Gateway API key',
+      functionName: 'resolveApiKey',
+      check: 'LLM Gateway key can be found in file, environment, or MongoDB key store',
+      summary: 'Resolved LLM Gateway API key state.',
+      metadata: { provider: 'llm-gateway' },
+    }, () => resolveApiKey('llm-gateway'));
+    emitAvailabilityTrace(trace, {
+      name: 'Check LLM Gateway key presence',
+      functionName: 'resolveProviderAvailability',
+      check: 'Resolved key is present before remote validation',
+      status: gatewayKey ? 'success' : 'warning',
+      summary: gatewayKey ? 'LLM Gateway API key is configured.' : 'LLM Gateway API key is not configured.',
+      metadata: { provider: 'llm-gateway', configured: Boolean(gatewayKey) },
+    });
+    const result = await traceAvailabilityCall(trace, {
+      name: 'Validate LLM Gateway provider',
+      functionName: 'validateRemoteProvider',
+      check: 'LLM Gateway validation request completes with a provider status',
+      summary: 'LLM Gateway validation completed.',
+      metadata: { provider: 'llm-gateway' },
+    }, () => validateRemoteProvider('llm-gateway', gatewayKey));
+    emitAvailabilityTrace(trace, {
+      name: 'Evaluate LLM Gateway availability result',
+      functionName: 'resolveProviderAvailability',
+      check: 'LLM Gateway validation result is available or has a known unavailable reason',
+      status: result?.available ? 'success' : 'warning',
+      summary: result?.reason || 'LLM Gateway availability evaluated.',
+      metadata: {
+        provider: 'llm-gateway',
+        available: Boolean(result?.available),
+        code: result?.code || '',
+      },
+    });
+    return ['llm-gateway', result];
+  })();
+
+  const lmStudioProbe = (async () => {
+    if (isProvidersStubbed()) {
+      const stub = getProviderStub('lm-studio', 'providerAvailability');
+      if (!stub) throw new MissingProviderStubError('lm-studio', 'providerAvailability');
+      const stubResult = await traceAvailabilityCall(trace, {
+        name: 'Read LM Studio provider stub',
+        functionName: 'getProviderStub',
+        check: 'Provider availability stub returns an LM Studio status',
+        summary: 'LM Studio provider stub returned availability.',
+        metadata: { provider: 'lm-studio' },
+      }, () => stub({ apiUrl: LM_STUDIO_API_URL }));
+      return ['lm-studio', stubResult];
+    }
     const lmStudioSnapshot = await traceAvailabilityCall(trace, {
       name: 'Check LM Studio model snapshot',
       functionName: 'getModelSnapshot',
@@ -1961,11 +2553,6 @@ async function resolveProviderAvailability(trace = null) {
         : (lmStudioSnapshot.status === 'no_model_loaded' || lmStudioSnapshot.status === 'no_models_available')
           ? 'No model loaded in LM Studio'
           : lmStudioSnapshot.reason || 'LM Studio unavailable';
-    providers['lm-studio'] = {
-      available: !!lmStudioModel,
-      model: lmStudioModel,
-      reason: lmStudioReason,
-    };
     emitAvailabilityTrace(trace, {
       name: 'Evaluate LM Studio model availability',
       functionName: 'resolveProviderAvailability',
@@ -1974,9 +2561,14 @@ async function resolveProviderAvailability(trace = null) {
       summary: lmStudioReason,
       metadata: { provider: 'lm-studio', model: lmStudioModel || '', status: lmStudioSnapshot.status || '' },
     });
-  }
+    return ['lm-studio', {
+      available: !!lmStudioModel,
+      model: lmStudioModel,
+      reason: lmStudioReason,
+    }];
+  })();
 
-  for (const provider of ['anthropic', 'openai', 'kimi', 'gemini']) {
+  const remoteProbes = remoteProviderNames.map((provider) => (async () => {
     const providerKey = await traceAvailabilityCall(trace, {
       name: `Resolve ${getRemoteProviderLabel(provider)} API key`,
       functionName: 'resolveApiKey',
@@ -1994,50 +2586,159 @@ async function resolveProviderAvailability(trace = null) {
         : `${getRemoteProviderLabel(provider)} API key is not configured.`,
       metadata: { provider, configured: Boolean(providerKey) },
     });
-    providers[provider] = await traceAvailabilityCall(trace, {
+    const result = await traceAvailabilityCall(trace, {
       name: `Validate ${getRemoteProviderLabel(provider)} provider`,
       functionName: 'validateRemoteProvider',
       check: `${getRemoteProviderLabel(provider)} validation request completes with a provider status`,
       summary: `${getRemoteProviderLabel(provider)} validation completed.`,
       metadata: { provider },
     }, () => validateRemoteProvider(provider, providerKey));
+    return [provider, result];
+  })());
+
+  // Codex CLI check is a single shared probe whose result is fanned out
+  // across all configured codex image-parser provider ids. Run it once,
+  // concurrently with everything else.
+  const codexProbe = codexProviderIds.length
+    ? (async () => {
+      const codexAvailability = await traceAvailabilityCall(trace, {
+        name: 'Check Codex image-provider CLI availability',
+        functionName: 'checkCodexCliAvailability',
+        check: 'codex --version completes before timeout',
+        summary: 'Codex image-provider CLI availability check completed.',
+        metadata: { providerCount: codexProviderIds.length },
+      }, () => checkCodexCliAvailability(''));
+      return ['__codex__', codexAvailability];
+    })()
+    : Promise.resolve(['__codex__', null]);
+
+  const allProbes = [llmGatewayProbe, lmStudioProbe, ...remoteProbes, codexProbe];
+
+  // Fix B: race the whole batch against an outer ceiling. Any probe that
+  // hasn't settled by the deadline is reported as OUTER_TIMEOUT below.
+  let outerTimeoutHandle = null;
+  const outerTimeoutSymbol = Symbol('PROVIDER_AVAILABILITY_OUTER_TIMEOUT');
+  const outerTimeoutPromise = new Promise((resolve) => {
+    outerTimeoutHandle = setTimeout(() => resolve(outerTimeoutSymbol), PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS);
+    outerTimeoutHandle.unref?.();
+  });
+
+  // Wrap each probe so it resolves with a discriminated tuple regardless of
+  // success or failure — keeps the post-race assembly uniform.
+  const guardedProbes = allProbes.map((probe) =>
+    probe.then(
+      ([key, value]) => ({ status: 'fulfilled', key, value }),
+      (err) => ({ status: 'rejected', key: null, reason: err })
+    )
+  );
+
+  // Snapshot the live settlement state so the timeout branch can still see
+  // which probes finished before the deadline.
+  const settled = new Array(guardedProbes.length).fill(null);
+  guardedProbes.forEach((p, idx) => {
+    p.then((outcome) => { settled[idx] = outcome; });
+  });
+
+  const allSettledPromise = Promise.all(guardedProbes);
+  const raceResult = await Promise.race([allSettledPromise, outerTimeoutPromise]);
+  if (outerTimeoutHandle) clearTimeout(outerTimeoutHandle);
+
+  const timedOut = raceResult === outerTimeoutSymbol;
+  const probeOutcomes = timedOut ? settled : raceResult;
+
+  if (timedOut) {
     emitAvailabilityTrace(trace, {
-      name: `Evaluate ${getRemoteProviderLabel(provider)} availability result`,
+      name: 'Provider availability outer ceiling reached',
       functionName: 'resolveProviderAvailability',
-      check: `${getRemoteProviderLabel(provider)} validation result is available or has a known unavailable reason`,
-      status: providers[provider]?.available ? 'success' : 'warning',
-      summary: providers[provider]?.reason || `${getRemoteProviderLabel(provider)} availability evaluated.`,
-      metadata: {
-        provider,
-        available: Boolean(providers[provider]?.available),
-        code: providers[provider]?.code || '',
-      },
+      check: `All provider probes complete within ${PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS}ms`,
+      status: 'warning',
+      summary: `Provider availability batch hit the ${PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS}ms outer ceiling; pending probes marked OUTER_TIMEOUT.`,
+      metadata: { timeoutMs: PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS },
     });
   }
 
-  const codexAvailability = CODEX_IMAGE_PARSER_PROVIDER_IDS.length
-    ? await traceAvailabilityCall(trace, {
-      name: 'Check Codex image-provider CLI availability',
-      functionName: 'checkCodexCliAvailability',
-      check: 'codex --version completes before timeout',
-      summary: 'Codex image-provider CLI availability check completed.',
-      metadata: { providerCount: CODEX_IMAGE_PARSER_PROVIDER_IDS.length },
-    }, () => checkCodexCliAvailability(''))
-    : null;
-  for (const providerId of CODEX_IMAGE_PARSER_PROVIDER_IDS) {
-    providers[providerId] = {
-      ...codexAvailability,
-      model: CODEX_IMAGE_PARSER_PROVIDER_MODELS[providerId] || providerId,
-    };
-    emitAvailabilityTrace(trace, {
-      name: `Map Codex availability to ${providerId}`,
-      functionName: 'resolveProviderAvailability',
-      check: 'Codex availability result is assigned to configured Codex image parser provider ids',
-      status: codexAvailability?.available ? 'success' : 'warning',
-      summary: `${providerId} availability mapped from Codex CLI check.`,
-      metadata: { provider: providerId, available: Boolean(codexAvailability?.available) },
-    });
-  }
+  const providers = {};
+
+  // Helper to mark a provider that didn't settle in time.
+  const markOuterTimeout = (providerKey) => ({
+    available: false,
+    reason: 'reachability probe timed out',
+    code: 'OUTER_TIMEOUT',
+  });
+
+  // Assemble results. Iterate the original probe order so we know which
+  // logical provider each slot corresponds to.
+  const probeKeys = ['llm-gateway', 'lm-studio', ...remoteProviderNames, '__codex__'];
+  probeKeys.forEach((logicalKey, idx) => {
+    const outcome = probeOutcomes[idx];
+
+    // Codex slot is special — its single result is fanned out across the
+    // configured codex provider ids.
+    if (logicalKey === '__codex__') {
+      let codexAvailability = null;
+      if (outcome && outcome.status === 'fulfilled') {
+        codexAvailability = outcome.value;
+      } else if (outcome && outcome.status === 'rejected') {
+        const reason = outcome.reason?.message || 'Codex CLI availability check failed.';
+        codexAvailability = { available: false, reason, code: 'PROVIDER_VALIDATION_THREW' };
+      } else if (codexProviderIds.length) {
+        codexAvailability = markOuterTimeout('codex');
+      }
+      for (const providerId of codexProviderIds) {
+        providers[providerId] = {
+          ...codexAvailability,
+          model: CODEX_IMAGE_PARSER_PROVIDER_MODELS[providerId] || providerId,
+        };
+        emitAvailabilityTrace(trace, {
+          name: `Map Codex availability to ${providerId}`,
+          functionName: 'resolveProviderAvailability',
+          check: 'Codex availability result is assigned to configured Codex image parser provider ids',
+          status: codexAvailability?.available ? 'success' : 'warning',
+          summary: `${providerId} availability mapped from Codex CLI check.`,
+          metadata: { provider: providerId, available: Boolean(codexAvailability?.available) },
+        });
+      }
+      return;
+    }
+
+    if (!outcome) {
+      // Probe never settled before the outer ceiling.
+      providers[logicalKey] = markOuterTimeout(logicalKey);
+      emitAvailabilityTrace(trace, {
+        name: `Evaluate ${getRemoteProviderLabel(logicalKey)} availability result`,
+        functionName: 'resolveProviderAvailability',
+        check: `${getRemoteProviderLabel(logicalKey)} validation result is available or has a known unavailable reason`,
+        status: 'warning',
+        summary: providers[logicalKey].reason,
+        metadata: { provider: logicalKey, available: false, code: 'OUTER_TIMEOUT' },
+      });
+      return;
+    }
+
+    if (outcome.status === 'fulfilled') {
+      providers[logicalKey] = outcome.value;
+    } else {
+      const reason = outcome.reason?.message || `${getRemoteProviderLabel(logicalKey)} validation threw an error.`;
+      providers[logicalKey] = { available: false, reason, code: 'PROVIDER_VALIDATION_THREW' };
+    }
+    // LLM Gateway / LM Studio emit their own per-provider trace inside the
+    // probe; only emit the standard remote-provider trace for the four
+    // remote API providers so we don't double-log.
+    if (remoteProviderNames.includes(logicalKey)) {
+      emitAvailabilityTrace(trace, {
+        name: `Evaluate ${getRemoteProviderLabel(logicalKey)} availability result`,
+        functionName: 'resolveProviderAvailability',
+        check: `${getRemoteProviderLabel(logicalKey)} validation result is available or has a known unavailable reason`,
+        status: providers[logicalKey]?.available ? 'success' : 'warning',
+        summary: providers[logicalKey]?.reason || `${getRemoteProviderLabel(logicalKey)} availability evaluated.`,
+        metadata: {
+          provider: logicalKey,
+          available: Boolean(providers[logicalKey]?.available),
+          code: providers[logicalKey]?.code || '',
+        },
+      });
+    }
+  });
 
   return providers;
 }

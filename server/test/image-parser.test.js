@@ -11,14 +11,18 @@ const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 const {
   __waitForProviderPackageRecorderSettled,
 } = require('../src/services/provider-call-package-recorder');
+const {
+  sendLlmGatewayChatCompletion,
+} = require('../src/services/providers/llm-gateway-provider-harness');
+const LLM_GATEWAY_IMAGE_PARSE_CALL_SITE = 'image-parser:callLlmGateway';
 
 // ---------------------------------------------------------------------------
 // HTTP mock helpers — intercept http.request to avoid real network calls
 // ---------------------------------------------------------------------------
 let _httpIntercept = null;
 
-function mockHttpRequest(responseStatusCode, responseBody) {
-  _httpIntercept = { statusCode: responseStatusCode, body: responseBody };
+function mockHttpRequest(responseStatusCode, responseBody, responseHeaders = {}) {
+  _httpIntercept = { statusCode: responseStatusCode, body: responseBody, headers: responseHeaders };
 }
 
 function clearHttpMock() {
@@ -36,9 +40,15 @@ http.request = function patchedRequest(...args) {
 
   if (!_httpIntercept) return _origRequest.apply(http, args);
 
-  const { statusCode, body } = _httpIntercept;
+  const { statusCode, body, headers } = _httpIntercept;
   const res = new EventEmitter();
   res.statusCode = statusCode;
+  res.statusMessage = statusCode >= 400 ? 'Error' : 'OK';
+  res.httpVersion = '1.1';
+  res.headers = headers || {};
+  res.rawHeaders = Object.entries(headers || {}).flatMap(([key, value]) => [key, String(value)]);
+  res.trailers = {};
+  res.rawTrailers = [];
 
   if (typeof callback === 'function') {
     process.nextTick(() => {
@@ -79,6 +89,59 @@ const {
 test.beforeEach(() => {
   clearProviderAvailabilityCache();
   clearHttpMock();
+});
+
+test('LLM Gateway harness returns only a package trace while full response is saved in Mongo', async () => {
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+
+  mockHttpRequest(200, {
+    id: 'chatcmpl-gateway-direct',
+    object: 'chat.completion',
+    model: 'google/gemma-4-e4b',
+    choices: [{ message: { content: 'Gateway reply' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 },
+    gateway: {
+      usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 },
+      cost: { currency: 'USD', total_cost_usd: 0.000004, pricing_source: 'default' },
+    },
+  }, {
+    'content-type': 'application/json',
+    'x-request-id': 'gateway-direct-request-id',
+  });
+
+  try {
+    const result = await sendLlmGatewayChatCompletion({
+      body: {
+        model: 'auto',
+        messages: [{ role: 'user', content: 'hello' }],
+      },
+      timeoutMs: 5000,
+      getApiKey: () => 'gw-test-key',
+      captureContext: {
+        callSite: 'test:llm-gateway-direct',
+        operation: 'chat-completion',
+        forceCapture: true,
+      },
+    });
+
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: 'test:llm-gateway-direct' }).lean();
+
+    assert.ok(saved);
+    assert.equal(result.providerTrace?.providerPackageId, String(saved._id));
+    assert.equal(Object.prototype.hasOwnProperty.call(result, 'body'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result, 'parsedJson'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(result, 'parseError'), false);
+    assert.equal(saved.llmGateway.response.bodyText.includes('Gateway reply'), true);
+    assert.equal(saved.llmGateway.response.parsedJson.choices[0].message.content, 'Gateway reply');
+    assert.equal(saved.llmGateway.response.gatewayRequestId, 'gateway-direct-request-id');
+  } finally {
+    clearHttpMock();
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -315,6 +378,7 @@ test('parseImage derives structured escalation fields and parse confidence', asy
     assert.equal(result.parseFields.mid, '67890');
     assert.equal(result.parseFields.caseNumber, 'CS-2026-001');
     assert.equal(result.parseFields.clientContact, 'Jane Smith');
+    assert.equal(result.parseFields.kbToolsUsed, 'payroll help article');
     assert.equal(result.parseFields.category, 'payroll');
     assert.equal(result.parseMeta?.passed, true);
     assert.equal(result.parseMeta?.confidence, 'high');
@@ -764,6 +828,537 @@ test('parseImage does not wait for background LM Studio image-parser package ins
   }
 });
 
+test('parseImage captures LLM Gateway image-parser package in gateway-specific shape even when global capture flag is off', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const previousKey = process.env.LLM_GATEWAY_API_KEY;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  process.env.LLM_GATEWAY_API_KEY = 'gw-test-key';
+
+  mockHttpRequest(200, {
+    id: 'chatcmpl-gateway-image',
+    object: 'chat.completion',
+    model: 'google/gemma-4-e4b',
+    choices: [{ message: { content: 'COID/MID: 999\nCASE: CS-GW-001' }, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 70, completion_tokens: 20, total_tokens: 90 },
+    gateway: {
+      usage: { prompt_tokens: 70, completion_tokens: 20, total_tokens: 90 },
+      cost: { currency: 'USD', total_cost_usd: 0.000013, pricing_source: 'default' },
+    },
+  }, {
+    'content-type': 'application/json',
+    'x-request-id': 'gateway-image-request-id',
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'llm-gateway', model: 'auto', eventBus });
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: LLM_GATEWAY_IMAGE_PARSE_CALL_SITE }).lean();
+
+    assert.equal(result.text, 'COID/MID: 999\nCASE: CS-GW-001');
+    assert.equal(result.providerTrace?.providerHarness, 'llm-gateway');
+    assert.equal(result.providerTrace?.providerPackageId, String(saved?._id));
+    assert.equal(result.providerTrace?.gatewayRequestId, 'gateway-image-request-id');
+    assert.equal(result.providerTrace?.packageCaptureQueued, true);
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'llm-gateway');
+    assert.equal(saved.providerResearchId, 'llm-gateway');
+    assert.equal(saved.providerPathType, 'gateway-http');
+    assert.equal(saved.operation, 'image-parse');
+    assert.equal(saved.request, null);
+    assert.equal(saved.response, null);
+    assert.equal(saved.lmStudio, null);
+    assert.equal(saved.llmGateway.request.modelRequested, 'auto');
+    assert.equal(saved.llmGateway.request.hasImages, true);
+    assert.equal(saved.llmGateway.request.images[0].mediaType, 'image/png');
+    assert.equal(saved.llmGateway.response.statusCode, 200);
+    assert.equal(saved.llmGateway.response.gatewayRequestId, 'gateway-image-request-id');
+    assert.equal(saved.llmGateway.response.parsedJson.gateway.cost.pricing_source, 'default');
+    assert.equal(saved.llmGateway.gateway.requestId, 'gateway-image-request-id');
+    assert.equal(saved.llmGateway.gateway.usage.total_tokens, 90);
+    assert.equal(saved.outcome, 'success');
+    assert.ok(events.some((event) => event.type === 'provider.harness_request_started'));
+    assert.ok(events.some((event) => event.type === 'parser.agent_handoff_to_provider'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_payload_received'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_payload_sent_to_provider'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_payload_received_from_provider'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_queued'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_payload_sent_to_database'));
+    assert.ok(events.some((event) => event.type === 'provider.database_save_completed'));
+    assert.ok(events.some((event) => event.type === 'provider.package_ready_for_agent'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_handoff_to_parser'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_content_found'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_loaded'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_payload_selected'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_trace_received'));
+    assert.ok(events.find((event) => event.type === 'provider.agent_payload_sent_to_database')?.payload?.surfaceToUser);
+  } finally {
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
+    else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage captures Gemini image-parser package in Gemini-specific shape even when global capture flag is off', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const cleanupKey = setupProviderKey('GEMINI_API_KEY', 'AIza-gemini-test-key');
+  const httpsMock = mockHttpsRequest(200, {
+    responseId: 'gemini-image-response-id',
+    modelVersion: 'gemini-3-flash-preview',
+    candidates: [
+      {
+        content: {
+          parts: [{ text: 'COID/MID: 321\nCASE: CS-GEM-001' }],
+        },
+        finishReason: 'STOP',
+      },
+    ],
+    promptFeedback: { safetyRatings: [] },
+    usageMetadata: {
+      promptTokenCount: 33,
+      candidatesTokenCount: 11,
+      totalTokenCount: 44,
+    },
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    const result = await parseImage(TINY_PNG_BASE64, {
+      provider: 'gemini',
+      model: 'gemini-3-flash-preview',
+      eventBus,
+    });
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callGemini' }).lean();
+
+    assert.ok(saved);
+    assert.equal(result.text, 'COID/MID: 321\nCASE: CS-GEM-001');
+    assert.equal(result.usage.model, 'gemini-3-flash-preview');
+    assert.equal(result.usage.inputTokens, 33);
+    assert.equal(result.usage.outputTokens, 11);
+    assert.equal(result.usage.totalTokens, 44);
+    assert.equal(result.providerTrace?.providerHarness, 'gemini-api');
+    assert.equal(result.providerTrace?.providerPackageId, String(saved._id));
+    assert.equal(result.providerTrace?.responseId, 'gemini-image-response-id');
+    assert.equal(result.providerTrace?.modelVersion, 'gemini-3-flash-preview');
+    assert.equal(result.providerTrace?.packageCaptureQueued, true);
+    assert.equal(saved.providerId, 'gemini');
+    assert.equal(saved.providerResearchId, 'gemini-api');
+    assert.equal(saved.providerPathType, 'direct-http');
+    assert.equal(saved.operation, 'image-parse');
+    assert.equal(saved.request, null);
+    assert.equal(saved.response, null);
+    assert.equal(saved.llmGateway, null);
+    assert.equal(saved.geminiApi.request.modelRequested, 'gemini-3-flash-preview');
+    assert.equal(saved.geminiApi.request.hasImages, true);
+    assert.equal(saved.geminiApi.request.images[0].mediaType, 'image/png');
+    assert.equal(saved.geminiApi.request.headers['x-goog-api-key'], '[REDACTED]');
+    assert.equal(saved.geminiApi.response.statusCode, 200);
+    assert.equal(saved.geminiApi.response.responseId, 'gemini-image-response-id');
+    assert.equal(saved.geminiApi.response.modelVersion, 'gemini-3-flash-preview');
+    assert.equal(saved.geminiApi.response.usageMetadata.totalTokenCount, 44);
+    assert.equal(saved.outcome, 'success');
+    assert.ok(events.some((event) => event.type === 'provider.harness_request_started'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_queued'));
+    assert.ok(events.some((event) => event.type === 'provider.package_ready_for_agent'));
+    assert.ok(events.some((event) => event.type === 'provider.agent_handoff_to_parser'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_payload_selected'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_trace_received'));
+  } finally {
+    httpsMock.restore();
+    cleanupKey();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage captures full LLM Gateway non-200 body in gateway package', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const previousKey = process.env.LLM_GATEWAY_API_KEY;
+  const fullErrorBody = JSON.stringify({
+    error: {
+      type: 'upstream_error',
+      code: 'UPSTREAM_NOT_READY',
+      message: `gateway failed ${'x'.repeat(700)}`,
+    },
+  });
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  process.env.LLM_GATEWAY_API_KEY = 'gw-test-key';
+
+  mockHttpRequest(503, fullErrorBody, {
+    'content-type': 'application/json',
+    'x-request-id': 'gateway-error-request-id',
+  });
+
+  try {
+    let thrown;
+    try {
+      await parseImage(TINY_PNG_BASE64, { provider: 'llm-gateway', model: 'auto' });
+    } catch (err) {
+      thrown = err;
+    }
+    assert.match(thrown?.message || '', /LLM Gateway API error \(HTTP 503\)/);
+    assert.equal(thrown?.providerTrace?.providerHarness, 'llm-gateway');
+    assert.equal(thrown?.providerTrace?.outcome, 'http_error');
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({ callSite: LLM_GATEWAY_IMAGE_PARSE_CALL_SITE }).lean();
+
+    assert.ok(saved);
+    assert.equal(thrown.providerTrace.providerPackageId, String(saved._id));
+    assert.equal(saved.outcome, 'http_error');
+    assert.equal(saved.llmGateway.response.statusCode, 503);
+    assert.equal(saved.llmGateway.response.bodyText, fullErrorBody);
+    assert.equal(saved.llmGateway.response.gatewayRequestId, 'gateway-error-request-id');
+    assert.equal(saved.llmGateway.error.gatewayErrorCode, 'UPSTREAM_NOT_READY');
+    assert.equal(saved.llmGateway.error.rawBody, fullErrorBody);
+  } finally {
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
+    else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage waits for LLM Gateway provider package before extracting parser text', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const previousKey = process.env.LLM_GATEWAY_API_KEY;
+  const originalCreate = ProviderCallPackage.create;
+  let releaseCreate;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  process.env.LLM_GATEWAY_API_KEY = 'gw-test-key';
+  ProviderCallPackage.create = async function delayedCreate(...args) {
+    await new Promise((resolve) => { releaseCreate = resolve; });
+    return originalCreate.apply(this, args);
+  };
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: FAST\nCASE: CS-GW-FAST' } }],
+    model: 'google/gemma-4-e4b',
+    usage: { prompt_tokens: 1, completion_tokens: 1 },
+    gateway: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+  }, {
+    'x-request-id': 'gateway-fast-request-id',
+  });
+
+  try {
+    let parseResolved = false;
+    const parsePromise = parseImage(TINY_PNG_BASE64, { provider: 'llm-gateway', model: 'auto' })
+      .then((value) => {
+        parseResolved = true;
+        return value;
+      });
+
+    while (!releaseCreate) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    assert.equal(parseResolved, false);
+
+    releaseCreate();
+    const result = await parsePromise;
+    assert.equal(result.text, 'COID/MID: FAST\nCASE: CS-GW-FAST');
+
+    await __waitForProviderPackageRecorderSettled();
+    assert.equal(await ProviderCallPackage.countDocuments({ callSite: LLM_GATEWAY_IMAGE_PARSE_CALL_SITE }), 1);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
+    else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage fails LLM Gateway when required provider package capture cannot save', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const previousKey = process.env.LLM_GATEWAY_API_KEY;
+  const originalCreate = ProviderCallPackage.create;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  process.env.LLM_GATEWAY_API_KEY = 'gw-test-key';
+  ProviderCallPackage.create = async function failingCreate() {
+    throw new Error('mongo write failed');
+  };
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: FAIL\nCASE: CS-GW-CAPTURE' } }],
+    model: 'google/gemma-4-e4b',
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    gateway: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+  }, {
+    'x-request-id': 'gateway-capture-failure-request-id',
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, { provider: 'llm-gateway', model: 'auto', eventBus }),
+      (err) => {
+        assert.equal(err.code, 'PROVIDER_PACKAGE_CAPTURE_FAILED');
+        assert.match(err.message, /failed to save to MongoDB/i);
+        assert.equal(err.providerTrace?.providerHarness, 'llm-gateway');
+        assert.equal(err.providerTrace?.packageCaptureStatus, 'failed');
+        assert.equal(err.providerTrace?.outcome, 'package_capture_failed');
+        assert.ok(err.providerTrace?.providerPackageId);
+        return true;
+      }
+    );
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_started'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_queued'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_failed'));
+    assert.ok(!events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.equal(await ProviderCallPackage.countDocuments({ callSite: LLM_GATEWAY_IMAGE_PARSE_CALL_SITE }), 0);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
+    else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage fails Gemini when required provider package capture cannot save', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const originalCreate = ProviderCallPackage.create;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const cleanupKey = setupProviderKey('GEMINI_API_KEY', 'AIza-gemini-test-key');
+  ProviderCallPackage.create = async function failingCreate() {
+    throw new Error('mongo write failed');
+  };
+  const httpsMock = mockHttpsRequest(200, {
+    responseId: 'gemini-capture-failure-response-id',
+    modelVersion: 'gemini-3-flash-preview',
+    candidates: [
+      {
+        content: { parts: [{ text: 'COID/MID: FAIL\nCASE: CS-GEM-CAPTURE' }] },
+        finishReason: 'STOP',
+      },
+    ],
+    usageMetadata: {
+      promptTokenCount: 1,
+      candidatesTokenCount: 1,
+      totalTokenCount: 2,
+    },
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, {
+        provider: 'gemini',
+        model: 'gemini-3-flash-preview',
+        eventBus,
+      }),
+      (err) => {
+        assert.equal(err.code, 'PROVIDER_PACKAGE_CAPTURE_FAILED');
+        assert.match(err.message, /failed to save to MongoDB/i);
+        assert.equal(err.providerTrace?.providerHarness, 'gemini-api');
+        assert.equal(err.providerTrace?.packageCaptureStatus, 'failed');
+        assert.equal(err.providerTrace?.outcome, 'package_capture_failed');
+        assert.ok(err.providerTrace?.providerPackageId);
+        return true;
+      }
+    );
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_started'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_queued'));
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_failed'));
+    assert.ok(!events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.equal(await ProviderCallPackage.countDocuments({ callSite: 'image-parser:callGemini' }), 0);
+  } finally {
+    ProviderCallPackage.create = originalCreate;
+    httpsMock.restore();
+    cleanupKey();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('parseImage reports provider package load timeout after required capture succeeds', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const previousKey = process.env.LLM_GATEWAY_API_KEY;
+  const previousWait = process.env.IMAGE_PARSER_PROVIDER_PACKAGE_WAIT_MS;
+  const originalFindById = ProviderCallPackage.findById;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  process.env.LLM_GATEWAY_API_KEY = 'gw-test-key';
+  process.env.IMAGE_PARSER_PROVIDER_PACKAGE_WAIT_MS = '50';
+  ProviderCallPackage.findById = function alwaysMissingProviderPackage() {
+    return { lean: async () => null };
+  };
+
+  mockHttpRequest(200, {
+    choices: [{ message: { content: 'COID/MID: LOAD\nCASE: CS-GW-LOAD' } }],
+    model: 'google/gemma-4-e4b',
+    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    gateway: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+  }, {
+    'x-request-id': 'gateway-load-timeout-request-id',
+  });
+
+  try {
+    const events = [];
+    const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
+    await assert.rejects(
+      () => parseImage(TINY_PNG_BASE64, { provider: 'llm-gateway', model: 'auto', eventBus }),
+      (err) => {
+        assert.equal(err.code, 'PROVIDER_PACKAGE_LOAD_TIMEOUT');
+        assert.match(err.message, /not readable from MongoDB/i);
+        return true;
+      }
+    );
+    assert.ok(events.some((event) => event.type === 'provider.package_capture_confirmed'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_retrieval_started'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_load_retry'));
+    assert.ok(events.some((event) => event.type === 'parser.provider_package_load_failed'));
+  } finally {
+    ProviderCallPackage.findById = originalFindById;
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    if (previousKey === undefined) delete process.env.LLM_GATEWAY_API_KEY;
+    else process.env.LLM_GATEWAY_API_KEY = previousKey;
+    if (previousWait === undefined) delete process.env.IMAGE_PARSER_PROVIDER_PACKAGE_WAIT_MS;
+    else process.env.IMAGE_PARSER_PROVIDER_PACKAGE_WAIT_MS = previousWait;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('validateRemoteProvider captures LLM Gateway provider-status package', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  mockHttpRequest(200, {
+    ok: true,
+    provider: 'llm-gateway',
+    authenticated: true,
+    gateway: { requestId: 'provider-status-body-id' },
+    upstream: { availableModel: 'google/gemma-4-e4b' },
+  }, {
+    'content-type': 'application/json',
+    'x-request-id': 'gateway-status-request-id',
+  });
+
+  try {
+    const result = await validateRemoteProvider('llm-gateway', 'gw-test-key');
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({
+      callSite: 'image-parser:validateRemoteProvider:llm-gateway',
+    }).lean();
+
+    assert.equal(result.available, true);
+    assert.equal(result.model, 'google/gemma-4-e4b');
+    assert.ok(saved);
+    assert.equal(saved.operation, 'provider-status');
+    assert.equal(saved.llmGateway.request.method, 'GET');
+    assert.equal(saved.llmGateway.response.gatewayRequestId, 'gateway-status-request-id');
+    assert.equal(saved.llmGateway.providerStatus.ok, true);
+    assert.equal(saved.llmGateway.providerStatus.upstream.availableModel, 'google/gemma-4-e4b');
+  } finally {
+    clearHttpMock();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
+test('validateRemoteProvider captures Gemini provider-status package', async () => {
+  const previousFlag = process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+
+  await mongo.connect();
+  await ProviderCallPackage.deleteMany({});
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+
+  const httpsMock = mockHttpsRequest(200, {
+    responseId: 'gemini-status-response-id',
+    modelVersion: 'gemini-3-flash-preview',
+    candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }],
+    usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+  });
+
+  try {
+    const result = await validateRemoteProvider('gemini', 'AIza-status-test-key');
+    await __waitForProviderPackageRecorderSettled();
+    const saved = await ProviderCallPackage.findOne({
+      callSite: 'image-parser:validateRemoteProvider:gemini',
+    }).lean();
+
+    assert.equal(result.available, true);
+    assert.equal(result.model, 'gemini-3-flash-preview');
+    assert.ok(saved);
+    assert.equal(saved.providerId, 'gemini');
+    assert.equal(saved.operation, 'provider-status');
+    assert.equal(saved.geminiApi.request.method, 'POST');
+    assert.equal(saved.geminiApi.request.headers['x-goog-api-key'], '[REDACTED]');
+    assert.equal(saved.geminiApi.response.responseId, 'gemini-status-response-id');
+    assert.equal(saved.geminiApi.providerStatus.ok, true);
+    assert.equal(saved.geminiApi.providerStatus.authenticated, true);
+    assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3-flash-preview');
+  } finally {
+    httpsMock.restore();
+    if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+    else process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
+    await __waitForProviderPackageRecorderSettled();
+    await ProviderCallPackage.deleteMany({}).catch(() => {});
+    await mongo.disconnect();
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // parseImage — Anthropic provider dispatch (HTTPS mock)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -772,15 +1367,40 @@ test('parseImage does not wait for background LM Studio image-parser package ins
  * Helper: mock https.request for cloud providers (Anthropic, OpenAI, Kimi).
  * Returns { restore(), getCapturedBody() }.
  */
+function getRequestCallback(args) {
+  return typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+}
+
+function normalizeCapturedRequestOptions(args) {
+  if (args[0] instanceof URL) {
+    return {
+      ...(args[1] && typeof args[1] === 'object' && typeof args[1] !== 'function' ? args[1] : {}),
+      protocol: args[0].protocol,
+      hostname: args[0].hostname,
+      port: args[0].port || (args[0].protocol === 'https:' ? 443 : 80),
+      path: `${args[0].pathname}${args[0].search}`,
+      href: args[0].toString(),
+    };
+  }
+  return args[0];
+}
+
 function mockHttpsRequest(statusCode, responseBody) {
   const origHttps = https.request;
   let capturedBody = null;
-  https.request = function mockedRequest(options, callback) {
+  https.request = function mockedRequest(...args) {
+    const callback = getRequestCallback(args);
     const req = new EventEmitter();
     req.write = (data) => { capturedBody = data; };
     req.end = () => {
       const res = new EventEmitter();
       res.statusCode = statusCode;
+      res.statusMessage = statusCode >= 400 ? 'Error' : 'OK';
+      res.httpVersion = '1.1';
+      res.headers = {};
+      res.rawHeaders = [];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
@@ -1657,8 +2277,9 @@ function mockHttpsCapture(responseBody) {
   const captured = { options: null, body: null, rawPayload: null };
   const origHttps = https.request;
 
-  https.request = function captureHttps(options, callback) {
-    captured.options = options;
+  https.request = function captureHttps(...args) {
+    const callback = getRequestCallback(args);
+    captured.options = normalizeCapturedRequestOptions(args);
     const req = new EventEmitter();
     const chunks = [];
     req.write = (data) => { chunks.push(data); };
@@ -1667,6 +2288,12 @@ function mockHttpsCapture(responseBody) {
       try { captured.body = JSON.parse(captured.rawPayload); } catch { captured.body = captured.rawPayload; }
       const res = new EventEmitter();
       res.statusCode = 200;
+      res.statusMessage = 'OK';
+      res.httpVersion = '1.1';
+      res.headers = {};
+      res.rawHeaders = [];
+      res.trailers = {};
+      res.rawTrailers = [];
       if (typeof callback === 'function') {
         process.nextTick(() => {
           callback(res);
