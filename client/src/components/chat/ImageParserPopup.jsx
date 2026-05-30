@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import useImageParser from '../../hooks/useImageParser.js';
+import { useToast } from '../../hooks/useToast.jsx';
 import WebcamCapture from '../WebcamCapture.jsx';
 import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
@@ -17,6 +18,8 @@ import {
   writeAgentRuntimeState,
 } from '../../lib/agentRuntimeSettings.js';
 import { isProviderMissingApiKey } from '../../lib/providerKeyStatus.js';
+import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
+import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
 import { transitions } from '../../utils/motion.js';
 
 const IMAGE_PARSER_PROVIDERS = [
@@ -104,6 +107,7 @@ function getParserModeLabel(parserMode) {
 
 export default function ImageParserPopup({ open, onClose, onParsed, seedImage = null, parserMode: initialParserMode = DEFAULT_PARSER_MODE }) {
   const { parse, parsing, result, error, checkAvailability } = useImageParser();
+  const toast = useToast();
   const [parserMode, setParserMode] = useState(() => normalizeParserMode(initialParserMode));
   const [provider, setProvider] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).provider);
   const [model, setModel] = useState(() => readParserRuntime(normalizeParserMode(initialParserMode)).model);
@@ -113,11 +117,13 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const [isDragOver, setIsDragOver] = useState(false);
   const [availability, setAvailability] = useState(null);
   const [showWebcam, setShowWebcam] = useState(false);
-  const [validationError, setValidationError] = useState('');
+  const [validationFailure, setValidationFailure] = useState(null);
   const [runtimeNotice, setRuntimeNotice] = useState('');
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
   const popupRef = useRef(null);
+  const toastedStageKeysRef = useRef(new Set());
+  const imageAddedAtRef = useRef(0);
   const parserModeLabel = getParserModeLabel(parserMode);
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
@@ -159,7 +165,8 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       : '');
     const src = typeof seedImage === 'string' ? seedImage : seedImage?.src;
     if (!src) return;
-    setValidationError('');
+    imageAddedAtRef.current = Date.now();
+    setValidationFailure(null);
     setImagePreview(src);
     setImageBase64(src);
   }, [initialParserMode, open, seedImage]);
@@ -197,7 +204,8 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target.result;
-      setValidationError('');
+      imageAddedAtRef.current = Date.now();
+      setValidationFailure(null);
       setImagePreview(dataUrl);
       setImageBase64(dataUrl);
     };
@@ -260,26 +268,123 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
     setRuntimeNotice(runtime.source === 'shared-image-parser'
       ? `${getParserModeLabel(nextParserMode)} is using shared image parser defaults. Saving them to this agent runtime.`
       : '');
-    setValidationError('');
+    setValidationFailure(null);
   }, []);
 
   const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
 
+  const handleParserStageEvent = useCallback((event) => {
+    if (!event || typeof event !== 'object') return;
+    const toastKey = [
+      event.runId || '',
+      event.stageId || '',
+      event.kind || '',
+      event.seq ?? '',
+      event?.data?.providerPackageId || '',
+      event?.data?.displayMessage || '',
+    ].join(':');
+    if (toastedStageKeysRef.current.has(toastKey)) return;
+    if (showImageParserStageToast(toast, event)) {
+      toastedStageKeysRef.current.add(toastKey);
+    }
+  }, [toast]);
+
   const handleParse = useCallback(async () => {
     if (!imageBase64 || !provider || providerMissingApiKey) return;
-    setValidationError('');
+    toastedStageKeysRef.current.clear();
+    setValidationFailure(null);
+    handleParserStageEvent({
+      stageId: 'parser',
+      runId: '',
+      ts: Date.now(),
+      seq: 0,
+      kind: 'parser.client_request_started',
+      category: 'run',
+      source: 'client',
+      data: {
+        provider,
+        model: model || '',
+        imageAddedAt: imageAddedAtRef.current || Date.now(),
+        status: 'sent',
+        surfaceToUser: true,
+        displayMessage: 'payload sent to server - sent',
+      },
+    });
     const data = await parse(imageBase64, {
       provider,
       model: model || undefined,
       reasoningEffort: reasoningEffort || undefined,
       promptId: parserMode,
+      onStageEvent: handleParserStageEvent,
     });
-    if (data?.parseMeta && data.parseMeta.passed === false) {
-      const issue = data.parseMeta.issues?.[0] || data.parseMeta.canonicalTemplate?.issues?.[0]?.code || 'validation failed';
-      const label = parserMode === 'follow-up-chat-parser'
-        ? 'follow-up chat transcript format'
-        : 'canonical escalation template';
-      setValidationError(`Parser output did not match the ${label} (${issue}). Retry with a clearer screenshot or another parser model.`);
+    if (!data) return;
+    const providerPackageId = data?.providerTrace?.providerPackageId || '';
+    if (providerPackageId) {
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.provider_content_received_client',
+        category: 'run',
+        source: 'client',
+        data: {
+          provider,
+          providerPackageId,
+          status: 'received',
+          surfaceToUser: true,
+          displayMessage: `providerPackageId: ${providerPackageId} content received in client - received`,
+        },
+      });
+    }
+    handleParserStageEvent({
+      stageId: 'parser',
+      runId: '',
+      ts: Date.now(),
+      seq: 0,
+      kind: 'parser.client_result_received',
+      category: 'run',
+      source: 'client',
+      data: {
+        provider: data?.providerUsed || provider,
+        model: data?.modelUsed || data?.usage?.model || model || '',
+        providerPackageId: providerPackageId || null,
+        textLength: (data?.text || '').length,
+        elapsedMs: data?.elapsedMs ?? 0,
+        status: 'complete',
+      },
+    });
+    const label = parserMode === 'follow-up-chat-parser'
+      ? 'follow-up chat transcript format'
+      : 'canonical escalation template';
+    const validation = summarizeImageParserValidationFailure(data?.parseMeta, { templateLabel: label });
+    if (validation) {
+      setValidationFailure({
+        ...validation,
+        providerPackageId: providerPackageId || null,
+        provider: data?.providerUsed || provider,
+        model: data?.modelUsed || data?.usage?.model || model || '',
+        text: data?.text || data?.sourceText || '',
+      });
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.validation_failed_client',
+        category: 'run',
+        source: 'client',
+        data: {
+          code: validation.code,
+          issue: validation.issue,
+          provider: data?.providerUsed || provider,
+          model: data?.modelUsed || data?.usage?.model || model || '',
+          providerPackageId: providerPackageId || null,
+          status: 'blocked',
+          surfaceToUser: true,
+          displayMessage: validation.operatorMessage,
+        },
+      });
       return;
     }
     if (data?.text) {
@@ -293,29 +398,43 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       // Reset state for next use
       setImagePreview(null);
       setImageBase64(null);
-      setValidationError('');
+      imageAddedAtRef.current = 0;
+      setValidationFailure(null);
       onClose();
     }
-  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parserMode, parse, onParsed, onClose]);
+  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parserMode, parse, handleParserStageEvent, onParsed, onClose]);
 
   const handleClear = useCallback(() => {
-    setValidationError('');
+    setValidationFailure(null);
     setImagePreview(null);
     setImageBase64(null);
+    imageAddedAtRef.current = 0;
   }, []);
 
   const handleWebcamCapture = useCallback((payload) => {
     const src = typeof payload === 'string' ? payload : payload?.src;
     if (!src) return;
     setShowWebcam(false);
-    setValidationError('');
+    setValidationFailure(null);
+    imageAddedAtRef.current = Date.now();
     setImagePreview(src);
     setImageBase64(src);
   }, []);
 
+  const handleCopyUnvalidatedText = useCallback(async () => {
+    const text = validationFailure?.text || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard access may be blocked outside secure contexts.
+    }
+  }, [validationFailure]);
+
   const providerStatus = provider && availability?.providers?.[provider];
   const isProviderOnline = providerStatus?.available;
   const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
+  const validationError = validationFailure?.message || '';
 
   if (!open) return null;
 
@@ -371,6 +490,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
               <select
                 value={provider}
                 onChange={(e) => {
+                  setValidationFailure(null);
                   setProvider(e.target.value);
                   setModel('');
                   setReasoningEffort('');
@@ -394,7 +514,10 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                 value={model}
                 placeholder={getImageParserModelPlaceholder(provider)}
                 list={IMAGE_PARSER_POPUP_MODEL_LIST_ID}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => {
+                  setValidationFailure(null);
+                  setModel(e.target.value);
+                }}
                 disabled={providerMissingApiKey}
               />
               <datalist id={IMAGE_PARSER_POPUP_MODEL_LIST_ID}>
@@ -408,7 +531,10 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                 <span>Effort</span>
                 <select
                   value={reasoningEffort}
-                  onChange={(e) => setReasoningEffort(e.target.value)}
+                  onChange={(e) => {
+                    setValidationFailure(null);
+                    setReasoningEffort(e.target.value);
+                  }}
                   disabled={providerMissingApiKey}
                 >
                   <option value="">Default</option>
@@ -460,7 +586,28 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
           {/* Error */}
           {runtimeNotice && <div className="ip-popup-warning">{runtimeNotice}</div>}
-          {(error || validationError) && <div className="ip-popup-error">{error || validationError}</div>}
+          {error && <div className="ip-popup-error">{error}</div>}
+          {validationFailure && (
+            <div className="ip-popup-recovery" role="alert">
+              <div className="ip-popup-recovery-title">Parser result blocked</div>
+              <div className="ip-popup-recovery-copy">
+                {validationError} Change the provider/model or replace the screenshot, then retry.
+              </div>
+              <div className="ip-popup-recovery-actions">
+                <button type="button" onClick={handleParse} disabled={!canParse}>
+                  Retry
+                </button>
+                <button type="button" onClick={() => fileInputRef.current?.click()} disabled={parsing}>
+                  Replace Image
+                </button>
+                {validationFailure.text && (
+                  <button type="button" onClick={handleCopyUnvalidatedText}>
+                    Copy Raw Output
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="ip-popup-actions">
             <button

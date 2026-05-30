@@ -1519,6 +1519,12 @@
   background: var(--surface-error, rgba(239, 68, 68, 0.08));
 }
 
+.room-pending-image--error .room-pending-image-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .room-pending-image-thumb {
   width: 48px;
   height: 48px;
@@ -1566,6 +1572,24 @@
   line-height: 1;
   flex-shrink: 0;
   transition: opacity 0.15s ease;
+}
+
+.room-pending-image-retry {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 4px;
+  background: var(--surface-secondary, rgba(255, 255, 255, 0.06));
+  color: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.room-pending-image-retry:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .room-pending-image-remove:hover {

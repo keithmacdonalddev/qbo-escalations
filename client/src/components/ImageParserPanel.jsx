@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import useImageParser from '../hooks/useImageParser.js';
+import { useToast } from '../hooks/useToast.jsx';
 import WebcamCapture from './WebcamCapture.jsx';
 import {
   IMAGE_PARSER_MODEL_SUGGESTIONS,
@@ -12,6 +13,8 @@ import {
   getImageParserStatusBadgeText,
   getImageParserStatusLabel,
 } from '../lib/imageParserStatus.js';
+import { showImageParserStageToast } from '../lib/imageParserStageToasts.js';
+import { summarizeImageParserValidationFailure } from '../lib/imageParserValidation.js';
 import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
 import './ImageParserPanel.css';
@@ -134,6 +137,7 @@ export default function ImageParserPanel() {
     parse, parsing, result, error, checkAvailability,
     history, historyMeta, historyLoading, fetchHistory, fetchHistoryItem,
   } = useImageParser();
+  const toast = useToast();
   const initialSelectionRef = useRef(null);
   if (!initialSelectionRef.current) {
     initialSelectionRef.current = resolveImageParserSelection(
@@ -151,8 +155,11 @@ export default function ImageParserPanel() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [availability, setAvailability] = useState(null);
   const [showWebcam, setShowWebcam] = useState(false);
+  const [validationFailure, setValidationFailure] = useState(null);
   const fileInputRef = useRef(null);
   const dropZoneRef = useRef(null);
+  const toastedStageKeysRef = useRef(new Set());
+  const imageAddedAtRef = useRef(0);
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
@@ -189,6 +196,8 @@ export default function ImageParserPanel() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target.result;
+      imageAddedAtRef.current = Date.now();
+      setValidationFailure(null);
       setImagePreview(dataUrl);
       // Send the full data URL so the server can extract the correct media type.
       // Previously we stripped the prefix, causing all images to default to
@@ -247,24 +256,130 @@ export default function ImageParserPanel() {
 
   const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
 
-  const handleParse = useCallback(() => {
+  const handleParserStageEvent = useCallback((event) => {
+    if (!event || typeof event !== 'object') return;
+    const toastKey = [
+      event.runId || '',
+      event.stageId || '',
+      event.kind || '',
+      event.seq ?? '',
+      event?.data?.providerPackageId || '',
+      event?.data?.displayMessage || '',
+    ].join(':');
+    if (toastedStageKeysRef.current.has(toastKey)) return;
+    if (showImageParserStageToast(toast, event)) {
+      toastedStageKeysRef.current.add(toastKey);
+    }
+  }, [toast]);
+
+  const handleParse = useCallback(async () => {
     if (!imageBase64 || !provider || providerMissingApiKey) return;
-    parse(imageBase64, {
+    toastedStageKeysRef.current.clear();
+    setValidationFailure(null);
+    handleParserStageEvent({
+      stageId: 'parser',
+      runId: '',
+      ts: Date.now(),
+      seq: 0,
+      kind: 'parser.client_request_started',
+      category: 'run',
+      source: 'client',
+      data: {
+        provider,
+        model: model || '',
+        imageAddedAt: imageAddedAtRef.current || Date.now(),
+        status: 'sent',
+        surfaceToUser: true,
+        displayMessage: 'payload sent to server - sent',
+      },
+    });
+    const data = await parse(imageBase64, {
       provider,
       model: model || undefined,
       reasoningEffort: reasoningEffort || undefined,
+      onStageEvent: handleParserStageEvent,
     });
-  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parse]);
+    if (!data) return;
+    const providerPackageId = data?.providerTrace?.providerPackageId || '';
+    if (providerPackageId) {
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.provider_content_received_client',
+        category: 'run',
+        source: 'client',
+        data: {
+          provider,
+          providerPackageId,
+          status: 'received',
+          surfaceToUser: true,
+          displayMessage: `providerPackageId: ${providerPackageId} content received in client - received`,
+        },
+      });
+    }
+    handleParserStageEvent({
+      stageId: 'parser',
+      runId: '',
+      ts: Date.now(),
+      seq: 0,
+      kind: 'parser.client_result_received',
+      category: 'run',
+      source: 'client',
+      data: {
+        provider: data?.providerUsed || provider,
+        model: data?.modelUsed || data?.usage?.model || model || '',
+        providerPackageId: providerPackageId || null,
+        textLength: (data?.text || '').length,
+        elapsedMs: data?.elapsedMs ?? 0,
+        status: 'complete',
+      },
+    });
+    const validation = summarizeImageParserValidationFailure(data?.parseMeta);
+    if (validation) {
+      setValidationFailure({
+        ...validation,
+        providerPackageId: providerPackageId || null,
+        provider: data?.providerUsed || provider,
+        model: data?.modelUsed || data?.usage?.model || model || '',
+        text: data?.text || data?.sourceText || '',
+      });
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.validation_failed_client',
+        category: 'run',
+        source: 'client',
+        data: {
+          code: validation.code,
+          issue: validation.issue,
+          provider: data?.providerUsed || provider,
+          model: data?.modelUsed || data?.usage?.model || model || '',
+          providerPackageId: providerPackageId || null,
+          status: 'blocked',
+          surfaceToUser: true,
+          displayMessage: validation.operatorMessage,
+        },
+      });
+    }
+  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parse, handleParserStageEvent]);
 
   const handleClear = useCallback(() => {
+    setValidationFailure(null);
     setImagePreview(null);
     setImageBase64(null);
+    imageAddedAtRef.current = 0;
   }, []);
 
   const handleWebcamCapture = useCallback((payload) => {
     const src = typeof payload === 'string' ? payload : payload?.src;
     if (!src) return;
     setShowWebcam(false);
+    setValidationFailure(null);
+    imageAddedAtRef.current = Date.now();
     setImagePreview(src);
     setImageBase64(src);
   }, []);
@@ -324,6 +439,16 @@ export default function ImageParserPanel() {
 
   const renderedOutput = result?.text ? renderMarkdown(result.text) : null;
 
+  const handleCopyUnvalidatedText = useCallback(async () => {
+    const text = validationFailure?.text || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard access may be blocked outside secure contexts.
+    }
+  }, [validationFailure]);
+
   return (
     <div className="image-parser-panel" onPaste={handlePaste}>
       <div className="image-parser-inner">
@@ -350,6 +475,7 @@ export default function ImageParserPanel() {
             <select
               value={provider}
               onChange={(e) => {
+                setValidationFailure(null);
                 setProvider(e.target.value);
                 setModel('');
                 setReasoningEffort('');
@@ -373,7 +499,10 @@ export default function ImageParserPanel() {
               value={model}
               placeholder={getImageParserModelPlaceholder(provider)}
               list={IMAGE_PARSER_PANEL_MODEL_LIST_ID}
-              onChange={(e) => setModel(e.target.value)}
+              onChange={(e) => {
+                setValidationFailure(null);
+                setModel(e.target.value);
+              }}
               disabled={providerMissingApiKey}
             />
             <datalist id={IMAGE_PARSER_PANEL_MODEL_LIST_ID}>
@@ -387,7 +516,10 @@ export default function ImageParserPanel() {
               <span>Effort</span>
               <select
                 value={reasoningEffort}
-                onChange={(e) => setReasoningEffort(e.target.value)}
+                onChange={(e) => {
+                  setValidationFailure(null);
+                  setReasoningEffort(e.target.value);
+                }}
                 disabled={providerMissingApiKey}
               >
                 <option value="">Default</option>
@@ -481,6 +613,27 @@ export default function ImageParserPanel() {
         {/* Error */}
         {error && (
           <div className="image-parser-error">{error}</div>
+        )}
+        {validationFailure && (
+          <div className="image-parser-recovery" role="alert">
+            <div className="image-parser-recovery-title">Parser result failed validation</div>
+            <div className="image-parser-recovery-copy">
+              {validationFailure.message} This output is shown below for inspection only and should not be treated as validated parser data.
+            </div>
+            <div className="image-parser-recovery-actions">
+              <button type="button" onClick={handleParse} disabled={!canParse}>
+                Retry
+              </button>
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={parsing}>
+                Replace Image
+              </button>
+              {validationFailure.text && (
+                <button type="button" onClick={handleCopyUnvalidatedText}>
+                  Copy Raw Output
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         {/* Results */}

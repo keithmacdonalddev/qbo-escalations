@@ -221,11 +221,49 @@ function getParserValidationSummary(parseMeta) {
   };
 }
 
+function parserIssueToText(issue) {
+  if (!issue) return '';
+  if (typeof issue === 'string') return safeString(issue, '').replace(/\s+/g, ' ').trim();
+  if (isPlainObject(issue)) {
+    return safeString(issue.message || issue.code || issue.reason || issue.field, '').replace(/\s+/g, ' ').trim();
+  }
+  return safeString(issue, '').replace(/\s+/g, ' ').trim();
+}
+
+function getParserFallbackSummary(result) {
+  const parseMeta = isPlainObject(result?.parseMeta) ? result.parseMeta : {};
+  if (parseMeta.passed !== false) {
+    return {
+      fallbackEligible: false,
+      fallbackUsed: false,
+      fallbackFrom: null,
+      fallbackReason: '',
+      recoverySurface: 'none',
+    };
+  }
+
+  const canonical = isPlainObject(parseMeta.canonicalTemplate) ? parseMeta.canonicalTemplate : {};
+  const directIssue = Array.isArray(parseMeta.issues)
+    ? parseMeta.issues.map(parserIssueToText).find(Boolean)
+    : '';
+  const canonicalIssue = Array.isArray(canonical.issues)
+    ? canonical.issues.map(parserIssueToText).find(Boolean)
+    : '';
+  return {
+    fallbackEligible: true,
+    fallbackUsed: false,
+    fallbackFrom: 'parse-validation',
+    fallbackReason: directIssue || canonicalIssue || 'validation failed',
+    recoverySurface: 'pipeline-test-record-only',
+  };
+}
+
 async function createImageParserTestResultRecord({ imageFixture, runtime, provider, result, elapsedMs }) {
   if (!ImageParserTestResult.db || ImageParserTestResult.db.readyState !== 1) return null;
   const parseMeta = result?.parseMeta || null;
   const validation = getParserValidationSummary(parseMeta);
   const model = safeString(result?.usage?.model || runtime.model, '') || IMAGE_DEFAULT_MODELS[provider] || '';
+  const fallbackSummary = getParserFallbackSummary(result);
   try {
     return await ImageParserTestResult.create({
       fixture: imageFixture,
@@ -242,6 +280,7 @@ async function createImageParserTestResultRecord({ imageFixture, runtime, provid
       parseFields: isPlainObject(result?.parseFields) ? result.parseFields : {},
       parseMeta,
       usage: result?.usage || null,
+      ...fallbackSummary,
     });
   } catch (err) {
     console.warn('[pipeline-tests] Failed to save image parser test result:', err.message);
@@ -432,6 +471,7 @@ function buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixtur
   const provider = normalizeImageParserProvider(runtime.provider);
   const model = safeString(result?.usage?.model || runtime.model, '') || IMAGE_DEFAULT_MODELS[provider] || '';
   const text = safeString(result?.text || result?.sourceText, '');
+  const fallbackSummary = getParserFallbackSummary(result);
   return {
     source: 'pipeline-test',
     canonicalTemplate: text,
@@ -444,6 +484,7 @@ function buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixtur
       promptId: result?.promptId || 'escalation-template-parser',
       imageFixture,
       parserValidation: result?.parseMeta || null,
+        fallback: fallbackSummary,
     },
     runs: [{
       agentId: 'escalation-template-parser',
@@ -459,6 +500,7 @@ function buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixtur
         promptId: result?.promptId || 'escalation-template-parser',
         imageFixture,
         parserValidation: result?.parseMeta || null,
+        fallback: fallbackSummary,
       },
     }],
     testRun: true,
@@ -731,6 +773,7 @@ router.post('/run', async (req, res) => {
         timeoutMs: TEST_TIMEOUT_MS,
       });
       const elapsedMs = Date.now() - startedAt;
+      const fallbackSummary = getParserFallbackSummary(result);
       const savedTestResult = await createImageParserTestResultRecord({
         imageFixture,
         runtime,
@@ -752,6 +795,7 @@ router.post('/run', async (req, res) => {
         text: safeString(result?.text || result?.sourceText, ''),
         parseFields: isPlainObject(result?.parseFields) ? result.parseFields : {},
         parseMeta: result?.parseMeta || null,
+        ...fallbackSummary,
         caseIntake: buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixture),
       });
     } finally {

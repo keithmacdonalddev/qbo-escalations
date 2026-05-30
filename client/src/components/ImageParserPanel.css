@@ -257,6 +257,50 @@
   border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 25%, transparent);
 }
 
+.image-parser-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--danger, #ef4444) 24%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger, #ef4444) 8%, var(--bg-raised));
+}
+
+.image-parser-recovery-title {
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--danger, #ef4444);
+}
+
+.image-parser-recovery-copy {
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--ink-secondary);
+}
+
+.image-parser-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.image-parser-recovery-actions button {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-sunken);
+  color: var(--ink);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.image-parser-recovery-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* Results */
 .image-parser-results {
   flex: 1;

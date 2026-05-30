@@ -1,6 +1,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import MentionAutocomplete from './MentionAutocomplete.jsx';
+import { apiFetch } from '../../api/http.js';
+import { consumeSSEStream } from '../../api/sse.js';
 import { prepareImageForChat } from '../../lib/chatImagePrep.js';
+import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
+import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
+import { useToast } from '../../hooks/useToast.jsx';
 
 const MAX_CHARS = 50000;
 const CHAR_WARN_THRESHOLD = 45000;
@@ -89,9 +94,11 @@ function buildPendingImageSummary(parsedImageContext) {
 }
 
 function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = false, onAbort }) {
+  const toast = useToast();
   const [text, setText] = useState('');
   const [pendingImage, setPendingImage] = useState(null);
   const [imageParseError, setImageParseError] = useState(null);
+  const [retryImageFile, setRetryImageFile] = useState(null);
   const [imageParsing, setImageParsing] = useState(false);
   const [mentionState, setMentionState] = useState({
     active: false,
@@ -101,6 +108,7 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
   });
   const textareaRef = useRef(null);
   const mentionRef = useRef(null);
+  const toastedStageKeysRef = useRef(new Set());
 
   const autoResize = useCallback(() => {
     const el = textareaRef.current;
@@ -143,10 +151,28 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
     }
   }, [mentionState.active]);
 
+  const handleParserStageEvent = useCallback((event) => {
+    if (!event || typeof event !== 'object') return;
+    const toastKey = [
+      event.runId || '',
+      event.stageId || '',
+      event.kind || '',
+      event.seq ?? '',
+      event?.data?.providerPackageId || '',
+      event?.data?.displayMessage || '',
+    ].join(':');
+    if (toastedStageKeysRef.current.has(toastKey)) return;
+    if (showImageParserStageToast(toast, event)) {
+      toastedStageKeysRef.current.add(toastKey);
+    }
+  }, [toast]);
+
   const handleImageFile = useCallback(async (file) => {
     if (!file || !file.type.startsWith('image/')) return;
+    const imageAddedAt = Date.now();
     setImageParseError(null);
     setImageParsing(true);
+    toastedStageKeysRef.current.clear();
 
     try {
       const prepared = await prepareImageForChat(file);
@@ -154,19 +180,131 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
         throw new Error('Failed to prepare image for parsing');
       }
 
-      const res = await fetch('/api/image-parser/parse', {
+      const provider = localStorage.getItem('qbo-image-parser-provider') || '';
+      const model = localStorage.getItem('qbo-image-parser-model') || '';
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.client_request_started',
+        category: 'run',
+        source: 'client',
+        data: {
+          provider,
+          model,
+          imageAddedAt,
+          status: 'sent',
+          surfaceToUser: true,
+          displayMessage: 'payload sent to server - sent',
+        },
+      });
+      // Route through apiFetch (not raw fetch) for the shared timeout, abort
+      // signal, request-waterfall tracking, and mutation-retry policy. Match the
+      // other parse callers: a long timeout for slow local models and noRetry so
+      // we never re-run vision inference (wastes tokens + time).
+      const res = await apiFetch('/api/image-parser/parse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
         body: JSON.stringify({
           image: prepared.src,
-          provider: localStorage.getItem('qbo-image-parser-provider') || '',
-          model: localStorage.getItem('qbo-image-parser-model') || undefined,
+          provider,
+          model: model || undefined,
+          promptId: 'escalation-template-parser',
         }),
+        timeout: 210_000,
+        noRetry: true,
       });
-      const data = await res.json();
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      let data;
+      if (contentType.includes('text/event-stream')) {
+        // The /parse SSE route delivers every terminal outcome — success AND
+        // failure — as a single `parse_complete` frame ({ ok:false, ... } on
+        // failure). It never emits a top-level `error` frame, so `parse_complete`
+        // is the sole terminal; the only fallback is a stream that closed early.
+        let completed = null;
+        await consumeSSEStream(res, (eventType, payload) => {
+          if (eventType === 'stage_event') {
+            handleParserStageEvent(payload);
+          } else if (eventType === 'parse_complete') {
+            completed = payload;
+          }
+        });
+        data = completed || {
+          ok: false,
+          error: 'Parse stream ended without a result.',
+        };
+      } else {
+        data = await res.json();
+      }
 
       if (!res.ok || !data.ok) {
         throw new Error(data.error || 'Image parse failed');
+      }
+      const providerPackageId = data?.providerTrace?.providerPackageId || '';
+      if (providerPackageId) {
+        handleParserStageEvent({
+          stageId: 'parser',
+          runId: '',
+          ts: Date.now(),
+          seq: 0,
+          kind: 'parser.provider_content_received_client',
+          category: 'run',
+          source: 'client',
+          data: {
+            provider,
+            providerPackageId,
+            status: 'received',
+            surfaceToUser: true,
+            displayMessage: `providerPackageId: ${providerPackageId} content received in client - received`,
+          },
+        });
+      }
+      handleParserStageEvent({
+        stageId: 'parser',
+        runId: '',
+        ts: Date.now(),
+        seq: 0,
+        kind: 'parser.client_result_received',
+        category: 'run',
+        source: 'client',
+        data: {
+          provider: data?.providerUsed || provider,
+          model: data?.modelUsed || data?.usage?.model || model || '',
+          providerPackageId: providerPackageId || null,
+          textLength: (data?.text || data?.transcription || '').length,
+          elapsedMs: data?.elapsedMs ?? 0,
+          status: 'complete',
+        },
+      });
+      const validation = summarizeImageParserValidationFailure(data?.parseMeta);
+      if (validation) {
+        handleParserStageEvent({
+          stageId: 'parser',
+          runId: '',
+          ts: Date.now(),
+          seq: 0,
+          kind: 'parser.validation_failed_client',
+          category: 'run',
+          source: 'client',
+          data: {
+            code: validation.code,
+            issue: validation.issue,
+            provider: data?.providerUsed || provider,
+            model: data?.modelUsed || data?.usage?.model || model || '',
+            providerPackageId: providerPackageId || null,
+            status: 'blocked',
+            surfaceToUser: true,
+            displayMessage: validation.operatorMessage,
+          },
+        });
+        throw Object.assign(
+          new Error(`${validation.message} The image was not attached as validated parser data.`),
+          { code: validation.code }
+        );
       }
 
       setPendingImage({
@@ -181,12 +319,14 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
         },
         thumbnail: prepared.src,
       });
+      setRetryImageFile(null);
     } catch (err) {
+      setRetryImageFile(file);
       setImageParseError(err.message || 'Image parse failed');
     } finally {
       setImageParsing(false);
     }
-  }, []);
+  }, [handleParserStageEvent]);
 
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items;
@@ -297,7 +437,7 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
           </div>
           <button
             type="button"
-            onClick={() => { setPendingImage(null); setImageParseError(null); }}
+            onClick={() => { setPendingImage(null); setImageParseError(null); setRetryImageFile(null); }}
             className="room-pending-image-remove"
             aria-label="Remove pending image"
           >
@@ -322,9 +462,19 @@ function ChatRoomComposer({ onSend, agents = [], streaming = false, disabled = f
           <span className="room-pending-image-label" style={{ color: 'var(--feedback-error, #ef4444)' }}>
             {imageParseError}
           </span>
+          {retryImageFile && (
+            <button
+              type="button"
+              onClick={() => handleImageFile(retryImageFile)}
+              className="room-pending-image-retry"
+              disabled={imageParsing}
+            >
+              Retry
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setImageParseError(null)}
+            onClick={() => { setImageParseError(null); setRetryImageFile(null); }}
             className="room-pending-image-remove"
             aria-label="Dismiss error"
           >

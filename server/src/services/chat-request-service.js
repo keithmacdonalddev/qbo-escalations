@@ -43,6 +43,34 @@ function safeString(value, fallback = '') {
   }
 }
 
+function parserIssueToText(issue) {
+  if (!issue) return '';
+  if (typeof issue === 'string') return safeString(issue, '').replace(/\s+/g, ' ').trim();
+  if (typeof issue === 'object') {
+    return safeString(issue.message || issue.code || issue.reason || issue.field, '').replace(/\s+/g, ' ').trim();
+  }
+  return safeString(issue, '').replace(/\s+/g, ' ').trim();
+}
+
+function summarizeImageParserValidationFailure(parseMeta) {
+  if (!parseMeta || parseMeta.passed !== false) return null;
+  const canonical = parseMeta.canonicalTemplate && typeof parseMeta.canonicalTemplate === 'object'
+    ? parseMeta.canonicalTemplate
+    : {};
+  const directIssue = Array.isArray(parseMeta.issues)
+    ? parseMeta.issues.map(parserIssueToText).find(Boolean)
+    : '';
+  const canonicalIssue = Array.isArray(canonical.issues)
+    ? canonical.issues.map(parserIssueToText).find(Boolean)
+    : '';
+  const issue = directIssue || canonicalIssue || 'validation failed';
+  return {
+    code: 'PARSER_VALIDATION_FAILED',
+    issue,
+    message: `Image Parser output failed validation (${issue}). Falling back to generic image transcription.`,
+  };
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -1483,6 +1511,7 @@ async function buildChatImageAugmentation({
           usage: parserResult && parserResult.usage ? parserResult.usage : null,
           source: 'image-parser-agent',
           role: parserResult && parserResult.role ? parserResult.role : 'unknown',
+          parseMeta: parserResult && parserResult.parseMeta ? parserResult.parseMeta : null,
           providerUsed: imageParserConfig.provider,
           model: safeString(
             (parserResult && parserResult.usage && parserResult.usage.model)
@@ -1502,13 +1531,37 @@ async function buildChatImageAugmentation({
             totalTokens: imageTranscription.usage.totalTokens,
           } : null,
         });
-        if (imageTranscription.role === 'inv-list') {
-          nonEscalationIntent = true;
-          parserEventBus?.emit('image.normalized', { role: 'inv-list' });
-        } else if (imageTranscription.role) {
-          parserEventBus?.emit('image.normalized', { role: imageTranscription.role });
-        }
-        if (!safeString(imageTranscription.text, '').trim()) {
+        const validationFailure = summarizeImageParserValidationFailure(parserResult?.parseMeta);
+        if (validationFailure) {
+          parserEventBus?.emit('error', {
+            code: validationFailure.code,
+            message: validationFailure.message,
+          });
+          await sendStatus({
+            level: 'warning',
+            message: validationFailure.message,
+            code: validationFailure.code,
+            provider: imageParserConfig.provider,
+            model: imageParserConfig.model || '',
+            fallbackUsed: true,
+            fallbackFrom: 'parse-validation',
+            fallbackReason: validationFailure.issue,
+          });
+          imageTranscription = await runChatImageTranscriptionFallback({
+            normalizedImages,
+            transcriptionModel,
+            effectiveReasoningEffort,
+            effectiveTimeoutMs,
+            sendStatus,
+          });
+          parserEventBus?.emit('stage.completed', {
+            status: 'failed',
+            durationMs: Date.now() - parserStartedAt,
+            fallbackUsed: true,
+            fallbackFrom: 'parse-validation',
+            fallbackReason: validationFailure.issue,
+          });
+        } else if (!safeString(imageTranscription.text, '').trim()) {
           parserEventBus?.emit('error', {
             code: 'IMAGE_PARSER_EMPTY_OUTPUT',
             message: 'Image Parser returned empty text. Falling back to generic image transcription.',
@@ -1533,6 +1586,12 @@ async function buildChatImageAugmentation({
             fallbackUsed: true,
           });
         } else {
+          if (imageTranscription.role === 'inv-list') {
+            nonEscalationIntent = true;
+            parserEventBus?.emit('image.normalized', { role: 'inv-list' });
+          } else if (imageTranscription.role) {
+            parserEventBus?.emit('image.normalized', { role: imageTranscription.role });
+          }
           parserEventBus?.emit('stage.completed', {
             status: 'success',
             durationMs: Date.now() - parserStartedAt,

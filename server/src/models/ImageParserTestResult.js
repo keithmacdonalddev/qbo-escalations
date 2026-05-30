@@ -31,6 +31,11 @@ const imageParserTestResultSchema = new mongoose.Schema({
   parseFields: { type: mongoose.Schema.Types.Mixed, default: {} },
   parseMeta: { type: mongoose.Schema.Types.Mixed, default: null },
   usage: { type: mongoose.Schema.Types.Mixed, default: null },
+  fallbackEligible: { type: Boolean, default: false, index: true },
+  fallbackUsed: { type: Boolean, default: false },
+  fallbackFrom: { type: String, default: null },
+  fallbackReason: { type: String, default: '' },
+  recoverySurface: { type: String, default: 'none' },
 }, {
   timestamps: true,
   versionKey: false,

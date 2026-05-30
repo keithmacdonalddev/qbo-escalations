@@ -3,6 +3,7 @@ import { sendChatMessage } from '../../api/chatApi.js';
 import { apiFetch } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
+import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
 import { useToast } from '../../hooks/useToast.jsx';
 import { normalizeError } from '../../utils/normalizeError.js';
 import {
@@ -220,9 +221,22 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
       stageEventAlreadyEmitted: sawFailureStageEvent,
     });
   }
+  const validation = summarizeImageParserValidationFailure(data?.parseMeta);
+  if (validation) {
+    throw Object.assign(new Error(`${validation.message} The staged parser result was not used.`), {
+      code: validation.code,
+      detail: validation.issue,
+      status: res.status,
+      statusText: res.statusText || '',
+      providerTrace: data?.providerTrace || null,
+      stageEventAlreadyEmitted: false,
+    });
+  }
   return {
     text: data.text || data.sourceText || '',
     sourceText: data.sourceText || data.text || '',
+    parseFields: data.parseFields || {},
+    parseMeta: data.parseMeta || null,
     providerUsed: data.providerUsed || cfg.provider,
     modelUsed: data.modelUsed || data.usage?.model || cfg.model || '',
     reasoningEffortUsed: cfg.reasoningEffort || '',

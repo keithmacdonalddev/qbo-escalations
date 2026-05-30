@@ -225,6 +225,50 @@
   border: 1px solid rgba(239, 83, 80, 0.20);
 }
 
+.ip-popup-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid rgba(239, 83, 80, 0.22);
+  border-radius: var(--radius-md);
+  background: rgba(239, 83, 80, 0.06);
+}
+
+.ip-popup-recovery-title {
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: #ff8a86;
+}
+
+.ip-popup-recovery-copy {
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: #f2c1bf;
+}
+
+.ip-popup-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ip-popup-recovery-actions button {
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: #E2E5EB;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ip-popup-recovery-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .ip-popup-actions {
   display: flex;
   gap: var(--sp-2);
