@@ -12,7 +12,7 @@ const { reportServerError } = require('../lib/server-error-pipeline');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 
 function getParsePrompt() {
-  return getRenderedAgentPrompt('sdk-image-parse');
+  return getRenderedAgentPrompt('escalation-template-parser');
 }
 
 const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
@@ -90,7 +90,8 @@ function normalizeEffort(value) {
  * @param {string} [options.model] - Model override
  * @param {string} [options.reasoningEffort] - low | medium | high
  * @returns {Promise<{text: string, usage: Object|null}|null>}
- *   Model answer text + usage, or null on failure (caller should fall back).
+ *   Model answer text + usage, or null on failure. The caller decides how to
+ *   surface failure; this adapter does not silently change parser contracts.
  */
 async function parseImageWithSDK(imageBase64, options = {}) {
   const { rawBase64, mediaType } = decodeBase64Input(imageBase64);
@@ -229,7 +230,7 @@ async function parseImageWithSDK(imageBase64, options = {}) {
 
     reportServerError({
       message: `SDK image parse error: ${err.message || err}`,
-      detail: 'parseImageWithSDK failed — caller will fall back to CLI path.',
+      detail: 'parseImageWithSDK failed; caller will surface provider failure or use an explicit fallback policy.',
       stack: (err && err.stack) || '',
       source: 'sdk-image-parse.js',
       category: 'runtime-error',

@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const path = require('path');
 const { EventEmitter } = require('events');
 
 const mongo = require('./_mongo-helper');
@@ -16,6 +17,9 @@ const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 const {
   __waitForProviderPackageRecorderSettled,
 } = require('../src/services/provider-call-package-recorder');
+const {
+  getRenderedAgentPrompt,
+} = require('../src/lib/agent-prompt-store');
 
 const sdkModulePath = require.resolve('../src/services/sdk-image-parse');
 const sdkModule = require('../src/services/sdk-image-parse');
@@ -125,6 +129,18 @@ const ANSWER_TEXT = [
   'TS STEPS: 1) Cleared cache 2) Retried with backup admin',
 ].join('\n');
 
+test('Anthropic SDK prompt uses the canonical escalation template contract', () => {
+  const canonicalPrompt = getRenderedAgentPrompt('escalation-template-parser').replace(/\r\n/g, '\n');
+  const sdkPrompt = getRenderedAgentPrompt('sdk-image-parse').replace(/\r\n/g, '\n');
+  const sdkSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sdk-image-parse.js'), 'utf8');
+
+  assert.equal(sdkPrompt, canonicalPrompt);
+  assert.match(sdkPrompt, /PROMPT_VERSION: P24/);
+  assert.match(sdkPrompt, /Return the completed form only/);
+  assert.doesNotMatch(sdkPrompt, /Return ONLY the JSON/i);
+  assert.match(sdkSource, /getRenderedAgentPrompt\('escalation-template-parser'\)/);
+});
+
 test.before(async () => {
   await mongo.connect();
 });
@@ -170,7 +186,7 @@ test('parseImage with provider=anthropic uses SDK adapter and forwards answer te
   }
 });
 
-test('parseImage with provider=anthropic forwards arbitrary SDK answer text without judging it', async () => {
+test('parseImage with provider=anthropic rejects non-template SDK output through normal validation', async () => {
   const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test-arbitrary', KEYS_FILE);
   const arbitraryText = '1 2 3 4 5\nthis is not a parser template';
   installSdkSpy(async () => ({ text: arbitraryText, usage: null }));
