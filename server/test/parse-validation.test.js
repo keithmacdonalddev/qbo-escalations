@@ -11,11 +11,13 @@ test('normalizeParsedEscalationFields coerces enums and trims text', () => {
     category: 'BANK_FEEDS',
     triedTestAccount: true,
     attemptingTo: '  Connect bank   account  ',
+    kbToolsUsed: '  Help   panel,   Google  ',
   }, 'Customer cannot connect bank feed');
 
   assert.equal(out.category, 'bank-feeds');
   assert.equal(out.triedTestAccount, 'yes');
   assert.equal(out.attemptingTo, 'Connect bank account');
+  assert.equal(out.kbToolsUsed, 'Help panel, Google');
 });
 
 test('normalizeParsedEscalationFields accepts common category aliases', () => {
@@ -39,6 +41,7 @@ test('validateParsedEscalation returns high confidence for complete payload', ()
     attemptingTo: 'Connect Chase bank feed and import transactions',
     expectedOutcome: 'Bank feed should connect and import the latest 90 days',
     actualOutcome: 'Connection fails with invalid credentials error',
+    kbToolsUsed: 'Help panel, Google',
     tsSteps: 'Cleared cache, relinked account, and tried incognito',
     triedTestAccount: 'no',
     category: 'bank-feeds',
@@ -47,7 +50,29 @@ test('validateParsedEscalation returns high confidence for complete payload', ()
   assert.equal(validation.passed, true);
   assert.equal(validation.confidence, 'high');
   assert.ok(validation.score >= 0.8);
+  assert.equal(validation.fieldsFound, 9);
+  assert.equal(validation.normalizedFields.kbToolsUsed, 'Help panel, Google');
   assert.equal(validation.issues.includes('unknown_category'), false);
+});
+
+test('validateParsedEscalation counts only canonical template fields as found', () => {
+  const validation = validateParsedEscalation({
+    coid: '12345',
+    mid: '67890',
+    caseNumber: 'CS-2026-000123',
+    clientContact: 'Jane Client',
+    agentName: 'Internal Agent Name',
+    attemptingTo: 'Connect Chase bank feed and import transactions',
+    expectedOutcome: 'Bank feed should connect and import the latest 90 days',
+    actualOutcome: 'Connection fails with invalid credentials error',
+    kbToolsUsed: 'Help panel, Google',
+    tsSteps: 'Cleared cache, relinked account, and tried incognito',
+    triedTestAccount: 'no',
+    category: 'bank-feeds',
+    severity: 'P3',
+  });
+
+  assert.equal(validation.fieldsFound, 9);
 });
 
 test('validateParsedEscalation fails when narrative fields are missing', () => {

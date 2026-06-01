@@ -1,0 +1,362 @@
+/* AgentBootOverlay.css
+ *
+ * Full-viewport boot screen that gates the app until the agent registry
+ * resolves the first health snapshot for every known agent.
+ *
+ * Visual reference: prototypes/design-challenge/vercel/index.html (boot
+ * overlay section). True-black terminal aesthetic, monospace, line-by-line
+ * reveal with a 150ms stagger, colored prefix tokens per status.
+ *
+ * Palette mirrored verbatim from the prototype:
+ *   #50e3c2  ok (online / success)
+ *   #0070f3  info (boot prefix / progress fill)
+ *   #f5a623  warn (offline / retrying)
+ *   #444     dim (gray prefix label)
+ *   #79ffe1  cyan (progress fill highlight)
+ *   #ededed  fg (default text)
+ *   #a1a1a1  muted text
+ *   #000     true-black background
+ */
+
+.boot-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: #000;
+  color: #a1a1a1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+/* Subtle scanline texture — same trick the prototype uses. */
+.boot-overlay::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(255, 255, 255, 0.008) 2px,
+    rgba(255, 255, 255, 0.008) 4px
+  );
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+.boot-overlay__container {
+  position: relative;
+  z-index: 1;
+  max-width: 720px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+}
+
+.boot-overlay__logo {
+  align-self: center;
+  margin-bottom: 8px;
+  color: #ededed;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0;
+  animation: bootLogoIn 0.6s 0.2s cubic-bezier(0, 0, 0.2, 1) forwards;
+  text-shadow: 0 0 20px rgba(0, 112, 243, 0.35);
+}
+
+@keyframes bootLogoIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.boot-overlay__lines {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.boot-line {
+  display: block;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 150ms ease-out, transform 150ms ease-out;
+  color: #a1a1a1;
+}
+
+.boot-line.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* Colored span tokens used inside each boot line. */
+.boot-line .bl-ok   { color: #50e3c2; }
+.boot-line .bl-info { color: #0070f3; }
+.boot-line .bl-warn { color: #f5a623; }
+.boot-line .bl-dim  { color: #444; }
+.boot-line .bl-val  { color: #ededed; }
+.boot-line .bl-mono { color: #79ffe1; font-family: inherit; }
+
+.boot-overlay__progress {
+  width: 100%;
+  height: 2px;
+  background: #1a1a1a;
+  border-radius: 1px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.boot-overlay__progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #0070f3, #79ffe1);
+  border-radius: 1px;
+  transition: width 250ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.boot-overlay__summary {
+  margin-top: 8px;
+  color: #50e3c2;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.boot-overlay__actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.boot-overlay__banner {
+  padding: 10px 14px;
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  background: rgba(245, 166, 35, 0.08);
+  color: #f5a623;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.boot-overlay__button {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid #333;
+  background: #ededed;
+  color: #000;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, transform 100ms ease;
+}
+
+.boot-overlay__button:hover {
+  background: #fff;
+  border-color: #555;
+}
+
+.boot-overlay__button:active {
+  transform: scale(0.97);
+}
+
+.boot-overlay__button:focus-visible {
+  outline: 2px solid #0070f3;
+  outline-offset: 2px;
+}
+
+.boot-overlay__button--ghost {
+  background: transparent;
+  color: #ededed;
+  border-color: #333;
+}
+
+.boot-overlay__button--ghost:hover {
+  background: #111;
+  border-color: #555;
+}
+
+.boot-overlay__server-error {
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid rgba(238, 0, 0, 0.4);
+  background: rgba(238, 0, 0, 0.08);
+  border-radius: 8px;
+  color: #ff1a1a;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.boot-overlay__server-error-title {
+  color: #ff1a1a;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.boot-overlay__server-error-detail {
+  color: #a1a1a1;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.boot-overlay__hint {
+  margin-top: 8px;
+  color: #666;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+ * Per-agent progress rows.
+ *
+ * One row per agent, rendered below the boot log. Each row has three
+ * columns: agent label (left), progress bar (center, flex-grows), status
+ * label (right). The bar has four visual states keyed off a modifier
+ * class on the parent row:
+ *   .boot-agent-row--checking  → indeterminate shimmer (info blue/cyan)
+ *   .boot-agent-row--success   → solid fill in ok green (#50e3c2)
+ *   .boot-agent-row--failure   → solid fill in warn amber (#f5a623)
+ *   .boot-agent-row--disabled  → solid fill in dim gray (#444)
+ *   .boot-agent-row--stuck     → indeterminate but tinted amber
+ *
+ * Colors and font are drawn straight from the existing boot palette so
+ * the rows belong to the same terminal aesthetic.
+ * ────────────────────────────────────────────────────────────────────── */
+.boot-overlay__agent-rows {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.boot-agent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) 1fr minmax(0, 110px);
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+  color: #a1a1a1;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+
+.boot-agent-row__label {
+  color: #ededed;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.boot-agent-row__bar {
+  position: relative;
+  display: block;
+  height: 4px;
+  background: #1a1a1a;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.boot-agent-row__bar-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #0070f3, #79ffe1);
+  transition: width 280ms cubic-bezier(0, 0, 0.2, 1), background 200ms ease;
+}
+
+/* Settled — success (online). */
+.boot-agent-row--success .boot-agent-row__bar-fill {
+  width: 100%;
+  background: linear-gradient(90deg, #36b390, #50e3c2);
+}
+.boot-agent-row--success .boot-agent-row__status {
+  color: #50e3c2;
+}
+
+/* Settled — failure (offline). */
+.boot-agent-row--failure .boot-agent-row__bar-fill {
+  width: 100%;
+  background: linear-gradient(90deg, #c97a17, #f5a623);
+}
+.boot-agent-row--failure .boot-agent-row__status {
+  color: #f5a623;
+}
+
+/* Settled — disabled. */
+.boot-agent-row--disabled .boot-agent-row__bar-fill {
+  width: 100%;
+  background: #333;
+}
+.boot-agent-row--disabled .boot-agent-row__label,
+.boot-agent-row--disabled .boot-agent-row__status {
+  color: #666;
+}
+
+/* In-flight — indeterminate shimmer. The fill becomes a sliding 40%-wide
+ * gradient that walks across the bar to telegraph "still working." */
+.boot-agent-row--checking .boot-agent-row__bar-fill,
+.boot-agent-row--stuck .boot-agent-row__bar-fill {
+  width: 40%;
+  background: linear-gradient(90deg, transparent, #79ffe1, transparent);
+  animation: bootRowShimmer 1.4s linear infinite;
+}
+.boot-agent-row--stuck .boot-agent-row__bar-fill {
+  background: linear-gradient(90deg, transparent, #f5a623, transparent);
+}
+
+.boot-agent-row--checking .boot-agent-row__status {
+  color: #0070f3;
+}
+.boot-agent-row--stuck .boot-agent-row__status {
+  color: #f5a623;
+}
+
+.boot-agent-row__status {
+  text-align: right;
+  white-space: nowrap;
+  color: #a1a1a1;
+}
+
+@keyframes bootRowShimmer {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(250%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot-overlay__logo,
+  .boot-line,
+  .boot-overlay__progress-fill,
+  .boot-agent-row__bar-fill {
+    animation: none !important;
+    transition: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .boot-agent-row--checking .boot-agent-row__bar-fill,
+  .boot-agent-row--stuck .boot-agent-row__bar-fill {
+    width: 60%;
+  }
+}

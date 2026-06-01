@@ -127,16 +127,63 @@ test('exact key o3 still matches', () => {
 
 // --- Pricing table correctness (cross-checked against vendor docs) ---
 
-test('Claude Opus 4.7 priced at $5/$25 per MTok', () => {
-  const rates = getRates('claude-opus-4-7', null);
+test('Claude Opus 4.8 priced at $5/$25 per MTok', () => {
+  const rates = getRates('claude-opus-4-8', null);
   assert.equal(rates.inputNanosPerToken, 5000);
   assert.equal(rates.outputNanosPerToken, 25000);
+});
+
+// --- Regression (batch 3 / Fix #5): current Opus ids must NOT fall back to the
+// generic `claude` provider rate (which equals Sonnet $3/$15) and undercount. ---
+
+test('Claude Opus 4.8 resolves to Opus rate, NOT the Sonnet/generic fallback', () => {
+  // Pass provider 'claude' to prove the Opus rate wins over the generic
+  // provider fallback (3000/15000) that previously masked the miss.
+  const r = calculateCost(1000, 500, 'claude-opus-4-8', 'claude');
+  assert.equal(r.rateFound, true);
+  // Opus = $5/$25 per MTok = 5000/25000 nanos per token.
+  assert.equal(r.inputCostNanos, 5_000_000);
+  assert.equal(r.outputCostNanos, 12_500_000);
+  // Guard against the regression: Sonnet/generic would have been 3_000_000 input.
+  assert.notEqual(r.inputCostNanos, 3_000_000);
+});
+
+test('Claude Opus 4.6 resolves to the Opus rate', () => {
+  const rates = getRates('claude-opus-4-6', 'claude');
+  assert.equal(rates.inputNanosPerToken, 5000);
+  assert.equal(rates.outputNanosPerToken, 25000);
+});
+
+test('unknown future claude-opus-* id resolves to Opus tier, not Sonnet fallback', () => {
+  const rates = getRates('claude-opus-4-9-20260101', 'claude');
+  assert.equal(rates.inputNanosPerToken, 5000);
+  assert.equal(rates.outputNanosPerToken, 25000);
+});
+
+test('Claude Sonnet 4.6 still resolves to the Sonnet rate', () => {
+  const r = calculateCost(1000, 500, 'claude-sonnet-4-6', 'claude');
+  assert.equal(r.rateFound, true);
+  // Sonnet = $3/$15 per MTok = 3000/15000 nanos per token.
+  assert.equal(r.inputCostNanos, 3_000_000);
+  assert.equal(r.outputCostNanos, 7_500_000);
 });
 
 test('Claude Haiku 3.5 priced at $0.80/$4 per MTok', () => {
   const rates = getRates('claude-3-5-haiku-20241022', null);
   assert.equal(rates.inputNanosPerToken, 800);
   assert.equal(rates.outputNanosPerToken, 4000);
+});
+
+test('Gemini 3.5 Flash priced at $1.50/$9 per MTok', () => {
+  const rates = getRates('gemini-3.5-flash', null);
+  assert.equal(rates.inputNanosPerToken, 1500);
+  assert.equal(rates.outputNanosPerToken, 9000);
+});
+
+test('Gemini 3 Flash Preview priced at $0.50/$3 per MTok', () => {
+  const rates = getRates('gemini-3-flash-preview', null);
+  assert.equal(rates.inputNanosPerToken, 500);
+  assert.equal(rates.outputNanosPerToken, 3000);
 });
 
 // --- microsToUsd / nanosToUsd ---
@@ -185,7 +232,7 @@ test('component micros sum to total for various token counts', () => {
     [1, 0, 'claude-3-haiku-20240307', 'claude'],
     [0, 1, 'claude-3-haiku-20240307', 'claude'],
     [13, 7, 'o3-mini', 'openai'],
-    [100000, 50000, 'claude-opus-4-7', 'claude'],
+    [100000, 50000, 'claude-opus-4-8', 'claude'],
   ];
   for (const [inp, out, model, prov] of cases) {
     const r = calculateCost(inp, out, model, prov);
@@ -236,7 +283,7 @@ test('fractional input tokens produce integer nanos (review repro: 0.333)', () =
 });
 
 test('fractional output tokens produce integer nanos', () => {
-  const r = calculateCost(0, 1.7, 'claude-opus-4-7', 'claude');
+  const r = calculateCost(0, 1.7, 'claude-opus-4-8', 'claude');
   assert.equal(Number.isInteger(r.outputCostNanos), true, 'outputCostNanos must be integer, got ' + r.outputCostNanos);
   assert.equal(Number.isInteger(r.totalCostNanos), true);
 });

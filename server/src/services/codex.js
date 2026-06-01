@@ -2,6 +2,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const mongoose = require('mongoose');
 const { extractCodexUsage } = require('../lib/usage-extractor');
 const {
   isStubbed: isProvidersStubbed,
@@ -12,10 +13,16 @@ const {
   isProviderCallPackageCaptureEnabled,
   recordCliProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
+const {
+  observeProviderPackageCapture,
+  setPackageCapturePromise,
+} = require('./providers/provider-handoff');
 
 const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.5';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
 const CODEX_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const DEFAULT_SERVICE_TIER = process.env.CODEX_SERVICE_TIER || 'fast';
+const CODEX_ALLOWED_SERVICE_TIERS = new Set(['fast', 'priority', 'flex']);
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -28,6 +35,29 @@ function didCliExitSuccessfully(code) {
 function normalizeCodexReasoningEffort(value, fallback = DEFAULT_REASONING_EFFORT) {
   const normalized = String(value || '').trim().toLowerCase();
   return CODEX_ALLOWED_EFFORTS.has(normalized) ? normalized : fallback;
+}
+
+// Last-line OS command-injection guard. Codex is spawned with shell:true, so the
+// model string is re-parsed by the OS shell and must never contain shell
+// metacharacters. Lazily require the shared validator to avoid a load-time
+// circular dependency (codex.js <- providers/registry <- chat-orchestrator).
+function assertSafeModel(model, label = 'model') {
+  if (model === undefined || model === null || model === '') return;
+  // eslint-disable-next-line global-require
+  const { assertModelAllowed } = require('./chat-orchestrator');
+  assertModelAllowed(model, label);
+}
+
+function normalizeCodexServiceTier(value, fallback = 'fast') {
+  const normalized = String(value || '').trim().toLowerCase();
+  return CODEX_ALLOWED_SERVICE_TIERS.has(normalized) ? normalized : fallback;
+}
+
+function codexConfigArgs({ reasoningEffort, serviceTier = DEFAULT_SERVICE_TIER }) {
+  return [
+    '-c', `reasoning_effort="${reasoningEffort}"`,
+    '-c', `service_tier="${normalizeCodexServiceTier(serviceTier)}"`,
+  ];
 }
 
 const CHAT_TIMEOUT_MS = parsePositiveInt(process.env.CODEX_CHAT_TIMEOUT_MS, 180000);
@@ -103,6 +133,275 @@ function isCodexSpawnFailure(err) {
     || /spawn .* (ENOENT|EACCES)/i.test(message);
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function buildCodexCliCaptureContext(overrides = {}) {
+  return {
+    providerId: 'codex',
+    providerResearchId: 'openai-cli',
+    providerPathType: 'cli',
+    ...overrides,
+    source: {
+      file: 'server/src/services/codex.js',
+      ...(overrides.source || {}),
+    },
+  };
+}
+
+function createCodexCliCapture({
+  captureContext = {},
+  command = 'codex',
+  args,
+  child,
+  stdinText,
+  timeoutMs,
+  requestStartedAt = nowIso(),
+  modelRequested,
+  reasoningEffort,
+  expectsJsonl = true,
+  captureEnabled,
+  onProviderEvent,
+}) {
+  const effectiveCaptureEnabled = captureEnabled ?? (
+    captureContext.forceCapture === true || isProviderCallPackageCaptureEnabled()
+  );
+  const packageId = effectiveCaptureEnabled ? new mongoose.Types.ObjectId() : null;
+  let stdoutBuffer = '';
+  let stdoutText = '';
+  let stderrText = '';
+  let firstStdoutAt = null;
+  let firstStderrAt = null;
+  let stdinWrittenAt = null;
+  let stdoutFinalBuffer = '';
+  let cliCaptureQueued = false;
+  let packageCaptureQueued = false;
+  let closeObserved = false;
+  let pendingCaptureMeta = null;
+  let captureCloseWaitTimer = null;
+  const stdoutLines = [];
+  const stdoutJsonlEvents = [];
+  const malformedStdoutLines = [];
+  const stdoutChunks = [];
+  const stderrChunks = [];
+
+  function writeStdin() {
+    child.stdin.write(stdinText);
+    child.stdin.end();
+    stdinWrittenAt = nowIso();
+  }
+
+  function handleStdoutData(data, onLine) {
+    if (cliCaptureQueued) return;
+    const chunkText = data.toString();
+    const receivedAt = nowIso();
+    if (!firstStdoutAt) firstStdoutAt = receivedAt;
+    stdoutChunks.push({ seq: stdoutChunks.length, receivedAt, text: chunkText });
+    stdoutText += chunkText;
+    stdoutBuffer += chunkText;
+    const lines = stdoutBuffer.split('\n');
+    stdoutBuffer = lines.pop() || '';
+    for (const line of lines) {
+      const parsed = captureStdoutLine(line);
+      if (typeof onLine === 'function') {
+        onLine(line, parsed.event);
+      }
+    }
+  }
+
+  function handleStderrData(data) {
+    if (cliCaptureQueued) return;
+    const chunkText = data.toString();
+    const receivedAt = nowIso();
+    if (!firstStderrAt) firstStderrAt = receivedAt;
+    stderrChunks.push({ seq: stderrChunks.length, receivedAt, text: chunkText });
+    if (stderrText.length < 10240) stderrText += chunkText;
+  }
+
+  function captureStdoutLine(line) {
+    stdoutLines.push(line);
+    try {
+      const event = JSON.parse(line);
+      stdoutJsonlEvents.push(event);
+      return { event, malformed: false };
+    } catch {
+      malformedStdoutLines.push(line);
+      return { event: null, malformed: true };
+    }
+  }
+
+  function finalizeStdoutBufferForClose() {
+    stdoutFinalBuffer = stdoutBuffer;
+    if (!stdoutFinalBuffer) return { line: '', event: null };
+    const parsed = captureStdoutLine(stdoutFinalBuffer);
+    return { line: stdoutFinalBuffer, event: parsed.event };
+  }
+
+  function getProviderTrace(meta = {}) {
+    return {
+      providerId: captureContext.providerId || 'codex',
+      providerResearchId: captureContext.providerResearchId || 'openai-cli',
+      providerPathType: captureContext.providerPathType || 'cli',
+      providerHarness: 'openai-cli',
+      operation: captureContext.operation || '',
+      callSite: captureContext.callSite || '',
+      modelRequested: modelRequested || captureContext.modelRequested || '',
+      model: modelRequested || captureContext.modelRequested || '',
+      reasoningEffort: reasoningEffort || captureContext.reasoningEffort || '',
+      requestStartedAt,
+      providerPackageId: packageId ? String(packageId) : null,
+      captureEnabled: Boolean(effectiveCaptureEnabled),
+      packageCaptureQueued: Boolean(packageCaptureQueued),
+      outcome: meta.outcome || null,
+      exitCode: Number.isFinite(meta.exitCode) ? meta.exitCode : null,
+      signal: meta.signal || null,
+      processClosedAt: meta.processClosedAt || null,
+    };
+  }
+
+  function queueCliCapture(meta = {}) {
+    if (!effectiveCaptureEnabled || cliCaptureQueued) {
+      return {
+        queued: false,
+        packageId: packageId ? String(packageId) : null,
+        providerTrace: getProviderTrace(meta),
+      };
+    }
+    cliCaptureQueued = true;
+    if (captureCloseWaitTimer) {
+      clearTimeout(captureCloseWaitTimer);
+      captureCloseWaitTimer = null;
+    }
+    const responseCompletedAt = nowIso();
+    const durationMs = Math.max(new Date(responseCompletedAt).getTime() - new Date(requestStartedAt).getTime(), 0);
+    const queued = recordCliProviderCallPackageInBackground({
+      captureContext,
+      command,
+      args,
+      spawnOptions: {
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        envOverrides: {
+          CLAUDECODE: '[unset]',
+        },
+      },
+      env: {
+        capturedKeys: ['CLAUDECODE'],
+        notes: ['CLAUDECODE is unset for Codex subprocess isolation'],
+      },
+      stdinText,
+      stdoutText,
+      stdoutLines,
+      stdoutJsonlEvents,
+      malformedStdoutLines,
+      stdoutFinalBuffer,
+      stdoutChunks,
+      stderrText,
+      stderrChunks,
+      pid: child.pid || null,
+      exitCode: Number.isFinite(meta.exitCode) ? meta.exitCode : null,
+      signal: meta.signal || null,
+      spawned: meta.spawned === false ? false : true,
+      closed: Boolean(meta.closed),
+      killed: Boolean(meta.killed),
+      killSignal: meta.killSignal || null,
+      timeout: {
+        timeoutMs,
+        fired: Boolean(meta.timeoutFired),
+      },
+      requestStartedAt,
+      stdinWrittenAt,
+      firstStdoutAt,
+      firstStderrAt,
+      processClosedAt: meta.processClosedAt || (meta.closed ? responseCompletedAt : null),
+      responseCompletedAt,
+      durationMs,
+      error: meta.error || null,
+      outcome: meta.outcome || null,
+      modelRequested,
+      reasoningEffort,
+      expectsJsonl,
+    }, {
+      log: true,
+      packageId,
+      force: captureContext.forceCapture === true,
+    });
+    packageCaptureQueued = Boolean(queued && queued.queued);
+    const providerTrace = getProviderTrace(meta);
+    if (queued?.promise) {
+      setPackageCapturePromise(providerTrace, queued.promise);
+    }
+    observeProviderPackageCapture({
+      providerTrace,
+      capture: {
+        queued: packageCaptureQueued,
+        promise: queued?.promise || null,
+      },
+      onProviderEvent,
+      providerId: providerTrace.providerId || captureContext.providerId || 'codex',
+      providerHarness: providerTrace.providerHarness || 'openai-cli',
+    });
+    return {
+      queued: packageCaptureQueued,
+      packageId: packageId ? String(packageId) : null,
+      promise: queued && queued.promise ? queued.promise : null,
+      providerTrace,
+    };
+  }
+
+  function deferCliCaptureUntilClose(meta = {}) {
+    if (!effectiveCaptureEnabled || cliCaptureQueued) return;
+    pendingCaptureMeta = {
+      ...(pendingCaptureMeta || {}),
+      ...meta,
+    };
+    if (closeObserved) {
+      queueCliCapture(pendingCaptureMeta);
+      pendingCaptureMeta = null;
+      return;
+    }
+    if (!captureCloseWaitTimer) {
+      captureCloseWaitTimer = setTimeout(() => {
+        if (!pendingCaptureMeta || cliCaptureQueued) return;
+        queueCliCapture(pendingCaptureMeta);
+        pendingCaptureMeta = null;
+      }, CLI_CAPTURE_CLOSE_WAIT_MS);
+      if (typeof captureCloseWaitTimer.unref === 'function') {
+        captureCloseWaitTimer.unref();
+      }
+    }
+  }
+
+  function markClosed() {
+    closeObserved = true;
+  }
+
+  function takePendingCaptureMeta() {
+    const meta = pendingCaptureMeta;
+    pendingCaptureMeta = null;
+    return meta;
+  }
+
+  function getStderrText() {
+    return stderrText;
+  }
+
+  return {
+    writeStdin,
+    handleStdoutData,
+    handleStderrData,
+    finalizeStdoutBufferForClose,
+    queueCliCapture,
+    deferCliCaptureUntilClose,
+    markClosed,
+    takePendingCaptureMeta,
+    getStderrText,
+    getProviderTrace,
+    requestStartedAt,
+  };
+}
+
 /**
  * Chat with Codex CLI via subprocess.
  *
@@ -116,23 +415,39 @@ function isCodexSpawnFailure(err) {
  * @param {function} opts.onError
  * @returns {function} cleanup
  */
-function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError }) {
+function chat({
+  messages,
+  systemPrompt,
+  images,
+  model,
+  reasoningEffort,
+  serviceTier,
+  timeoutMs,
+  captureContext,
+  onProviderEvent,
+  onChunk,
+  onThinkingChunk,
+  onDone,
+  onError,
+}) {
   if (isProvidersStubbed()) {
     const stub = getProviderStub('codex', 'chat');
     if (!stub) throw new MissingProviderStubError('codex', 'chat');
-    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError });
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, serviceTier, timeoutMs, captureContext, onProviderEvent, onChunk, onThinkingChunk, onDone, onError });
   }
+  assertSafeModel(model);
   const prompt = buildPrompt(messages, systemPrompt);
   const tempFiles = writeImageTempFiles(images);
   const effectiveModel = model || DEFAULT_MODEL;
   const effectiveReasoningEffort = normalizeCodexReasoningEffort(reasoningEffort);
+  const effectiveServiceTier = normalizeCodexServiceTier(serviceTier);
   const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
 
   const args = [
     'exec',
     '--json',
     '--model', effectiveModel,
-    '-c', `reasoning_effort="${effectiveReasoningEffort}"`,
+    ...codexConfigArgs({ reasoningEffort: effectiveReasoningEffort, serviceTier: effectiveServiceTier }),
     '--skip-git-repo-check',
   ];
 
@@ -155,23 +470,80 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     shell: true,
     env: { ...process.env, CLAUDECODE: undefined },
   });
-  child.stdin.write(prompt);
-  child.stdin.end();
+  const cliCapture = createCodexCliCapture({
+    captureContext: buildCodexCliCaptureContext({
+      callSite: 'codex:chat',
+      operation: 'chat',
+      modelRequested: effectiveModel,
+      reasoningEffort: effectiveReasoningEffort,
+      ...(captureContext || {}),
+      source: {
+        functionName: 'chat',
+        spawnSite: 'codex.chat',
+        ...(captureContext?.source || {}),
+      },
+    }),
+    args,
+    child,
+    stdinText: prompt,
+    timeoutMs: effectiveTimeoutMs,
+    modelRequested: effectiveModel,
+    reasoningEffort: effectiveReasoningEffort,
+    onProviderEvent,
+  });
+  try {
+    cliCapture.writeStdin();
+  } catch (err) {
+    finishWithError(err, { outcome: 'process_error' });
+    return function cleanupAfterStdinFailure() {
+      return {
+        usage: capturedUsage || null,
+        partialResponse: fullResponse,
+        providerTrace: cliCapture.getProviderTrace({ outcome: 'process_error' }),
+      };
+    };
+  }
 
-  function finishWithError(err) {
+  function finishWithError(err, meta = {}, options = {}) {
     if (settled || killed) return;
     settled = true;
     cleanupTempFiles(tempFiles);
     const error = err instanceof Error ? err : new Error(String(err));
     error._usage = capturedUsage || null;
+    const captureMeta = { ...meta, error, outcome: meta.outcome || null };
+    if (options.deferCaptureUntilClose) {
+      cliCapture.deferCliCaptureUntilClose(captureMeta);
+      error.providerTrace = cliCapture.getProviderTrace(captureMeta);
+    } else {
+      const capture = cliCapture.queueCliCapture(captureMeta);
+      error.providerTrace = capture.providerTrace;
+    }
     onError(error);
   }
 
-  function finishWithSuccess(text) {
+  function finishWithSuccess(text, meta = {}) {
     if (settled || killed) return;
     settled = true;
     cleanupTempFiles(tempFiles);
-    onDone(text, capturedUsage || null);
+    const capture = cliCapture.queueCliCapture({ ...meta, outcome: meta.outcome || 'success' });
+    onDone(text, capturedUsage || null, capture.providerTrace);
+  }
+
+  function processStdoutLine(line, event) {
+    if (settled || killed) return;
+    if (event) {
+      const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
+      if (usage) capturedUsage = usage;
+    }
+    const thinking = extractThinkingFromEventLine(line, seenReasoningTextByItem);
+    if (thinking && onThinkingChunk) {
+      try { onThinkingChunk(thinking); } catch { /* ignore callback errors */ }
+    }
+    const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
+    if (delta) {
+      fullResponse += delta;
+      try { onChunk(delta); } catch { /* ignore callback errors */ }
+    }
   }
 
   const timeout = setTimeout(() => {
@@ -179,77 +551,94 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
     const timeoutErr = new Error('Codex CLI timed out after ' + effectiveTimeoutMs + 'ms');
     timeoutErr.code = 'TIMEOUT';
-    finishWithError(timeoutErr);
+    finishWithError(timeoutErr, {
+      outcome: 'timeout',
+      timeoutFired: true,
+      killed: true,
+      killSignal: 'SIGTERM',
+    }, {
+      deferCaptureUntilClose: true,
+    });
   }, effectiveTimeoutMs);
 
-  let stdoutBuffer = '';
   child.stdout.on('data', (data) => {
-    if (settled || killed) return;
-    stdoutBuffer += data.toString();
-    const lines = stdoutBuffer.split('\n');
-    stdoutBuffer = lines.pop() || '';
-
-    for (const line of lines) {
-      try {
-        const event = JSON.parse(line);
-        const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
-        if (usage) capturedUsage = usage;
-      } catch { /* non-JSON line */ }
-      const thinking = extractThinkingFromEventLine(line, seenReasoningTextByItem);
-      if (thinking && onThinkingChunk) {
-        try { onThinkingChunk(thinking); } catch { /* ignore callback errors */ }
-      }
-      const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
-      if (delta) {
-        fullResponse += delta;
-        try { onChunk(delta); } catch { /* ignore callback errors */ }
-      }
-    }
+    cliCapture.handleStdoutData(data, processStdoutLine);
   });
 
-  let stderrOutput = '';
   child.stderr.on('data', (data) => {
-    if (stderrOutput.length < 10240) stderrOutput += data.toString();
+    cliCapture.handleStderrData(data);
   });
 
-  child.on('close', (code) => {
+  child.on('close', (code, signal) => {
     clearTimeout(timeout);
+    cliCapture.markClosed();
+    const processClosedAt = new Date().toISOString();
+    const tail = cliCapture.finalizeStdoutBufferForClose();
+    if (tail.line) processStdoutLine(tail.line, tail.event);
+
+    const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+    if (pendingCaptureMeta) {
+      cliCapture.queueCliCapture({
+        ...pendingCaptureMeta,
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+        processClosedAt,
+      });
+      return;
+    }
+
     if (settled || killed) return;
 
-    try {
-      const event = JSON.parse(stdoutBuffer);
-      const usage = extractCodexUsage(event, { fallbackModel: effectiveModel });
-      if (usage) capturedUsage = usage;
-    } catch { /* ignore */ }
-
-    const tailThinking = extractThinkingFromEventLine(stdoutBuffer, seenReasoningTextByItem);
-    if (tailThinking && onThinkingChunk) {
-      try { onThinkingChunk(tailThinking); } catch { /* ignore callback errors */ }
-    }
-
-    const tailDelta = extractDeltaFromEventLine(stdoutBuffer, seenAgentTextByItem);
-    if (tailDelta) {
-      fullResponse += tailDelta;
-      try { onChunk(tailDelta); } catch { /* ignore callback errors */ }
-    }
     if (!didCliExitSuccessfully(code)) {
-      finishWithError(new Error(formatCliFailure(code, stderrOutput)));
+      finishWithError(new Error(formatCliFailure(code, cliCapture.getStderrText())), {
+        outcome: 'process_error',
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+        processClosedAt,
+      });
     } else {
-      finishWithSuccess(fullResponse);
+      finishWithSuccess(fullResponse, {
+        outcome: 'success',
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+        processClosedAt,
+      });
     }
   });
 
   child.on('error', (err) => {
     clearTimeout(timeout);
-    if (!killed) finishWithError(err);
+    const spawnFailure = isCodexSpawnFailure(err);
+    if (!killed) {
+      finishWithError(err, {
+        outcome: spawnFailure ? 'spawn_error' : 'process_error',
+        spawned: !spawnFailure,
+      }, {
+        deferCaptureUntilClose: true,
+      });
+    }
   });
 
   return function cleanup() {
     killed = true;
     clearTimeout(timeout);
     try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    cliCapture.deferCliCaptureUntilClose({
+      outcome: 'aborted',
+      aborted: true,
+      killed: true,
+      killSignal: 'SIGTERM',
+      error: Object.assign(new Error('Codex CLI chat aborted'), { code: 'ABORT_ERR' }),
+    });
     cleanupTempFiles(tempFiles);
-    return { usage: capturedUsage || null, partialResponse: fullResponse };
+    return {
+      usage: capturedUsage || null,
+      partialResponse: fullResponse,
+      providerTrace: cliCapture.getProviderTrace({ outcome: 'aborted' }),
+    };
   };
 }
 
@@ -264,7 +653,7 @@ async function warmUp() {
       'exec',
       '--json',
       '--model', DEFAULT_MODEL,
-      '-c', `reasoning_effort="${DEFAULT_REASONING_EFFORT}"`,
+      ...codexConfigArgs({ reasoningEffort: DEFAULT_REASONING_EFFORT }),
       '--skip-git-repo-check',
       '-',
     ], {
@@ -313,8 +702,10 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : PARSE_TIMEOUT_MS;
+  assertSafeModel(options.model);
   const effectiveParseModel = options.model || PARSE_MODEL;
   const effectiveParseReasoningEffort = normalizeCodexReasoningEffort(options.reasoningEffort, PARSE_REASONING_EFFORT);
+  const effectiveParseServiceTier = normalizeCodexServiceTier(options.serviceTier);
 
   const schemaExample = JSON.stringify({
     coid: '',
@@ -353,7 +744,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     'exec',
     '--json',
     '--model', effectiveParseModel,
-    '-c', `reasoning_effort="${effectiveParseReasoningEffort}"`,
+    ...codexConfigArgs({ reasoningEffort: effectiveParseReasoningEffort, serviceTier: effectiveParseServiceTier }),
     '--skip-git-repo-check',
   ];
   for (const file of tempFiles) {
@@ -369,94 +760,157 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       shell: true,
       env: { ...process.env, CLAUDECODE: undefined },
     });
+    const cliCapture = createCodexCliCapture({
+      captureContext: buildCodexCliCaptureContext({
+        callSite: 'codex:parseEscalation',
+        operation: 'parse-escalation',
+        modelRequested: effectiveParseModel,
+        reasoningEffort: effectiveParseReasoningEffort,
+        ...(options.captureContext || {}),
+        source: {
+          functionName: 'parseEscalation',
+          spawnSite: 'codex.parseEscalation',
+          ...(options.captureContext?.source || {}),
+        },
+      }),
+      args,
+      child,
+      stdinText: prompt,
+      timeoutMs,
+      modelRequested: effectiveParseModel,
+      reasoningEffort: effectiveParseReasoningEffort,
+    });
 
     let settled = false;
-    let stdoutBuffer = '';
-    let stderrOutput = '';
     let fullResponse = '';
     let capturedUsage = null;
     const seenAgentTextByItem = new Map();
 
-    function finishOk(result) {
+    function finishOk(result, meta = {}) {
       if (settled) return;
       settled = true;
       cleanupTempFiles(tempFiles);
-      resolve({ fields: result, usage: capturedUsage });
+      const capture = cliCapture.queueCliCapture({ ...meta, outcome: meta.outcome || 'success' });
+      resolve({ fields: result, usage: capturedUsage, providerTrace: capture.providerTrace });
     }
 
-    function finishErr(err) {
+    function finishErr(err, meta = {}, options = {}) {
       if (settled) return;
       settled = true;
       cleanupTempFiles(tempFiles);
       const error = err instanceof Error ? err : new Error(String(err));
       error._usage = capturedUsage || null;
+      const captureMeta = { ...meta, error, outcome: meta.outcome || null };
+      if (options.deferCaptureUntilClose) {
+        cliCapture.deferCliCaptureUntilClose(captureMeta);
+        error.providerTrace = cliCapture.getProviderTrace(captureMeta);
+      } else {
+        const capture = cliCapture.queueCliCapture(captureMeta);
+        error.providerTrace = capture.providerTrace;
+      }
       reject(error);
     }
 
-    child.stdin.write(prompt);
-    child.stdin.end();
+    function processStdoutLine(line, event) {
+      if (settled) return;
+      if (event) {
+        const usage = extractCodexUsage(event, { fallbackModel: effectiveParseModel });
+        if (usage) capturedUsage = usage;
+      }
+      const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
+      if (delta) fullResponse += delta;
+    }
+
+    try {
+      cliCapture.writeStdin();
+    } catch (err) {
+      finishErr(err, { outcome: 'process_error' });
+      return;
+    }
 
     const timeout = setTimeout(() => {
       if (settled) return;
       try { child.kill('SIGTERM'); } catch { /* ignore */ }
       const timeoutErr = new Error('Codex CLI parse timed out after ' + timeoutMs + 'ms');
       timeoutErr.code = 'TIMEOUT';
-      finishErr(timeoutErr);
+      finishErr(timeoutErr, {
+        outcome: 'timeout',
+        timeoutFired: true,
+        killed: true,
+        killSignal: 'SIGTERM',
+      }, {
+        deferCaptureUntilClose: true,
+      });
     }, timeoutMs);
 
     child.stdout.on('data', (data) => {
-      if (settled) return;
-      stdoutBuffer += data.toString();
-      const lines = stdoutBuffer.split('\n');
-      stdoutBuffer = lines.pop() || '';
-      for (const line of lines) {
-        try {
-          const event = JSON.parse(line);
-          const usage = extractCodexUsage(event, { fallbackModel: effectiveParseModel });
-          if (usage) capturedUsage = usage;
-        } catch { /* non-JSON, ignore */ }
-        const delta = extractDeltaFromEventLine(line, seenAgentTextByItem);
-        if (delta) fullResponse += delta;
-      }
+      cliCapture.handleStdoutData(data, processStdoutLine);
     });
 
     child.stderr.on('data', (data) => {
-      stderrOutput += data.toString();
+      cliCapture.handleStderrData(data);
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timeout);
-      if (settled) return;
+      cliCapture.markClosed();
+      const processClosedAt = nowIso();
+      const tail = cliCapture.finalizeStdoutBufferForClose();
+      if (tail.line) processStdoutLine(tail.line, tail.event);
 
-      try {
-        const event = JSON.parse(stdoutBuffer);
-        const usage = extractCodexUsage(event, { fallbackModel: effectiveParseModel });
-        if (usage) capturedUsage = usage;
-      } catch { /* ignore */ }
-
-      const tailDelta = extractDeltaFromEventLine(stdoutBuffer, seenAgentTextByItem);
-      if (tailDelta) fullResponse += tailDelta;
-
-      if (code !== 0 && !fullResponse) {
-        finishErr(new Error(formatCliFailure(code, stderrOutput)));
+      const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+      if (pendingCaptureMeta) {
+        cliCapture.queueCliCapture({
+          ...pendingCaptureMeta,
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
         return;
       }
 
+      if (settled) return;
+
+      if (code !== 0 && !fullResponse) {
+        finishErr(new Error(formatCliFailure(code, cliCapture.getStderrText())), {
+          outcome: 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
+        return;
+      }
+
+      const finishMeta = {
+        outcome: code === 0 ? 'success' : 'process_error',
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+        processClosedAt,
+      };
       const parsed = extractJSONObject(fullResponse);
       if (parsed) {
-        finishOk(parsed);
+        finishOk(parsed, finishMeta);
         return;
       }
 
       finishOk({
         category: 'unknown',
         attemptingTo: fullResponse.slice(0, 800),
-      });
+      }, finishMeta);
     });
 
     child.on('error', (err) => {
       clearTimeout(timeout);
-      finishErr(err);
+      const spawnFailure = isCodexSpawnFailure(err);
+      finishErr(err, {
+        outcome: spawnFailure ? 'spawn_error' : 'process_error',
+        spawned: !spawnFailure,
+      }, {
+        deferCaptureUntilClose: true,
+      });
     });
   });
 }
@@ -484,11 +938,13 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   const input = typeof imageBase64OrPath === 'string' ? imageBase64OrPath.trim() : '';
   if (!input) throw new Error('transcribeImage: image input is empty');
 
+  assertSafeModel(options.model);
   const effectiveModel = options.model || PARSE_MODEL;
   const effectiveReasoningEffort = normalizeCodexReasoningEffort(
     options.reasoningEffort,
     PARSE_REASONING_EFFORT
   );
+  const effectiveServiceTier = normalizeCodexServiceTier(options.serviceTier);
   const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
     ? options.timeoutMs
     : PARSE_TIMEOUT_MS;
@@ -522,7 +978,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     'exec',
     '--json',
     '--model', effectiveModel,
-    '-c', `reasoning_effort="${effectiveReasoningEffort}"`,
+    ...codexConfigArgs({ reasoningEffort: effectiveReasoningEffort, serviceTier: effectiveServiceTier }),
     '--skip-git-repo-check',
   ];
   for (const file of imagePaths) {

@@ -10,6 +10,19 @@ const DUPLICATE_WINDOW_MS = 100;
 const DUPLICATE_BADGE_DURATION_MS = 3000;
 const MAX_TRACKED_BODY_CHARS = 8_192;
 
+// Endpoints excluded from the waterfall + HealthBanner tracking.
+// /api/agent-identities/health intentionally probes remote providers and can
+// take several seconds (especially with ?forceRefresh=true) — its slowness is
+// expected and reported separately by the dedicated AgentHealthBanner. Feeding
+// it into the generic HealthBanner causes a false "Recent ... request was slow"
+// warning. Use includes() so query strings like ?forceRefresh=true still match.
+const IGNORED_TRACKER_PATHS = ['/api/agent-identities/health'];
+
+function isIgnoredTrackerUrl(url) {
+  if (typeof url !== 'string') return false;
+  return IGNORED_TRACKER_PATHS.some((path) => url.includes(path));
+}
+
 // ── localStorage helpers (silent on quota errors) ────────────
 
 function loadJSON(key, fallback) {
@@ -144,6 +157,13 @@ export function useRequestWaterfall() {
   // Stable tracker object — mutates entries in-place for perf
   const tracker = useRef({
     start({ url, method, startTime, options }) {
+      // Skip recording for ignored endpoints — request still happens, but
+      // it never enters the requests array, so HealthBanner can't flag it.
+      // Return a sentinel id; subsequent lifecycle calls find no entry and
+      // early-return via their `if (!req) return` guards.
+      if (isIgnoredTrackerUrl(url)) {
+        return `req-ignored-${nextIdRef.current++}`;
+      }
       const id = `req-${nextIdRef.current++}`;
       const shortUrl = url.split('?')[0].replace('/api/', '');
       const endpoint = url.split('?')[0]; // full endpoint without query params

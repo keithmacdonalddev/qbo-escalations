@@ -99,6 +99,7 @@ const runtimeSettingsSchema = new mongoose.Schema({
   model: { type: String, default: '' },
   fallbackModel: { type: String, default: '' },
   reasoningEffort: { type: String, default: '' },
+  serviceTier: { type: String, default: '' },
   configured: { type: Boolean, default: false },
   source: { type: String, default: 'agent-profile' },
   updatedBy: { type: String, default: '' },

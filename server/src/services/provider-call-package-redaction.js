@@ -556,6 +556,227 @@ function redactProviderCallPackage(envelope) {
     );
   }
 
+  if (redacted.llmGateway && typeof redacted.llmGateway === 'object') {
+    if (redacted.llmGateway.request?.headers) {
+      const result = redactHeaders(redacted.llmGateway.request.headers);
+      redacted.llmGateway.request.headers = result.headers;
+      redacted.llmGateway.request.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+
+    if (redacted.llmGateway.request?.bodyJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.llmGateway.request.bodyJson = redactBodySecrets(
+        redacted.llmGateway.request.bodyJson,
+        'llmGateway.request.bodyJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.llmGateway.request, 'llmGateway.request.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (!redacted.llmGateway.request?.bodyJson) {
+      redactJsonTextField(
+        redacted.llmGateway.request,
+        'bodyText',
+        'llmGateway.request.bodyText',
+        redactedBodyPaths,
+        notes,
+        'llmGateway.request.bodyText JSON string redacted'
+      );
+    }
+
+    if (redacted.llmGateway.response?.headers) {
+      const result = redactHeaders(redacted.llmGateway.response.headers);
+      redacted.llmGateway.response.headers = result.headers;
+      redacted.llmGateway.response.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.llmGateway.response?.rawHeaders) {
+      const result = redactRawHeaders(redacted.llmGateway.response.rawHeaders);
+      redacted.llmGateway.response.rawHeaders = result.rawHeaders;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.llmGateway.response?.parsedJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.llmGateway.response.parsedJson = redactBodySecrets(
+        redacted.llmGateway.response.parsedJson,
+        'llmGateway.response.parsedJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.llmGateway.response, 'llmGateway.response.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (Array.isArray(redacted.llmGateway.response?.bodyChunks)) {
+      redacted.llmGateway.response.bodyChunks = redactTextChunkArray(
+        redacted.llmGateway.response.bodyChunks,
+        'llmGateway.response.bodyChunks',
+        redactedBodyPaths,
+        notes
+      );
+    }
+
+    if (redacted.llmGateway.gateway?.metadata) {
+      redacted.llmGateway.gateway.metadata = redactBodySecrets(
+        redacted.llmGateway.gateway.metadata,
+        'llmGateway.gateway.metadata',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.llmGateway.gateway?.usage) {
+      redacted.llmGateway.gateway.usage = redactBodySecrets(
+        redacted.llmGateway.gateway.usage,
+        'llmGateway.gateway.usage',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.llmGateway.gateway?.cost) {
+      redacted.llmGateway.gateway.cost = redactBodySecrets(
+        redacted.llmGateway.gateway.cost,
+        'llmGateway.gateway.cost',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.llmGateway.gateway?.credits) {
+      redacted.llmGateway.gateway.credits = redactBodySecrets(
+        redacted.llmGateway.gateway.credits,
+        'llmGateway.gateway.credits',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.llmGateway.providerStatus) {
+      redacted.llmGateway.providerStatus = redactBodySecrets(
+        redacted.llmGateway.providerStatus,
+        'llmGateway.providerStatus',
+        redactedBodyPaths
+      );
+    }
+
+    if (redacted.llmGateway.error?.object) {
+      redacted.llmGateway.error.object = redactBodySecrets(
+        redacted.llmGateway.error.object,
+        'llmGateway.error.object',
+        redactedBodyPaths
+      );
+    }
+    redactJsonTextField(
+      redacted.llmGateway.error,
+      'rawBody',
+      'llmGateway.error.rawBody',
+      redactedBodyPaths,
+      notes,
+      'llmGateway.error.rawBody JSON string redacted'
+    );
+  }
+
+  if (redacted.geminiApi && typeof redacted.geminiApi === 'object') {
+    if (redacted.geminiApi.request?.headers) {
+      const result = redactHeaders(redacted.geminiApi.request.headers);
+      redacted.geminiApi.request.headers = result.headers;
+      redacted.geminiApi.request.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+
+    if (redacted.geminiApi.request?.bodyJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.geminiApi.request.bodyJson = redactBodySecrets(
+        redacted.geminiApi.request.bodyJson,
+        'geminiApi.request.bodyJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.geminiApi.request, 'geminiApi.request.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (!redacted.geminiApi.request?.bodyJson) {
+      redactJsonTextField(
+        redacted.geminiApi.request,
+        'bodyText',
+        'geminiApi.request.bodyText',
+        redactedBodyPaths,
+        notes,
+        'geminiApi.request.bodyText JSON string redacted'
+      );
+    }
+
+    if (redacted.geminiApi.response?.headers) {
+      const result = redactHeaders(redacted.geminiApi.response.headers);
+      redacted.geminiApi.response.headers = result.headers;
+      redacted.geminiApi.response.redactedHeaderNames = result.redactedHeaderNames;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.geminiApi.response?.rawHeaders) {
+      const result = redactRawHeaders(redacted.geminiApi.response.rawHeaders);
+      redacted.geminiApi.response.rawHeaders = result.rawHeaders;
+      redactedHeaderNames.push(...result.redactedHeaderNames);
+    }
+    if (redacted.geminiApi.response?.parsedJson) {
+      const beforeCount = redactedBodyPaths.length;
+      redacted.geminiApi.response.parsedJson = redactBodySecrets(
+        redacted.geminiApi.response.parsedJson,
+        'geminiApi.response.parsedJson',
+        redactedBodyPaths
+      );
+      if (redactedBodyPaths.length > beforeCount) {
+        replaceJsonText(redacted.geminiApi.response, 'geminiApi.response.bodyText regenerated after body secret redaction', notes);
+      }
+    }
+    if (Array.isArray(redacted.geminiApi.response?.bodyChunks)) {
+      redacted.geminiApi.response.bodyChunks = redactTextChunkArray(
+        redacted.geminiApi.response.bodyChunks,
+        'geminiApi.response.bodyChunks',
+        redactedBodyPaths,
+        notes
+      );
+    }
+
+    if (redacted.geminiApi.response?.promptFeedback) {
+      redacted.geminiApi.response.promptFeedback = redactBodySecrets(
+        redacted.geminiApi.response.promptFeedback,
+        'geminiApi.response.promptFeedback',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.geminiApi.response?.usageMetadata) {
+      redacted.geminiApi.response.usageMetadata = redactBodySecrets(
+        redacted.geminiApi.response.usageMetadata,
+        'geminiApi.response.usageMetadata',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.geminiApi.providerStatus) {
+      redacted.geminiApi.providerStatus = redactBodySecrets(
+        redacted.geminiApi.providerStatus,
+        'geminiApi.providerStatus',
+        redactedBodyPaths
+      );
+    }
+
+    if (redacted.geminiApi.error?.object) {
+      redacted.geminiApi.error.object = redactBodySecrets(
+        redacted.geminiApi.error.object,
+        'geminiApi.error.object',
+        redactedBodyPaths
+      );
+    }
+    if (redacted.geminiApi.error?.googleErrorDetails) {
+      redacted.geminiApi.error.googleErrorDetails = redactBodySecrets(
+        redacted.geminiApi.error.googleErrorDetails,
+        'geminiApi.error.googleErrorDetails',
+        redactedBodyPaths
+      );
+    }
+    redactJsonTextField(
+      redacted.geminiApi.error,
+      'rawBody',
+      'geminiApi.error.rawBody',
+      redactedBodyPaths,
+      notes,
+      'geminiApi.error.rawBody JSON string redacted'
+    );
+  }
+
   redacted.redaction = {
     ...(redacted.redaction && typeof redacted.redaction === 'object' ? redacted.redaction : {}),
     applied: true,

@@ -7,12 +7,18 @@ import './HealthBanner.css';
  * Reads the same request data from useRequestWaterfall and shows:
  *   Green:  "All systems working" (auto-hides after 3s)
  *   Yellow: "Chat is responding slowly" etc.
- *   Red:    "2 features aren't working" etc.
+ *   Red:    "Recent Chat request failed" etc.
  *
  * Click the pill to expand a per-feature detail panel.
  */
 
 const ENDPOINT_NAMES = {
+  'agent-identities/provider-strategy/health/logs': 'Provider health logs',
+  'agent-identities/provider-strategy/health': 'Provider health check',
+  'agent-identities/runtime-defaults': 'Agent runtime defaults',
+  'agent-identities/lifecycle': 'Agent lifecycle',
+  'agent-identities/health': 'Agent health',
+  'agent-identities': 'Agent profiles',
   'chat/send': 'Chat',
   'chat/parse-escalation': 'Triage Preview',
   'chat/conversations': 'Conversations',
@@ -49,6 +55,22 @@ function formatDuration(ms) {
   return (ms / 1000).toFixed(2) + 's';
 }
 
+function requestSortTime(request, now) {
+  return request.endTime || request.headersTime || request.startTime || now;
+}
+
+function isFailedRequest(request) {
+  return request.state === 'error' || (request.status && request.status >= 500);
+}
+
+function hasRequestOutcome(request) {
+  return request.state === 'complete' || request.state === 'error' || request.state === 'aborted';
+}
+
+function requestDuration(request, now) {
+  return (request.endTime || now) - request.startTime;
+}
+
 export default function HealthBanner({ requests, slowThreshold = 500 }) {
   const [dismissed, setDismissed] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -61,33 +83,48 @@ export default function HealthBanner({ requests, slowThreshold = 500 }) {
     const now = performance.now();
     const recent = requests.filter(r => !r.restored && now - r.startTime < 30_000);
 
-    // Failures: status >= 500 or state === 'error' in recent window
-    const failed = recent.filter(r => r.state === 'error' || (r.status && r.status >= 500));
-    // Slow: completed requests exceeding threshold
-    const slow = recent.filter(r => {
-      if (r.state !== 'complete') return false;
-      const dur = (r.endTime || now) - r.startTime;
+    // Show the latest request state per feature. A failed request followed by
+    // a successful retry should not keep claiming that feature is down.
+    const latestByName = new Map();
+    for (const request of recent) {
+      if (!hasRequestOutcome(request)) continue;
+      const name = featureName(request.url);
+      const sortTime = requestSortTime(request, now);
+      const existing = latestByName.get(name);
+      if (!existing || sortTime >= existing.sortTime) {
+        latestByName.set(name, { name, request, sortTime });
+      }
+    }
+
+    const latestRows = [...latestByName.values()];
+    // Failures: status >= 500 or state === 'error' on the latest feature request
+    const failed = latestRows.filter(({ request }) => isFailedRequest(request));
+    // Slow: completed latest requests exceeding threshold, excluding failures
+    const slow = latestRows.filter(({ request }) => {
+      if (isFailedRequest(request)) return false;
+      if (request.state !== 'complete') return false;
+      const dur = requestDuration(request, now);
       return slowThreshold > 0 && dur > slowThreshold;
     });
 
     // Build details array — one entry per request that's bad
     const rawDetails = [];
-    for (const r of failed) {
-      const dur = (r.endTime || now) - r.startTime;
+    for (const { name, request } of failed) {
+      const dur = requestDuration(request, now);
       rawDetails.push({
-        name: featureName(r.url),
+        name,
         duration: dur,
         status: 'error',
-        statusCode: r.status || null,
+        statusCode: request.status || null,
       });
     }
-    for (const r of slow) {
-      const dur = (r.endTime || now) - r.startTime;
+    for (const { name, request } of slow) {
+      const dur = requestDuration(request, now);
       rawDetails.push({
-        name: featureName(r.url),
+        name,
         duration: dur,
         status: 'slow',
-        statusCode: r.status || null,
+        statusCode: request.status || null,
       });
     }
 
@@ -111,15 +148,15 @@ export default function HealthBanner({ requests, slowThreshold = 500 }) {
       return b.duration - a.duration;
     });
 
-    const failedFeatures = [...new Set(failed.map(r => featureName(r.url)))];
+    const failedFeatures = failed.map(({ name }) => name);
     if (failedFeatures.length > 0) {
       const msg = failedFeatures.length === 1
-        ? `${failedFeatures[0]} is not working`
-        : `${failedFeatures.slice(0, 3).join(', ')}${failedFeatures.length > 3 ? ` +${failedFeatures.length - 3} more` : ''} not working`;
+        ? `Recent ${failedFeatures[0]} request failed`
+        : `Recent failed requests: ${failedFeatures.slice(0, 3).join(', ')}${failedFeatures.length > 3 ? ` +${failedFeatures.length - 3} more` : ''}`;
       return { level: 'red', message: msg, details: dedupedDetails };
     }
 
-    const slowFeatures = [...new Set(slow.map(r => featureName(r.url)))];
+    const slowFeatures = slow.map(({ name }) => name);
     if (slowFeatures.length > 0) {
       const msg = slowFeatures.length === 1
         ? `Recent ${slowFeatures[0]} request was slow`

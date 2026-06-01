@@ -4,12 +4,17 @@ import {
   getAgentIdentity,
   getAgentIdentityHistory,
   importAgentIdentities,
+  deleteImageParserTestResult,
   listImageParserTestResults,
   listImageParserHistory,
+  listTriageTestResults,
   listAgentIdentities,
+  programmaticCheckImageParserTestResult,
   recordAgentHarnessRun,
   recordAgentReview,
+  retestImageParserTestResult,
   updateImageParserTestResult,
+  updateTriageTestResult,
   updateAgentIdentity,
   updateAgentEnabled,
   updateAgentRuntime,
@@ -27,8 +32,10 @@ import {
 import {
   dispatchAgentRuntimeDefaultsApplied,
   getAgentRuntimeDefinition,
+  getAgentRuntimeEffectiveModel,
   getAgentRuntimeModelPlaceholder,
   getAgentRuntimeModelSuggestions,
+  getAgentRuntimeProviderLabel,
   getAgentRuntimeSummary,
   normalizeAgentRuntimeState,
   readAgentRuntimeState,
@@ -37,12 +44,41 @@ import {
 import { dispatchAgentProfileUpdated } from '../lib/agentIdentityEvents.js';
 import {
   IMAGE_PARSER_PROVIDER_OPTIONS,
+  getImageParserDeterminismProfile,
   getImageParserReasoningEffortOptions,
 } from '../lib/imageParserCatalog.js';
-import { PROVIDER_OPTIONS, REASONING_EFFORT_OPTIONS } from '../lib/providerCatalog.js';
+import {
+  CODEX_SERVICE_TIER_OPTIONS,
+  PROVIDER_OPTIONS,
+  REASONING_EFFORT_OPTIONS,
+  getProviderMeta,
+  providerSupportsCodexServiceTier,
+} from '../lib/providerCatalog.js';
 import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
 import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
+import { useAgentRegistry } from '../context/AgentRegistryContext.jsx';
+import { useAgentTestModal } from './agent-tests/AgentTestModalProvider.jsx';
+import { isAgentTestSupported } from './agent-tests/agentTestHarnesses.js';
+import ConfirmModal from './ConfirmModal.jsx';
+// healthStatusToOperationalToken converts the registry's health.status tokens
+// (online/offline/disabled/unknown) into the legacy operational tokens
+// (active/degraded/disabled/idle) that drive the status-dot-* CSS classes
+// declared in AgentsView.css. Shared with PipelineSidebar (Step 5), the
+// upcoming boot overlay (Step 7), and inline save-time recheck (Step 6).
+import {
+  healthStatusToOperationalToken,
+  buildDotTooltip,
+  healthStatusLabel,
+  formatLastChecked,
+} from '../lib/agentStatus.js';
+import {
+  PIPELINE_TOPOLOGY,
+  pipelineNodeLabel,
+  pipelinePosition,
+} from './chat-v5/pipelineRuntime.js';
+import { STAGE_LABELS } from './chat-v5/mockData.js';
 import './AgentsView.css';
+import './AgentOverviewTab.css';
 
 const PROFILE_FIELDS = [
   { key: 'roleTitle', label: 'Agent name', type: 'text' },
@@ -82,6 +118,15 @@ const IMAGE_PARSER_PROFILE_TABS = [
   ...PROFILE_TABS.slice(4),
 ];
 
+// Stage 4 Triage Agent gets its own Test Results tab now that there is a
+// dedicated /api/triage-tests/run endpoint persisting each test run for
+// operator review. Same slot position as the parser's test-results tab.
+const TRIAGE_AGENT_PROFILE_TABS = [
+  ...PROFILE_TABS.slice(0, 4),
+  { id: 'triage-test-results', label: 'Test Results' },
+  ...PROFILE_TABS.slice(4),
+];
+
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
   acc[field.key] = '';
   return acc;
@@ -92,7 +137,6 @@ const AGENT_OPERATION_META = {
     department: 'Conversation Ops',
     owner: 'Ava Chen',
     team: 'Escalation Desk',
-    status: 'active',
     risk: 'Medium',
     trust: 4.7,
     reviewStatus: 'Human-reviewed',
@@ -107,7 +151,6 @@ const AGENT_OPERATION_META = {
     department: 'Intake Reliability',
     owner: 'Maya Patel',
     team: 'Parser Ops',
-    status: 'active',
     risk: 'Low',
     trust: 4.8,
     reviewStatus: 'Deterministic',
@@ -122,7 +165,6 @@ const AGENT_OPERATION_META = {
     department: 'Support Intelligence',
     owner: 'Olivia Chen',
     team: 'Customer Support',
-    status: 'active',
     risk: 'Medium',
     trust: 4.6,
     reviewStatus: 'Human-reviewed',
@@ -137,7 +179,6 @@ const AGENT_OPERATION_META = {
     department: 'Knowledge Ops',
     owner: 'David Park',
     team: 'Investigation Support',
-    status: 'active',
     risk: 'Low',
     trust: 4.5,
     reviewStatus: 'Human-reviewed',
@@ -152,7 +193,6 @@ const AGENT_OPERATION_META = {
     department: 'Follow-up Ops',
     owner: 'Noah Kim',
     team: 'Escalation Desk',
-    status: 'idle',
     risk: 'Low',
     trust: 4.2,
     reviewStatus: 'Human-reviewed',
@@ -167,7 +207,6 @@ const AGENT_OPERATION_META = {
     department: 'Workspace Automation',
     owner: 'Ava Chen',
     team: 'Platform Ops',
-    status: 'active',
     risk: 'High',
     trust: 4.4,
     reviewStatus: 'Human-reviewed',
@@ -182,7 +221,6 @@ const AGENT_OPERATION_META = {
     department: 'Guided Operations',
     owner: 'Maya Patel',
     team: 'Expert Desk',
-    status: 'active',
     risk: 'Medium',
     trust: 4.5,
     reviewStatus: 'Human-reviewed',
@@ -197,7 +235,6 @@ const AGENT_OPERATION_META = {
     department: 'Visual Evidence',
     owner: 'David Park',
     team: 'Parser Ops',
-    status: 'review',
     risk: 'Medium',
     trust: 4.1,
     reviewStatus: 'Review overdue',
@@ -219,6 +256,7 @@ const STATUS_LABELS = {
 };
 
 function AgentsView({ agentIdFromRoute = null }) {
+  const { openAgentTest } = useAgentTestModal();
   const [agents, setAgents] = useState([]);
   const [selectedAgentId, setSelectedAgentId] = useState(agentIdFromRoute);
   const [currentAgent, setCurrentAgent] = useState(null);
@@ -242,6 +280,16 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [previewVersion, setPreviewVersion] = useState(null);
   const [runtimeSelections, setRuntimeSelections] = useState({});
   const [runtimeSaveStatus, setRuntimeSaveStatus] = useState(null);
+  // Inline save-time recheck result shown in RuntimeSettingsPanel beside the
+  // Save button (Step 6 of the agent-registry-bootstrap plan). Shape:
+  //   { agentId, status, message, latencyMs }
+  // status is one of: 'checking' | 'online' | 'offline' | 'disabled'
+  //                   | 'unknown' | 'failed'
+  // `checking` is the in-flight state shown while we await the forced refresh.
+  // The result auto-clears 10 seconds after a terminal state lands so stale
+  // messages from earlier saves don't pile up in the panel.
+  const [runtimeRecheckResult, setRuntimeRecheckResult] = useState(null);
+  const runtimeRecheckTimeoutRef = useRef(null);
   const [activeProfileTab, setActiveProfileTab] = useState('overview');
   const [registryModalMode, setRegistryModalMode] = useState(null);
   const [registrySaving, setRegistrySaving] = useState(false);
@@ -252,6 +300,14 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [parserTestResultsLoading, setParserTestResultsLoading] = useState(false);
   const [parserTestResultsError, setParserTestResultsError] = useState(null);
   const [parserResultPreview, setParserResultPreview] = useState(null);
+  const [parserDeleteTarget, setParserDeleteTarget] = useState(null);
+  const [parserDeleteSaving, setParserDeleteSaving] = useState(false);
+  // Stage 4 Triage Agent results state. Mirrors the parser state above so
+  // the new TriageAgentTestResultsTab can reuse the same loading/error/stats
+  // patterns.
+  const [triageTestResults, setTriageTestResults] = useState({ results: [], stats: null, dbAvailable: true });
+  const [triageTestResultsLoading, setTriageTestResultsLoading] = useState(false);
+  const [triageTestResultsError, setTriageTestResultsError] = useState(null);
   const [parserHistory, setParserHistory] = useState({ results: [], total: 0 });
   const [parserSavedEvents, setParserSavedEvents] = useState([]);
   const [parserHistoryLoading, setParserHistoryLoading] = useState(false);
@@ -339,6 +395,23 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }, []);
 
+  const loadTriageTestResults = useCallback(async () => {
+    try {
+      setTriageTestResultsLoading(true);
+      const data = await listTriageTestResults({ limit: 80 });
+      setTriageTestResults({
+        results: data.results || [],
+        stats: data.stats || null,
+        dbAvailable: data.dbAvailable !== false,
+      });
+      setTriageTestResultsError(null);
+    } catch (err) {
+      setTriageTestResultsError(err.message || 'Failed to load triage test results.');
+    } finally {
+      setTriageTestResultsLoading(false);
+    }
+  }, []);
+
   const loadParserEventStreams = useCallback(async () => {
     try {
       setParserHistoryLoading(true);
@@ -392,6 +465,12 @@ function AgentsView({ agentIdFromRoute = null }) {
   }, [activeProfileTab, selectedAgentId]);
 
   useEffect(() => {
+    if (selectedAgentId !== 'triage-agent' && activeProfileTab === 'triage-test-results') {
+      setActiveProfileTab('overview');
+    }
+  }, [activeProfileTab, selectedAgentId]);
+
+  useEffect(() => {
     if (
       selectedAgentId !== 'escalation-template-parser'
       && (activeProfileTab === 'event-streams' || activeProfileTab === 'chat-sessions')
@@ -411,6 +490,12 @@ function AgentsView({ agentIdFromRoute = null }) {
       loadParserTestResults();
     }
   }, [activeProfileTab, loadParserTestResults, selectedAgentId]);
+
+  useEffect(() => {
+    if (selectedAgentId === 'triage-agent' && activeProfileTab === 'triage-test-results') {
+      loadTriageTestResults();
+    }
+  }, [activeProfileTab, loadTriageTestResults, selectedAgentId]);
 
   useEffect(() => {
     if (selectedAgentId === 'escalation-template-parser' && activeProfileTab === 'event-streams') {
@@ -433,6 +518,11 @@ function AgentsView({ agentIdFromRoute = null }) {
     setPromptError(null);
     setPreviewVersion(null);
     setRuntimeSaveStatus(null);
+    setRuntimeRecheckResult(null);
+    if (runtimeRecheckTimeoutRef.current) {
+      clearTimeout(runtimeRecheckTimeoutRef.current);
+      runtimeRecheckTimeoutRef.current = null;
+    }
     setActiveProfileTab('overview');
   }, [selectedAgentId]);
 
@@ -446,6 +536,15 @@ function AgentsView({ agentIdFromRoute = null }) {
     setProfileSummary('');
   }, [currentAgent]);
 
+  // Clear any pending inline-recheck auto-dismiss timer on unmount so the
+  // setState callback can't fire on a torn-down component.
+  useEffect(() => () => {
+    if (runtimeRecheckTimeoutRef.current) {
+      clearTimeout(runtimeRecheckTimeoutRef.current);
+      runtimeRecheckTimeoutRef.current = null;
+    }
+  }, []);
+
   const selectedAgent = currentAgent?.agentId === selectedAgentId
     ? currentAgent
     : agents.find((agent) => agent.agentId === selectedAgentId) || null;
@@ -454,12 +553,67 @@ function AgentsView({ agentIdFromRoute = null }) {
     ? getAgentRuntimeDefinition(selectedAgent.agentId)
     : null;
 
+  // Subscribe to the agent registry so every status dot on this page reflects
+  // real provider reachability instead of the static AGENT_OPERATION_META
+  // table. We read the registry once here (a single hook call at the top of
+  // the component) so we don't violate the Rules of Hooks inside the agent
+  // list's render loop. The map below converts the registry's health.status
+  // tokens into the legacy operational tokens that the rest of this file
+  // (CSS classes, attention-list filter, sparkline tone) already understands.
+  const agentRegistry = useAgentRegistry();
+  // Build the live-status map by iterating the page's `agents` list (the
+  // authoritative set of visible rows), NOT the registry's keys. Reason:
+  // an agent that the API list returned but the registry hasn't observed yet
+  // (custom agent added mid-session, or any agent before the registry's first
+  // poll lands) would otherwise be missing from this map, and the downstream
+  // CSS class becomes `status-dot-undefined` — an unstyled, invisible dot.
+  // Iterating over `agents` guarantees every rendered row gets a defined
+  // operational token; healthStatusToOperationalToken falls back to 'idle'
+  // for any registry entry whose health hasn't been populated yet. See
+  // cto-review finding H2.
+  const liveStatusByAgentId = useMemo(() => {
+    const map = {};
+    const registryAgents = agentRegistry?.agents || {};
+    for (const agent of agents) {
+      const id = agent?.agentId;
+      if (!id) continue;
+      map[id] = healthStatusToOperationalToken(
+        registryAgents[id]?.health?.status,
+      );
+    }
+    return map;
+  }, [agentRegistry, agents]);
+
+  // Raw per-agent health (status + checkedAt) plumbed through to dot
+  // tooltips so they can render "Online · last checked 12s ago" per AC#13.
+  // The legacy operational token (above) only carries the *color* category;
+  // tooltips need the registry's raw `status` (online/offline/...) plus the
+  // `checkedAt` ISO timestamp from the health service.
+  const registryHealthById = useMemo(() => {
+    const map = {};
+    const registryAgents = agentRegistry?.agents || {};
+    for (const agent of agents) {
+      const id = agent?.agentId;
+      if (!id) continue;
+      const health = registryAgents[id]?.health || null;
+      map[id] = {
+        status: health?.status || 'unknown',
+        checkedAt: health?.checkedAt || null,
+      };
+    }
+    return map;
+  }, [agentRegistry, agents]);
+
   const operationalProfiles = useMemo(
     () =>
       agents.map((agent) =>
-        buildOperationalProfile(agent, runtimeSelections[agent.agentId])
+        buildOperationalProfile(
+          agent,
+          runtimeSelections[agent.agentId],
+          liveStatusByAgentId[agent.agentId],
+        )
       ),
-    [agents, runtimeSelections]
+    [agents, runtimeSelections, liveStatusByAgentId]
   );
 
   const operationById = useMemo(() => {
@@ -472,8 +626,12 @@ function AgentsView({ agentIdFromRoute = null }) {
     if (!selectedAgent) {
       return null;
     }
-    return buildOperationalProfile(selectedAgent, selectedRuntimeState);
-  }, [selectedAgent, selectedRuntimeState]);
+    return buildOperationalProfile(
+      selectedAgent,
+      selectedRuntimeState,
+      liveStatusByAgentId[selectedAgent.agentId],
+    );
+  }, [selectedAgent, selectedRuntimeState, liveStatusByAgentId]);
 
   const filteredAgents = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -548,31 +706,170 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }
 
+  // Schedule the inline recheck banner to auto-clear after 10s so the panel
+  // doesn't accumulate stale "Saved" messages from earlier edits. Any newer
+  // recheck attempt (call to scheduleRecheckClear or to runSaveTimeRecheck)
+  // resets this timer.
+  function scheduleRecheckClear(forAgentId) {
+    if (runtimeRecheckTimeoutRef.current) {
+      clearTimeout(runtimeRecheckTimeoutRef.current);
+      runtimeRecheckTimeoutRef.current = null;
+    }
+    runtimeRecheckTimeoutRef.current = setTimeout(() => {
+      // Only clear if the still-visible result belongs to the same agent; if
+      // the user has since switched agents (which resets state anyway) this
+      // is a no-op.
+      setRuntimeRecheckResult((previous) =>
+        previous && previous.agentId === forAgentId ? null : previous,
+      );
+      runtimeRecheckTimeoutRef.current = null;
+    }, 10_000);
+  }
+
+  // Run a forced single-agent reachability recheck after a runtime-affecting
+  // save and surface the result inline next to the Save button. Honors the
+  // memory rule "reachability must be checked at every layer — save-time,
+  // per-request pre-flight, AND background monitor."
+  //
+  //   options.disabled  — true when the user just turned the agent off; we
+  //                       skip latency timing because an intentionally-off
+  //                       agent is expected to be unreachable.
+  async function runSaveTimeRecheck(agentId, options = {}) {
+    if (!agentId) return;
+    // Show the "Rechecking..." pill immediately so the user sees feedback
+    // even before the network roundtrip completes.
+    if (runtimeRecheckTimeoutRef.current) {
+      clearTimeout(runtimeRecheckTimeoutRef.current);
+      runtimeRecheckTimeoutRef.current = null;
+    }
+    setRuntimeRecheckResult({
+      agentId,
+      status: 'checking',
+      message: 'Rechecking provider...',
+      latencyMs: null,
+    });
+    const startedAt = performance.now();
+    let fresh = null;
+    try {
+      // refreshOne now returns the fresh single-agent payload directly. We
+      // MUST read the result from this return value, NOT from
+      // agentRegistry?.agents?.[agentId]?.health afterwards. The reason:
+      // refreshOne updates the registry via setLocalHealth, but state updates
+      // are batched — the closure-captured `agentRegistry` reference in this
+      // function still points at the PRE-refresh render's snapshot. Reading
+      // the registry here would surface the previous poll's status dressed up
+      // as a "Saved · ..." confirmation, falsely confirming saves of broken
+      // configs. See cto-review finding H1.
+      fresh = await agentRegistry.refreshOne(agentId);
+    } catch (err) {
+      setRuntimeRecheckResult({
+        agentId,
+        status: 'failed',
+        message: `Saved · Recheck failed: ${err?.message || 'unknown error'}`,
+        latencyMs: null,
+      });
+      scheduleRecheckClear(agentId);
+      return;
+    }
+    const latencyMs = Math.round(performance.now() - startedAt);
+
+    if (options.disabled) {
+      setRuntimeRecheckResult({
+        agentId,
+        status: 'disabled',
+        message: 'Saved · Agent disabled',
+        latencyMs: null,
+      });
+      scheduleRecheckClear(agentId);
+      return;
+    }
+
+    // Health-service responses use `message` for the human-readable detail;
+    // the registry's merged shape renames it to `diagnostic`. Accept either
+    // because `fresh` here is the raw server payload returned by refreshOne,
+    // which uses `message`, not `diagnostic`.
+    const status = fresh?.status || 'unknown';
+    const updatedDiagnostic = fresh?.diagnostic ?? fresh?.message ?? null;
+    if (status === 'online') {
+      setRuntimeRecheckResult({
+        agentId,
+        status,
+        message: `Saved · Provider responding at ${latencyMs}ms`,
+        latencyMs,
+      });
+    } else if (status === 'offline') {
+      const diagnostic = updatedDiagnostic || 'no diagnostic available';
+      setRuntimeRecheckResult({
+        agentId,
+        status,
+        message: `Saved · Provider unreachable: ${diagnostic}`,
+        latencyMs,
+      });
+    } else if (status === 'disabled') {
+      setRuntimeRecheckResult({
+        agentId,
+        status,
+        message: 'Saved · Agent disabled',
+        latencyMs: null,
+      });
+    } else if (status === 'degraded') {
+      // Server's outer health-refresh ceiling fired (AGENT_HEALTH_REFRESH_TIMEOUT).
+      // The save itself persisted; we just couldn't confirm reachability fast
+      // enough. Background polling will retry — don't alarm the user.
+      setRuntimeRecheckResult({
+        agentId,
+        status,
+        message: 'Saved · Provider reachability still verifying...',
+        latencyMs,
+      });
+    } else {
+      // 'unknown' — defensive; awaiting refreshOne should have produced a
+      // concrete status, but if the polling engine hasn't merged yet we still
+      // show a sensible message rather than a blank pill.
+      setRuntimeRecheckResult({
+        agentId,
+        status: 'unknown',
+        message: 'Saved · Recheck pending...',
+        latencyMs,
+      });
+    }
+    scheduleRecheckClear(agentId);
+  }
+
   async function handleSaveRuntime(nextRuntime) {
     if (!selectedAgent?.agentId) {
       return;
     }
+    const agentId = selectedAgent.agentId;
     try {
       setRuntimeSaveStatus('Saving runtime defaults...');
-      const localRuntime = writeAgentRuntimeState(selectedAgent.agentId, nextRuntime);
+      const localRuntime = writeAgentRuntimeState(agentId, nextRuntime);
       const updated = await updateAgentRuntime(
-        selectedAgent.agentId,
+        agentId,
         localRuntime,
-        `Updated runtime defaults for ${selectedAgent.profile?.roleTitle || selectedAgent.agentId}.`
+        `Updated runtime defaults for ${selectedAgent.profile?.roleTitle || agentId}.`
       );
       const updatedRuntime = updated?.runtime || localRuntime;
       setRuntimeSelections((previous) => ({
         ...previous,
-        [selectedAgent.agentId]: updatedRuntime,
+        [agentId]: updatedRuntime,
       }));
       applyUpdatedAgent(updated);
       dispatchAgentRuntimeDefaultsApplied({
-        [selectedAgent.agentId]: updatedRuntime,
+        [agentId]: updatedRuntime,
       });
       window.dispatchEvent(new CustomEvent('agent-health-refresh'));
       setRuntimeSaveStatus('Runtime defaults saved to server.');
+      // Save succeeded; immediately recheck this agent's reachability so the
+      // user sees within ~8 seconds whether the new provider/model config
+      // actually works. Awaited but not propagated — recheck failures don't
+      // back out the save (the runSaveTimeRecheck helper catches its own
+      // errors and surfaces them inline).
+      runSaveTimeRecheck(agentId);
     } catch (err) {
       setRuntimeSaveStatus(err.message || 'Failed to save runtime defaults.');
+      // Save itself failed — leave the inline recheck pill empty so the only
+      // visible feedback is the existing save-error message.
     }
   }
 
@@ -628,6 +925,13 @@ function AgentsView({ agentIdFromRoute = null }) {
       }
       setHistory((previous) => mergeLifecycleRunIntoHistory(previous, result?.lifecycleRun));
       window.dispatchEvent(new CustomEvent('agent-health-refresh'));
+      // Enabled-flag changes affect whether the provider should even be
+      // contacted, so trigger a save-time recheck for parity with
+      // handleSaveRuntime. When the user just disabled the agent we mark the
+      // result as 'disabled' instead of reporting reachability — an
+      // intentionally-off agent is expected to be unreachable, and showing
+      // "Provider unreachable" would be misleading.
+      runSaveTimeRecheck(selectedAgent.agentId, { disabled: nextEnabled === false });
     } catch (err) {
       if (err.lifecycleRun) {
         setLifecycleModal({ run: err.lifecycleRun, agentName: agentLabel, requestState: 'error' });
@@ -774,6 +1078,30 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }
 
+  function handleRunAgentTest(agent = selectedAgent) {
+    const agentId = agent?.agentId || selectedAgent?.agentId || '';
+    if (!agentId) return;
+    if (!isAgentTestSupported(agentId)) {
+      setError(`No test harness is registered for ${agent?.profile?.roleTitle || agentId} yet.`);
+      return;
+    }
+    openAgentTest({
+      agentId,
+      launchSurface: 'agent-profile',
+      context: {
+        activeProfileTab,
+      },
+      onRecorded: () => {
+        if (agentId === 'escalation-template-parser') {
+          loadParserTestResults();
+        }
+        if (agentId === 'triage-agent') {
+          loadTriageTestResults();
+        }
+      },
+    });
+  }
+
   async function handleUpdateParserTestResult(id, status) {
     try {
       const result = await updateImageParserTestResult(id, {
@@ -790,6 +1118,110 @@ function AgentsView({ agentIdFromRoute = null }) {
       return result;
     } catch (err) {
       setParserTestResultsError(err.message || 'Failed to update parser test result.');
+      throw err;
+    }
+  }
+
+  async function handleProgrammaticCheckParserTestResult(id) {
+    try {
+      const data = await programmaticCheckImageParserTestResult(id);
+      if (data?.result) {
+        setParserTestResults((prev) => ({
+          ...prev,
+          results: (prev.results || []).map((entry) => (entry.id === data.result.id ? data.result : entry)),
+        }));
+      }
+      loadParserTestResults();
+      return data;
+    } catch (err) {
+      setParserTestResultsError(err.message || 'Failed to run parser output check.');
+      throw err;
+    }
+  }
+
+  async function handleRetestParserTestResult(result) {
+    try {
+      const data = await retestImageParserTestResult(result);
+      loadParserTestResults();
+      return data;
+    } catch (err) {
+      setParserTestResultsError(err.message || 'Failed to retest parser image.');
+      throw err;
+    }
+  }
+
+  async function handleDeleteParserTestResult(id) {
+    try {
+      const data = await deleteImageParserTestResult(id);
+      setParserTestResults((prev) => ({
+        ...prev,
+        results: (prev.results || []).filter((entry) => entry.id !== id),
+      }));
+      if (parserResultPreview?.id === id) {
+        setParserResultPreview(null);
+      }
+      loadParserTestResults();
+      return data;
+    } catch (err) {
+      setParserTestResultsError(err.message || 'Failed to delete parser test result.');
+      throw err;
+    }
+  }
+
+  function handleOpenParserTestResult(result) {
+    const opened = openAgentTest({
+      agentId: 'escalation-template-parser',
+      completedResult: result,
+      onRecorded: ({ result: savedResult } = {}) => {
+        if (savedResult?.id) {
+          setParserTestResults((prev) => ({
+            ...prev,
+            results: (prev.results || []).map((entry) => (entry.id === savedResult.id ? savedResult : entry)),
+          }));
+        }
+        loadParserTestResults();
+      },
+    });
+    if (!opened) {
+      setParserResultPreview(result);
+    }
+  }
+
+  function requestDeleteParserTestResult(result) {
+    if (!result?.id) return;
+    setParserDeleteTarget({
+      id: result.id,
+      name: result.fixture?.name || 'this parser test run',
+    });
+  }
+
+  async function confirmDeleteParserTestResult() {
+    if (!parserDeleteTarget?.id || parserDeleteSaving) return;
+    setParserDeleteSaving(true);
+    try {
+      await handleDeleteParserTestResult(parserDeleteTarget.id);
+      setParserDeleteTarget(null);
+    } finally {
+      setParserDeleteSaving(false);
+    }
+  }
+
+  async function handleUpdateTriageTestResult(id, status) {
+    try {
+      const result = await updateTriageTestResult(id, {
+        status,
+        operatorNote: status === 'fail'
+          ? 'Operator marked this triage test result as incorrect from the agent profile.'
+          : 'Operator marked this triage test result as correct from the agent profile.',
+      });
+      setTriageTestResults((prev) => ({
+        ...prev,
+        results: (prev.results || []).map((entry) => (entry.id === result.id ? result : entry)),
+      }));
+      loadTriageTestResults();
+      return result;
+    } catch (err) {
+      setTriageTestResultsError(err.message || 'Failed to update triage test result.');
       throw err;
     }
   }
@@ -818,6 +1250,9 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
     if (tabId === 'test-results') {
       loadParserTestResults();
+    }
+    if (tabId === 'triage-test-results') {
+      loadTriageTestResults();
     }
     if (tabId === 'event-streams') {
       loadParserEventStreams();
@@ -853,6 +1288,15 @@ function AgentsView({ agentIdFromRoute = null }) {
     activeTab: activeProfileTab,
     agent: selectedAgent,
     operation: selectedOperation,
+    // Live provider reachability for the selected agent, read from the same
+    // agent registry that powers every status dot on this page. Shape:
+    //   { status: 'online'|'offline'|'disabled'|'unknown', checkedAt: ISO|null }
+    // The Overview ID-badge card reads this to render a truthful health pill
+    // instead of inventing a health value. Falls back to a neutral "unknown"
+    // entry when the registry hasn't observed this agent yet (boot window).
+    selectedHealth: selectedAgent?.agentId
+      ? (registryHealthById[selectedAgent.agentId] || { status: 'unknown', checkedAt: null })
+      : null,
     history,
     historyLoading,
     historyError,
@@ -869,6 +1313,7 @@ function AgentsView({ agentIdFromRoute = null }) {
     runtimeDefinition: selectedRuntimeDefinition,
     runtimeState: selectedRuntimeState,
     runtimeSaveStatus,
+    runtimeRecheckResult,
     reviewSaving,
     harnessSaving,
     parserTestResults,
@@ -883,6 +1328,9 @@ function AgentsView({ agentIdFromRoute = null }) {
     parserSessions,
     parserSessionsLoading,
     parserSessionsError,
+    triageTestResults,
+    triageTestResultsLoading,
+    triageTestResultsError,
     onPromptDraftChange: setPromptDraft,
     onPromptSummaryChange: setPromptSummary,
     onPromptSave: handleSavePrompt,
@@ -896,14 +1344,28 @@ function AgentsView({ agentIdFromRoute = null }) {
     enabledSaving,
     onMarkReviewed: handleMarkReviewed,
     onRecordHarnessRun: handleRecordHarnessRun,
+    onRunAgentTest: handleRunAgentTest,
     onLoadParserTestResults: loadParserTestResults,
     onLoadParserEventStreams: loadParserEventStreams,
     onLoadParserChatSessions: loadParserChatSessions,
     onUpdateParserTestResult: handleUpdateParserTestResult,
+    onProgrammaticCheckParserTestResult: handleProgrammaticCheckParserTestResult,
+    onRetestParserTestResult: handleRetestParserTestResult,
+    onDeleteParserTestResult: handleDeleteParserTestResult,
+    onOpenParserTestResult: handleOpenParserTestResult,
+    onRequestDeleteParserTestResult: requestDeleteParserTestResult,
     onPreviewParserResult: setParserResultPreview,
     onCloseParserResultPreview: () => setParserResultPreview(null),
+    onLoadTriageTestResults: loadTriageTestResults,
+    onUpdateTriageTestResult: handleUpdateTriageTestResult,
     onLoadHistory: loadHistoryForSelectedAgent,
     onLoadPrompt: loadPromptForSelectedAgent,
+    // The redesigned Overview tab navigates to sibling tabs (Harness / Test
+    // Results) from its "Recent Results" control, and lazily warms the parser
+    // test-result + prompt-version data so those sections show real values
+    // instead of an empty state. handleTabChange already triggers the matching
+    // loader, so reusing it keeps a single navigation+load path.
+    onTabChange: handleTabChange,
   };
 
   if (!agentIdFromRoute) {
@@ -916,6 +1378,7 @@ function AgentsView({ agentIdFromRoute = null }) {
         onQueryChange={setQuery}
         operationalProfiles={operationalProfiles}
         operationById={operationById}
+        registryHealthById={registryHealthById}
         onSelectAgent={handleSelectAgent}
         registryModalMode={registryModalMode}
         registrySaving={registrySaving}
@@ -966,6 +1429,17 @@ function AgentsView({ agentIdFromRoute = null }) {
           onImport={handleImportAgents}
         />
       )}
+      <ConfirmModal
+        open={Boolean(parserDeleteTarget)}
+        title="Delete Test Run"
+        message={`Delete ${parserDeleteTarget?.name || 'this parser test run'} permanently? This removes the saved test record and cannot be undone.`}
+        confirmLabel={parserDeleteSaving ? 'Deleting...' : 'Delete'}
+        danger
+        onConfirm={confirmDeleteParserTestResult}
+        onCancel={() => {
+          if (!parserDeleteSaving) setParserDeleteTarget(null);
+        }}
+      />
     </>
   );
 }
@@ -978,6 +1452,7 @@ function AgentsMissionControlPage({
   onQueryChange,
   operationalProfiles,
   operationById,
+  registryHealthById,
   onSelectAgent,
   registryModalMode,
   registrySaving,
@@ -1029,6 +1504,7 @@ function AgentsMissionControlPage({
             <AgentMissionGrid
               agents={agents}
               operationById={operationById}
+              registryHealthById={registryHealthById}
               onSelectAgent={onSelectAgent}
             />
           ) : (
@@ -1266,7 +1742,7 @@ function AgentLifecycleRunModal({ run, agentName, requestState, onClose }) {
   );
 }
 
-function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
+function AgentMissionGrid({ agents, operationById, registryHealthById, onSelectAgent }) {
   return (
     <div className="agent-card-grid">
       {agents.map((agent, index) => (
@@ -1274,6 +1750,7 @@ function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
           key={agent.agentId}
           agent={agent}
           operation={operationById.get(agent.agentId)}
+          registryHealth={registryHealthById?.[agent.agentId]}
           rank={index + 1}
           onSelect={() => onSelectAgent(agent.agentId)}
         />
@@ -1282,7 +1759,14 @@ function AgentMissionGrid({ agents, operationById, onSelectAgent }) {
   );
 }
 
-function AgentMissionCard({ agent, operation, rank, onSelect }) {
+function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) {
+  // Build the dot tooltip from the registry's raw status (online/offline/...)
+  // and checkedAt timestamp so the user sees "Online · last checked 12s ago".
+  // Falls back to the legacy STATUS_LABELS for the operational token when no
+  // registry health is available yet (boot window). See cto-review finding M3.
+  const dotTooltip = registryHealth
+    ? buildDotTooltip(registryHealth.status, registryHealth.checkedAt)
+    : (STATUS_LABELS[operation?.status] || 'Idle');
   return (
     <a
       href={`#/agents/${encodeURIComponent(agent.agentId)}`}
@@ -1293,8 +1777,8 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
         <span className="rank-pill">{rank}</span>
         <span
           className={`status-dot status-dot-${operation?.status || 'idle'} agent-row-status-dot`}
-          title={STATUS_LABELS[operation?.status] || 'Idle'}
-          aria-label={STATUS_LABELS[operation?.status] || 'Idle'}
+          title={dotTooltip}
+          aria-label={dotTooltip}
         />
       </header>
       <div className="agent-mission-card-title">
@@ -1320,6 +1804,140 @@ function AgentMissionCard({ agent, operation, rank, onSelect }) {
   );
 }
 
+// UnifiedAgentHeader — the single, page-level premium header that owns agent
+// identity + status + the enable toggle for EVERY profile tab (it sits above
+// the tab bar). This is the promoted version of the rich treatment that used
+// to live only inside the Overview tab; consolidating it here removes the
+// double-header (page top-strip + Overview header) the user flagged.
+//
+// What it folds in from the old `profile-page-topbar`:
+//   - the back/breadcrumb link to the agent directory (kept as a quiet
+//     "Back to agents" affordance above the name, so the route is still
+//     reachable from every tab),
+//   - the REAL enable/disable toggle (same checkbox wiring — value from
+//     agent.enabled, change calls onToggleAgentEnabled which runs the existing
+//     PATCH /enabled flow; disabled while enabledSaving),
+//   - the "Refreshing profile..." loading hint.
+//
+// HONESTY: every value is real — name = profile.roleTitle/displayName; purpose
+// = profile.headline; enabled = agent.enabled; health = the SAME registry
+// `selectedHealth` ({status, checkedAt}) the status dots use. No fabrication.
+//
+// CSS DEFENSE: scoped under `.agent-profile-header` (NO class contains the
+// substring "title", so overhaul.css's `header [class*="title"]` holographic
+// transparent-fill rule can't match). AgentOverviewTab.css carries the
+// `-webkit-text-fill-color: currentColor` guard, the explicit pin on the name,
+// and a `header::before { content: none }` reset for this header.
+function UnifiedAgentHeader({
+  selectedAgent,
+  selectedHealth,
+  loadingCurrent,
+  enabledSaving,
+  onToggleAgentEnabled,
+  onRunAgentTest,
+}) {
+  if (!selectedAgent) {
+    return null;
+  }
+
+  const name =
+    selectedAgent.profile?.roleTitle
+    || selectedAgent.profile?.displayName
+    || labelAgent(selectedAgent.agentId);
+  const purpose = selectedAgent.profile?.headline || 'No purpose described yet.';
+  const enabled = selectedAgent.enabled !== false;
+  const supportsAgentTest = isAgentTestSupported(selectedAgent.agentId);
+
+  // Live provider health — same registry source as every status dot.
+  const health = selectedHealth || { status: 'unknown', checkedAt: null };
+  const healthStatus = health.status || 'unknown';
+  const healthLabel = healthStatusLabel(healthStatus);
+  const healthFresh = formatLastChecked(health.checkedAt);
+  const healthTone =
+    healthStatus === 'online' ? 'online'
+      : healthStatus === 'offline' ? 'offline'
+        : 'neutral';
+
+  return (
+    <header className="agent-profile-header">
+      {/* Compact single-band identity: back affordance + avatar + name + purpose
+          all on one horizontal row (no stacked breadcrumb line) so the
+          persistent cross-tab header stays a slim strip. */}
+      <div className="aph-left">
+        <a href="#/agents" className="aph-back" title="Back to Agent Profiles" aria-label="Back to agent profiles">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+        </a>
+        <span className="aph-monogram">
+          <AgentAvatar agent={selectedAgent} size="small" />
+        </span>
+        <div className="aph-text">
+          <div className="aph-name">{name}</div>
+          <div className="aph-purpose" title={purpose}>{purpose}</div>
+        </div>
+      </div>
+
+      <div className="aph-right">
+        {loadingCurrent && (
+          <span className="aph-refreshing">
+            <InlineLoading label="Refreshing..." />
+          </span>
+        )}
+        {supportsAgentTest && (
+          <button
+            type="button"
+            className="aph-test-button"
+            onClick={() => onRunAgentTest?.(selectedAgent)}
+            title={`Run ${name} test`}
+            aria-label={`Run ${name} test`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            Run test
+          </button>
+        )}
+        <div className="aph-status-item">
+          <label
+            className={`aph-enable-switch${enabled ? ' is-on' : ' is-off'}`}
+            aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`}
+          >
+            <input
+              type="checkbox"
+              checked={enabled}
+              disabled={enabledSaving}
+              onChange={(event) => onToggleAgentEnabled?.(event.target.checked)}
+            />
+            <span className="aph-status-line">
+              <span className="aph-enable-track" aria-hidden="true">
+                <span className="aph-enable-thumb" />
+              </span>
+              {enabled ? 'Enabled' : 'Disabled'}
+            </span>
+          </label>
+          <div className="aph-status-caption">
+            {enabledSaving ? 'Saving...' : enabled ? 'Active in pipeline' : 'Turned off'}
+          </div>
+        </div>
+
+        <div className="aph-divider" aria-hidden="true" />
+
+        <div className="aph-status-item">
+          <div
+            className="aph-status-line"
+            title={buildDotTooltip(healthStatus, health.checkedAt)}
+          >
+            <span className={`aph-health-dot tone-${healthTone}`} aria-hidden="true" />
+            {healthLabel}
+          </div>
+          <div className="aph-status-caption">
+            {healthFresh ? `Checked ${healthFresh}` : 'Not checked yet'}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function AgentProfileDetailPage({
   error,
   selectedAgent,
@@ -1332,43 +1950,27 @@ function AgentProfileDetailPage({
   onOpenHarness,
   workspaceProps,
 }) {
-  const enabled = selectedAgent?.enabled !== false;
-  const profileTitle = formatAgentProfileTitle(selectedAgent);
   return (
     <div className="agent-profiles-page agent-profile-detail-page">
-      <header className="profile-page-topbar">
-        <div className="profile-page-title-row">
-          <a href="#/agents" className="back-link" title="Back to Agent Profiles">
-            {profileTitle}
-          </a>
-          {selectedAgent && (
-            <label
-              className={`agent-enabled-switch${enabled ? ' is-on' : ' is-off'}`}
-              aria-label={`${enabled ? 'Disable' : 'Enable'} ${selectedAgent.profile?.roleTitle || selectedAgent.agentId}`}
-            >
-              <input
-                type="checkbox"
-                checked={enabled}
-                disabled={workspaceProps.enabledSaving}
-                onChange={(event) => workspaceProps.onToggleAgentEnabled?.(event.target.checked)}
-              />
-              <span className="agent-enabled-switch-caption">Agent status</span>
-              <span className="agent-enabled-switch-track" aria-hidden="true">
-                <span className="agent-enabled-switch-thumb" />
-              </span>
-              <span className="agent-enabled-switch-label">{enabled ? 'Active' : 'Inactive'}</span>
-            </label>
-          )}
-        </div>
-        {loadingCurrent && <InlineLoading label="Refreshing profile..." />}
-      </header>
+      <UnifiedAgentHeader
+        selectedAgent={selectedAgent}
+        selectedHealth={workspaceProps.selectedHealth}
+        loadingCurrent={loadingCurrent}
+        enabledSaving={workspaceProps.enabledSaving}
+        onToggleAgentEnabled={workspaceProps.onToggleAgentEnabled}
+        onRunAgentTest={workspaceProps.onRunAgentTest}
+      />
 
       {error && <div className="agent-alert">{error}</div>}
 
       {selectedAgent ? (
         <main className="profile-detail-shell">
           <AgentProfileTabs
-            tabs={selectedAgent.agentId === 'escalation-template-parser' ? IMAGE_PARSER_PROFILE_TABS : PROFILE_TABS}
+            tabs={(() => {
+              if (selectedAgent.agentId === 'escalation-template-parser') return IMAGE_PARSER_PROFILE_TABS;
+              if (selectedAgent.agentId === 'triage-agent') return TRIAGE_AGENT_PROFILE_TABS;
+              return PROFILE_TABS;
+            })()}
             activeTab={activeProfileTab}
             onChange={onTabChange}
           />
@@ -1549,6 +2151,9 @@ function AgentProfileWorkspace(props) {
   if (activeTab === 'test-results') {
     return <ImageParserTestResultsTab {...props} />;
   }
+  if (activeTab === 'triage-test-results') {
+    return <TriageAgentTestResultsTab {...props} />;
+  }
   if (activeTab === 'event-streams') {
     return <ImageParserEventStreamsTab {...props} />;
   }
@@ -1574,48 +2179,872 @@ function AgentProfileWorkspace(props) {
   return <AgentOverviewTab {...props} />;
 }
 
+// ===========================================================================
+// AgentOverviewTab — chrome-light overview PAGE (approved mockup at
+// prototypes/agent-card/overview-page.html). This SUBSUMES the old stack of
+// boxed panels into a single source-of-truth page. The intermediate-step
+// components that this page fully replaced — AgentIdentityBadgeCard,
+// QualityPerformance, ProfileSourceOfTruthPanel — have been removed as dead
+// code. The remaining panel FUNCTIONS defined below (WorkflowFootprint,
+// PromptContractPanel, HarnessSummaryPanel, ReviewWorkflowPanel) are still
+// rendered by other tabs (Workflows/Prompt/Harness/Configuration), so they
+// stay defined — but they are no longer rendered on this page.
+//
+// HONESTY CONTRACT (see agent-profiles-overhaul/01-overview-page-review.md):
+// every value rendered is backed by a REAL field or shows an explicit empty
+// state. No per-agent decorative constants (the AGENT_OPERATION_META
+// anti-pattern) are read. Fields from the mockup with no real source are
+// OMITTED rather than fabricated — documented inline at each section.
+//
+// CSS defense: the whole subtree is scoped under `.agent-overview-v2`, which
+// (a) carries a `-webkit-text-fill-color: currentColor` guard so the global
+// `header [class*="title"]` holographic gradient in overhaul.css can't
+// transparency-bomb inherited text, and (b) deliberately uses NO class name
+// containing the substring "title". See AgentOverviewTab.css.
 function AgentOverviewTab({
   agent,
   operation,
-  reviewSaving,
-  onMarkReviewed,
+  parserTestResults,
+  parserTestResultsLoading,
+  promptState,
+  onTabChange,
+  onRunAgentTest,
+  onLoadParserTestResults,
+  onLoadPrompt,
 }) {
+  const agentId = agent?.agentId;
+  const isParser = agentId === 'escalation-template-parser';
+  const supportsModalTest = isAgentTestSupported(agentId);
+
+  // Warm the lazily-loaded real data the Overview needs so its Recent-Results
+  // summary and Prompt-version rail item show real values without the user
+  // first visiting those tabs. Both loaders are idempotent fetchers.
+  useEffect(() => {
+    const hasLoadedParserResults = Boolean(
+      parserTestResults?.stats || (Array.isArray(parserTestResults?.results) && parserTestResults.results.length > 0)
+    );
+    if (isParser && !parserTestResultsLoading && !hasLoadedParserResults) {
+      onLoadParserTestResults?.();
+    }
+  }, [isParser, parserTestResults, parserTestResultsLoading, onLoadParserTestResults]);
+
+  useEffect(() => {
+    if (agent?.promptId && !promptState) {
+      onLoadPrompt?.();
+    }
+  }, [agent?.promptId, promptState, onLoadPrompt]);
+
+  // NOTE: identity (name / purpose / avatar), the enabled state, and the live
+  // provider-health pill are rendered by the page-level UnifiedAgentHeader now
+  // (shown above the tab bar on every tab), so the Overview body no longer
+  // computes or renders them — it starts at the properties strip below.
+  // `purpose` is still derived here because the Behavior section uses it to
+  // decide whether the profile headline is distinct enough to show as "Does".
+  const purpose = agent?.profile?.headline || 'No purpose described yet.';
+
+  // ---- PROPERTIES STRIP (real) -------------------------------------------
+  // Split the real runtime selection into model + provider via the runtime
+  // catalog helpers (the combined operation.modelLabel is a single string).
+  const runtimeDefinition = agentId ? getAgentRuntimeDefinition(agentId) : null;
+  const runtimeState = agent?.runtime || {};
+  const providerLabel = runtimeDefinition
+    ? getAgentRuntimeProviderLabel(runtimeDefinition, runtimeState)
+    : '';
+  const modelName = runtimeDefinition
+    ? getAgentRuntimeEffectiveModel(runtimeDefinition, runtimeState)
+    : '';
+  const modelDisplay = modelName || operation?.modelLabel || '';
+  const tools = Array.isArray(agent?.tools?.available) ? agent.tools.available : [];
+
+  // PROVIDER LOGO — pick by the agent's REAL runtime PROVIDER (not the model),
+  // reusing the canonical catalog mapping (shared/ai-provider-catalog.json via
+  // getProviderMeta). The normalized runtime provider id (e.g. "gemini",
+  // "openai") matches the catalog id, which carries iconPath/iconLightPath. We
+  // do NOT fabricate a logo: providerMeta is only truthy when there is a real
+  // runtime selection, and ProviderModelLogo falls back to a neutral monogram
+  // when a provider has no icon asset.
+  const normalizedRuntime = runtimeDefinition
+    ? normalizeAgentRuntimeState(runtimeDefinition, runtimeState)
+    : null;
+  const providerId = normalizedRuntime?.provider || '';
+  const providerMeta = providerId ? getProviderMeta(providerId) : null;
+  const determinismProfile = isParser && (providerId || modelName)
+    ? getImageParserDeterminismProfile(providerId, modelName)
+    : null;
+
+  // ---- PIPELINE (real topology) ------------------------------------------
+  const inPipeline = Boolean(agentId && PIPELINE_TOPOLOGY[agentId]);
+  const position = agentId ? pipelinePosition(agentId) : null;
+
+  // ---- BEHAVIOR (real profile fields only) -------------------------------
+  const headline = agent?.profile?.headline || '';
+  const doesText = headline && headline !== purpose ? headline : (isParser ? null : headline || null);
+  // The parser's purpose line already states what it does; rather than repeat
+  // it verbatim under "Does", we surface its real boundary on the Won't side
+  // and only print a Does line when the profile carries a distinct headline.
+  const showDoes = Boolean(doesText) && doesText !== purpose;
+  const guardrail = agent?.profile?.boundaries || '';
+
+  // ---- RECENT RESULTS (real parser test stats or honest empty) -----------
+  const parserStats = parserTestResults?.stats || null;
+  const hasParserStats = isParser && parserStats && Number(parserStats.total) > 0;
+  const consistencyMetric = determinismProfile
+    ? formatParserReliabilityMetric(parserStats, providerId, modelName, parserTestResultsLoading)
+    : '';
+  const reliabilitySummary = determinismProfile
+    ? formatParserReliabilitySummary(parserStats, providerId, modelName, determinismProfile.summary, parserTestResultsLoading)
+    : '';
+
+  // ---- ACTIVITY + ATTENTION (real records) -------------------------------
+  const activityEntries = Array.isArray(agent?.activity?.entries) ? agent.activity.entries : [];
+  const sortedActivity = activityEntries
+    .slice()
+    .sort((a, b) =>
+      new Date(b.createdAt || b.timestamp || 0).getTime()
+      - new Date(a.createdAt || a.timestamp || 0).getTime())
+    .slice(0, 6);
+  const attention = buildIdentityAttention(agent);
+  const allClear = attention.tone !== 'down' && attention.tone !== 'warn';
+
+  // ---- INFO RAIL (only items with a real/derivable source) ---------------
+  // Transport: cleanly derivable from the runtime kind — image-parser agents
+  // use Transport 2 (direct provider API); the CLI-orchestrated legs use
+  // Transport 1 (Claude CLI subprocess). Omitted when there is no runtime
+  // definition to derive it from.
+  const transport = runtimeDefinition
+    ? (runtimeDefinition.kind === 'image-parser' ? 'Direct provider API' : 'Claude CLI subprocess')
+    : null;
+  // Accepts / Returns: there is NO real structured per-agent source for these,
+  // so they are OMITTED (documented in the review doc) rather than hardcoded.
+  // Prompt version: the prompt store tracks snapshot COUNT, not a semantic
+  // "P24". Show the real snapshot count when the prompt has loaded; omit
+  // otherwise (no fabricated version number).
+  const snapshotCount = promptState?.versions?.length || 0;
+  const promptVersionLabel = agent?.promptId && snapshotCount > 0
+    ? `${snapshotCount} ${snapshotCount === 1 ? 'snapshot' : 'snapshots'}`
+    : null;
+  const lastUpdatedIso = latestAgentTimestamp(agent);
+  const lastUpdated = lastUpdatedIso ? formatDate(lastUpdatedIso) : null;
+
+  function goToTab(tabId) {
+    onTabChange?.(tabId);
+  }
+
   return (
-    <section className="agent-tab-content overview-layout">
-      <Panel title="Overview" actions={<span className="panel-status-text">{operation?.workflowCount} workflows</span>}>
-        <div className="overview-definition-grid">
-          <Definition label="Agent name">{agent.profile?.roleTitle || agent.profile?.displayName || labelAgent(agent.agentId)}</Definition>
-          <Definition label="Agent ID">{agent.agentId}</Definition>
-          <Definition label="Code identity">{agent.agentId}</Definition>
-          <Definition label="Prompt ID">{agent.promptId || 'No prompt registered'}</Definition>
-          <Definition label="Department">{operation?.department}</Definition>
-          <Definition label="Model">{operation?.modelLabel}</Definition>
-          <Definition label="Tools">{operation?.toolSummary}</Definition>
-          <Definition label="Permissions">{operation?.permissions}</Definition>
-          <Definition label="Escalation Policy">{operation?.escalationPolicy}</Definition>
-          <Definition label="Risk Level">{operation?.risk}</Definition>
-          <Definition label="Review Status">{operation?.reviewStatus}</Definition>
+    <div className="agent-overview-v2">
+      {/* Identity + status + enable toggle now live in the page-level
+          UnifiedAgentHeader (above the tab bar, shown on every tab), so the
+          Overview body starts directly at the properties row / pipeline — no
+          duplicate header here. */}
+      <div className="aov-body-grid">
+        <div className="aov-content">
+          {/* PROPERTIES STRIP */}
+          <section className="aov-props">
+            <div className="aov-prop">
+              <div className="aov-overline">Agent ID</div>
+              <div className="aov-prop-value"><code className="aov-mono">{agentId || 'Unknown'}</code></div>
+            </div>
+            <div className="aov-prop">
+              <div className="aov-overline">Model</div>
+              <div className="aov-prop-value">
+                {modelDisplay ? (
+                  <>
+                    <ProviderModelLogo providerMeta={providerMeta} providerLabel={providerLabel} />
+                    <code className="aov-mono">{modelDisplay}</code>
+                    {providerLabel ? <span className="aov-prop-sub">{providerLabel}</span> : null}
+                  </>
+                ) : (
+                  <span className="aov-prop-muted">Runtime not configured</span>
+                )}
+              </div>
+            </div>
+            <div className="aov-prop">
+              <div className="aov-overline">Tools</div>
+              <div className="aov-prop-value">
+                {tools.length === 0 ? (
+                  <span className="aov-prop-muted">None &middot; works from its prompt and inputs only</span>
+                ) : (
+                  <span className="aov-tools-inline">
+                    {tools.map((tool, index) => (
+                      <span className="aov-chip" key={normalizeToolLabel(tool, index)}>
+                        {normalizeToolLabel(tool, index)}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            </div>
+          </section>
+
+          {/* PIPELINE */}
+          <section className="aov-section">
+            <div className="aov-overline aov-section-overline">Pipeline</div>
+            {inPipeline ? (
+              <PipelineDiagram agentId={agentId} />
+            ) : (
+              <div className="aov-standalone">
+                <span className="aov-standalone-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4" /><path d="M12 16h.01" /></svg>
+                </span>
+                <div className="aov-standalone-text">
+                  <div className="aov-standalone-head">Standalone agent</div>
+                  <div className="aov-standalone-sub">Not part of the escalation pipeline — it runs on its own, not fed by or feeding the other escalation agents.</div>
+                </div>
+              </div>
+            )}
+          </section>
+
+          {/* BEHAVIOR */}
+          {(showDoes || guardrail) && (
+            <section className="aov-section">
+              <div className="aov-overline aov-section-overline">Behavior</div>
+              <div className="aov-behavior">
+                {showDoes && (
+                  <div className="aov-behavior-block">
+                    <div className="aov-behavior-head does">
+                      <span className="aov-bico" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                      </span>
+                      Does
+                    </div>
+                    <div className="aov-behavior-body">{doesText}</div>
+                  </div>
+                )}
+                {guardrail && (
+                  <div className="aov-behavior-block">
+                    <div className="aov-behavior-head wont">
+                      <span className="aov-bico" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                      </span>
+                      Won't
+                    </div>
+                    <div className="aov-behavior-body">{guardrail}</div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* RECENT RESULTS */}
+          <section className="aov-section">
+            <div className="aov-overline aov-section-overline">Recent Results</div>
+            {hasParserStats ? (
+              <div className="aov-results">
+                <div className="aov-result-stats">
+                  <div className="aov-result-stat">
+                    <span className="aov-result-value">{formatRate(parserStats.passRate)}</span>
+                    <span className="aov-result-label">Pass rate</span>
+                  </div>
+                  <div className="aov-result-stat">
+                    <span className="aov-result-value">{parserStats.total}</span>
+                    <span className="aov-result-label">Tests recorded</span>
+                  </div>
+                  <div className="aov-result-stat">
+                    <span className="aov-result-value">{formatMs(parserStats.avgElapsedMs)}</span>
+                    <span className="aov-result-label">Avg time</span>
+                  </div>
+                </div>
+                <div className="aov-result-sub">
+                  {parserStats.pass || 0} pass / {parserStats.fail || 0} fail
+                  {parserStats.pending ? ` · ${parserStats.pending} pending review` : ''}
+                </div>
+                {determinismProfile && (
+                  <div className="aov-result-note">
+                    <div className="aov-overline">Test run check</div>
+                    <div className="aov-result-note-body">
+                      <span className={`aov-determinism-pill is-${determinismProfile.tone}`}>
+                        {determinismProfile.label}
+                      </span>
+                      <span>{consistencyMetric}</span>
+                    </div>
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="aov-link-action"
+                  onClick={() => goToTab('test-results')}
+                >
+                  View test results
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></svg>
+                </button>
+                {isParser && (
+                  <button
+                    type="button"
+                    className="aov-link-action"
+                    onClick={() => onRunAgentTest?.(agent)}
+                  >
+                    Run test
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="aov-empty">
+                <span className="aov-empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M7 15l3-3 3 2 4-5" /></svg>
+                </span>
+                <div className="aov-empty-text">
+                  <div className="aov-empty-head">
+                    {isParser ? 'No transcription tests recorded yet' : 'No harness results recorded yet'}
+                  </div>
+                  <div className="aov-empty-sub">Results from the harness will appear here once you run a test set.</div>
+                </div>
+                <button
+                  type="button"
+                  className="aov-empty-action"
+                  onClick={() => (supportsModalTest ? onRunAgentTest?.(agent) : goToTab('harness'))}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3" /></svg>
+                  {supportsModalTest ? 'Run test' : 'Open harness'}
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* ACTIVITY */}
+          <section className="aov-section">
+            <div className="aov-overline aov-section-overline">Activity</div>
+            {sortedActivity.length ? (
+              <div className="aov-timeline">
+                {sortedActivity.map((entry, index) => (
+                  <div className="aov-tl-item" key={timelineEntryKey(entry) || index}>
+                    <div className="aov-tl-marker">
+                      <span className="aov-tl-dot" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                      </span>
+                      {index < sortedActivity.length - 1 && <span className="aov-tl-line" aria-hidden="true" />}
+                    </div>
+                    <div className="aov-tl-body">
+                      <div className="aov-tl-head">{entry.summary || entry.event || 'Activity recorded'}</div>
+                      <div className="aov-tl-meta">{formatDate(entry.createdAt || entry.timestamp)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="aov-empty-line">No activity recorded for this agent yet.</div>
+            )}
+
+            <div className={`aov-allclear ${allClear ? 'is-clear' : 'is-attention'}`}>
+              {allClear ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" /></svg>
+              )}
+              <span>{allClear ? 'All clear — nothing needs attention.' : attention.text}</span>
+            </div>
+          </section>
         </div>
-      </Panel>
 
-      <WorkflowFootprint agent={agent} operation={operation} />
+        {/* QUIET CONTEXT RAIL — only real/derivable facts */}
+        <aside className="aov-rail">
+          <div className="aov-rail-group">
+            {transport && (
+              <div className="aov-rail-row">
+                <div className="aov-overline">Transport</div>
+                <div className="aov-rail-value">{transport}</div>
+              </div>
+            )}
+            {determinismProfile && (
+              <div className="aov-rail-row">
+                <div className="aov-overline">Reliability note</div>
+                <div className={`aov-rail-value aov-determinism-text is-${determinismProfile.tone}`}>
+                  {reliabilitySummary}
+                </div>
+              </div>
+            )}
+            {/* Accepts / Returns OMITTED — no honest per-agent source. */}
+          </div>
 
-      <QualityPerformance operation={operation} />
+          <div className="aov-rail-group">
+            {promptVersionLabel && (
+              <div className="aov-rail-row">
+                <div className="aov-overline">Prompt version</div>
+                <div className="aov-rail-value aov-mono">{promptVersionLabel}</div>
+              </div>
+            )}
+            {lastUpdated && (
+              <div className="aov-rail-row">
+                <div className="aov-overline">Last updated</div>
+                <div className="aov-rail-value">{lastUpdated}</div>
+              </div>
+            )}
+          </div>
 
-      <PromptContractPanel agent={agent} operation={operation} />
-
-      <HarnessSummaryPanel operation={operation} />
-
-      <ProfileSourceOfTruthPanel agent={agent} operation={operation} />
-
-      <ReviewWorkflowPanel
-        agent={agent}
-        operation={operation}
-        saving={reviewSaving}
-        onMarkReviewed={onMarkReviewed}
-      />
-    </section>
+          {position && (
+            <div className="aov-rail-group">
+              <div className="aov-rail-row">
+                <div className="aov-overline">Position in pipeline</div>
+                <div className="aov-rail-value">
+                  Step {position.step} of {position.total}
+                  <span className="aov-rail-muted"> &middot; {position.role}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </aside>
+      </div>
+    </div>
   );
+}
+
+// PipelineDiagram — the PRODUCTION animated dataflow diagram for the escalation
+// pipeline, ported faithfully from the user-confirmed prototype
+// (prototypes/agent-card/pipeline-animated.html). It renders the REAL
+// PIPELINE_TOPOLOGY: Operator screenshot → Image Parser → {INV Search + Triage,
+// in parallel} → QBO Assistant. The layout/geometry is FIXED (identical to the
+// prototype); only the "this agent" highlight (the glowing node + ★ badge)
+// moves to whichever pipeline agent's profile is being viewed.
+//
+// ----------------------------------------------------------------------------
+// CRITICAL RENDERING FIXES carried over VERBATIM from the prototype (these were
+// ~6 rounds of hard-won fixes; lose any and the spine/combined pulses go
+// invisible or freeze in the user's REAL Chrome — headless verification will
+// NOT catch it). See worker memory `svg-flow-animation-gotchas`.
+//   1. Every STRAIGHT-LINE flow gradient (#aovG-entry, #aovG-pass,
+//      #aovG-combined) uses gradientUnits="userSpaceOnUse" with explicit
+//      x1/y1/x2/y2 — NOT the default objectBoundingBox, which is degenerate on
+//      a zero-height straight stroke (→ invisible in real Chrome).
+//   2. NO SVG blur/filter on ANY animated stroke (GPU-freezes the pulse in real
+//      Chrome). There are none here — keep none.
+//   3. The fork (branch) flow pulses ORIGINATE at the Image Parser card's right
+//      edge (x=544), not at a fork point.
+//   4. The 3 merge streams converge → a SINGLE combined pulse continues INTO the
+//      final node.
+//   5. Gated ignition: the final node holds "Waiting · 3 inputs" then ignites to
+//      "Active" after the parallel pair's merge pulses arrive.
+//   6. prefers-reduced-motion → static, no motion (handled in JS + CSS).
+//   7. Plain `.aov-wire-flow` stroke-dashoffset technique — no comet/head/filter.
+// CSS lives in AgentOverviewTab.css, scoped under `.agent-overview-v2 .aov-flow`.
+function PipelineDiagram({ agentId }) {
+  const label = (id) => pipelineNodeLabel(id, STAGE_LABELS);
+  const parserId = 'escalation-template-parser';
+  const invId = 'known-issue-search-agent';
+  const triageId = 'triage-agent';
+  const finalId = 'chat';
+
+  // ref into the live DOM for the entrance + gated-ignition loop (ported from
+  // the prototype's vanilla-JS controller, adapted to a React effect).
+  const rootRef = useRef(null);
+  // ref to the FIXED 1180x343 design canvas that both the wire SVG and the node
+  // grid live inside. The wrapper (.aov-flow) is fluid; this inner stage is the
+  // one shared coordinate space.
+  const stageRef = useRef(null);
+
+  // SHARED-COORDINATE-SPACE SCALING (the alignment fix).
+  // ----------------------------------------------------------------------------
+  // ROOT CAUSE of the old misalignment: the wire SVG used a fixed viewBox
+  // (0 0 1180 343) with preserveAspectRatio="xMidYMid meet" stretched across the
+  // panel width, while the node grid was a separate fixed-px column track. At any
+  // width other than the prototype's exact 1180x343 stage, the SVG letterboxed
+  // and scaled by a DIFFERENT factor than the grid → wires drifted off the node
+  // edges (measured offsets up to +73 / -69px).
+  //
+  // FIX: the SVG and the grid now BOTH live inside a single .aov-flow-stage that
+  // is sized at the FIXED design dimensions (1180x343px) — exactly the layout the
+  // wire coordinates were tuned against in the prototype. We then scale that whole
+  // stage as ONE unit via CSS transform to fit the available width. Because the
+  // entire subtree (wires + nodes) scales by the same factor with no reflow, the
+  // wires stay glued to the node edges at EVERY width — the alignment is now
+  // width-independent by construction, not re-tuned for one width.
+  useEffect(() => {
+    const root = rootRef.current;
+    const stage = stageRef.current;
+    if (!root || !stage) return undefined;
+
+    const DESIGN_WIDTH = 1180;
+    const applyScale = () => {
+      // The wrapper's content-box width is the space we have to fit into. On
+      // narrow screens the responsive CSS (<=1100px) stacks the grid and hides
+      // the wires; there we clear the transform so the stacked layout flows
+      // naturally (scale would otherwise shrink the stacked nodes).
+      const stacked =
+        typeof window !== 'undefined' &&
+        window.matchMedia &&
+        window.matchMedia('(max-width: 1100px)').matches;
+      if (stacked) {
+        root.style.removeProperty('--aov-scale');
+        return;
+      }
+      const available = root.clientWidth || DESIGN_WIDTH;
+      const scale = Math.min(1, available / DESIGN_WIDTH);
+      root.style.setProperty('--aov-scale', String(scale));
+    };
+
+    applyScale();
+    let observer = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(applyScale);
+      observer.observe(root);
+    } else if (typeof window !== 'undefined') {
+      window.addEventListener('resize', applyScale);
+    }
+    return () => {
+      if (observer) observer.disconnect();
+      else if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', applyScale);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    const nodes = Array.prototype.slice.call(root.querySelectorAll('.aov-flow-node'));
+    const assistant = root.querySelector('.aov-flow-node.indigo');
+    const gateChip = root.querySelector('.aov-flow-gate');
+
+    // Reduced motion: reveal everything, present the TRUTH statically — the
+    // Assistant is the final node, so render it already ignited/active.
+    if (reduce) {
+      nodes.forEach((n) => {
+        n.style.opacity = '1';
+        n.style.transform = 'none';
+      });
+      if (assistant) assistant.classList.add('ignited');
+      if (gateChip) gateChip.classList.add('live');
+      return undefined;
+    }
+
+    const timers = [];
+
+    // Staggered entrance: reveal nodes left→right in pipeline order.
+    const base = 320;
+    const step = 160;
+    nodes.forEach((n) => {
+      const col = n.closest('.aov-flow-col');
+      const order = col ? parseInt(col.getAttribute('data-order'), 10) || 1 : 1;
+      timers.push(
+        setTimeout(() => {
+          n.classList.add('show');
+        }, base + (order - 1) * step)
+      );
+    });
+
+    if (!assistant) {
+      return () => {
+        timers.forEach(clearTimeout);
+      };
+    }
+
+    // GATED IGNITION loop — truthful timeline per the verified server flow:
+    //   1. Parser fires first; its context pulse leaves early.
+    //   2. INV + Triage run in parallel on the parser output.
+    //   3. Server awaits Promise.all([inv, triage]); ONLY THEN the Assistant runs.
+    // So the Assistant holds a "waiting" state while pulses travel, and only
+    // ignites after the gating parallel pair's merge pulses arrive. Loop the
+    // cycle so a late-arriving viewer still sees the gating happen.
+    const ENTRANCE_DONE = 1500;
+    const GATE_WINDOW = 2400;
+    const HOLD_LIT = 3600;
+    const RESET_FADE = 1300;
+
+    const ignite = () => {
+      assistant.classList.add('ignited');
+      if (gateChip) gateChip.classList.add('live');
+    };
+    const idle = () => {
+      assistant.classList.remove('ignited');
+      if (gateChip) gateChip.classList.remove('live');
+    };
+
+    const cycle = () => {
+      timers.push(
+        setTimeout(() => {
+          ignite();
+          timers.push(
+            setTimeout(() => {
+              idle();
+              timers.push(setTimeout(cycle, RESET_FADE));
+            }, HOLD_LIT)
+          );
+        }, GATE_WINDOW)
+      );
+    };
+
+    idle();
+    timers.push(setTimeout(cycle, ENTRANCE_DONE));
+
+    return () => {
+      timers.forEach(clearTimeout);
+    };
+    // Re-run when the highlighted agent changes so the loop/refs stay bound to
+    // the freshly-rendered nodes.
+  }, [agentId]);
+
+  // "this agent" highlight generalizes: whichever pipeline node matches the
+  // viewed agentId gets the ★ pin + an is-current ring, ON TOP of its permanent
+  // informational role color. Agents not in the pipeline never reach this
+  // component (the caller renders the standalone fallback).
+  const isCurrent = (id) => agentId === id;
+  const pin = (id) =>
+    isCurrent(id) ? <span className="aov-flow-pin">&#9733; This agent</span> : null;
+  const nodeClass = (id, role) =>
+    `aov-flow-node ${role}${isCurrent(id) ? ' is-current' : ''}`;
+
+  return (
+    <div className="aov-flow" ref={rootRef}>
+      {/* FIXED 1180x343 DESIGN CANVAS — the single shared coordinate space.
+          Both the wire SVG and the node grid live inside this stage at the exact
+          dimensions the wire coordinates were tuned against (the prototype's
+          1180x343 stage). The wrapper scales this whole stage as ONE unit (CSS
+          transform driven by the ResizeObserver above), so the wires stay glued
+          to the node edges at every container width. See the effect comment. */}
+      <div className="aov-flow-stage" ref={stageRef}>
+        {/* ===== WIRE LAYER (animated) — sits BEHIND the node grid so wires anchor
+             to node edges. Ported VERBATIM from the prototype. viewBox is 1:1 with
+             the stage (no stretch, no letterbox). Spine y=172. Branch centers INV
+             y=85, Triage y=258. Node edges: Operator right 292 · Parser 348→544 ·
+             Branches 608→808 · Assistant left 873. ===== */}
+        <svg
+          className="aov-flow-wires"
+          viewBox="0 0 1180 343"
+          preserveAspectRatio="xMidYMid meet"
+          aria-hidden="true"
+        >
+        <defs>
+          {/* FIX #1: straight-line gradients use userSpaceOnUse + explicit
+              coords. #aovG-entry, #aovG-pass and #aovG-combined are horizontal
+              strokes (y1=y2) — objectBoundingBox would be degenerate (zero
+              height) and render invisible in real Chrome. */}
+          <linearGradient id="aovG-entry" gradientUnits="userSpaceOnUse" x1="292" y1="172" x2="348" y2="172">
+            <stop offset="0" stopColor="#8b8b93" /><stop offset="1" stopColor="#4d9bff" />
+          </linearGradient>
+          <linearGradient id="aovG-fork-teal" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#4d9bff" /><stop offset="1" stopColor="#2dd4bf" />
+          </linearGradient>
+          <linearGradient id="aovG-fork-violet" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#4d9bff" /><stop offset="1" stopColor="#b07cff" />
+          </linearGradient>
+          <linearGradient id="aovG-merge-teal" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#2dd4bf" /><stop offset="1" stopColor="#7c83ff" />
+          </linearGradient>
+          <linearGradient id="aovG-merge-violet" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stopColor="#b07cff" /><stop offset="1" stopColor="#7c83ff" />
+          </linearGradient>
+          {/* SPINE pulse gradient — userSpaceOnUse across the spine (544→845). */}
+          <linearGradient id="aovG-pass" gradientUnits="userSpaceOnUse" x1="544" y1="172" x2="845" y2="172">
+            <stop offset="0" stopColor="#8cc0ff" /><stop offset="1" stopColor="#7c83ff" />
+          </linearGradient>
+          {/* combined entry gradient — userSpaceOnUse across merge→Assistant. */}
+          <linearGradient id="aovG-combined" gradientUnits="userSpaceOnUse" x1="845" y1="172" x2="873" y2="172">
+            <stop offset="0" stopColor="#8a93ff" /><stop offset="1" stopColor="#7c83ff" />
+          </linearGradient>
+          <radialGradient id="aovG-fuse" cx="50%" cy="50%" r="50%">
+            <stop offset="0" stopColor="#aab2ff" /><stop offset="1" stopColor="#7c83ff" stopOpacity="0" />
+          </radialGradient>
+        </defs>
+
+        {/* SEGMENT 1: Operator → Image Parser (x292 → 348, spine y=172) */}
+        <path className="aov-wire-track" d="M292 172 H348" />
+        <path className="aov-wire-flow" stroke="url(#aovG-entry)" d="M292 172 H348" style={{ animationDelay: '0s' }} />
+        <path className="aov-wire-arrow" stroke="#4d9bff" d="M341 167 l6 5 -6 5" />
+
+        {/* CENTRAL SPINE track: Image Parser → MERGE POINT (the MAIN thread).
+            FIX #3: the spine pulse departs FROM the card right edge x=544. */}
+        <path className="aov-wire-pass-track" d="M544 172 H845" />
+
+        {/* FORK (tap-off): branches diverge from the spine up to INV (616,85) and
+            down to Triage (616,258). */}
+        <path className="aov-wire-track" d="M544 172 C600 172, 600 85, 616 85" />
+        <path className="aov-wire-track" d="M544 172 C600 172, 600 258, 616 258" />
+        {/* IN-SYNC fork pulses (identical delay = simultaneity). FIX #3: both
+            start at x=544, the Image Parser card edge — not at a fork point. */}
+        <path className="aov-wire-flow" stroke="url(#aovG-fork-teal)" d="M544 172 C600 172, 600 85, 616 85" style={{ animationDelay: '0.34s' }} />
+        <path className="aov-wire-flow" stroke="url(#aovG-fork-violet)" d="M544 172 C600 172, 600 258, 616 258" style={{ animationDelay: '0.34s' }} />
+        <path className="aov-wire-arrow" stroke="#2dd4bf" d="M609 80 l6 5 -6 5" />
+        <path className="aov-wire-arrow" stroke="#b07cff" d="M609 253 l6 5 -6 5" />
+
+        {/* 3→1 JOIN: INV (above) + Triage (below) + spine (center) converge at
+            the merge point (845,172) just left of the Assistant. */}
+        <path className="aov-wire-track" d="M808 86 C842 86, 821 172, 845 172" />
+        <path className="aov-wire-track" d="M808 259 C842 259, 821 172, 845 172" />
+        {/* in-sync merge pulses (the GATING pair) */}
+        <path className="aov-wire-flow" stroke="url(#aovG-merge-teal)" d="M808 86 C842 86, 821 172, 845 172" style={{ animationDelay: '0.62s' }} />
+        <path className="aov-wire-flow" stroke="url(#aovG-merge-violet)" d="M808 259 C842 259, 821 172, 845 172" style={{ animationDelay: '0.62s' }} />
+
+        {/* FUSE point: glow flash + anchor dot where the three streams combine */}
+        <circle className="aov-merge-glow" cx="845" cy="172" r="14" />
+        <circle className="aov-merge-dot" cx="845" cy="172" r="4.5" />
+
+        {/* COMBINED single edge track: merge point (845,172) → Assistant (873,172) */}
+        <path className="aov-wire-combined-track" d="M845 172 H873" />
+        <path className="aov-wire-arrow" stroke="#8a9bff" strokeWidth="2.4" d="M866 166 l7 6 -7 6" />
+
+        {/* spine label, BELOW the spine in the lower clear lane so it never sits
+            on the pulse's runway. Short connector tick links it to the spine. */}
+        <line x1="698" y1="179" x2="698" y2="184" stroke="rgba(124,131,255,0.35)" strokeWidth="1" />
+        <rect className="aov-pass-label-bg" x="640" y="185" width="116" height="15" rx="4" />
+        <text className="aov-pass-label" x="698" y="193" textAnchor="middle" dominantBaseline="middle">
+          parser context (direct)
+        </text>
+
+        {/* TOP LAYER: flowing pulses drawn LAST so nothing covers them.
+            FIX #4 + #7: the SPINE pulse uses the IDENTICAL plain .aov-wire-flow
+            mechanism as the branches (same dasharray, same keyframes, NO filter,
+            NO separate head element). FIX #3: it departs from x=544. */}
+        <path className="aov-wire-flow" stroke="url(#aovG-pass)" d="M544 172 H845" style={{ animationDelay: '0.18s' }} />
+        {/* COMBINED entry flow: stream continues from merge point INTO the node */}
+        <path className="aov-wire-combined-flow" d="M845 172 H873" />
+      </svg>
+
+      {/* ===== NODE GRID ===== */}
+      <div className="aov-flow-grid">
+        {/* 1. ENTRY: Operator Screenshot (input, not an agent) */}
+        <div className="aov-flow-col" data-order="1">
+          <div className="aov-flow-cap aov-flow-cap-top">&nbsp;</div>
+          <div className="aov-flow-node entry">
+            <span className="aov-flow-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="14" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><path d="M21 15l-5-5L5 21" /></svg>
+            </span>
+            <span className="aov-flow-name">Operator Screenshot</span>
+            <span className="aov-flow-role">Raw input</span>
+          </div>
+          <div className="aov-flow-cap">Entry point</div>
+        </div>
+
+        <div className="aov-flow-spacer" />
+
+        {/* 2. Image Parser (hero blue role color; ★ pin when current) */}
+        <div className="aov-flow-col" data-order="2">
+          <div className="aov-flow-cap aov-flow-cap-top">{pin(parserId)}</div>
+          <div className={nodeClass(parserId, 'hero')}>
+            <span className="aov-flow-halo" aria-hidden="true" />
+            <span className="aov-flow-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2.5" /><path d="M3 8.5h18" /><path d="M8 13.5l2.2 2.2L15 11" /></svg>
+            </span>
+            <span className="aov-flow-name">{label(parserId)}</span>
+            <span className="aov-flow-role">Reads the form, field by field</span>
+          </div>
+          <div className="aov-flow-cap">&nbsp;</div>
+        </div>
+
+        <div className="aov-flow-spacer" />
+
+        {/* 3. PARALLEL: INV Search Agent (teal) + Triage Agent (violet) */}
+        <div className="aov-flow-col" data-order="3">
+          <div className="aov-flow-cap aov-flow-cap-top">
+            <span className="aov-flow-parallel"><span className="aov-flow-sync" />Run in parallel</span>
+          </div>
+          <div className="aov-flow-branch">
+            <div className={nodeClass(invId, 'teal')}>
+              {pin(invId)}
+              <span className="aov-flow-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              </span>
+              <span className="aov-flow-name">{label(invId)}</span>
+            </div>
+            <div className={nodeClass(triageId, 'violet')}>
+              {pin(triageId)}
+              <span className="aov-flow-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 6h18" /><path d="M7 12h10" /><path d="M10 18h4" /></svg>
+              </span>
+              <span className="aov-flow-name">{label(triageId)}</span>
+            </div>
+          </div>
+          <div className="aov-flow-cap">&nbsp;</div>
+        </div>
+
+        <div className="aov-flow-spacer" />
+
+        {/* 4. FINAL: QBO Assistant (indigo, GATED on all three inputs) */}
+        <div className="aov-flow-col" data-order="4">
+          <div className="aov-flow-cap aov-flow-cap-top">
+            {isCurrent(finalId) ? (
+              pin(finalId)
+            ) : (
+              <span className="aov-flow-gate">
+                <span className="aov-flow-gdot" />
+                <span className="aov-flow-gwait">Waiting &middot; 3 inputs</span>
+                <span className="aov-flow-glive">Active</span>
+              </span>
+            )}
+          </div>
+          <div className={nodeClass(finalId, 'indigo')}>
+            <span className="aov-flow-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v1a4 4 0 0 1 4 4v2a4 4 0 0 1-1 2.6V18a3 3 0 0 1-3 3H9a3 3 0 0 1-3-3v-.4A4 4 0 0 1 5 15v-2a4 4 0 0 1 4-4V5a3 3 0 0 1 3-3z" /><path d="M9 13h.01M15 13h.01" /></svg>
+            </span>
+            <span className="aov-flow-name">{label(finalId)}</span>
+            <span className="aov-flow-role">Composes the reply</span>
+          </div>
+          <div className="aov-flow-cap">Final response</div>
+        </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ProviderModelLogo — the small inline provider mark shown next to the Model
+// value on the Overview. Source of truth is the SAME canonical catalog mapping
+// the app's provider picker uses (shared/ai-provider-catalog.json →
+// getProviderMeta → iconPath/iconLightPath); we do not invent a new mapping.
+//
+// HONESTY: we only render a real asset. When a provider's catalog entry has an
+// iconPath we render that file (preferring the light variant on this dark
+// surface, matching AppHeader's ProviderLogo). When the entry has NO icon
+// (e.g. the LLM Gateway uses a runtime-model-family strategy with no static
+// asset) we fall back to a tasteful neutral monogram built from the provider's
+// real short label — never a fabricated logo. `decoding`/`loading` keep it
+// cheap; a load error hides the broken image so we degrade to text-only.
+function ProviderModelLogo({ providerMeta, providerLabel }) {
+  const [errored, setErrored] = useState(false);
+  const iconSrc = providerMeta?.iconLightPath || providerMeta?.iconPath || '';
+  const altLabel = providerMeta?.shortLabel || providerMeta?.label || providerLabel || 'Provider';
+
+  if (iconSrc && !errored) {
+    return (
+      <span className="aov-provider-logo" title={altLabel}>
+        <img
+          src={iconSrc}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+          onError={() => setErrored(true)}
+        />
+      </span>
+    );
+  }
+
+  // Neutral monogram fallback — real initial from the provider's short label.
+  const initial = (altLabel || '?').trim().charAt(0).toUpperCase() || '?';
+  return (
+    <span className="aov-provider-logo is-fallback" title={altLabel} aria-hidden="true">
+      {initial}
+    </span>
+  );
+}
+
+// Build the "Attention" line from real signals only. We deliberately read the
+// raw harness and review RECORDS here, NOT operation.reviewStatus — that field
+// falls back to the hardcoded AGENT_OPERATION_META literal ("Deterministic",
+// "Review overdue", ...) when an agent has no real review, and trusting it
+// would let fabricated text claim a real concern. We only flag a concern when
+// an actual record says so. If we checked the real records and found nothing
+// wrong, "Nothing needs attention." is an honest statement.
+function buildIdentityAttention(agent) {
+  const lastRun = latestAgentHarnessRun(agent);
+  if (lastRun && (lastRun.status === 'fail' || lastRun.status === 'failed')) {
+    return { text: `Last test failed — ${lastRun.summary || 'review the harness results'}.`, tone: 'down' };
+  }
+  const lastReview = latestAgentReview(agent);
+  if (lastReview && lastReview.status === 'rejected') {
+    return { text: 'Latest review was rejected — changes are blocked.', tone: 'down' };
+  }
+  if (!agent?.promptId && !agent?.agentId?.includes('parser')) {
+    return { text: 'No prompt registered yet — not ready for live work.', tone: 'warn' };
+  }
+  if (lastReview && lastReview.status === 'approved') {
+    return { text: `Reviewed and approved · ${formatDate(lastReview.createdAt)}`, tone: 'good' };
+  }
+  return { text: 'Nothing needs attention.', tone: 'neutral' };
 }
 
 function WorkflowFootprint({ agent, operation }) {
@@ -1650,25 +3079,6 @@ function WorkflowFootprint({ agent, operation }) {
   );
 }
 
-function QualityPerformance({ operation }) {
-  return (
-    <Panel title="Quality & Performance" actions={<span className="panel-status-text">Last 30 days</span>}>
-      <div className="quality-list">
-        {operation?.qualityMetrics?.map((metric) => (
-          <div className="quality-row" key={metric.label}>
-            <span>
-              <i className={`quality-icon ${metric.tone}`} />
-              {metric.label}
-            </span>
-            <strong>{metric.value}</strong>
-            <small className={metric.deltaTone}>{metric.delta}</small>
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-}
-
 function HarnessSummaryPanel({ operation }) {
   return (
     <Panel title="Harness & Execution" actions={<span className="panel-status-text">{operation?.testCoverage}% tested</span>}>
@@ -1682,36 +3092,6 @@ function HarnessSummaryPanel({ operation }) {
       </div>
       <div className="coverage-bar" aria-label={`Test coverage ${operation?.testCoverage}%`}>
         <span style={{ width: `${operation?.testCoverage || 0}%` }} />
-      </div>
-    </Panel>
-  );
-}
-
-function ProfileSourceOfTruthPanel({ agent, operation }) {
-  const coverage = [
-    ['Identity', Boolean(agent?.agentId && agent?.profile?.roleTitle), agent?.agentId],
-    ['Prompt', Boolean(agent?.promptId), agent?.promptId || 'Missing prompt link'],
-    ['Runtime', Boolean(agent?.runtime), operation?.modelLabel || 'Runtime not loaded'],
-    ['Memory', Boolean(agent?.memory), `${agent?.memory?.notes?.length || 0} notes`],
-    ['History', Boolean(agent?.history), `${agent?.history?.entries?.length || 0} entries`],
-    ['Harness', Boolean(agent?.harness), `${agent?.harness?.runs?.length || 0} runs`],
-    ['Activity', Boolean(agent?.activity), `${agent?.activity?.entries?.length || 0} entries`],
-    ['Relationships', Boolean(agent?.relationships), `${agent?.relationships?.notes?.length || 0} notes`],
-    ['Issues / tasks', false, 'No first-class agent issue/task ledger yet'],
-    ['Monitoring', Boolean(agent?.lifecycle), agent?.enabled === false ? 'Disabled' : 'Enabled'],
-  ];
-
-  return (
-    <Panel title="Profile Source of Truth" actions={<span className="panel-status-text">Canonical profile</span>}>
-      <div className="compact-list">
-        {coverage.map(([label, ready, detail]) => (
-          <CompactItem
-            key={label}
-            title={label}
-            meta={ready ? 'Available from agent profile' : 'Gap'}
-            detail={detail}
-          />
-        ))}
       </div>
     </Panel>
   );
@@ -1829,7 +3209,12 @@ function ReviewWorkflowPanel({ agent, operation, saving = false, onMarkReviewed 
   );
 }
 
-function HarnessResultsPanel({ operation, saving = false, onRecordHarnessRun }) {
+function HarnessResultsPanel({ agent, operation, saving = false, onRecordHarnessRun, onRunAgentTest }) {
+  const supportsAgentTest = isAgentTestSupported(agent?.agentId);
+  const actionLabel = supportsAgentTest ? 'Run Test' : 'Record Run';
+  const actionHandler = supportsAgentTest ? () => onRunAgentTest?.(agent) : onRecordHarnessRun;
+  const actionDisabled = saving || !actionHandler;
+
   return (
     <Panel
       title="Harness Results"
@@ -1837,10 +3222,10 @@ function HarnessResultsPanel({ operation, saving = false, onRecordHarnessRun }) 
         <button
           type="button"
           className="text-action"
-          disabled={saving || !onRecordHarnessRun}
-          onClick={onRecordHarnessRun}
+          disabled={actionDisabled}
+          onClick={actionHandler}
         >
-          {saving ? 'Saving...' : 'Record Run'}
+          {saving ? 'Saving...' : actionLabel}
         </button>
       }
     >
@@ -1867,6 +3252,7 @@ function AgentConfigurationTab({
   runtimeDefinition,
   runtimeState,
   runtimeSaveStatus,
+  runtimeRecheckResult,
   reviewSaving,
   onProfileChange,
   onProfileSummaryChange,
@@ -1908,6 +3294,7 @@ function AgentConfigurationTab({
           definition={runtimeDefinition}
           runtimeState={runtimeState}
           saveStatus={runtimeSaveStatus}
+          recheckResult={runtimeRecheckResult}
           onSave={onRuntimeSave}
         />
       </Panel>
@@ -1952,46 +3339,107 @@ function AgentPromptTab({
   onRestorePreview,
   onLoadPrompt,
 }) {
+  const [editingPrompt, setEditingPrompt] = useState(false);
+
+  useEffect(() => {
+    setEditingPrompt(false);
+  }, [agent?.promptId, promptState?.updatedAt]);
+
+  const promptMeta = (
+    <div className="prompt-editor-meta prompt-editor-meta-header">
+      <Badge>Prompt: {agent.promptId}</Badge>
+      <Badge>{promptState?.versions?.length || 0} snapshots</Badge>
+      <Badge>{formatDate(promptState?.updatedAt)}</Badge>
+    </div>
+  );
+  const promptHeader = (
+    <div className="prompt-editor-toolbar">
+      {agent.promptId ? promptMeta : <span />}
+      <div className="prompt-editor-actions">
+        <button
+          type="button"
+          className={`prompt-icon-button${promptLoading ? ' is-loading' : ''}`}
+          onClick={onLoadPrompt}
+          disabled={promptLoading}
+          aria-label="Reload prompt"
+          title="Reload"
+        >
+          <svg aria-hidden="true" focusable="false" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 12a9 9 0 0 1-15.1 6.6" />
+            <path d="M3 12A9 9 0 0 1 18.1 5.4" />
+            <path d="M18 2v4h-4" />
+            <path d="M6 22v-4h4" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className={`prompt-icon-button${editingPrompt ? ' is-active' : ''}`}
+          onClick={() => setEditingPrompt((value) => !value)}
+          disabled={!agent.promptId || promptLoading}
+          aria-pressed={editingPrompt}
+          aria-label={editingPrompt ? 'Disable prompt editing' : 'Enable prompt editing'}
+          title={editingPrompt ? 'Editing' : 'Edit'}
+        >
+          <svg aria-hidden="true" focusable="false" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+
+  const currentPromptVersion = getPromptVersionFromContent(promptState?.content);
+  const currentPromptSha = formatShortSha(promptState?.promptSha256);
+  const versionRows = [
+    ...(promptState?.content ? [{
+      versionId: 'current',
+      versionLabel: currentPromptVersion
+        ? `${currentPromptVersion} current production${currentPromptSha ? ` · ${currentPromptSha}` : ''}`
+        : 'Current production',
+      createdAt: promptState?.updatedAt,
+      summary: 'Active prompt file',
+      content: promptState.content,
+      isCurrent: true,
+    }] : []),
+    ...(promptState?.versions || []),
+  ];
+
   return (
     <section className="agent-tab-content prompt-layout">
       <Panel
-        title="Editable Prompt Surface"
-        actions={
-          <button type="button" className="text-action" onClick={onLoadPrompt}>
-            Reload
-          </button>
-        }
+        headerContent={promptHeader}
       >
         {!agent.promptId ? (
-          <EmptyState title="No editable prompt" copy="This identity is runtime-only or deterministic and does not expose an editable prompt file." />
+          <EmptyState title="No editable prompt" copy="This identity does not use an editable prompt file." />
         ) : promptLoading ? (
           <InlineLoading label="Loading prompt..." />
         ) : (
           <>
             {promptError && <div className="agent-alert">{promptError}</div>}
-            <div className="prompt-editor-meta">
-              <Badge>Prompt: {agent.promptId}</Badge>
-              <Badge>{promptState?.versions?.length || 0} versions</Badge>
-              <Badge>{formatDate(promptState?.updatedAt)}</Badge>
-            </div>
             <textarea
-              className="prompt-editor"
+              className={`prompt-editor${editingPrompt ? ' is-editing' : ' is-readonly'}`}
               value={promptDraft}
               onChange={(event) => onPromptDraftChange(event.target.value)}
+              readOnly={!editingPrompt}
               spellCheck={false}
             />
-            <FormField
-              label="Change summary"
-              type="textarea"
-              value={promptSummary}
-              placeholder="Summarize the prompt update."
-              onChange={onPromptSummaryChange}
-            />
-            <div className="form-action-row">
-              <button type="button" className="primary-action" onClick={onPromptSave} disabled={promptSaving}>
-                {promptSaving ? 'Saving...' : 'Save Prompt'}
-              </button>
-            </div>
+            {editingPrompt && (
+              <>
+                <FormField
+                  label="Change summary"
+                  type="textarea"
+                  value={promptSummary}
+                  placeholder="Summarize the prompt update."
+                  onChange={onPromptSummaryChange}
+                />
+                <div className="form-action-row">
+                  <button type="button" className="primary-action" onClick={onPromptSave} disabled={promptSaving}>
+                    {promptSaving ? 'Saving...' : 'Save Prompt'}
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
       </Panel>
@@ -1999,12 +3447,12 @@ function AgentPromptTab({
       <PromptContractPanel agent={agent} operation={operation} />
 
       <Panel title="Prompt Versions">
-        {promptState?.versions?.length ? (
+        {versionRows.length ? (
           <div className="version-rows">
-            {promptState.versions.map((version) => (
+            {versionRows.map((version) => (
               <button
                 type="button"
-                className="version-row-button"
+                className={`version-row-button${version.isCurrent ? ' is-current' : ''}`}
                 key={version.versionId || version.createdAt || version.summary}
                 onClick={() => onPreviewVersion(version)}
               >
@@ -2048,17 +3496,21 @@ function AgentHarnessTab({
   runtimeDefinition,
   runtimeState,
   runtimeSaveStatus,
+  runtimeRecheckResult,
   harnessSaving,
   onRuntimeSave,
   onRecordHarnessRun,
+  onRunAgentTest,
 }) {
   return (
     <section className="agent-tab-content harness-layout">
       <HarnessSummaryPanel operation={operation} />
       <HarnessResultsPanel
+        agent={agent}
         operation={operation}
         saving={harnessSaving}
         onRecordHarnessRun={onRecordHarnessRun}
+        onRunAgentTest={onRunAgentTest}
       />
       <Panel title="Runtime Provider Matrix">
         <RuntimeSettingsPanel
@@ -2066,6 +3518,7 @@ function AgentHarnessTab({
           definition={runtimeDefinition}
           runtimeState={runtimeState}
           saveStatus={runtimeSaveStatus}
+          recheckResult={runtimeRecheckResult}
           onSave={onRuntimeSave}
         />
       </Panel>
@@ -2084,6 +3537,163 @@ function AgentHarnessTab({
   );
 }
 
+// Status chip definitions for the Recent Runs filter bar. Single-select.
+// `match` is the predicate ANDed with the provider + model dropdowns.
+const RUN_FILTER_STATUSES = [
+  { value: 'all', label: 'All', match: () => true },
+  { value: 'recorded', label: 'Recorded', match: (status) => status === 'pass' || status === 'fail' },
+  { value: 'pending-review', label: 'Pending review', match: (status) => status === 'pending-review' },
+  { value: 'pass', label: 'Passed', match: (status) => status === 'pass' },
+  { value: 'fail', label: 'Failed', match: (status) => status === 'fail' },
+];
+
+// Client-side filtering for a loaded Recent Runs array. No refetching — the data
+// (limit 80) is already in page state. Holds the three filter selections, derives
+// distinct sorted provider/model options, and returns the filtered array.
+function useRunFilters(results) {
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [providerFilter, setProviderFilter] = useState('all');
+  const [modelFilter, setModelFilter] = useState('all');
+
+  const providerOptions = useMemo(() => {
+    const seen = new Set();
+    for (const run of results) {
+      if (run?.provider) seen.add(run.provider);
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [results]);
+
+  const modelOptions = useMemo(() => {
+    const seen = new Set();
+    for (const run of results) {
+      if (run?.model) seen.add(run.model);
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [results]);
+
+  const filtered = useMemo(() => {
+    const statusDef = RUN_FILTER_STATUSES.find((entry) => entry.value === statusFilter)
+      || RUN_FILTER_STATUSES[0];
+    return results.filter((run) => {
+      const status = run?.status || 'pending-review';
+      if (!statusDef.match(status)) return false;
+      if (providerFilter !== 'all' && run?.provider !== providerFilter) return false;
+      if (modelFilter !== 'all' && run?.model !== modelFilter) return false;
+      return true;
+    });
+  }, [results, statusFilter, providerFilter, modelFilter]);
+
+  // Per-status counts for the toolbar chips. Each chip shows how many runs match
+  // its status predicate across the full (unfiltered) result set, so the numbers
+  // stay stable while provider/model dropdowns narrow the visible list.
+  const statusCounts = useMemo(() => {
+    const counts = {};
+    for (const entry of RUN_FILTER_STATUSES) {
+      counts[entry.value] = 0;
+    }
+    for (const run of results) {
+      const status = run?.status || 'pending-review';
+      for (const entry of RUN_FILTER_STATUSES) {
+        if (entry.match(status)) counts[entry.value] += 1;
+      }
+    }
+    return counts;
+  }, [results]);
+
+  const isActive = statusFilter !== 'all' || providerFilter !== 'all' || modelFilter !== 'all';
+
+  const reset = useCallback(() => {
+    setStatusFilter('all');
+    setProviderFilter('all');
+    setModelFilter('all');
+  }, []);
+
+  return {
+    statusFilter,
+    setStatusFilter,
+    providerFilter,
+    setProviderFilter,
+    modelFilter,
+    setModelFilter,
+    providerOptions,
+    modelOptions,
+    statusCounts,
+    filtered,
+    isActive,
+    reset,
+  };
+}
+
+// Presentational filter bar for the Recent Runs lists. Controlled — all state
+// lives in the parent's useRunFilters() call and is passed in as props.
+function RunFilterBar({ filters, totalCount }) {
+  const {
+    statusFilter,
+    setStatusFilter,
+    providerFilter,
+    setProviderFilter,
+    modelFilter,
+    setModelFilter,
+    providerOptions,
+    modelOptions,
+    statusCounts,
+    filtered,
+    isActive,
+    reset,
+  } = filters;
+
+  return (
+    <div className="tr-toolbar">
+      <div className="tr-chips" role="group" aria-label="Filter runs by status">
+        {RUN_FILTER_STATUSES.map((entry) => {
+          const active = statusFilter === entry.value;
+          const count = statusCounts?.[entry.value] ?? 0;
+          return (
+            <button
+              key={entry.value}
+              type="button"
+              className={`tr-chip${active ? ' is-active' : ''}`}
+              aria-pressed={active}
+              onClick={() => setStatusFilter(entry.value)}
+            >
+              {entry.label}
+              <span className="tr-chip-n">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="tr-filters">
+        <select
+          className="tr-select"
+          aria-label="Filter runs by provider"
+          value={providerFilter}
+          onChange={(event) => setProviderFilter(event.target.value)}
+        >
+          <option value="all">All providers</option>
+          {providerOptions.map((provider) => (
+            <option key={provider} value={provider}>{provider}</option>
+          ))}
+        </select>
+        <select
+          className="tr-select"
+          aria-label="Filter runs by model"
+          value={modelFilter}
+          onChange={(event) => setModelFilter(event.target.value)}
+        >
+          <option value="all">All models</option>
+          {modelOptions.map((model) => (
+            <option key={model} value={model}>{model}</option>
+          ))}
+        </select>
+        <span className="tr-showing">{filtered.length} of {totalCount}</span>
+        {isActive && (
+          <button type="button" className="tr-clear" onClick={reset}>Clear</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ImageParserTestResultsTab({
   parserTestResults,
   parserTestResultsLoading,
@@ -2091,18 +3701,35 @@ function ImageParserTestResultsTab({
   parserResultPreview,
   onLoadParserTestResults,
   onUpdateParserTestResult,
+  onProgrammaticCheckParserTestResult,
+  onRetestParserTestResult,
+  onDeleteParserTestResult,
+  onOpenParserTestResult,
+  onRequestDeleteParserTestResult,
   onPreviewParserResult,
   onCloseParserResultPreview,
 }) {
   const stats = parserTestResults?.stats || {};
   const results = parserTestResults?.results || [];
+  const runFilters = useRunFilters(results);
+  const providerReliabilityRows = (stats.byProvider || []).map((row) => ({
+    ...row,
+    reliability: getImageParserDeterminismProfile(row.provider || ''),
+    metric: formatReliabilityRowMetric(row),
+  }));
+
+  const blocked = parserTestResultsLoading || parserTestResultsError
+    || parserTestResults?.dbAvailable === false;
 
   return (
-    <section className="agent-tab-content parser-results-layout">
-      <Panel
-        title="Image Parser Test Results"
-        actions={<button type="button" className="text-action" onClick={onLoadParserTestResults}>Refresh</button>}
-      >
+    <section className="agent-tab-content tr-results">
+      <aside className="tr-summary">
+        <div className="tr-summary-head">
+          <div className="tr-summary-heading">Image Parser Test Results</div>
+          <p>Live parser runs checked against the required QBO format.</p>
+          <button type="button" className="tr-refresh" onClick={onLoadParserTestResults}>Refresh</button>
+        </div>
+
         {parserTestResultsLoading ? (
           <InlineLoading label="Loading parser test results..." />
         ) : parserTestResultsError ? (
@@ -2111,57 +3738,110 @@ function ImageParserTestResultsTab({
           <EmptyState title="Database unavailable" copy="Parser test results are separate from escalation logs, and MongoDB is not currently connected." />
         ) : (
           <>
-            <div className="parser-result-stat-grid">
+            <div className="tr-metrics">
               <ParserResultMetric label="Total" value={stats.total || 0} detail={`${stats.pending || 0} pending review`} />
-              <ParserResultMetric label="Pass Rate" value={formatRate(stats.passRate)} detail={`${stats.pass || 0} pass / ${stats.fail || 0} fail`} />
-              <ParserResultMetric label="Avg Time" value={formatMs(stats.avgElapsedMs)} detail="Live parser test elapsed time" />
+              <ParserResultMetric label="Pass rate" value={formatRate(stats.passRate)} detail={`${stats.pass || 0} pass / ${stats.fail || 0} fail`} tone={passRateTone(stats.passRate)} />
+              <ParserResultMetric label="Avg time" value={formatMs(stats.avgElapsedMs)} detail="elapsed per run" />
             </div>
-            <ParserResultBreakdown title="By Provider" rows={stats.byProvider || []} labelFor={(row) => row.provider || 'Unknown'} />
-            <ParserResultBreakdown title="By Model" rows={stats.byModel || []} labelFor={(row) => [row.provider, row.model].filter(Boolean).join(' / ') || 'Unknown'} />
-            <ParserResultBreakdown title="By Test Image" rows={stats.byFixture || []} labelFor={(row) => row.fixtureName || 'Unknown fixture'} withThumbs />
+            <ParserResultBreakdown label="By provider" headLabel="Provider" rows={stats.byProvider || []} labelFor={(row) => row.provider || 'Unknown'} />
+            {providerReliabilityRows.length > 0 && (
+              <div className="tr-determinism">
+                <div className="tr-section-label">Reliability notes</div>
+                {providerReliabilityRows.map((row) => (
+                  <div className={`tr-determinism-row is-${row.reliability.tone}`} key={`reliability-${row.provider || 'unknown'}`}>
+                    <strong>{row.provider || 'Unknown'}</strong>
+                    <span>{row.reliability.label}</span>
+                    <small>{row.metric}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+            <ParserResultBreakdown label="By model" headLabel="Model" mono rows={stats.byModel || []} labelFor={(row) => [row.provider, row.model].filter(Boolean).join(' / ') || 'Unknown'} />
+            <ParserResultBreakdown
+              label="By prompt version"
+              headLabel="Prompt"
+              mono
+              rows={stats.byPromptVersion || []}
+              labelFor={(row) => [
+                row.promptVersion || 'Unknown version',
+                formatShortSha(row.promptSha256),
+              ].filter(Boolean).join(' · ')}
+            />
+            <ParserResultBreakdown label="By test image" headLabel="Image" rows={stats.byFixture || []} labelFor={(row) => row.fixtureName || 'Unknown fixture'} withThumbs />
           </>
         )}
-      </Panel>
+      </aside>
 
-      <Panel title="Recent Runs">
-        {results.length ? (
-          <div className="parser-result-list">
-            {results.map((result) => (
-              <article className={`parser-result-card is-${result.status || 'pending-review'}`} key={result.id}>
-                <button
-                  type="button"
-                  className="parser-result-thumb"
-                  onClick={() => onPreviewParserResult(result)}
-                  title="Open test image"
-                >
-                  {result.fixture?.url ? <img src={result.fixture.url} alt="" /> : <span>No image</span>}
-                </button>
-                <div className="parser-result-main">
-                  <header>
-                    <strong>{result.fixture?.name || 'Unknown fixture'}</strong>
-                    <span>{formatDate(result.createdAt)}</span>
-                  </header>
-                  <div className="parser-result-meta">
-                    <span>{result.provider || 'provider?'}</span>
-                    <span>{result.model || 'model?'}</span>
-                    <span>{result.reasoningEffort || 'default effort'}</span>
-                    <span>{formatMs(result.elapsedMs)}</span>
-                    <span>9-label {result.canonicalPassed === false ? 'failed' : result.canonicalPassed === true ? 'passed' : 'unknown'}</span>
-                  </div>
-                  <pre>{result.parsedText || 'No parser output saved.'}</pre>
-                </div>
-                <ParserResultActions
-                  resultId={result.id}
-                  currentStatus={result.status}
-                  onUpdate={onUpdateParserTestResult}
-                />
-              </article>
-            ))}
-          </div>
+      <section className="tr-runs">
+        <div className="tr-eyebrow">
+          <span className="tr-section-label">Recent runs</span>
+        </div>
+        {blocked ? (
+          <div className="tr-runs-placeholder" aria-hidden="true" />
+        ) : results.length ? (
+          <>
+            <RunFilterBar filters={runFilters} totalCount={results.length} />
+            {runFilters.filtered.length ? (
+              <div className="tr-list">
+                {runFilters.filtered.map((result) => {
+                  const status = result.status || 'pending-review';
+                  return (
+                    <article className={`tr-run is-${status}`} key={result.id}>
+                      <div className="tr-run-body">
+                        <div className="tr-run-head">
+                          <button
+                            type="button"
+                            className="tr-run-thumb"
+                            onClick={() => onPreviewParserResult(result)}
+                            aria-label="Open test image"
+                          >
+                            {result.fixture?.url ? <img src={result.fixture.url} alt="" /> : <span>No image</span>}
+                          </button>
+                          <div className="tr-run-copy">
+                            <div className="tr-run-top">
+                              <span className="tr-run-name">{result.fixture?.name || 'Unknown fixture'}</span>
+                              <span className="tr-run-time">{formatDate(result.createdAt)}</span>
+                            </div>
+                            <div className="tr-run-meta">
+                              <span className="tr-tag is-mono">{[result.provider || 'provider?', result.model || 'model?'].join(' / ')}</span>
+                              <span className="tr-tag">{result.reasoningEffort || 'default effort'}</span>
+                              <span className="tr-tag is-mono">{formatMs(result.elapsedMs)}</span>
+                              <span className={`tr-tag${result.canonicalPassed === true ? ' is-ok' : result.canonicalPassed === false ? ' is-fail' : ''}`}>
+                                9-label {result.canonicalPassed === false ? 'failed' : result.canonicalPassed === true ? 'passed' : 'unknown'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <pre className="tr-run-out">{result.parsedText || 'No parser output saved.'}</pre>
+                      </div>
+                      <ParserResultActions
+                        result={result}
+                        resultId={result.id}
+                        currentStatus={result.status}
+                        onUpdate={onUpdateParserTestResult}
+                        onProgrammaticCheck={onProgrammaticCheckParserTestResult}
+                        onRetest={onRetestParserTestResult}
+                        onDelete={onDeleteParserTestResult}
+                        onOpen={() => onOpenParserTestResult(result)}
+                        onRequestDelete={() => onRequestDeleteParserTestResult(result)}
+                        onReview={() => onPreviewParserResult(result)}
+                        openOnly
+                      />
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="tr-empty">
+                <span>No runs match these filters.</span>
+                <button type="button" className="tr-clear" onClick={runFilters.reset}>Clear</button>
+              </div>
+            )}
+          </>
         ) : (
           <EmptyState title="No parser tests saved yet" copy="Run the Image Parser test from Chat, then mark the result pass or fail." />
         )}
-      </Panel>
+      </section>
 
       {parserResultPreview && (
         <ImageParserResultPreviewModal result={parserResultPreview} onClose={onCloseParserResultPreview} />
@@ -2170,7 +3850,137 @@ function ImageParserTestResultsTab({
   );
 }
 
-function ParserResultActions({ resultId, currentStatus, onUpdate }) {
+function TriageAgentTestResultsTab({
+  triageTestResults,
+  triageTestResultsLoading,
+  triageTestResultsError,
+  onLoadTriageTestResults,
+  onUpdateTriageTestResult,
+}) {
+  const stats = triageTestResults?.stats || {};
+  const results = triageTestResults?.results || [];
+  const runFilters = useRunFilters(results);
+
+  const blocked = triageTestResultsLoading || triageTestResultsError
+    || triageTestResults?.dbAvailable === false;
+
+  return (
+    <section className="agent-tab-content tr-results">
+      <aside className="tr-summary">
+        <div className="tr-summary-head">
+          <div className="tr-summary-heading">Triage Agent Test Results</div>
+          <p>Live triage runs graded on severity, category, and confidence.</p>
+          <button type="button" className="tr-refresh" onClick={onLoadTriageTestResults}>Refresh</button>
+        </div>
+
+        {triageTestResultsLoading ? (
+          <InlineLoading label="Loading triage test results..." />
+        ) : triageTestResultsError ? (
+          <EmptyState title="Test results unavailable" copy={triageTestResultsError} />
+        ) : triageTestResults?.dbAvailable === false ? (
+          <EmptyState title="Database unavailable" copy="Triage test results are separate from escalation logs, and MongoDB is not currently connected." />
+        ) : (
+          <>
+            <div className="tr-metrics">
+              <ParserResultMetric label="Total" value={stats.total || 0} detail={`${stats.pending || 0} pending review`} />
+              <ParserResultMetric label="Pass rate" value={formatRate(stats.passRate)} detail={`${stats.pass || 0} pass / ${stats.fail || 0} fail`} tone={passRateTone(stats.passRate)} />
+              <ParserResultMetric label="Avg time" value={formatMs(stats.avgElapsedMs)} detail="elapsed per run" />
+            </div>
+            <ParserResultBreakdown label="By provider" headLabel="Provider" rows={stats.byProvider || []} labelFor={(row) => row.provider || 'Unknown'} />
+            <ParserResultBreakdown label="By model" headLabel="Model" mono rows={stats.byModel || []} labelFor={(row) => [row.provider, row.model].filter(Boolean).join(' / ') || 'Unknown'} />
+            <ParserResultBreakdown label="By fixture" headLabel="Fixture" rows={stats.byFixture || []} labelFor={(row) => row.fixtureName || 'Unknown fixture'} />
+          </>
+        )}
+      </aside>
+
+      <section className="tr-runs">
+        <div className="tr-eyebrow">
+          <span className="tr-section-label">Recent runs</span>
+        </div>
+        {blocked ? (
+          <div className="tr-runs-placeholder" aria-hidden="true" />
+        ) : results.length ? (
+          <>
+            <RunFilterBar filters={runFilters} totalCount={results.length} />
+            {runFilters.filtered.length ? (
+              <div className="tr-list">
+                {runFilters.filtered.map((result) => {
+                  const fixture = result.fixture || {};
+                  const tags = Array.isArray(fixture.tags) ? fixture.tags.filter(Boolean) : [];
+                  const missingInfo = Array.isArray(result.missingInfo) ? result.missingInfo.filter(Boolean) : [];
+                  const status = result.status || 'pending-review';
+                  return (
+                    <article className={`tr-run tr-run--triage is-${status}`} key={result.id}>
+                      <div className="tr-run-body">
+                        <div className="tr-run-top">
+                          <span className="tr-run-name">{fixture.name || 'Unknown fixture'}</span>
+                          <span className="tr-run-time">{formatDate(result.createdAt)}</span>
+                        </div>
+                        {fixture.description && (
+                          <p className="tr-run-desc">{fixture.description}</p>
+                        )}
+                        <div className="tr-run-meta">
+                          <span className="tr-tag is-mono">{[result.provider || 'provider?', result.model || 'model?'].join(' / ')}</span>
+                          <span className="tr-tag">{result.reasoningEffort || 'default effort'}</span>
+                          <span className="tr-tag is-mono">{formatMs(result.elapsedMs)}</span>
+                          <span className="tr-tag"><span className="tr-tag-k">severity</span> {result.severity || '—'}</span>
+                          <span className="tr-tag"><span className="tr-tag-k">category</span> {result.category || '—'}</span>
+                          <span className="tr-tag is-mono"><span className="tr-tag-k">conf</span> {result.confidence || '—'}</span>
+                          {result.fallbackEligible && <span className="tr-tag is-warn" title={result.fallbackReason || 'Parser validation failed'}>fallback-eligible</span>}
+                          {result.fallbackUsed && <span className="tr-tag is-warn">rule-fallback</span>}
+                        </div>
+                        {tags.length > 0 && (
+                          <div className="tr-run-meta">
+                            {tags.map((tag) => <span className="tr-tag is-faint" key={tag}>#{tag}</span>)}
+                          </div>
+                        )}
+                        {result.read && (
+                          <pre className="tr-run-out">{`Fast read: ${result.read}`}</pre>
+                        )}
+                        {result.action && (
+                          <pre className="tr-run-out">{`Next step: ${result.action}`}</pre>
+                        )}
+                        {missingInfo.length > 0 && (
+                          <pre className="tr-run-out">{`Missing info: ${missingInfo.join(', ')}`}</pre>
+                        )}
+                      </div>
+                      <ParserResultActions
+                        resultId={result.id}
+                        currentStatus={result.status}
+                        onUpdate={onUpdateTriageTestResult}
+                      />
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="tr-empty">
+                <span>No runs match these filters.</span>
+                <button type="button" className="tr-clear" onClick={runFilters.reset}>Clear</button>
+              </div>
+            )}
+          </>
+        ) : (
+          <EmptyState title="No triage tests saved yet" copy="Run the Triage Agent test from Chat, then mark the result pass or fail." />
+        )}
+      </section>
+    </section>
+  );
+}
+
+function ParserResultActions({
+  result = null,
+  resultId,
+  currentStatus,
+  onUpdate,
+  onProgrammaticCheck,
+  onRetest,
+  onDelete,
+  onOpen,
+  onRequestDelete,
+  onReview,
+  openOnly = false,
+}) {
   // Single-click Pass / Fail grading for a parser test result row.
   // Behavior mirrors the chat-area `ParserOutput` review buttons in ChatV5Container.jsx:
   // - One click PATCHes /api/pipeline-tests/parser-results/:id
@@ -2178,12 +3988,34 @@ function ParserResultActions({ resultId, currentStatus, onUpdate }) {
   // - The active button keeps its is-pass / is-fail color after the save lands
   // - A status line below the buttons announces "Saving...", "Recorded: pass/fail", or "Pending review"
   const [pendingStatus, setPendingStatus] = useState('');
+  const [pendingAction, setPendingAction] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
   const status = currentStatus || 'pending-review';
-  const isSaving = Boolean(pendingStatus);
+  const isSaving = Boolean(pendingStatus || pendingAction);
+  const hasConfirmedOutput = result?.hasConfirmedOutput === true;
+  const hasFixture = Boolean(result?.fixture?.name);
+  const canAutoCheck = status === 'pending-review' && hasConfirmedOutput && Boolean(onProgrammaticCheck);
+  const canReview = status === 'pending-review' && !hasConfirmedOutput && Boolean(onReview);
+  const canRetest = status === 'fail' && hasFixture && Boolean(onRetest);
+  const canDelete = Boolean((onRequestDelete || onDelete) && resultId);
+
+  async function runRowAction(action, fn) {
+    if (isSaving) return;
+    setPendingAction(action);
+    setActionMessage('');
+    try {
+      await fn();
+    } catch (err) {
+      setActionMessage(err?.message || 'Action failed.');
+    } finally {
+      setPendingAction('');
+    }
+  }
 
   async function handleClick(nextStatus) {
     if (isSaving) return;
     setPendingStatus(nextStatus);
+    setActionMessage('');
     try {
       await onUpdate(resultId, nextStatus);
     } catch (_err) {
@@ -2193,65 +4025,220 @@ function ParserResultActions({ resultId, currentStatus, onUpdate }) {
     }
   }
 
-  let statusLine;
-  if (isSaving) {
-    statusLine = 'Saving...';
-  } else if (status === 'pass' || status === 'fail') {
-    statusLine = `Recorded: ${status}`;
-  } else {
-    statusLine = 'Pending review';
+  // verdictKind drives the prominent state pill. graded === a recorded human call.
+  const verdictKind = status === 'pass' ? 'pass' : status === 'fail' ? 'fail' : 'pending';
+  const verdictLabel = isSaving
+    ? pendingAction === 'check' ? 'Checking'
+      : pendingAction === 'retest' ? 'Retesting'
+        : pendingAction === 'delete' ? 'Deleting'
+          : 'Saving'
+    : status === 'pass' ? 'Pass' : status === 'fail' ? 'Fail' : 'Pending';
+  const railLabel = status === 'pass' || status === 'fail' ? 'Regrade' : 'Grade';
+
+  if (openOnly && typeof onOpen === 'function') {
+    return (
+      <div className="tr-run-rail tr-run-rail--open" aria-label="Open test result">
+        <span className={`tr-verdict is-${verdictKind}`}>{verdictLabel}</span>
+        <div className="tr-row-open-actions">
+          <button
+            type="button"
+            className="tr-row-action is-open"
+            disabled={isSaving}
+            onClick={onOpen}
+          >
+            Open
+          </button>
+          {canDelete && (
+            <button
+              type="button"
+              className="tr-trash-run"
+              disabled={isSaving}
+              aria-label={`Delete ${result?.fixture?.name || 'test run'}`}
+              title="Delete saved test run"
+              onClick={onRequestDelete || (() => runRowAction('delete', () => onDelete(resultId)))}
+            >
+              <TrashIcon size={14} />
+            </button>
+          )}
+        </div>
+        {actionMessage && <small className="tr-action-message">{actionMessage}</small>}
+      </div>
+    );
   }
 
   return (
-    <div className="parser-result-actions" aria-label="Record parser test result">
-      <button
-        type="button"
-        className={status === 'pass' ? 'is-pass' : ''}
-        disabled={isSaving}
-        aria-label="Mark this parser test result as a pass"
-        onClick={() => handleClick('pass')}
-      >
-        Pass
-      </button>
-      <button
-        type="button"
-        className={status === 'fail' ? 'is-fail' : ''}
-        disabled={isSaving}
-        aria-label="Mark this parser test result as a fail"
-        onClick={() => handleClick('fail')}
-      >
-        Fail
-      </button>
-      <span>{statusLine}</span>
-    </div>
-  );
-}
-
-function ParserResultMetric({ label, value, detail }) {
-  return (
-    <div className="parser-result-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{detail}</small>
-    </div>
-  );
-}
-
-function ParserResultBreakdown({ title, rows, labelFor, withThumbs = false }) {
-  return (
-    <div className="parser-result-breakdown">
-      <h4>{title}</h4>
-      {rows.length ? rows.map((row) => (
-        <div className="parser-result-breakdown-row" key={`${title}-${labelFor(row)}`}>
-          {withThumbs && row.fixture?.url && <img src={row.fixture.url} alt="" />}
-          <strong>{labelFor(row)}</strong>
-          <span>{row.total || 0} runs</span>
-          <span>{formatRate(row.passRate)}</span>
-          <span>{row.fail || 0} fail</span>
-          <span>{formatMs(row.avgElapsedMs)}</span>
+    <div className="tr-run-rail" aria-label="Record test result">
+      <span className={`tr-verdict is-${verdictKind}`}>{verdictLabel}</span>
+      {(canAutoCheck || canReview || canRetest) && (
+        <div className="tr-row-actions">
+          {canAutoCheck && (
+            <button
+              type="button"
+              className="tr-row-action is-check"
+              disabled={isSaving}
+              onClick={() => runRowAction('check', () => onProgrammaticCheck(resultId))}
+            >
+              Auto check
+            </button>
+          )}
+          {canReview && (
+            <button
+              type="button"
+              className="tr-row-action is-review"
+              disabled={isSaving}
+              onClick={onReview}
+            >
+              Review
+            </button>
+          )}
+          {canRetest && (
+            <button
+              type="button"
+              className="tr-row-action is-retest"
+              disabled={isSaving}
+              onClick={() => runRowAction('retest', () => onRetest(result))}
+            >
+              Retest
+            </button>
+          )}
         </div>
-      )) : (
-        <div className="muted-text">No data yet.</div>
+      )}
+      <div className="tr-rail-label">{railLabel}</div>
+      <div className="tr-grade">
+        <button
+          type="button"
+          className={status === 'pass' ? 'is-on-pass' : ''}
+          disabled={isSaving}
+          aria-label="Mark this test result as a pass"
+          onClick={() => handleClick('pass')}
+        >
+          Pass
+        </button>
+        <button
+          type="button"
+          className={status === 'fail' ? 'is-on-fail' : ''}
+          disabled={isSaving}
+          aria-label="Mark this test result as a fail"
+          onClick={() => handleClick('fail')}
+        >
+          Fail
+        </button>
+      </div>
+      {canDelete && (
+        <button
+          type="button"
+          className="tr-delete-run"
+          disabled={isSaving}
+          onClick={onRequestDelete || (() => runRowAction('delete', () => onDelete(resultId)))}
+        >
+          Delete
+        </button>
+      )}
+      {actionMessage && <small className="tr-action-message">{actionMessage}</small>}
+    </div>
+  );
+}
+
+function TrashIcon({ size = 14 }) {
+  return (
+    <svg
+      aria-hidden="true"
+      focusable="false"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v5" />
+      <path d="M14 11v5" />
+    </svg>
+  );
+}
+
+function ParserResultMetric({ label, value, detail, tone }) {
+  // tone is semantic: 'ok' | 'warn' | 'err' color the value; anything else is neutral.
+  const toneClass = tone === 'ok' || tone === 'warn' || tone === 'err' ? ` is-${tone}` : '';
+  return (
+    <div className="tr-metric">
+      <div className="tr-metric-label">{label}</div>
+      <div className={`tr-metric-value${toneClass}`}>{value}</div>
+      <div className="tr-metric-detail">{detail}</div>
+    </div>
+  );
+}
+
+// Breakdown rendered as a real data table with 4 unambiguous columns:
+// NAME | RUNS | PASS RATE (mini bar + % + "N pass · M fail") | AVG.
+// Pass + fail fold into one cell so 360-400px stays readable. `headLabel`
+// names the first column; `mono` renders the name cell in monospace (model
+// strings); `withThumbs` shows a fixture thumbnail before the name. All values
+// are real stats fields — pass is derived as total - fail.
+function ParserResultBreakdown({ label, headLabel, rows, labelFor, withThumbs = false, mono = false }) {
+  return (
+    <div className="tr-breakdown">
+      <div className="tr-section-label">{label}</div>
+      {rows.length ? (
+        <table className="tr-table">
+          <colgroup>
+            <col className="c-name" />
+            <col className="c-runs" />
+            <col className="c-rate" />
+            <col className="c-avg" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th className="h-name">{headLabel}</th>
+              <th>Runs</th>
+              <th className="h-rate">Pass rate</th>
+              <th>Avg</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => {
+              const total = row.total || 0;
+              const fail = row.fail || 0;
+              const pass = Math.max(0, total - fail);
+              const ratePct = Math.round(clamp(Number(row.passRate) || 0, 0, 1) * 100);
+              // Tone-grade the bar fill on the same thresholds as the pass-rate
+              // metric so a bad rate never shows a green bar.
+              const fillTone = passRateTone(row.passRate) || 'err';
+              return (
+                <tr key={`${label}-${labelFor(row)}`}>
+                  <td className={`tr-row-name${mono ? ' tr-mono' : ''}`} title={labelFor(row)}>
+                    {withThumbs && (
+                      row.fixture?.url
+                        ? <img className="tr-thumb" src={row.fixture.url} alt="" />
+                        : <span className="tr-thumb" />
+                    )}
+                    {labelFor(row)}
+                  </td>
+                  <td>{total}</td>
+                  <td className="tr-rate">
+                    <div className="tr-rate-top">
+                      <div className="tr-rate-bar">
+                        <div className={`tr-rate-fill is-${fillTone}`} style={{ width: `${ratePct}%` }} />
+                      </div>
+                      <span className="tr-rate-pct">{formatRate(row.passRate)}</span>
+                    </div>
+                    <div className="tr-rate-sub">
+                      {pass} pass · <span className={`tr-rate-fail${fail === 0 ? ' is-zero' : ''}`}>{fail} fail</span>
+                    </div>
+                  </td>
+                  <td className="tr-mono">{formatMs(row.avgElapsedMs)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="tr-breakdown-empty">No data yet.</div>
       )}
     </div>
   );
@@ -2304,6 +4291,20 @@ function ImageParserEventStreamsTab({
   const events = parserSavedEvents || [];
   const parserStats = parserEventStats?.byStage?.parser || {};
   const totals = parserEventStats?.totals || {};
+  const providerCaptures = results
+    .filter((result) => result?.providerTrace)
+    .map((result) => ({
+      key: result._id || result.id || `${result.provider}-${result.createdAt}`,
+      title: result.providerTrace?.providerPackageId || 'Provider package pending',
+      meta: [
+        result.provider || 'provider?',
+        result.providerTrace?.providerHarness || 'provider harness',
+        result.providerTrace?.outcome || result.status || 'run',
+        formatDate(result.createdAt),
+      ].filter(Boolean).join(' · '),
+      detail: formatProviderTraceDetail(result.providerTrace),
+    }))
+    .slice(0, 20);
 
   return (
     <section className="agent-tab-content single-column-layout">
@@ -2341,6 +4342,22 @@ function ImageParserEventStreamsTab({
           <Definition label="Parser event average">{parserStats.avg ? `${parserStats.avg} per run` : 'No parser average yet'}</Definition>
           <Definition label="Pipeline events total">{totals.allTime || 0}</Definition>
         </div>
+      </Panel>
+      <Panel title="Provider Harness Captures">
+        {providerCaptures.length ? (
+          <div className="compact-list">
+            {providerCaptures.map((capture) => (
+              <CompactItem
+                key={capture.key}
+                title={capture.title}
+                meta={capture.meta}
+                detail={capture.detail}
+              />
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No provider captures yet" copy="Run the Image Parser with a harnessed provider to populate provider package traces." />
+        )}
       </Panel>
     </section>
   );
@@ -2427,10 +4444,31 @@ function formatParserEventDetail(event) {
   if (data.model) parts.push(`model=${data.model}`);
   if (data.elapsedMs != null) parts.push(`elapsed=${formatMs(data.elapsedMs)}`);
   if (data.durationMs != null) parts.push(`duration=${formatMs(data.durationMs)}`);
+  if (data.providerHarness) parts.push(`harness=${data.providerHarness}`);
+  if (data.providerPackageId) parts.push(`package=${data.providerPackageId}`);
+  if (data.outcome) parts.push(`outcome=${data.outcome}`);
+  if (data.captureEnabled != null) parts.push(`capture=${data.captureEnabled ? 'on' : 'off'}`);
+  if (data.packageCaptureQueued != null) parts.push(`queued=${data.packageCaptureQueued ? 'yes' : 'no'}`);
   if (data.textChars != null) parts.push(`chars=${data.textChars}`);
   if (data.error) parts.push(`error=${data.error}`);
   if (data.status) parts.push(`status=${data.status}`);
   return parts.join(' · ') || 'Saved event from conversation case intake.';
+}
+
+function formatProviderTraceDetail(trace) {
+  if (!trace || typeof trace !== 'object') {
+    return 'No provider trace metadata saved.';
+  }
+
+  const parts = [];
+  if (trace.callSite) parts.push(`call=${trace.callSite}`);
+  if (trace.statusCode != null) parts.push(`http=${trace.statusCode}`);
+  if (trace.durationMs != null) parts.push(`duration=${formatMs(trace.durationMs)}`);
+  if (trace.captureEnabled != null) parts.push(`capture=${trace.captureEnabled ? 'on' : 'off'}`);
+  if (trace.packageCaptureQueued != null) parts.push(`queued=${trace.packageCaptureQueued ? 'yes' : 'no'}`);
+  if (trace.gatewayRequestId) parts.push(`gateway=${trace.gatewayRequestId}`);
+  if (trace.textLength != null) parts.push(`chars=${trace.textLength}`);
+  return parts.join(' · ') || 'Provider harness trace saved.';
 }
 
 function AgentWorkflowsTab({ agent, operation }) {
@@ -2574,7 +4612,7 @@ function AgentVersionsTab({ history, historyLoading, historyError, onLoadHistory
   );
 }
 
-function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onSave }) {
+function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, recheckResult, onSave }) {
   const { providerStatus } = useProviderKeyStatus();
   const normalizedRuntimeState = normalizeAgentRuntimeState(definition, runtimeState || {});
   const [provider, setProvider] = useState(normalizedRuntimeState?.provider || '');
@@ -2585,6 +4623,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
   const [reasoningEffort, setReasoningEffort] = useState(
     normalizedRuntimeState?.reasoningEffort || ''
   );
+  const [serviceTier, setServiceTier] = useState(normalizedRuntimeState?.serviceTier || 'fast');
 
   useEffect(() => {
     const normalized = normalizeAgentRuntimeState(definition, runtimeState || {});
@@ -2594,6 +4633,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
     setModel(normalized?.model || '');
     setFallbackModel(normalized?.fallbackModel || '');
     setReasoningEffort(normalized?.reasoningEffort || '');
+    setServiceTier(normalized?.serviceTier || 'fast');
   }, [definition, runtimeState]);
 
   if (!definition) {
@@ -2616,6 +4656,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
     model,
     fallbackModel,
     reasoningEffort,
+    serviceTier,
   };
   const modelSuggestions = getAgentRuntimeModelSuggestions(definition, currentRuntime);
   const fallbackModelSuggestions = getAgentRuntimeModelSuggestions(definition, currentRuntime, {
@@ -2626,16 +4667,27 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
   const reasoningOptions = definition.kind === 'image-parser'
     ? getImageParserReasoningEffortOptions(provider)
     : REASONING_EFFORT_OPTIONS;
+  const supportsServiceTier = providerSupportsCodexServiceTier(provider)
+    || (definition.supportsModes && mode === 'fallback' && providerSupportsCodexServiceTier(fallbackProvider));
+  const determinismProfile = definition.kind === 'image-parser' && (provider || model)
+    ? getImageParserDeterminismProfile(provider, model)
+    : null;
 
   function handleProviderChange(nextProvider) {
     setProvider(nextProvider);
     setModel('');
     if (definition.kind === 'image-parser') setReasoningEffort('');
+    if (!providerSupportsCodexServiceTier(nextProvider)) setServiceTier('');
+    if (providerSupportsCodexServiceTier(nextProvider) && !serviceTier) setServiceTier('fast');
   }
 
   function handleFallbackProviderChange(nextProvider) {
     setFallbackProvider(nextProvider);
     setFallbackModel('');
+    if (!providerSupportsCodexServiceTier(provider) && !providerSupportsCodexServiceTier(nextProvider)) {
+      setServiceTier('');
+    }
+    if (providerSupportsCodexServiceTier(nextProvider) && !serviceTier) setServiceTier('fast');
   }
 
   return (
@@ -2745,12 +4797,32 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
             </select>
           </label>
         )}
+
+        {supportsServiceTier && (
+          <label>
+            <span>Codex service tier</span>
+            <select value={serviceTier || 'fast'} onChange={(event) => setServiceTier(event.target.value)}>
+              {CODEX_SERVICE_TIER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <div className="runtime-summary-box">
         <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
         <span>{getAgentRuntimeSummary(definition, currentRuntime)}</span>
       </div>
+
+      {determinismProfile && (
+        <div className={`runtime-determinism-note is-${determinismProfile.tone}`}>
+          <strong>{determinismProfile.label}</strong>
+          <span>{determinismProfile.summary}</span>
+        </div>
+      )}
 
       <div className="form-action-row">
         <button
@@ -2764,24 +4836,63 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, onS
               model,
               fallbackModel,
               reasoningEffort: reasoningEffort || null,
+              serviceTier: supportsServiceTier ? (serviceTier || 'fast') : null,
             })
           }
         >
           Save Runtime
         </button>
         {saveStatus && <span className="save-status">{saveStatus}</span>}
+        {recheckResult && recheckResult.agentId === agent.agentId && (
+          <span
+            className="save-status"
+            title={recheckResult.message}
+            aria-live="polite"
+          >
+            <span
+              className={`status-dot ${runtimeRecheckDotClass(recheckResult.status)}`}
+              aria-hidden="true"
+            />
+            {recheckResult.message}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function Panel({ title, children, actions = null }) {
+// Map the inline recheck result's status onto the existing .status-dot-*
+// CSS classes declared in AgentsView.css. Green (active) for online, orange
+// (degraded) for offline / recheck-failed, gray (idle) for everything else
+// including the in-flight "checking" state and the intentionally-off
+// "disabled" state. No new CSS is introduced.
+function runtimeRecheckDotClass(status) {
+  switch (status) {
+    case 'online':
+      return 'status-dot-active';
+    case 'offline':
+    case 'failed':
+      return 'status-dot-degraded';
+    case 'disabled':
+      return 'status-dot-disabled';
+    case 'checking':
+    case 'unknown':
+    default:
+      return 'status-dot-idle';
+  }
+}
+
+function Panel({ title, children, actions = null, headerContent = null }) {
   return (
     <section className="agent-panel">
-      <header>
-        <h3>{title}</h3>
-        {actions}
-      </header>
+      {headerContent ? (
+        <header>{headerContent}</header>
+      ) : (
+        <header>
+          <h3>{title}</h3>
+          {actions}
+        </header>
+      )}
       <div>{children}</div>
     </section>
   );
@@ -3252,7 +5363,7 @@ function buildPromptState(payload, versions) {
     ...prompt,
     prompt,
     content: payload?.content || '',
-    updatedAt: prompt?.updatedAt || prompt?.lastModified || null,
+    updatedAt: prompt?.updatedAt || prompt?.lastModified || prompt?.modified || null,
     versions: normalizePromptVersions(versions),
   };
 }
@@ -3261,16 +5372,66 @@ function normalizePromptVersions(versions) {
   if (!Array.isArray(versions)) {
     return [];
   }
-  return versions.map((version) => ({
-    ...version,
-    versionId: String(version.ts || version.versionId || ''),
-    versionLabel: version.label || (version.ts ? `Snapshot ${version.ts}` : 'Prompt snapshot'),
-    createdAt: version.ts ? new Date(Number(version.ts)).toISOString() : version.createdAt,
-    summary: version.label || `${version.size || 0} bytes`,
-  }));
+  return versions.map((version) => {
+    const promptVersion = String(version.promptVersion || '').trim();
+    const label = String(version.label || '').trim();
+    const source = String(version.source || '').trim();
+    const sha = formatShortSha(version.sha256);
+    return {
+      ...version,
+      promptVersion,
+      versionId: String(version.ts || version.versionId || ''),
+      versionLabel: [
+        promptVersion || (version.ts ? `Snapshot ${version.ts}` : 'Prompt snapshot'),
+        sha,
+      ].filter(Boolean).join(' · '),
+      createdAt: version.ts ? new Date(Number(version.ts)).toISOString() : version.createdAt,
+      summary: formatPromptVersionSummary({ label, source, size: version.size }),
+    };
+  });
 }
 
-function buildOperationalProfile(agent, runtimeState) {
+function formatShortSha(value) {
+  const clean = String(value || '').trim();
+  return clean ? clean.slice(0, 8) : '';
+}
+
+function formatPromptVersionSummary({ label, source, size }) {
+  const cleanLabel = String(label || '').trim();
+  const cleanSource = String(source || '').trim();
+  if (cleanSource.endsWith(':after')) {
+    return cleanLabel ? `Saved change: ${cleanLabel}` : 'Saved prompt change';
+  }
+  if (cleanSource.endsWith(':before')) {
+    return cleanLabel ? cleanLabel : 'Before prompt change';
+  }
+  if (cleanSource === 'api-list-current') {
+    return 'Observed active prompt file';
+  }
+  if (cleanSource === 'runtime-read') {
+    return 'Observed during runtime prompt use';
+  }
+  if (cleanSource === 'read') {
+    return 'Observed during prompt read';
+  }
+  if (cleanLabel) {
+    return cleanLabel;
+  }
+  return `${size || 0} bytes`;
+}
+
+function getPromptVersionFromContent(content) {
+  const match = String(content || '').match(/^\s*PROMPT_VERSION:\s*([^\r\n]+)/im);
+  return match ? match[1].trim() : '';
+}
+
+// liveStatus comes from the AgentRegistry (see AgentsView's useAgentRegistry
+// call). It's the legacy-token form of the agent's real reachability and
+// replaces the static `meta.status` lookup. Passing it through the existing
+// signature (rather than reading the registry inside this helper) keeps this
+// function a pure transform that's easy to call from useMemo without hook
+// rules getting in the way.
+function buildOperationalProfile(agent, runtimeState, liveStatus) {
   const meta = getAgentMeta(agent?.agentId);
   const runtimeDefinition = getAgentRuntimeDefinition(agent?.agentId);
   const modelLabel = runtimeDefinition
@@ -3281,7 +5442,7 @@ function buildOperationalProfile(agent, runtimeState) {
   const relationshipCount = Object.keys(agent?.relationships?.map || {}).length;
   const memoryCount = agent?.memory?.notes?.length || 0;
   const promptReady = Boolean(agent?.promptId);
-  const status = resolveOperationalStatus(meta, agent);
+  const status = resolveOperationalStatus(meta, agent, liveStatus);
   const latestReview = latestAgentReview(agent);
   const latestHarnessRun = latestAgentHarnessRun(agent);
   const reviewStatus = resolveReviewStatus(meta, latestReview);
@@ -3653,14 +5814,29 @@ function getAgentMeta(agentId) {
   );
 }
 
-function resolveOperationalStatus(meta, agent) {
+// liveStatus is the legacy operational token derived from the registry's
+// health.status for this agent (see healthStatusToOperationalToken). It is the
+// single source of truth for the dot color. The `meta` argument is still
+// passed because callers already hold it for labels/descriptions, but its
+// `.status` field is intentionally NOT read here — we no longer let the static
+// table claim an agent is "active" when the underlying provider is offline.
+function resolveOperationalStatus(meta, agent, liveStatus) {
   if (agent?.enabled === false) {
     return 'disabled';
   }
+  // Defensive: a caller may pass undefined/null if an agent is missing from
+  // the live-status map (e.g. registry hasn't observed it yet). Default to
+  // 'idle' so downstream CSS resolves to a real `status-dot-idle` class
+  // rather than the missing `status-dot-undefined`. See cto-review finding H2.
+  const safeLive = liveStatus || 'idle';
+  // An agent with no prompt configured (and that isn't a parser) is not yet
+  // wired up for real work, so downgrade a live "active" to "idle" to keep the
+  // UI honest. Non-active live tokens (degraded, disabled, idle) pass through
+  // unchanged.
   if (!agent?.promptId && !agent?.agentId?.includes('parser')) {
-    return meta.status === 'active' ? 'idle' : meta.status;
+    return safeLive === 'active' ? 'idle' : safeLive;
   }
-  return meta.status;
+  return safeLive;
 }
 
 function describeWorkflow(workflow, agent) {
@@ -3802,6 +5978,90 @@ function formatRate(value) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '0%';
   return `${Math.round(numeric * 100)}%`;
+}
+
+function normalizeReliabilityKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function formatReliabilityRowMetric(row) {
+  if (!row || Number(row.total || 0) <= 0) {
+    return 'No recent tests yet';
+  }
+  const pass = Number(row.pass || 0);
+  const fail = Number(row.fail || 0);
+  const pending = Number(row.pending || 0);
+  const pendingText = pending > 0 ? `, ${pending} pending` : '';
+  return `${formatRate(row.passRate)} pass (${pass} pass, ${fail} fail${pendingText})`;
+}
+
+function findParserReliabilityRow(stats, provider, model) {
+  if (!stats || Number(stats.total || 0) <= 0) {
+    return null;
+  }
+
+  const providerKey = normalizeReliabilityKey(provider);
+  const modelKey = normalizeReliabilityKey(model);
+  const modelRows = Array.isArray(stats.byModel) ? stats.byModel : [];
+  const providerRows = Array.isArray(stats.byProvider) ? stats.byProvider : [];
+
+  const modelRow = modelRows.find((row) => {
+    const rowModel = normalizeReliabilityKey(row?.model);
+    const rowProvider = normalizeReliabilityKey(row?.provider);
+    return modelKey && rowModel === modelKey && (!providerKey || rowProvider === providerKey);
+  });
+  if (modelRow) {
+    return { kind: 'model', row: modelRow };
+  }
+
+  const providerRow = providerRows.find((row) => (
+    providerKey && normalizeReliabilityKey(row?.provider) === providerKey
+  ));
+  if (providerRow) {
+    return { kind: 'provider', row: providerRow };
+  }
+
+  return { kind: 'recent', row: stats };
+}
+
+function formatParserReliabilityMetric(stats, provider, model, loading = false) {
+  const match = findParserReliabilityRow(stats, provider, model);
+  if (!match) {
+    return loading ? 'Loading recent test results...' : 'No recent tests found';
+  }
+
+  const prefix = match.kind === 'model'
+    ? 'This model'
+    : match.kind === 'provider'
+      ? 'This provider'
+      : 'Recent tests';
+  return `${prefix}: ${formatReliabilityRowMetric(match.row)}`;
+}
+
+function formatParserReliabilitySummary(stats, provider, model, fallback, loading = false) {
+  const match = findParserReliabilityRow(stats, provider, model);
+  if (!match) {
+    return loading ? 'Loading recent test results...' : fallback;
+  }
+
+  const total = Number(match.row.total || 0);
+  const noun = total === 1 ? 'test' : 'tests';
+  const subject = match.kind === 'model'
+    ? 'This model'
+    : match.kind === 'provider'
+      ? 'This provider'
+      : 'Recent parser runs';
+  return `${subject} has ${total} recent ${noun}: ${formatReliabilityRowMetric(match.row)}.`;
+}
+
+// Semantic tone for a 0-1 pass rate: green only when genuinely good, amber for
+// borderline, red for poor. Keeps the metric honest — a low rate is never green.
+function passRateTone(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return undefined;
+  if (numeric >= 0.9) return 'ok';
+  if (numeric >= 0.7) return 'warn';
+  return 'err';
 }
 
 function clamp(value, min, max) {

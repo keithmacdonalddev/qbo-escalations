@@ -66,7 +66,7 @@ await t.test('claude chat() onDone receives usage as second argument', (t, done)
         assert.ok(usage, 'usage should not be null');
         assert.equal(usage.inputTokens, 10);
         assert.equal(usage.outputTokens, 25);
-        assert.equal(usage.model, 'claude-opus-4-7');
+        assert.equal(usage.model, 'claude-opus-4-8');
         done();
       },
       onError(err) { done(err); },
@@ -75,7 +75,7 @@ await t.test('claude chat() onDone receives usage as second argument', (t, done)
     emitLines(fakeChild, [
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Hello there' }] } }),
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-opus-4-7',
+        type: 'result', result: '', model: 'claude-opus-4-8',
         usage: { input_tokens: 10, output_tokens: 25 },
       }),
     ]);
@@ -100,7 +100,7 @@ await t.test('claude chat() onError receives err._usage on CLI failure', (t, don
 
     emitLines(fakeChild, [
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-opus-4-7',
+        type: 'result', result: '', model: 'claude-opus-4-8',
         usage: { input_tokens: 5, output_tokens: 0 },
       }),
     ]);
@@ -121,7 +121,7 @@ await t.test('claude chat() cleanup() returns usage and partialResponse', (t, do
     emitLines(fakeChild, [
       JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial' }] } }),
       JSON.stringify({
-        type: 'result', result: '', model: 'claude-opus-4-7',
+        type: 'result', result: '', model: 'claude-opus-4-8',
         usage: { input_tokens: 3, output_tokens: 7 },
       }),
     ]);
@@ -146,7 +146,7 @@ await t.test('claude parseEscalation() returns { fields, usage } wrapper', async
 
     const response = {
       type: 'result',
-      model: 'claude-opus-4-7',
+      model: 'claude-opus-4-8',
       usage: { input_tokens: 50, output_tokens: 30 },
       structured_output: {
         category: 'payroll',
@@ -168,7 +168,7 @@ await t.test('claude parseEscalation() returns { fields, usage } wrapper', async
   assert.equal(result.fields.category, 'payroll');
   assert.equal(result.usage.inputTokens, 50);
   assert.equal(result.usage.outputTokens, 30);
-  assert.equal(result.usage.model, 'claude-opus-4-7');
+  assert.equal(result.usage.model, 'claude-opus-4-8');
 });
 
 await t.test('claude parseEscalation() catch fallback extracts usage from non-canonical stdout', async () => {
@@ -180,7 +180,7 @@ await t.test('claude parseEscalation() catch fallback extracts usage from non-ca
     // JSON.parse(stdout) fails (multi-line, not a single JSON blob).
     // Catch path: line-by-line usage extraction + regex field extraction.
     const usageLine = JSON.stringify({
-      type: 'result', model: 'claude-opus-4-7',
+      type: 'result', model: 'claude-opus-4-8',
       usage: { input_tokens: 20, output_tokens: 15 }, result: '',
     });
     // Second line: plain text wrapping a JSON escalation object
@@ -198,7 +198,7 @@ await t.test('claude parseEscalation() catch fallback extracts usage from non-ca
   assert.ok(result.usage, 'usage should be extracted from line-by-line fallback');
   assert.equal(result.usage.inputTokens, 20);
   assert.equal(result.usage.outputTokens, 15);
-  assert.equal(result.usage.model, 'claude-opus-4-7');
+  assert.equal(result.usage.model, 'claude-opus-4-8');
 });
 
 // ============================================================
@@ -345,7 +345,7 @@ await t.test('claude chat() usage prefers model from event over env fallback', (
       onChunk() {},
       onDone(_, usage) {
         assert.ok(usage, 'usage should not be null');
-        assert.equal(usage.model, 'claude-opus-4-7', 'should use model from event');
+        assert.equal(usage.model, 'claude-opus-4-8', 'should use model from event');
         done();
       },
       onError(err) { done(err); },
@@ -353,7 +353,7 @@ await t.test('claude chat() usage prefers model from event over env fallback', (
 
     emitLines(fakeChild, [
       JSON.stringify({
-        type: 'result', result: 'ok', model: 'claude-opus-4-7',
+        type: 'result', result: 'ok', model: 'claude-opus-4-8',
         usage: { input_tokens: 1, output_tokens: 1 },
       }),
     ]);

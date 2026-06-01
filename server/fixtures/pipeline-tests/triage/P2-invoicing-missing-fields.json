@@ -1,0 +1,21 @@
+{
+  "name": "P2-invoicing-missing-fields",
+  "description": "Recurring invoice template stopped firing after a billing schedule edit. Customer has no ts steps captured - exercises the rule-fallback path because tsSteps is the empty string.",
+  "tags": ["severity-p2", "category-invoicing", "rule-fallback", "missing-ts-steps"],
+  "schemaVersion": 1,
+  "parserText": "COID/MID: 2851 / 0048-1607\nCASE: ESC-2026-0515-P2D\nCLIENT/CONTACT: Cedarpoint Studio LLC - Mason T.\nCX IS ATTEMPTING TO: Have the monthly recurring invoice 'Studio Retainer 2026' send to the customer Aspen Bloom on the 15th of every month.\nEXPECTED OUTCOME: The recurring invoice fires at 06:00 PT on the scheduled day, the customer receives a PDF invoice email, and a copy lands in Sent.\nACTUAL OUTCOME: The recurring template still shows 'Active' and 'Next run: 05/15/2026' but no invoice was created, no email went out, and the audit log has no entry for that template on 05/15/2026.\nKB/TOOLS USED: Recurring transactions help article, customer's billing schedule screenshot.\nTRIED TEST ACCOUNT: Not yet - customer is asking for the invoice to be sent manually first so we have not reproduced this in a sandbox.\nTS STEPS: ",
+  "parseFields": {
+    "coid": "2851",
+    "mid": "0048-1607",
+    "caseNumber": "ESC-2026-0515-P2D",
+    "clientContact": "Cedarpoint Studio LLC - Mason T.",
+    "agentName": "Triage fixture P2 invoicing missing ts steps",
+    "attemptingTo": "Have the monthly recurring invoice 'Studio Retainer 2026' send to the customer Aspen Bloom on the 15th of every month.",
+    "expectedOutcome": "The recurring invoice fires at 06:00 PT on the scheduled day, the customer receives a PDF invoice email, and a copy lands in Sent.",
+    "actualOutcome": "The recurring template still shows 'Active' and 'Next run: 05/15/2026' but no invoice was created, no email went out, and the audit log has no entry for that template on 05/15/2026.",
+    "kbToolsUsed": "Recurring transactions help article, customer's billing schedule screenshot.",
+    "triedTestAccount": "Not yet - customer is asking for the invoice to be sent manually first so we have not reproduced this in a sandbox.",
+    "tsSteps": "",
+    "category": "invoicing"
+  }
+}

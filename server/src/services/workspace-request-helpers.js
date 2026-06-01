@@ -391,6 +391,7 @@ function startWorkspaceCollectedChat({
   fallbackProvider = WORKSPACE_FALLBACK_PROVIDER,
   fallbackModel = '',
   reasoningEffort = 'high',
+  serviceTier = '',
   onChunk,
   onThinkingChunk,
   onStatus,
@@ -425,6 +426,7 @@ function startWorkspaceCollectedChat({
       systemPrompt,
       timeoutMs,
       reasoningEffort,
+      serviceTier,
       onChunk: ({ text, provider }) => {
         fullText += text;
         try { onChunk?.(text, provider); } catch { /* ignore caller callback errors */ }

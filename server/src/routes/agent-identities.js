@@ -237,6 +237,58 @@ router.get('/health', async (req, res) => {
   res.json({ ok: true, ...snapshot });
 });
 
+// Streaming per-agent health refresh. Emits one NDJSON event as each agent's
+// reachability check settles, then a final 'complete' event with the full
+// snapshot. Matches the NDJSON pattern used by /:id/enabled/stream.
+router.get('/health/stream', async (req, res) => {
+  const ids = typeof req.query.ids === 'string'
+    ? req.query.ids.split(',').map((value) => value.trim()).filter(Boolean)
+    : [];
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders?.();
+  res.socket?.setNoDelay(true);
+
+  let clientClosed = false;
+  function writeEvent(event) {
+    if (clientClosed) return;
+    try {
+      res.write(`${JSON.stringify(event)}\n`);
+      res.flush?.();
+    } catch {
+      // Client closed mid-write; stop trying.
+      clientClosed = true;
+    }
+  }
+  req.on('close', () => {
+    clientClosed = true;
+  });
+
+  try {
+    const snapshot = await refreshAgentHealth({
+      agentIds: ids,
+      forceRefresh: true,
+      onAgent: (agentId, health) => {
+        writeEvent({ type: 'agent', agentId, health });
+      },
+    });
+    writeEvent({
+      type: 'complete',
+      checkedAt: snapshot.checkedAt,
+      agents: snapshot.agents,
+    });
+  } catch (err) {
+    writeEvent({
+      type: 'error',
+      code: err?.code || 'AGENT_HEALTH_STREAM_FAILED',
+      error: err?.message || 'Agent health stream failed.',
+    });
+  }
+  if (!clientClosed) res.end();
+});
+
 router.post('/provider-strategy/health', async (req, res) => {
   const body = req.body || {};
   const refreshRaw = String(req.query?.refresh || req.query?.forceRefresh || '').toLowerCase();

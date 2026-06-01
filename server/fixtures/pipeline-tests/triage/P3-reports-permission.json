@@ -1,0 +1,21 @@
+{
+  "name": "P3-reports-permission",
+  "description": "Non-admin user cannot run a custom Profit & Loss report. The admin claims permissions are set correctly. Ambiguous between reports and permissions - exercises categoryCheck.",
+  "tags": ["severity-p3", "category-reports", "category-ambiguous", "category-check"],
+  "schemaVersion": 1,
+  "parserText": "COID/MID: 6128 / 0033-7741\nCASE: ESC-2026-0512-P3C\nCLIENT/CONTACT: Hollander Veterinary Clinic - Alex R. (non-admin user) and Dr. Hollander (admin).\nCX IS ATTEMPTING TO: Open the company custom P&L by Class report from the Reports tab.\nEXPECTED OUTCOME: The custom report opens with the year-to-date numbers Alex needs for the partner meeting.\nACTUAL OUTCOME: Clicking the report title returns the page 'Sorry, you don't have permission to view this report. Check with your admin.' The admin confirms Reports access is enabled and screen-shared the permission matrix showing 'View custom reports = on'.\nKB/TOOLS USED: Custom reports permission article, screen share recording with the admin, internal permission diagnostic tool.\nTRIED TEST ACCOUNT: Yes - a fresh test user added to the same role hit the same error. A new test user added to the admin role can open the report.\nTS STEPS: Verified the user role in Manage Users. Asked the admin to toggle View custom reports off then on (no change). Cleared browser cache, tried incognito, tried a different browser, all reproduced the error. Escalating because the admin sees the toggle as on but the user sees a permission block, suggesting either a permission rollout bug or a custom-report-specific permission we cannot see in the UI.",
+  "parseFields": {
+    "coid": "6128",
+    "mid": "0033-7741",
+    "caseNumber": "ESC-2026-0512-P3C",
+    "clientContact": "Hollander Veterinary Clinic - Alex R. (non-admin user) and Dr. Hollander (admin).",
+    "agentName": "Triage fixture P3 reports permission",
+    "attemptingTo": "Open the company custom P&L by Class report from the Reports tab.",
+    "expectedOutcome": "The custom report opens with the year-to-date numbers Alex needs for the partner meeting.",
+    "actualOutcome": "Clicking the report title returns the page 'Sorry, you don't have permission to view this report. Check with your admin.' The admin confirms Reports access is enabled and screen-shared the permission matrix showing 'View custom reports = on'.",
+    "kbToolsUsed": "Custom reports permission article, screen share recording with the admin, internal permission diagnostic tool.",
+    "triedTestAccount": "Yes - a fresh test user added to the same role hit the same error. A new test user added to the admin role can open the report.",
+    "tsSteps": "Verified the user role in Manage Users. Asked the admin to toggle View custom reports off then on (no change). Cleared browser cache, tried incognito, tried a different browser, all reproduced the error. Escalating because the admin sees the toggle as on but the user sees a permission block, suggesting either a permission rollout bug or a custom-report-specific permission we cannot see in the UI.",
+    "category": "reports"
+  }
+}

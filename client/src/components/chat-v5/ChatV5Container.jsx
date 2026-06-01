@@ -6,7 +6,8 @@ import '../chat/ImageParserPopup.css';
 import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
 import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
-import { apiFetchJson } from '../../api/http.js';
+import { apiFetch, apiFetchJson } from '../../api/http.js';
+import { consumeSSEStream } from '../../api/sse.js';
 import { getEventStats } from '../../api/chatApi.js';
 import {
   getAgentRuntimeEffectiveModel,
@@ -14,10 +15,14 @@ import {
 } from '../../lib/agentRuntimeSettings.js';
 import { getProviderMeta } from '../../lib/providerCatalog.js';
 import { AGENT_PROFILE_UPDATED_EVENT } from '../../lib/agentIdentityEvents.js';
+import { SURFACE_DEFAULTS_APPLIED_EVENT } from '../../lib/surfacePreferences.js';
 import {
+  buildPipelineRuntimePayload,
+  PIPELINE_RUNTIME_IDS,
   readPipelineProfileRuntimeStates,
   readPipelineRuntimeStatesSync,
 } from './pipelineRuntime.js';
+import { useAgentTestModal } from '../agent-tests/AgentTestModalProvider.jsx';
 import { useStageOrchestrator } from './useStageOrchestrator.js';
 import { useRunningTimer } from './useRunningTimer.js';
 import './chat-v5.css';
@@ -292,6 +297,37 @@ function cleanValue(value) {
   return String(value).trim();
 }
 
+function toFiniteNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function formatTokenCount(value) {
+  const numeric = toFiniteNumber(value);
+  if (numeric === null || numeric < 0) return '';
+  return Math.round(numeric).toLocaleString();
+}
+
+function formatApiCostValue(apiCost) {
+  if (!apiCost || typeof apiCost !== 'object') return '';
+  const explicit = cleanValue(apiCost.totalCostUsd);
+  if (explicit) return explicit.startsWith('$') ? explicit : `$${explicit}`;
+  const nanos = toFiniteNumber(apiCost.totalCostNanos);
+  if (nanos !== null) return `$${(nanos / 1_000_000_000).toFixed(9)}`;
+  const micros = toFiniteNumber(apiCost.totalCostMicros);
+  if (micros !== null) return `$${(micros / 1_000_000).toFixed(6)}`;
+  return '';
+}
+
+function formatApiCostTokens(apiCost) {
+  if (!apiCost || typeof apiCost !== 'object') return '';
+  const input = formatTokenCount(apiCost.inputTokens);
+  const output = formatTokenCount(apiCost.outputTokens);
+  const total = formatTokenCount(apiCost.totalTokens);
+  if (input || output) return `${input || '0'} in / ${output || '0'} out`;
+  return total ? `${total} tokens` : '';
+}
+
 function getAgentProfileHref(agentId) {
   const value = cleanValue(agentId);
   return value ? `#/agents/${encodeURIComponent(value)}` : '#/agents';
@@ -394,16 +430,16 @@ function buildTemplateRows(caseIntake, parsedFields) {
   }));
 }
 
-function buildPipelineRuntimePayload(runtimeByStage) {
-  const runtime = runtimeByStage || {};
-  return {
-    imageParser: runtime.parser || {},
-    'image-parser': runtime.parser || {},
-    'escalation-template-parser': runtime.parser || {},
-    'known-issue-search-agent': runtime.inv || {},
-    'triage-agent': runtime.triage || {},
-    chat: runtime.main || {},
-  };
+function runtimeUpdatesFromSurfaceDefaults(surfaces = {}) {
+  if (!surfaces || typeof surfaces !== 'object') return null;
+  const updates = {};
+  for (const [stageKey, runtimeId] of Object.entries(PIPELINE_RUNTIME_IDS)) {
+    const runtime = surfaces[runtimeId];
+    if (runtime && typeof runtime === 'object') {
+      updates[stageKey] = runtime;
+    }
+  }
+  return Object.keys(updates).length > 0 ? updates : null;
 }
 
 function getProviderInitials(providerId, providerLabel) {
@@ -471,6 +507,13 @@ function formatReasoningEffortLabel(value) {
   return effort;
 }
 
+function formatServiceTierLabel(value) {
+  const tier = cleanValue(value).toLowerCase();
+  if (!tier) return '';
+  if (tier === 'priority') return 'fast';
+  return tier;
+}
+
 function buildRuntimeInfo(step, runtimeByStage, health) {
   const state = runtimeByStage?.[step.key] || {};
   const provider = cleanValue(state.provider);
@@ -489,6 +532,8 @@ function buildRuntimeInfo(step, runtimeByStage, health) {
     model,
     reasoningEffort: cleanValue(state.reasoningEffort),
     reasoningEffortLabel: formatReasoningEffortLabel(state.reasoningEffort),
+    serviceTier: cleanValue(state.serviceTier),
+    serviceTierLabel: formatServiceTierLabel(state.serviceTier),
     family: providerMeta?.family || provider || 'unknown',
     initials: getProviderInitials(provider, providerLabel),
     iconPath: icon.iconPath,
@@ -863,7 +908,7 @@ function WorkflowCardMenu({ step, health, testRun, testRunning, pipelineRunning,
             }}
             disabled={testRunning}
           >
-            Test stage
+            Test agent
           </button>
           {pipelineRunning && (
             <button
@@ -911,7 +956,9 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
   const testRunning = testRun?.status === 'running';
   const modelLabel = runtimeInfo?.model || 'No model';
   const effortLabel = runtimeInfo?.reasoningEffortLabel || 'default';
-  const modelTitle = `${modelLabel} - reasoning effort: ${effortLabel}`;
+  const serviceTierLabel = runtimeInfo?.serviceTierLabel || '';
+  const serviceTierTitle = serviceTierLabel ? ` - service tier: ${serviceTierLabel}` : '';
+  const modelTitle = `${modelLabel} - reasoning effort: ${effortLabel}${serviceTierTitle}`;
   const cardRef = useRef(null);
   const captionRef = useRef(null);
   const [captionFrozen, setCaptionFrozen] = useState(false);
@@ -1005,6 +1052,14 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
             <strong>{modelLabel}</strong>
             {' '}
             <span className="v5-workflow-card__effort" title={`Reasoning effort: ${effortLabel}`}>{effortLabel}</span>
+            {serviceTierLabel && (
+              <span
+                className="v5-workflow-card__tier"
+                title={`Codex service tier: ${serviceTierLabel}`}
+              >
+                {serviceTierLabel}
+              </span>
+            )}
           </span>
           <span className="v5-workflow-card__provider-label" title={runtimeInfo?.providerLabel || 'No provider'}>{runtimeInfo?.providerLabel || 'No provider'}</span>
         </span>
@@ -1223,6 +1278,10 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
   const rawTemplate = cleanValue(sourceCaseIntake?.canonicalTemplate || testRun?.data?.text);
   const savedTestResultId = cleanValue(testRun?.data?.savedTestResultId || testRun?.data?.savedTestResult?.id);
   const savedStatus = cleanValue(testRun?.data?.savedTestResult?.status);
+  const apiCost = testRun?.data?.apiCost || testRun?.data?.savedTestResult?.apiCost || null;
+  const apiCostValue = formatApiCostValue(apiCost);
+  const apiCostTokens = formatApiCostTokens(apiCost);
+  const apiCostModel = cleanValue(apiCost?.model || testRun?.data?.modelUsed);
 
   useEffect(() => {
     if (!previewOpen) return undefined;
@@ -1354,6 +1413,15 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
           <span>{markingStatus ? 'Saving...' : savedStatus ? `Recorded: ${savedStatus}` : 'Pending review'}</span>
         </div>
       )}
+      {status === 'done' && apiCost && (
+        <div className={`v5-parser-test-cost${apiCost.rateFound === false ? ' is-warning' : ''}`}>
+          <span>API COST</span>
+          <strong>{apiCost.rateFound === false ? 'Rate missing' : apiCostValue}</strong>
+          {(apiCostTokens || apiCostModel) && (
+            <small>{[apiCostTokens, apiCostModel].filter(Boolean).join(' - ')}</small>
+          )}
+        </div>
+      )}
       <div className="v5-template-output__lines">
         {rows.map((row) => (
           <div className="v5-template-line" key={row.label}>
@@ -1387,7 +1455,7 @@ function ParserOutput({ caseIntake, parsedFields, stage, testRun, onClearTest, o
   );
 }
 
-function TriageOutput({ stage, card, testRun, onClearTest, agentLabel = 'Triage Agent' }) {
+function TriageOutput({ stage, card, testRun, onClearTest, onMarkTestResult, agentLabel = 'Triage Agent' }) {
   const viewStage = testStageFromRun(testRun, stage);
   const testCard = testRun?.data?.triageCard || null;
   const displayCard = testCard || card;
@@ -1403,6 +1471,25 @@ function TriageOutput({ stage, card, testRun, onClearTest, agentLabel = 'Triage 
   const confidence = cleanValue(displayCard?.confidence).toLowerCase() || 'medium';
   const confidenceDots = TRIAGE_CONFIDENCE_DOTS[confidence] || 2;
   const fallbackUsed = Boolean(displayCard?.fallback?.used || viewStage?.fallbackUsed);
+  // Triage test surface. When the operator runs a triage test from the
+  // workflow card's three-dot menu, the response carries the fixture that
+  // was randomly picked plus a savedTestResultId so the operator can record
+  // pass/fail. Mirrors the parser test affordances in ParserOutput.
+  const testFixture = testRun?.data?.fixture || null;
+  const fixtureTags = Array.isArray(testFixture?.tags) ? testFixture.tags.filter(Boolean) : [];
+  const savedTestResultId = cleanValue(testRun?.data?.savedTestResultId || testRun?.data?.savedTestResult?.id);
+  const savedStatus = cleanValue(testRun?.data?.savedTestResult?.status);
+  const [markingStatus, setMarkingStatus] = useState('');
+
+  async function markResult(nextStatus) {
+    if (!savedTestResultId || typeof onMarkTestResult !== 'function') return;
+    setMarkingStatus(nextStatus);
+    try {
+      await onMarkTestResult(savedTestResultId, nextStatus);
+    } finally {
+      setMarkingStatus('');
+    }
+  }
 
   if (isFailed) {
     return (
@@ -1435,6 +1522,40 @@ function TriageOutput({ stage, card, testRun, onClearTest, agentLabel = 'Triage 
   return (
     <div className="v5-triage-panel">
       <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
+      {testRun && testRun.status !== 'idle' && testFixture && (
+        <div className="v5-dock-inline-status">
+          {`Fixture: ${testFixture.name || 'triage test fixture'}`}
+          {testFixture.description ? ` - ${testFixture.description}` : ''}
+        </div>
+      )}
+      {fixtureTags.length > 0 && (
+        <div className="v5-chip-row" aria-label="Triage test fixture tags">
+          {fixtureTags.map((tag) => <span key={tag}>{tag}</span>)}
+        </div>
+      )}
+      {savedTestResultId && status === 'done' && (
+        <div className="v5-parser-review-actions" aria-label="Record triage test result">
+          <button
+            type="button"
+            className={savedStatus === 'pass' ? 'is-pass' : ''}
+            disabled={Boolean(markingStatus)}
+            aria-label="Mark this triage test result as a pass"
+            onClick={() => markResult('pass')}
+          >
+            Pass
+          </button>
+          <button
+            type="button"
+            className={savedStatus === 'fail' ? 'is-fail' : ''}
+            disabled={Boolean(markingStatus)}
+            aria-label="Mark this triage test result as a fail"
+            onClick={() => markResult('fail')}
+          >
+            Fail
+          </button>
+          <span>{markingStatus ? 'Saving...' : savedStatus ? `Recorded: ${savedStatus}` : 'Pending review'}</span>
+        </div>
+      )}
       <div className="v5-triage-panel__meta">
         <span className={`v5-severity v5-severity--${severity.toLowerCase()}`}>{severity}</span>
         {category && <span className="v5-triage-panel__category">{category}</span>}
@@ -1544,6 +1665,7 @@ function EvidenceDock({
   testRuns,
   onClearStageTest,
   onMarkParserTestResult,
+  onMarkTriageTestResult,
   parserThumbnail,
   onParserThumbnailClick,
   stageLabels = buildStageLabels(WORKFLOW_STEPS),
@@ -1615,6 +1737,7 @@ function EvidenceDock({
           card={card}
           testRun={testRuns?.triage}
           onClearTest={() => onClearStageTest('triage')}
+          onMarkTestResult={onMarkTriageTestResult}
           agentLabel={stageLabels.triage || 'Triage Agent'}
         />
       </DockSection>
@@ -1951,6 +2074,7 @@ export default function ChatV5Container({ isActive = true }) {
     stageState,
     stageEvents,
     liveEventCounts,
+    ingestStageEvent,
     pushLocalStageEvent,
     capturedImageSrc,
     caseIntake,
@@ -1963,6 +2087,7 @@ export default function ChatV5Container({ isActive = true }) {
     requestError,
   } = useStageOrchestrator();
   const { workflowSteps, stageLabels } = usePipelineAgentLabels();
+  const { openAgentTest } = useAgentTestModal();
   // Moving-average denominator per stage, fetched once on mount and refreshed
   // after each completed pipeline run so the bar tracks recent reality. The
   // server response is cheap (capped scan + projection) so this stays light.
@@ -2044,8 +2169,8 @@ export default function ChatV5Container({ isActive = true }) {
     if (step1TimerRef.current) clearTimeout(step1TimerRef.current);
   }, []);
 
-  // Manual-test modal (ImageParserPopup) — opened from the dock's
-  // Image Parser section thumbnail. Same modal users see for manual tests.
+  // Image preview/parser utility popup opened from the dock thumbnail. Agent
+  // test runs now use the shared AgentTestModal instead of this live-image tool.
   const [parserPopupOpen, setParserPopupOpen] = useState(false);
 
   // Cancel-pipeline confirm modal. Opened from the kebab menu's
@@ -2243,8 +2368,41 @@ export default function ChatV5Container({ isActive = true }) {
     return () => clearInterval(id);
   }, [refreshPipelineStatus]);
 
+  useEffect(() => {
+    const handleRuntimeDefaultsApplied = (event) => {
+      const updates = runtimeUpdatesFromSurfaceDefaults(event?.detail?.surfaces);
+      if (!updates) return;
+      setRuntimeByStage((previous) => ({
+        ...previous,
+        ...updates,
+      }));
+      refreshPipelineStatus(true);
+    };
+
+    window.addEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleRuntimeDefaultsApplied);
+    return () => {
+      window.removeEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleRuntimeDefaultsApplied);
+    };
+  }, [refreshPipelineStatus]);
+
   const runStageTest = useCallback(async (stageKey) => {
     if (!PIPELINE_TEST_STAGES.includes(stageKey)) return;
+    const agentId = PIPELINE_RUNTIME_IDS[stageKey];
+    if (agentId) {
+      openAgentTest({
+        agentId,
+        stageKey,
+        launchSurface: 'chat-stage-card',
+        context: {
+          imageCaptured,
+          hasCurrentImage: Boolean(capturedImageSrc),
+        },
+        onRecorded: () => {
+          refreshPipelineStatus(false);
+        },
+      });
+      return;
+    }
     const runtime = await readPipelineProfileRuntimeStates();
     const startedAt = Date.now();
     setRuntimeByStage(runtime);
@@ -2260,16 +2418,80 @@ export default function ChatV5Container({ isActive = true }) {
       },
     }));
     try {
-      const data = await apiFetchJson('/api/pipeline-tests/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          stage: stageKey,
-          runtime: buildPipelineRuntimePayload(runtime),
-        }),
-        timeout: 180_000,
-        noRetry: true,
-      }, 'Pipeline agent test failed');
+      const requestBody = {
+        stage: stageKey,
+        runtime: buildPipelineRuntimePayload(runtime),
+      };
+      let data;
+      if (stageKey === 'triage') {
+        // Stage 4 (Triage Agent) test runs against the dedicated
+        // /api/triage-tests/run endpoint, which picks a random fixture from
+        // server/fixtures/pipeline-tests/triage/, streams stage events over
+        // SSE, and persists the run as a TriageTestResult the operator can
+        // grade pass/fail. This is parity with the parser test route.
+        const triageRuntime = runtime?.triage || runtime?.['triage-agent'] || {};
+        pushLocalStageEvent('triage', 'triage.client_request_started', {
+          provider: triageRuntime.provider || '',
+          model: triageRuntime.model || '',
+          requestStartedAt: startedAt,
+          testRun: true,
+          status: 'sent',
+          surfaceToUser: true,
+          displayMessage: 'triage test payload sent to server - sent',
+        });
+        const res = await apiFetch('/api/triage-tests/run', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+          },
+          body: JSON.stringify(requestBody),
+          timeout: 180_000,
+          noRetry: true,
+        });
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/event-stream')) {
+          let completed = null;
+          let errorPayload = null;
+          await consumeSSEStream(res, (eventType, payload) => {
+            if (eventType === 'stage_event') {
+              ingestStageEvent?.(payload);
+            } else if (eventType === 'test_complete') {
+              completed = payload;
+            } else if (eventType === 'error') {
+              errorPayload = payload;
+            }
+          });
+          data = completed || {
+            ok: false,
+            error: errorPayload?.error || errorPayload?.message || 'Triage test stream ended without a result.',
+            code: errorPayload?.code,
+          };
+        } else {
+          data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
+        }
+        if (!res.ok || !data?.ok) {
+          throw normalizeTestError(data || { message: `Triage agent test failed (HTTP ${res.status})` });
+        }
+        pushLocalStageEvent('triage', 'triage.client_result_received', {
+          provider: data.providerUsed || triageRuntime.provider || '',
+          model: data.modelUsed || triageRuntime.model || '',
+          severity: data.triageCard?.severity || '',
+          category: data.triageCard?.category || '',
+          confidence: data.triageCard?.confidence || '',
+          elapsedMs: data.elapsedMs ?? 0,
+          testRun: true,
+          status: 'complete',
+        });
+      } else {
+        data = await apiFetchJson('/api/pipeline-tests/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+          timeout: 180_000,
+          noRetry: true,
+        }, 'Pipeline agent test failed');
+      }
       const finishedAt = Date.now();
       setTestRuns((prev) => ({
         ...prev,
@@ -2298,7 +2520,7 @@ export default function ChatV5Container({ isActive = true }) {
       }));
       refreshPipelineStatus(false);
     }
-  }, [refreshPipelineStatus]);
+  }, [capturedImageSrc, imageCaptured, ingestStageEvent, openAgentTest, pushLocalStageEvent, refreshPipelineStatus]);
 
   const clearStageTest = useCallback((stageKey) => {
     setTestRuns((prev) => {
@@ -2321,6 +2543,13 @@ export default function ChatV5Container({ isActive = true }) {
       noRetry: true,
     }, 'Failed to record parser test result');
 
+    if (status === 'pass') {
+      closeTransientWorkbenchTabs();
+      reset();
+      setTestRuns({});
+      return;
+    }
+
     setTestRuns((prev) => ({
       ...prev,
       parser: prev.parser
@@ -2333,6 +2562,38 @@ export default function ChatV5Container({ isActive = true }) {
             },
           }
         : prev.parser,
+    }));
+  }, [closeTransientWorkbenchTabs, reset]);
+
+  // Mirror of markParserTestResult but targeting the triage test result
+  // collection. PATCH succeeds, then we replace testRuns.triage.data with
+  // the updated savedTestResult so the UI reflects the new status without a
+  // refetch.
+  const markTriageTestResult = useCallback(async (resultId, status) => {
+    const data = await apiFetchJson(`/api/triage-tests/results/${encodeURIComponent(resultId)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status,
+        operatorNote: status === 'fail'
+          ? 'Operator marked the live triage test output as incorrect.'
+          : 'Operator marked the live triage test output as correct.',
+      }),
+      noRetry: true,
+    }, 'Failed to record triage test result');
+
+    setTestRuns((prev) => ({
+      ...prev,
+      triage: prev.triage
+        ? {
+            ...prev.triage,
+            data: {
+              ...(prev.triage.data || {}),
+              savedTestResult: data.result,
+              savedTestResultId: data.result?.id || resultId,
+            },
+          }
+        : prev.triage,
     }));
   }, []);
 
@@ -2401,6 +2662,7 @@ export default function ChatV5Container({ isActive = true }) {
           testRuns={testRuns}
           onClearStageTest={clearStageTest}
           onMarkParserTestResult={markParserTestResult}
+          onMarkTriageTestResult={markTriageTestResult}
           parserThumbnail={!step1Visible && capturedImageSrc ? capturedImageSrc : null}
           onParserThumbnailClick={() => setParserPopupOpen(true)}
         />

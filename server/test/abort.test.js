@@ -484,7 +484,7 @@ async function createTestConversation(title) {
       message: 'test abort during 3-way parallel',
       mode: 'parallel',
       primaryProvider: 'claude',
-      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-7'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8'],
     });
 
     await sse.waitForEvent('chunk');

@@ -60,7 +60,7 @@ module.exports = {
   triggerMentions: ['@workspace', '@ea', '@assistant'],
   priority: 10,
   maxContextMessages: 20,
-  preferredProvider: 'claude-opus-4-7',
+  preferredProvider: 'claude-opus-4-8',
   supportsTools: true,
   useActionFlow: true,
 
@@ -207,6 +207,7 @@ module.exports = {
           policy,
           requestedPrimaryProvider: primaryProvider,
           effectiveReasoningEffort: runtimePolicy?.reasoningEffort || 'high',
+          effectiveServiceTier: runtimePolicy?.serviceTier || '',
           timeoutMs: DEFAULT_TIMEOUT_MS,
           workspaceRole: systemPrompt,
           workspaceChatOnlyRole: systemPrompt,

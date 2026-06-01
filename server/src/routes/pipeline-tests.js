@@ -3,6 +3,7 @@
 const express = require('express');
 const fs = require('fs/promises');
 const path = require('path');
+const { randomUUID } = require('node:crypto');
 const sharp = require('sharp');
 const { parseImage } = require('../services/image-parser');
 const { getAgentHealthSnapshot, refreshAgentHealth } = require('../services/agent-health-service');
@@ -30,7 +31,12 @@ const {
   getProviderModelId,
   getProviderShortLabel,
 } = require('../services/providers/catalog');
+const { createStageEventBus } = require('../lib/stage-events');
+const { calculateCost, nanosToUsd, PRICING_VERSION } = require('../lib/pricing');
+const { buildExactOutputComparison } = require('../lib/exact-output-check');
+const { getBuiltInConfirmedOutput } = require('../lib/image-parser-confirmed-outputs');
 const ImageParserTestResult = require('../models/ImageParserTestResult');
+const ImageParserFixtureBaseline = require('../models/ImageParserFixtureBaseline');
 
 const router = express.Router();
 
@@ -100,6 +106,13 @@ function isPlainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function clientWantsSse(req) {
+  const accept = safeString(req.headers?.accept, '').toLowerCase();
+  if (accept.includes('text/event-stream')) return true;
+  const streamQ = safeString(req.query?.stream, '').toLowerCase();
+  return streamQ === '1' || streamQ === 'true' || streamQ === 'yes';
+}
+
 function readRuntimeMap(body = {}) {
   return isPlainObject(body.runtime) ? body.runtime : {};
 }
@@ -152,6 +165,14 @@ async function readCaseFixture() {
   return JSON.parse(raw);
 }
 
+function imageParserTestDbAvailable() {
+  return Boolean(ImageParserTestResult.db && ImageParserTestResult.db.readyState === 1);
+}
+
+function imageParserBaselineDbAvailable() {
+  return Boolean(ImageParserFixtureBaseline.db && ImageParserFixtureBaseline.db.readyState === 1);
+}
+
 async function readTemplateImageDataUrl() {
   const svg = await fs.readFile(TEMPLATE_SVG_PATH);
   const png = await sharp(svg).png().toBuffer();
@@ -201,6 +222,16 @@ async function listImageParserFixtures() {
 function chooseRandomFixture(fixtures) {
   if (!Array.isArray(fixtures) || fixtures.length === 0) return null;
   return fixtures[Math.floor(Math.random() * fixtures.length)];
+}
+
+function chooseImageParserFixture(fixtures) {
+  return chooseRandomFixture(fixtures);
+}
+
+function normalizeImageFixtureName(name) {
+  const clean = safeString(name, '').trim();
+  if (!clean || clean !== path.basename(clean)) return '';
+  return clean;
 }
 
 function buildImageFixtureUrl(name) {
@@ -258,11 +289,49 @@ function getParserFallbackSummary(result) {
   };
 }
 
+function toTokenCount(value) {
+  const numeric = safeNumber(value, 0);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
+}
+
+function buildApiCostSummary({ usage, provider, model }) {
+  if (!isPlainObject(usage)) return null;
+
+  const inputTokens = toTokenCount(usage.inputTokens ?? usage.input_tokens ?? usage.prompt_tokens);
+  const outputTokens = toTokenCount(usage.outputTokens ?? usage.output_tokens ?? usage.completion_tokens);
+  const totalTokens = toTokenCount(usage.totalTokens ?? usage.total_tokens) || inputTokens + outputTokens;
+  const modelId = safeString(usage.model || model, '');
+  const providerId = safeString(provider, '');
+  const cost = calculateCost(inputTokens, outputTokens, modelId, providerId);
+
+  return {
+    currency: 'USD',
+    source: 'server-pricing',
+    pricingVersion: PRICING_VERSION,
+    rateFound: Boolean(cost.rateFound),
+    provider: providerId,
+    model: modelId,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    inputCostNanos: cost.inputCostNanos,
+    outputCostNanos: cost.outputCostNanos,
+    totalCostNanos: cost.totalCostNanos,
+    inputCostMicros: cost.inputCostMicros,
+    outputCostMicros: cost.outputCostMicros,
+    totalCostMicros: cost.totalCostMicros,
+    inputCostUsd: nanosToUsd(cost.inputCostNanos),
+    outputCostUsd: nanosToUsd(cost.outputCostNanos),
+    totalCostUsd: nanosToUsd(cost.totalCostNanos),
+  };
+}
+
 async function createImageParserTestResultRecord({ imageFixture, runtime, provider, result, elapsedMs }) {
-  if (!ImageParserTestResult.db || ImageParserTestResult.db.readyState !== 1) return null;
+  if (!imageParserTestDbAvailable()) return null;
   const parseMeta = result?.parseMeta || null;
   const validation = getParserValidationSummary(parseMeta);
   const model = safeString(result?.usage?.model || runtime.model, '') || IMAGE_DEFAULT_MODELS[provider] || '';
+  const apiCost = buildApiCostSummary({ usage: result?.usage, provider, model });
   const fallbackSummary = getParserFallbackSummary(result);
   try {
     return await ImageParserTestResult.create({
@@ -272,7 +341,15 @@ async function createImageParserTestResultRecord({ imageFixture, runtime, provid
       model,
       modelRequested: safeString(runtime.model, ''),
       reasoningEffort: safeString(runtime.reasoningEffort, ''),
+      serviceTier: safeString(runtime.serviceTier, ''),
       runtime,
+      promptId: safeString(result?.promptId, 'escalation-template-parser'),
+      promptVersion: safeString(result?.promptVersion, ''),
+      promptSha256: safeString(result?.promptSha256, ''),
+      promptLength: Number.isFinite(Number(result?.promptLength)) ? Number(result.promptLength) : 0,
+      providerPackageId: safeString(result?.providerTrace?.providerPackageId, ''),
+      providerHarness: safeString(result?.providerTrace?.providerHarness, ''),
+      providerTrace: result?.providerTrace || null,
       elapsedMs,
       status: 'pending-review',
       ...validation,
@@ -280,6 +357,7 @@ async function createImageParserTestResultRecord({ imageFixture, runtime, provid
       parseFields: isPlainObject(result?.parseFields) ? result.parseFields : {},
       parseMeta,
       usage: result?.usage || null,
+      apiCost,
       ...fallbackSummary,
     });
   } catch (err) {
@@ -297,6 +375,246 @@ function serializeImageParserTestResult(doc) {
   };
 }
 
+function serializeImageParserTestResultWithConfirmedOutput(doc, confirmedOutput) {
+  const result = serializeImageParserTestResult(doc);
+  if (!result) return null;
+  return {
+    ...result,
+    hasConfirmedOutput: Boolean(confirmedOutput),
+    confirmedOutputSource: safeString(confirmedOutput?.source, ''),
+    confirmedOutputUpdatedAt: confirmedOutput?.updatedAt || null,
+    confirmedOutputCount: safeNumber(confirmedOutput?.outputCount, confirmedOutput?.outputs?.length || 0),
+  };
+}
+
+function serializeAcceptedOutput(output, fixtureName, fallback = {}) {
+  if (!output) return null;
+  const expectedText = safeString(output.expectedText, fallback.expectedText || '');
+  if (!expectedText) return null;
+  return {
+    id: String(output._id || output.id || fallback.id || ''),
+    fixtureName: safeString(output.fixtureName, fixtureName),
+    expectedText,
+    source: safeString(output.source, fallback.source || 'saved') || 'saved',
+    sourceResultId: safeString(output.sourceResultId, fallback.sourceResultId || ''),
+    sourceProvider: safeString(output.sourceProvider, fallback.sourceProvider || ''),
+    sourceModel: safeString(output.sourceModel, fallback.sourceModel || ''),
+    promptId: safeString(output.promptId, fallback.promptId || 'escalation-template-parser') || 'escalation-template-parser',
+    promptVersion: safeString(output.promptVersion, fallback.promptVersion || ''),
+    promptSha256: safeString(output.promptSha256, fallback.promptSha256 || ''),
+    confirmedBy: safeString(output.confirmedBy, fallback.confirmedBy || 'operator') || 'operator',
+    operatorNote: safeString(output.operatorNote, fallback.operatorNote || ''),
+    createdAt: output.createdAt || fallback.createdAt || null,
+    updatedAt: output.updatedAt || fallback.updatedAt || null,
+  };
+}
+
+function collectAcceptedOutputsFromBaseline(baseline) {
+  if (!baseline) return [];
+  const fixtureName = safeString(baseline.fixtureName, '');
+  const outputs = [];
+  const seenText = new Set();
+
+  function addOutput(output, fallback = {}) {
+    const serialized = serializeAcceptedOutput(output, fixtureName, fallback);
+    if (!serialized || seenText.has(serialized.expectedText)) return;
+    seenText.add(serialized.expectedText);
+    outputs.push({
+      ...serialized,
+      outputIndex: outputs.length,
+    });
+  }
+
+  if (Array.isArray(baseline.acceptableOutputs)) {
+    baseline.acceptableOutputs.forEach((output) => addOutput(output, {
+      source: 'saved',
+      updatedAt: output?.updatedAt || baseline.updatedAt || null,
+    }));
+  }
+
+  addOutput(baseline, {
+    source: 'saved',
+    updatedAt: baseline.updatedAt || null,
+  });
+
+  return outputs;
+}
+
+function serializeImageParserBaseline(doc) {
+  if (!doc) return null;
+  const baseline = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  const outputs = collectAcceptedOutputsFromBaseline(baseline);
+  return {
+    ...baseline,
+    id: String(baseline._id || baseline.id || ''),
+    outputs,
+    outputCount: outputs.length,
+    expectedText: outputs[0]?.expectedText || safeString(baseline.expectedText, ''),
+  };
+}
+
+function outputForStorage(output) {
+  const stored = {
+    expectedText: safeString(output.expectedText, ''),
+    sourceResultId: safeString(output.sourceResultId, ''),
+    sourceProvider: safeString(output.sourceProvider, ''),
+    sourceModel: safeString(output.sourceModel, ''),
+    promptId: safeString(output.promptId, 'escalation-template-parser') || 'escalation-template-parser',
+    promptVersion: safeString(output.promptVersion, ''),
+    promptSha256: safeString(output.promptSha256, ''),
+    confirmedBy: safeString(output.confirmedBy, 'operator') || 'operator',
+    operatorNote: safeString(output.operatorNote, ''),
+    source: safeString(output.source, 'saved') || 'saved',
+    createdAt: output.createdAt || new Date(),
+    updatedAt: output.updatedAt || new Date(),
+  };
+  if (/^[a-f\d]{24}$/i.test(safeString(output.id, ''))) {
+    stored._id = output.id;
+  }
+  return stored;
+}
+
+async function findImageParserTestResultById(id) {
+  if (!imageParserTestDbAvailable()) return null;
+  if (typeof ImageParserTestResult.findById === 'function') {
+    const query = ImageParserTestResult.findById(id);
+    if (query && typeof query.lean === 'function') return query.lean();
+    return query;
+  }
+  return null;
+}
+
+async function findBaselineByFixtureName(fixtureName) {
+  if (!imageParserBaselineDbAvailable() || typeof ImageParserFixtureBaseline.findOne !== 'function') {
+    return null;
+  }
+  const query = ImageParserFixtureBaseline.findOne({ fixtureName });
+  return query && typeof query.lean === 'function' ? query.lean() : query;
+}
+
+async function resolveConfirmedOutputSetForFixture(fixtureName) {
+  const cleanFixtureName = safeString(fixtureName, '').trim();
+  if (!cleanFixtureName) return null;
+
+  const saved = await findBaselineByFixtureName(cleanFixtureName);
+  if (saved) {
+    const baseline = serializeImageParserBaseline(saved);
+    if (baseline?.outputs?.length) {
+      return {
+        fixtureName: cleanFixtureName,
+        expectedText: baseline.outputs[0].expectedText,
+        outputs: baseline.outputs,
+        outputCount: baseline.outputs.length,
+        source: 'saved',
+        updatedAt: baseline.updatedAt || null,
+        baseline,
+      };
+    }
+  }
+
+  const builtIn = getBuiltInConfirmedOutput(cleanFixtureName);
+  if (!builtIn) return null;
+  const builtInOutput = serializeAcceptedOutput({
+    fixtureName: cleanFixtureName,
+    expectedText: safeString(builtIn.expectedText, ''),
+    source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
+    confirmedBy: safeString(builtIn.confirmedBy, 'operator') || 'operator',
+  }, cleanFixtureName);
+  return {
+    fixtureName: cleanFixtureName,
+    expectedText: builtInOutput?.expectedText || '',
+    outputs: builtInOutput ? [{ ...builtInOutput, outputIndex: 0 }] : [],
+    outputCount: builtInOutput ? 1 : 0,
+    source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
+    updatedAt: null,
+    baseline: {
+      fixtureName: cleanFixtureName,
+      source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
+      confirmedBy: safeString(builtIn.confirmedBy, 'operator') || 'operator',
+      expectedText: builtInOutput?.expectedText || '',
+      outputs: builtInOutput ? [{ ...builtInOutput, outputIndex: 0 }] : [],
+      outputCount: builtInOutput ? 1 : 0,
+    },
+  };
+}
+
+async function resolveConfirmedOutputForFixture(fixtureName) {
+  const outputSet = await resolveConfirmedOutputSetForFixture(fixtureName);
+  if (!outputSet?.outputs?.length) return null;
+  return {
+    ...outputSet,
+    expectedText: outputSet.outputs[0].expectedText,
+  };
+}
+
+async function saveConfirmedOutputFromResult(result, body = {}) {
+  if (!imageParserBaselineDbAvailable()) {
+    const err = new Error('Parser confirmed-output database is unavailable.');
+    err.statusCode = 503;
+    err.code = 'DB_UNAVAILABLE';
+    throw err;
+  }
+
+  const fixtureName = safeString(result?.fixture?.name, '').trim();
+  if (!fixtureName) {
+    const err = new Error('Parser test result does not have an image fixture name.');
+    err.statusCode = 400;
+    err.code = 'MISSING_FIXTURE';
+    throw err;
+  }
+
+  const expectedText = typeof body.expectedText === 'string' ? body.expectedText : safeString(result?.parsedText, '');
+  const now = new Date();
+  const newOutput = {
+    fixtureName,
+    expectedText,
+    sourceResultId: String(result?._id || result?.id || ''),
+    sourceProvider: safeString(result?.provider, ''),
+    sourceModel: safeString(result?.model, ''),
+    promptId: safeString(result?.promptId, 'escalation-template-parser') || 'escalation-template-parser',
+    promptVersion: safeString(result?.promptVersion, ''),
+    promptSha256: safeString(result?.promptSha256, ''),
+    confirmedBy: safeString(body.confirmedBy, 'operator') || 'operator',
+    operatorNote: safeString(body.operatorNote, ''),
+    source: 'saved',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  if (typeof ImageParserFixtureBaseline.findOneAndUpdate !== 'function') {
+    const err = new Error('Parser confirmed-output database does not support updates.');
+    err.statusCode = 503;
+    err.code = 'DB_UNAVAILABLE';
+    throw err;
+  }
+
+  const existing = await findBaselineByFixtureName(fixtureName);
+  const existingOutputs = collectAcceptedOutputsFromBaseline(existing);
+  const duplicate = existingOutputs.find((output) => output.expectedText === expectedText);
+  const acceptedOutputs = duplicate
+    ? existingOutputs
+    : [...existingOutputs, newOutput];
+  const latestOutput = duplicate || newOutput;
+  const update = {
+    ...latestOutput,
+    fixtureName,
+    acceptableOutputs: acceptedOutputs.map(outputForStorage),
+  };
+
+  const query = ImageParserFixtureBaseline.findOneAndUpdate(
+    { fixtureName },
+    { $set: update },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
+  const saved = query && typeof query.lean === 'function' ? await query.lean() : await query;
+  return {
+    baseline: serializeImageParserBaseline(saved),
+    added: !duplicate,
+    duplicate: Boolean(duplicate),
+    output: serializeAcceptedOutput(latestOutput, fixtureName),
+  };
+}
+
 function buildEmptyParserTestStats() {
   return {
     total: 0,
@@ -308,11 +626,12 @@ function buildEmptyParserTestStats() {
     byProvider: [],
     byModel: [],
     byFixture: [],
+    byPromptVersion: [],
   };
 }
 
 async function buildParserTestStats() {
-  const [overallAgg, byProvider, byModel, byFixture] = await Promise.all([
+  const [overallAgg, byProvider, byModel, byFixture, byPromptVersion] = await Promise.all([
     ImageParserTestResult.aggregate([
       {
         $group: {
@@ -368,6 +687,24 @@ async function buildParserTestStats() {
       { $sort: { fail: -1, total: -1 } },
       { $limit: 30 },
     ]),
+    ImageParserTestResult.aggregate([
+      {
+        $group: {
+          _id: {
+            promptId: '$promptId',
+            promptVersion: '$promptVersion',
+            promptSha256: '$promptSha256',
+          },
+          total: { $sum: 1 },
+          pass: { $sum: { $cond: [{ $eq: ['$status', 'pass'] }, 1, 0] } },
+          fail: { $sum: { $cond: [{ $eq: ['$status', 'fail'] }, 1, 0] } },
+          pending: { $sum: { $cond: [{ $eq: ['$status', 'pending-review'] }, 1, 0] } },
+          avgElapsedMs: { $avg: '$elapsedMs' },
+        },
+      },
+      { $sort: { '_id.promptVersion': -1, total: -1 } },
+      { $limit: 40 },
+    ]),
   ]);
 
   const overall = overallAgg[0] || buildEmptyParserTestStats();
@@ -375,7 +712,7 @@ async function buildParserTestStats() {
   const normalize = (entry) => ({
     ...entry,
     id: typeof entry._id === 'object' ? undefined : entry._id,
-    provider: entry._id?.provider || entry.provider || entry._id || '',
+    provider: entry._id?.provider || entry.provider || (typeof entry._id === 'string' ? entry._id : ''),
     model: entry._id?.model || entry.model || '',
     passRate: entry.pass + entry.fail > 0 ? Math.round((entry.pass / (entry.pass + entry.fail)) * 10000) / 10000 : 0,
     avgElapsedMs: Math.round(entry.avgElapsedMs || 0),
@@ -395,12 +732,38 @@ async function buildParserTestStats() {
       fixtureName: entry._id || '',
       fixture: entry.fixture || null,
     })),
+    byPromptVersion: byPromptVersion.map((entry) => ({
+      ...normalize(entry),
+      promptId: entry._id?.promptId || '',
+      promptVersion: entry._id?.promptVersion || '',
+      promptSha256: entry._id?.promptSha256 || '',
+    })),
   };
 }
 
-async function readRandomImageParserFixtureDataUrl() {
+async function readImageParserFixtureDataUrl(fixtureName = '', options = {}) {
   const fixtures = await listImageParserFixtures();
-  const selected = chooseRandomFixture(fixtures);
+  const requestedName = normalizeImageFixtureName(fixtureName);
+  const excludedName = normalizeImageFixtureName(options.excludeFixtureName || '');
+  if (safeString(fixtureName, '').trim() && !requestedName) {
+    const err = new Error('Invalid image fixture name.');
+    err.statusCode = 400;
+    err.code = 'INVALID_FIXTURE_NAME';
+    throw err;
+  }
+
+  const selectableFixtures = !requestedName && excludedName && fixtures.length > 1
+    ? fixtures.filter((entry) => entry.name !== excludedName)
+    : fixtures;
+  const selected = requestedName
+    ? fixtures.find((entry) => entry.name === requestedName)
+    : chooseImageParserFixture(selectableFixtures);
+  if (requestedName && !selected) {
+    const err = new Error('Image parser fixture not found.');
+    err.statusCode = 404;
+    err.code = 'FIXTURE_NOT_FOUND';
+    throw err;
+  }
   if (!selected) return readTemplateImageDataUrl();
 
   const image = await fs.readFile(selected.filePath);
@@ -413,6 +776,7 @@ async function readRandomImageParserFixtureDataUrl() {
       mimeType: selected.mimeType,
       source: 'image-fixture',
       fixtureCount: fixtures.length,
+      requested: Boolean(requestedName),
     },
   };
 }
@@ -482,9 +846,12 @@ function buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixtur
       elapsedMs,
       testRun: true,
       promptId: result?.promptId || 'escalation-template-parser',
+      promptVersion: safeString(result?.promptVersion, ''),
+      promptSha256: safeString(result?.promptSha256, ''),
+      promptLength: Number.isFinite(Number(result?.promptLength)) ? Number(result.promptLength) : 0,
       imageFixture,
       parserValidation: result?.parseMeta || null,
-        fallback: fallbackSummary,
+      fallback: fallbackSummary,
     },
     runs: [{
       agentId: 'escalation-template-parser',
@@ -498,6 +865,9 @@ function buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixtur
       detail: {
         testRun: true,
         promptId: result?.promptId || 'escalation-template-parser',
+        promptVersion: safeString(result?.promptVersion, ''),
+        promptSha256: safeString(result?.promptSha256, ''),
+        promptLength: Number.isFinite(Number(result?.promptLength)) ? Number(result.promptLength) : 0,
         imageFixture,
         parserValidation: result?.parseMeta || null,
         fallback: fallbackSummary,
@@ -669,8 +1039,26 @@ router.post('/status', async (req, res) => {
   });
 });
 
+router.get('/image-fixtures/:name', async (req, res) => {
+  const requestedName = safeString(req.params?.name, '').trim();
+  if (!requestedName || requestedName !== path.basename(requestedName)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_FIXTURE_NAME', error: 'Invalid image fixture name.' });
+  }
+
+  const fixtures = await listImageParserFixtures();
+  const fixture = fixtures.find((entry) => entry.name === requestedName);
+  if (!fixture) {
+    return res.status(404).json({ ok: false, code: 'FIXTURE_NOT_FOUND', error: 'Image parser fixture not found.' });
+  }
+
+  const image = await fs.readFile(fixture.filePath);
+  res.setHeader('Content-Type', fixture.mimeType);
+  res.setHeader('Cache-Control', 'no-store');
+  return res.send(image);
+});
+
 router.get('/parser-results', async (req, res) => {
-  if (!ImageParserTestResult.db || ImageParserTestResult.db.readyState !== 1) {
+  if (!imageParserTestDbAvailable()) {
     return res.json({
       ok: true,
       results: [],
@@ -685,22 +1073,41 @@ router.get('/parser-results', async (req, res) => {
   if (req.query.model) filter.model = safeString(req.query.model);
   if (req.query.fixture) filter['fixture.name'] = safeString(req.query.fixture);
   if (req.query.status) filter.status = safeString(req.query.status);
+  if (req.query.promptId) filter.promptId = safeString(req.query.promptId);
+  if (req.query.promptVersion) filter.promptVersion = safeString(req.query.promptVersion);
+  if (req.query.promptSha256) filter.promptSha256 = safeString(req.query.promptSha256);
 
   const [results, stats] = await Promise.all([
     ImageParserTestResult.find(filter).sort({ createdAt: -1 }).limit(limit).lean(),
     buildParserTestStats(),
   ]);
 
+  const confirmedOutputByFixture = new Map();
+  const fixtureNames = Array.from(new Set(
+    results
+      .map((result) => safeString(result?.fixture?.name, '').trim())
+      .filter(Boolean)
+  ));
+  await Promise.all(fixtureNames.map(async (fixtureName) => {
+    confirmedOutputByFixture.set(fixtureName, await resolveConfirmedOutputForFixture(fixtureName));
+  }));
+
   return res.json({
     ok: true,
-    results: results.map(serializeImageParserTestResult),
+    results: results.map((result) => {
+      const fixtureName = safeString(result?.fixture?.name, '').trim();
+      return serializeImageParserTestResultWithConfirmedOutput(
+        result,
+        fixtureName ? confirmedOutputByFixture.get(fixtureName) : null,
+      );
+    }),
     stats,
     dbAvailable: true,
   });
 });
 
 router.patch('/parser-results/:id', async (req, res) => {
-  if (!ImageParserTestResult.db || ImageParserTestResult.db.readyState !== 1) {
+  if (!imageParserTestDbAvailable()) {
     return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Parser test result database is unavailable.' });
   }
 
@@ -724,13 +1131,271 @@ router.patch('/parser-results/:id', async (req, res) => {
   return res.json({ ok: true, result: serializeImageParserTestResult(result) });
 });
 
+router.delete('/parser-results/:id', async (req, res) => {
+  if (!imageParserTestDbAvailable()) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Parser test result database is unavailable.' });
+  }
+
+  let result = null;
+  if (typeof ImageParserTestResult.findByIdAndDelete === 'function') {
+    const query = ImageParserTestResult.findByIdAndDelete(req.params.id);
+    result = query && typeof query.lean === 'function' ? await query.lean() : await query;
+  } else if (typeof ImageParserTestResult.deleteOne === 'function') {
+    const existing = await findImageParserTestResultById(req.params.id);
+    if (existing) {
+      const deleteResult = await ImageParserTestResult.deleteOne({ _id: req.params.id });
+      result = deleteResult?.deletedCount > 0 ? existing : null;
+    }
+  }
+
+  if (!result) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parser test result not found.' });
+  }
+
+  return res.json({ ok: true, deletedId: String(result._id || result.id || req.params.id) });
+});
+
+router.post('/parser-results/:id/confirmed-output', async (req, res) => {
+  if (!imageParserTestDbAvailable()) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Parser test result database is unavailable.' });
+  }
+
+  const result = await findImageParserTestResultById(req.params.id);
+  if (!result) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parser test result not found.' });
+  }
+
+  try {
+    const saved = await saveConfirmedOutputFromResult(result, req.body || {});
+    return res.json({
+      ok: true,
+      baseline: saved.baseline,
+      output: saved.output,
+      added: saved.added,
+      duplicate: saved.duplicate,
+      outputCount: saved.baseline?.outputCount || 0,
+    });
+  } catch (err) {
+    const status = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+    return res.status(status).json({
+      ok: false,
+      code: err?.code || 'CONFIRMED_OUTPUT_SAVE_FAILED',
+      error: err?.message || 'Failed to save confirmed parser output.',
+    });
+  }
+});
+
+router.get('/parser-results/:id/confirmed-output', async (req, res) => {
+  if (!imageParserTestDbAvailable()) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Parser test result database is unavailable.' });
+  }
+
+  const result = await findImageParserTestResultById(req.params.id);
+  if (!result) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parser test result not found.' });
+  }
+
+  const fixtureName = safeString(result?.fixture?.name, '').trim();
+  if (!fixtureName) {
+    return res.status(400).json({
+      ok: false,
+      code: 'MISSING_FIXTURE',
+      error: 'Parser test result does not have an image fixture name.',
+    });
+  }
+
+  const confirmedOutput = await resolveConfirmedOutputSetForFixture(fixtureName);
+  return res.json({
+    ok: true,
+    fixtureName,
+    hasConfirmedOutput: Boolean(confirmedOutput),
+    baseline: confirmedOutput?.baseline || null,
+    outputs: confirmedOutput?.outputs || [],
+    outputCount: confirmedOutput?.outputCount || 0,
+    source: confirmedOutput?.source || '',
+    updatedAt: confirmedOutput?.updatedAt || null,
+  });
+});
+
+router.post('/parser-results/:id/programmatic-check', async (req, res) => {
+  if (!imageParserTestDbAvailable()) {
+    return res.status(503).json({ ok: false, code: 'DB_UNAVAILABLE', error: 'Parser test result database is unavailable.' });
+  }
+
+  const result = await findImageParserTestResultById(req.params.id);
+  if (!result) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parser test result not found.' });
+  }
+
+  const fixtureName = safeString(result?.fixture?.name, '').trim();
+  if (!fixtureName) {
+    return res.status(400).json({
+      ok: false,
+      code: 'MISSING_FIXTURE',
+      error: 'Parser test result does not have an image fixture name.',
+    });
+  }
+
+  const confirmedOutput = await resolveConfirmedOutputSetForFixture(fixtureName);
+  if (!confirmedOutput?.outputs?.length) {
+    return res.status(409).json({
+      ok: false,
+      code: 'NO_CONFIRMED_OUTPUT',
+      error: `No official confirmed parser output has been saved for ${fixtureName}.`,
+      fixtureName,
+    });
+  }
+
+  const actual = safeString(result?.parsedText, '');
+  const checks = [];
+  let passingCheck = null;
+  for (const output of confirmedOutput.outputs) {
+    const comparison = buildExactOutputComparison({
+      actual,
+      expected: output.expectedText,
+    });
+    const check = {
+      output,
+      comparison,
+      passed: comparison.passed,
+      summary: comparison.summary,
+    };
+    checks.push(check);
+    if (comparison.passed) {
+      passingCheck = check;
+      break;
+    }
+  }
+
+  const bestFailedCheck = checks.reduce((best, check) => {
+    if (!best) return check;
+    const currentFailures = safeNumber(check.summary?.failedCharacters, Number.MAX_SAFE_INTEGER);
+    const bestFailures = safeNumber(best.summary?.failedCharacters, Number.MAX_SAFE_INTEGER);
+    return currentFailures < bestFailures ? check : best;
+  }, null);
+  const selectedCheck = passingCheck || bestFailedCheck || checks[0];
+  const comparison = selectedCheck.comparison;
+  const selectedOutput = selectedCheck.output;
+  const checkSummaries = checks.map((check, index) => ({
+    outputIndex: check.output.outputIndex ?? index,
+    outputId: check.output.id || '',
+    source: check.output.source || '',
+    passed: check.passed,
+    summary: check.summary,
+  }));
+  const passed = Boolean(passingCheck);
+  const manualReviewAfterCheck = req.body?.manualReviewAfterCheck === true
+    || safeString(req.body?.recordMode, '') === 'manual-on-fail';
+  const requiresManualReview = manualReviewAfterCheck && !passed;
+  const programmaticStatus = passed ? 'pass' : 'fail';
+  const status = requiresManualReview ? 'pending-review' : programmaticStatus;
+  const exactMatchSummary = {
+    ...comparison.summary,
+    outputCount: confirmedOutput.outputCount,
+    checkedOutputCount: checks.length,
+    matchedOutputIndex: passingCheck ? selectedOutput.outputIndex : null,
+    matchedOutputId: passingCheck ? selectedOutput.id || '' : '',
+    matchedOutputSource: passingCheck ? selectedOutput.source || '' : '',
+    selectedOutputIndex: selectedOutput?.outputIndex ?? null,
+    selectedOutputId: selectedOutput?.id || '',
+    selectedOutputSource: selectedOutput?.source || '',
+    checks: checkSummaries,
+  };
+  const baseline = {
+    fixtureName,
+    id: selectedOutput?.id || '',
+    outputIndex: selectedOutput?.outputIndex ?? 0,
+    outputCount: confirmedOutput.outputCount,
+    source: selectedOutput?.source || confirmedOutput.source,
+    updatedAt: selectedOutput?.updatedAt || confirmedOutput.updatedAt,
+    expectedText: selectedOutput?.expectedText || '',
+    outputs: confirmedOutput.outputs,
+  };
+  const update = {
+    status,
+    reviewer: safeString(req.body?.reviewer, 'programmatic-check') || 'programmatic-check',
+    operatorNote: passed
+      ? `Programmatic exact-output check passed for ${fixtureName}.`
+      : requiresManualReview
+        ? `Programmatic exact-output check failed for ${fixtureName}; manual review is required.`
+        : `Programmatic exact-output check failed for ${fixtureName}.`,
+    exactMatchPassed: passed,
+    exactMatchCheckedAt: new Date(),
+    exactMatchBaselineSource: safeString(baseline.source, ''),
+    exactMatchSummary,
+  };
+  if (!requiresManualReview) {
+    update.reviewedAt = new Date();
+  }
+
+  const savedResult = await ImageParserTestResult.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+
+  return res.json({
+    ok: true,
+    fixtureName,
+    status,
+    programmaticStatus,
+    passed,
+    requiresManualReview,
+    baseline,
+    checkedOutputCount: checks.length,
+    matchedOutputIndex: passingCheck ? selectedOutput.outputIndex : null,
+    matchedOutputId: passingCheck ? selectedOutput.id || '' : '',
+    checks: checkSummaries,
+    candidateResults: checkSummaries,
+    comparison,
+    result: serializeImageParserTestResult(savedResult),
+  });
+});
+
 router.post('/run', async (req, res) => {
   const stage = safeString(req.body?.stage, '').trim();
   const runtimeMap = readRuntimeMap(req.body);
-  const fixture = await readCaseFixture();
+  const streamMode = stage === 'parser' && clientWantsSse(req);
+  const requestAbortController = new AbortController();
+  let clientClosed = false;
+
+  if (typeof res.on === 'function') {
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        clientClosed = true;
+        requestAbortController.abort();
+      }
+    });
+  }
 
   if (typeof req.setResponseTimeout === 'function') {
     req.setResponseTimeout(TEST_TIMEOUT_MS + 30_000);
+  }
+
+  let sseOpen = false;
+  function sendSse(eventName, payload) {
+    if (!sseOpen || clientClosed) return;
+    try {
+      res.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+    } catch {
+      // Client disconnected.
+    }
+  }
+  function openSse() {
+    if (!streamMode || sseOpen || res.headersSent || clientClosed) return;
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sseOpen = true;
+  }
+  function respondRun(status, body) {
+    if (clientClosed) return undefined;
+    if (!streamMode) {
+      return res.status(status).json(body);
+    }
+    openSse();
+    sendSse(status >= 200 && status < 300 ? 'test_complete' : 'error', body);
+    try { res.end(); } catch { /* noop */ }
+    return undefined;
   }
 
   const stageAgentId = STAGE_AGENT_IDS[stage];
@@ -751,11 +1416,11 @@ router.post('/run', async (req, res) => {
     const runtime = getImageParserRuntime(runtimeMap);
     const provider = normalizeImageParserProvider(runtime.provider);
     if (!provider) {
-      return res.status(400).json({ ok: false, code: 'IMAGE_PARSER_NOT_CONFIGURED', error: 'Image parser provider is not configured.' });
+      return respondRun(400, { ok: false, code: 'IMAGE_PARSER_NOT_CONFIGURED', error: 'Image parser provider is not configured.' });
     }
 
     if (parserTestInFlight) {
-      return res.status(409).json({
+      return respondRun(409, {
         ok: false,
         code: 'IMAGE_PARSER_TEST_ALREADY_RUNNING',
         error: 'Image Parser test is already running. Wait for it to finish before starting another test.',
@@ -763,16 +1428,58 @@ router.post('/run', async (req, res) => {
     }
 
     parserTestInFlight = true;
+    const bus = streamMode
+      ? createStageEventBus({ send: sendSse, stageId: 'parser', runId: randomUUID() })
+      : null;
+    if (streamMode) {
+      openSse();
+      bus.emit('parser.server_request_received', {
+        provider,
+        model: safeString(runtime.model, ''),
+        streamMode: true,
+        testRun: true,
+        route: '/api/pipeline-tests/run',
+        fixtureName: safeString(req.body?.fixtureName, '').trim(),
+        excludeFixtureName: safeString(req.body?.excludeFixtureName, '').trim(),
+        retest: Boolean(req.body?.retest),
+      });
+    }
     try {
-      const { dataUrl: image, fixture: imageFixture } = await readRandomImageParserFixtureDataUrl();
+      const requestedFixtureName = safeString(req.body?.fixtureName, '').trim();
+      const excludedFixtureName = safeString(req.body?.excludeFixtureName, '').trim();
+      const { dataUrl: image, fixture: imageFixture } = await readImageParserFixtureDataUrl(requestedFixtureName, {
+        excludeFixtureName: excludedFixtureName,
+      });
       const startedAt = Date.now();
+      if (requestAbortController.signal.aborted || clientClosed) {
+        bus?.emit('parser.test_cancelled', {
+          testRun: true,
+          status: 'cancelled',
+          displayMessage: 'Parser test cancelled by client.',
+        });
+        return undefined;
+      }
       const result = await parseImage(image, {
         provider,
         model: safeString(runtime.model, '') || undefined,
+        reasoningEffort: safeString(runtime.reasoningEffort, '') || undefined,
+        serviceTier: safeString(runtime.serviceTier, '') || undefined,
         promptId: 'escalation-template-parser',
         timeoutMs: TEST_TIMEOUT_MS,
+        eventBus: bus,
+        signal: requestAbortController.signal,
       });
+      if (requestAbortController.signal.aborted || clientClosed) {
+        bus?.emit('parser.test_cancelled', {
+          testRun: true,
+          status: 'cancelled',
+          displayMessage: 'Parser test cancelled by client.',
+        });
+        return undefined;
+      }
       const elapsedMs = Date.now() - startedAt;
+      const modelUsed = safeString(result?.usage?.model || runtime.model, '') || IMAGE_DEFAULT_MODELS[provider] || '';
+      const apiCost = buildApiCostSummary({ usage: result?.usage, provider, model: modelUsed });
       const fallbackSummary = getParserFallbackSummary(result);
       const savedTestResult = await createImageParserTestResultRecord({
         imageFixture,
@@ -781,22 +1488,73 @@ router.post('/run', async (req, res) => {
         result,
         elapsedMs,
       });
-      return res.json({
+      const savedSerialized = serializeImageParserTestResult(savedTestResult);
+      const saveStatus = savedSerialized ? 'saved' : 'not-saved';
+      const saveReason = savedSerialized
+        ? ''
+        : imageParserTestDbAvailable()
+          ? 'The parser test completed, but the result could not be saved.'
+          : 'The parser test completed, but the test-result database is unavailable.';
+      const responseBody = {
         ok: true,
         stage,
         testRun: true,
-        alert: 'Test result only - not saved to the database.',
+        alert: savedSerialized
+          ? 'Test result saved as pending review.'
+          : 'Test result completed but was not saved.',
+        saveStatus,
+        saveReason,
         imageFixture,
         savedTestResultId: savedTestResult ? String(savedTestResult._id) : '',
-        savedTestResult: serializeImageParserTestResult(savedTestResult),
+        savedTestResult: savedSerialized,
         providerUsed: provider,
-        modelUsed: safeString(result?.usage?.model || runtime.model, '') || IMAGE_DEFAULT_MODELS[provider] || '',
+        modelUsed,
+        promptId: safeString(result?.promptId, 'escalation-template-parser'),
+        promptVersion: safeString(result?.promptVersion, ''),
+        promptSha256: safeString(result?.promptSha256, ''),
+        promptLength: Number.isFinite(Number(result?.promptLength)) ? Number(result.promptLength) : 0,
         elapsedMs,
+        usage: result?.usage || null,
+        apiCost,
         text: safeString(result?.text || result?.sourceText, ''),
         parseFields: isPlainObject(result?.parseFields) ? result.parseFields : {},
         parseMeta: result?.parseMeta || null,
+        providerTrace: result?.providerTrace || null,
         ...fallbackSummary,
         caseIntake: buildCaseIntakeFromParserResult(result, runtime, elapsedMs, imageFixture),
+      };
+      if (result?.providerTrace?.providerPackageId) {
+        bus?.emit('parser.provider_content_sending_to_client', {
+          provider,
+          providerPackageId: result.providerTrace.providerPackageId,
+          testRun: true,
+          status: 'sent',
+          surfaceToUser: true,
+          displayMessage: `Sending providerPackageId: ${result.providerTrace.providerPackageId} content to client - sent`,
+        });
+      }
+      bus?.emit('parser.response_sent', {
+        elapsedMs,
+        bytes: 0,
+        streamMode,
+        testRun: true,
+      });
+      return respondRun(200, responseBody);
+    } catch (err) {
+      bus?.emit('error', {
+        code: err.code || 'PIPELINE_PARSER_TEST_FAILED',
+        message: err.message || 'Image Parser test failed.',
+        providerPackageId: err.providerTrace?.providerPackageId || null,
+        providerHarness: err.providerTrace?.providerHarness || null,
+        testRun: true,
+      });
+      return respondRun(err.statusCode || 422, {
+        ok: false,
+        stage,
+        testRun: true,
+        code: err.code || 'PIPELINE_PARSER_TEST_FAILED',
+        error: err.message || 'Image Parser test failed.',
+        providerTrace: err.providerTrace || null,
       });
     } finally {
       parserTestInFlight = false;
@@ -804,6 +1562,7 @@ router.post('/run', async (req, res) => {
   }
 
   if (stage === 'inv') {
+    const fixture = await readCaseFixture();
     const runtime = getAgentRuntime(runtimeMap, 'known-issue-search-agent');
     const fallbackPolicy = buildFallbackPolicy(runtimeMap);
     const policy = resolveKnownIssueAgentPolicy({
@@ -832,6 +1591,7 @@ router.post('/run', async (req, res) => {
   }
 
   if (stage === 'triage') {
+    const fixture = await readCaseFixture();
     const runtime = getAgentRuntime(runtimeMap, 'triage-agent');
     const fallbackPolicy = buildFallbackPolicy(runtimeMap);
     const policy = resolveTriageAgentPolicy({
@@ -866,6 +1626,7 @@ router.post('/run', async (req, res) => {
   }
 
   if (stage === 'main') {
+    const fixture = await readCaseFixture();
     const runtime = getChatRuntime(runtimeMap);
     const policy = buildFallbackPolicy({ ...runtimeMap, chat: runtime });
     const result = await runAssistantCompletion({

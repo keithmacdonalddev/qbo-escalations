@@ -1,0 +1,11 @@
+{
+  "ts": 1780280967113,
+  "promptId": "escalation-template-parser",
+  "promptVersion": "P31",
+  "sha256": "75ccc9b5f9fba7ccb1e7010fc79a4098561d6d0033b537a478dec81d9852ccdd",
+  "size": 5606,
+  "source": "file-watch",
+  "label": null,
+  "createdAt": "2026-06-01T02:29:27.113Z",
+  "fileModified": "2026-06-01T02:29:26.857Z"
+}

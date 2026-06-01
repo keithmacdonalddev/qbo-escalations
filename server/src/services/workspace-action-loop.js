@@ -135,6 +135,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
     policy,
     requestedPrimaryProvider,
     effectiveReasoningEffort,
+    effectiveServiceTier = '',
     timeoutMs,
     workspaceRole,
     workspaceChatOnlyRole,
@@ -195,6 +196,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         systemPrompt: workspaceChatOnlyRole,
         timeoutMs,
         reasoningEffort: effectiveReasoningEffort,
+        serviceTier: effectiveServiceTier,
         onChunk: ({ text }) => {
           markAiSubprocessOutputReceived();
           if (isClientDisconnected()) return;
@@ -314,6 +316,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: effectiveReasoningEffort,
+        serviceTier: effectiveServiceTier,
         onChunk: (text) => {
           markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, passLabel, text);
@@ -403,6 +406,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: effectiveReasoningEffort,
+        serviceTier: effectiveServiceTier,
         onChunk: (text) => {
           markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, 'pass1', text);

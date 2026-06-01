@@ -58,6 +58,33 @@ function verboseError(...args) {
   }
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function parserIssueToText(issue) {
+  if (typeof issue === 'string') return issue;
+  if (!isPlainObject(issue)) return '';
+  return [issue.code, issue.message].filter(Boolean).join(': ');
+}
+
+function buildParserValidationRecord(parseMeta) {
+  const meta = isPlainObject(parseMeta) ? parseMeta : {};
+  const canonical = isPlainObject(meta.canonicalTemplate) ? meta.canonicalTemplate : {};
+  const fieldsFound = Number(meta.fieldsFound);
+
+  return {
+    validationPassed: typeof meta.passed === 'boolean' ? meta.passed : null,
+    canonicalPassed: typeof canonical.passed === 'boolean' ? canonical.passed : null,
+    semanticPassed: typeof meta.semanticPassed === 'boolean' ? meta.semanticPassed : null,
+    parserIssues: Array.isArray(meta.issues)
+      ? meta.issues.map(parserIssueToText).filter(Boolean)
+      : [],
+    canonicalIssues: Array.isArray(canonical.issues) ? canonical.issues : [],
+    fieldsFound: Number.isFinite(fieldsFound) ? fieldsFound : 0,
+  };
+}
+
 function persistParseResult(record, sourceImage, onArchived) {
   return (async () => {
     if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
@@ -265,6 +292,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parserPromptId: result.promptId || effectivePromptId,
       parsedText: result.text || '',
       textLength: (result.text || '').length,
+      parseFields: result.parseFields || {},
+      parseMeta: result.parseMeta || null,
+      ...buildParserValidationRecord(result.parseMeta),
       source: 'panel',
       providerTrace: result.providerTrace || null,
     }, image, (archived) => {

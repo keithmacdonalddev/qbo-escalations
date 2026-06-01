@@ -384,6 +384,7 @@ async function runKnownIssueSearchAgent({
       provider: policy.primaryProvider,
       model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
       reasoningEffort: policy.reasoningEffort || 'high',
+      serviceTier: policy.serviceTier || '',
       allowedTools: KNOWN_ISSUE_ALLOWED_TOOLS,
     });
 
@@ -406,6 +407,7 @@ async function runKnownIssueSearchAgent({
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: policy.reasoningEffort || 'high',
+        serviceTier: policy.serviceTier || '',
       },
       allowedToolNames: KNOWN_ISSUE_ALLOWED_TOOLS,
       includeActionParamsInResults: true,

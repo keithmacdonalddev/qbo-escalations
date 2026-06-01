@@ -15,19 +15,32 @@ const VALID_CATEGORIES = new Set([
   'technical',
 ]);
 
-const FIELD_WEIGHTS = {
-  category: 0.16,
+const QUALITY_FIELD_WEIGHTS = {
+  category: 0.12,
   attemptingTo: 0.18,
   actualOutcome: 0.16,
   expectedOutcome: 0.08,
   tsSteps: 0.12,
   triedTestAccount: 0.06,
+  kbToolsUsed: 0.04,
   coid: 0.06,
   mid: 0.04,
   caseNumber: 0.06,
   clientContact: 0.04,
   agentName: 0.04,
 };
+
+const TEMPLATE_FIELD_KEYS = [
+  'coidMid',
+  'caseNumber',
+  'clientContact',
+  'attemptingTo',
+  'expectedOutcome',
+  'actualOutcome',
+  'kbToolsUsed',
+  'triedTestAccount',
+  'tsSteps',
+];
 
 const CATEGORY_HINTS = [
   { category: 'payroll', terms: ['payroll', 'paycheck', 'w-2', 'w2', 't4', 't4a', 'direct deposit', 'employee'] },
@@ -130,6 +143,7 @@ function normalizeParsedEscalationFields(fields, sourceText = '') {
     attemptingTo: coerceString(next.attemptingTo),
     expectedOutcome: coerceString(next.expectedOutcome),
     actualOutcome: coerceString(next.actualOutcome),
+    kbToolsUsed: coerceString(next.kbToolsUsed, 500),
     tsSteps: coerceString(next.tsSteps),
     triedTestAccount: normalizeYesNoUnknown(next.triedTestAccount),
     category: normalizeCategory(next.category, sourceText),
@@ -182,12 +196,10 @@ function confidenceFromScore(score) {
 }
 
 function countFoundFields(fields) {
-  const keys = Object.keys(FIELD_WEIGHTS);
   let count = 0;
-  for (const key of keys) {
-    const value = fields[key];
+  for (const key of TEMPLATE_FIELD_KEYS) {
+    const value = key === 'coidMid' ? (fields.coid || fields.mid) : fields[key];
     if (!value) continue;
-    if (key === 'category' && value === 'unknown') continue;
     if (key === 'triedTestAccount' && value === 'unknown') continue;
     count += 1;
   }
@@ -203,7 +215,7 @@ function validateParsedEscalation(rawFields, options = {}) {
   const issues = [];
 
   let weightedScore = 0;
-  for (const [field, weight] of Object.entries(FIELD_WEIGHTS)) {
+  for (const [field, weight] of Object.entries(QUALITY_FIELD_WEIGHTS)) {
     const quality = scoreField(field, normalizedFields[field]);
     weightedScore += quality * weight;
   }

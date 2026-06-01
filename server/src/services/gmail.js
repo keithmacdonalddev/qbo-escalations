@@ -71,9 +71,12 @@ async function getAuth(email) {
   const oauth2 = getOAuth2Client();
   if (!oauth2) return null;
 
+  // Token fields are select:false on the model, so the metadata statics
+  // (getByEmail/getPrimary) no longer return them. This path needs the raw
+  // tokens to drive the OAuth client, so query directly and opt the secrets in.
   const stored = email
-    ? await GmailAuth.getByEmail(email)
-    : await GmailAuth.getPrimary();
+    ? await GmailAuth.findOne({ email: email.toLowerCase().trim() }).select('+accessToken +refreshToken').lean()
+    : await GmailAuth.findOne().sort({ updatedAt: -1 }).select('+accessToken +refreshToken').lean();
   if (!stored) return null;
 
   oauth2.setCredentials({
@@ -197,9 +200,11 @@ async function handleCallback(code) {
  * @param {string} [email] - Specific account to disconnect. If omitted, disconnects primary.
  */
 async function disconnect(email) {
+  // Revocation needs the raw tokens, which are select:false on the model, so
+  // query directly and opt the secrets in (the metadata statics omit them).
   const stored = email
-    ? await GmailAuth.getByEmail(email)
-    : await GmailAuth.getPrimary();
+    ? await GmailAuth.findOne({ email: email.toLowerCase().trim() }).select('+accessToken +refreshToken').lean()
+    : await GmailAuth.findOne().sort({ updatedAt: -1 }).select('+accessToken +refreshToken').lean();
   if (stored) {
     // Try to revoke the token with Google (best-effort)
     try {

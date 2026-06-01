@@ -29,7 +29,7 @@ Other names this id appears under in code:
 - ENV key mapping: `anthropic -> ANTHROPIC_API_KEY` at `server/src/services/image-parser.js:167` and `server/src/services/remote-api-providers.js:26`.
 - Display labels: `"Anthropic"` in `getRemoteProviderLabel` at `server/src/services/image-parser.js:330`; `"Anthropic API"` in `PROVIDER_CONFIG.anthropic.displayName` at `server/src/services/remote-api-providers.js:27`.
 
-No additional aliases. There is no `anthropic-api` provider id in the catalog — the catalog id is just `anthropic`. The CLI subprocess transport uses separate catalog ids (`claude`, `claude-opus-4-7`) with `transport: "claude"` and is out of scope here.
+No additional aliases. There is no `anthropic-api` provider id in the catalog — the catalog id is just `anthropic`. The CLI subprocess transport uses separate catalog ids (`claude`, `claude-opus-4-8`) with `transport: "claude"` and is out of scope here.
 
 ## Current App Call Sites
 

@@ -806,6 +806,7 @@ function startRoomOrchestration({
       provider: runtimePolicy.primaryProvider,
       model: runtimePolicy.reportedModel,
       reasoningEffort: runtimePolicy.reasoningEffort,
+      serviceTier: runtimePolicy.serviceTier,
     });
 
     // --- Tool-executing agents (workspace) ---
@@ -1108,6 +1109,7 @@ function startRoomOrchestration({
           systemPrompt: contextResult.systemPrompt,
           images: [],
           reasoningEffort: runtimePolicy.reasoningEffort || DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,
+          serviceTier: runtimePolicy.serviceTier || '',
           onChunk: ({ provider, text }) => {
             if (cancelled || settled) return;
             fullResponse += text;

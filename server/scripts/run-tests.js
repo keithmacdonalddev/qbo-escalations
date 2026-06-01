@@ -46,7 +46,7 @@ function runTestFile(relativePath) {
     const args = ['--test', '--test-isolation=none', relativePath];
     const child = spawn(process.execPath, args, {
       cwd: rootDir,
-      env: process.env,
+      env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'test' },
       detached: process.platform !== 'win32',
       stdio: verbose ? 'inherit' : ['ignore', 'pipe', 'pipe'],
       windowsHide: true,

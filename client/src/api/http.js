@@ -519,7 +519,7 @@ async function _fetchWithRetry(url, options) {
       lastError = err;
       lastResponse = null;
       _recordFailure();
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
         _notifyApiError({
           url, method, status: 0, statusText: err.message,
           timestamp: Date.now(), type: 'timeout',
@@ -530,7 +530,7 @@ async function _fetchWithRetry(url, options) {
   }
   // Final failure after retries exhausted — notify
   if (lastError) {
-    const isAbort = lastError.name === 'AbortError';
+    const isAbort = lastError.name === 'AbortError' || lastError.name === 'TimeoutError';
     if (!isAbort) {
       _notifyApiError({
         url, method, status: lastStatus, statusText: lastStatusText || lastError.message,
@@ -577,7 +577,7 @@ async function _fetchMutationWithRetry(url, options) {
     } catch (err) {
       lastError = err;
       lastResponse = null;
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
         _notifyApiError({
           url, method, status: 0, statusText: err.message,
           timestamp: Date.now(), type: 'timeout',
@@ -588,7 +588,7 @@ async function _fetchMutationWithRetry(url, options) {
   }
   // Final failure after retries exhausted — notify
   if (lastError) {
-    const isAbort = lastError.name === 'AbortError';
+    const isAbort = lastError.name === 'AbortError' || lastError.name === 'TimeoutError';
     if (!isAbort) {
       _notifyApiError({
         url, method, status: lastStatus, statusText: lastStatusText || lastError.message,
@@ -606,7 +606,10 @@ function _fetchWithTimeout(url, options) {
   const externalSignal = options.signal;
   const controller = new AbortController();
   const timeoutMs = options.timeout ?? DEFAULT_TIMEOUT_MS;
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(
+    () => controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError')),
+    timeoutMs,
+  );
 
   let removeAbortListener = null;
   if (externalSignal) {
@@ -716,7 +719,7 @@ function _trackedFetch(url, method, options, fetchPromise) {
     },
     (err) => {
       const endTime = performance.now();
-      if (err.name === 'AbortError') {
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
         if (tracker) tracker.abort(id, { endTime });
         if (hasListeners) {
           _notifyRequestEvent({ phase: 'abort', id, url, method, duration: endTime - startTime, startTime });

@@ -506,7 +506,8 @@ a:hover {
 .app-header-provider-menu {
   position: absolute;
   top: calc(100% + 7px);
-  right: 0;
+  left: 0;
+  right: auto;
   width: min(620px, calc(100vw - 20px));
   max-height: calc(100vh - 58px);
   overflow: auto;
@@ -1704,6 +1705,35 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
+  max-height: calc(100vh - 40px);
+  max-width: min(520px, calc(100vw - 40px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.toast-list-controls {
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: auto;
+}
+
+.toast-list-close {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(18, 22, 28, 0.92);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  padding: 7px 11px;
+  box-shadow: var(--shadow-sm);
+}
+
+.toast-list-close:hover {
+  background: rgba(34, 42, 54, 0.98);
 }
 
 .toast {
@@ -1712,35 +1742,47 @@ textarea {
   font-size: var(--text-sm);
   font-weight: 500;
   box-shadow: var(--shadow-md);
-  animation: toast-in var(--duration-emphasis) var(--ease-emphasized);
+  animation: toast-in 900ms var(--ease-emphasized);
   display: flex;
   align-items: center;
   gap: var(--sp-3);
   min-width: 260px;
+  max-width: 100%;
+  will-change: opacity, transform;
 }
 
-.toast-success {
+.toast-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast-success,
+.toast--success {
   background: var(--success);
   color: #fff;
 }
 
-.toast-error {
+.toast-error,
+.toast--error {
   background: var(--danger);
   color: #fff;
 }
 
-.toast-info {
+.toast-info,
+.toast--info {
   background: var(--accent);
   color: #fff;
 }
 
-.toast-warning {
+.toast-warning,
+.toast--warning {
   background: var(--warning);
   color: #fff;
 }
 
 .toast-exit {
-  animation: toast-out var(--duration-normal) var(--ease-accelerate) forwards;
+  animation: toast-out 650ms var(--ease-accelerate) forwards;
+  pointer-events: none;
 }
 
 /* ----- Loading States ----- */
@@ -2240,13 +2282,13 @@ textarea {
 }
 
 @keyframes toast-in {
-  from { opacity: 0; transform: translateY(16px) scale(0.95); }
+  from { opacity: 0; transform: translateY(18px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes toast-out {
   from { opacity: 1; transform: translateY(0) scale(1); }
-  to   { opacity: 0; transform: translateY(8px) scale(0.95); }
+  to   { opacity: 0; transform: translateY(12px) scale(0.98); }
 }
 
 @keyframes modal-overlay-in {
@@ -2557,7 +2599,8 @@ textarea {
   }
 
   .app-header-provider-menu {
-    right: -112px;
+    left: 0;
+    right: auto;
     width: min(420px, calc(100vw - 14px));
   }
 

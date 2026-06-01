@@ -5,6 +5,9 @@ const { EventEmitter } = require('events');
 
 const mongo = require('./_mongo-helper');
 const ProviderCallPackage = require('../src/models/ProviderCallPackage');
+const {
+  __waitForProviderPackageRecorderSettled,
+} = require('../src/services/provider-call-package-recorder');
 const { isValidProvider, getProvider } = require('../src/services/providers/registry');
 const remoteApiProviders = require('../src/services/remote-api-providers');
 
@@ -45,6 +48,7 @@ async function withCaptureEnabled(fn) {
     } else {
       process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = previousFlag;
     }
+    await __waitForProviderPackageRecorderSettled();
     await ProviderCallPackage.deleteMany({}).catch(() => {});
     await mongo.disconnect();
   }
@@ -279,6 +283,8 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
   assert.equal(captured.urlPath, '/v1/chat/completions');
   assert.equal(captured.headers.Authorization, 'Bearer sk-moonshot');
   assert.equal(captured.body.model, 'kimi-k2.5');
+  assert.equal(captured.body.temperature, undefined);
+  assert.deepEqual(captured.body.thinking, { type: 'disabled' });
   assert.deepEqual(captured.captureContext, {
     providerId: 'kimi',
     providerResearchId: 'kimi-api',
@@ -378,6 +384,212 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
     });
     await mongo.disconnect();
   }
+});
+
+test('requestLlmGatewayChat captures gateway package in gateway-specific shape', async () => {
+  await withCaptureEnabled(async () => {
+    let server = null;
+    try {
+      server = http.createServer((req, res) => {
+        req.resume();
+        res.statusCode = 200;
+        res.statusMessage = 'OK';
+        res.setHeader('content-type', 'application/json');
+        res.setHeader('x-request-id', 'gateway-chat-request-id');
+        res.end(JSON.stringify({
+          id: 'chatcmpl-gateway-chat',
+          object: 'chat.completion',
+          model: 'google/gemma-4-e4b',
+          choices: [{ message: { content: 'Gateway workspace reply' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 },
+          gateway: {
+            usage: { prompt_tokens: 9, completion_tokens: 3, total_tokens: 12 },
+            cost: { currency: 'USD', total_cost_usd: 0.000013, pricing_source: 'default' },
+          },
+        }));
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const port = server.address().port;
+      const baseUrl = `http://127.0.0.1:${port}`;
+
+      const request = requestLlmGatewayChat({
+        messages: [{ role: 'user', content: 'Use the gateway' }],
+        systemPrompt: 'Be brief.',
+        model: 'auto',
+        getApiKeyFn: async () => 'gw-secret',
+        requestFn: (method, _baseUrl, urlPath, body, headers, timeoutMs, captureContext) => (
+          remoteApiProviders._internal.jsonRequestCancelable(
+            method,
+            baseUrl,
+            urlPath,
+            body,
+            headers,
+            timeoutMs,
+            captureContext
+          )
+        ),
+      });
+
+      const result = await request.promise;
+      await __waitForProviderPackageRecorderSettled();
+      const saved = await ProviderCallPackage.findOne({
+        callSite: 'remote-api-providers:requestLlmGatewayChat',
+      }).lean();
+
+      assert.equal(result.text, 'Gateway workspace reply');
+      assert.ok(saved);
+      assert.equal(saved.providerId, 'llm-gateway');
+      assert.equal(saved.providerResearchId, 'llm-gateway');
+      assert.equal(saved.providerPathType, 'gateway-http');
+      assert.equal(saved.operation, 'chat');
+      assert.equal(saved.request, null);
+      assert.equal(saved.response, null);
+      assert.equal(saved.lmStudio, null);
+      assert.equal(saved.llmGateway.request.stream, false);
+      assert.equal(saved.llmGateway.request.headers.Authorization, 'Bearer [REDACTED]');
+      assert.equal(saved.llmGateway.response.gatewayRequestId, 'gateway-chat-request-id');
+      assert.equal(saved.llmGateway.response.parsedJson.gateway.cost.pricing_source, 'default');
+      assert.equal(saved.llmGateway.gateway.usage.total_tokens, 12);
+      assert.equal(saved.outcome, 'success');
+    } finally {
+      await new Promise((resolve) => {
+        if (!server) return resolve();
+        server.close(() => resolve());
+      });
+    }
+  });
+});
+
+test('requestGeminiChat captures Gemini API package in Gemini-specific shape', async () => {
+  await withCaptureEnabled(async () => {
+    let server = null;
+    try {
+      server = http.createServer((req, res) => {
+        req.resume();
+        res.statusCode = 200;
+        res.statusMessage = 'OK';
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({
+          responseId: 'gemini-chat-response-id',
+          modelVersion: 'gemini-3-flash-preview',
+          candidates: [{ content: { parts: [{ text: 'Gemini workspace reply' }] }, finishReason: 'STOP' }],
+          promptFeedback: { safetyRatings: [] },
+          usageMetadata: { promptTokenCount: 13, candidatesTokenCount: 5, totalTokenCount: 18 },
+        }));
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+      const request = requestGeminiChat({
+        messages: [{ role: 'user', content: 'Use Gemini' }],
+        systemPrompt: 'Be brief.',
+        model: 'gemini-3-flash-preview',
+        getApiKeyFn: async () => 'AIza-secret',
+        requestFn: (method, _baseUrl, urlPath, body, headers, timeoutMs, captureContext) => (
+          remoteApiProviders._internal.jsonRequestCancelable(
+            method,
+            baseUrl,
+            urlPath,
+            body,
+            headers,
+            timeoutMs,
+            captureContext
+          )
+        ),
+      });
+
+      const result = await request.promise;
+      await __waitForProviderPackageRecorderSettled();
+      const saved = await ProviderCallPackage.findOne({
+        callSite: 'remote-api-providers:requestGeminiChat',
+      }).lean();
+
+      assert.equal(result.text, 'Gemini workspace reply');
+      assert.deepStrictEqual(result.usage, {
+        model: 'gemini-3-flash-preview',
+        inputTokens: 13,
+        outputTokens: 5,
+      });
+      assert.ok(saved);
+      assert.equal(saved.providerId, 'gemini');
+      assert.equal(saved.providerResearchId, 'gemini-api');
+      assert.equal(saved.providerPathType, 'direct-http');
+      assert.equal(saved.operation, 'chat');
+      assert.equal(saved.request, null);
+      assert.equal(saved.response, null);
+      assert.equal(saved.llmGateway, null);
+      assert.equal(saved.geminiApi.request.stream, false);
+      assert.equal(saved.geminiApi.request.modelRequested, 'gemini-3-flash-preview');
+      assert.equal(saved.geminiApi.request.headers['x-goog-api-key'], '[REDACTED]');
+      assert.equal(saved.geminiApi.response.responseId, 'gemini-chat-response-id');
+      assert.equal(saved.geminiApi.response.modelVersion, 'gemini-3-flash-preview');
+      assert.equal(saved.geminiApi.response.usageMetadata.totalTokenCount, 18);
+      assert.equal(saved.outcome, 'success');
+    } finally {
+      await new Promise((resolve) => {
+        if (!server) return resolve();
+        server.close(() => resolve());
+      });
+    }
+  });
+});
+
+test('requestLlmGatewayChat does not wait for background gateway package insert', async () => {
+  await withCaptureEnabled(async () => {
+    let server = null;
+    const originalCreate = ProviderCallPackage.create;
+    let releaseCreate;
+    try {
+      ProviderCallPackage.create = async function delayedCreate(...args) {
+        await new Promise((resolve) => { releaseCreate = resolve; });
+        return originalCreate.apply(this, args);
+      };
+      server = http.createServer((req, res) => {
+        req.resume();
+        res.statusCode = 200;
+        res.setHeader('content-type', 'application/json');
+        res.setHeader('x-request-id', 'gateway-chat-fast-id');
+        res.end(JSON.stringify({
+          model: 'google/gemma-4-e4b',
+          choices: [{ message: { content: 'Fast gateway reply' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+          gateway: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+        }));
+      });
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+      const request = requestLlmGatewayChat({
+        messages: [{ role: 'user', content: 'Use the gateway' }],
+        model: 'auto',
+        getApiKeyFn: async () => 'gw-secret',
+        requestFn: (method, _baseUrl, urlPath, body, headers, timeoutMs, captureContext) => (
+          remoteApiProviders._internal.jsonRequestCancelable(method, baseUrl, urlPath, body, headers, timeoutMs, captureContext)
+        ),
+      });
+
+      const result = await Promise.race([
+        request.promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('requestLlmGatewayChat waited for recorder')), 250)),
+      ]);
+      assert.equal(result.text, 'Fast gateway reply');
+
+      while (!releaseCreate) {
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      releaseCreate();
+      await __waitForProviderPackageRecorderSettled();
+      assert.equal(await ProviderCallPackage.countDocuments({
+        callSite: 'remote-api-providers:requestLlmGatewayChat',
+      }), 1);
+    } finally {
+      ProviderCallPackage.create = originalCreate;
+      await new Promise((resolve) => {
+        if (!server) return resolve();
+        server.close(() => resolve());
+      });
+    }
+  });
 });
 
 function installRequestErrorMock(mode) {

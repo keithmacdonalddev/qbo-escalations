@@ -4,8 +4,12 @@ const mongoose = require('mongoose');
 
 const gmailAuthSchema = new mongoose.Schema({
   email:        { type: String, required: true, unique: true, lowercase: true, trim: true },
-  accessToken:  { type: String, required: true },
-  refreshToken: { type: String, required: true },
+  // select:false — OAuth tokens never loaded unless a read-site explicitly opts
+  // in via .select('+accessToken +refreshToken'). The metadata statics
+  // (getByEmail/getAll/getPrimary/getCurrent) deliberately omit them; only
+  // gmail.js getAuth()/disconnect() need the raw token values.
+  accessToken:  { type: String, required: true, select: false },
+  refreshToken: { type: String, required: true, select: false },
   tokenExpiry:  { type: Date, required: true },
   scope:        { type: String, default: '' },
 }, {

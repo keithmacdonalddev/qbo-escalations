@@ -2,6 +2,18 @@
 
 const mongoose = require('mongoose');
 
+// Forensic capture data — moderate default retention. Env-tunable. Mirrors the
+// UsageLog TTL pattern (dedicated expiresAt field + expireAfterSeconds:0 index)
+// to avoid conflicting with the existing { createdAt: -1 } query index.
+// BACKLOG: large payloads are also externalized to disk under
+// server/data/provider-call-packages/...; this Mongo TTL deletes the document
+// but NOT the on-disk files. An on-disk cleanup job is still needed.
+const DEFAULT_TTL_DAYS = 30;
+const ttlDays = (() => {
+  const env = Number.parseInt(process.env.PROVIDER_CALL_PACKAGE_TTL_DAYS, 10);
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_TTL_DAYS;
+})();
+
 const strictSubdocumentOptions = {
   _id: false,
   minimize: false,
@@ -210,6 +222,203 @@ const lmStudioPackageSchema = new mongoose.Schema({
   error: { type: lmStudioProviderErrorSchema, default: null },
 }, strictSubdocumentOptions);
 
+const llmGatewayJsonParseErrorSchema = new mongoose.Schema({
+  name: { type: String, default: 'SyntaxError' },
+  message: { type: String, default: '' },
+}, strictSubdocumentOptions);
+
+const llmGatewayTextChunkSchema = new mongoose.Schema({
+  seq: { type: Number, required: true },
+  receivedAt: { type: String, required: true },
+  byteLength: { type: Number, required: true },
+  sha256: { type: String, default: null },
+  text: { type: String, default: null },
+  textPayloadRef: { type: payloadRefSchema, default: null },
+}, strictSubdocumentOptions);
+
+const llmGatewayImageSchema = new mongoose.Schema({
+  seq: { type: Number, required: true },
+  mediaType: { type: String, default: '' },
+  source: { type: String, default: 'data-url' },
+  dataUrlSha256: { type: String, default: null },
+  decodedByteLength: { type: Number, default: null },
+  dataUrlPayloadRef: { type: payloadRefSchema, default: null },
+}, strictSubdocumentOptions);
+
+const llmGatewayRequestSchema = new mongoose.Schema({
+  method: { type: String, required: true },
+  baseUrl: { type: String, default: '' },
+  url: { type: String, default: '' },
+  protocol: { type: String, default: '' },
+  hostname: { type: String, default: '' },
+  port: { type: Number, default: null },
+  path: { type: String, default: '' },
+  urlPath: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  bodyKind: { type: String, enum: ['none', 'text', 'json'], default: 'none' },
+  bodyText: { type: String, default: null },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  bodyJsonPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  modelRequested: { type: String, default: '' },
+  stream: { type: Boolean, default: false },
+  timeoutMs: { type: Number, default: null },
+  hasImages: { type: Boolean, default: false },
+  images: { type: [llmGatewayImageSchema], default: [] },
+}, strictSubdocumentOptions);
+
+const llmGatewayResponseSchema = new mongoose.Schema({
+  received: { type: Boolean, default: false },
+  statusCode: { type: Number, default: 0 },
+  statusMessage: { type: String, default: '' },
+  httpVersion: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  rawHeaders: { type: [String], default: [] },
+  trailers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  rawTrailers: { type: [String], default: [] },
+  gatewayRequestId: { type: String, default: null },
+  bodyChunks: { type: [llmGatewayTextChunkSchema], default: [] },
+  bodyText: { type: String, default: '' },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  parsedJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  parsedJsonPayloadRef: { type: payloadRefSchema, default: null },
+  jsonParseError: { type: llmGatewayJsonParseErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
+const llmGatewayMetadataSchema = new mongoose.Schema({
+  requestId: { type: String, default: null },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: null },
+  usage: { type: mongoose.Schema.Types.Mixed, default: null },
+  cost: { type: mongoose.Schema.Types.Mixed, default: null },
+  credits: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const llmGatewayProviderStatusSchema = new mongoose.Schema({
+  ok: { type: Boolean, default: null },
+  provider: { type: String, default: '' },
+  authenticated: { type: Boolean, default: null },
+  upstream: { type: mongoose.Schema.Types.Mixed, default: null },
+  gateway: { type: mongoose.Schema.Types.Mixed, default: null },
+  error: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const llmGatewayProviderErrorSchema = new mongoose.Schema({
+  name: { type: String, default: 'Error' },
+  message: { type: String, default: '' },
+  code: { type: String, default: '' },
+  stack: { type: String, default: '' },
+  statusCode: { type: Number, default: null },
+  rawBody: { type: String, default: null },
+  rawBodyPayloadRef: { type: payloadRefSchema, default: null },
+  object: { type: mongoose.Schema.Types.Mixed, default: null },
+  gatewayErrorType: { type: String, default: '' },
+  gatewayErrorCode: { type: String, default: '' },
+  gatewayErrorMessage: { type: String, default: '' },
+  nodeErrorCode: { type: String, default: '' },
+}, strictSubdocumentOptions);
+
+const llmGatewayPackageSchema = new mongoose.Schema({
+  request: { type: llmGatewayRequestSchema, required: true },
+  response: { type: llmGatewayResponseSchema, required: true },
+  gateway: { type: llmGatewayMetadataSchema, default: null },
+  providerStatus: { type: llmGatewayProviderStatusSchema, default: null },
+  error: { type: llmGatewayProviderErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
+const geminiApiImageSchema = new mongoose.Schema({
+  seq: { type: Number, required: true },
+  mediaType: { type: String, default: '' },
+  source: { type: String, default: 'inline-data' },
+  dataSha256: { type: String, default: null },
+  decodedByteLength: { type: Number, default: null },
+  dataPayloadRef: { type: payloadRefSchema, default: null },
+}, strictSubdocumentOptions);
+
+const geminiApiRequestSchema = new mongoose.Schema({
+  method: { type: String, required: true },
+  baseUrl: { type: String, default: '' },
+  url: { type: String, default: '' },
+  protocol: { type: String, default: '' },
+  hostname: { type: String, default: '' },
+  port: { type: Number, default: null },
+  path: { type: String, default: '' },
+  urlPath: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  bodyKind: { type: String, enum: ['none', 'text', 'json'], default: 'none' },
+  bodyText: { type: String, default: null },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  bodyJsonPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  modelRequested: { type: String, default: '' },
+  stream: { type: Boolean, default: false },
+  timeoutMs: { type: Number, default: null },
+  hasImages: { type: Boolean, default: false },
+  images: { type: [geminiApiImageSchema], default: [] },
+}, strictSubdocumentOptions);
+
+const geminiApiResponseSchema = new mongoose.Schema({
+  received: { type: Boolean, default: false },
+  statusCode: { type: Number, default: 0 },
+  statusMessage: { type: String, default: '' },
+  httpVersion: { type: String, default: '' },
+  headers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  redactedHeaderNames: { type: [String], default: [] },
+  rawHeaders: { type: [String], default: [] },
+  trailers: { type: mongoose.Schema.Types.Mixed, default: {} },
+  rawTrailers: { type: [String], default: [] },
+  bodyChunks: { type: [llmGatewayTextChunkSchema], default: [] },
+  bodyText: { type: String, default: '' },
+  bodyTextPayloadRef: { type: payloadRefSchema, default: null },
+  bodyByteLength: { type: Number, default: 0 },
+  bodySha256: { type: String, default: null },
+  parsedJson: { type: mongoose.Schema.Types.Mixed, default: null },
+  parsedJsonPayloadRef: { type: payloadRefSchema, default: null },
+  jsonParseError: { type: llmGatewayJsonParseErrorSchema, default: null },
+  responseId: { type: String, default: '' },
+  modelVersion: { type: String, default: '' },
+  promptFeedback: { type: mongoose.Schema.Types.Mixed, default: null },
+  usageMetadata: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const geminiApiProviderStatusSchema = new mongoose.Schema({
+  ok: { type: Boolean, default: null },
+  authenticated: { type: Boolean, default: null },
+  model: { type: String, default: '' },
+  error: { type: mongoose.Schema.Types.Mixed, default: null },
+}, strictSubdocumentOptions);
+
+const geminiApiProviderErrorSchema = new mongoose.Schema({
+  name: { type: String, default: 'Error' },
+  message: { type: String, default: '' },
+  code: { type: String, default: '' },
+  stack: { type: String, default: '' },
+  statusCode: { type: Number, default: null },
+  rawBody: { type: String, default: null },
+  rawBodyPayloadRef: { type: payloadRefSchema, default: null },
+  object: { type: mongoose.Schema.Types.Mixed, default: null },
+  googleErrorCode: { type: Number, default: null },
+  googleErrorStatus: { type: String, default: '' },
+  googleErrorMessage: { type: String, default: '' },
+  googleErrorDetails: { type: mongoose.Schema.Types.Mixed, default: null },
+  nodeErrorCode: { type: String, default: '' },
+}, strictSubdocumentOptions);
+
+const geminiApiPackageSchema = new mongoose.Schema({
+  request: { type: geminiApiRequestSchema, required: true },
+  response: { type: geminiApiResponseSchema, required: true },
+  providerStatus: { type: geminiApiProviderStatusSchema, default: null },
+  error: { type: geminiApiProviderErrorSchema, default: null },
+}, strictSubdocumentOptions);
+
 const timingSchema = new mongoose.Schema({
   requestStartedAt: { type: String, default: null },
   requestWrittenAt: { type: String, default: null },
@@ -262,11 +471,20 @@ const providerCallPackageSchema = new mongoose.Schema({
   response: { type: mongoose.Schema.Types.Mixed, default: null },
   cli: { type: cliPackageSchema, default: null },
   lmStudio: { type: lmStudioPackageSchema, default: null },
+  llmGateway: { type: llmGatewayPackageSchema, default: null },
+  geminiApi: { type: geminiApiPackageSchema, default: null },
   timing: { type: timingSchema, default: null },
   outcome: { type: String, required: true, index: true },
   error: { type: providerErrorSchema, default: null },
   redaction: { type: redactionSchema, default: null },
   storage: { type: storageSchema, default: null },
+
+  // TTL — MongoDB auto-removes docs past expiresAt (env-tunable retention).
+  // NOTE: does NOT delete the externalized on-disk payloads (see file header).
+  expiresAt: {
+    type: Date,
+    default: () => new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000),
+  },
 }, {
   timestamps: true,
   versionKey: false,
@@ -277,5 +495,8 @@ providerCallPackageSchema.index({ createdAt: -1 });
 providerCallPackageSchema.index({ providerId: 1, createdAt: -1 });
 providerCallPackageSchema.index({ callSite: 1, createdAt: -1 });
 providerCallPackageSchema.index({ outcome: 1, createdAt: -1 });
+
+// TTL index — separate expiresAt field avoids conflicting with createdAt index.
+providerCallPackageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('ProviderCallPackage', providerCallPackageSchema);

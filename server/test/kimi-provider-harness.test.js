@@ -146,12 +146,14 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
     assert.equal(saved.providerResearchId, 'kimi-api');
     assert.equal(saved.outcome, 'success');
     assert.equal(saved.request.bodyJson.model, 'moonshot-v1-8k');
-    assert.equal(saved.request.bodyJson.temperature, 1);
+    assert.equal(saved.request.bodyJson.temperature, undefined);
+    assert.deepEqual(saved.request.bodyJson.thinking, { type: 'disabled' });
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
     assert.equal(saved.response.parsedJson.usage.prompt_tokens, 11);
 
     const requestBody = JSON.parse(server.requests[0].body);
-    assert.equal(requestBody.temperature, 1, 'Kimi must keep temperature exactly 1');
+    assert.equal(requestBody.temperature, undefined);
+    assert.deepEqual(requestBody.thinking, { type: 'disabled' });
     assert.equal(server.requests[0].req.headers.authorization, 'Bearer mk-test-kimi-key');
     assert.ok(events.some((event) => event.type === 'provider.package_capture_confirmed'));
     assert.ok(events.some((event) => event.type === 'parser.provider_payload_selected'));
@@ -160,6 +162,38 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
   }
 });
 
+test('Kimi image-parser path ignores reasoning_content as parser output', async () => {
+  const server = await startProviderServer(({ res }) => {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ...kimiResponse({
+        content: '',
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+        id: 'chatcmpl-kimi-reasoning-only',
+        model: 'kimi-k2.5',
+      }),
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          reasoning_content: 'internal reasoning that must not become parser output',
+        },
+        finish_reason: 'length',
+      }],
+    }));
+  });
+
+  try {
+    const result = await parseWithServer(server);
+    assert.equal(result.text, '');
+    assert.equal(result.providerTrace.providerPayload.sourcePath, 'response.parsedJson.choices[0].message.content');
+    assert.equal(result.providerTrace.providerPayload.usedReasoningContent, false);
+    assert.equal(result.providerTrace.providerPayload.reasoningContentPresent, true);
+  } finally {
+    await server.close();
+  }
+});
 test('Kimi HTTP errors save package and surface http_error trace', async () => {
   const server = await startProviderServer(({ res }) => {
     res.writeHead(429, { 'content-type': 'application/json' });

@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "dev": "nodemon --exec \"node --max-old-space-size=512\" src/index.js",
+    "dev": "nodemon --config nodemon.json --exec \"node --max-old-space-size=512\" src/index.js",
     "start": "node --max-old-space-size=512 src/index.js",
     "test": "node scripts/run-tests.js"
   },

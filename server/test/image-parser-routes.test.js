@@ -4,6 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const mongo = require('./_mongo-helper');
+const ImageParseResult = require('../src/models/ImageParseResult');
 
 // Set NODE_ENV=test so the rate limiter is bypassed
 process.env.NODE_ENV = 'test';
@@ -356,6 +358,75 @@ test('POST /parse success response includes image metadata and structured fields
     assert.equal(typeof res.payload.elapsedMs, 'number');
   } finally {
     _mockParseImage = null;
+  }
+});
+
+test('POST /parse persists validation record to parse history', async () => {
+  const handler = findHandler('post', '/parse');
+  await mongo.connect();
+  await ImageParseResult.deleteMany({});
+
+  _mockParseImage = async () => ({
+    text: 'COID/MID: 123\nCASE: CS-001',
+    role: 'escalation',
+    usage: { model: 'test-model', inputTokens: 10, outputTokens: 5 },
+    parseFields: { coid: '123', caseNumber: 'CS-001', category: 'technical' },
+    parseMeta: {
+      passed: false,
+      semanticPassed: true,
+      confidence: 'medium',
+      fieldsFound: 7,
+      issues: ['canonical_FIELD_ORDER_OR_LABEL_MISMATCH'],
+      canonicalTemplate: {
+        passed: false,
+        issues: [
+          {
+            code: 'FIELD_ORDER_OR_LABEL_MISMATCH',
+            message: 'Expected "CASE:" at line 2.',
+          },
+        ],
+        labels: ['COID/MID', 'CASE'],
+      },
+    },
+    stats: {
+      providerLatencyMs: 42,
+      image: {
+        originalFormat: 'image/png',
+        finalFormat: 'image/png',
+        originalSizeBytes: 100,
+        finalSizeBytes: 100,
+        wasConverted: false,
+        conversionTimeMs: 0,
+      },
+    },
+  });
+
+  try {
+    const res = makeRes();
+    await handler(makeReq({ image: 'not-valid-base64!!!!', provider: 'lm-studio' }), res);
+    assert.equal(res.payload.ok, true);
+
+    let saved = null;
+    for (let i = 0; i < 20; i += 1) {
+      saved = await ImageParseResult.findOne({ provider: 'lm-studio' }).lean();
+      if (saved) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+
+    assert.ok(saved, 'expected parse result history row to be saved');
+    assert.equal(saved.parsedText, 'COID/MID: 123\nCASE: CS-001');
+    assert.deepEqual(saved.parseFields, { coid: '123', caseNumber: 'CS-001', category: 'technical' });
+    assert.equal(saved.parseMeta.passed, false);
+    assert.equal(saved.validationPassed, false);
+    assert.equal(saved.semanticPassed, true);
+    assert.equal(saved.canonicalPassed, false);
+    assert.equal(saved.fieldsFound, 7);
+    assert.deepEqual(saved.parserIssues, ['canonical_FIELD_ORDER_OR_LABEL_MISMATCH']);
+    assert.equal(saved.canonicalIssues[0].code, 'FIELD_ORDER_OR_LABEL_MISMATCH');
+  } finally {
+    _mockParseImage = null;
+    await ImageParseResult.deleteMany({});
+    await mongo.disconnect();
   }
 });
 

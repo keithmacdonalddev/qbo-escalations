@@ -1,0 +1,11 @@
+{
+  "ts": 1780280181770,
+  "promptId": "escalation-enrichment",
+  "promptVersion": "",
+  "sha256": "309b32e6088b20d7951ddebe512d6e0b76b1c8a70cb5149c69ce90629549204e",
+  "size": 373,
+  "source": "startup-scan",
+  "label": null,
+  "createdAt": "2026-06-01T02:16:21.770Z",
+  "fileModified": "2026-04-04T09:20:00.966Z"
+}

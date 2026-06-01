@@ -40,7 +40,7 @@ Important source facts:
 - Codex has three model-work subprocess paths in `server/src/services/codex.js`: `chat` at `105-240`, `parseEscalation` at `291-448`, and `transcribeImage` at `464-612`. `warmUp` is separate at `242-282`.
 - Claude has model-work subprocess paths in `server/src/services/claude.js`: `chat`, `parseEscalation`, `prompt`, and `transcribeImage`, plus `warmUp`.
 - There is also a separate Claude CLI model-work spawn in `server/src/services/workspace-proactive.js:124-212`.
-- Provider catalog ids are broader than only `codex` and `claude`: `shared/ai-provider-catalog.json:1-133` includes `claude-opus-4-7`, `codex`, `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini`, all routing through CLI transports.
+- Provider catalog ids are broader than only `codex` and `claude`: `shared/ai-provider-catalog.json:1-133` includes `claude-opus-4-8`, `codex`, `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini`, all routing through CLI transports.
 - Existing mocked child-process tests are available as a pattern in `server/test/provider-usage-contract.test.js:21-46`.
 
 ## What The Plan Gets Right
@@ -188,7 +188,7 @@ Required fields for CLI attempts:
 
 Why selected provider id matters:
 
-- The catalog includes `claude`, `claude-opus-4-7`, `codex`, `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini`: `shared/ai-provider-catalog.json:1-133`.
+- The catalog includes `claude`, `claude-opus-4-8`, `codex`, `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini`: `shared/ai-provider-catalog.json:1-133`.
 - Registry routing maps `transport: "codex"` to the Codex service and `transport: "claude"` to the Claude service: `server/src/services/providers/registry.js:40-58`.
 - If every record is only `providerId: "codex"` or `providerId: "claude"`, the harness can lose which catalog option or model-specific provider initiated the call.
 

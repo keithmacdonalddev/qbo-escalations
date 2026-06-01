@@ -187,6 +187,7 @@ function sendJsonRequest({
   timeoutMs,
   captureContext = {},
   onProviderEvent,
+  signal,
 }) {
   const url = new URL(path, baseUrl);
   const requestBodyText = JSON.stringify(body || {});
@@ -250,11 +251,17 @@ function sendJsonRequest({
   return new Promise((resolve, reject) => {
     let settled = false;
     let timeoutTriggered = false;
+    let removeAbortListener = null;
+    function cleanupAbortListener() {
+      removeAbortListener?.();
+      removeAbortListener = null;
+    }
     function rejectOnce(err, outcome) {
       if (settled) {
         return;
       }
       settled = true;
+      cleanupAbortListener();
       const finishedAt = nowIso();
       const capture = queueCapture({
         packageId,
@@ -328,6 +335,7 @@ function sendJsonRequest({
             return;
           }
           settled = true;
+          cleanupAbortListener();
           const finishedAt = nowIso();
           const rawBodyText = Buffer.concat(responseChunks).toString('utf8');
           let parsedJson = null;
@@ -445,6 +453,27 @@ function sendJsonRequest({
       }
     );
 
+    if (signal?.aborted) {
+      const err = new Error('LLM Gateway request aborted');
+      err.name = 'AbortError';
+      err.code = 'ABORT_ERR';
+      rejectOnce(err, 'aborted');
+      req.destroy(err);
+      return;
+    }
+
+    if (signal) {
+      const onAbort = () => {
+        const err = new Error('LLM Gateway request aborted');
+        err.name = 'AbortError';
+        err.code = 'ABORT_ERR';
+        rejectOnce(err, 'aborted');
+        req.destroy(err);
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener('abort', onAbort);
+    }
+
     req.on('timeout', () => {
       const err = new Error(`LLM Gateway request timed out after ${timeoutMs}ms`);
       err.code = 'PROVIDER_TIMEOUT';
@@ -470,6 +499,7 @@ async function sendLlmGatewayChatCompletion({
   getApiKey,
   captureContext = {},
   onProviderEvent,
+  signal,
 } = {}) {
   const effectiveModel = model || body?.model || DEFAULT_LLM_GATEWAY_MODEL;
   const apiKey = typeof getApiKey === 'function' ? await getApiKey('llm-gateway') : null;
@@ -506,6 +536,7 @@ async function sendLlmGatewayChatCompletion({
       timeoutMs,
       captureContext: effectiveCaptureContext,
       onProviderEvent,
+      signal,
     });
   } catch (err) {
     throw attachProviderTraceToError(err, err.providerTrace);

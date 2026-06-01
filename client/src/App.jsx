@@ -5,8 +5,10 @@ import { transitions, fade } from './utils/motion.js';
 import Sidebar from './components/Sidebar.jsx';
 import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import HealthBanner from './components/HealthBanner.jsx';
+import AgentHealthBanner from './components/AgentHealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
 import AgentDock from './components/AgentDock.jsx';
+import AgentBootOverlay from './components/AgentBootOverlay.jsx';
 import AppHeader from './components/app/AppHeader.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
@@ -16,6 +18,8 @@ import useAppRouteState from './hooks/useAppRouteState.js';
 import useAppShellRuntime from './hooks/useAppShellRuntime.js';
 import { useChat } from './hooks/useChat.js';
 import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
+import { AgentRegistryProvider } from './context/AgentRegistryContext.jsx';
+import { AgentTestModalProvider } from './components/agent-tests/AgentTestModalProvider.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import { getSidebarCurrentRoute } from './lib/appRoute.js';
@@ -223,7 +227,7 @@ function App() {
       case 'agents':
         return (
           <Profiler id="Agents" onRender={flame.onRender}>
-          <motion.div key="agents" {...motionProps}>
+          <motion.div key="agents" {...motionProps} style={{ height: '100%' }}>
             <AgentsView agentIdFromRoute={route.agentId || null} />
           </motion.div>
           </Profiler>
@@ -324,10 +328,15 @@ function App() {
     <Profiler id="app" onRender={flame.onRender}>
     <MotionConfig reducedMotion="user">
     <WorkspaceMonitorProvider enabled>
+    <AgentRegistryProvider>
+    <AgentBootOverlay>
+    <AgentTestModalProvider>
     <div className={`app app-dock-mode-${dockShellMode}${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
       <a href="#main-content" className="skip-nav-link">Skip to main content</a>
       {/* Health banner — always visible at the very top */}
       <HealthBanner requests={waterfall.requests} slowThreshold={waterfall.slowThreshold} />
+      {/* Agent health banner — appears whenever any AI agent is offline */}
+      <AgentHealthBanner />
 
       {/* Render flame bar — dev only, toggleable in Settings */}
       {devToolsEnabled && import.meta.env.DEV && flameBarEnabled && (
@@ -547,6 +556,9 @@ function App() {
         </>
       )}
     </div>
+    </AgentTestModalProvider>
+    </AgentBootOverlay>
+    </AgentRegistryProvider>
     </WorkspaceMonitorProvider>
     </MotionConfig>
     </Profiler>

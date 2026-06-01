@@ -35,7 +35,7 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
           label: 'Agent generated',
           latencyMs: 2400,
           provider: 'claude',
-          model: 'claude-opus-4-7',
+          model: 'claude-opus-4-8',
         },
       },
     },
@@ -81,7 +81,7 @@ test('buildCaseIntakeFromParsedEscalation records known issue search run when av
         matches: [{ invNumber: 'INV-151000', confidence: 'high', subject: 'Payroll suspended' }],
         rejectedCandidates: [],
         validation: { passed: true, issues: [], toolSearchCount: 1, fetchedInvestigationCount: 1 },
-        meta: { providerUsed: 'claude', model: 'claude-opus-4-7', latencyMs: 850, runtimeConfigured: true },
+        meta: { providerUsed: 'claude', model: 'claude-opus-4-8', latencyMs: 850, runtimeConfigured: true },
       },
       triageCard: {
         category: 'payroll',
@@ -179,7 +179,7 @@ test('buildCaseIntakeFromParsedEscalation treats rule fallback as completed with
       parseMeta: { providerUsed: 'llm-gateway', model: 'auto', validation: { passed: true, score: 0.95 } },
       triageMeta: {
         providerUsed: 'claude',
-        model: 'claude-opus-4-7',
+        model: 'claude-opus-4-8',
         usedRuleFallback: true,
         fallbackFrom: 'agent-shape',
         fallbackReason: 'Triage Agent response did not match the required field format.',

@@ -218,6 +218,52 @@ export async function updateImageParserTestResult(id, payload) {
   return data.result;
 }
 
+export async function programmaticCheckImageParserTestResult(id) {
+  return apiFetchJson(`/api/pipeline-tests/parser-results/${encodeURIComponent(id)}/programmatic-check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reviewer: 'programmatic-check' }),
+    noRetry: true,
+  }, 'Failed to run parser output check');
+}
+
+export async function retestImageParserTestResult(result) {
+  const fixtureName = String(result?.fixture?.name || '').trim();
+
+  const previousRuntime = result?.runtime && typeof result.runtime === 'object' ? result.runtime : {};
+  const parserRuntime = {
+    ...previousRuntime,
+    provider: result?.provider || previousRuntime.provider || '',
+    model: result?.model || previousRuntime.model || '',
+    reasoningEffort: result?.reasoningEffort || previousRuntime.reasoningEffort || '',
+  };
+
+  return apiFetchJson('/api/pipeline-tests/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      stage: 'parser',
+      retest: true,
+      fixtureName,
+      runtime: {
+        imageParser: parserRuntime,
+        'image-parser': parserRuntime,
+        'escalation-template-parser': parserRuntime,
+      },
+    }),
+    timeout: 180_000,
+    noRetry: true,
+  }, 'Failed to retest parser image');
+}
+
+export async function deleteImageParserTestResult(id) {
+  const data = await apiFetchJson(`/api/pipeline-tests/parser-results/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    noRetry: true,
+  }, 'Failed to delete image parser test result');
+  return data;
+}
+
 export async function listImageParserHistory(options = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -226,4 +272,27 @@ export async function listImageParserHistory(options = {}) {
   if (options.status) params.set('status', options.status);
   const query = params.toString() ? `?${params.toString()}` : '';
   return apiFetchJson(`/api/image-parser/history${query}`, {}, 'Failed to load image parser history');
+}
+
+// Stage 4 Triage Agent test results. Same shape as the parser equivalents
+// above but pointed at /api/triage-tests/... which is the dedicated route
+// added alongside the triage parity work.
+export async function listTriageTestResults(options = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.provider) params.set('provider', options.provider);
+  if (options.model) params.set('model', options.model);
+  if (options.fixture) params.set('fixture', options.fixture);
+  if (options.status) params.set('status', options.status);
+  const query = params.toString() ? `?${params.toString()}` : '';
+  return apiFetchJson(`/api/triage-tests/results${query}`, {}, 'Failed to load triage agent test results');
+}
+
+export async function updateTriageTestResult(id, payload) {
+  const data = await apiFetchJson(`/api/triage-tests/results/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  }, 'Failed to update triage agent test result');
+  return data.result;
 }

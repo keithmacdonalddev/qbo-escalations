@@ -3,6 +3,12 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 // ── Friendly endpoint-to-feature name mapping ────────────────
 
 const ENDPOINT_NAMES = {
+  'agent-identities/provider-strategy/health/logs': 'Provider health logs',
+  'agent-identities/provider-strategy/health': 'Provider health check',
+  'agent-identities/runtime-defaults': 'Agent runtime defaults',
+  'agent-identities/lifecycle': 'Agent lifecycle',
+  'agent-identities/health': 'Agent health',
+  'agent-identities': 'Agent profiles',
   'chat/send': 'Chat',
   'chat/conversations': 'Conversations',
   'chat/history': 'Chat History',

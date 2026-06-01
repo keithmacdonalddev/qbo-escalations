@@ -10,19 +10,33 @@ const path = require('path');
  * To convert from vendor pricing ($/MTok): rate_nanos = price_per_MTok * 1000
  * Example: $3/MTok input = 3000 nanos/token
  *
- * PRICING_VERSION: 2026-05-18
+ * PRICING_VERSION: 2026-05-25
  * Sources:
  *   Anthropic: https://docs.anthropic.com/en/docs/about-claude/pricing
  *   OpenAI:    https://openai.com/api/pricing/
+ *   Gemini:    https://ai.google.dev/gemini-api/docs/pricing
  * Override stale values via PRICING_CONFIG_PATH env var.
  */
 const DEFAULT_PRICING = {
-  // Claude models — Anthropic pricing as of 2026-04-29
-  'claude-opus-4-7':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
+  // Claude models — Anthropic pricing as of 2026-05-28.
+  // Opus 4.8 is priced at $5/$25 per MTok.
+  // Source: anthropic.com/news/claude-opus-4-8.
+  'claude-opus-4-8':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
+  'claude-opus-4-6':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
   'claude-opus-4-5':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
+  // Opus prefix-tier fallback: any unknown claude-opus-* id resolves to the Opus
+  // rate (NOT the generic `claude` provider fallback, which equals Sonnet and
+  // would undercount Opus usage). Longest-first sort checks exact ids above first.
+  'claude-opus':                  { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok (Opus tier)
   'claude-4-6-opus':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // alias
+  // Sonnet 4.5/4.6 priced at $3/$15 per MTok (verified 2026-05-28 against
+  // anthropic.com/news/claude-sonnet-4-5, /claude-sonnet-4-6).
+  'claude-sonnet-4-6':            { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // $3/$15 per MTok
   'claude-sonnet-4-5-20250514':   { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // $3/$15 per MTok
   'claude-sonnet-4-5':            { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // alias
+  // Sonnet prefix-tier fallback: any unknown claude-sonnet-* id resolves to the
+  // Sonnet rate explicitly rather than relying on the generic `claude` fallback.
+  'claude-sonnet':                { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // $3/$15 per MTok (Sonnet tier)
   'claude-3-5-sonnet-20241022':   { inputNanosPerToken: 3000,  outputNanosPerToken: 15000  }, // $3/$15 per MTok
   'claude-haiku-4-5':             { inputNanosPerToken: 1000,  outputNanosPerToken: 5000   }, // $1/$5 per MTok
   'claude-3-5-haiku-20241022':    { inputNanosPerToken: 800,   outputNanosPerToken: 4000   }, // $0.80/$4 per MTok
@@ -37,9 +51,13 @@ const DEFAULT_PRICING = {
   'gpt-4o-mini':                  { inputNanosPerToken: 150,   outputNanosPerToken: 600    }, // $0.15/$0.60 per MTok
   'o3':                           { inputNanosPerToken: 2000,  outputNanosPerToken: 8000   }, // $2/$8 per MTok
   'o3-mini':                      { inputNanosPerToken: 1100,  outputNanosPerToken: 4400   }, // $1.10/$4.40 per MTok
+
+  // Google Gemini API — standard paid-tier pricing as of 2026-05-25
+  'gemini-3.5-flash':             { inputNanosPerToken: 1500,  outputNanosPerToken: 9000   }, // $1.50/$9 per MTok
+  'gemini-3-flash-preview':       { inputNanosPerToken: 500,   outputNanosPerToken: 3000   }, // $0.50/$3 per MTok
 };
 
-const PRICING_VERSION = '2026-05-18';
+const PRICING_VERSION = '2026-05-25';
 
 /**
  * Provider-level fallback rates (nanodollars) when the exact model is unknown.

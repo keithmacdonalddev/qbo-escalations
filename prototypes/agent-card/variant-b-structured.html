@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Profile — Structured Dashboard (Variant B)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     DESIGN TOKENS — Stripe / modern admin-console, dark theme
+     Surface steps use the Apple warm-dark scale (>=5% lightness
+     apart) so page / card / inset are unmistakably separated.
+     ============================================================ */
+  :root {
+    /* Surfaces — stepped, never pure black */
+    --bg-page:      #16181d;  /* deepest — page canvas              */
+    --bg-card:      #1f2228;  /* the detail card                    */
+    --bg-inset:     #282b32;  /* key-value cells, chips, avatar      */
+    --bg-inset-2:   #31343c;  /* hover / nested emphasis            */
+
+    /* Hairline borders (semi-transparent white reads as crisp) */
+    --border:       rgba(255, 255, 255, 0.09);
+    --border-strong:rgba(255, 255, 255, 0.14);
+    --border-inset: rgba(255, 255, 255, 0.06);
+
+    /* Text — three levels only */
+    --text-primary:   #eef1f6;
+    --text-secondary: #a3acba;
+    --text-muted:     #6f7886;
+
+    /* Single accent — indigo/blue (trust, enterprise). Interactive + brand only. */
+    --accent:         #7c8cff;
+    --accent-strong:  #6c7cff;
+    --accent-subtle:  rgba(124, 140, 255, 0.14);
+    --accent-border:  rgba(124, 140, 255, 0.34);
+
+    /* Semantic — online/success green, distinct from accent */
+    --green:          #3ddc84;
+    --green-subtle:   rgba(61, 220, 132, 0.13);
+    --green-border:   rgba(61, 220, 132, 0.30);
+
+    /* Mono color for technical IDs */
+    --mono-text:      #cfd6e4;
+
+    --radius-card:   16px;
+    --radius-md:     10px;
+    --radius-sm:     8px;
+    --radius-pill:   999px;
+
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font-sans);
+    background:
+      radial-gradient(1100px 620px at 82% -8%, rgba(124, 140, 255, 0.07), transparent 60%),
+      var(--bg-page);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: 'cv05' 1, 'cv11' 1, 'ss01' 1;
+    /* realistic dark content area: center the card with breathing room */
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 72px 32px;
+    min-height: 100vh;
+  }
+
+  .stage { width: 100%; max-width: 720px; }
+
+  /* breadcrumb / context line above the card (admin-console framing) */
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 18px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: -0.003em;
+  }
+  .crumbs a { color: var(--text-secondary); text-decoration: none; }
+  .crumbs a:hover { color: var(--text-primary); }
+  .crumbs .sep { color: var(--text-muted); opacity: 0.7; }
+  .crumbs .here { color: var(--text-primary); font-weight: 600; }
+
+  /* ============================================================
+     CARD
+     ============================================================ */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),  /* premium top-edge highlight */
+      0 0 0 1px rgba(0, 0, 0, 0.30),
+      0 18px 48px -12px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+  }
+
+  /* ---------- HEADER ---------- */
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 22px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .avatar {
+    flex: 0 0 auto;
+    width: 52px;
+    height: 52px;
+    border-radius: 13px;
+    display: grid;
+    place-items: center;
+    background:
+      linear-gradient(155deg, rgba(124, 140, 255, 0.22), rgba(124, 140, 255, 0.05));
+    border: 1px solid var(--accent-border);
+    position: relative;
+  }
+  .avatar svg { width: 26px; height: 26px; display: block; }
+
+  .header-main { flex: 1 1 auto; min-width: 0; padding-top: 1px; }
+
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .title {
+    font-size: 21px;
+    font-weight: 700;
+    line-height: 1.18;
+    letter-spacing: -0.018em;
+    color: var(--text-primary);
+  }
+
+  /* Agent ID directly under the title — Stripe customer-detail pattern */
+  .title-id {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 9px;
+  }
+  .title-id .id-key {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+  }
+  .mono-pill--inline {
+    padding: 3px 9px;
+    font-size: 12px;
+  }
+
+  .purpose {
+    margin-top: 11px;
+    font-size: 13.5px;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: -0.004em;
+    color: var(--text-secondary);
+    max-width: 46ch;
+  }
+
+  /* status cluster: two visually DISTINCT chips */
+  .status-cluster {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  /* Enabled chip — accent-tinted, reads as a SWITCH/state pill */
+  .chip-enabled {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 12px 0 8px;
+    background: var(--accent-subtle);
+    border: 1px solid var(--accent-border);
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.002em;
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  /* mini toggle glyph so it visibly reads as an on/off switch */
+  .mini-toggle {
+    width: 26px;
+    height: 15px;
+    border-radius: 999px;
+    background: var(--accent-strong);
+    position: relative;
+    flex: 0 0 auto;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  }
+  .mini-toggle::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+  }
+
+  /* Online chip — green DOT pill, structurally different from Enabled */
+  .chip-online {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 26px;
+    padding: 0 11px;
+    background: var(--green-subtle);
+    border: 1px solid var(--green-border);
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: -0.002em;
+    color: #b7f4d2;
+    white-space: nowrap;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-subtle);
+    position: relative;
+  }
+  /* gentle live pulse — online is an active state */
+  .dot::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { transform: scale(1); opacity: 0.55; }
+    70%  { transform: scale(2.6); opacity: 0; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  .chip-online .checked-at {
+    color: #7fd8a6;
+    font-weight: 500;
+    opacity: 0.92;
+  }
+
+  /* ---------- DETAIL GRID (key/value) ---------- */
+  .detail-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+  .cell {
+    background: var(--bg-card);
+    padding: 17px 24px 18px;
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);   /* crisp horizontal hairline */
+  }
+  /* crisp vertical hairline between the two columns */
+  .cell:nth-child(odd) { border-right: 1px solid var(--border); }
+  .cell.full { grid-column: 1 / -1; border-right: none; }
+
+  .label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 9px;
+  }
+  .label svg { width: 13px; height: 13px; opacity: 0.85; }
+
+  .value {
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: -0.006em;
+    color: var(--text-primary);
+  }
+  .value.secondary { color: var(--text-secondary); font-weight: 400; }
+
+  /* monospace technical value, boxed like a Stripe ID field */
+  .mono-pill {
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    padding: 5px 10px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-inset);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--mono-text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* "Runs on" — provider identity row, fills the full width edge-to-edge */
+  .runs-on {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    width: 100%;
+    padding: 9px 12px 9px 10px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-inset);
+    border-radius: var(--radius-md);
+  }
+  .provider-mark {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    display: grid; place-items: center;
+    background: #fff;
+    flex: 0 0 auto;
+  }
+  .provider-mark svg { width: 17px; height: 17px; display: block; }
+  .runs-on .provider-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.004em;
+  }
+  .runs-on .provider-sub {
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: -0.002em;
+    margin-top: 1px;
+  }
+  .runs-on .provider-meta { display: flex; flex-direction: column; min-width: 0; }
+  .runs-on .spacer { flex: 1 1 auto; }
+  /* model id sits as a mono chip pinned to the right — fills the row */
+  .runs-on .model-id {
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--mono-text);
+    letter-spacing: -0.01em;
+    padding: 4px 9px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-inset);
+    border-radius: var(--radius-sm);
+  }
+
+  /* boundary ("Won't") cell — subtle restrictive tint via icon, not loud red */
+  .boundary-text {
+    font-size: 13.5px;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+    color: var(--text-secondary);
+  }
+  .label .ic-restrict { color: #f0a4a4; opacity: 0.9; }
+
+  .tools-text {
+    font-size: 13.5px;
+    font-weight: 400;
+    line-height: 1.5;
+    letter-spacing: -0.005em;
+    color: var(--text-secondary);
+  }
+  .tools-text strong { color: var(--text-primary); font-weight: 600; }
+
+  /* ---------- FOOTER (Lately + Attention) ---------- */
+  .card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 15px 24px;
+    background: rgba(255, 255, 255, 0.018);   /* faint footer band, still in-card */
+  }
+  .footer-left {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+  }
+  .footer-left svg { width: 14px; height: 14px; color: var(--text-muted); flex: 0 0 auto; }
+  .footer-left .lately-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: -0.002em;
+  }
+  .footer-left .lately-value {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    letter-spacing: -0.004em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* Attention = clear-state pill (green check), reads as "all good" */
+  .attention-clear {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 26px;
+    padding: 0 11px;
+    background: var(--green-subtle);
+    border: 1px solid var(--green-border);
+    border-radius: var(--radius-pill);
+    font-size: 12px;
+    font-weight: 600;
+    color: #b7f4d2;
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .attention-clear svg { width: 13px; height: 13px; }
+
+  /* a caption beneath the card so the framing feels like a real console */
+  .stage-caption {
+    margin-top: 14px;
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.01em;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <!-- admin-console breadcrumb framing -->
+    <nav class="crumbs" aria-label="Breadcrumb">
+      <a href="#">Agents</a>
+      <span class="sep">/</span>
+      <a href="#">Parsers</a>
+      <span class="sep">/</span>
+      <span class="here">Escalation Image Parser</span>
+    </nav>
+
+    <article class="card" aria-label="Agent profile overview">
+      <!-- HEADER -->
+      <header class="card-header">
+        <div class="avatar" aria-hidden="true">
+          <!-- document + scan beam: parses a template, confident and legible -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="#b9c2ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M6 3.5h7L18 8v9.5A2.5 2.5 0 0 1 15.5 20h-9A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6 3.5Z" />
+            <path d="M13 3.5V8h4.5" />
+            <path d="M7.5 12.5h7" stroke="#8ea0ff" />
+            <path d="M7.5 15.5h4" stroke="#8ea0ff" />
+          </svg>
+        </div>
+
+        <div class="header-main">
+          <div class="eyebrow">Agent Profile</div>
+          <h1 class="title">Escalation Image Parser</h1>
+          <div class="title-id"><span class="id-key">ID</span><span class="mono-pill mono-pill--inline">escalation-template-parser</span></div>
+          <p class="purpose">Strict parser for one known QBO escalation template.</p>
+        </div>
+
+        <div class="status-cluster">
+          <span class="chip-enabled" title="This agent is enabled">
+            <span class="mini-toggle" aria-hidden="true"></span>
+            Enabled
+          </span>
+          <span class="chip-online" title="Health check passed ~1 minute ago">
+            <span class="dot" aria-hidden="true"></span>
+            Online
+            <span class="checked-at">· checked ~1m ago</span>
+          </span>
+        </div>
+      </header>
+
+      <!-- DETAIL GRID -->
+      <section class="detail-grid">
+        <!-- Runs on — full width, the headline "what it is" -->
+        <div class="cell full">
+          <div class="label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="4" width="16" height="16" rx="3" />
+              <rect x="9" y="9" width="6" height="6" rx="1" />
+              <path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2" />
+            </svg>
+            Runs On
+          </div>
+          <span class="runs-on">
+            <span class="provider-mark" aria-hidden="true">
+              <!-- Gemini spark mark -->
+              <svg viewBox="0 0 24 24" fill="none">
+                <path d="M12 2c.6 4.9 4.5 8.8 9.4 9.4-4.9.6-8.8 4.5-9.4 9.4-.6-4.9-4.5-8.8-9.4-9.4C7.5 10.8 11.4 6.9 12 2Z" fill="#4285F4"/>
+                <path d="M12 2c.6 4.9 4.5 8.8 9.4 9.4-3.3.4-6.2 2.2-7.9 4.8C12.9 11 12.6 6 12 2Z" fill="#1A73E8" opacity="0.85"/>
+              </svg>
+            </span>
+            <span class="provider-meta">
+              <span class="provider-name">Google Gemini API</span>
+              <span class="provider-sub">Direct provider API</span>
+            </span>
+            <span class="spacer"></span>
+            <span class="model-id">gemini-3.5-flash</span>
+          </span>
+        </div>
+
+        <!-- Won't (boundary) -->
+        <div class="cell">
+          <div class="label">
+            <svg class="ic-restrict" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M5.6 5.6l12.8 12.8" />
+            </svg>
+            Won't Do
+          </div>
+          <p class="boundary-text">Does not diagnose, summarize, triage, or explain the escalation.</p>
+        </div>
+
+        <!-- Can access (tools) -->
+        <div class="cell">
+          <div class="label">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4l-5.6 5.6a1.5 1.5 0 0 0 2.1 2.1l5.6-5.6a4 4 0 0 0 5.4-5.4l-2.4 2.4-2.1-2.1 2.4-2.4Z" />
+            </svg>
+            Can Access
+          </div>
+          <p class="tools-text"><strong>No tools</strong> — works from its prompt and inputs only.</p>
+        </div>
+      </section>
+
+      <!-- FOOTER -->
+      <footer class="card-footer">
+        <div class="footer-left">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 7v5l3 2" />
+          </svg>
+          <span class="lately-label">Lately</span>
+          <span class="lately-value">Updated runtime defaults · May 25, 2026, 12:11 PM</span>
+        </div>
+        <span class="attention-clear" title="Nothing needs attention">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          Nothing needs attention
+        </span>
+      </footer>
+    </article>
+
+    <p class="stage-caption">Agent overview · Structured Dashboard</p>
+  </div>
+</body>
+</html>

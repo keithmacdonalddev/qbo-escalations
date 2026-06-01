@@ -333,7 +333,7 @@ Open it. Triage commits at ~1.5s, Maya arrives ~2.5s, chat streams with evidence
 6. **Every element justified.** Triage rail = primary signal anchor. INV = precedent. Parser pill = collapsed receipt. Scratchpad = operator-private memory. Scrubber = audit / onboarding / "what did Maya say two min ago." Diamond = pipeline status in one glyph. Weather = ambient confidence. Spine = chassis. Whisper bar = the actual job. ✓
 7. **Unique unexpected features (8 named):** Citation Halo · Confidence Weather · Handoff Diamond · Rewind Scrubber · Draft Shadow (Tab to accept) · Provenance Quote Peek · Severity Tuner · Phone Whisper. ✓
 8. **Chassis visible.** Far-left 64px spine with Escalation (lit), INV-Start / Trip-Planner / Email-Composer (stubbed with dots), +New, and operator avatar. Same constellation chrome would host any pipeline — swap satellites. ✓
-9. **Maya Alvarez** — name, role, "Opus 4.7 · online," gradient avatar with live status ring, every chat turn timestamped with her name. ✓
+9. **Maya Alvarez** — name, role, "Opus 4.8 · online," gradient avatar with live status ring, every chat turn timestamped with her name. ✓
 10. **All agent identities visible at appropriate weight.** Parser quietly in the pill ("Junior · GPT-4o-mini · 1.2s" in the drawer header). INV quietly in the panel header ("Junior · Haiku 4.5"). Triage labeled "Senior · Sonnet 4.5." Maya is *felt*. ✓
 
 **Differentiation note — last update:**

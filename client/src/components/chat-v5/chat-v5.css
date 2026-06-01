@@ -588,6 +588,16 @@
   text-transform: uppercase;
 }
 
+.v5-workflow-card__tier {
+  color: #f5b944;
+  flex: 0 0 auto;
+  font-size: 7.4px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .v5-workflow-card__provider-label {
   color: var(--v5-muted);
   font-size: 8.8px;
@@ -1532,6 +1542,48 @@
   grid-column: 1 / -1;
   color: var(--v5-muted);
   font-size: 11px;
+}
+
+.v5-parser-test-cost {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: baseline;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.035);
+  font: 11px/1.35 var(--font-mono);
+}
+
+.v5-parser-test-cost span {
+  color: var(--v5-blue);
+  font-weight: 750;
+}
+
+.v5-parser-test-cost strong {
+  min-width: 0;
+  color: var(--v5-ink);
+  font-weight: 800;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.v5-parser-test-cost small {
+  grid-column: 1 / -1;
+  min-width: 0;
+  color: var(--v5-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v5-parser-test-cost.is-warning {
+  border-color: rgba(255, 196, 87, 0.28);
+}
+
+.v5-parser-test-cost.is-warning strong {
+  color: var(--v5-amber);
 }
 
 .v5-parser-fixture-modal {

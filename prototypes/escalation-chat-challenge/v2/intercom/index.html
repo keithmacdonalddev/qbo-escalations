@@ -828,7 +828,7 @@
           <div class="av analyst">M</div>
           <div class="info">
             <div class="nm">Maya Chen</div>
-            <div class="ml">claude-opus-4.7</div>
+            <div class="ml">claude-opus-4.8</div>
             <div class="rl">Main analyst · QBO expert</div>
           </div>
           <div class="status" id="stAnalyst"><span class="dot"></span><span>Standby</span></div>
@@ -1107,14 +1107,14 @@ async function stepAnalystArrives() {
 
   appendMsg({
     avClass: 'analyst', avText: 'M',
-    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.7', time: fmtTime(),
+    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.8', time: fmtTime(),
     bodyHTML: `
       <div class="analyst-card">
         <div class="analyst-head">
           <div class="av analyst">M</div>
           <div class="analyst-info">
             <div class="name">Maya Chen <span class="sparkle">✦</span></div>
-            <div class="role-line">Main analyst · QBO playbook & 4,200 prior escalations · <span class="mdl">claude-opus-4.7</span></div>
+            <div class="role-line">Main analyst · QBO playbook & 4,200 prior escalations · <span class="mdl">claude-opus-4.8</span></div>
             <div class="analyst-status"><span class="dot"></span> Read the case · ready to help</div>
           </div>
         </div>
@@ -1142,7 +1142,7 @@ async function stepChat() {
   // Maya speaks first
   const turn1 = appendMsg({
     avClass: 'analyst', avText: 'M',
-    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.7', time: fmtTime(),
+    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.8', time: fmtTime(),
     bodyHTML: `<div class="speech" id="sp1"><span class="cursor"></span></div>`
   });
   await typeInto('#sp1',
@@ -1167,7 +1167,7 @@ async function stepChat() {
   // Maya replies
   const turn2 = appendMsg({
     avClass: 'analyst', avText: 'M',
-    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.7', time: fmtTime(),
+    name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.8', time: fmtTime(),
     bodyHTML: `<div class="speech" id="sp2"><span class="cursor"></span></div>`
   });
   await typeInto('#sp2',
@@ -1311,7 +1311,7 @@ function sendReply() {
   later(async () => {
     appendMsg({
       avClass: 'analyst', avText: 'M',
-      name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.7', time: fmtTime(),
+      name: 'Maya Chen', role: 'Main analyst', model: 'claude-opus-4.8', time: fmtTime(),
       bodyHTML: `<div class="speech" id="spR"><span class="cursor"></span></div>`
     });
     await typeInto('#spR', `<p>Good call. I'll draft the response template back to Marcus now — give me a sec.</p>`);

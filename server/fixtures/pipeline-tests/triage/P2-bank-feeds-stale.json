@@ -1,0 +1,21 @@
+{
+  "name": "P2-bank-feeds-stale",
+  "description": "Connected bank feed has not refreshed in 9 days. Client is closing the month, reconciliation deadline is tomorrow.",
+  "tags": ["severity-p2", "category-bank-feeds", "weak-missing-info"],
+  "schemaVersion": 1,
+  "parserText": "COID/MID: 4407 / 0014-2299\nCASE: ESC-2026-0518-P2B\nCLIENT/CONTACT: Birchwood Property Group - Priya S.\nCX IS ATTEMPTING TO: Reconcile April month-end using bank feed transactions from the connected business checking account.\nEXPECTED OUTCOME: Daily bank feed refresh delivers all transactions through 05/16/2026 so reconciliation can finish before the 05/19/2026 deadline.\nACTUAL OUTCOME: Bank feed last refreshed 05/08/2026. No new transactions for 9 days. Manual refresh button spins then returns 'Update is taking longer than expected. Try again later.'\nKB/TOOLS USED: Bank feed troubleshooting article, Chase connection status page, browser console.\nTRIED TEST ACCOUNT: Not applicable - the bank connection is unique to this customer.\nTS STEPS: Confirmed Chase business banking is operational. Verified no MFA prompt is outstanding. Disconnected and reconnected the bank feed twice (once on 05/14 and again this morning). Both reconnects succeeded but no new transactions arrived. Bank-feeds team has not yet acknowledged the connection ID.",
+  "parseFields": {
+    "coid": "4407",
+    "mid": "0014-2299",
+    "caseNumber": "ESC-2026-0518-P2B",
+    "clientContact": "Birchwood Property Group - Priya S.",
+    "agentName": "Triage fixture P2 bank feeds",
+    "attemptingTo": "Reconcile April month-end using bank feed transactions from the connected business checking account.",
+    "expectedOutcome": "Daily bank feed refresh delivers all transactions through 05/16/2026 so reconciliation can finish before the 05/19/2026 deadline.",
+    "actualOutcome": "Bank feed last refreshed 05/08/2026. No new transactions for 9 days. Manual refresh button spins then returns 'Update is taking longer than expected. Try again later.'",
+    "kbToolsUsed": "Bank feed troubleshooting article, Chase connection status page, browser console.",
+    "triedTestAccount": "Not applicable - the bank connection is unique to this customer.",
+    "tsSteps": "Confirmed Chase business banking is operational. Verified no MFA prompt is outstanding. Disconnected and reconnected the bank feed twice (once on 05/14 and again this morning). Both reconnects succeeded but no new transactions arrived. Bank-feeds team has not yet acknowledged the connection ID.",
+    "category": "bank-feeds"
+  }
+}

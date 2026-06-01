@@ -1,0 +1,11 @@
+{
+  "ts": 1780280181763,
+  "promptId": "known-issue-search-agent",
+  "promptVersion": "",
+  "sha256": "50d3bbf98505064d0cdcb4efb194fbd9f80ff4785d54eee8ec42e61acde7045e",
+  "size": 3345,
+  "source": "startup-scan",
+  "label": null,
+  "createdAt": "2026-06-01T02:16:21.763Z",
+  "fileModified": "2026-05-17T22:59:05.694Z"
+}

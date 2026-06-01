@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { transitions } from '../../utils/motion.js';
 import useUnreadEmailCount from '../../hooks/useUnreadEmailCount.js';
-import useAgentHealth from '../../hooks/useAgentHealth.js';
+import useAgent from '../../hooks/useAgent.js';
 import useProviderStrategyHealth from '../../hooks/useProviderStrategyHealth.js';
+import { useAgentRegistry } from '../../context/AgentRegistryContext.jsx';
 import { useWorkspaceMonitorStream } from '../../context/WorkspaceMonitorContext.jsx';
 import { listProviderStrategyHealthLogs } from '../../api/agentIdentitiesApi.js';
 import { syncAiAssistantDefaultsToServer } from '../../lib/aiAssistantPreferences.js';
@@ -16,6 +17,7 @@ import {
   getProviderLabel,
   getProviderModelSuggestions,
 } from '../../lib/providerCatalog.js';
+import { buildDotTooltip } from '../../lib/agentStatus.js';
 
 const PROVIDER_MODE_OPTIONS = [
   { value: 'single', label: 'Single' },
@@ -513,7 +515,68 @@ export default function AppHeader({
 }) {
   const unreadCount = useUnreadEmailCount();
   const workspaceMonitor = useWorkspaceMonitorStream();
-  const { agents: agentHealth } = useAgentHealth(HEADER_AGENTS.map((agent) => agent.id));
+  // Read each header agent's health from the AgentRegistry (the single
+  // source of truth) instead of calling useAgentHealth directly. The three
+  // hook calls are unconditional and in a fixed order so the Rules of Hooks
+  // are honored. We then re-pack them into the same `{ [agentId]: legacy }`
+  // shape that getAgentState already understands, so the JSX below — and the
+  // resulting dot colors, badges, and tooltips — are byte-identical to before.
+  const workspaceAgent = useAgent('workspace');
+  const chatAgent = useAgent('chat');
+  const copilotAgent = useAgent('copilot');
+  // Step 9: pull `refreshAll` off the registry so the header's "Refresh All"
+  // button can force-refresh every agent's health in one click. Reading the
+  // registry alongside useAgent is intentional — both hooks read the same
+  // context, so adding this call costs nothing and lets us trigger a forced
+  // refresh that hits /api/agent-identities/health?forceRefresh=true.
+  const { refreshAll } = useAgentRegistry();
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const agentHealth = useMemo(() => {
+    const toLegacy = (entry) => {
+      if (!entry || !entry.health) return undefined;
+      const status = entry.health.status;
+      // `active` and `message` were the two fields `useAgentHealth` exposed
+      // that the new shape renames/relocates. Reconstruct them so the
+      // downstream tone/badge logic in getAgentState stays untouched:
+      //   - active === true ⇔ status === 'online' (matches the server's own
+      //     mapping in agent-health-service.js: `active: finalStatus !== 'offline'`
+      //     combined with the 'online' tone, which only ever pairs with active).
+      //   - message ← diagnostic (same human-readable failure detail; the
+      //     registry just renamed the field on its way through).
+      //   - enabled is promoted from the top-level `useAgent` return into the
+      //     legacy health object since getAgentState reads `health.enabled`.
+      return {
+        status,
+        active: status === 'online',
+        message: entry.health.diagnostic || null,
+        enabled: entry.enabled,
+      };
+    };
+    return {
+      workspace: toLegacy(workspaceAgent),
+      chat: toLegacy(chatAgent),
+      copilot: toLegacy(copilotAgent),
+    };
+  }, [workspaceAgent, chatAgent, copilotAgent]);
+
+  // Per-agent registry health (raw status + checkedAt) used for the dot
+  // tooltip's "Online · last checked Ns ago" freshness hint per AC#13. Kept
+  // separate from agentHealth (which is the legacy shape getAgentState needs)
+  // so neither map has to compromise its own contract. See cto-review M3.
+  const agentDotTooltipById = useMemo(() => ({
+    workspace: buildDotTooltip(
+      workspaceAgent?.health?.status,
+      workspaceAgent?.health?.checkedAt,
+    ),
+    chat: buildDotTooltip(
+      chatAgent?.health?.status,
+      chatAgent?.health?.checkedAt,
+    ),
+    copilot: buildDotTooltip(
+      copilotAgent?.health?.status,
+      copilotAgent?.health?.checkedAt,
+    ),
+  }), [workspaceAgent, chatAgent, copilotAgent]);
   const {
     snapshot: providerHealth,
     error: providerHealthError,
@@ -566,6 +629,26 @@ export default function AppHeader({
       setProviderCheckRunning(false);
     }
   }, [loadProviderLogs, providerCheckRunning, refreshProviderHealth]);
+
+  // Step 9: "Refresh All" button handler. Calls the registry's force-refresh,
+  // which under the hood hits /api/agent-identities/health?forceRefresh=true
+  // and skips the 30s server cache so every agent gets a fresh reachability
+  // check. The try/finally ensures the in-flight state always clears, even if
+  // the underlying request throws (refreshAll already swallows its errors
+  // internally, but we belt-and-suspenders the UI side here).
+  const handleRefreshAll = useCallback(async () => {
+    if (refreshingAll) return;
+    setRefreshingAll(true);
+    try {
+      await refreshAll();
+    } catch {
+      // refreshAll's internal pollingRefresh records errors on the per-agent
+      // health snapshot already; we just need to make sure the in-flight UI
+      // state resets so the button becomes clickable again.
+    } finally {
+      setRefreshingAll(false);
+    }
+  }, [refreshAll, refreshingAll]);
 
   const updateProviderDraft = useCallback((field, value) => {
     setProviderDraft((previous) => {
@@ -824,6 +907,13 @@ export default function AppHeader({
             });
             const selected = agentModalOpen && activeAgentTab === agent.id;
             const label = `Open ${agent.label}. ${state.status}. ${state.activity}.`;
+            // Append the dot's freshness hint to the title so hovering shows
+            // "Open <Agent>. Active. Ready. — Online · last checked 12s ago".
+            // aria-label stays as the unannotated sentence so screen readers
+            // don't get a stale "Ns ago" reading (the timestamp doesn't update
+            // live; the freshness hint is for the sighted hover tooltip).
+            const dotTooltip = agentDotTooltipById?.[agent.id];
+            const titleText = dotTooltip ? `${label} — ${dotTooltip}` : label;
             return (
               <motion.button
                 key={agent.id}
@@ -831,7 +921,7 @@ export default function AppHeader({
                 onClick={() => onOpenAgent?.(agent.id)}
                 type="button"
                 aria-label={label}
-                title={label}
+                title={titleText}
                 whileHover={{ scale: 1.08 }}
                 whileTap={{ scale: 0.92 }}
               >
@@ -847,6 +937,42 @@ export default function AppHeader({
               </motion.button>
             );
           })}
+          {/* Refresh All agents — forces a fresh reachability check by calling
+              the registry's refreshAll, which hits the health endpoint with
+              forceRefresh=true (bypassing the 30s server cache). Sits at the
+              end of the agent strip so it visually groups with the three
+              agent status indicators it refreshes. */}
+          <motion.button
+            className="app-header-icon-btn"
+            onClick={handleRefreshAll}
+            type="button"
+            aria-label="Refresh all agent health checks"
+            title={refreshingAll ? 'Refreshing all agents...' : 'Refresh All Agents'}
+            disabled={refreshingAll}
+            aria-busy={refreshingAll ? 'true' : 'false'}
+            whileHover={refreshingAll ? undefined : { scale: 1.08 }}
+            whileTap={refreshingAll ? undefined : { scale: 0.92 }}
+          >
+            <motion.svg
+              aria-hidden="true"
+              focusable="false"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              animate={refreshingAll ? { rotate: 360 } : { rotate: 0 }}
+              transition={refreshingAll
+                ? { repeat: Infinity, duration: 1, ease: 'linear' }
+                : transitions.springSnappy}
+            >
+              <path d="M21 12a9 9 0 1 1-3.51-7.13" />
+              <polyline points="21 4 21 10 15 10" />
+            </motion.svg>
+          </motion.button>
         </div>
         {/* Mail inbox */}
         <motion.button

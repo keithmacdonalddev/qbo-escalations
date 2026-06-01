@@ -23,6 +23,19 @@ const PARSED_FIELD_KEYS = [
   'attemptingTo',
   'expectedOutcome',
   'actualOutcome',
+  'kbToolsUsed',
+  'triedTestAccount',
+  'tsSteps',
+];
+
+const TEMPLATE_FIELD_KEYS = [
+  'coidMid',
+  'caseNumber',
+  'clientContact',
+  'attemptingTo',
+  'expectedOutcome',
+  'actualOutcome',
+  'kbToolsUsed',
   'triedTestAccount',
   'tsSteps',
 ];
@@ -75,9 +88,9 @@ const FIELD_LABELS = {
   'TROUBLESHOOTING STEPS': 'tsSteps',
   'STEPS TAKEN': 'tsSteps',
   'ALREADY TRIED': 'tsSteps',
-  'KB/TOOLS USED': IGNORED_LABEL,
-  'KB/TOOLS': IGNORED_LABEL,
-  'KB TOOLS USED': IGNORED_LABEL,
+  'KB/TOOLS USED': 'kbToolsUsed',
+  'KB/TOOLS': 'kbToolsUsed',
+  'KB TOOLS USED': 'kbToolsUsed',
 };
 
 // Category keywords for auto-classification
@@ -133,11 +146,20 @@ function splitCoidMid(value) {
   };
 }
 
+function hasTemplateFieldValue(fields, key) {
+  if (key === 'coidMid') {
+    return Boolean(fields.coid || fields.mid);
+  }
+  const value = fields[key];
+  if (!value) return false;
+  if (key === 'triedTestAccount' && value === 'unknown') return false;
+  return true;
+}
+
 function countFoundFields(fields) {
-  return PARSED_FIELD_KEYS.reduce((count, key) => {
-    const value = fields[key];
+  return TEMPLATE_FIELD_KEYS.reduce((count, key) => {
+    const value = hasTemplateFieldValue(fields, key);
     if (!value) return count;
-    if (key === 'triedTestAccount' && value === 'unknown') return count;
     return count + 1;
   }, 0);
 }

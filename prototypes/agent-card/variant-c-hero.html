@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Agent Profile — Polished Product Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     DESIGN TOKENS — Apple warm dark palette, clearly stepped
+     page (#141416) < card (#202022) < inset (#2c2c2e) < hover
+     ============================================================ */
+  :root {
+    --bg-page:      #141416;
+    --bg-card:      #202022;
+    --bg-inset:     #2c2c2e;
+    --bg-inset-2:   #3a3a3c;
+
+    --text-primary:  #f5f5f7;
+    --text-secondary:#a6a6ad;
+    --text-muted:    #74747c;
+
+    --border-soft:   rgba(255,255,255,0.06);
+    --border-edge:   rgba(255,255,255,0.11);
+    --border-strong: rgba(255,255,255,0.16);
+
+    --accent:        #7c78f0;
+    --accent-text:   #c9c6ff;
+    --accent-soft:   rgba(124,120,240,0.15);
+    --accent-edge:   rgba(124,120,240,0.34);
+
+    --green:         #32d74b;
+    --green-text:    #74e08b;
+    --green-soft:    rgba(50,215,75,0.15);
+    --green-edge:    rgba(50,215,75,0.32);
+    --green-dim:     #5aa86c;
+
+    --red-ico:       #ff7a85;
+
+    --mono: 'JetBrains Mono','SF Mono','Cascadia Code','Consolas',monospace;
+
+    --r-card: 20px;
+    --r-md:   12px;
+    --r-sm:   9px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background:
+      radial-gradient(1100px 560px at 50% -8%, #1c1c22 0%, var(--bg-page) 58%);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 64px 32px;
+  }
+
+  .stage { width: 100%; max-width: 468px; }
+
+  /* SVG default — MUST be constrained or inline icons balloon */
+  svg.ic {
+    width: 16px; height: 16px;
+    flex: 0 0 auto;
+    stroke: currentColor; stroke-width: 1.8; fill: none;
+    stroke-linecap: round; stroke-linejoin: round;
+    display: block;
+  }
+
+  /* ============================================================
+     CARD
+     ============================================================ */
+  .card {
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--border-edge);
+    border-radius: var(--r-card);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.05) inset,
+      0 30px 60px -20px rgba(0,0,0,0.65),
+      0 4px 14px -6px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  /* faint violet top-edge accent — ties identity hue to elevation */
+  .card::before {
+    content: ""; position: absolute; top: 0; left: 24px; right: 24px; height: 1px;
+    background: linear-gradient(90deg,
+      transparent, var(--accent-edge) 22%, var(--accent-edge) 78%, transparent);
+    opacity: 0.7; pointer-events: none;
+  }
+
+  /* ---- Header ---- */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 24px 24px 18px;
+  }
+  .avatar {
+    position: relative;
+    flex: 0 0 auto;
+    width: 60px; height: 60px;
+    border-radius: 17px;
+    display: grid; place-items: center;
+    background: linear-gradient(157deg, #8f8bf7 0%, #6560d8 100%);
+    box-shadow:
+      0 0 0 1px var(--accent-edge),
+      0 10px 22px -10px rgba(101,96,216,0.75);
+    color: #fff;
+    font-weight: 700; font-size: 22px; letter-spacing: -0.02em;
+    user-select: none;
+  }
+  .avatar::after {
+    content: ""; position: absolute; inset: 1px; border-radius: 16px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.20), rgba(255,255,255,0) 48%);
+    pointer-events: none;
+  }
+  .avatar-dot {
+    position: absolute; right: -3px; bottom: -3px;
+    width: 17px; height: 17px; border-radius: 50%;
+    background: var(--green);
+    border: 3px solid var(--bg-card);
+    box-shadow: 0 0 0 1px var(--green-edge);
+  }
+  .id-block { min-width: 0; flex: 1; }
+  .id-name {
+    font-size: 20px; font-weight: 600; letter-spacing: -0.012em;
+    line-height: 1.2; color: var(--text-primary);
+  }
+  .id-purpose {
+    margin-top: 5px; font-size: 13.5px; line-height: 1.45;
+    color: var(--text-secondary);
+  }
+
+  /* ---- Status pills ---- */
+  .status-row {
+    display: flex; gap: 8px; padding: 0 24px 20px; flex-wrap: wrap;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 28px; padding: 0 12px;
+    border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; letter-spacing: 0.005em;
+    border: 1px solid var(--border-edge);
+    background: var(--bg-inset);
+    color: var(--text-primary);
+    white-space: nowrap;
+  }
+  .pill--enabled {
+    background: var(--accent-soft); border-color: var(--accent-edge);
+    color: var(--accent-text); padding-left: 9px;
+  }
+  .pill--enabled .toggle {
+    width: 24px; height: 14px; border-radius: 999px;
+    background: var(--accent); position: relative;
+    box-shadow: 0 0 0 1px var(--accent-edge);
+  }
+  .pill--enabled .toggle::after {
+    content: ""; position: absolute; top: 2px; right: 2px;
+    width: 10px; height: 10px; border-radius: 50%; background: #fff;
+  }
+  .pill--online {
+    background: var(--green-soft); border-color: var(--green-edge);
+    color: var(--green-text); padding-left: 11px;
+  }
+  .pill--online .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 0 3px var(--green-soft);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 3px var(--green-soft); }
+    50%     { box-shadow: 0 0 0 5px rgba(50,215,75,0.04); }
+  }
+  .pill--online .checked-meta {
+    color: var(--green-dim); font-weight: 500; margin-left: -1px;
+  }
+
+  /* ---- Spec grid ---- */
+  .spec {
+    margin: 0 16px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border-soft);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--r-md);
+    overflow: hidden;
+  }
+  .spec-cell { background: var(--bg-inset); padding: 14px 15px; }
+  .spec-label {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-muted);
+  }
+  .spec-label .ic { width: 13px; height: 13px; color: var(--text-muted); }
+  .spec-value {
+    margin-top: 9px;
+    font-family: var(--mono); font-size: 12px; font-weight: 500;
+    color: var(--text-primary); line-height: 1.4; word-break: break-word;
+    letter-spacing: -0.01em;
+  }
+  .spec-value .sub {
+    display: block; color: var(--text-secondary); font-weight: 400;
+    font-size: 11.5px; margin-top: 3px;
+  }
+
+  /* ---- Facts ---- */
+  .facts {
+    padding: 16px 16px 6px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .fact {
+    display: flex; gap: 12px; padding: 12px 14px;
+    background: var(--bg-inset); border: 1px solid var(--border-soft);
+    border-radius: var(--r-md);
+  }
+  .fact-ico {
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: var(--r-sm);
+    display: grid; place-items: center;
+    background: var(--bg-inset-2); border: 1px solid var(--border-soft);
+  }
+  /* differentiate the boundary (guardrail) from the capability */
+  .fact-ico--wont {
+    background: rgba(255,122,133,0.10);
+    border-color: rgba(255,122,133,0.22);
+  }
+  .fact-ico--access {
+    background: var(--accent-soft);
+    border-color: var(--accent-edge);
+  }
+  .fact-body { min-width: 0; }
+  .fact-label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--text-muted);
+  }
+  .fact-text {
+    margin-top: 4px; font-size: 13px; line-height: 1.45; color: var(--text-primary);
+  }
+
+  /* ---- Footer (two stacked meta rows) ---- */
+  .footer {
+    margin-top: 12px;
+    padding: 12px 24px 16px;
+    border-top: 1px solid var(--border-soft);
+    background: rgba(255,255,255,0.015);
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .meta-row { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .meta-ico { color: var(--text-muted); flex: 0 0 auto; }
+  .meta-ico .ic { width: 14px; height: 14px; }
+  .meta-ico--ok { color: var(--green); }
+  .meta-txt { font-size: 12px; line-height: 1.3; }
+  .meta-k { color: var(--text-muted); }
+  .meta-v { color: var(--text-secondary); font-weight: 500; }
+  .attention-ok {
+    font-size: 12px; font-weight: 500; color: var(--green-text);
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <div class="card">
+
+      <!-- Header: avatar + identity -->
+      <div class="header">
+        <div class="avatar">
+          EP
+          <span class="avatar-dot" aria-hidden="true"></span>
+        </div>
+        <div class="id-block">
+          <div class="id-name">Escalation Image Parser</div>
+          <div class="id-purpose">Strict parser for one known QBO escalation template.</div>
+        </div>
+      </div>
+
+      <!-- Status pills -->
+      <div class="status-row">
+        <span class="pill pill--enabled">
+          <span class="toggle" aria-hidden="true"></span>
+          Enabled
+        </span>
+        <span class="pill pill--online">
+          <span class="dot" aria-hidden="true"></span>
+          Online
+          <span class="checked-meta">· checked ~1m ago</span>
+        </span>
+      </div>
+
+      <!-- Spec grid -->
+      <div class="spec">
+        <div class="spec-cell">
+          <div class="spec-label">
+            <svg class="ic" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2.5"/><path d="M9.5 2.5v3M14.5 2.5v3M9.5 18.5v3M14.5 18.5v3M2.5 9.5h3M2.5 14.5h3M18.5 9.5h3M18.5 14.5h3"/></svg>
+            Runs on
+          </div>
+          <div class="spec-value">gemini-3.5-flash<span class="sub">Google Gemini API</span></div>
+        </div>
+        <div class="spec-cell">
+          <div class="spec-label">
+            <svg class="ic" viewBox="0 0 24 24"><path d="M4 7l8-4 8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4M4 17l8 4 8-4"/></svg>
+            Agent ID
+          </div>
+          <div class="spec-value">escalation-template-parser</div>
+        </div>
+      </div>
+
+      <!-- Boundary + Access facts -->
+      <div class="facts">
+        <div class="fact">
+          <div class="fact-ico fact-ico--wont" style="color:var(--red-ico)">
+            <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></svg>
+          </div>
+          <div class="fact-body">
+            <div class="fact-label">Won't do</div>
+            <div class="fact-text">Does not diagnose, summarize, triage, or explain the escalation.</div>
+          </div>
+        </div>
+        <div class="fact">
+          <div class="fact-ico fact-ico--access" style="color:var(--accent-text)">
+            <svg class="ic" viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 015.66 5.66l-1.41 1.41M9.5 17.5a4 4 0 01-5.66-5.66l1.41-1.41"/><path d="M8.5 15.5l7-7"/></svg>
+          </div>
+          <div class="fact-body">
+            <div class="fact-label">Can access</div>
+            <div class="fact-text">No tools — works from its prompt and inputs only.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="footer">
+        <div class="meta-row">
+          <span class="meta-ico"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 1.8"/></svg></span>
+          <span class="meta-txt"><span class="meta-k">Updated runtime defaults</span> <span class="meta-v">· May 25, 2026, 12:11 PM</span></span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-ico meta-ico--ok"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/></svg></span>
+          <span class="attention-ok">Nothing needs attention</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</body>
+</html>

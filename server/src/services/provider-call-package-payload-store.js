@@ -276,6 +276,26 @@ async function externalizeLmStudioFrames(envelope, options) {
   return true;
 }
 
+async function externalizeLlmGatewayTextChunks(envelope, options) {
+  return await externalizeTextChunks(
+    envelope.llmGateway?.response?.bodyChunks,
+    'llmGateway.response.bodyChunks',
+    'llm_gateway_response_body_chunk',
+    envelope,
+    options
+  );
+}
+
+async function externalizeGeminiApiTextChunks(envelope, options) {
+  return await externalizeTextChunks(
+    envelope.geminiApi?.response?.bodyChunks,
+    'geminiApi.response.bodyChunks',
+    'gemini_api_response_body_chunk',
+    envelope,
+    options
+  );
+}
+
 function duplicateJsonMatchesText(envelope, textPath, jsonPath, options) {
   const bodyText = readPath(envelope, textPath);
   const bodyJson = readPath(envelope, jsonPath);
@@ -347,6 +367,30 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
     'lmStudio.request.bodyJson',
     payloadOptions
   );
+  const shouldDropDuplicateLlmGatewayRequestBodyJson = duplicateJsonMatchesText(
+    prepared,
+    'llmGateway.request.bodyText',
+    'llmGateway.request.bodyJson',
+    payloadOptions
+  );
+  const shouldDropDuplicateLlmGatewayResponseParsedJson = duplicateJsonMatchesText(
+    prepared,
+    'llmGateway.response.bodyText',
+    'llmGateway.response.parsedJson',
+    payloadOptions
+  );
+  const shouldDropDuplicateGeminiApiRequestBodyJson = duplicateJsonMatchesText(
+    prepared,
+    'geminiApi.request.bodyText',
+    'geminiApi.request.bodyJson',
+    payloadOptions
+  );
+  const shouldDropDuplicateGeminiApiResponseParsedJson = duplicateJsonMatchesText(
+    prepared,
+    'geminiApi.response.bodyText',
+    'geminiApi.response.parsedJson',
+    payloadOptions
+  );
 
   let externalized = false;
   for (const fieldPath of fields) {
@@ -377,6 +421,54 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
         continue;
       }
     }
+    if (fieldPath === 'llmGateway.request.bodyJson' && shouldDropDuplicateLlmGatewayRequestBodyJson) {
+      if (omitDuplicateJsonFromExternalizedText(
+        prepared,
+        storage,
+        'llmGateway.request.bodyText',
+        'llmGateway.request.bodyJson',
+        'llmGateway.request.bodyJson omitted because it duplicates externalized llmGateway.request.bodyText'
+      )) {
+        externalized = true;
+        continue;
+      }
+    }
+    if (fieldPath === 'llmGateway.response.parsedJson' && shouldDropDuplicateLlmGatewayResponseParsedJson) {
+      if (omitDuplicateJsonFromExternalizedText(
+        prepared,
+        storage,
+        'llmGateway.response.bodyText',
+        'llmGateway.response.parsedJson',
+        'llmGateway.response.parsedJson omitted because it duplicates externalized llmGateway.response.bodyText'
+      )) {
+        externalized = true;
+        continue;
+      }
+    }
+    if (fieldPath === 'geminiApi.request.bodyJson' && shouldDropDuplicateGeminiApiRequestBodyJson) {
+      if (omitDuplicateJsonFromExternalizedText(
+        prepared,
+        storage,
+        'geminiApi.request.bodyText',
+        'geminiApi.request.bodyJson',
+        'geminiApi.request.bodyJson omitted because it duplicates externalized geminiApi.request.bodyText'
+      )) {
+        externalized = true;
+        continue;
+      }
+    }
+    if (fieldPath === 'geminiApi.response.parsedJson' && shouldDropDuplicateGeminiApiResponseParsedJson) {
+      if (omitDuplicateJsonFromExternalizedText(
+        prepared,
+        storage,
+        'geminiApi.response.bodyText',
+        'geminiApi.response.parsedJson',
+        'geminiApi.response.parsedJson omitted because it duplicates externalized geminiApi.response.bodyText'
+      )) {
+        externalized = true;
+        continue;
+      }
+    }
     externalized = await externalizeField(prepared, fieldPath, payloadOptions) || externalized;
   }
   externalized = await externalizeResponseChunks(prepared, payloadOptions) || externalized;
@@ -384,6 +476,8 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
   externalized = await externalizeCliTextChunks(prepared, 'stderr', payloadOptions) || externalized;
   externalized = await externalizeLmStudioTextChunks(prepared, payloadOptions) || externalized;
   externalized = await externalizeLmStudioFrames(prepared, payloadOptions) || externalized;
+  externalized = await externalizeLlmGatewayTextChunks(prepared, payloadOptions) || externalized;
+  externalized = await externalizeGeminiApiTextChunks(prepared, payloadOptions) || externalized;
 
   storage.inline = !externalized && storage.externalPayloads.length === 0;
   storage.truncated = false;

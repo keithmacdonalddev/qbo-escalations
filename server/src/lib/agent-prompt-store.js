@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { reloadPlaybook } = require('./playbook-loader');
@@ -9,6 +10,10 @@ const AGENT_PROMPTS_ROOT = path.join(PROJECT_ROOT, 'prompts', 'agents');
 const CUSTOM_AGENT_PROMPTS_ROOT = path.join(AGENT_PROMPTS_ROOT, 'custom');
 const AGENT_PROMPT_VERSIONS_ROOT = path.join(PROJECT_ROOT, 'prompts', 'versions', 'agents');
 const CUSTOM_AGENT_PROMPT_PREFIX = 'custom-';
+const AGENT_PROMPT_VERSION_META_EXT = '.meta.json';
+const promptWatchers = [];
+const promptWatchDebounce = new Map();
+let promptWatchStarted = false;
 
 const AGENT_PROMPT_DEFINITIONS = Object.freeze([
   {
@@ -195,6 +200,13 @@ function listCustomPromptDefinitions() {
     .filter(Boolean);
 }
 
+function listAllPromptDefinitions() {
+  return [
+    ...AGENT_PROMPT_DEFINITIONS,
+    ...listCustomPromptDefinitions(),
+  ];
+}
+
 function getAgentPromptDefinition(id) {
   const promptId = String(id || '').trim();
   const definition = promptDefinitionById.get(promptId) || buildCustomPromptDefinition(promptId);
@@ -202,16 +214,202 @@ function getAgentPromptDefinition(id) {
   return definition;
 }
 
+function findAgentPromptDefinitionByFilePath(filePath) {
+  const targetPath = path.resolve(String(filePath || ''));
+  return listAllPromptDefinitions().find((definition) => path.resolve(definition.filePath) === targetPath) || null;
+}
+
+function getPromptVersionFromText(content) {
+  const match = String(content || '').match(/^\s*PROMPT_VERSION:\s*([^\r\n]+)/im);
+  return match ? match[1].trim() : '';
+}
+
+function getPromptSha256(content) {
+  return crypto.createHash('sha256').update(String(content || ''), 'utf8').digest('hex');
+}
+
+function safeSnapshotTs(ts) {
+  return /^\d+$/.test(String(ts || '')) ? String(ts) : null;
+}
+
+function readPromptFile(definition) {
+  return fs.readFileSync(definition.filePath, 'utf-8');
+}
+
+function readPromptVersionMeta(versionsDir, ts) {
+  const metaPath = path.join(versionsDir, `${ts}${AGENT_PROMPT_VERSION_META_EXT}`);
+  if (!fs.existsSync(metaPath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function readPromptVersionLabel(versionsDir, ts) {
+  const labelPath = path.join(versionsDir, `${ts}.label`);
+  if (!fs.existsSync(labelPath)) return '';
+  try {
+    return fs.readFileSync(labelPath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+
+function getPromptVersionEntries(definition) {
+  const versionsDir = getAgentPromptVersionsDir(definition.id);
+  if (!fs.existsSync(versionsDir)) return [];
+
+  return fs.readdirSync(versionsDir)
+    .filter((fileName) => /^\d+\.md$/.test(fileName))
+    .map((fileName) => {
+      const ts = parseInt(fileName, 10);
+      const snapshotPath = path.join(versionsDir, fileName);
+      const stats = fs.statSync(snapshotPath);
+      const content = fs.readFileSync(snapshotPath, 'utf-8');
+      const meta = readPromptVersionMeta(versionsDir, ts);
+      const label = readPromptVersionLabel(versionsDir, ts) || String(meta.label || '').trim();
+      const sha256 = String(meta.sha256 || '').trim() || getPromptSha256(content);
+      return {
+        ts,
+        size: stats.size,
+        label: label || null,
+        promptVersion: String(meta.promptVersion || '').trim() || getPromptVersionFromText(content),
+        sha256,
+        source: String(meta.source || '').trim(),
+        createdAt: meta.createdAt || new Date(ts).toISOString(),
+        fileModified: meta.fileModified || null,
+      };
+    })
+    .sort((a, b) => b.ts - a.ts);
+}
+
+function nextPromptSnapshotTs(versionsDir) {
+  let ts = Date.now();
+  while (fs.existsSync(path.join(versionsDir, `${ts}.md`))) {
+    ts += 1;
+  }
+  return ts;
+}
+
+function captureAgentPromptVersion(idOrDefinition, options = {}) {
+  const definition = typeof idOrDefinition === 'string'
+    ? getAgentPromptDefinition(idOrDefinition)
+    : idOrDefinition;
+  if (!definition || !fs.existsSync(definition.filePath)) {
+    return null;
+  }
+
+  ensurePromptDirectories();
+  const content = typeof options.content === 'string'
+    ? options.content
+    : readPromptFile(definition);
+  const sha256 = getPromptSha256(content);
+  const versionsDir = getAgentPromptVersionsDir(definition.id);
+  fs.mkdirSync(versionsDir, { recursive: true });
+
+  const existing = getPromptVersionEntries(definition).find((entry) => entry.sha256 === sha256);
+  if (existing) {
+    return { ...existing, created: false };
+  }
+
+  const ts = nextPromptSnapshotTs(versionsDir);
+  const snapshotPath = path.join(versionsDir, `${ts}.md`);
+  const label = String(options.label || '').trim();
+  const source = String(options.source || 'observed').trim() || 'observed';
+  let fileModified = null;
+  try {
+    fileModified = fs.statSync(definition.filePath).mtime.toISOString();
+  } catch {
+    fileModified = null;
+  }
+
+  fs.writeFileSync(snapshotPath, content, 'utf-8');
+  if (label) {
+    fs.writeFileSync(path.join(versionsDir, `${ts}.label`), label, 'utf-8');
+  }
+  fs.writeFileSync(
+    path.join(versionsDir, `${ts}${AGENT_PROMPT_VERSION_META_EXT}`),
+    `${JSON.stringify({
+      ts,
+      promptId: definition.id,
+      promptVersion: getPromptVersionFromText(content),
+      sha256,
+      size: Buffer.byteLength(content, 'utf8'),
+      source,
+      label: label || null,
+      createdAt: new Date(ts).toISOString(),
+      fileModified,
+    }, null, 2)}\n`,
+    'utf-8'
+  );
+
+  return {
+    ts,
+    size: Buffer.byteLength(content, 'utf8'),
+    label: label || null,
+    promptVersion: getPromptVersionFromText(content),
+    sha256,
+    source,
+    createdAt: new Date(ts).toISOString(),
+    fileModified,
+    created: true,
+  };
+}
+
+function listAgentPromptVersions(id, options = {}) {
+  const definition = getAgentPromptDefinition(id);
+  if (!definition) {
+    const err = new Error('Agent prompt not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (options.captureCurrent !== false) {
+    captureAgentPromptVersion(definition, {
+      source: options.source || 'list-current',
+    });
+  }
+  return getPromptVersionEntries(definition);
+}
+
+function readAgentPromptVersion(id, ts) {
+  const definition = getAgentPromptDefinition(id);
+  if (!definition) {
+    const err = new Error('Agent prompt not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  const safeTs = safeSnapshotTs(ts);
+  if (!safeTs) {
+    const err = new Error('Invalid timestamp');
+    err.code = 'INVALID_TS';
+    throw err;
+  }
+
+  const snapshotPath = path.join(getAgentPromptVersionsDir(definition.id), `${safeTs}.md`);
+  if (!fs.existsSync(snapshotPath)) {
+    const err = new Error('Version not found');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+
+  return fs.readFileSync(snapshotPath, 'utf-8');
+}
+
 function toPromptMetadata(definition) {
   let size = 0;
   let modified = null;
+  let content = '';
   try {
     const stats = fs.statSync(definition.filePath);
     size = stats.size;
     modified = stats.mtime;
+    content = readPromptFile(definition);
   } catch {
     size = 0;
     modified = null;
+    content = '';
   }
 
   return {
@@ -223,6 +421,8 @@ function toPromptMetadata(definition) {
     description: definition.description,
     size,
     modified,
+    promptVersion: getPromptVersionFromText(content),
+    promptSha256: content ? getPromptSha256(content) : '',
     custom: Boolean(definition.custom),
   };
 }
@@ -230,30 +430,76 @@ function toPromptMetadata(definition) {
 function listAgentPromptDefinitions(options = {}) {
   ensurePromptDirectories();
   const includeInternal = options && options.includeInternal === true;
-  return [
-    ...AGENT_PROMPT_DEFINITIONS,
-    ...listCustomPromptDefinitions(),
-  ]
+  return listAllPromptDefinitions()
     .filter((definition) => includeInternal || definition.visible !== false)
     .map(toPromptMetadata)
     .sort((a, b) => a.order - b.order);
 }
 
-function readAgentPrompt(id) {
+function captureAllAgentPromptVersions(source = 'startup-scan') {
+  return listAllPromptDefinitions()
+    .map((definition) => captureAgentPromptVersion(definition, { source }))
+    .filter(Boolean);
+}
+
+function schedulePromptFileCapture(filePath, source) {
+  const cleanPath = path.resolve(String(filePath || ''));
+  if (!cleanPath.toLowerCase().endsWith('.md')) return;
+  const existingTimer = promptWatchDebounce.get(cleanPath);
+  if (existingTimer) clearTimeout(existingTimer);
+  const timer = setTimeout(() => {
+    promptWatchDebounce.delete(cleanPath);
+    const definition = findAgentPromptDefinitionByFilePath(cleanPath);
+    if (!definition || !fs.existsSync(definition.filePath)) return;
+    captureAgentPromptVersion(definition, { source });
+  }, 250);
+  if (typeof timer.unref === 'function') timer.unref();
+  promptWatchDebounce.set(cleanPath, timer);
+}
+
+function watchAgentPromptVersions() {
+  if (promptWatchStarted || process.env.DISABLE_AGENT_PROMPT_VERSION_WATCH === '1') {
+    return promptWatchers;
+  }
+  promptWatchStarted = true;
+  captureAllAgentPromptVersions('startup-scan');
+
+  const watchDir = (dirPath) => {
+    if (!fs.existsSync(dirPath)) return;
+    const watcher = fs.watch(dirPath, { persistent: false }, (_eventType, fileName) => {
+      if (!fileName) return;
+      schedulePromptFileCapture(path.join(dirPath, String(fileName)), 'file-watch');
+    });
+    promptWatchers.push(watcher);
+  };
+
+  watchDir(AGENT_PROMPTS_ROOT);
+  watchDir(CUSTOM_AGENT_PROMPTS_ROOT);
+  return promptWatchers;
+}
+
+function readAgentPrompt(id, options = {}) {
   const definition = getAgentPromptDefinition(id);
   if (!definition) {
     const err = new Error('Agent prompt not found');
     err.code = 'NOT_FOUND';
     throw err;
   }
-  return fs.readFileSync(definition.filePath, 'utf-8');
+  const content = readPromptFile(definition);
+  if (options.capture !== false) {
+    captureAgentPromptVersion(definition, {
+      content,
+      source: options.source || 'read',
+    });
+  }
+  return content;
 }
 
 function getRenderedAgentPrompt(id) {
-  return readAgentPrompt(id);
+  return readAgentPrompt(id, { source: 'runtime-read' });
 }
 
-function writeAgentPrompt(id, content) {
+function writeAgentPrompt(id, content, options = {}) {
   const definition = getAgentPromptDefinition(id);
   if (!definition) {
     const err = new Error('Agent prompt not found');
@@ -263,10 +509,32 @@ function writeAgentPrompt(id, content) {
 
   ensurePromptDirectories();
   const normalizedContent = String(content);
+  let previousContent = null;
+  try {
+    previousContent = readPromptFile(definition);
+  } catch {
+    previousContent = null;
+  }
+
+  const source = String(options.source || 'write').trim() || 'write';
+  const label = String(options.label || '').trim();
+  if (previousContent !== null && getPromptSha256(previousContent) !== getPromptSha256(normalizedContent)) {
+    captureAgentPromptVersion(definition, {
+      content: previousContent,
+      source: `${source}:before`,
+      label: label ? `Before ${label}` : 'Before prompt write',
+    });
+  }
+
   fs.writeFileSync(definition.filePath, normalizedContent, 'utf-8');
   if (typeof definition.afterWrite === 'function') {
     definition.afterWrite();
   }
+  captureAgentPromptVersion(definition, {
+    content: normalizedContent,
+    source: `${source}:after`,
+    label: label || 'Prompt write',
+  });
   return toPromptMetadata(definition);
 }
 
@@ -332,11 +600,18 @@ module.exports = {
   CUSTOM_AGENT_PROMPTS_ROOT,
   CUSTOM_AGENT_PROMPT_PREFIX,
   ensureCustomAgentPrompt,
+  captureAllAgentPromptVersions,
+  captureAgentPromptVersion,
   getAgentIdForCustomPromptId,
   getAgentPromptDefinition,
   getAgentPromptVersionsDir,
+  getPromptSha256,
+  getPromptVersionFromText,
   getRenderedAgentPrompt,
+  listAgentPromptVersions,
   listAgentPromptDefinitions,
   readAgentPrompt,
+  readAgentPromptVersion,
+  watchAgentPromptVersions,
   writeAgentPrompt,
 };

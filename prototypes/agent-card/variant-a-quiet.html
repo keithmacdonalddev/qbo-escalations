@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Agent Profile — Quiet Precision</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     QUIET PRECISION — Linear / Vercel developer-tool aesthetic
+     Monochrome, hairline dividers, dense. Color only on status.
+     ============================================================ */
+  :root {
+    /* Surface hierarchy — true-neutral developer-tool stepping.
+       Each step is clearly apart so surfaces separate at a glance. */
+    --bg-page:      #0a0a0c;   /* page (never pure black) — pushed darker */
+    --bg-card:      #1a1a1d;   /* the card body — lifted for clear separation */
+    --bg-card-top:  #212125;   /* header strip (slightly lifted) */
+    --bg-inset:     #26262a;   /* inset rows / value chips */
+    --bg-inset-hi:  #303035;   /* hover / monogram */
+
+    /* Hairlines */
+    --line:         rgba(255,255,255,0.07);
+    --line-strong:  rgba(255,255,255,0.13);
+
+    /* Text */
+    --tx-primary:   #f3f3f5;
+    --tx-secondary: #a6a6ad;
+    --tx-muted:     #6f6f78;
+    --tx-faint:     #565660;
+
+    /* Semantic — the ONLY color in the card */
+    --green:        #3fd07a;
+    --green-bg:     rgba(63, 208, 122, 0.12);
+    --green-line:   rgba(63, 208, 122, 0.28);
+
+    --radius:       12px;
+    --radius-sm:    7px;
+    --radius-chip:  6px;
+
+    --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font);
+    background:
+      radial-gradient(130% 90% at 50% -20%, #121215 0%, var(--bg-page) 60%);
+    color: var(--tx-primary);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 48px 24px;
+  }
+
+  /* Realistic app content area: centered, max-width container on page bg */
+  .stage {
+    width: 100%;
+    max-width: 1040px;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* ============================================================
+     CARD — hugs its content. ~380px. Dense.
+     ============================================================ */
+  .card {
+    width: 372px;
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    overflow: hidden;
+    /* definition: deep ambient shadow to lift the card off the page,
+       plus a crisp dark seam so the lit border reads as machined. */
+    box-shadow:
+      0 1px 0 0 rgba(255,255,255,0.04) inset,  /* top highlight seam */
+      0 0 0 1px rgba(0,0,0,0.5),
+      0 24px 60px -16px rgba(0,0,0,0.75);
+  }
+
+  /* ---------- Header strip ---------- */
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 14px 15px;
+    background: linear-gradient(180deg, var(--bg-card-top), var(--bg-card));
+    border-bottom: 1px solid var(--line);
+  }
+
+  .monogram {
+    flex: 0 0 auto;
+    width: 38px;
+    height: 38px;
+    border-radius: 9px;
+    background: var(--bg-inset-hi);
+    border: 1px solid var(--line-strong);
+    display: grid;
+    place-items: center;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    color: var(--tx-primary);
+    /* subtle inner top highlight for a machined feel */
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+
+  .head-text { min-width: 0; flex: 1; padding-top: 1px; }
+
+  .title {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    color: var(--tx-primary);
+  }
+
+  .subtitle {
+    margin-top: 3px;
+    font-size: 12.5px;
+    font-weight: 400;
+    line-height: 1.4;
+    color: var(--tx-secondary);
+  }
+
+  /* ---------- Status row (chips) ---------- */
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 9px 0 8px;
+    border-radius: var(--radius-chip);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  /* Enabled = neutral/monochrome chip (a toggle state, not a health signal) */
+  .chip--enabled {
+    background: var(--bg-inset);
+    border: 1px solid var(--line-strong);
+    color: var(--tx-secondary);
+  }
+  /* Toggle drawn in the ON position: knob to the right, track lit
+     in monochrome white (green stays reserved for the health signal). */
+  .chip--enabled .toggle {
+    width: 19px;
+    height: 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.82);
+    position: relative;
+    flex: 0 0 auto;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.15);
+  }
+  .chip--enabled .toggle::after {
+    content: "";
+    position: absolute;
+    top: 1.5px; right: 1.5px;
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: #1a1a1d;
+  }
+  .chip--enabled b { color: var(--tx-primary); font-weight: 600; }
+
+  /* Online = semantic green health chip — visually DISTINCT from Enabled */
+  .chip--online {
+    background: var(--green-bg);
+    border: 1px solid var(--green-line);
+    color: var(--green);
+    font-weight: 600;
+  }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    flex: 0 0 auto;
+    position: relative;
+    box-shadow: 0 0 0 0 rgba(63,208,122,0.5);
+    animation: pulse 2.4s ease-out infinite;
+  }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(63,208,122,0.45); }
+    70%  { box-shadow: 0 0 0 5px rgba(63,208,122,0); }
+    100% { box-shadow: 0 0 0 0 rgba(63,208,122,0); }
+  }
+
+  .status-meta {
+    margin-left: auto;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--tx-muted);
+    letter-spacing: 0.005em;
+    white-space: nowrap;
+  }
+
+  /* ---------- Spec list (overline label + value) ---------- */
+  .specs { padding: 4px 16px 6px; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child { border-bottom: none; }
+
+  .label {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--tx-muted);
+    line-height: 1.4;
+    padding-top: 1px;
+  }
+
+  .value {
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.45;
+    color: var(--tx-primary);
+  }
+  .value.secondary { color: var(--tx-secondary); }
+
+  /* monospace data pill (ID, model) */
+  .code {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--tx-primary);
+    background: var(--bg-inset);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 2px 7px;
+    line-height: 1.45;
+  }
+  .code .muted { color: var(--tx-muted); }
+
+  .stack { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+  .stack .runs-on {
+    font-size: 11.5px;
+    color: var(--tx-muted);
+    font-weight: 500;
+  }
+
+  /* ---------- Footer (lately + attention) ---------- */
+  .foot {
+    padding: 11px 16px 13px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-card-top);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .foot-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11.5px;
+    line-height: 1.4;
+  }
+  .foot-line .k {
+    color: var(--tx-muted);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-size: 10px;
+    flex: 0 0 auto;
+  }
+  .foot-line .v { color: var(--tx-secondary); }
+  .foot-line .v.calm { color: var(--tx-muted); }
+
+  .check {
+    width: 13px; height: 13px;
+    flex: 0 0 auto;
+    color: var(--tx-muted);
+  }
+</style>
+</head>
+<body>
+  <div class="stage">
+    <article class="card" role="group" aria-label="Agent profile: Escalation Image Parser">
+
+      <!-- Header -->
+      <header class="head">
+        <div class="monogram" aria-hidden="true">IP</div>
+        <div class="head-text">
+          <h1 class="title">Escalation Image Parser</h1>
+          <p class="subtitle">Strict parser for one known QBO escalation template.</p>
+        </div>
+      </header>
+
+      <!-- Status -->
+      <div class="status-row">
+        <span class="chip chip--enabled" title="Agent is switched on">
+          <span class="toggle" aria-hidden="true"></span>
+          <b>Enabled</b>
+        </span>
+        <span class="chip chip--online" title="Health check passed">
+          <span class="dot" aria-hidden="true"></span>
+          Online
+        </span>
+        <span class="status-meta">checked ~1m ago</span>
+      </div>
+
+      <!-- Specs -->
+      <div class="specs">
+        <div class="row">
+          <span class="label">Agent ID</span>
+          <span class="value"><span class="code">escalation-template-parser</span></span>
+        </div>
+
+        <div class="row">
+          <span class="label">Runs on</span>
+          <span class="value">
+            <span class="stack">
+              <span class="code">gemini-3.5-flash</span>
+              <span class="runs-on">Google Gemini API</span>
+            </span>
+          </span>
+        </div>
+
+        <div class="row">
+          <span class="label">Won&rsquo;t do</span>
+          <span class="value secondary">Does not diagnose, summarize, triage, or explain the escalation.</span>
+        </div>
+
+        <div class="row">
+          <span class="label">Can access</span>
+          <span class="value secondary">No tools &mdash; works from its prompt and inputs only.</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="foot">
+        <div class="foot-line">
+          <span class="k">Lately</span>
+          <span class="v">Updated runtime defaults &middot; May 25, 2026, 12:11&nbsp;PM</span>
+        </div>
+        <div class="foot-line">
+          <svg class="check" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M5.4 8.2l1.8 1.8 3.4-3.8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span class="v calm">Nothing needs attention.</span>
+        </div>
+      </footer>
+
+    </article>
+  </div>
+</body>
+</html>

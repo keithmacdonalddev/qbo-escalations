@@ -86,6 +86,7 @@ async function runAgentToolLoop({
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
         reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
+        serviceTier: runtimePolicy?.serviceTier || '',
         onThinkingChunk: (thinking, provider) => {
           const chunk = typeof thinking === 'string' ? thinking : '';
           const thinkingProvider = provider || finalProviderUsed || policy.primaryProvider;

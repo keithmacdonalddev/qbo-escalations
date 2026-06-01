@@ -59,7 +59,7 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.equal(promptRes.body.ok, true);
   assert.match(promptRes.body.content, /Billing Audit Specialist/);
 
-  const editedPrompt = `${promptRes.body.content}\n## Test Note\nPersist custom prompt edits.\n`;
+  const editedPrompt = `PROMPT_VERSION: P1\n\n${promptRes.body.content}\n## Test Note\nPersist custom prompt edits.\n`;
   await agent
     .put('/api/agent-prompts/custom-billing-audit-agent')
     .send({
@@ -70,6 +70,50 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
 
   const editedPromptRes = await agent.get('/api/agent-prompts/custom-billing-audit-agent').expect(200);
   assert.match(editedPromptRes.body.content, /Persist custom prompt edits/);
+  assert.match(editedPromptRes.body.content, /PROMPT_VERSION: P1/);
+
+  const secondEditedPrompt = editedPrompt
+    .replace('PROMPT_VERSION: P1', 'PROMPT_VERSION: P2')
+    .replace('Persist custom prompt edits.', 'Persist custom prompt edits with a second version.');
+  await agent
+    .put('/api/agent-prompts/custom-billing-audit-agent')
+    .send({
+      content: secondEditedPrompt,
+      label: 'Second custom prompt test edit',
+    })
+    .expect(200);
+
+  const promptVersionsRes = await agent.get('/api/agent-prompts/custom-billing-audit-agent/versions').expect(200);
+  assert.equal(promptVersionsRes.body.ok, true);
+  assert.equal(promptVersionsRes.body.versions[0].promptVersion, 'P2');
+  assert.equal(promptVersionsRes.body.versions[0].label, 'Second custom prompt test edit');
+  assert.match(promptVersionsRes.body.versions[0].sha256, /^[a-f0-9]{64}$/);
+  assert.ok(promptVersionsRes.body.versions.some((version) => version.promptVersion === 'P1'));
+
+  const newestVersionContentRes = await agent
+    .get(`/api/agent-prompts/custom-billing-audit-agent/versions/${promptVersionsRes.body.versions[0].ts}`)
+    .expect(200);
+  assert.match(newestVersionContentRes.body.content, /PROMPT_VERSION: P2/);
+
+  const thirdEditedPrompt = secondEditedPrompt
+    .replace('PROMPT_VERSION: P2', 'PROMPT_VERSION: P3')
+    .replace('second version.', 'third direct-file version.');
+  fs.writeFileSync(
+    path.join(CUSTOM_AGENT_PROMPTS_ROOT, 'billing-audit-agent.md'),
+    thirdEditedPrompt,
+    'utf-8'
+  );
+
+  const directFileVersionsRes = await agent.get('/api/agent-prompts/custom-billing-audit-agent/versions').expect(200);
+  assert.equal(directFileVersionsRes.body.ok, true);
+  assert.equal(directFileVersionsRes.body.versions[0].promptVersion, 'P3');
+  assert.equal(directFileVersionsRes.body.versions[0].source, 'api-list-current');
+  assert.match(directFileVersionsRes.body.versions[0].sha256, /^[a-f0-9]{64}$/);
+
+  const directFileVersionContentRes = await agent
+    .get(`/api/agent-prompts/custom-billing-audit-agent/versions/${directFileVersionsRes.body.versions[0].ts}`)
+    .expect(200);
+  assert.match(directFileVersionContentRes.body.content, /third direct-file version/);
 
   await agent
     .post('/api/agent-identities')

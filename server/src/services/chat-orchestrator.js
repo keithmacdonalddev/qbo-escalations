@@ -4,7 +4,7 @@ const {
   normalizeProvider,
   isValidProvider,
 } = require('./providers/registry');
-const { getProviderModelId } = require('./providers/catalog');
+const { getProviderModelId, PROVIDER_CATALOG } = require('./providers/catalog');
 const {
   recordSuccess,
   recordFailure,
@@ -17,8 +17,69 @@ function normalizeMode(mode) {
   return VALID_MODES.has(mode) ? mode : 'single';
 }
 
+// --- Model-override safety allowlist (OS command-injection guard) -----------
+// User-supplied model overrides ultimately reach `spawn('claude'|'codex',
+// ['--model', model], { shell: true })`. With shell:true the OS shell re-parses
+// the argument, so an unsanitized model string like `sonnet & calc` or one with
+// backticks is a command-injection vector. We allow:
+//   1. The empty string (caller fell back to the provider default — happy path).
+//   2. Any model id that appears in the read-only provider catalog.
+//   3. Any string matching a strict safe pattern (alphanumerics plus the small
+//      set of punctuation real model ids use: . _ : / -). This preserves the
+//      existing ability to pass ad-hoc/new model ids without a catalog update
+//      while making it impossible for a shell metacharacter (& | ; $ ` ( ) < >,
+//      quotes, whitespace, etc.) to survive validation.
+const MAX_MODEL_OVERRIDE_LENGTH = 200;
+const SAFE_MODEL_PATTERN = /^[A-Za-z0-9._:/-]+$/;
+
+const CATALOG_MODEL_IDS = new Set(
+  (Array.isArray(PROVIDER_CATALOG) ? PROVIDER_CATALOG : [])
+    .map((entry) => (entry && typeof entry.model === 'string' ? entry.model.trim() : ''))
+    .filter(Boolean)
+);
+
+// Default model ids the code itself may inject via env configuration. These are
+// trusted operator-controlled values, so they are always allowed.
+const ENV_DEFAULT_MODEL_IDS = new Set(
+  [
+    process.env.CLAUDE_CHAT_MODEL,
+    process.env.CLAUDE_PARSE_MODEL,
+    process.env.CODEX_CHAT_MODEL,
+    process.env.CODEX_PARSE_MODEL,
+  ]
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+);
+
 function normalizeModelOverride(value) {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Returns true when a model override is safe to pass to a CLI subprocess.
+ * Empty/undefined is treated as "no override" and is always safe (the caller
+ * falls back to the provider default).
+ */
+function isModelAllowed(value) {
+  const model = normalizeModelOverride(value);
+  if (!model) return true;
+  if (model.length > MAX_MODEL_OVERRIDE_LENGTH) return false;
+  if (CATALOG_MODEL_IDS.has(model) || ENV_DEFAULT_MODEL_IDS.has(model)) return true;
+  return SAFE_MODEL_PATTERN.test(model);
+}
+
+/**
+ * Throws a standard `INVALID_MODEL` error (mapped to HTTP 400 by the shared
+ * api-error pipeline) when a model override is unsafe. Used as a guard before
+ * any model value can reach a `spawn` call.
+ */
+function assertModelAllowed(value, label = 'model') {
+  if (isModelAllowed(value)) return;
+  const err = new Error(
+    `Invalid ${label}: contains unsupported characters. Model identifiers may only use letters, numbers, and ". _ : / -".`
+  );
+  err.code = 'INVALID_MODEL';
+  throw err;
 }
 
 function resolveProviderModel(providerId, modelOverride) {
@@ -29,6 +90,10 @@ function resolvePolicy({ mode, primaryProvider, primaryModel, fallbackProvider, 
   const resolvedMode = normalizeMode(mode);
   const resolvedPrimary = normalizeProvider(primaryProvider);
   const resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
+
+  // Reject unsafe model overrides before they can reach a CLI spawn.
+  assertModelAllowed(primaryModel, 'primaryModel');
+  assertModelAllowed(fallbackModel, 'fallbackModel');
 
   const policy = {
     mode: resolvedMode,
@@ -123,6 +188,7 @@ function runAttempt({
   systemPrompt,
   images,
   reasoningEffort,
+  serviceTier,
   timeoutMs,
   onChunk,
   onThinkingChunk,
@@ -151,6 +217,7 @@ function runAttempt({
       images,
       model: normalizeModelOverride(model) || undefined,
       reasoningEffort,
+      serviceTier,
       timeoutMs,
       onChunk: (text) => {
         if (settled) return;
@@ -339,6 +406,7 @@ function startChatOrchestration({
   systemPrompt,
   images = [],
   reasoningEffort,
+  serviceTier,
   timeoutMs,
   onChunk,
   onThinkingChunk,
@@ -379,6 +447,7 @@ function startChatOrchestration({
         systemPrompt,
         images,
         reasoningEffort,
+        serviceTier,
         timeoutMs: getEffectiveTimeoutMs(providerId),
         onChunk: onChunk || (() => {}),
         onThinkingChunk: onThinkingChunk || null,
@@ -620,6 +689,8 @@ module.exports = {
   VALID_MODES,
   normalizeMode,
   normalizeModelOverride,
+  isModelAllowed,
+  assertModelAllowed,
   resolveProviderModel,
   resolvePolicy,
   startChatOrchestration,

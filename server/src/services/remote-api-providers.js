@@ -12,6 +12,8 @@ const {
   buildResponseChunk,
   isProviderCallPackageCaptureEnabled,
   recordHttpProviderCallPackage,
+  recordGeminiApiProviderCallPackageInBackground,
+  recordLlmGatewayProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -112,6 +114,12 @@ function resolveTransport(baseUrl) {
 }
 
 async function recordCapturedHttpPackage(captureInput) {
+  if (captureInput?.captureContext?.providerId === 'llm-gateway') {
+    return recordLlmGatewayProviderCallPackageInBackground(captureInput);
+  }
+  if (captureInput?.captureContext?.providerId === 'gemini') {
+    return recordGeminiApiProviderCallPackageInBackground(captureInput);
+  }
   const result = await recordHttpProviderCallPackage(captureInput);
   return result;
 }
@@ -293,7 +301,6 @@ function extractOpenAiText(message) {
       .filter(Boolean)
       .join('\n');
   }
-  if (typeof message.reasoning_content === 'string') return message.reasoning_content;
   return '';
 }
 
@@ -494,6 +501,9 @@ function requestOpenAiLikeChat({
     };
     if (providerId === 'openai') {
       applyOpenAiGenerationOptions(body, effectiveModel, reasoningEffort);
+    } else if (providerId === 'kimi') {
+      body.max_tokens = DEFAULT_MAX_TOKENS;
+      body.thinking = { type: 'disabled' };
     } else {
       body.max_tokens = DEFAULT_MAX_TOKENS;
       body.temperature = 0.2;

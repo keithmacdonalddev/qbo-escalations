@@ -29,6 +29,17 @@ function normalizeClaudeEffort(value) {
   return CLAUDE_ALLOWED_EFFORTS.has(normalized) ? normalized : null;
 }
 
+// Last-line OS command-injection guard. Because the CLI is spawned with
+// shell:true, the model string is re-parsed by the OS shell and must never
+// contain shell metacharacters. Lazily require the shared validator to avoid a
+// load-time circular dependency (claude.js <- providers/registry <- chat-orchestrator).
+function assertSafeModel(model, label = 'model') {
+  if (model === undefined || model === null || model === '') return;
+  // eslint-disable-next-line global-require
+  const { assertModelAllowed } = require('./chat-orchestrator');
+  assertModelAllowed(model, label);
+}
+
 function cleanupTempFiles(paths) {
   for (const f of paths) {
     try { fs.unlinkSync(f); } catch { /* ignore */ }
@@ -198,6 +209,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     if (!stub) throw new MissingProviderStubError('claude', 'chat');
     return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError });
   }
+  assertSafeModel(model);
   const prompt = buildPrompt(messages);
   const tempFiles = [];
   const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
@@ -358,6 +370,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     });
 
     child.stderr.on('data', (data) => {
+      // Mirror the stdout handler's guard: a late stderr chunk after the request
+      // has already settled (success/error/abort) must NOT re-arm the activity
+      // timeout, or each trailing chunk would keep a fresh timer alive for the
+      // full inactivity window after the request was done.
+      if (settled || killed) return;
       resetActivityTimeout();
       if (stderrOutput.length < 10240) stderrOutput += data.toString();
     });
@@ -450,6 +467,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     /^[A-Za-z0-9+/=]{100,}/.test(source);
 
   const modelOverride = options.model || null;
+  assertSafeModel(modelOverride);
   const effortOverride = normalizeClaudeEffort(options.reasoningEffort);
 
   const schema = JSON.stringify({
@@ -675,7 +693,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           const usage = extractClaudeUsage(parsed, { fallbackModel: process.env.CLAUDE_PARSE_MODEL || '' });
           if (usage) capturedUsage = usage;
           const combined = combineUsage(stepAUsage, capturedUsage);
-          const data = parsed.structured_output || parsed.result || parsed;
+          // Fall back to a clean default — NOT `parsed` — when neither a
+          // structured_output nor a result is present. `parsed` is the CLI
+          // wrapper ({type, result, usage, duration_ms, ...}); treating it as
+          // fields silently pollutes the parse with envelope metadata.
+          const data = parsed.structured_output || parsed.result || { category: 'unknown', attemptingTo: '' };
           if (typeof data === 'string') {
             const jsonMatch = data.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
@@ -805,7 +827,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         const parsed = JSON.parse(stdout);
         const usage = extractClaudeUsage(parsed, { fallbackModel: process.env.CLAUDE_PARSE_MODEL || '' });
         if (usage) capturedUsage = usage;
-        const data = parsed.structured_output || parsed.result || parsed;
+        // Fall back to a clean default — NOT `parsed` — when neither a
+        // structured_output nor a result is present. `parsed` is the CLI
+        // wrapper ({type, result, usage, duration_ms, ...}); treating it as
+        // fields silently pollutes the parse with envelope metadata.
+        const data = parsed.structured_output || parsed.result || { category: 'unknown', attemptingTo: '' };
         if (typeof data === 'string') {
           const jsonMatch = data.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
@@ -976,6 +1002,7 @@ async function prompt(promptText, options = {}) {
     if (!stub) throw new MissingProviderStubError('claude', 'prompt');
     return stub(promptText, options);
   }
+  assertSafeModel(options.model);
   const args = ['-p', '--output-format', 'text', '--max-turns', '1'];
   if (options.model) args.push('--model', options.model);
   const effort = normalizeClaudeEffort(options.reasoningEffort);
@@ -1095,6 +1122,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   if (!input) throw new Error('transcribeImage: image input is empty');
 
   const modelOverride = options.model || null;
+  assertSafeModel(modelOverride);
   const effortOverride = normalizeClaudeEffort(options.reasoningEffort);
   const timeoutMs = parsePositiveInt(options.timeoutMs, TRANSCRIBE_TIMEOUT_MS);
 

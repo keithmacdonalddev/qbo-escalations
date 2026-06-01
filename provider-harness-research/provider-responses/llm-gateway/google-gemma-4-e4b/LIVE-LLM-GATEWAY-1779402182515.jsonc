@@ -1,0 +1,763 @@
+// LLM Gateway provider harness live runtime evidence
+// Generated from Mongo ProviderCallPackage records after a real qbo -> llm-gateway -> qbo run.
+// The package body below is the redacted provider package stored by qbo-escalations.
+{
+  "marker": "LIVE-LLM-GATEWAY-1779402182515",
+  "generatedAt": "2026-05-21T22:23:02.516Z",
+  "providerId": "llm-gateway",
+  "modelFolder": "google-gemma-4-e4b",
+  "summary": [
+    {
+      "id": "6a0f85abce91242b6f175fa6",
+      "createdAt": "2026-05-21T22:22:35.101Z",
+      "callSite": "image-parser:validateRemoteProvider:llm-gateway",
+      "operation": "provider-status",
+      "outcome": "success",
+      "providerPathType": "gateway-http",
+      "gatewayRequestId": "38c5ff87-0727-4e5d-a9ac-66348306a271",
+      "responseStatusCode": 200,
+      "storageInline": true,
+      "externalPayloadCount": 0
+    },
+    {
+      "id": "6a0f85abce91242b6f175faf",
+      "createdAt": "2026-05-21T22:22:35.773Z",
+      "callSite": "remote-api-providers:requestLlmGatewayChat",
+      "operation": "chat",
+      "outcome": "success",
+      "providerPathType": "gateway-http",
+      "gatewayRequestId": "9716f1bd-9e2f-427d-97b7-f7491502dd4d",
+      "responseStatusCode": 200,
+      "storageInline": true,
+      "externalPayloadCount": 0
+    },
+    {
+      "id": "6a0f85b0ce91242b6f175fb4",
+      "createdAt": "2026-05-21T22:22:40.552Z",
+      "callSite": "image-parser:callLlmGateway",
+      "operation": "image-parse",
+      "outcome": "success",
+      "providerPathType": "gateway-http",
+      "gatewayRequestId": "5fe4901a-df4a-46a3-938b-177a08afe449",
+      "responseStatusCode": 200,
+      "storageInline": true,
+      "externalPayloadCount": 0
+    }
+  ],
+  "records": [
+    {
+      "_id": "6a0f85abce91242b6f175fa6",
+      "schemaVersion": "0.1",
+      "captureVersion": "provider-harness-llm-gateway-v0.1",
+      "providerId": "llm-gateway",
+      "providerResearchId": "llm-gateway",
+      "providerPathType": "gateway-http",
+      "callSite": "image-parser:validateRemoteProvider:llm-gateway",
+      "operation": "provider-status",
+      "source": {
+        "file": "server/src/services/image-parser.js",
+        "functionName": "validateRemoteProvider",
+        "helperName": "testRemoteProviderKey",
+        "spawnSite": ""
+      },
+      "request": null,
+      "response": null,
+      "cli": null,
+      "lmStudio": null,
+      "llmGateway": {
+        "request": {
+          "method": "GET",
+          "baseUrl": "http://127.0.0.1:4100",
+          "url": "http://127.0.0.1:4100/v1/provider-status",
+          "protocol": "http:",
+          "hostname": "127.0.0.1",
+          "port": 4100,
+          "path": "/v1/provider-status",
+          "urlPath": "/v1/provider-status",
+          "headers": {
+            "Authorization": "Bearer [REDACTED]",
+            "Accept": "application/json"
+          },
+          "redactedHeaderNames": [
+            "authorization"
+          ],
+          "bodyKind": "none",
+          "bodyText": null,
+          "bodyTextPayloadRef": null,
+          "bodyJson": null,
+          "bodyJsonPayloadRef": null,
+          "bodyByteLength": 0,
+          "bodySha256": null,
+          "modelRequested": "",
+          "stream": false,
+          "timeoutMs": 10000,
+          "hasImages": false,
+          "images": []
+        },
+        "response": {
+          "received": true,
+          "statusCode": 200,
+          "statusMessage": "OK",
+          "httpVersion": "1.1",
+          "headers": {
+            "x-request-id": "38c5ff87-0727-4e5d-a9ac-66348306a271",
+            "content-type": "application/json; charset=utf-8",
+            "content-length": "332",
+            "etag": "W/\"14c-436HmNWwsjbRWKfmSNTVB/KPa4I\"",
+            "date": "Thu, 21 May 2026 22:22:35 GMT",
+            "connection": "keep-alive",
+            "keep-alive": "timeout=5"
+          },
+          "redactedHeaderNames": [],
+          "rawHeaders": [
+            "X-Request-Id",
+            "38c5ff87-0727-4e5d-a9ac-66348306a271",
+            "Content-Type",
+            "application/json; charset=utf-8",
+            "Content-Length",
+            "332",
+            "ETag",
+            "W/\"14c-436HmNWwsjbRWKfmSNTVB/KPa4I\"",
+            "Date",
+            "Thu, 21 May 2026 22:22:35 GMT",
+            "Connection",
+            "keep-alive",
+            "Keep-Alive",
+            "timeout=5"
+          ],
+          "trailers": {},
+          "rawTrailers": [],
+          "gatewayRequestId": "38c5ff87-0727-4e5d-a9ac-66348306a271",
+          "bodyChunks": [
+            {
+              "seq": 0,
+              "receivedAt": "Thu May 21 2026 19:22:35 GMT-0300 (Atlantic Daylight Time)",
+              "byteLength": 332,
+              "sha256": "1f10a4e1d674e0706945dc0ad2be0b2ef57a6bcc92ce043b3c25b8621db155b1",
+              "text": "{\"ok\":true,\"provider\":\"llm-gateway\",\"authenticated\":true,\"gateway\":{\"reachable\":true,\"healthy\":true},\"upstream\":{\"lmStudioConnected\":true,\"loadedModel\":\"google/gemma-4-e4b\",\"availableModel\":\"google/gemma-4-e4b\",\"downloadedModelCount\":6,\"source\":\"native\",\"nativeApi\":true,\"state\":\"ready\",\"reason\":\"Loaded model: google/gemma-4-e4b\"}}",
+              "textPayloadRef": null
+            }
+          ],
+          "bodyText": "{\"ok\":true,\"provider\":\"llm-gateway\",\"authenticated\":true,\"gateway\":{\"reachable\":true,\"healthy\":true},\"upstream\":{\"lmStudioConnected\":true,\"loadedModel\":\"google/gemma-4-e4b\",\"availableModel\":\"google/gemma-4-e4b\",\"downloadedModelCount\":6,\"source\":\"native\",\"nativeApi\":true,\"state\":\"ready\",\"reason\":\"Loaded model: google/gemma-4-e4b\"}}",
+          "bodyTextPayloadRef": null,
+          "bodyByteLength": 332,
+          "bodySha256": "1f10a4e1d674e0706945dc0ad2be0b2ef57a6bcc92ce043b3c25b8621db155b1",
+          "parsedJson": {
+            "ok": true,
+            "provider": "llm-gateway",
+            "authenticated": true,
+            "gateway": {
+              "reachable": true,
+              "healthy": true
+            },
+            "upstream": {
+              "lmStudioConnected": true,
+              "loadedModel": "google/gemma-4-e4b",
+              "availableModel": "google/gemma-4-e4b",
+              "downloadedModelCount": 6,
+              "source": "native",
+              "nativeApi": true,
+              "state": "ready",
+              "reason": "Loaded model: google/gemma-4-e4b"
+            }
+          },
+          "parsedJsonPayloadRef": null,
+          "jsonParseError": null
+        },
+        "gateway": {
+          "requestId": "38c5ff87-0727-4e5d-a9ac-66348306a271",
+          "metadata": {
+            "reachable": true,
+            "healthy": true
+          },
+          "usage": null,
+          "cost": null,
+          "credits": null
+        },
+        "providerStatus": {
+          "ok": true,
+          "provider": "llm-gateway",
+          "authenticated": true,
+          "upstream": {
+            "lmStudioConnected": true,
+            "loadedModel": "google/gemma-4-e4b",
+            "availableModel": "google/gemma-4-e4b",
+            "downloadedModelCount": 6,
+            "source": "native",
+            "nativeApi": true,
+            "state": "ready",
+            "reason": "Loaded model: google/gemma-4-e4b"
+          },
+          "gateway": {
+            "reachable": true,
+            "healthy": true
+          },
+          "error": null
+        },
+        "error": null
+      },
+      "timing": {
+        "requestStartedAt": "2026-05-21T22:22:35.074Z",
+        "requestWrittenAt": "2026-05-21T22:22:35.075Z",
+        "responseHeadersAt": "2026-05-21T22:22:35.082Z",
+        "stdinWrittenAt": null,
+        "firstStdoutAt": null,
+        "firstStderrAt": null,
+        "processClosedAt": null,
+        "responseCompletedAt": "2026-05-21T22:22:35.083Z",
+        "durationMs": 9
+      },
+      "outcome": "success",
+      "error": null,
+      "redaction": {
+        "applied": true,
+        "redactedHeaderNames": [
+          "authorization"
+        ],
+        "redactedBodyPaths": [],
+        "notes": []
+      },
+      "storage": {
+        "inline": true,
+        "externalPayloads": [],
+        "notes": [],
+        "truncated": false,
+        "truncationReason": null
+      },
+      "createdAt": "2026-05-21T22:22:35.101Z",
+      "updatedAt": "2026-05-21T22:22:35.101Z"
+    },
+    {
+      "_id": "6a0f85abce91242b6f175faf",
+      "schemaVersion": "0.1",
+      "captureVersion": "provider-harness-llm-gateway-v0.1",
+      "providerId": "llm-gateway",
+      "providerResearchId": "llm-gateway",
+      "providerPathType": "gateway-http",
+      "callSite": "remote-api-providers:requestLlmGatewayChat",
+      "operation": "chat",
+      "source": {
+        "file": "server/src/services/remote-api-providers.js",
+        "functionName": "requestLlmGatewayChat",
+        "helperName": "jsonRequestCancelable",
+        "spawnSite": ""
+      },
+      "request": null,
+      "response": null,
+      "cli": null,
+      "lmStudio": null,
+      "llmGateway": {
+        "request": {
+          "method": "POST",
+          "baseUrl": "http://127.0.0.1:4100",
+          "url": "http://127.0.0.1:4100/v1/chat/completions",
+          "protocol": "http:",
+          "hostname": "127.0.0.1",
+          "port": 4100,
+          "path": "/v1/chat/completions",
+          "urlPath": "/v1/chat/completions",
+          "headers": {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": "Bearer [REDACTED]",
+            "Content-Length": 192
+          },
+          "redactedHeaderNames": [
+            "authorization"
+          ],
+          "bodyKind": "json",
+          "bodyText": "{\"model\":\"auto\",\"messages\":[{\"role\":\"system\",\"content\":\"Keep the response short.\"},{\"role\":\"user\",\"content\":\"Reply with exactly: gateway live harness ok\"}],\"max_tokens\":4096,\"temperature\":0.2}",
+          "bodyTextPayloadRef": null,
+          "bodyJson": {
+            "model": "auto",
+            "messages": [
+              {
+                "role": "system",
+                "content": "Keep the response short."
+              },
+              {
+                "role": "user",
+                "content": "Reply with exactly: gateway live harness ok"
+              }
+            ],
+            "max_tokens": 4096,
+            "temperature": 0.2
+          },
+          "bodyJsonPayloadRef": null,
+          "bodyByteLength": 192,
+          "bodySha256": "5d899f6f7432683b74fbc4b7b35e514a13ba2c1aa0638e1c0aa4bd7847f12afe",
+          "modelRequested": "auto",
+          "stream": false,
+          "timeoutMs": 120000,
+          "hasImages": false,
+          "images": []
+        },
+        "response": {
+          "received": true,
+          "statusCode": 200,
+          "statusMessage": "OK",
+          "httpVersion": "1.1",
+          "headers": {
+            "x-request-id": "9716f1bd-9e2f-427d-97b7-f7491502dd4d",
+            "content-type": "application/json; charset=utf-8",
+            "content-length": "827",
+            "etag": "W/\"33b-ciVe6syNgShIQ9XgRDlaJo6057c\"",
+            "date": "Thu, 21 May 2026 22:22:35 GMT",
+            "connection": "keep-alive",
+            "keep-alive": "timeout=5"
+          },
+          "redactedHeaderNames": [],
+          "rawHeaders": [
+            "X-Request-Id",
+            "9716f1bd-9e2f-427d-97b7-f7491502dd4d",
+            "Content-Type",
+            "application/json; charset=utf-8",
+            "Content-Length",
+            "827",
+            "ETag",
+            "W/\"33b-ciVe6syNgShIQ9XgRDlaJo6057c\"",
+            "Date",
+            "Thu, 21 May 2026 22:22:35 GMT",
+            "Connection",
+            "keep-alive",
+            "Keep-Alive",
+            "timeout=5"
+          ],
+          "trailers": {},
+          "rawTrailers": [],
+          "gatewayRequestId": "9716f1bd-9e2f-427d-97b7-f7491502dd4d",
+          "bodyChunks": [
+            {
+              "seq": 0,
+              "receivedAt": "Thu May 21 2026 19:22:35 GMT-0300 (Atlantic Daylight Time)",
+              "byteLength": 827,
+              "sha256": "4d7e05f38217cd0a6a190d578c8928f4fea6443a129cb8dc31c69b68988f1081",
+              "text": "{\"id\":\"chatcmpl-809yx7y86ds3khx2eea0u6\",\"object\":\"chat.completion\",\"created\":1779402155,\"model\":\"google/gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"gateway live harness ok\",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":31,\"completion_tokens\":5,\"total_tokens\":36,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},\"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":31,\"completion_tokens\":5,\"total_tokens\":36},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.000155,\"completion_cost_usd\":0.000125,\"total_cost_usd\":0.00028,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},\"credits\":{\"balance_usd\":10097.41448,\"total_granted_usd\":10100,\"total_charged_usd\":2.58552}}}",
+              "textPayloadRef": null
+            }
+          ],
+          "bodyText": "{\"id\":\"chatcmpl-809yx7y86ds3khx2eea0u6\",\"object\":\"chat.completion\",\"created\":1779402155,\"model\":\"google/gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"gateway live harness ok\",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":31,\"completion_tokens\":5,\"total_tokens\":36,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},\"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":31,\"completion_tokens\":5,\"total_tokens\":36},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.000155,\"completion_cost_usd\":0.000125,\"total_cost_usd\":0.00028,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},\"credits\":{\"balance_usd\":10097.41448,\"total_granted_usd\":10100,\"total_charged_usd\":2.58552}}}",
+          "bodyTextPayloadRef": null,
+          "bodyByteLength": 827,
+          "bodySha256": "4d7e05f38217cd0a6a190d578c8928f4fea6443a129cb8dc31c69b68988f1081",
+          "parsedJson": {
+            "id": "chatcmpl-809yx7y86ds3khx2eea0u6",
+            "object": "chat.completion",
+            "created": 1779402155,
+            "model": "google/gemma-4-e4b",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "gateway live harness ok",
+                  "reasoning_content": "",
+                  "tool_calls": []
+                },
+                "logprobs": null,
+                "finish_reason": "stop"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 31,
+              "completion_tokens": 5,
+              "total_tokens": 36,
+              "completion_tokens_details": {
+                "reasoning_tokens": 0
+              }
+            },
+            "stats": {},
+            "system_fingerprint": "google/gemma-4-e4b",
+            "gateway": {
+              "usage": {
+                "prompt_tokens": 31,
+                "completion_tokens": 5,
+                "total_tokens": 36
+              },
+              "cost": {
+                "currency": "USD",
+                "prompt_cost_usd": 0.000155,
+                "completion_cost_usd": 0.000125,
+                "total_cost_usd": 0.00028,
+                "prompt_cost_per_1m_usd": 5,
+                "completion_cost_per_1m_usd": 25,
+                "pricing_source": "default"
+              },
+              "credits": {
+                "balance_usd": 10097.41448,
+                "total_granted_usd": 10100,
+                "total_charged_usd": 2.58552
+              }
+            }
+          },
+          "parsedJsonPayloadRef": null,
+          "jsonParseError": null
+        },
+        "gateway": {
+          "requestId": "9716f1bd-9e2f-427d-97b7-f7491502dd4d",
+          "metadata": {
+            "usage": {
+              "prompt_tokens": 31,
+              "completion_tokens": 5,
+              "total_tokens": 36
+            },
+            "cost": {
+              "currency": "USD",
+              "prompt_cost_usd": 0.000155,
+              "completion_cost_usd": 0.000125,
+              "total_cost_usd": 0.00028,
+              "prompt_cost_per_1m_usd": 5,
+              "completion_cost_per_1m_usd": 25,
+              "pricing_source": "default"
+            },
+            "credits": {
+              "balance_usd": 10097.41448,
+              "total_granted_usd": 10100,
+              "total_charged_usd": 2.58552
+            }
+          },
+          "usage": {
+            "prompt_tokens": 31,
+            "completion_tokens": 5,
+            "total_tokens": 36
+          },
+          "cost": {
+            "currency": "USD",
+            "prompt_cost_usd": 0.000155,
+            "completion_cost_usd": 0.000125,
+            "total_cost_usd": 0.00028,
+            "prompt_cost_per_1m_usd": 5,
+            "completion_cost_per_1m_usd": 25,
+            "pricing_source": "default"
+          },
+          "credits": {
+            "balance_usd": 10097.41448,
+            "total_granted_usd": 10100,
+            "total_charged_usd": 2.58552
+          }
+        },
+        "providerStatus": null,
+        "error": null
+      },
+      "timing": {
+        "requestStartedAt": "2026-05-21T22:22:35.228Z",
+        "requestWrittenAt": "2026-05-21T22:22:35.228Z",
+        "responseHeadersAt": "2026-05-21T22:22:35.768Z",
+        "stdinWrittenAt": null,
+        "firstStdoutAt": null,
+        "firstStderrAt": null,
+        "processClosedAt": null,
+        "responseCompletedAt": "2026-05-21T22:22:35.768Z",
+        "durationMs": 540
+      },
+      "outcome": "success",
+      "error": null,
+      "redaction": {
+        "applied": true,
+        "redactedHeaderNames": [
+          "authorization"
+        ],
+        "redactedBodyPaths": [],
+        "notes": []
+      },
+      "storage": {
+        "inline": true,
+        "externalPayloads": [],
+        "notes": [],
+        "truncated": false,
+        "truncationReason": null
+      },
+      "createdAt": "2026-05-21T22:22:35.773Z",
+      "updatedAt": "2026-05-21T22:22:35.773Z"
+    },
+    {
+      "_id": "6a0f85b0ce91242b6f175fb4",
+      "schemaVersion": "0.1",
+      "captureVersion": "provider-harness-llm-gateway-v0.1",
+      "providerId": "llm-gateway",
+      "providerResearchId": "llm-gateway",
+      "providerPathType": "gateway-http",
+      "callSite": "image-parser:callLlmGateway",
+      "operation": "image-parse",
+      "source": {
+        "file": "server/src/services/image-parser.js",
+        "functionName": "callLlmGateway",
+        "helperName": "jsonRequest",
+        "spawnSite": ""
+      },
+      "request": null,
+      "response": null,
+      "cli": null,
+      "lmStudio": null,
+      "llmGateway": {
+        "request": {
+          "method": "POST",
+          "baseUrl": "http://127.0.0.1:4100",
+          "url": "http://127.0.0.1:4100/v1/chat/completions",
+          "protocol": "http:",
+          "hostname": "127.0.0.1",
+          "port": 4100,
+          "path": "/v1/chat/completions",
+          "urlPath": "/v1/chat/completions",
+          "headers": {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": "Bearer [REDACTED]",
+            "Content-Length": 1426
+          },
+          "redactedHeaderNames": [
+            "authorization"
+          ],
+          "bodyKind": "json",
+          "bodyText": "{\"model\":\"auto\",\"max_tokens\":4096,\"temperature\":0.1,\"messages\":[{\"role\":\"system\",\"content\":\"You are the Image Parser for the QBO escalation workflow.\\n\\r\\nYour job is narrow: read one screenshot of the known escalation template and output the canonical template text only.\\r\\n\\r\\nOutput exactly these labels, in this order:\\r\\n\\r\\nCOID/MID:\\r\\nCASE:\\r\\nCLIENT/CONTACT:\\r\\nCX IS ATTEMPTING TO:\\r\\nEXPECTED OUTCOME:\\r\\nACTUAL OUTCOME:\\r\\nKB/TOOLS USED:\\r\\nTRIED TEST ACCOUNT:\\r\\nTS STEPS:\\r\\n\\r\\nRules:\\r\\n- Output no commentary, no markdown, no bullets, and no extra headings.\\r\\n- Read every visible value exactly as written.\\r\\n- Preserve spelling, capitalization, punctuation, identifiers, and line breaks.\\r\\n- If a value is missing, hidden, blank, or unreadable, leave the value blank after the label.\\r\\n- Do not include AGENT, CATEGORY, SEVERITY, OPERATOR NOTE, or any other non-canonical field.\\r\\n- Do not diagnose, summarize, rewrite, or infer what the customer means.\\r\\n- If COID and MID are both visible, include both in COID/MID separated by a slash.\\r\\n- TS STEPS may be multi-line and should preserve visible line breaks.\\r\\n\"},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Parse this image.\"},{\"type\":\"image_url\",\"image_url\":{\"url\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\"}}]}],\"chat_template_kwargs\":{\"enable_thinking\":false}}",
+          "bodyTextPayloadRef": null,
+          "bodyJson": {
+            "model": "auto",
+            "max_tokens": 4096,
+            "temperature": 0.1,
+            "messages": [
+              {
+                "role": "system",
+                "content": "You are the Image Parser for the QBO escalation workflow.\n\r\nYour job is narrow: read one screenshot of the known escalation template and output the canonical template text only.\r\n\r\nOutput exactly these labels, in this order:\r\n\r\nCOID/MID:\r\nCASE:\r\nCLIENT/CONTACT:\r\nCX IS ATTEMPTING TO:\r\nEXPECTED OUTCOME:\r\nACTUAL OUTCOME:\r\nKB/TOOLS USED:\r\nTRIED TEST ACCOUNT:\r\nTS STEPS:\r\n\r\nRules:\r\n- Output no commentary, no markdown, no bullets, and no extra headings.\r\n- Read every visible value exactly as written.\r\n- Preserve spelling, capitalization, punctuation, identifiers, and line breaks.\r\n- If a value is missing, hidden, blank, or unreadable, leave the value blank after the label.\r\n- Do not include AGENT, CATEGORY, SEVERITY, OPERATOR NOTE, or any other non-canonical field.\r\n- Do not diagnose, summarize, rewrite, or infer what the customer means.\r\n- If COID and MID are both visible, include both in COID/MID separated by a slash.\r\n- TS STEPS may be multi-line and should preserve visible line breaks.\r\n"
+              },
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Parse this image."
+                  },
+                  {
+                    "type": "image_url",
+                    "image_url": {
+                      "url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                    }
+                  }
+                ]
+              }
+            ],
+            "chat_template_kwargs": {
+              "enable_thinking": false
+            }
+          },
+          "bodyJsonPayloadRef": null,
+          "bodyByteLength": 1426,
+          "bodySha256": "3dbcde5e83316fdf2073db94f46376c9683a1bce766f35b677b3b4f83e2bd1dc",
+          "modelRequested": "auto",
+          "stream": false,
+          "timeoutMs": 120000,
+          "hasImages": true,
+          "images": [
+            {
+              "seq": 0,
+              "mediaType": "image/png",
+              "source": "data-url",
+              "dataUrlSha256": "53f01d18fd6a95d0d6c5890b5f790ef5feda33980e6165ae2d58ebe46b35d363",
+              "decodedByteLength": 70,
+              "dataUrlPayloadRef": null
+            }
+          ]
+        },
+        "response": {
+          "received": true,
+          "statusCode": 200,
+          "statusMessage": "OK",
+          "httpVersion": "1.1",
+          "headers": {
+            "x-request-id": "5fe4901a-df4a-46a3-938b-177a08afe449",
+            "content-type": "application/json; charset=utf-8",
+            "content-length": "1228",
+            "etag": "W/\"4cc-Hz9A5sjlzbI+WBEmsKGVs0oC7MA\"",
+            "date": "Thu, 21 May 2026 22:22:40 GMT",
+            "connection": "keep-alive",
+            "keep-alive": "timeout=5"
+          },
+          "redactedHeaderNames": [],
+          "rawHeaders": [
+            "X-Request-Id",
+            "5fe4901a-df4a-46a3-938b-177a08afe449",
+            "Content-Type",
+            "application/json; charset=utf-8",
+            "Content-Length",
+            "1228",
+            "ETag",
+            "W/\"4cc-Hz9A5sjlzbI+WBEmsKGVs0oC7MA\"",
+            "Date",
+            "Thu, 21 May 2026 22:22:40 GMT",
+            "Connection",
+            "keep-alive",
+            "Keep-Alive",
+            "timeout=5"
+          ],
+          "trailers": {},
+          "rawTrailers": [],
+          "gatewayRequestId": "5fe4901a-df4a-46a3-938b-177a08afe449",
+          "bodyChunks": [
+            {
+              "seq": 0,
+              "receivedAt": "Thu May 21 2026 19:22:40 GMT-0300 (Atlantic Daylight Time)",
+              "byteLength": 1228,
+              "sha256": "84fcb3c57d5a4364f81735320cf6cad26c940a9ef1ca0d54afe28cf3be4402b7",
+              "text": "{\"id\":\"chatcmpl-5qy0i5umcxtgxe6mjl97rn\",\"object\":\"chat.completion\",\"created\":1779402155,\"model\":\"google/gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The user has provided an image that is entirely green and contains no discernible text or data fields corresponding to the required template labels (COID/MID, CASE, CLIENT/CONTACT, etc.).\\nTherefore, I must output all labels with blank values as per the instructions.<channel|>COID/MID:\\nCASE:\\nCLIENT/CONTACT:\\nCX IS ATTEMPTING TO:\\nEXPECTED OUTCOME:\\nACTUAL OUTCOME:\\nKB/TOOLS USED:\\nTRIED TEST ACCOUNT:\\nTS STEPS:\",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":557,\"completion_tokens\":107,\"total_tokens\":664,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},\"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":557,\"completion_tokens\":107,\"total_tokens\":664},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.002785,\"completion_cost_usd\":0.002675,\"total_cost_usd\":0.00546,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},\"credits\":{\"balance_usd\":10097.40902,\"total_granted_usd\":10100,\"total_charged_usd\":2.59098}}}",
+              "textPayloadRef": null
+            }
+          ],
+          "bodyText": "{\"id\":\"chatcmpl-5qy0i5umcxtgxe6mjl97rn\",\"object\":\"chat.completion\",\"created\":1779402155,\"model\":\"google/gemma-4-e4b\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"The user has provided an image that is entirely green and contains no discernible text or data fields corresponding to the required template labels (COID/MID, CASE, CLIENT/CONTACT, etc.).\\nTherefore, I must output all labels with blank values as per the instructions.<channel|>COID/MID:\\nCASE:\\nCLIENT/CONTACT:\\nCX IS ATTEMPTING TO:\\nEXPECTED OUTCOME:\\nACTUAL OUTCOME:\\nKB/TOOLS USED:\\nTRIED TEST ACCOUNT:\\nTS STEPS:\",\"reasoning_content\":\"\",\"tool_calls\":[]},\"logprobs\":null,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":557,\"completion_tokens\":107,\"total_tokens\":664,\"completion_tokens_details\":{\"reasoning_tokens\":0}},\"stats\":{},\"system_fingerprint\":\"google/gemma-4-e4b\",\"gateway\":{\"usage\":{\"prompt_tokens\":557,\"completion_tokens\":107,\"total_tokens\":664},\"cost\":{\"currency\":\"USD\",\"prompt_cost_usd\":0.002785,\"completion_cost_usd\":0.002675,\"total_cost_usd\":0.00546,\"prompt_cost_per_1m_usd\":5,\"completion_cost_per_1m_usd\":25,\"pricing_source\":\"default\"},\"credits\":{\"balance_usd\":10097.40902,\"total_granted_usd\":10100,\"total_charged_usd\":2.59098}}}",
+          "bodyTextPayloadRef": null,
+          "bodyByteLength": 1228,
+          "bodySha256": "84fcb3c57d5a4364f81735320cf6cad26c940a9ef1ca0d54afe28cf3be4402b7",
+          "parsedJson": {
+            "id": "chatcmpl-5qy0i5umcxtgxe6mjl97rn",
+            "object": "chat.completion",
+            "created": 1779402155,
+            "model": "google/gemma-4-e4b",
+            "choices": [
+              {
+                "index": 0,
+                "message": {
+                  "role": "assistant",
+                  "content": "The user has provided an image that is entirely green and contains no discernible text or data fields corresponding to the required template labels (COID/MID, CASE, CLIENT/CONTACT, etc.).\nTherefore, I must output all labels with blank values as per the instructions.<channel|>COID/MID:\nCASE:\nCLIENT/CONTACT:\nCX IS ATTEMPTING TO:\nEXPECTED OUTCOME:\nACTUAL OUTCOME:\nKB/TOOLS USED:\nTRIED TEST ACCOUNT:\nTS STEPS:",
+                  "reasoning_content": "",
+                  "tool_calls": []
+                },
+                "logprobs": null,
+                "finish_reason": "stop"
+              }
+            ],
+            "usage": {
+              "prompt_tokens": 557,
+              "completion_tokens": 107,
+              "total_tokens": 664,
+              "completion_tokens_details": {
+                "reasoning_tokens": 0
+              }
+            },
+            "stats": {},
+            "system_fingerprint": "google/gemma-4-e4b",
+            "gateway": {
+              "usage": {
+                "prompt_tokens": 557,
+                "completion_tokens": 107,
+                "total_tokens": 664
+              },
+              "cost": {
+                "currency": "USD",
+                "prompt_cost_usd": 0.002785,
+                "completion_cost_usd": 0.002675,
+                "total_cost_usd": 0.00546,
+                "prompt_cost_per_1m_usd": 5,
+                "completion_cost_per_1m_usd": 25,
+                "pricing_source": "default"
+              },
+              "credits": {
+                "balance_usd": 10097.40902,
+                "total_granted_usd": 10100,
+                "total_charged_usd": 2.59098
+              }
+            }
+          },
+          "parsedJsonPayloadRef": null,
+          "jsonParseError": null
+        },
+        "gateway": {
+          "requestId": "5fe4901a-df4a-46a3-938b-177a08afe449",
+          "metadata": {
+            "usage": {
+              "prompt_tokens": 557,
+              "completion_tokens": 107,
+              "total_tokens": 664
+            },
+            "cost": {
+              "currency": "USD",
+              "prompt_cost_usd": 0.002785,
+              "completion_cost_usd": 0.002675,
+              "total_cost_usd": 0.00546,
+              "prompt_cost_per_1m_usd": 5,
+              "completion_cost_per_1m_usd": 25,
+              "pricing_source": "default"
+            },
+            "credits": {
+              "balance_usd": 10097.40902,
+              "total_granted_usd": 10100,
+              "total_charged_usd": 2.59098
+            }
+          },
+          "usage": {
+            "prompt_tokens": 557,
+            "completion_tokens": 107,
+            "total_tokens": 664
+          },
+          "cost": {
+            "currency": "USD",
+            "prompt_cost_usd": 0.002785,
+            "completion_cost_usd": 0.002675,
+            "total_cost_usd": 0.00546,
+            "prompt_cost_per_1m_usd": 5,
+            "completion_cost_per_1m_usd": 25,
+            "pricing_source": "default"
+          },
+          "credits": {
+            "balance_usd": 10097.40902,
+            "total_granted_usd": 10100,
+            "total_charged_usd": 2.59098
+          }
+        },
+        "providerStatus": null,
+        "error": null
+      },
+      "timing": {
+        "requestStartedAt": "2026-05-21T22:22:35.897Z",
+        "requestWrittenAt": "2026-05-21T22:22:35.897Z",
+        "responseHeadersAt": "2026-05-21T22:22:40.545Z",
+        "stdinWrittenAt": null,
+        "firstStdoutAt": null,
+        "firstStderrAt": null,
+        "processClosedAt": null,
+        "responseCompletedAt": "2026-05-21T22:22:40.546Z",
+        "durationMs": 4649
+      },
+      "outcome": "success",
+      "error": null,
+      "redaction": {
+        "applied": true,
+        "redactedHeaderNames": [
+          "authorization"
+        ],
+        "redactedBodyPaths": [],
+        "notes": []
+      },
+      "storage": {
+        "inline": true,
+        "externalPayloads": [],
+        "notes": [],
+        "truncated": false,
+        "truncationReason": null
+      },
+      "createdAt": "2026-05-21T22:22:40.552Z",
+      "updatedAt": "2026-05-21T22:22:40.552Z"
+    }
+  ],
+  "storageNotes": [
+    {
+      "id": "6a0f85abce91242b6f175fa6",
+      "inline": true,
+      "externalPayloads": [],
+      "truncated": false,
+      "truncationReason": null
+    },
+    {
+      "id": "6a0f85abce91242b6f175faf",
+      "inline": true,
+      "externalPayloads": [],
+      "truncated": false,
+      "truncationReason": null
+    },
+    {
+      "id": "6a0f85b0ce91242b6f175fb4",
+      "inline": true,
+      "externalPayloads": [],
+      "truncated": false,
+      "truncationReason": null
+    }
+  ]
+}

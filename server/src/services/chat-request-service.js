@@ -23,12 +23,14 @@ const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
 const {
   getAlternateProvider,
   getDefaultProvider,
+  getProviderTransport,
   normalizeProvider,
 } = require('./providers/registry');
 const { getProviderModelId } = require('./providers/catalog');
 
 const DEFAULT_PARALLEL_OPEN_TURN_LIMIT = 8;
 const DEFAULT_PROVIDER = getDefaultProvider();
+const CODEX_SERVICE_TIERS = new Set(['fast', 'priority', 'flex']);
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
 const TRIAGE_AGENT_ID = 'triage-agent';
 const KNOWN_ISSUE_AGENT_ID = knownIssueSearchModule.KNOWN_ISSUE_AGENT_ID;
@@ -403,6 +405,19 @@ function normalizeTriageMode(value) {
   return value === 'fallback' ? 'fallback' : 'single';
 }
 
+function providerSupportsCodexServiceTier(provider) {
+  return provider && getProviderTransport(provider) === 'codex';
+}
+
+function normalizeWorkflowServiceTier(provider, fallbackProvider, value) {
+  if (!providerSupportsCodexServiceTier(provider) && !providerSupportsCodexServiceTier(fallbackProvider)) {
+    return '';
+  }
+  const requested = safeString(value, '').trim().toLowerCase();
+  if (requested === 'priority') return 'fast';
+  return CODEX_SERVICE_TIERS.has(requested) ? requested : 'fast';
+}
+
 function readAgentRuntimeSelection(agentRuntime, agentId, aliases = []) {
   if (!isPlainObject(agentRuntime)) return {};
   return agentRuntime[agentId]
@@ -449,6 +464,11 @@ function resolveWorkflowAgentPolicy({
     reasoningEffort: normalizeReasoningEffort(
       runtimeConfigured ? raw.reasoningEffort : fallbackReasoningEffort,
       fallbackReasoningEffort || defaultReasoningEffort
+    ),
+    serviceTier: normalizeWorkflowServiceTier(
+      provider,
+      fallbackProvider,
+      runtimeConfigured ? raw.serviceTier : fallbackPolicy?.serviceTier
     ),
     runtimeConfigured,
     usedDefaultRuntime: !runtimeConfigured,
@@ -679,6 +699,7 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, timeoutMs, 
       provider: policy.primaryProvider,
       model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
       reasoningEffort: policy.reasoningEffort || '',
+      serviceTier: policy.serviceTier || '',
       mode: policy.mode,
     });
 
@@ -692,6 +713,7 @@ function runTriageAgentCompletion({ policy, parserText, parseFields, timeoutMs, 
       systemPrompt,
       images: [],
       reasoningEffort: policy.reasoningEffort,
+      serviceTier: policy.serviceTier,
       timeoutMs,
       onChunk: () => {
         if (!streamingEmitted) {
@@ -1138,6 +1160,7 @@ async function buildAgentBackedTriageContext({
         provider: knownIssuePolicy.primaryProvider,
         model: knownIssuePolicy.primaryModel || getProviderModelId(knownIssuePolicy.primaryProvider) || '',
         reasoningEffort: knownIssuePolicy.reasoningEffort || '',
+        serviceTier: knownIssuePolicy.serviceTier || '',
       });
       return knownIssueSearchModule.runKnownIssueSearchAgent({
         parserText,
@@ -1166,6 +1189,7 @@ async function buildAgentBackedTriageContext({
       provider: policy.primaryProvider,
       model: policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
       reasoningEffort: policy.reasoningEffort || '',
+      serviceTier: policy.serviceTier || '',
     });
     triageEventBus?.emit('triage.context_built', {
       parseFieldCount: Object.keys(baseContext.parseFields || {}).length,
@@ -1481,12 +1505,13 @@ async function buildChatImageAugmentation({
         provider: imageParserConfig.provider,
         model: imageParserConfig.model || '',
       });
-      parserEventBus?.emit('stage.started', {
-        agentName: 'Image Parser',
-        provider: imageParserConfig.provider,
-        model: imageParserConfig.model || '',
-        reasoningEffort: imageParserConfig.reasoningEffort || '',
-      });
+        parserEventBus?.emit('stage.started', {
+          agentName: 'Image Parser',
+          provider: imageParserConfig.provider,
+          model: imageParserConfig.model || '',
+          reasoningEffort: imageParserConfig.reasoningEffort || '',
+          serviceTier: imageParserConfig.serviceTier || '',
+        });
       parserEventBus?.emit('prompt.rendered', {
         promptId: imageParserConfig.promptId || 'escalation-template-parser',
       });
@@ -1497,12 +1522,14 @@ async function buildChatImageAugmentation({
           provider: imageParserConfig.provider,
           model: imageParserConfig.model || '',
           reasoningEffort: imageParserConfig.reasoningEffort || '',
+          serviceTier: imageParserConfig.serviceTier || '',
           promptId: imageParserConfig.promptId || 'escalation-template-parser',
         });
         const parserResult = await parseImage(normalizedImages[0], {
           provider: imageParserConfig.provider,
           model: imageParserConfig.model || undefined,
           reasoningEffort: imageParserConfig.reasoningEffort || undefined,
+          serviceTier: imageParserConfig.serviceTier || undefined,
           promptId: imageParserConfig.promptId || 'escalation-template-parser',
           timeoutMs: 45_000,
         });
@@ -1723,6 +1750,57 @@ async function buildChatImageAugmentation({
   };
 }
 
+// Test-only shim that runs Stage 4 (Triage Agent) end-to-end against a
+// fixture. The shape mirrors the production triage call path inside
+// buildAgentBackedTriageContext, but with the INV search pass skipped and the
+// parser leg replaced by pre-supplied parserText + parseFields. The /run
+// handler in routes/triage-tests.js is the only caller; the production chat
+// flow continues to use buildAgentBackedTriageContext directly with its full
+// param surface (INV search enabled, real parser output).
+async function runTriageAgent({
+  runtimeMap = {},
+  fallbackPolicy,
+  reasoningEffort,
+  parserText,
+  parseFields,
+  timeoutMs,
+  eventBus,
+}) {
+  const safeRuntimeMap = runtimeMap && typeof runtimeMap === 'object' ? runtimeMap : {};
+  const triageAgentRuntime = {
+    ...safeRuntimeMap,
+    [TRIAGE_AGENT_ID]: {
+      ...(safeRuntimeMap[TRIAGE_AGENT_ID] && typeof safeRuntimeMap[TRIAGE_AGENT_ID] === 'object'
+        ? safeRuntimeMap[TRIAGE_AGENT_ID]
+        : {}),
+      configured: Boolean(safeRuntimeMap[TRIAGE_AGENT_ID]?.provider),
+    },
+  };
+
+  const policy = resolveTriageAgentPolicy({
+    agentRuntime: triageAgentRuntime,
+    fallbackPolicy,
+    fallbackReasoningEffort: reasoningEffort,
+  });
+
+  const context = await buildAgentBackedTriageContext({
+    parserText: safeString(parserText, ''),
+    parserProvider: 'triage-test-fixture',
+    parserModel: 'fixture',
+    parseFieldsOverride: parseFields && typeof parseFields === 'object' ? parseFields : {},
+    elapsedMs: 0,
+    triageAgentRuntime,
+    fallbackPolicy,
+    reasoningEffort,
+    timeoutMs,
+    emitStatus: async () => {},
+    runKnownIssueSearch: false,
+    triageEventBus: eventBus,
+  });
+
+  return { context, policy };
+}
+
 module.exports = {
   DEFAULT_PROVIDER,
   buildAgentBackedTriageContext,
@@ -1739,5 +1817,6 @@ module.exports = {
   resolveKnownIssueAgentPolicy,
   resolveTriageAgentPolicy,
   resolveParseMode,
+  runTriageAgent,
   toParseResponseMeta,
 };

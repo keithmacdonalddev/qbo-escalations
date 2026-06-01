@@ -1,5 +1,6 @@
 import {
   DEFAULT_PROVIDER,
+  DEFAULT_CODEX_SERVICE_TIER,
   DEFAULT_REASONING_EFFORT,
   PROVIDER_FAMILY,
   getAlternateProvider,
@@ -8,9 +9,11 @@ import {
   getProviderModelSuggestions,
   getProviderShortLabel,
   hasCustomModelOverride,
+  normalizeCodexServiceTier,
   normalizeModelOverride,
   normalizeProvider,
   normalizeReasoningEffort,
+  providerSupportsCodexServiceTier,
   resolveProviderSelection,
 } from './providerCatalog.js';
 import {
@@ -158,6 +161,7 @@ function storageKeysForDefinition(definition) {
       storageKey(definition.storagePrefix, 'provider'),
       storageKey(definition.storagePrefix, 'model'),
       storageKey(definition.storagePrefix, 'reasoning-effort'),
+      storageKey(definition.storagePrefix, 'service-tier'),
     ];
   }
   return [
@@ -167,6 +171,7 @@ function storageKeysForDefinition(definition) {
     storageKey(definition.storagePrefix, 'model'),
     storageKey(definition.storagePrefix, 'fallback-model'),
     storageKey(definition.storagePrefix, 'reasoning-effort'),
+    storageKey(definition.storagePrefix, 'service-tier'),
   ];
 }
 
@@ -199,6 +204,17 @@ function getProviderModelSummary(provider, model) {
   return providerLabel || getProviderDefaultModel(provider) || 'auto';
 }
 
+function normalizeProviderServiceTier(provider, value) {
+  return providerSupportsCodexServiceTier(provider)
+    ? normalizeCodexServiceTier(value || DEFAULT_CODEX_SERVICE_TIER)
+    : '';
+}
+
+function formatServiceTierSummary(serviceTier) {
+  if (!serviceTier) return '';
+  return serviceTier === 'flex' ? 'flex tier' : 'fast tier';
+}
+
 export function getAgentRuntimeDefinition(id) {
   return RUNTIME_BY_ID[String(id || '').trim()] || null;
 }
@@ -220,6 +236,7 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
       provider,
       model: normalizeModelOverride(selection.model),
       reasoningEffort: normalizeImageParserReasoningEffort(provider, state.reasoningEffort),
+      serviceTier: normalizeProviderServiceTier(provider, state.serviceTier),
     };
   }
 
@@ -253,6 +270,9 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
       ? normalizeProviderModelOverride(fallbackProvider, fallbackSelection.model)
       : '',
     reasoningEffort,
+    serviceTier: providerSupportsCodexServiceTier(provider) || providerSupportsCodexServiceTier(fallbackProvider)
+      ? normalizeCodexServiceTier(state.serviceTier || DEFAULT_CODEX_SERVICE_TIER)
+      : '',
   };
 }
 
@@ -268,6 +288,7 @@ export function readAgentRuntimeState(definitionOrId) {
       provider: readStoredPreference(storageKey(storagePrefix, 'provider')) || '',
       model: readStoredPreference(storageKey(storagePrefix, 'model')) || '',
       reasoningEffort: readStoredPreference(storageKey(storagePrefix, 'reasoning-effort')) || '',
+      serviceTier: readStoredPreference(storageKey(storagePrefix, 'service-tier')) || DEFAULT_CODEX_SERVICE_TIER,
     });
   }
 
@@ -282,6 +303,7 @@ export function readAgentRuntimeState(definitionOrId) {
     model: readStoredPreference(storageKey(storagePrefix, 'model')) || '',
     fallbackModel: readStoredPreference(storageKey(storagePrefix, 'fallback-model')) || '',
     reasoningEffort: readStoredPreference(storageKey(storagePrefix, 'reasoning-effort')) || DEFAULT_REASONING_EFFORT,
+    serviceTier: readStoredPreference(storageKey(storagePrefix, 'service-tier')) || DEFAULT_CODEX_SERVICE_TIER,
   });
 }
 
@@ -298,6 +320,7 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
     writeStoredPreference(storageKey(storagePrefix, 'provider'), normalized.provider);
     writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
     writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
+    writeStoredPreference(storageKey(storagePrefix, 'service-tier'), normalized.serviceTier);
     return normalized;
   }
 
@@ -307,6 +330,7 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
   writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
   writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
   writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
+  writeStoredPreference(storageKey(storagePrefix, 'service-tier'), normalized.serviceTier);
 
   return normalized;
 }
@@ -413,14 +437,18 @@ export function getAgentRuntimeSummary(definitionOrId, state = {}) {
   if (isImageParser(definition)) {
     if (!normalized.provider) return 'Image parser disabled';
     const effort = normalized.reasoningEffort ? ` | effort ${normalized.reasoningEffort}` : '';
-    return `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}${effort}`;
+    const serviceTier = formatServiceTierSummary(normalized.serviceTier);
+    const tier = serviceTier ? ` | ${serviceTier}` : '';
+    return `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}${effort}${tier}`;
   }
 
   const primary = getProviderModelSummary(normalized.provider, normalized.model);
+  const serviceTier = formatServiceTierSummary(normalized.serviceTier);
+  const tier = serviceTier ? ` | ${serviceTier}` : '';
   if (normalized.mode === 'fallback') {
-    return `${primary} + ${getProviderModelSummary(normalized.fallbackProvider, normalized.fallbackModel)}`;
+    return `${primary} + ${getProviderModelSummary(normalized.fallbackProvider, normalized.fallbackModel)}${tier}`;
   }
-  return primary;
+  return `${primary}${tier}`;
 }
 
 export function getAgentRuntimeModelPlaceholder(definitionOrId, state = {}, options = {}) {

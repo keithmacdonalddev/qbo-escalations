@@ -12,6 +12,7 @@ const { normalizeModelOverride } = require('./chat-orchestrator');
 const {
   getAlternateProvider,
   getDefaultProvider,
+  getProviderTransport,
   isAllowedEffort,
   normalizeProvider,
 } = require('./providers/registry');
@@ -28,6 +29,15 @@ const MAX_RELATIONSHIP_NOTES = 24;
 const MAX_REVIEW_ENTRIES = 80;
 const MAX_HARNESS_RUNS = 50;
 const MAX_HARNESS_CASES = 40;
+
+const PROFILE_PAYLOAD_MEMORY_NOTES = 8;
+const PROFILE_PAYLOAD_TOOL_USAGE_ENTRIES = 10;
+const PROFILE_PAYLOAD_ACTIVITY_ENTRIES = 5;
+const PROFILE_PAYLOAD_RELATIONSHIP_NOTES = 8;
+const PROFILE_PAYLOAD_REVIEW_ENTRIES = 5;
+const PROFILE_PAYLOAD_HARNESS_RUNS = 3;
+const PROFILE_PAYLOAD_HISTORY_ENTRIES = 5;
+const CODEX_SERVICE_TIERS = new Set(['fast', 'priority', 'flex']);
 
 const SHARED_AGENT_TOOLS = Object.freeze([
   { name: 'agentProfiles.list', kind: 'read', description: 'List agent profiles with summary fields and references.', params: '{}' },
@@ -118,6 +128,29 @@ const IMAGE_RUNTIME_AGENT_IDS = new Set([
   'follow-up-chat-parser',
   'image-analyst',
 ]);
+
+const AGENT_IDENTITY_PROFILE_PROJECTION = Object.freeze({
+  agentId: 1,
+  enabled: 1,
+  enabledUpdatedAt: 1,
+  enabledUpdatedBy: 1,
+  profile: 1,
+  runtime: 1,
+  custom: 1,
+  'memory.notes': { $slice: PROFILE_PAYLOAD_MEMORY_NOTES },
+  'memory.lastLearnedAt': 1,
+  'tools.recentUsage': { $slice: PROFILE_PAYLOAD_TOOL_USAGE_ENTRIES },
+  'activity.entries': { $slice: PROFILE_PAYLOAD_ACTIVITY_ENTRIES },
+  'relationships.notes': { $slice: PROFILE_PAYLOAD_RELATIONSHIP_NOTES },
+  'relationships.lastUpdatedAt': 1,
+  'reviews.entries': { $slice: PROFILE_PAYLOAD_REVIEW_ENTRIES },
+  'reviews.lastApprovedAt': 1,
+  'harness.runs': { $slice: PROFILE_PAYLOAD_HARNESS_RUNS },
+  'harness.lastRunAt': 1,
+  'history.entries': { $slice: PROFILE_PAYLOAD_HISTORY_ENTRIES },
+  updatedAt: 1,
+  createdAt: 1,
+});
 
 function clone(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -463,6 +496,19 @@ function normalizeImageRuntimeReasoningEffort(provider, value) {
   return isAllowedEffort(provider, requested) ? requested : '';
 }
 
+function providerSupportsCodexServiceTier(provider) {
+  return provider && getProviderTransport(provider) === 'codex';
+}
+
+function normalizeRuntimeServiceTier(provider, fallbackProvider, value) {
+  if (!providerSupportsCodexServiceTier(provider) && !providerSupportsCodexServiceTier(fallbackProvider)) {
+    return '';
+  }
+  const requested = safeText(value).toLowerCase();
+  if (requested === 'priority') return 'fast';
+  return CODEX_SERVICE_TIERS.has(requested) ? requested : 'fast';
+}
+
 function normalizeAgentRuntimeState(agentId, input = {}) {
   const source = input && typeof input === 'object' ? input : {};
   const imageRuntime = IMAGE_RUNTIME_AGENT_IDS.has(agentId);
@@ -486,6 +532,7 @@ function normalizeAgentRuntimeState(agentId, input = {}) {
     reasoningEffort: imageRuntime
       ? normalizeImageRuntimeReasoningEffort(provider, source.reasoningEffort)
       : normalizeRuntimeReasoningEffort(provider, source.reasoningEffort),
+    serviceTier: normalizeRuntimeServiceTier(provider, fallbackProvider, source.serviceTier),
     configured: source.configured !== false && Boolean(provider || source.configured),
     source: safeText(source.source) || 'agent-profile',
   };
@@ -500,6 +547,7 @@ function buildRuntimeSummary(runtime) {
     runtime.mode === 'fallback' && runtime.fallbackProvider ? `fallback ${runtime.fallbackProvider}` : '',
     runtime.fallbackModel ? `fallback model ${runtime.fallbackModel}` : '',
     runtime.reasoningEffort ? `effort ${runtime.reasoningEffort}` : '',
+    runtime.serviceTier ? `tier ${runtime.serviceTier}` : '',
   ].filter(Boolean);
   return parts.join(' | ');
 }
@@ -778,7 +826,7 @@ function buildMergedIdentity(agentId, doc = null, docsById = null) {
 }
 
 async function listAgentIdentities() {
-  const docs = await AgentIdentity.find({}).lean();
+  const docs = await AgentIdentity.find({}, AGENT_IDENTITY_PROFILE_PROJECTION).lean();
   const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
   const defaultIds = Object.keys(DEFAULT_PROFILES);
   const customIds = docs
@@ -811,6 +859,30 @@ async function listAgentRuntimeDefaults(agentIds = []) {
   }, {});
 }
 
+async function listAgentHealthIdentitySnapshots(agentIds = []) {
+  const requestedIds = (Array.isArray(agentIds) ? agentIds : [])
+    .map((agentId) => safeText(agentId))
+    .filter(Boolean);
+  const ids = requestedIds.length > 0 ? requestedIds : Object.keys(DEFAULT_PROFILES);
+  const docs = await AgentIdentity.find({ agentId: { $in: ids } })
+    .select('agentId enabled profile updatedAt')
+    .lean();
+  const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
+
+  return ids.reduce((acc, agentId) => {
+    const doc = byId.get(agentId) || null;
+    const profile = resolveAgentProfile(agentId, doc);
+    if (!profile) return acc;
+    acc[agentId] = {
+      agentId,
+      enabled: doc?.enabled !== false,
+      profile,
+      updatedAt: doc?.updatedAt || null,
+    };
+    return acc;
+  }, {});
+}
+
 async function listAgentLifecycleStates(agentIds = []) {
   const requestedIds = (Array.isArray(agentIds) ? agentIds : [])
     .map((agentId) => safeText(agentId))
@@ -837,7 +909,7 @@ async function listAgentLifecycleStates(agentIds = []) {
 async function getAgentIdentity(agentId) {
   const normalizedAgentId = safeText(agentId);
   if (!normalizedAgentId) return null;
-  const docs = await AgentIdentity.find({}).lean();
+  const docs = await AgentIdentity.find({}, AGENT_IDENTITY_PROFILE_PROJECTION).lean();
   const byId = new Map(docs.map((doc) => [doc.agentId, doc]));
   const doc = byId.get(normalizedAgentId) || null;
   if (!DEFAULT_PROFILES[normalizedAgentId] && !doc) return null;
@@ -937,6 +1009,7 @@ async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summ
           provider: runtime.provider,
           mode: runtime.mode,
           fallbackProvider: runtime.fallbackProvider,
+          serviceTier: runtime.serviceTier,
           configured: runtime.configured,
         },
         createdAt: updatedAt,
@@ -956,6 +1029,7 @@ async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summ
           provider: runtime.provider,
           mode: runtime.mode,
           fallbackProvider: runtime.fallbackProvider,
+          serviceTier: runtime.serviceTier,
         },
         createdAt: updatedAt,
       },
@@ -2069,6 +2143,7 @@ module.exports = {
   importAgentIdentities,
   learnFromInteraction,
   listAgentIdentities,
+  listAgentHealthIdentitySnapshots,
   listAgentLifecycleStates,
   listAgentRuntimeDefaults,
   normalizeAgentRuntimeState,

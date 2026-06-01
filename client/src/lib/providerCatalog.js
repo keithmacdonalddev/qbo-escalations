@@ -45,6 +45,7 @@ export const PROVIDER_IDS = Object.freeze(PROVIDER_CATALOG.map((entry) => entry.
 export const SELECTABLE_PROVIDER_IDS = Object.freeze(PROVIDER_OPTIONS.map((entry) => entry.value));
 export const DEFAULT_PROVIDER = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
 export const DEFAULT_REASONING_EFFORT = 'high';
+export const DEFAULT_CODEX_SERVICE_TIER = 'fast';
 export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'none', label: 'None' },
   { value: 'low', label: 'Low' },
@@ -52,6 +53,10 @@ export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'high', label: 'High' },
   { value: 'xhigh', label: 'Extra High' },
   { value: 'max', label: 'Max' },
+]);
+export const CODEX_SERVICE_TIER_OPTIONS = Object.freeze([
+  { value: 'fast', label: 'Fast' },
+  { value: 'flex', label: 'Flex' },
 ]);
 
 const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
@@ -70,6 +75,8 @@ const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
   ]),
   gemini: Object.freeze([
     { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
   ]),
   kimi: Object.freeze([
     { value: 'kimi-k2.5', label: 'Kimi K2.5' },
@@ -207,6 +214,18 @@ export function getProviderTransport(provider) {
 
 export function getProviderFamily(provider) {
   return getProviderMeta(provider)?.family || 'claude';
+}
+
+export function providerSupportsCodexServiceTier(provider) {
+  return getProviderTransport(provider) === 'codex' || getProviderFamily(provider) === 'codex';
+}
+
+export function normalizeCodexServiceTier(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'priority') return 'fast';
+  return CODEX_SERVICE_TIER_OPTIONS.some((option) => option.value === normalized)
+    ? normalized
+    : DEFAULT_CODEX_SERVICE_TIER;
 }
 
 export function getSelectableProviderIds() {

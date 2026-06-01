@@ -15,6 +15,7 @@ test('parseEscalationText extracts core fields from standard escalation format',
     'CX IS ATTEMPTING TO: Connect their bank feed and import transactions',
     'EXPECTED OUTCOME: Transactions sync successfully',
     'ACTUAL OUTCOME: Connection error appears repeatedly',
+    'KB/TOOLS USED: Help panel, Google',
     'TRIED TEST ACCOUNT: Yes',
     'TS STEPS: Cleared cache, tried incognito, reconnected bank',
   ].join('\n');
@@ -26,9 +27,10 @@ test('parseEscalationText extracts core fields from standard escalation format',
   assert.equal(parsed.caseNumber, 'CS-2026-000111');
   assert.equal(parsed.clientContact, 'Jane Smith');
   assert.equal(parsed.agentName, 'John Doe');
+  assert.equal(parsed.kbToolsUsed, 'Help panel, Google');
   assert.equal(parsed.triedTestAccount, 'yes');
   assert.ok(['bank-feeds', 'integrations'].includes(parsed.category));
-  assert.ok(parsed._fieldsFound >= 7);
+  assert.equal(parsed._fieldsFound, 9);
 });
 
 test('classifyCategory returns unknown when no category keywords match', () => {
@@ -90,6 +92,7 @@ test('parseEscalationText keeps blank canonical fields blank for payroll suspend
   assert.equal(parsed.attemptingTo, 'paying her employees via DD');
   assert.equal(parsed.expectedOutcome, '');
   assert.equal(parsed.actualOutcome, 'payroll suspended');
+  assert.equal(parsed.kbToolsUsed, 'Iboss, cs server');
   assert.equal(parsed.triedTestAccount, 'no');
   assert.equal(
     parsed.tsSteps,

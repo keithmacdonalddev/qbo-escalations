@@ -1,0 +1,105 @@
+/* ==========================================================
+   AGENT HEALTH BANNER — persistent strip when any agent is offline
+   ==========================================================
+   Stacks directly under the existing HealthBanner (which is
+   position: fixed; top: 0; height: 34px). We pin at top: 34px so
+   the two banners read as siblings without overlapping.
+
+   Color note: this codebase has no "red" CSS palette entry — orange
+   is the strongest attention color we have (already used for the
+   .status-dot-degraded dot you see on offline agents in the dock).
+   We tint the banner with the same orange so the banner color and
+   the offending dot color agree.
+*/
+
+.agent-health-banner {
+  position: fixed;
+  top: 34px; /* directly under the HealthBanner strip */
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  z-index: 10000; /* above HealthBanner (9999) — agent-down is more urgent than HTTP-slow */
+  background: #f5a623;
+  color: #1a1a1a;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
+  animation: agent-health-banner-slide-in 200ms ease-out;
+  pointer-events: auto;
+}
+
+@keyframes agent-health-banner-slide-in {
+  from { transform: translateY(-100%); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.agent-health-banner-dot {
+  /* status-dot-degraded supplies the orange fill + glow; we only set the
+     box dimensions here so the dot matches the dock dot exactly. */
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.agent-health-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  max-width: min(80vw, 920px);
+}
+
+.agent-health-banner-headline {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.agent-health-banner-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-health-banner-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #1a1a1a;
+}
+
+.agent-health-banner-name {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.agent-health-banner-sep {
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.agent-health-banner-diag {
+  font-weight: 400;
+  opacity: 0.92;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}

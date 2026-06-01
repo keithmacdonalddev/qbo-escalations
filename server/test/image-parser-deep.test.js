@@ -344,8 +344,9 @@ test('Provider request body: Kimi', async (t) => {
       assert.equal(capture.options.headers['Authorization'], 'Bearer mk-test-kimi-key');
     });
 
-    await t.test('body contains temperature: 1 (CRITICAL — Kimi rejects other values)', () => {
-      assert.equal(capture.body.temperature, 1, 'Kimi MUST have temperature exactly 1');
+    await t.test('body disables Kimi thinking and omits temperature', () => {
+      assert.equal(capture.body.temperature, undefined);
+      assert.deepEqual(capture.body.thinking, { type: 'disabled' });
     });
 
     await t.test('body contains model kimi-k2.5 by default', () => {

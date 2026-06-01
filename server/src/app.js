@@ -8,6 +8,7 @@ const { listProviderHealth } = require('./services/provider-health');
 const { registerRequestRuntime, getRequestRuntimeHealth } = require('./services/request-runtime');
 const { getAiRuntimeHealth } = require('./services/ai-runtime');
 const { registerDomainRequestObserver } = require('./services/domain-health');
+const { watchAgentPromptVersions } = require('./lib/agent-prompt-store');
 const requestId = require('./middleware/request-id');
 const responseTimeout = require('./middleware/response-timeout');
 
@@ -19,6 +20,13 @@ function createApp() {
   if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   }
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      watchAgentPromptVersions();
+    } catch (err) {
+      console.warn('[agent-prompts] Prompt version watcher failed:', err.message || err);
+    }
+  }
 
   const app = express();
   app.use(cors(buildCorsOptions()));
@@ -26,7 +34,11 @@ function createApp() {
   app.use(registerRequestRuntime);
   app.use(registerDomainRequestObserver);
   app.use(responseTimeout(30_000));
-  app.use(express.json({ limit: '12mb' }));
+  // Body limit must accommodate base64 image uploads. The chat image caps allow
+  // up to ~20MB/image and ~30MB total of *decoded* bytes; base64 inflates that
+  // by ~33%, so the JSON payload can approach ~40MB plus overhead. 50MB matches
+  // the documented limit and is the smallest value that covers those caps.
+  app.use(express.json({ limit: '50mb' }));
   app.use('/uploads', express.static(UPLOADS_DIR));
   app.use('/prototypes', express.static(PROTOTYPES_DIR));
   app.use('/api/pipeline-tests/image-fixtures', express.static(PIPELINE_TEST_IMAGE_FIXTURES_DIR));
@@ -77,14 +89,41 @@ function createApp() {
   app.use('/api/preferences', require('./routes/preferences'));
   app.use('/api/image-parser', require('./routes/image-parser'));
   app.use('/api/pipeline-tests', require('./routes/pipeline-tests'));
+  app.use('/api/triage-tests', require('./routes/triage-tests'));
   app.use('/api/live-call-assist', require('./routes/live-call-assist'));
   app.use('/api/test-runner', require('./routes/test-runner'));
   app.use('/api/rooms', require('./routes/room'));
+
+  // Catch-all for unmatched /api routes. Without this, an unknown /api path falls
+  // through to Express's default finalizer and returns an HTML 404, which breaks
+  // clients that call res.json() and violates the { ok, code, error } contract.
+  // Scoped to /api so non-API paths (static uploads/prototypes, SPA assets) are
+  // unaffected. Placed AFTER all /api route registrations (so real routes win)
+  // and BEFORE the 4-arg error handler (so this is not treated as an error).
+  app.use('/api', (req, res) => {
+    res.status(404).json({
+      ok: false,
+      code: 'NOT_FOUND',
+      error: 'Route not found',
+    });
+  });
 
   app.use((err, req, res, next) => {
     console.error(`[${req.method} ${req.path}]`, err.message || err);
     if (err?.stack) {
       console.error(err.stack);
+    }
+
+    // Map oversized request bodies (express.json / body-parser) to the standard
+    // { ok:false, code, error } shape instead of a generic 500. body-parser sets
+    // err.type to 'entity.too.large' and the status to 413.
+    if (err && (err.type === 'entity.too.large' || err.status === 413 || err.statusCode === 413)) {
+      if (res.headersSent) return next(err);
+      return res.status(413).json({
+        ok: false,
+        code: 'PAYLOAD_TOO_LARGE',
+        error: 'Request body is too large. Reduce the image or attachment size and try again.',
+      });
     }
 
     // Report to server error pipeline for dev agent visibility

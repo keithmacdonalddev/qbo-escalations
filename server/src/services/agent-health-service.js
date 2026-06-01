@@ -3,7 +3,7 @@
 const { spawn } = require('child_process');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
 const {
-  getAgentIdentity,
+  listAgentHealthIdentitySnapshots,
   listAgentRuntimeDefaults,
   normalizeAgentRuntimeState,
 } = require('./agent-identity-service');
@@ -25,7 +25,18 @@ const {
 
 const DEFAULT_AGENT_HEALTH_INTERVAL_MS = 60_000;
 const DEFAULT_AGENT_HEALTH_TTL_MS = 30_000;
-const DEFAULT_READINESS_TIMEOUT_MS = 20_000;
+// Defensive outer ceiling on refreshAgentHealth. The inner work *should*
+// already finish in under 5s (image-parser checkProviderAvailability has its
+// own 5s outer race, and per-agent CLI/DB probes are individually bounded),
+// but if anything inside drifts (DNS hang, MongoDB stall, slow CLI shell), we
+// must still return well before the client's 15s HTTP timeout so the user
+// sees a degraded result instead of a "Request timed out after 15000ms"
+// error. The save-time recheck path is the most user-visible offender.
+const AGENT_HEALTH_REFRESH_CEILING_MS = 5_000;
+// Match per-agent display timeout from boot overlay (8s). Worst-case probe
+// latency drops from ~20s to ~8s so the readiness/canary paths can't drag
+// the /api/agent-identities/health response past the slow-request threshold.
+const DEFAULT_READINESS_TIMEOUT_MS = 8_000;
 const PROVIDER_HEALTH_LEVELS = new Set(['heartbeat', 'readiness', 'canary']);
 const IMAGE_AGENT_IDS = new Set([
   'escalation-template-parser',
@@ -34,9 +45,34 @@ const IMAGE_AGENT_IDS = new Set([
 ]);
 const AGENT_HEALTH_IDS = Object.freeze(Object.keys(DEFAULT_PROFILES));
 
+// Per-provider host hints used to enrich vague upstream diagnostics
+// (e.g. "Connection failed") with the host the agent was actually trying
+// to reach. Keep in sync with the URLs in image-parser.js.
+const PROVIDER_HOST_HINTS = Object.freeze({
+  anthropic: 'api.anthropic.com',
+  openai: 'api.openai.com',
+  gemini: 'generativelanguage.googleapis.com',
+  kimi: 'api.moonshot.ai',
+  'llm-gateway': process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100',
+  'lm-studio': process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234',
+});
+
+// Reasons emitted by upstream probes that we treat as "vague" — they tell
+// us a connection failed but not where to. We rewrite them to include the
+// provider host so the banner/toast/tooltip can show a specific diagnostic.
+const VAGUE_REASON_PATTERNS = [
+  /^connection failed$/i,
+  /^connection refused$/i,
+  /^connection (?:to provider )?timed out$/i,
+  /^(?:provider )?unavailable\.?$/i,
+  /^offline$/i,
+];
+
 let healthByAgentId = new Map();
 let lastCheckedAt = null;
 let inFlightRefresh = null;
+let inFlightRefreshForced = false;
+let inFlightRefreshKey = '';
 let healthTimer = null;
 
 function toInt(value, fallback) {
@@ -104,6 +140,15 @@ function resolveAgentIds(agentIds = []) {
   return AGENT_HEALTH_IDS;
 }
 
+function buildRefreshKey(agentIds = [], runtimeOverrides = {}) {
+  const overrideEntries = runtimeOverrides && typeof runtimeOverrides === 'object'
+    ? Object.keys(runtimeOverrides)
+      .sort()
+      .map((agentId) => `${agentId}:${JSON.stringify(runtimeOverrides[agentId])}`)
+    : [];
+  return `${agentIds.join('|')}::${overrideEntries.join('|')}`;
+}
+
 function getRuntimeForAgent(agentId, runtimeDefaults = {}, runtimeOverrides = {}) {
   const overrideRuntime = runtimeOverrides?.[agentId] || null;
   const savedRuntime = runtimeDefaults?.[agentId]?.runtime || null;
@@ -155,6 +200,83 @@ function formatAvailabilityMessage(providerStatus, roleLabel = 'Provider') {
   const summary = formatProviderSummary(providerStatus);
   if (providerStatus?.available) return `${roleLabel} is available: ${summary}.`;
   return `${roleLabel} is unavailable: ${summary}.`;
+}
+
+function getProviderHostHint(provider) {
+  const normalized = normalizeProvider(provider || '');
+  return PROVIDER_HOST_HINTS[normalized] || '';
+}
+
+function isVagueReason(reason) {
+  const trimmed = safeText(reason);
+  if (!trimmed) return true;
+  return VAGUE_REASON_PATTERNS.some((pattern) => pattern.test(trimmed));
+}
+
+// Rewrite vague upstream diagnostics into specific strings that name the
+// provider, host, model, or command so the UI banner/toast/tooltip can show
+// "<Label> offline: connection refused at host" instead of bare "offline".
+// Specific upstream messages (e.g. "LM Studio API token rejected") are
+// passed through unchanged.
+function sharpenProviderDiagnostic({
+  provider,
+  providerLabel,
+  model,
+  code,
+  reason,
+  command,
+}) {
+  if (!provider && !command) return safeText(reason);
+  const label = safeText(providerLabel) || (provider ? getProviderLabel(provider) : '') || provider || command || 'Provider';
+  const host = getProviderHostHint(provider);
+  const upstream = safeText(reason);
+  const normalizedCode = safeText(code).toUpperCase();
+
+  if (command) {
+    // CLI transports (Codex, Claude). Upstream already names the command;
+    // we add a clearer hint about what to fix.
+    if (normalizedCode === 'TIMEOUT') {
+      return `${label} CLI did not respond to '${command} --version' before timeout`
+        + (upstream ? ` (${upstream})` : '');
+    }
+    if (normalizedCode === 'CLI_UNAVAILABLE') {
+      if (/enoent|not found|not recognized|cannot find/i.test(upstream)) {
+        return `${label} CLI not installed or not on PATH (${command} --version failed)`;
+      }
+      return upstream
+        ? `${label} CLI unavailable: ${upstream}`
+        : `${label} CLI unavailable (${command} --version failed)`;
+    }
+    return upstream;
+  }
+
+  if (normalizedCode === 'NO_KEY') {
+    return `${label} API key not configured`;
+  }
+  if (normalizedCode === 'INVALID_KEY') {
+    return upstream && !isVagueReason(upstream)
+      ? `${label} API key rejected: ${upstream}`
+      : `${label} API key rejected`;
+  }
+  if (normalizedCode === 'TIMEOUT') {
+    return host
+      ? `${label} timed out connecting to ${host}`
+      : `${label} timed out`;
+  }
+  if (normalizedCode === 'PROVIDER_UNAVAILABLE') {
+    return upstream && !isVagueReason(upstream)
+      ? `${label} unavailable: ${upstream}`
+      : `${label} unavailable`;
+  }
+
+  if (isVagueReason(upstream)) {
+    return host
+      ? `${label} unreachable at ${host}`
+      : `${label} unreachable`;
+  }
+  // Upstream already produced a specific diagnostic (e.g. LM Studio's
+  // "Cannot reach LM Studio at <url>"). Pass through.
+  return upstream;
 }
 
 function checkCli(command, args = ['--version'], timeoutMs = 3000) {
@@ -238,13 +360,23 @@ async function checkRuntimeProvider(runtime, availabilityByProvider, trace = nul
       summary: 'Codex CLI availability check completed.',
       metadata: { provider, command: 'codex --version' },
     }, () => checkCli('codex'));
+    const providerLabel = getProviderLabel(provider);
     return {
       provider,
-      providerLabel: getProviderLabel(provider),
+      providerLabel,
       model,
       available: cli.available,
       code: cli.code,
-      reason: cli.reason,
+      reason: cli.available
+        ? cli.reason
+        : sharpenProviderDiagnostic({
+          provider,
+          providerLabel,
+          model,
+          code: cli.code,
+          reason: cli.reason,
+          command: 'codex',
+        }),
     };
   }
 
@@ -256,13 +388,23 @@ async function checkRuntimeProvider(runtime, availabilityByProvider, trace = nul
       summary: 'Claude CLI availability check completed.',
       metadata: { provider, command: 'claude --version' },
     }, () => checkCli('claude'));
+    const providerLabel = getProviderLabel(provider);
     return {
       provider,
-      providerLabel: getProviderLabel(provider),
+      providerLabel,
       model,
       available: cli.available,
       code: cli.code,
-      reason: cli.reason,
+      reason: cli.available
+        ? cli.reason
+        : sharpenProviderDiagnostic({
+          provider,
+          providerLabel,
+          model,
+          code: cli.code,
+          reason: cli.reason,
+          command: 'claude',
+        }),
     };
   }
 
@@ -277,13 +419,26 @@ async function checkRuntimeProvider(runtime, availabilityByProvider, trace = nul
       : `${getProviderLabel(provider)} did not have a shared availability result.`,
     metadata: { provider, code: status?.code || '', available: Boolean(status?.available) },
   });
+  const providerLabel = getProviderLabel(provider);
+  const sharedModel = safeText(status?.model) || model;
+  const sharedAvailable = Boolean(status?.available);
+  const sharedCode = safeText(status?.code) || (sharedAvailable ? 'OK' : 'UNAVAILABLE');
+  const sharedReason = safeText(status?.reason) || (sharedAvailable ? 'Provider available.' : '');
   return {
     provider,
-    providerLabel: getProviderLabel(provider),
-    model: safeText(status?.model) || model,
-    available: Boolean(status?.available),
-    code: safeText(status?.code) || (status?.available ? 'OK' : 'UNAVAILABLE'),
-    reason: safeText(status?.reason) || (status?.available ? 'Provider available.' : 'Provider unavailable.'),
+    providerLabel,
+    model: sharedModel,
+    available: sharedAvailable,
+    code: sharedCode,
+    reason: sharedAvailable
+      ? sharedReason
+      : sharpenProviderDiagnostic({
+        provider,
+        providerLabel,
+        model: sharedModel,
+        code: sharedCode,
+        reason: sharedReason,
+      }),
   };
 }
 
@@ -667,14 +822,8 @@ async function checkProviderStrategyHealth(rawStrategy = {}, options = {}) {
   };
 }
 
-async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides = {}, trace = null) {
-  const identity = await traceHealthCall(trace, {
-    name: 'Load agent identity for health',
-    functionName: 'getAgentIdentity',
-    check: 'Health refresh can read the current merged agent identity',
-    summary: `Loaded identity for health refresh: ${agentId}.`,
-    metadata: { agentId },
-  }, () => getAgentIdentity(agentId));
+async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides = {}, trace = null, identitySnapshots = {}) {
+  const identity = identitySnapshots?.[agentId] || null;
   const profile = identity?.profile || DEFAULT_PROFILES[agentId] || {};
   const enabled = identity?.enabled !== false;
   const runtime = getRuntimeForAgent(agentId, runtimeDefaults, runtimeOverrides);
@@ -741,6 +890,8 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
       provider: '',
       providerLabel: '',
       model: '',
+      code: 'NO_PROVIDER',
+      diagnostic: 'No image parser provider configured for this agent',
       message: 'Agent is enabled, but no image parser provider is configured.',
       checkedAt,
     };
@@ -784,7 +935,34 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
 
 async function refreshAgentHealth(options = {}) {
   const trace = typeof options.trace === 'function' ? options.trace : null;
-  if (inFlightRefresh) {
+  const onAgent = typeof options.onAgent === 'function' ? options.onAgent : null;
+  const forceRefresh = options.forceRefresh === true;
+  const runtimeOverrides = options.runtimeOverrides && typeof options.runtimeOverrides === 'object'
+    ? options.runtimeOverrides
+    : {};
+  // Resolve agentIds eagerly so timeout fallback and in-flight reuse both use
+  // the same requested scope.
+  const agentIds = resolveAgentIds(options.agentIds);
+  const refreshKey = buildRefreshKey(agentIds, runtimeOverrides);
+  // Track which agentIds have already been delivered via onAgent so the outer
+  // ceiling branch (below) can backfill the remaining ones with degraded
+  // shapes — the streaming client must receive one event per requested agent.
+  const onAgentEmitted = new Set();
+  function emitAgent(agentId, health) {
+    if (!onAgent || onAgentEmitted.has(agentId)) return;
+    onAgentEmitted.add(agentId);
+    try {
+      onAgent(agentId, clone(health));
+    } catch {
+      // Per-agent stream emission must never affect the aggregate result.
+    }
+  }
+  // If a refresh is already running AND either (a) the caller did not
+  // request force-refresh, or (b) the in-flight refresh is itself a
+  // force-refresh, it is safe to reuse the in-flight promise. Otherwise
+  // the caller asked for fresh data while a cached refresh is running —
+  // start a new refresh so the caller is not handed a stale snapshot.
+  if (inFlightRefresh && !onAgent && inFlightRefreshKey === refreshKey && (!forceRefresh || inFlightRefreshForced)) {
     emitTrace(trace, {
       name: 'Reuse in-flight health refresh',
       functionName: 'refreshAgentHealth',
@@ -795,8 +973,35 @@ async function refreshAgentHealth(options = {}) {
     return inFlightRefresh;
   }
 
-  inFlightRefresh = (async () => {
-    const agentIds = resolveAgentIds(options.agentIds);
+  inFlightRefreshForced = forceRefresh;
+  inFlightRefreshKey = refreshKey;
+
+  // Build a safe degraded health entry that matches the shape of a normal
+  // entry from buildAgentHealth. This is what every agent gets when the
+  // outer ceiling fires — we must keep the same keys so downstream consumers
+  // (registry merge, save-time recheck pill, banner) don't trip on missing
+  // fields.
+  function buildDegradedEntry(agentId, checkedAt) {
+    return {
+      agentId,
+      label: agentId,
+      enabled: true,
+      active: false,
+      status: 'degraded',
+      tone: 'offline',
+      provider: '',
+      providerLabel: '',
+      model: '',
+      code: 'AGENT_HEALTH_REFRESH_TIMEOUT',
+      diagnostic: 'reachability probe timed out',
+      message: 'reachability probe timed out',
+      checkedAt,
+      ok: false,
+      reason: 'reachability probe timed out',
+    };
+  }
+
+  async function doTheActualWork() {
     emitTrace(trace, {
       name: 'Resolve health refresh agent ids',
       functionName: 'resolveAgentIds',
@@ -805,17 +1010,22 @@ async function refreshAgentHealth(options = {}) {
       summary: `Health refresh will check ${agentIds.length} agent${agentIds.length === 1 ? '' : 's'}.`,
       metadata: { agentIds },
     });
-    const forceRefresh = options.forceRefresh === true;
-    const runtimeDefaults = await traceHealthCall(trace, {
-      name: 'Load runtime defaults for health',
-      functionName: 'listAgentRuntimeDefaults',
-      check: 'MongoDB runtime defaults are readable',
-      summary: 'Loaded runtime defaults for health refresh.',
-      metadata: { agentIds },
-    }, () => listAgentRuntimeDefaults(agentIds));
-    const runtimeOverrides = options.runtimeOverrides && typeof options.runtimeOverrides === 'object'
-      ? options.runtimeOverrides
-      : {};
+    const [runtimeDefaults, identitySnapshots] = await Promise.all([
+      traceHealthCall(trace, {
+        name: 'Load runtime defaults for health',
+        functionName: 'listAgentRuntimeDefaults',
+        check: 'MongoDB runtime defaults are readable',
+        summary: 'Loaded runtime defaults for health refresh.',
+        metadata: { agentIds },
+      }, () => listAgentRuntimeDefaults(agentIds)),
+      traceHealthCall(trace, {
+        name: 'Load lightweight identities for health',
+        functionName: 'listAgentHealthIdentitySnapshots',
+        check: 'MongoDB identity profile and lifecycle fields are readable',
+        summary: 'Loaded lightweight identity snapshots for health refresh.',
+        metadata: { agentIds },
+      }, () => listAgentHealthIdentitySnapshots(agentIds)),
+    ]);
     emitTrace(trace, {
       name: 'Normalize runtime overrides',
       functionName: 'refreshAgentHealth',
@@ -846,11 +1056,44 @@ async function refreshAgentHealth(options = {}) {
         metadata: { forceRefresh },
       }, () => checkProviderAvailability({ forceRefresh, trace }))
       : {};
-    const entries = await Promise.all(
-      agentIds.map((agentId) => buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides, trace))
-    );
-
+    // Promise.allSettled (was Promise.all) so a single rejected per-agent
+    // build does not blow up the whole batch — the route must always return
+    // something for every requested id. A rejection becomes a degraded entry
+    // for just that agent.
     const checkedAt = new Date().toISOString();
+    // Per-agent promises with an inline .then that fires `onAgent` as each
+    // build settles. Wrapping in a try/catch + degraded fallback inside the
+    // .then lets us emit a per-agent event for rejections too, while keeping
+    // the original allSettled outcome shape intact for the aggregate path.
+    const perAgentPromises = agentIds.map((agentId) => {
+      const p = buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider, runtimeOverrides, trace, identitySnapshots);
+      // Side-channel: fire onAgent as soon as this agent's build resolves
+      // (or rejects). We don't gate the allSettled outcome on this.
+      p.then(
+        (entry) => emitAgent(agentId, entry),
+        (err) => {
+          const degraded = buildDegradedEntry(agentId, checkedAt);
+          degraded.diagnostic = err?.message || degraded.diagnostic;
+          degraded.message = degraded.diagnostic;
+          degraded.code = err?.code || 'AGENT_HEALTH_BUILD_FAILED';
+          degraded.reason = degraded.diagnostic;
+          emitAgent(agentId, degraded);
+        }
+      );
+      return p;
+    });
+    const settledEntries = await Promise.allSettled(perAgentPromises);
+    const entries = settledEntries.map((outcome, idx) => {
+      if (outcome.status === 'fulfilled') return outcome.value;
+      const failedId = agentIds[idx];
+      const degraded = buildDegradedEntry(failedId, checkedAt);
+      degraded.diagnostic = outcome.reason?.message || degraded.diagnostic;
+      degraded.message = degraded.diagnostic;
+      degraded.code = outcome.reason?.code || 'AGENT_HEALTH_BUILD_FAILED';
+      degraded.reason = degraded.diagnostic;
+      return degraded;
+    });
+
     for (const entry of entries) {
       healthByAgentId.set(entry.agentId, entry);
     }
@@ -867,8 +1110,52 @@ async function refreshAgentHealth(options = {}) {
       checkedAt,
       agents: Object.fromEntries(entries.map((entry) => [entry.agentId, clone(entry)])),
     };
+  }
+
+  // Outer 5s ceiling. If doTheActualWork hangs past the deadline, return a
+  // degraded snapshot rather than throwing — the route handler relies on a
+  // resolved value and the client only has a 15s HTTP timeout. Throwing would
+  // leak past the route as a 500.
+  inFlightRefresh = (async () => {
+    let ceilingHandle = null;
+    const ceilingSymbol = Symbol('AGENT_HEALTH_REFRESH_TIMEOUT');
+    const ceilingPromise = new Promise((resolve) => {
+      ceilingHandle = setTimeout(() => resolve(ceilingSymbol), AGENT_HEALTH_REFRESH_CEILING_MS);
+      ceilingHandle.unref?.();
+    });
+    try {
+      const result = await Promise.race([doTheActualWork(), ceilingPromise]);
+      if (result === ceilingSymbol) {
+        const checkedAt = new Date().toISOString();
+        emitTrace(trace, {
+          name: 'Agent health refresh outer ceiling reached',
+          functionName: 'refreshAgentHealth',
+          check: `refreshAgentHealth completes within ${AGENT_HEALTH_REFRESH_CEILING_MS}ms`,
+          status: 'warning',
+          summary: `Agent health refresh hit the ${AGENT_HEALTH_REFRESH_CEILING_MS}ms outer ceiling; returning degraded snapshot.`,
+          metadata: { timeoutMs: AGENT_HEALTH_REFRESH_CEILING_MS, agentIds },
+        });
+        const degradedEntries = agentIds.map((agentId) => buildDegradedEntry(agentId, checkedAt));
+        for (const entry of degradedEntries) {
+          healthByAgentId.set(entry.agentId, entry);
+          // Backfill the stream with degraded entries for any agent that
+          // hadn't already emitted before the outer ceiling fired.
+          emitAgent(entry.agentId, entry);
+        }
+        lastCheckedAt = checkedAt;
+        return {
+          checkedAt,
+          agents: Object.fromEntries(degradedEntries.map((entry) => [entry.agentId, clone(entry)])),
+        };
+      }
+      return result;
+    } finally {
+      if (ceilingHandle) clearTimeout(ceilingHandle);
+    }
   })().finally(() => {
     inFlightRefresh = null;
+    inFlightRefreshForced = false;
+    inFlightRefreshKey = '';
   });
 
   return inFlightRefresh;

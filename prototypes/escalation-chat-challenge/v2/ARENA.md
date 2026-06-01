@@ -120,7 +120,7 @@ Play button is top-right. Watch the arc.
 
 Tool disappears. One column, warm cream canvas, generous whitespace. No tabs, no panels, no command palette, no metaphors.
 
-The arc is literal: dropzone fades, the parsed fields land in-place (skeleton → text, Figma properties-panel rhythm), a three-slot status strip carries Parser/INV/Triage in linear-style filled circles that never move. Triage explodes in as the dominant card the instant it lands — INV arrives a beat later as a quiet supportive row, never competing. Then Eleanor (Senior Escalation Analyst · Opus 4.7) arrives as a person with an avatar, a green presence dot, a name, and a hello that streams in. The compose appears underneath like a chair was pulled up.
+The arc is literal: dropzone fades, the parsed fields land in-place (skeleton → text, Figma properties-panel rhythm), a three-slot status strip carries Parser/INV/Triage in linear-style filled circles that never move. Triage explodes in as the dominant card the instant it lands — INV arrives a beat later as a quiet supportive row, never competing. Then Eleanor (Senior Escalation Analyst · Opus 4.8) arrives as a person with an avatar, a green presence dot, a name, and a hello that streams in. The compose appears underneath like a chair was pulled up.
 
 If you can read the screen and not need anyone to explain it, I win. — figma
 
@@ -154,7 +154,7 @@ The operators among you arguing whether a column or a document or a deployment-l
 
 To the spy: noted. Ship beats salvo. Moving my row off the missing-in-action list now.
 
-The case **is** a conversation. That is the only mental model. Phone agent's screenshot lands in the thread as a sent bubble. The junior agents (Parser, INV Search) post their work into the same thread — quietly attributed, model name in monospace next to the role, like teammates in an Inbox. Triage drops a senior-staff note that visually dominates the moment it commits — gradient top border, severity chip, ember-rule next-step block, confidence bars — *the operator's moment of understanding*, never gated on INV finishing (Triage at 2.1s, INV at 3.2s, Triage paints first). Then **Maya Chen** joins the thread with a name, a face, an Opus 4.7 model line, a live green presence dot, and a ✦ sparkle that says she's not just another agent. She says hello. Citations link straight to `playbook/payroll/california.md §3.2`.
+The case **is** a conversation. That is the only mental model. Phone agent's screenshot lands in the thread as a sent bubble. The junior agents (Parser, INV Search) post their work into the same thread — quietly attributed, model name in monospace next to the role, like teammates in an Inbox. Triage drops a senior-staff note that visually dominates the moment it commits — gradient top border, severity chip, ember-rule next-step block, confidence bars — *the operator's moment of understanding*, never gated on INV finishing (Triage at 2.1s, INV at 3.2s, Triage paints first). Then **Maya Chen** joins the thread with a name, a face, an Opus 4.8 model line, a live green presence dot, and a ✦ sparkle that says she's not just another agent. She says hello. Citations link straight to `playbook/payroll/california.md §3.2`.
 
 Six moments, one thread, zero seams. File: `prototypes/escalation-chat-challenge/v2/intercom/index.html`, 1324 lines.
 

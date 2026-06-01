@@ -1,0 +1,21 @@
+{
+  "name": "P4-reconciliation-question",
+  "description": "How-to question about a one-cent reconciliation discrepancy. Customer already knows the cause, just wants the recommended fix. Should produce high confidence + a single short next step.",
+  "tags": ["severity-p4", "category-reconciliation", "how-to", "high-confidence"],
+  "schemaVersion": 1,
+  "parserText": "COID/MID: 7903 / 0061-8842\nCASE: ESC-2026-0510-P4E\nCLIENT/CONTACT: Iverson Bookkeeping Services - Sam I.\nCX IS ATTEMPTING TO: Finish April reconciliation for Northshore Auto Detail. There is a $0.01 ending-balance variance against the bank statement.\nEXPECTED OUTCOME: Reconciliation completes at $0.00 difference and shows a green 'Success' banner so Sam can move on to the next client.\nACTUAL OUTCOME: The reconcile screen shows '$0.01 Difference - Cannot finish without resolving'. Sam already knows it came from a rounded sales-tax line and just wants the recommended way to clear it cleanly without distorting the P&L.\nKB/TOOLS USED: Reconciliation help article, bank statement PDF, the customer's own internal bookkeeping notes.\nTRIED TEST ACCOUNT: Not applicable - this is a routine procedural question.\nTS STEPS: Verified the variance is exactly $0.01. Confirmed it traces back to a single sales-tax adjustment posted on 04/22/2026. Asked Sam to confirm no other transactions are unreconciled. Sam wants the cleanest path - either a one-cent expense account entry or a Reconciliation Discrepancies adjustment - whichever your team typically recommends for under-a-dollar variances.",
+  "parseFields": {
+    "coid": "7903",
+    "mid": "0061-8842",
+    "caseNumber": "ESC-2026-0510-P4E",
+    "clientContact": "Iverson Bookkeeping Services - Sam I.",
+    "agentName": "Triage fixture P4 reconciliation how-to",
+    "attemptingTo": "Finish April reconciliation for Northshore Auto Detail. There is a $0.01 ending-balance variance against the bank statement.",
+    "expectedOutcome": "Reconciliation completes at $0.00 difference and shows a green 'Success' banner so Sam can move on to the next client.",
+    "actualOutcome": "The reconcile screen shows '$0.01 Difference - Cannot finish without resolving'. Sam already knows it came from a rounded sales-tax line and just wants the recommended way to clear it cleanly without distorting the P&L.",
+    "kbToolsUsed": "Reconciliation help article, bank statement PDF, the customer's own internal bookkeeping notes.",
+    "triedTestAccount": "Not applicable - this is a routine procedural question.",
+    "tsSteps": "Verified the variance is exactly $0.01. Confirmed it traces back to a single sales-tax adjustment posted on 04/22/2026. Asked Sam to confirm no other transactions are unreconciled. Sam wants the cleanest path - either a one-cent expense account entry or a Reconciliation Discrepancies adjustment - whichever your team typically recommends for under-a-dollar variances.",
+    "category": "reconciliation"
+  }
+}

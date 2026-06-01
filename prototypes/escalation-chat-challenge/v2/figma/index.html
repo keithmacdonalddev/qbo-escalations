@@ -427,7 +427,7 @@
         </div>
         <div class="ag" data-ag="triage">
           <span class="cir pending" id="cirTriage"></span>
-          <span class="who"><span class="role">Triage</span><span class="model">Opus 4.7 · senior</span></span>
+          <span class="who"><span class="role">Triage</span><span class="model">Opus 4.8 · senior</span></span>
           <span class="state" id="stTriage">queued</span>
         </div>
       </div>
@@ -501,7 +501,7 @@ const INV = {
 const ANALYST = {
   name: "Eleanor",
   role: "Senior Escalation Analyst",
-  model: "Claude Opus 4.7",
+  model: "Claude Opus 4.8",
   hello: "Hi — I've read Mara's note and the parser output. This is the unscheduled-payroll/term-date guardrail; I've also pulled INV-147914 which is the same shape. I have a clean walkthrough for Mara and a one-liner she can read to the customer. Want me to start with the customer-facing script or the in-app steps?"
 };
 
@@ -549,7 +549,7 @@ function renderTriage(){
   const c = `<div class="triage" role="region" aria-label="Triage summary">
     <div class="head">
       <span class="cir done" style="width:10px;height:10px"></span>
-      <span class="who">Triage · Senior · Opus 4.7</span>
+      <span class="who">Triage · Senior · Opus 4.8</span>
       <span class="spacer"></span>
       <span class="conf">confidence
         <span class="bar"><i style="width:${TRIAGE.confidence==='high'?'88%':TRIAGE.confidence==='medium'?'55%':'25%'}"></i></span>

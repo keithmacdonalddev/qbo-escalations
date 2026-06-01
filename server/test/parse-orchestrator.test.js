@@ -35,7 +35,7 @@ test('parse-orchestrator suite', async (t) => {
       triedTestAccount: 'no',
       coid: '12345',
     },
-    usage: { inputTokens: 100, outputTokens: 50, model: 'claude-opus-4-7' },
+    usage: { inputTokens: 100, outputTokens: 50, model: 'claude-opus-4-8' },
   });
 
   const out = await parseWithPolicy({
@@ -92,7 +92,7 @@ await t.test('parallel mode returns candidates and chooses deterministic winner'
       tsSteps: 'Tried once',
       triedTestAccount: 'unknown',
     },
-    usage: { inputTokens: 90, outputTokens: 30, model: 'claude-opus-4-7' },
+    usage: { inputTokens: 90, outputTokens: 30, model: 'claude-opus-4-8' },
   });
   codex.parseEscalation = async () => ({
     fields: {
@@ -198,7 +198,7 @@ await t.test('parallel mode can regex-fallback when both providers fail on escal
 // --- Phase 3: Usage threading through attempts and candidates ---
 
 await t.test('single mode threads usage into meta.attempts on success', async () => {
-  const mockUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-opus-4-7' };
+  const mockUsage = { inputTokens: 100, outputTokens: 50, model: 'claude-opus-4-8' };
   claude.parseEscalation = async () => ({
     fields: {
       category: 'bank-feeds',
@@ -220,12 +220,12 @@ await t.test('single mode threads usage into meta.attempts on success', async ()
   assert.equal(out.meta.attempts.length, 1);
   assert.equal(out.meta.attempts[0].inputTokens, 100);
   assert.equal(out.meta.attempts[0].outputTokens, 50);
-  assert.equal(out.meta.attempts[0].model, 'claude-opus-4-7');
+  assert.equal(out.meta.attempts[0].model, 'claude-opus-4-8');
   assert.deepStrictEqual(out.meta.attempts[0].usage, mockUsage);
 });
 
 await t.test('fallback mode threads usage into meta.attempts for both success and failure', async () => {
-  const failUsage = { inputTokens: 30, outputTokens: 0, model: 'claude-opus-4-7' };
+  const failUsage = { inputTokens: 30, outputTokens: 0, model: 'claude-opus-4-8' };
   claude.parseEscalation = async () => {
     const err = new Error('claude unavailable');
     err.code = 'PARSE_PROVIDER_FAILED';
@@ -265,7 +265,7 @@ await t.test('fallback mode threads usage into meta.attempts for both success an
 });
 
 await t.test('parallel mode threads usage into meta.candidates', async () => {
-  const claudeUsage = { inputTokens: 90, outputTokens: 30, model: 'claude-opus-4-7' };
+  const claudeUsage = { inputTokens: 90, outputTokens: 30, model: 'claude-opus-4-8' };
   const codexUsage = { inputTokens: 80, outputTokens: 60, model: 'gpt-5.5' };
   claude.parseEscalation = async () => ({
     fields: {

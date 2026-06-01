@@ -107,7 +107,7 @@ test('buildAgentBackedTriageContext uses formatted triage-agent model output', a
       'Missing info: None',
       'Confidence: High',
       'Category check: Payroll because T4 forms are generated from payroll workflows.',
-    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-7' });
+    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-8' });
     return () => {};
   };
 
@@ -139,9 +139,9 @@ test('buildAgentBackedTriageContext uses formatted triage-agent model output', a
   assert.equal(context.triageCard.generation.source, 'agent');
   assert.equal(context.triageCard.generation.label, 'Agent generated');
   assert.equal(context.triageCard.generation.provider, 'claude');
-  assert.equal(context.triageCard.generation.model, 'claude-opus-4-7');
+  assert.equal(context.triageCard.generation.model, 'claude-opus-4-8');
   assert.equal(context.triageMeta.providerUsed, 'claude');
-  assert.equal(context.triageMeta.model, 'claude-opus-4-7');
+  assert.equal(context.triageMeta.model, 'claude-opus-4-8');
   assert.equal(context.triageMeta.usedRuleFallback, false);
 });
 
@@ -174,7 +174,7 @@ test('buildAgentBackedTriageContext runs Known Issue Search Agent alongside tria
     noMatchReason: '',
     needsMoreInfo: [],
     validation: { passed: true, issues: [], toolSearchCount: 1, fetchedInvestigationCount: 1 },
-    meta: { providerUsed: 'claude', model: 'claude-opus-4-7' },
+    meta: { providerUsed: 'claude', model: 'claude-opus-4-8' },
   });
 
   let capturedMessage = '';
@@ -188,7 +188,7 @@ test('buildAgentBackedTriageContext runs Known Issue Search Agent alongside tria
       'Missing info: Tax year',
       'Confidence: High',
       'Category check: Payroll because T4 forms are generated from payroll workflows.',
-    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-7' });
+    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-8' });
     return () => {};
   };
 
@@ -233,7 +233,7 @@ test('buildAgentBackedTriageContext marks rule fallback triage as server generat
   });
 
   claude.chat = ({ onDone }) => {
-    onDone('Not the required labeled fields.', { inputTokens: 12, outputTokens: 7, model: 'claude-opus-4-7' });
+    onDone('Not the required labeled fields.', { inputTokens: 12, outputTokens: 7, model: 'claude-opus-4-8' });
     return () => {};
   };
 
@@ -281,7 +281,7 @@ test('buildAgentBackedTriageContext warns when Triage Agent runtime is not saved
       'Missing info: None',
       'Confidence: High',
       'Category check: Payroll because T4 forms are generated from payroll workflows.',
-    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-7' });
+    ].join('\n'), { inputTokens: 12, outputTokens: 34, model: 'claude-opus-4-8' });
     return () => {};
   };
 

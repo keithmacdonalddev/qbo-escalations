@@ -13,6 +13,9 @@ const {
   buildCliProviderCallPackage,
   recordCliProviderCallPackage,
 } = require('../src/services/provider-call-package-recorder');
+const {
+  requireProviderPackageCapture,
+} = require('../src/services/providers/provider-handoff');
 const { redactProviderCallPackage } = require('../src/services/provider-call-package-redaction');
 
 const originalSpawn = childProcess.spawn;
@@ -339,6 +342,178 @@ test('codex transcribeImage returns normally and writes no record when capture i
   await __waitForProviderPackageRecorderSettled();
   assert.equal(result.text, 'NO CAPTURE TEXT');
   assert.equal(await ProviderCallPackage.countDocuments({}), 0);
+});
+
+test('codex chat honors caller-supplied capture context and force-captures the CLI package', async () => {
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+  let donePayload = null;
+  const providerEvents = [];
+
+  const done = new Promise((resolve, reject) => {
+    codex.chat({
+      messages: [{ role: 'user', content: 'Read the image.' }],
+      systemPrompt: 'Parser instructions',
+      images: ['data:image/png;base64,aGVsbG8='],
+      model: 'gpt-5.5',
+      reasoningEffort: 'high',
+      timeoutMs: 1000,
+      captureContext: {
+        providerId: 'gpt-5.5',
+        providerResearchId: 'openai-cli',
+        providerPathType: 'cli',
+        callSite: 'image-parser:callCodex',
+        operation: 'image-parse',
+        forceCapture: true,
+        source: {
+          file: 'server/src/services/image-parser.js',
+          functionName: 'callCodex',
+          helperName: 'codex.chat',
+          spawnSite: 'codex.chat',
+        },
+      },
+      onProviderEvent(eventType, payload) {
+        providerEvents.push({ eventType, payload });
+      },
+      onChunk() {},
+      onThinkingChunk() {},
+      onDone(text, usage, providerTrace) {
+        donePayload = { text, usage, providerTrace };
+        resolve();
+      },
+      onError: reject,
+    });
+  });
+
+  assert.equal(spawnCalls.length, 1);
+  const { child, args } = spawnCalls[0];
+  assert.ok(args.includes('--image'));
+  emitStdoutLines(child, [
+    JSON.stringify({ item: { type: 'reasoning', id: 'r1', text: 'Thinking trace' } }),
+    JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'COID/MID: 123' } }),
+    JSON.stringify({ type: 'usage', prompt_tokens: 20, completion_tokens: 10, model: 'gpt-5.5' }),
+  ]);
+  closeChild(child, 0);
+
+  await done;
+  assert.equal(donePayload.text, 'COID/MID: 123');
+  assert.equal(donePayload.usage.inputTokens, 20);
+  assert.equal(donePayload.providerTrace.providerHarness, 'openai-cli');
+  assert.equal(donePayload.providerTrace.providerPackageId.length, 24);
+  assert.equal(donePayload.providerTrace.packageCaptureQueued, true);
+  assert.equal(donePayload.providerTrace.packageCaptureStatus, 'queued');
+  assert.equal(typeof donePayload.providerTrace.packageCapturePromise?.then, 'function');
+
+  await requireProviderPackageCapture({
+    providerTrace: donePayload.providerTrace,
+    onProviderEvent(eventType, payload) {
+      providerEvents.push({ eventType, payload });
+    },
+    providerId: donePayload.providerTrace.providerId,
+    providerHarness: donePayload.providerTrace.providerHarness,
+  });
+  assert.equal(donePayload.providerTrace.packageCaptureStatus, 'saved');
+  assert.equal(donePayload.providerTrace.packageReadbackStatus, 'confirmed');
+
+  const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callCodex' }).lean();
+  assert.ok(saved, 'expected a provider call package record');
+  assert.equal(donePayload.providerTrace.providerPackageId, String(saved._id));
+  assert.equal(saved.providerId, 'gpt-5.5');
+  assert.equal(saved.providerResearchId, 'openai-cli');
+  assert.equal(saved.providerPathType, 'cli');
+  assert.equal(saved.operation, 'image-parse');
+  assert.equal(saved.cli.command, 'codex');
+  assert.equal(saved.cli.modelRequested, 'gpt-5.5');
+  assert.equal(saved.cli.reasoningEffort, 'high');
+  assert.equal(saved.cli.stdin.text, child.getStdinText());
+  assert.equal(saved.cli.stdout.lines.length, 3);
+  assert.equal(saved.cli.stdout.jsonlEvents.length, 3);
+  assert.equal(saved.cli.process.exitCode, 0);
+  assert.equal(saved.cli.process.closed, true);
+  assert.equal(saved.outcome, 'success');
+  assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_started'), true);
+  assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_saved'), true);
+  assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_wait_started'), true);
+  assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_read_confirmed'), true);
+  assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_confirmed'), true);
+});
+
+test('codex chat records cleanup as an aborted CLI package', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const cleanup = codex.chat({
+    messages: [{ role: 'user', content: 'hello' }],
+    model: 'gpt-5.5',
+    reasoningEffort: 'high',
+    timeoutMs: 1000,
+    onChunk() {},
+    onDone() {},
+    onError() {},
+  });
+
+  const { child } = spawnCalls[0];
+  emitStdoutLines(child, [
+    JSON.stringify({ item: { type: 'agent_message', id: 'a1', text: 'partial' } }),
+  ]);
+  const abortData = cleanup();
+  closeChild(child, null, 'SIGTERM');
+
+  assert.equal(abortData.partialResponse, 'partial');
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:chat' }).lean();
+  assert.ok(saved, 'expected aborted chat package');
+  assert.equal(saved.outcome, 'aborted');
+  assert.equal(saved.cli.process.killed, true);
+  assert.equal(saved.cli.process.killSignal, 'SIGTERM');
+  assert.equal(saved.cli.process.closed, true);
+  assert.equal(saved.cli.process.signal, 'SIGTERM');
+  assert.equal(saved.error.code, 'ABORT_ERR');
+});
+
+test('codex parseEscalation writes one background CLI package record on success', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const spawnCalls = installSpawnMock();
+  const codex = requireFresh('../src/services/codex');
+
+  const promise = codex.parseEscalation('CASE: CS-CODEX-001', {
+    model: 'gpt-5.5',
+    reasoningEffort: 'high',
+    timeoutMs: 1000,
+  });
+
+  const { child } = spawnCalls[0];
+  emitStdoutLines(child, [
+    JSON.stringify({
+      item: {
+        type: 'agent_message',
+        id: 'a1',
+        text: '{"category":"general","caseNumber":"CS-CODEX-001","triedTestAccount":"unknown"}',
+      },
+    }),
+    JSON.stringify({ type: 'usage', prompt_tokens: 30, completion_tokens: 15, model: 'gpt-5.5' }),
+  ]);
+  closeChild(child, 0);
+
+  const result = await promise;
+  assert.equal(result.fields.caseNumber, 'CS-CODEX-001');
+  assert.equal(result.usage.inputTokens, 30);
+
+  await __waitForProviderPackageRecorderSettled();
+  const saved = await ProviderCallPackage.findOne({ callSite: 'codex:parseEscalation' }).lean();
+  assert.ok(saved, 'expected parseEscalation provider package');
+  assert.equal(saved.providerId, 'codex');
+  assert.equal(saved.providerResearchId, 'openai-cli');
+  assert.equal(saved.providerPathType, 'cli');
+  assert.equal(saved.operation, 'parse-escalation');
+  assert.equal(saved.cli.modelRequested, 'gpt-5.5');
+  assert.equal(saved.cli.reasoningEffort, 'high');
+  assert.equal(saved.cli.stdin.text, child.getStdinText());
+  assert.equal(saved.cli.stdout.jsonlEvents.length, 2);
+  assert.equal(saved.cli.process.exitCode, 0);
+  assert.equal(saved.outcome, 'success');
 });
 
 test('codex transcribeImage does not wait for background Mongo insert', async () => {

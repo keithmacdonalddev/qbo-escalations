@@ -63,6 +63,68 @@ const IMAGE_PARSER_EFFORTS_BY_PROVIDER = Object.freeze({
   ])),
 });
 
+const CODEX_DETERMINISM_PROFILES = Object.fromEntries(CODEX_IMAGE_PARSER_OPTIONS.map((option) => [
+  option.value,
+  Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'This model can vary between runs. The app checks the answer after the AI replies, so use recent test results before relying on it.',
+  }),
+]));
+
+const IMAGE_PARSER_DETERMINISM_BY_PROVIDER = Object.freeze({
+  'llm-gateway': Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'Gateway routing can change which AI handles the request. Use recent test results before relying on this provider.',
+  }),
+  'lm-studio': Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'Local model settings can vary. The app checks the answer after the AI replies, so review recent test results before relying on it.',
+  }),
+  anthropic: Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'The app checks this provider answer after the AI replies. Review recent test results before relying on it.',
+  }),
+  openai: Object.freeze({
+    tone: 'ok',
+    label: 'Good comparison option',
+    metric: 'Watch recent pass/fail results',
+    summary: 'This is a good provider to compare others against, but the recent test results still matter.',
+  }),
+  kimi: Object.freeze({
+    tone: 'danger',
+    label: 'Use carefully',
+    metric: 'Do not use as the main comparison',
+    summary: 'This provider requires settings that can make answers vary. Use it for trials, not as the main reliability comparison.',
+  }),
+  gemini: Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'Gemini answers are checked after the AI replies. Review recent test results before relying on this provider.',
+  }),
+  codex: Object.freeze({
+    tone: 'warn',
+    label: 'Checked after AI reply',
+    metric: 'Review recent pass/fail results',
+    summary: 'Codex model choices can vary by preset. Review recent test results before relying on this provider.',
+  }),
+  unknown: Object.freeze({
+    tone: 'warn',
+    label: 'Not rated yet',
+    metric: 'Review recent pass/fail results',
+    summary: 'This provider has not been rated in the app yet. Use recent test results before relying on it.',
+  }),
+  ...CODEX_DETERMINISM_PROFILES,
+});
+
 function formatCodexModelLabel(option) {
   const model = option.model || option.value;
   const label = option.label || option.shortLabel || model;
@@ -93,6 +155,8 @@ export const IMAGE_PARSER_MODEL_SUGGESTIONS = uniqueSuggestions([
   { value: 'gpt-5.4-nano', provider: 'openai', label: 'GPT-5.4 Nano - cheapest extraction' },
   { value: DEFAULT_IMAGE_PARSER_MODELS.kimi, provider: 'kimi', label: 'Kimi K2.5' },
   { value: DEFAULT_IMAGE_PARSER_MODELS.gemini, provider: 'gemini', label: 'Gemini 3 Flash' },
+  { value: 'gemini-3.5-flash', provider: 'gemini', label: 'Gemini 3.5 Flash' },
+  { value: 'gemini-3.1-pro-preview', provider: 'gemini', label: 'Gemini 3.1 Pro Preview' },
 ]);
 
 export function resolveImageParserSelection(provider, model = '') {
@@ -131,4 +195,18 @@ export function normalizeImageParserReasoningEffort(provider, value) {
   return getImageParserReasoningEffortOptions(provider).some((option) => option.value === normalized)
     ? normalized
     : '';
+}
+
+export function getImageParserDeterminismProfile(provider, model = '') {
+  const providerValue = typeof provider === 'string' ? provider.trim() : '';
+  const modelValue = typeof model === 'string' ? model.trim() : '';
+  const profile = IMAGE_PARSER_DETERMINISM_BY_PROVIDER[providerValue]
+    || IMAGE_PARSER_DETERMINISM_BY_PROVIDER[modelValue]
+    || IMAGE_PARSER_DETERMINISM_BY_PROVIDER.unknown;
+
+  return {
+    ...profile,
+    provider: providerValue,
+    model: modelValue,
+  };
 }

@@ -3,7 +3,7 @@
 ## Summary
 
 - **Provider path type**: Local Claude CLI subprocess path. The qbo-escalations server spawns the `claude` CLI binary as a child process via Node's `child_process.spawn`, pipes the prompt over stdin, and reads the response from the child's stdout/stderr. There is no HTTPS call made by qbo-escalations server code itself on this path — the subprocess handles its own auth (the user's Claude Max / Claude subscription, or `ANTHROPIC_API_KEY`) and its own network I/O. (The `@anthropic-ai/claude-agent-sdk` Node package is a separate code path used elsewhere in this repo — out of scope here; cited only when official docs describe the CLI's emitted output shape.)
-- **Current implementation status**: Implemented and in active production use. Backed by `server/src/services/claude.js` exporting `chat`, `parseEscalation`, `prompt`, `transcribeImage`, `warmUp`. Wired into the chat/parse/triage legs via `server/src/services/providers/registry.js`. Catalog ids are `claude` and `claude-opus-4-7` — there is no provider id literally named `anthropic-cli` in the codebase.
+- **Current implementation status**: Implemented and in active production use. Backed by `server/src/services/claude.js` exporting `chat`, `parseEscalation`, `prompt`, `transcribeImage`, `warmUp`. Wired into the chat/parse/triage legs via `server/src/services/providers/registry.js`. Catalog ids are `claude` and `claude-opus-4-8` — there is no provider id literally named `anthropic-cli` in the codebase.
 - **Full package preservation status**: Currently the server **discards most of the package**. Only an accumulated text string (`fullResponse`) and a normalized `usage` object (`{ inputTokens, outputTokens, model, rawUsage, usageComplete }`) survive past the wrapper. The original per-line JSON events from `--output-format stream-json`, the exit code, the stderr output, the spawn options, and the CLI arg list are all consumed locally for control-flow and then dropped. No Mongo record persists the raw stdout line stream today.
 - **Streaming**: `chat` uses `--output-format stream-json --verbose --include-partial-messages` and consumes newline-delimited JSON events line-by-line in real time. `parseEscalation` uses `--output-format json` (non-streaming, one JSON blob) or `--output-format text` for the transcribe sub-step. `prompt` and `transcribeImage` use `--output-format text`. So streaming is required for the chat path; the other paths are buffered.
 - **Main uncertainty**: The exact, fully-versioned shape of every stream-json event the Claude CLI emits (especially `system/init`, `message_start`, `message_delta`, partial-message `stream_event` wrappers, and the terminal `result` event) is documented at a feature level in the headless docs but not as a single exhaustive type schema. The proposed Mongo shape stores raw event objects so future schema drift does not break preservation.
@@ -11,14 +11,14 @@
 ## Provider IDs In This App
 
 - **Exact app ids (catalog)** — `shared/ai-provider-catalog.json:2-32`:
-  - `id: "claude"` — label `"Claude CLI - Opus 4.7 (Default)"`, family `claude`, transport `claude`, model `claude-opus-4-7`, `selectable: true`, `default: true`.
-  - `id: "claude-opus-4-7"` — label `"Claude CLI - Opus 4.7"`, family `claude`, transport `claude`, model `claude-opus-4-7`, `selectable: true`.
+  - `id: "claude"` — label `"Claude CLI - Opus 4.8 (Default)"`, family `claude`, transport `claude`, model `claude-opus-4-8`, `selectable: true`, `default: true`.
+  - `id: "claude-opus-4-8"` — label `"Claude CLI - Opus 4.8"`, family `claude`, transport `claude`, model `claude-opus-4-8`, `selectable: true`.
 - **There is no `anthropic-cli` id in the catalog.** The closest matches are the two ids above. The handoff prompt's `anthropic-cli` label maps to the `transport: "claude"` path in this app's source.
 - **Aliases this id appears under in code**:
   - Transport string `'claude'` — registry switch at `server/src/services/providers/registry.js:56-58` (the default case).
   - Default-when-unknown — `server/src/services/providers/registry.js:115` (`const transport = meta?.transport || 'claude';`) and `server/src/services/providers/catalog.js:67` (`getProviderTransport` defaults to `'claude'`).
   - Capability flag — `server/src/services/agent-health-service.js:87, 204` treats `transport === 'claude'` specially when deriving health-check behaviour.
-- **UI labels** (from catalog above): "Claude CLI - Opus 4.7 (Default)" / "Claude CLI - Opus 4.7"; short label "Claude CLI Opus 4.7"; icon `/provider-icons/anthropic.png`.
+- **UI labels** (from catalog above): "Claude CLI - Opus 4.8 (Default)" / "Claude CLI - Opus 4.8"; short label "Claude CLI Opus 4.8"; icon `/provider-icons/anthropic.png`.
 - **Environment variables read by the wrapper**:
   - `CLAUDE_CHAT_TIMEOUT_MS` (default 180000 ms) — `claude.js:23`.
   - `CLAUDE_PARSE_TIMEOUT_MS` (default 300000 ms) — `claude.js:24`.
@@ -417,7 +417,7 @@ Suggestive naming below — the harness may rename freely. The intent is to pres
 
 #### Required
 
-- `provider` — one of `"claude"`, `"claude-opus-4-7"` (the catalog id passed in).
+- `provider` — one of `"claude"`, `"claude-opus-4-8"` (the catalog id passed in).
 - `transport` — `"claude"`.
 - `callerSite` — string identifying which wrapper function spawned the call. Source-backed values today: `"chat"`, `"parseEscalation:image:transcribe"`, `"parseEscalation:image:parse"`, `"parseEscalation:text"`, `"prompt"`, `"transcribeImage"`, `"warmUp"`, `"workspace-proactive"`. Pins down which CLI args and stdin shape were used.
 - `requestStartedAt` — timestamp captured immediately before `spawn(...)`.
@@ -505,7 +505,7 @@ Note: `system/api_retry` events are part of the emitted package and are preserve
 
 ### Repo source (read on current `master` HEAD; line numbers verified)
 
-- `shared/ai-provider-catalog.json:2-32` — catalog entries `claude` and `claude-opus-4-7` with `transport: "claude"`.
+- `shared/ai-provider-catalog.json:2-32` — catalog entries `claude` and `claude-opus-4-8` with `transport: "claude"`.
 - `server/src/services/claude.js:1-11` — module imports including `extractClaudeUsage`, `reportServerError`, harness gate helpers.
 - `server/src/services/claude.js:12-46` — isolated tmpdir root, spawn helpers, env overrides.
 - `server/src/services/claude.js:23-26` — timeout constants (`CHAT_TIMEOUT_MS`, `PARSE_TIMEOUT_MS`).

@@ -679,6 +679,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           provider: req.body.imageParserProvider,
           model: req.body.imageParserModel || undefined,
           reasoningEffort: req.body.imageParserReasoningEffort || undefined,
+          serviceTier: req.body.imageParserServiceTier || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
         }
       : null,
@@ -2160,6 +2161,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           provider: req.body.imageParserProvider,
           model: req.body.imageParserModel || undefined,
           reasoningEffort: req.body.imageParserReasoningEffort || undefined,
+          serviceTier: req.body.imageParserServiceTier || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
         }
       : null,

@@ -6,6 +6,7 @@ const {
   getAlternateProvider,
   getProviderLabel,
   getProviderModelId,
+  getProviderTransport,
   isAllowedEffort,
   normalizeProvider,
 } = require('./providers/registry');
@@ -13,11 +14,26 @@ const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
 
 const FALLBACK_ROOM_AGENT_PROVIDERS = Object.freeze({
-  chat: 'claude-opus-4-7',
-  workspace: 'claude-opus-4-7',
-  copilot: 'claude-opus-4-7',
+  chat: 'claude-opus-4-8',
+  workspace: 'claude-opus-4-8',
+  copilot: 'claude-opus-4-8',
   'image-analyst': 'claude',
 });
+
+const CODEX_SERVICE_TIERS = new Set(['fast', 'priority', 'flex']);
+
+function providerSupportsCodexServiceTier(provider) {
+  return provider && getProviderTransport(provider) === 'codex';
+}
+
+function normalizeServiceTier(primaryProvider, fallbackProvider, value) {
+  if (!providerSupportsCodexServiceTier(primaryProvider) && !providerSupportsCodexServiceTier(fallbackProvider)) {
+    return '';
+  }
+  const requested = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (requested === 'priority') return 'fast';
+  return CODEX_SERVICE_TIERS.has(requested) ? requested : 'fast';
+}
 
 function normalizeRoomAgentRuntimeSelections(rawSelections = {}) {
   const result = {};
@@ -43,6 +59,7 @@ function normalizeRoomAgentRuntimeSelections(rawSelections = {}) {
     const reasoningEffort = requestedEffort && isAllowedEffort(primaryProvider, requestedEffort)
       ? requestedEffort
       : defaultEffort;
+    const serviceTier = normalizeServiceTier(primaryProvider, fallbackProvider, raw.serviceTier);
 
     result[agentId] = {
       mode,
@@ -51,6 +68,7 @@ function normalizeRoomAgentRuntimeSelections(rawSelections = {}) {
       fallbackProvider,
       fallbackModel,
       reasoningEffort,
+      serviceTier,
     };
   }
 
@@ -77,6 +95,7 @@ function resolveAgentRuntimePolicy(agent, selections = {}) {
   const reasoningEffort = requestedEffort && isAllowedEffort(primaryProvider, requestedEffort)
     ? requestedEffort
     : defaultEffort;
+  const serviceTier = normalizeServiceTier(primaryProvider, fallbackProvider, selection?.serviceTier);
 
   return {
     mode,
@@ -85,6 +104,7 @@ function resolveAgentRuntimePolicy(agent, selections = {}) {
     fallbackProvider,
     fallbackModel,
     reasoningEffort,
+    serviceTier,
     reportedModel: primaryModel || getProviderModelId(primaryProvider) || '',
     providerLabel: getProviderLabel(primaryProvider),
   };
@@ -117,6 +137,7 @@ function buildRoomRuntimeContext(currentAgentId, activeAgentIds = [], selections
         ? `fallback ${getProviderLabel(policy.fallbackProvider)}${policy.fallbackModel ? ` / ${policy.fallbackModel}` : ''}`
         : '',
       policy.reasoningEffort ? `effort ${policy.reasoningEffort}` : '',
+      policy.serviceTier ? `tier ${policy.serviceTier}` : '',
     ].filter(Boolean);
     lines.push(parts.join(' | '));
   }

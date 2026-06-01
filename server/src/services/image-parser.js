@@ -5,6 +5,7 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const codex = require('./codex');
 const { getLoadedModel, getModelSnapshot } = require('./lm-studio');
 const {
@@ -54,6 +55,24 @@ const {
   recordLlmGatewayProviderCallPackageInBackground,
   recordLmStudioProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
+const {
+  requireProviderPackageCapture,
+} = require('./providers/provider-handoff');
+
+function getPromptVersionFromText(promptText) {
+  const match = String(promptText || '').match(/^\s*PROMPT_VERSION:\s*([^\r\n]+)/im);
+  return match ? match[1].trim() : '';
+}
+
+function buildPromptTrace(promptId, promptText) {
+  const text = String(promptText || '');
+  return {
+    promptId,
+    promptVersion: getPromptVersionFromText(text),
+    promptSha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    promptLength: text.length,
+  };
+}
 
 // Anthropic Agent SDK provider adapter. Loaded lazily so the ESM-only SDK is
 // not imported at module load time, and so test fixtures can substitute the
@@ -143,6 +162,53 @@ function emitUserVisibleStatus(eventBus, kind, message, status, data = {}) {
     status,
     displayMessage: `${message} - ${status}`,
     surfaceToUser: true,
+  });
+}
+
+function createAbortError(message = 'Image parser request cancelled') {
+  const err = new Error(message);
+  err.name = 'AbortError';
+  err.code = 'ABORT_ERR';
+  err.statusCode = 499;
+  return err;
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) {
+    throw createAbortError();
+  }
+}
+
+function abortable(promise, signal, onAbort) {
+  if (!signal) return promise;
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    function cleanup() {
+      signal.removeEventListener('abort', handleAbort);
+    }
+    function handleAbort() {
+      if (settled) return;
+      settled = true;
+      try { onAbort?.(); } catch { /* ignore cleanup errors */ }
+      cleanup();
+      reject(createAbortError());
+    }
+    signal.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    );
   });
 }
 
@@ -1220,7 +1286,8 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
  * LM Studio — reuses jsonRequest pattern, non-streaming POST to /v1/chat/completions
  * Note: llama.cpp only supports PNG and JPEG. WebP/GIF are auto-converted to PNG.
  */
-async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus) {
+async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus, signal = null) {
+  throwIfAborted(signal);
   const effectiveModel = model || await getLoadedModel(LM_STUDIO_API_URL);
 
   // llama.cpp (LM Studio backend) only supports PNG and JPEG — convert others
@@ -1318,6 +1385,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
       },
     },
     onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+    signal,
   });
   emitUserVisibleStatus(
     eventBus,
@@ -1333,6 +1401,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
   const payloadResult = await buildLmStudioImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
+    signal,
   });
 
   return {
@@ -1350,7 +1419,8 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
 /**
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
-async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null) {
+async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null, signal = null) {
+  throwIfAborted(signal);
   const effectiveModel = model || 'claude-sonnet-4-20250514';
 
   const body = {
@@ -1407,6 +1477,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
       },
     },
     onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+    signal,
   });
 
   emitUserVisibleStatus(
@@ -1423,6 +1494,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
   const payloadResult = await buildAnthropicImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
+    signal,
   });
 
   return {
@@ -1441,7 +1513,8 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
  * Agent SDK adapter and returns the model's answer text. It does not decide
  * whether the answer is a good parser result; downstream validation owns that.
  */
-async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, timeoutMs) {
+async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, timeoutMs, signal = null) {
+  throwIfAborted(signal);
   const apiKey = await resolveApiKey('anthropic');
   if (!apiKey) {
     const err = new Error('Anthropic API key not configured');
@@ -1456,11 +1529,11 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
   // already detected upstream.
   const dataUri = `data:${mediaType || 'image/png'};base64,${rawBase64}`;
 
-  const sdkResult = await parseImageWithSDK(dataUri, {
+  const sdkResult = await abortable(parseImageWithSDK(dataUri, {
     model,
     reasoningEffort,
     timeoutMs,
-  });
+  }), signal);
 
   if (!sdkResult || typeof sdkResult.text !== 'string') {
     const err = new Error('Anthropic SDK parse failed — SDK returned no answer text');
@@ -1474,7 +1547,8 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
 /**
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
-async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null) {
+async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+  throwIfAborted(signal);
   const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
     const err = new Error('OpenAI API key not configured');
@@ -1533,6 +1607,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
       },
     },
     onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+    signal,
   });
 
   emitUserVisibleStatus(
@@ -1549,6 +1624,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
   const payloadResult = await buildOpenAiImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
+    signal,
   });
 
   return {
@@ -1565,7 +1641,8 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
 /**
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
-async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null) {
+async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null, signal = null) {
+  throwIfAborted(signal);
   const effectiveModel = model || 'gemini-3-flash-preview';
   const body = {
     system_instruction: {
@@ -1622,6 +1699,7 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, 
   const payloadResult = await buildGeminiImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
+    signal,
   });
 
   return {
@@ -1638,12 +1716,13 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, 
 /**
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
-async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus = null) {
+async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus = null, signal = null) {
+  throwIfAborted(signal);
   const effectiveModel = model || 'kimi-k2.5';
   const body = {
     model: effectiveModel,
     max_tokens: 4096,
-    temperature: 1,
+    thinking: { type: 'disabled' },
     messages: [
       { role: 'system', content: systemPrompt },
       {
@@ -1690,6 +1769,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
       },
     },
     onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+    signal,
   });
 
   emitUserVisibleStatus(
@@ -1706,6 +1786,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
   const payloadResult = await buildKimiImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
+    signal,
   });
 
   return {
@@ -1719,12 +1800,14 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
   };
 }
 
-async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus) {
+async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal = null) {
+  throwIfAborted(signal);
   const effectiveModel = getCodexImageParserModel(provider, model);
 
   return new Promise((resolve, reject) => {
     let streamedText = '';
     let settled = false;
+    let cleanupCodex = null;
     const coalescer = createThinkingCoalescer((delta) => {
       eventBus?.emit('llm.thinking', {
         provider,
@@ -1736,6 +1819,7 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
     function finishOk(text, usage, providerTrace) {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', handleAbort);
       coalescer.flush();
       resolve({
         text: String(text || streamedText || '').trim(),
@@ -1747,14 +1831,25 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
     function finishErr(err) {
       if (settled) return;
       settled = true;
+      signal?.removeEventListener('abort', handleAbort);
       coalescer.flush();
       const error = err instanceof Error ? err : new Error(String(err));
       if (!error.code) error.code = 'PROVIDER_ERROR';
       reject(error);
     }
 
+    function handleAbort() {
+      if (settled) return;
+      const cleanupResult = typeof cleanupCodex === 'function' ? cleanupCodex() : null;
+      const error = createAbortError();
+      if (cleanupResult?.providerTrace) error.providerTrace = cleanupResult.providerTrace;
+      finishErr(error);
+    }
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+
     try {
-      codex.chat({
+      cleanupCodex = codex.chat({
         messages: [
           {
             role: 'user',
@@ -1783,6 +1878,7 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
             spawnSite: 'codex.chat',
           },
         },
+        onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
         onChunk: (chunk) => { streamedText += chunk || ''; },
         onThinkingChunk: (delta) => { coalescer.push(typeof delta === 'string' ? delta : ''); },
         onDone: finishOk,
@@ -1903,6 +1999,10 @@ function providerPackageWaitMs() {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function delayWithAbort(ms, signal) {
+  return abortable(delay(ms), signal);
 }
 
 function createProviderPackageError(message, code = 'PROVIDER_ERROR') {
@@ -2224,7 +2324,8 @@ function buildCodexPayloadFromEvents(events, modelFallback = '') {
   return { text: text.trim(), usage };
 }
 
-async function waitForProviderPackage(providerTrace, eventBus = null) {
+async function waitForProviderPackage(providerTrace, eventBus = null, signal = null) {
+  throwIfAborted(signal);
   const providerPackageId = providerTrace?.providerPackageId;
   if (!providerPackageId) {
     throw createProviderPackageError(
@@ -2251,6 +2352,7 @@ async function waitForProviderPackage(providerTrace, eventBus = null) {
   const startedAt = Date.now();
   let attempt = 0;
   while (Date.now() - startedAt <= timeoutMs) {
+    throwIfAborted(signal);
     attempt += 1;
     const providerPackage = await ProviderCallPackage.findById(providerPackageId).lean();
     if (providerPackage) {
@@ -2291,7 +2393,7 @@ async function waitForProviderPackage(providerTrace, eventBus = null) {
       timeoutMs,
       status: 'retrying',
     });
-    await delay(Math.min(25 + attempt * 10, 250));
+    await delayWithAbort(Math.min(25 + attempt * 10, 250), signal);
   }
 
   emitUserVisibleStatus(
@@ -2307,8 +2409,8 @@ async function waitForProviderPackage(providerTrace, eventBus = null) {
   );
 }
 
-async function buildCodexImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildCodexImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerResearchId !== 'openai-cli' && providerPackage.providerPathType !== 'cli') {
     throw createProviderPackageError(`Unsupported provider package for Codex image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2337,8 +2439,8 @@ async function buildCodexImageParserResultFromProviderPackage(providerTrace, { e
   };
 }
 
-async function buildImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'llm-gateway') {
     throw createProviderPackageError(`Unsupported provider package for image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2374,8 +2476,8 @@ async function buildImageParserResultFromProviderPackage(providerTrace, { eventB
   };
 }
 
-async function buildOpenAiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildOpenAiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'openai' && providerPackage.providerResearchId !== 'openai-api') {
     throw createProviderPackageError(`Unsupported provider package for OpenAI image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2407,8 +2509,8 @@ async function buildOpenAiImageParserResultFromProviderPackage(providerTrace, { 
   };
 }
 
-async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'lm-studio' && providerPackage.providerResearchId !== 'lm-studio-openai-compatible') {
     throw createProviderPackageError(`Unsupported provider package for LM Studio image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2445,8 +2547,8 @@ async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, 
   };
 }
 
-async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'gemini' && providerPackage.providerResearchId !== 'gemini-api') {
     throw createProviderPackageError(`Unsupported provider package for Gemini image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2478,8 +2580,8 @@ async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { 
   };
 }
 
-async function buildAnthropicImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildAnthropicImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'anthropic' && providerPackage.providerResearchId !== 'anthropic-api') {
     throw createProviderPackageError(`Unsupported provider package for Anthropic image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2511,8 +2613,8 @@ async function buildAnthropicImageParserResultFromProviderPackage(providerTrace,
   };
 }
 
-async function buildKimiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '' } = {}) {
-  const providerPackage = await waitForProviderPackage(providerTrace, eventBus);
+async function buildKimiImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'kimi' && providerPackage.providerResearchId !== 'kimi-api') {
     throw createProviderPackageError(`Unsupported provider package for Kimi image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
@@ -2521,11 +2623,9 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
   const message = parsed?.choices?.[0]?.message || {};
   const content = typeof message.content === 'string' ? message.content : '';
   const reasoningContent = typeof message.reasoning_content === 'string' ? message.reasoning_content : '';
-  const text = (content || reasoningContent || '').trim();
+  const text = content.trim();
   const usage = buildUsageFromOpenAiCompatibleJson(parsed, providerTrace?.model || model);
-  const sourcePath = content
-    ? 'response.parsedJson.choices[0].message.content'
-    : 'response.parsedJson.choices[0].message.reasoning_content';
+  const sourcePath = 'response.parsedJson.choices[0].message.content';
   const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
 
   verboseLog('[image-parser-debug] callKimi package payload:', {
@@ -2555,7 +2655,8 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
       providerPackageId,
       sourcePath,
       role: message.role || '',
-      usedReasoningContent: !content && Boolean(reasoningContent),
+      usedReasoningContent: false,
+      reasoningContentPresent: Boolean(reasoningContent),
     },
   };
 }
@@ -2584,16 +2685,17 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
  * }>}
  */
 async function parseImage(imageBase64, options = {}) {
-  const { provider, model, reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus } = options;
+  const { provider, model, reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus, signal } = options;
+  throwIfAborted(signal);
   // Legacy structured flag: false opts out of the Anthropic SDK adapter.
   // The SDK adapter now returns provider answer text only; downstream parser
   // validation owns all decisions about whether that text is useful.
   const useStructured = options.structured !== false;
   const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
   const systemPrompt = getRenderedAgentPrompt(promptId);
+  const promptTrace = buildPromptTrace(promptId, systemPrompt);
   eventBus?.emit('parser.prompt_resolved', {
-    promptId,
-    promptLength: typeof systemPrompt === 'string' ? systemPrompt.length : 0,
+    ...promptTrace,
   });
 
   if (!imageBase64 || typeof imageBase64 !== 'string' || !imageBase64.trim()) {
@@ -2655,12 +2757,25 @@ async function parseImage(imageBase64, options = {}) {
       reasoningEffort,
       serviceTier,
       timeoutMs,
+      signal,
     });
   } else if (isCodexImageParserProvider(provider)) {
-    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus);
+    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal);
+    await requireProviderPackageCapture({
+      providerTrace: result.providerTrace,
+      onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+      providerId: result.providerTrace?.providerId || provider || 'codex',
+      providerHarness: result.providerTrace?.providerHarness || 'openai-cli',
+    });
+    eventBus?.emit('provider.package_ready_for_agent', {
+      outcome: 'success',
+      model: result.providerTrace?.model || model || '',
+      providerPackageId: result.providerTrace?.providerPackageId || null,
+    });
     const payloadResult = await buildCodexImageParserResultFromProviderPackage(result.providerTrace, {
       eventBus,
       model,
+      signal,
     });
     result = {
       ...result,
@@ -2741,6 +2856,7 @@ async function parseImage(imageBase64, options = {}) {
               },
             },
             onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+            signal,
           });
           emitUserVisibleStatus(
             eventBus,
@@ -2756,6 +2872,7 @@ async function parseImage(imageBase64, options = {}) {
             const payloadResult = await buildImageParserResultFromProviderPackage(result.providerTrace, {
               eventBus,
               model,
+              signal,
             });
             result = {
               ...result,
@@ -2770,7 +2887,7 @@ async function parseImage(imageBase64, options = {}) {
         }
         break;
       case 'lm-studio':
-        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
+        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
         break;
       case 'anthropic':
         if (useStructured) {
@@ -2778,23 +2895,23 @@ async function parseImage(imageBase64, options = {}) {
             provider,
             engine: 'anthropic-agent-sdk',
           });
-          result = await callAnthropicSdk(normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs);
+          result = await callAnthropicSdk(normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, signal);
         } else {
           eventBus?.emit('parser.sdk_path_skipped', {
             provider,
             reason: 'opt_out_legacy_structured_false',
           });
-          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
+          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
         }
         break;
       case 'openai':
-        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus);
+        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal);
         break;
       case 'gemini':
-        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus);
+        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
         break;
       case 'kimi':
-        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs, eventBus);
+        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs, eventBus, signal);
         break;
       default: {
         const err = new Error(`Invalid provider: ${provider}. Must be one of: ${VALID_IMAGE_PARSER_PROVIDERS.join(', ')}`);
@@ -2803,6 +2920,7 @@ async function parseImage(imageBase64, options = {}) {
       }
     }
   }
+  throwIfAborted(signal);
   const providerLatencyMs = Date.now() - providerStartTime;
   eventBus?.emit('parser.generation_completed', {
     provider,
@@ -2881,7 +2999,7 @@ async function parseImage(imageBase64, options = {}) {
   return {
     text: result.text,
     role,
-    promptId,
+    ...promptTrace,
     usage: result.usage,
     providerTrace: result.providerTrace || null,
     parseFields,

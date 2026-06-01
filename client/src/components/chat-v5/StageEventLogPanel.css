@@ -205,6 +205,12 @@
 }
 
 .v5-stage-log-panel__time { flex: 0 0 auto; color: #5b6168; font-family: inherit; }
+.v5-stage-log-panel__elapsed {
+  flex: 0 0 auto;
+  color: #75808c;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+}
 .v5-stage-log-panel__kind { flex: 0 0 auto; font-family: inherit; font-weight: 500; }
 .v5-stage-log-panel__sep { color: #4a4e54; flex: 0 0 auto; }
 .v5-stage-log-panel__msg { flex: 1 1 auto; min-width: 0; color: inherit; font-family: inherit; }
