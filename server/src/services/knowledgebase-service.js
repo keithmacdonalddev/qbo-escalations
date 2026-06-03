@@ -10,6 +10,7 @@ const TRUST_STATES = Object.freeze({
   TRUSTED: 'trusted',
   REJECTED: 'rejected',
   RESTRICTED: 'restricted',
+  DEPRECATED: 'deprecated',
   LEGACY_TRUSTED: 'legacy-trusted',
 });
 
@@ -27,6 +28,8 @@ const FINAL_AGENT_USES = new Set([
   ALLOWED_USES.AGENT_RESPONSE,
   ALLOWED_USES.TRIAGE,
 ]);
+
+const FINAL_AGENT_OUTCOMES = new Set(['canonical', 'edge-case']);
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -144,10 +147,11 @@ function emptyKnowledgeRecordPage({ limit = 50, offset = 0 } = {}) {
   };
 }
 
-function deriveTrustState(candidate) {
+function baseTrustState(candidate) {
   const reviewStatus = safeString(candidate?.reviewStatus, 'draft');
   const reusableOutcome = safeString(candidate?.reusableOutcome, 'case-history-only');
 
+  if (candidate?.deprecatedAt) return TRUST_STATES.DEPRECATED;
   if (reviewStatus === 'rejected') return TRUST_STATES.REJECTED;
   if (reusableOutcome === 'unsafe-to-reuse') return TRUST_STATES.RESTRICTED;
   if (reviewStatus === 'published') return TRUST_STATES.TRUSTED;
@@ -155,9 +159,28 @@ function deriveTrustState(candidate) {
   return TRUST_STATES.CANDIDATE;
 }
 
-function deriveAllowedUses(candidate) {
+function isRestrictiveTrustOverride(base, override) {
+  if (!override || !Object.values(TRUST_STATES).includes(override)) return false;
+  if ([TRUST_STATES.REJECTED, TRUST_STATES.RESTRICTED, TRUST_STATES.DEPRECATED].includes(override)) return true;
+  if (override === TRUST_STATES.CANDIDATE) return base !== TRUST_STATES.CANDIDATE;
+  if (override === TRUST_STATES.REVIEWED) {
+    return base === TRUST_STATES.TRUSTED || base === TRUST_STATES.REVIEWED;
+  }
+  if (override === TRUST_STATES.TRUSTED) return base === TRUST_STATES.TRUSTED;
+  return false;
+}
+
+function deriveTrustState(candidate) {
+  const base = baseTrustState(candidate);
+  const trustStateOverride = safeString(candidate?.trustStateOverride, '').trim();
+  return isRestrictiveTrustOverride(base, trustStateOverride) ? trustStateOverride : base;
+}
+
+function deriveBaseAllowedUses(candidate) {
   const reviewStatus = safeString(candidate?.reviewStatus, 'draft');
   const reusableOutcome = safeString(candidate?.reusableOutcome, 'case-history-only');
+  if (candidate?.deprecatedAt) return [ALLOWED_USES.DEPRECATED_WARNING, ALLOWED_USES.REVIEW_ONLY];
+
   const trusted = reviewStatus === 'published';
 
   if (reusableOutcome === 'unsafe-to-reuse') {
@@ -207,6 +230,17 @@ function deriveAllowedUses(candidate) {
   return [ALLOWED_USES.REVIEW_ONLY];
 }
 
+function deriveAllowedUses(candidate) {
+  const baseUses = deriveBaseAllowedUses(candidate);
+  const override = Array.isArray(candidate?.allowedUsesOverride)
+    ? candidate.allowedUsesOverride.filter((use) => Object.values(ALLOWED_USES).includes(use))
+    : [];
+  if (override.length === 0) return baseUses;
+  const baseSet = new Set(baseUses);
+  const restricted = [...new Set(override)].filter((use) => baseSet.has(use));
+  return restricted.length > 0 ? restricted : [ALLOWED_USES.REVIEW_ONLY];
+}
+
 function buildWarnings(candidate, trustState, allowedUses) {
   const warnings = [];
   const reviewStatus = safeString(candidate?.reviewStatus, 'draft');
@@ -219,10 +253,14 @@ function buildWarnings(candidate, trustState, allowedUses) {
   if (reusableOutcome === 'customer-specific') warnings.push('customer_specific_scope');
   if (reusableOutcome === 'temporary-incident') warnings.push('temporary_incident_scope');
   if (reusableOutcome === 'unsafe-to-reuse') warnings.push('unsafe_to_reuse');
+  if (candidate?.deprecatedAt) warnings.push('deprecated_guidance');
+  if (candidate?.supersededBy) warnings.push('superseded_by_newer_guidance');
+  if (candidate?.redaction?.customerIdentifiersRedacted) warnings.push('source_identifiers_redacted');
   if (!allowedUses.some((use) => FINAL_AGENT_USES.has(use))) warnings.push('not_allowed_for_final_agent_response');
   if (!safeString(candidate?.exactFix, '').trim()) warnings.push('missing_exact_fix');
   if (!safeString(candidate?.rootCause, '').trim()) warnings.push('missing_root_cause');
   if (trustState === TRUST_STATES.RESTRICTED) warnings.push('restricted_trust_state');
+  if (trustState === TRUST_STATES.DEPRECATED) warnings.push('deprecated_trust_state');
 
   return [...new Set(warnings)];
 }
@@ -230,17 +268,18 @@ function buildWarnings(candidate, trustState, allowedUses) {
 function buildCandidateEvidence(candidate) {
   const snapshot = candidate?.sourceSnapshot || {};
   const evidence = [];
+  const redacted = Boolean(candidate?.redaction?.customerIdentifiersRedacted);
 
   if (candidate?.escalationId) {
     evidence.push({
       type: 'escalation',
       id: safeString(candidate.escalationId),
       label: snapshot.caseNumber
-        ? `Case ${snapshot.caseNumber}`
+        ? `Case ${redacted ? '[redacted]' : snapshot.caseNumber}`
         : 'Source escalation',
       category: snapshot.category || candidate.category || '',
       status: snapshot.status || '',
-      coid: snapshot.coid || '',
+      coid: redacted && snapshot.coid ? '[redacted]' : (snapshot.coid || ''),
       resolvedAt: toIso(snapshot.resolvedAt),
       evidenceStatus: snapshot.resolvedAt ? 'finalized-case' : 'case-snapshot',
     });
@@ -266,7 +305,73 @@ function buildCandidateEvidence(candidate) {
     });
   }
 
+  const refs = Array.isArray(candidate?.evidenceRefs) ? candidate.evidenceRefs : [];
+  for (const ref of refs.slice(0, 12)) {
+    evidence.push({
+      type: safeString(ref.type, 'note'),
+      id: safeString(ref.id),
+      label: compactText(ref.label || ref.summary || ref.type, 160),
+      status: safeString(ref.status),
+      strength: clampConfidence(ref.strength),
+      summary: compactText(ref.summary, 400),
+      url: safeString(ref.url),
+      evidenceStatus: safeString(ref.status, 'supporting-evidence'),
+    });
+  }
+
   return evidence;
+}
+
+function normalizeAuditEvents(candidate) {
+  const events = Array.isArray(candidate?.auditEvents) ? candidate.auditEvents : [];
+  return events.slice(-40).reverse().map((event) => ({
+    eventId: safeString(event.eventId),
+    action: safeString(event.action),
+    actor: safeString(event.actor),
+    role: safeString(event.role),
+    summary: compactText(event.summary, 300),
+    metadata: event.metadata && typeof event.metadata === 'object' ? event.metadata : {},
+    createdAt: toIso(event.createdAt),
+  }));
+}
+
+function normalizeRelationships(candidate) {
+  const relationships = Array.isArray(candidate?.relationships) ? candidate.relationships : [];
+  return relationships.slice(0, 40).map((item) => ({
+    type: safeString(item.type, 'related'),
+    targetRecordId: safeString(item.targetRecordId),
+    targetKnowledgeCandidateId: item.targetKnowledgeCandidateId ? safeString(item.targetKnowledgeCandidateId) : null,
+    strength: clampConfidence(item.strength),
+    status: safeString(item.status, 'proposed'),
+    summary: compactText(item.summary, 300),
+    evidence: normalizeStringArray(item.evidence, 8),
+    proposedBy: safeString(item.proposedBy),
+    reviewedBy: safeString(item.reviewedBy),
+    createdAt: toIso(item.createdAt),
+    reviewedAt: toIso(item.reviewedAt),
+  }));
+}
+
+function normalizeOutcomeFeedback(candidate) {
+  const feedback = Array.isArray(candidate?.outcomeFeedback) ? candidate.outcomeFeedback : [];
+  return feedback.slice(-30).reverse().map((item) => ({
+    source: safeString(item.source, 'manual'),
+    outcome: safeString(item.outcome, 'unknown'),
+    notes: compactText(item.notes, 300),
+    actor: safeString(item.actor),
+    escalationId: item.escalationId ? safeString(item.escalationId) : null,
+    createdAt: toIso(item.createdAt),
+  }));
+}
+
+function normalizeActionRecommendations(candidate) {
+  const actions = Array.isArray(candidate?.actionRecommendations) ? candidate.actionRecommendations : [];
+  return actions.slice(0, 12).map((item) => ({
+    action: compactText(item.action, 220),
+    priority: safeString(item.priority, 'medium'),
+    rationale: compactText(item.rationale, 300),
+    createdAt: toIso(item.createdAt),
+  }));
 }
 
 function normalizeKnowledgeCandidate(candidate) {
@@ -308,8 +413,36 @@ function normalizeKnowledgeCandidate(candidate) {
       publishedDocPath: safeString(source.publishedDocPath, ''),
       publishedMarker: safeString(source.publishedMarker, ''),
       publishedSectionTitle: safeString(source.publishedSectionTitle, ''),
+      reviewedBy: safeString(source.reviewedBy, ''),
+      reviewedAt: toIso(source.reviewedAt),
+      deprecatedAt: toIso(source.deprecatedAt),
     },
     reviewNotes: compactText(source.reviewNotes, 500),
+    reviewedBy: safeString(source.reviewedBy, ''),
+    reviewedAt: toIso(source.reviewedAt),
+    deprecatedAt: toIso(source.deprecatedAt),
+    deprecatedReason: compactText(source.deprecatedReason, 500),
+    supersededBy: source.supersededBy ? `candidate:${safeString(source.supersededBy)}` : null,
+    trustStateOverride: safeString(source.trustStateOverride, ''),
+    allowedUsesOverride: Array.isArray(source.allowedUsesOverride) ? source.allowedUsesOverride : [],
+    scope: {
+      appliesTo: normalizeStringArray(source.scope?.appliesTo, 12),
+      excludes: normalizeStringArray(source.scope?.excludes, 12),
+      versionNotes: compactText(source.scope?.versionNotes, 500),
+      customerScope: compactText(source.scope?.customerScope, 240),
+      lastValidatedAt: toIso(source.scope?.lastValidatedAt),
+    },
+    redaction: {
+      customerIdentifiersRedacted: Boolean(source.redaction?.customerIdentifiersRedacted),
+      fields: normalizeStringArray(source.redaction?.fields, 16),
+      notes: compactText(source.redaction?.notes, 300),
+      redactedBy: safeString(source.redaction?.redactedBy, ''),
+      redactedAt: toIso(source.redaction?.redactedAt),
+    },
+    relationships: normalizeRelationships(source),
+    actionRecommendations: normalizeActionRecommendations(source),
+    outcomeFeedback: normalizeOutcomeFeedback(source),
+    auditEvents: normalizeAuditEvents(source),
     warnings,
     updatedAt: toIso(source.updatedAt),
   };
@@ -407,6 +540,19 @@ function buildCandidateFilter({ query, reviewStatus, category, reusableOutcome }
   return filter;
 }
 
+function normalizeKnowledgeRecordId(value) {
+  const text = safeString(value, '').trim();
+  if (!text) return { sourceType: '', id: '' };
+  if (text.startsWith('candidate:')) {
+    return { sourceType: 'knowledge-candidate', id: text.slice('candidate:'.length) };
+  }
+  return { sourceType: 'knowledge-candidate', id: text };
+}
+
+function isLikelyObjectId(value) {
+  return /^[a-f0-9]{24}$/i.test(safeString(value, '').trim());
+}
+
 function filterRecordForPolicy(record, {
   allowedUse = '',
   trustState = '',
@@ -415,6 +561,13 @@ function filterRecordForPolicy(record, {
   if (!record) return false;
   if (trustState && record.trustState !== trustState) return false;
   if (allowedUse && !record.allowedUses.includes(allowedUse)) return false;
+  if (
+    record.sourceType === 'knowledge-candidate'
+    && (FINAL_AGENT_USES.has(allowedUse) || !includeCandidates)
+    && (record.reviewStatus !== 'published' || record.trustState !== TRUST_STATES.TRUSTED)
+  ) {
+    return false;
+  }
   if (!includeCandidates && ![
     TRUST_STATES.TRUSTED,
     TRUST_STATES.LEGACY_TRUSTED,
@@ -422,6 +575,50 @@ function filterRecordForPolicy(record, {
     return false;
   }
   return true;
+}
+
+function applyPolicyQueryConstraints(filter, {
+  allowedUse = '',
+  trustState = '',
+  includeCandidates = true,
+} = {}) {
+  const requestedOutcome = typeof filter.reusableOutcome === 'string'
+    ? safeString(filter.reusableOutcome, '')
+    : '';
+  const shouldConstrainTrustedPolicy = !includeCandidates
+    || trustState === TRUST_STATES.TRUSTED
+    || FINAL_AGENT_USES.has(allowedUse);
+  const requirePublished = () => {
+    if (filter.reviewStatus && filter.reviewStatus !== 'published') {
+      filter._id = null;
+    } else {
+      filter.reviewStatus = 'published';
+    }
+  };
+  if (shouldConstrainTrustedPolicy) {
+    requirePublished();
+    filter.deprecatedAt = null;
+    if (!requestedOutcome) {
+      filter.reusableOutcome = { $ne: 'unsafe-to-reuse' };
+    }
+  }
+  if (FINAL_AGENT_USES.has(allowedUse)) {
+    if (requestedOutcome && !FINAL_AGENT_OUTCOMES.has(requestedOutcome)) {
+      filter._id = null;
+    } else {
+      filter.reusableOutcome = requestedOutcome || { $in: [...FINAL_AGENT_OUTCOMES] };
+    }
+  }
+  return filter;
+}
+
+async function getKnowledgeRecordById(recordId) {
+  const parsed = normalizeKnowledgeRecordId(recordId);
+  if (!parsed.id || parsed.sourceType !== 'knowledge-candidate' || !isLikelyObjectId(parsed.id) || !isKnowledgeCandidateDbReady()) {
+    return null;
+  }
+  const doc = await KnowledgeCandidate.findById(parsed.id).lean();
+  return doc ? normalizeKnowledgeCandidate(doc) : null;
 }
 
 function normalizeSort(sort) {
@@ -447,9 +644,35 @@ async function listKnowledgeRecords(options = {}) {
   const includeCandidates = parseBoolean(options.includeCandidates, true);
   const filter = buildCandidateFilter(options);
   const sort = normalizeSort(options.sort);
+  const policyOptions = {
+    allowedUse: safeString(options.allowedUse, ''),
+    trustState: safeString(options.trustState, ''),
+    includeCandidates,
+  };
+  applyPolicyQueryConstraints(filter, policyOptions);
+  const hasDerivedPolicyFilter = Boolean(
+    policyOptions.allowedUse
+    || policyOptions.trustState
+    || !includeCandidates
+  );
 
   if (!isKnowledgeCandidateDbReady()) {
     return emptyKnowledgeRecordPage({ limit, offset });
+  }
+
+  if (hasDerivedPolicyFilter) {
+    const docs = await KnowledgeCandidate.find(filter)
+      .sort(sort)
+      .lean();
+    const filtered = docs
+      .map(normalizeKnowledgeCandidate)
+      .filter((record) => filterRecordForPolicy(record, policyOptions));
+    return {
+      records: filtered.slice(offset, offset + limit),
+      total: filtered.length,
+      offset,
+      limit,
+    };
   }
 
   const [docs, total] = await Promise.all([
@@ -463,11 +686,7 @@ async function listKnowledgeRecords(options = {}) {
 
   const records = docs
     .map(normalizeKnowledgeCandidate)
-    .filter((record) => filterRecordForPolicy(record, {
-      allowedUse: safeString(options.allowedUse, ''),
-      trustState: safeString(options.trustState, ''),
-      includeCandidates,
-    }));
+    .filter((record) => filterRecordForPolicy(record, policyOptions));
 
   return {
     records,
@@ -596,6 +815,8 @@ async function getKnowledgeSummary() {
           [TRUST_STATES.REVIEWED]: 0,
           [TRUST_STATES.TRUSTED]: 0,
           [TRUST_STATES.REJECTED]: 0,
+          [TRUST_STATES.RESTRICTED]: 0,
+          [TRUST_STATES.DEPRECATED]: 0,
         },
       },
       legacyPlaybook: {
@@ -618,10 +839,14 @@ async function getKnowledgeSummary() {
     reviewStatusCounts,
     reusableOutcomeCounts,
     publishTargetCounts,
+    deprecatedCount,
+    restrictedCount,
   ] = await Promise.all([
     KnowledgeCandidate.aggregate([{ $group: { _id: '$reviewStatus', count: { $sum: 1 } } }]),
     KnowledgeCandidate.aggregate([{ $group: { _id: '$reusableOutcome', count: { $sum: 1 } } }]),
     KnowledgeCandidate.aggregate([{ $group: { _id: '$publishTarget', count: { $sum: 1 } } }]),
+    KnowledgeCandidate.countDocuments({ deprecatedAt: { $ne: null } }),
+    KnowledgeCandidate.countDocuments({ reusableOutcome: 'unsafe-to-reuse' }),
   ]);
 
   const byReviewStatus = {};
@@ -637,6 +862,8 @@ async function getKnowledgeSummary() {
     [TRUST_STATES.REVIEWED]: byReviewStatus.approved || 0,
     [TRUST_STATES.TRUSTED]: byReviewStatus.published || 0,
     [TRUST_STATES.REJECTED]: byReviewStatus.rejected || 0,
+    [TRUST_STATES.RESTRICTED]: restrictedCount || 0,
+    [TRUST_STATES.DEPRECATED]: deprecatedCount || 0,
   };
 
   return {
@@ -669,9 +896,11 @@ module.exports = {
   buildAgentKnowledgeContext,
   deriveAllowedUses,
   deriveTrustState,
+  getKnowledgeRecordById,
   getKnowledgeSummary,
   listKnowledgeRecords,
   normalizeKnowledgeCandidate,
+  normalizeKnowledgeRecordId,
   normalizePlaybookChunk,
   isKnowledgeCandidateDbReady,
   parseBoolean,

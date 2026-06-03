@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
 const EscalationAttentionItem = require('../models/EscalationAttentionItem');
-const { hasCategoryPlaybook, publishKnowledgeCandidate, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
+const { hasCategoryPlaybook, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 const {
   buildDuplicateSafetyForEscalation,
   createLinkedEscalationFromConversation,
@@ -20,6 +20,12 @@ const {
   syncResolutionDisciplineAttentionItem,
   syncStaleEscalationAttentionItems,
 } = require('../lib/escalation-attention');
+const {
+  assertKnowledgePermission,
+  publishKnowledgeRecord,
+  resolveKnowledgeActor,
+  updateKnowledgeRecord,
+} = require('../services/knowledgebase-management-service');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { createRateLimiter } = require('../middleware/rate-limit');
@@ -87,6 +93,15 @@ function compactText(value, maxChars = 240) {
   if (!compact) return '';
   if (!Number.isFinite(maxChars) || maxChars <= 0 || compact.length <= maxChars) return compact;
   return compact.slice(0, Math.max(0, maxChars - 3)).trimEnd() + '...';
+}
+
+function parseBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  const normalized = safeString(value, '').trim().toLowerCase();
+  if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) return false;
+  return fallback;
 }
 
 function firstNonEmpty(values, fallback = '') {
@@ -1185,19 +1200,21 @@ router.patch('/:id/knowledge', async (req, res) => {
   }
 
   try {
-    const updates = sanitizeKnowledgeCandidateUpdates(req.body);
-    knowledge.set(updates);
-    await knowledge.save();
-    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
-    return res.json({ ok: true, knowledge: knowledge.toObject(), knowledgeReview });
+    const result = await updateKnowledgeRecord(
+      `candidate:${knowledge._id}`,
+      req.body || {},
+      resolveKnowledgeActor(req)
+    );
+    const refreshed = await KnowledgeCandidate.findById(knowledge._id).lean();
+    return res.json({ ok: true, knowledge: refreshed, knowledgeReview: result.knowledgeReview });
   } catch (err) {
     const code = err && err.code ? err.code : 'INVALID_KNOWLEDGE_UPDATE';
-    const status = code.startsWith('INVALID_') ? 400 : 500;
+    const status = err?.status || (code.startsWith('INVALID_') ? 400 : 500);
     return res.status(status).json({ ok: false, code, error: err.message || 'Invalid knowledge update' });
   }
 });
 
-// POST /api/escalations/:id/knowledge/publish -- Publish an approved draft into the playbook
+// POST /api/escalations/:id/knowledge/publish -- Publish an approved draft as database knowledge, optionally exporting markdown
 router.post('/:id/knowledge/publish', async (req, res) => {
   if (!isValidObjectId(req.params.id)) {
     return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
@@ -1211,6 +1228,15 @@ router.post('/:id/knowledge/publish', async (req, res) => {
   const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
   if (!knowledge) {
     return res.status(404).json({ ok: false, code: 'KNOWLEDGE_NOT_FOUND', error: 'Knowledge draft not found' });
+  }
+  try {
+    assertKnowledgePermission(resolveKnowledgeActor(req), 'publish');
+  } catch (err) {
+    return res.status(err?.status || 403).json({
+      ok: false,
+      code: err?.code || 'KNOWLEDGE_PERMISSION_DENIED',
+      error: err?.message || 'Knowledgebase publish permission is required.',
+    });
   }
   if (knowledge.reviewStatus === 'published' && knowledge.publishedAt) {
     return res.json({ ok: true, knowledge: knowledge.toObject(), published: false, idempotent: true });
@@ -1231,30 +1257,31 @@ router.post('/:id/knowledge/publish', async (req, res) => {
   }
 
   try {
-    const publish = publishKnowledgeCandidate({ knowledge: knowledge.toObject(), escalation });
-    knowledge.reviewStatus = 'published';
-    knowledge.publishedAt = new Date();
-    knowledge.publishedDocType = publish.docType;
-    knowledge.publishedDocPath = publish.relativePath;
-    knowledge.publishedMarker = publish.marker;
-    knowledge.publishedSectionTitle = publish.sectionTitle;
-    await knowledge.save();
-    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
+    const markdownDisabled = parseBoolean(process.env.KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED, false);
+    const exportMarkdown = !markdownDisabled && parseBoolean(req.body && req.body.exportMarkdown, true);
+    const result = await publishKnowledgeRecord(
+      `candidate:${knowledge._id}`,
+      { ...(req.body || {}), exportMarkdown },
+      resolveKnowledgeActor(req)
+    );
+    const refreshed = await KnowledgeCandidate.findById(knowledge._id).lean();
 
     return res.json({
       ok: true,
-      knowledge: knowledge.toObject(),
-      publish,
-      published: true,
-      knowledgeReview,
+      knowledge: refreshed,
+      publish: result.export,
+      publishMode: result.export ? 'markdown-export' : 'database',
+      published: result.published,
+      idempotent: result.idempotent,
+      knowledgeReview: result.knowledgeReview,
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_PUBLISH_FAILED';
-    const status = (
+    const status = err?.status || ((
       code === 'INVALID_PUBLISH_TARGET'
       || code === 'CATEGORY_PLAYBOOK_NOT_FOUND'
       || code === 'KNOWLEDGE_REQUIRED'
-    ) ? 400 : 500;
+    ) ? 400 : 500);
     return res.status(status).json({ ok: false, code, error: err.message || 'Failed to publish knowledge draft' });
   }
 });
@@ -1283,13 +1310,29 @@ router.post('/:id/knowledge/unpublish', async (req, res) => {
   }
 
   try {
-    const result = unpublishKnowledgeCandidate({ knowledge: knowledge.toObject() });
+    const actor = resolveKnowledgeActor(req);
+    assertKnowledgePermission(actor, 'publish');
+    const result = knowledge.publishedDocType === 'database'
+      ? { removed: false, databaseOnly: true }
+      : unpublishKnowledgeCandidate({ knowledge: knowledge.toObject() });
     knowledge.reviewStatus = 'draft';
     knowledge.publishedAt = null;
-    knowledge.publishedDocType = null;
-    knowledge.publishedDocPath = null;
-    knowledge.publishedMarker = null;
-    knowledge.publishedSectionTitle = null;
+    knowledge.publishedDocType = '';
+    knowledge.publishedDocPath = '';
+    knowledge.publishedMarker = '';
+    knowledge.publishedSectionTitle = '';
+    knowledge.auditEvents = Array.isArray(knowledge.auditEvents) ? knowledge.auditEvents : [];
+    knowledge.auditEvents.push({
+      eventId: `kb-record-unpublish-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`,
+      action: 'record.unpublish',
+      actor: actor.actor,
+      role: actor.role,
+      summary: result.databaseOnly
+        ? 'Database-published knowledge record unpublished.'
+        : 'Knowledge record unpublished and removed from markdown.',
+      metadata: { result },
+      createdAt: new Date(),
+    });
     await knowledge.save();
     const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
 
@@ -1301,7 +1344,7 @@ router.post('/:id/knowledge/unpublish', async (req, res) => {
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_UNPUBLISH_FAILED';
-    const status = code === 'PUBLISHED_FILE_NOT_FOUND' ? 404 : 500;
+    const status = err?.status || (code === 'PUBLISHED_FILE_NOT_FOUND' ? 404 : 500);
     return res.status(status).json({ ok: false, code, error: err.message || 'Failed to unpublish knowledge' });
   }
 });

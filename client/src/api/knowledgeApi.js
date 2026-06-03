@@ -39,6 +39,82 @@ export async function listKnowledgeRecords(options = {}) {
   };
 }
 
+export async function getKnowledgeRecord(id) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}`, {}, 'Failed to load knowledge record');
+  return data.record;
+}
+
+export async function updateKnowledgeRecord(id, fields) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields || {}),
+  }, 'Failed to update knowledge record');
+  return data.record;
+}
+
+export async function publishKnowledgeRecord(id, options = {}) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      exportMarkdown: Boolean(options.exportMarkdown),
+    }),
+  }, 'Failed to publish knowledge record');
+  return data;
+}
+
+export async function deprecateKnowledgeRecord(id, fields = {}) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/deprecate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  }, 'Failed to deprecate knowledge record');
+  return data.record;
+}
+
+export async function redactKnowledgeRecord(id, fields = {}) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/redact`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  }, 'Failed to redact knowledge record');
+  return data.record;
+}
+
+export async function addKnowledgeRelationship(id, fields = {}) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/relationships`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  }, 'Failed to add knowledge relationship');
+  return data.record;
+}
+
+export async function recordKnowledgeFeedback(id, fields = {}) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  }, 'Failed to record knowledge feedback');
+  return data.record;
+}
+
+export async function getKnowledgeOntologySummary() {
+  const data = await apiFetchJson(`${BASE}/ontology/summary`, {}, 'Failed to load ontology summary');
+  return data.summary;
+}
+
+export async function exportKnowledge(options = {}) {
+  const params = buildKnowledgeParams({
+    ...options,
+    limit: options.limit || 500,
+  });
+  params.set('format', options.format || 'json');
+  const data = await apiFetchJson(`${BASE}/export?${params}`, {}, 'Failed to export knowledgebase');
+  return data.export;
+}
+
 export async function searchKnowledge(options = {}) {
   const params = buildKnowledgeParams(options);
   const data = await apiFetchJson(`${BASE}/search?${params}`, {}, 'Failed to search knowledge');

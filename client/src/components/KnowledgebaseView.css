@@ -132,7 +132,8 @@
 
 .knowledgebase-filter-panel,
 .knowledgebase-agent-status,
-.knowledgebase-scan-panel {
+.knowledgebase-scan-panel,
+.knowledgebase-record-detail {
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius, 8px);
   background: var(--bg-raised);
@@ -222,6 +223,11 @@
   border: 1px solid var(--line-subtle);
   border-radius: var(--radius, 8px);
   background: var(--bg-raised);
+}
+
+.knowledgebase-record.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--line-subtle));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
 .knowledgebase-record-top,
@@ -325,11 +331,126 @@
 }
 
 .knowledgebase-agent-status,
-.knowledgebase-scan-panel {
+.knowledgebase-scan-panel,
+.knowledgebase-record-detail {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
   padding: var(--sp-4);
+}
+
+.knowledgebase-record-detail {
+  max-height: calc(100vh - var(--sp-6));
+  overflow: auto;
+}
+
+.knowledgebase-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.knowledgebase-detail-header h2 {
+  margin: var(--sp-2) 0 0;
+  color: var(--ink-primary);
+  font-size: var(--text-md);
+  line-height: 1.25;
+}
+
+.knowledgebase-detail-header p {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.knowledgebase-detail-actions,
+.knowledgebase-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.knowledgebase-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.knowledgebase-detail-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.knowledgebase-detail-field span {
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.knowledgebase-detail-field input,
+.knowledgebase-detail-field select,
+.knowledgebase-detail-field textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+  color: var(--ink-primary);
+  font: inherit;
+}
+
+.knowledgebase-detail-field input,
+.knowledgebase-detail-field select {
+  min-height: 36px;
+  padding: 0 var(--sp-3);
+}
+
+.knowledgebase-detail-field textarea {
+  resize: vertical;
+  padding: var(--sp-2) var(--sp-3);
+  line-height: 1.45;
+}
+
+.knowledgebase-detail-notice {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--line-subtle));
+  border-radius: var(--radius, 8px);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-raised));
+  color: var(--ink-primary);
+  font-size: var(--text-sm);
+}
+
+.knowledgebase-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.knowledgebase-detail-list-item {
+  padding: var(--sp-3);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-sunken);
+}
+
+.knowledgebase-detail-list-item strong {
+  display: block;
+  color: var(--ink-primary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.knowledgebase-detail-list-item p {
+  margin: var(--sp-1) 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .knowledgebase-agent-heading,
@@ -449,6 +570,11 @@
   color: var(--danger, #ef4444);
 }
 
+.knowledgebase-trust-badge.trust-deprecated {
+  border-color: color-mix(in srgb, var(--danger, #ef4444) 52%, var(--line-subtle));
+  color: var(--danger, #ef4444);
+}
+
 .knowledgebase-rail-empty {
   padding: var(--sp-3);
   border: 1px dashed var(--line-subtle);
@@ -470,6 +596,10 @@
     position: static;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .knowledgebase-record-detail {
+    max-height: none;
   }
 }
 
@@ -498,6 +628,10 @@
     grid-column: 1;
     grid-row: auto;
     justify-self: start;
+  }
+
+  .knowledgebase-detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 

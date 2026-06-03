@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  addKnowledgeRelationship,
+  deprecateKnowledgeRecord,
+  exportKnowledge,
   getKnowledgeAgentStatus,
+  getKnowledgeOntologySummary,
+  getKnowledgeRecord,
   getKnowledgeSummary,
   listKnowledgeRecords,
+  publishKnowledgeRecord,
+  recordKnowledgeFeedback,
+  redactKnowledgeRecord,
   scanKnowledgeAgent,
   searchKnowledge,
+  updateKnowledgeRecord,
 } from '../api/knowledgeApi.js';
 import './KnowledgebaseView.css';
 
@@ -14,6 +23,7 @@ const TRUST_LABELS = {
   trusted: 'Trusted',
   rejected: 'Rejected',
   restricted: 'Restricted',
+  deprecated: 'Deprecated',
   'legacy-trusted': 'Legacy',
 };
 
@@ -33,6 +43,7 @@ const ALLOWED_USE_LABELS = {
   'pattern-detection': 'Pattern',
   'playbook-export': 'Export',
   'review-only': 'Review only',
+  'deprecated-warning': 'Deprecated warning',
 };
 
 const TAB_CONFIG = {
@@ -90,6 +101,67 @@ function trustClass(value) {
   return String(value || 'candidate').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
 }
 
+function linesToText(value) {
+  return Array.isArray(value) ? value.join('\n') : '';
+}
+
+function textToLines(value) {
+  return String(value || '')
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toEditableDraft(record = {}) {
+  return {
+    reviewStatus: record.reviewStatus || 'draft',
+    publishTarget: record.publishTarget || 'case-history-only',
+    reusableOutcome: record.reusableOutcome || 'case-history-only',
+    confidence: Number.isFinite(Number(record.confidence)) ? String(record.confidence) : '0.6',
+    title: record.title || '',
+    category: record.category || 'unknown',
+    summary: record.summary || '',
+    symptom: record.symptom || '',
+    rootCause: record.rootCause || '',
+    exactFix: record.exactFix || '',
+    escalationPath: record.escalationPath || '',
+    reviewNotes: record.reviewNotes || '',
+    keySignalsText: linesToText(record.keySignals),
+    allowedUsesText: linesToText(record.allowedUsesOverride),
+    trustStateOverride: record.trustStateOverride || '',
+    scopeAppliesText: linesToText(record.scope?.appliesTo),
+    scopeExcludesText: linesToText(record.scope?.excludes),
+    scopeVersionNotes: record.scope?.versionNotes || '',
+    scopeCustomerScope: record.scope?.customerScope || '',
+  };
+}
+
+function fromEditableDraft(draft = {}) {
+  return {
+    reviewStatus: draft.reviewStatus,
+    publishTarget: draft.publishTarget,
+    reusableOutcome: draft.reusableOutcome,
+    confidence: Number(draft.confidence),
+    title: draft.title,
+    category: draft.category,
+    summary: draft.summary,
+    symptom: draft.symptom,
+    rootCause: draft.rootCause,
+    exactFix: draft.exactFix,
+    escalationPath: draft.escalationPath,
+    reviewNotes: draft.reviewNotes,
+    keySignals: textToLines(draft.keySignalsText),
+    allowedUsesOverride: textToLines(draft.allowedUsesText),
+    trustStateOverride: draft.trustStateOverride || '',
+    scope: {
+      appliesTo: textToLines(draft.scopeAppliesText),
+      excludes: textToLines(draft.scopeExcludesText),
+      versionNotes: draft.scopeVersionNotes,
+      customerScope: draft.scopeCustomerScope,
+    },
+  };
+}
+
 function IconRefresh({ size = 15 }) {
   return (
     <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -133,7 +205,7 @@ function IconOpen({ size = 15 }) {
   );
 }
 
-export default function KnowledgebaseView() {
+export default function KnowledgebaseView({ recordIdFromRoute = null }) {
   const [activeTab, setActiveTab] = useState('review');
   const [summary, setSummary] = useState(null);
   const [agentStatus, setAgentStatus] = useState(null);
@@ -148,6 +220,12 @@ export default function KnowledgebaseView() {
   const [error, setError] = useState('');
   const [scanLoading, setScanLoading] = useState(false);
   const [lastScan, setLastScan] = useState(null);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [recordDraft, setRecordDraft] = useState(null);
+  const [recordActionBusy, setRecordActionBusy] = useState(false);
+  const [recordNotice, setRecordNotice] = useState('');
+  const [ontologySummary, setOntologySummary] = useState(null);
+  const [exportNotice, setExportNotice] = useState('');
 
   const activeConfig = TAB_CONFIG[activeTab] || TAB_CONFIG.review;
 
@@ -168,15 +246,17 @@ export default function KnowledgebaseView() {
         limit: 50,
         sort: '-updatedAt',
       };
-      const [nextSummary, nextAgentStatus, recordResult] = await Promise.all([
+      const [nextSummary, nextAgentStatus, nextOntologySummary, recordResult] = await Promise.all([
         getKnowledgeSummary(),
         getKnowledgeAgentStatus(),
+        getKnowledgeOntologySummary(),
         query.trim() || effectiveIncludeLegacy
           ? searchKnowledge(baseOptions)
           : listKnowledgeRecords(baseOptions),
       ]);
       setSummary(nextSummary);
       setAgentStatus(nextAgentStatus);
+      setOntologySummary(nextOntologySummary);
       setRecords(recordResult.records || []);
       setTotal(recordResult.total || 0);
     } catch (err) {
@@ -193,6 +273,40 @@ export default function KnowledgebaseView() {
     }, delay);
     return () => clearTimeout(timer);
   }, [loadKnowledge, query]);
+
+  const openRecord = useCallback(async (recordId, updateHash = true) => {
+    if (!recordId) {
+      setSelectedRecord(null);
+      setRecordDraft(null);
+      if (updateHash) window.location.hash = '#/knowledge';
+      return;
+    }
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await getKnowledgeRecord(recordId);
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      if (updateHash) window.location.hash = `#/knowledge/${encodeURIComponent(record.id)}`;
+    } catch (err) {
+      setError(err?.message || 'Knowledge record unavailable');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!recordIdFromRoute) return;
+    openRecord(recordIdFromRoute, false);
+  }, [openRecord, recordIdFromRoute]);
+
+  const refreshSelectedRecord = useCallback(async () => {
+    if (!selectedRecord?.id) return null;
+    const record = await getKnowledgeRecord(selectedRecord.id);
+    setSelectedRecord(record);
+    setRecordDraft(toEditableDraft(record));
+    return record;
+  }, [selectedRecord?.id]);
 
   const metrics = useMemo(() => {
     const candidates = summary?.candidates || {};
@@ -237,6 +351,137 @@ export default function KnowledgebaseView() {
     setIncludeLegacy(false);
   };
 
+  const handleSaveRecord = useCallback(async () => {
+    if (!selectedRecord?.id || !recordDraft) return;
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await updateKnowledgeRecord(selectedRecord.id, fromEditableDraft(recordDraft));
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      setRecordNotice('Record saved.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Save failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, recordDraft, selectedRecord?.id]);
+
+  const handlePublishRecord = useCallback(async (exportMarkdown = false) => {
+    if (!selectedRecord?.id) return;
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const result = await publishKnowledgeRecord(selectedRecord.id, { exportMarkdown });
+      setSelectedRecord(result.record);
+      setRecordDraft(toEditableDraft(result.record));
+      setRecordNotice(exportMarkdown ? 'Record published and exported to markdown.' : 'Record published in the database.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Publish failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, selectedRecord?.id]);
+
+  const handleDeprecateRecord = useCallback(async () => {
+    if (!selectedRecord?.id) return;
+    const reason = window.prompt('Deprecation reason');
+    if (reason === null) return;
+    setRecordActionBusy(true);
+    try {
+      const record = await deprecateKnowledgeRecord(selectedRecord.id, { reason });
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      setRecordNotice('Record deprecated.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Deprecate failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, selectedRecord?.id]);
+
+  const handleRedactRecord = useCallback(async () => {
+    if (!selectedRecord?.id) return;
+    setRecordActionBusy(true);
+    try {
+      const record = await redactKnowledgeRecord(selectedRecord.id, {
+        customerIdentifiersRedacted: true,
+        fields: ['caseNumber', 'coid'],
+        notes: 'Reviewer requested source identifier redaction.',
+      });
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      setRecordNotice('Source identifiers marked for redaction.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Redaction failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, selectedRecord?.id]);
+
+  const handleAddRelationship = useCallback(async () => {
+    if (!selectedRecord?.id) return;
+    const targetRecordId = window.prompt('Target record id, for example candidate:<id>');
+    if (!targetRecordId) return;
+    const type = window.prompt('Relationship type', 'related') || 'related';
+    setRecordActionBusy(true);
+    try {
+      const record = await addKnowledgeRelationship(selectedRecord.id, {
+        targetRecordId,
+        type,
+        status: 'proposed',
+        summary: 'Relationship proposed from Knowledgebase page.',
+      });
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      setRecordNotice('Relationship added.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Relationship failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, selectedRecord?.id]);
+
+  const handleRecordFeedback = useCallback(async (outcome) => {
+    if (!selectedRecord?.id) return;
+    setRecordActionBusy(true);
+    try {
+      const record = await recordKnowledgeFeedback(selectedRecord.id, {
+        outcome,
+        source: 'knowledgebase-ui',
+        notes: `Reviewer marked guidance outcome as ${outcome}.`,
+      });
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      setRecordNotice('Outcome feedback recorded.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Feedback failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, selectedRecord?.id]);
+
+  const handleExport = useCallback(async (format) => {
+    setExportNotice('');
+    try {
+      const result = await exportKnowledge({
+        format,
+        includeCandidates: true,
+        includeLegacy: false,
+        limit: 500,
+      });
+      setExportNotice(`${result.filename} ready (${result.count} records).`);
+    } catch (err) {
+      setExportNotice(err?.message || 'Export failed.');
+    }
+  }, []);
+
   return (
     <div className="app-content-constrained knowledgebase-page">
       <div className="page-header knowledgebase-header">
@@ -276,6 +521,7 @@ export default function KnowledgebaseView() {
         <MetricTile label="Rejected" value={formatCount(metrics.rejected)} />
         <MetricTile label="Legacy Sources" value={formatCount(metrics.legacySources)} />
         <MetricTile label="Open KB Reviews" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} tone={agentStatus?.counts?.openKnowledgeReviewItems ? 'warning' : ''} />
+        <MetricTile label="Evidence Strength" value={ontologySummary?.evidenceStrength?.average ?? '--'} />
       </div>
 
       <div className="knowledgebase-tabs" role="tablist" aria-label="Knowledgebase views">
@@ -334,7 +580,7 @@ export default function KnowledgebaseView() {
               />
               <span>Legacy</span>
             </label>
-            <button className="btn btn-ghost btn-sm" type="button" onClick={resetFilters}>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={resetFilters}>
               Clear
             </button>
           </div>
@@ -356,13 +602,33 @@ export default function KnowledgebaseView() {
           ) : (
             <div className="knowledgebase-record-list">
               {records.map((record) => (
-                <KnowledgeRecordRow key={record.id} record={record} />
+                <KnowledgeRecordRow
+                  key={record.id}
+                  record={record}
+                  selected={selectedRecord?.id === record.id}
+                  onOpen={() => openRecord(record.id)}
+                />
               ))}
             </div>
           )}
         </section>
 
         <aside className="knowledgebase-agent-panel">
+          <KnowledgeRecordDetail
+            record={selectedRecord}
+            draft={recordDraft}
+            busy={recordActionBusy}
+            notice={recordNotice}
+            onClose={() => openRecord(null)}
+            onDraftChange={setRecordDraft}
+            onSave={handleSaveRecord}
+            onPublish={handlePublishRecord}
+            onDeprecate={handleDeprecateRecord}
+            onRedact={handleRedactRecord}
+            onRelationship={handleAddRelationship}
+            onFeedback={handleRecordFeedback}
+          />
+
           <section className="knowledgebase-agent-status">
             <div className="knowledgebase-agent-heading">
               <span className={`knowledgebase-agent-dot${agentStatus?.dbReady ? ' is-ready' : ''}`} />
@@ -380,6 +646,24 @@ export default function KnowledgebaseView() {
               <IconOpen />
               <span>Agent Profile</span>
             </a>
+          </section>
+
+          <section className="knowledgebase-scan-panel">
+            <div className="knowledgebase-rail-heading">
+              <span>Ontology</span>
+              <strong>{formatCount(ontologySummary?.totalRecords)} records</strong>
+            </div>
+            <div className="knowledgebase-scan-grid">
+              <MiniMetric label="Weak Evidence" value={formatCount(ontologySummary?.evidenceStrength?.weak)} />
+              <MiniMetric label="Relationships" value={formatCount(Object.values(ontologySummary?.relationshipCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0))} />
+              <MiniMetric label="Feedback" value={formatCount(Object.values(ontologySummary?.feedbackCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0))} />
+              <MiniMetric label="Gaps" value={formatCount(ontologySummary?.coverageGaps?.length)} />
+            </div>
+            <div className="knowledgebase-export-actions">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleExport('json')}>JSON Export</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleExport('markdown')}>Markdown Export</button>
+            </div>
+            {exportNotice && <div className="knowledgebase-rail-empty">{exportNotice}</div>}
           </section>
 
           <section className="knowledgebase-scan-panel">
@@ -434,11 +718,11 @@ function MiniMetric({ label, value }) {
   );
 }
 
-function KnowledgeRecordRow({ record }) {
+function KnowledgeRecordRow({ record, selected = false, onOpen }) {
   const escalationId = record?.sourceIds?.escalationId || '';
   const warnings = Array.isArray(record.warnings) ? record.warnings : [];
   return (
-    <article className="knowledgebase-record">
+    <article className={`knowledgebase-record${selected ? ' is-selected' : ''}`}>
       <div className="knowledgebase-record-top">
         <span className={`knowledgebase-trust-badge trust-${trustClass(record.trustState)}`}>
           {TRUST_LABELS[record.trustState] || record.trustState || 'Candidate'}
@@ -470,6 +754,9 @@ function KnowledgeRecordRow({ record }) {
         </div>
       )}
       <div className="knowledgebase-record-actions">
+        <button className="btn btn-primary btn-sm" type="button" onClick={onOpen}>
+          <span>{selected ? 'Open' : 'Details'}</span>
+        </button>
         {escalationId && (
           <a className="btn btn-secondary btn-sm" href={`#/escalations/${encodeURIComponent(escalationId)}`}>
             <IconOpen />
@@ -478,6 +765,263 @@ function KnowledgeRecordRow({ record }) {
         )}
       </div>
     </article>
+  );
+}
+
+function KnowledgeRecordDetail({
+  record,
+  draft,
+  busy,
+  notice,
+  onClose,
+  onDraftChange,
+  onSave,
+  onPublish,
+  onDeprecate,
+  onRedact,
+  onRelationship,
+  onFeedback,
+}) {
+  if (!record || !draft) {
+    return (
+      <section className="knowledgebase-record-detail">
+        <div className="knowledgebase-rail-heading">
+          <span>Record Detail</span>
+          <strong>None</strong>
+        </div>
+        <div className="knowledgebase-rail-empty">Select a knowledge record.</div>
+      </section>
+    );
+  }
+
+  const updateDraft = (field, value) => {
+    onDraftChange((current) => ({ ...(current || draft), [field]: value }));
+  };
+  const disabledPublish = busy || record.reviewStatus !== 'approved';
+  const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+  const relationships = Array.isArray(record.relationships) ? record.relationships : [];
+  const feedback = Array.isArray(record.outcomeFeedback) ? record.outcomeFeedback : [];
+  const auditEvents = Array.isArray(record.auditEvents) ? record.auditEvents : [];
+  const actions = Array.isArray(record.actionRecommendations) ? record.actionRecommendations : [];
+  const saveDisabled = busy || record.reviewStatus === 'published';
+
+  return (
+    <section className="knowledgebase-record-detail">
+      <div className="knowledgebase-detail-header">
+        <div>
+          <span className={`knowledgebase-trust-badge trust-${trustClass(record.trustState)}`}>
+            {TRUST_LABELS[record.trustState] || record.trustState || 'Candidate'}
+          </span>
+          <h2>{record.title || 'Untitled knowledge record'}</h2>
+          <p>{record.id}</p>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
+          Close
+        </button>
+      </div>
+
+      <div className="knowledgebase-detail-actions">
+        <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saveDisabled}>
+          Save
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPublish(false)} disabled={disabledPublish}>
+          Publish DB
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPublish(true)} disabled={disabledPublish}>
+          Export Markdown
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onDeprecate} disabled={busy || record.trustState === 'deprecated'}>
+          Deprecate
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onRedact} disabled={busy || record.redaction?.customerIdentifiersRedacted}>
+          Redact IDs
+        </button>
+      </div>
+
+      {notice && <div className="knowledgebase-detail-notice">{notice}</div>}
+
+      <div className="knowledgebase-detail-grid">
+        <label className="knowledgebase-detail-field">
+          <span>Review</span>
+          <select value={draft.reviewStatus} onChange={(event) => updateDraft('reviewStatus', event.target.value)} disabled={busy}>
+            <option value="draft">Draft</option>
+            <option value="approved">Approved</option>
+            <option value="published" disabled>Published</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+        <label className="knowledgebase-detail-field">
+          <span>Target</span>
+          <select value={draft.publishTarget} onChange={(event) => updateDraft('publishTarget', event.target.value)} disabled={busy}>
+            <option value="category">Category</option>
+            <option value="edge-case">Edge case</option>
+            <option value="case-history-only">Case history only</option>
+          </select>
+        </label>
+        <label className="knowledgebase-detail-field">
+          <span>Outcome</span>
+          <select value={draft.reusableOutcome} onChange={(event) => updateDraft('reusableOutcome', event.target.value)} disabled={busy}>
+            <option value="canonical">Canonical</option>
+            <option value="edge-case">Edge case</option>
+            <option value="case-history-only">Case history only</option>
+            <option value="customer-specific">Customer specific</option>
+            <option value="temporary-incident">Temporary incident</option>
+            <option value="unsafe-to-reuse">Unsafe to reuse</option>
+          </select>
+        </label>
+        <label className="knowledgebase-detail-field">
+          <span>Confidence</span>
+          <input type="number" min="0" max="1" step="0.05" value={draft.confidence} onChange={(event) => updateDraft('confidence', event.target.value)} disabled={busy} />
+        </label>
+        <label className="knowledgebase-detail-field">
+          <span>Trust Override</span>
+          <select value={draft.trustStateOverride} onChange={(event) => updateDraft('trustStateOverride', event.target.value)} disabled={busy}>
+            <option value="">Derived</option>
+            <option value="candidate">Candidate</option>
+            <option value="reviewed">Reviewed</option>
+            <option value="rejected">Rejected</option>
+            <option value="restricted">Restricted</option>
+            <option value="deprecated">Deprecated</option>
+          </select>
+        </label>
+        <label className="knowledgebase-detail-field">
+          <span>Category</span>
+          <input type="text" value={draft.category} onChange={(event) => updateDraft('category', event.target.value)} disabled={busy} />
+        </label>
+      </div>
+
+      <label className="knowledgebase-detail-field">
+        <span>Title</span>
+        <input type="text" value={draft.title} onChange={(event) => updateDraft('title', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Summary</span>
+        <textarea rows={3} value={draft.summary} onChange={(event) => updateDraft('summary', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Symptom</span>
+        <textarea rows={3} value={draft.symptom} onChange={(event) => updateDraft('symptom', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Root Cause</span>
+        <textarea rows={3} value={draft.rootCause} onChange={(event) => updateDraft('rootCause', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Exact Fix</span>
+        <textarea rows={5} value={draft.exactFix} onChange={(event) => updateDraft('exactFix', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Signals</span>
+        <textarea rows={3} value={draft.keySignalsText} onChange={(event) => updateDraft('keySignalsText', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Allowed Uses Override</span>
+        <textarea rows={3} value={draft.allowedUsesText} onChange={(event) => updateDraft('allowedUsesText', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Applies To</span>
+        <textarea rows={2} value={draft.scopeAppliesText} onChange={(event) => updateDraft('scopeAppliesText', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Excludes</span>
+        <textarea rows={2} value={draft.scopeExcludesText} onChange={(event) => updateDraft('scopeExcludesText', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Version Notes</span>
+        <textarea rows={2} value={draft.scopeVersionNotes} onChange={(event) => updateDraft('scopeVersionNotes', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Customer Scope</span>
+        <input type="text" value={draft.scopeCustomerScope} onChange={(event) => updateDraft('scopeCustomerScope', event.target.value)} disabled={busy} />
+      </label>
+      <label className="knowledgebase-detail-field">
+        <span>Review Notes</span>
+        <textarea rows={3} value={draft.reviewNotes} onChange={(event) => updateDraft('reviewNotes', event.target.value)} disabled={busy} />
+      </label>
+
+      <div className="knowledgebase-detail-actions">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onRelationship} disabled={busy}>
+          Add Relationship
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFeedback('worked')} disabled={busy}>
+          Worked
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFeedback('partial')} disabled={busy}>
+          Partial
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onFeedback('did-not-work')} disabled={busy}>
+          Did Not Work
+        </button>
+      </div>
+
+      <RecordDetailList
+        title="Evidence"
+        empty="No evidence"
+        items={evidence.map((item) => ({
+          key: `${item.type || 'evidence'}-${item.id || item.label}`,
+          label: item.label || item.type || 'Evidence',
+          detail: item.summary || item.text || item.preview || item.evidenceStatus || item.status || '',
+        }))}
+      />
+      <RecordDetailList
+        title="Relationships"
+        empty="No relationships"
+        items={relationships.map((item) => ({
+          key: `${item.type}-${item.targetRecordId}`,
+          label: `${item.type} ${item.targetRecordId}`,
+          detail: `${item.status || 'proposed'} ${formatPercent(item.strength)} ${item.summary || ''}`.trim(),
+        }))}
+      />
+      <RecordDetailList
+        title="Recommended Actions"
+        empty="No recommendations"
+        items={actions.map((item, index) => ({
+          key: `${item.action}-${index}`,
+          label: `${item.priority || 'medium'} priority`,
+          detail: item.rationale ? `${item.action} - ${item.rationale}` : item.action,
+        }))}
+      />
+      <RecordDetailList
+        title="Outcome Feedback"
+        empty="No feedback"
+        items={feedback.map((item, index) => ({
+          key: `${item.createdAt}-${index}`,
+          label: `${item.outcome || 'unknown'} by ${item.actor || 'user'}`,
+          detail: item.notes || item.source || formatDate(item.createdAt),
+        }))}
+      />
+      <RecordDetailList
+        title="Audit History"
+        empty="No audit events"
+        items={auditEvents.map((item) => ({
+          key: item.eventId,
+          label: `${item.action} by ${item.actor || 'system'}`,
+          detail: `${formatDate(item.createdAt)} ${item.summary || ''}`.trim(),
+        }))}
+      />
+    </section>
+  );
+}
+
+function RecordDetailList({ title, empty, items }) {
+  const visible = Array.isArray(items) ? items.filter((item) => item.label || item.detail).slice(0, 8) : [];
+  return (
+    <div className="knowledgebase-detail-list">
+      <div className="knowledgebase-rail-heading">
+        <span>{title}</span>
+        <strong>{formatCount(visible.length)}</strong>
+      </div>
+      {visible.length === 0 ? (
+        <div className="knowledgebase-rail-empty">{empty}</div>
+      ) : (
+        visible.map((item) => (
+          <div className="knowledgebase-detail-list-item" key={item.key || item.label}>
+            <strong>{item.label}</strong>
+            {item.detail && <p>{item.detail}</p>}
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 

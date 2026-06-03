@@ -1,6 +1,7 @@
 const express = require('express');
 const {
   buildAgentKnowledgeContext,
+  getKnowledgeRecordById,
   getKnowledgeSummary,
   listKnowledgeRecords,
   parseBoolean,
@@ -12,6 +13,18 @@ const {
   getKnowledgebaseAgentStatus,
   scanKnowledgebaseAgent,
 } = require('../services/knowledgebase-agent-service');
+const {
+  addKnowledgeRelationship,
+  assertKnowledgePermission,
+  deprecateKnowledgeRecord,
+  exportKnowledgeRecords,
+  getKnowledgeOntologySummary,
+  publishKnowledgeRecord,
+  redactKnowledgeRecord,
+  recordKnowledgeFeedback,
+  resolveKnowledgeActor,
+  updateKnowledgeRecord,
+} = require('../services/knowledgebase-management-service');
 
 const router = express.Router();
 
@@ -31,6 +44,15 @@ function readCommonQuery(req, defaults = {}) {
   };
 }
 
+function knowledgeError(res, err, fallbackCode = 'KNOWLEDGE_ERROR') {
+  const status = err?.status || 500;
+  return res.status(status).json({
+    ok: false,
+    code: err?.code || fallbackCode,
+    error: status >= 500 ? 'Knowledgebase operation failed' : (err?.message || 'Knowledgebase operation failed'),
+  });
+}
+
 // GET /api/knowledge/summary
 router.get('/summary', async (req, res) => {
   const summary = await getKnowledgeSummary();
@@ -39,6 +61,43 @@ router.get('/summary', async (req, res) => {
     summary,
     generatedAt: new Date().toISOString(),
   });
+});
+
+// GET /api/knowledge/ontology/summary
+router.get('/ontology/summary', async (req, res) => {
+  const summary = await getKnowledgeOntologySummary();
+  res.json({
+    ok: true,
+    summary,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+// GET /api/knowledge/export?format=json|markdown
+router.get('/export', async (req, res) => {
+  try {
+    const actor = resolveKnowledgeActor(req);
+    const result = await exportKnowledgeRecords({
+      ...readCommonQuery(req, {
+        includeLegacy: false,
+        includeCandidates: true,
+        limit: 500,
+        maxLimit: 1000,
+      }),
+      format: req.query.format || 'json',
+    }, actor);
+    if (parseBoolean(req.query.download, false)) {
+      res.setHeader('Content-Type', result.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
+      return res.send(result.content);
+    }
+    return res.json({
+      ok: true,
+      export: result,
+    });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_EXPORT_FAILED');
+  }
 });
 
 // GET /api/knowledge/agent/status
@@ -53,19 +112,27 @@ router.get('/agent/status', async (req, res) => {
 
 // POST /api/knowledge/agent/scan
 router.post('/agent/scan', async (req, res) => {
-  const payload = req.body && typeof req.body === 'object' ? req.body : {};
-  const options = {
-    limit: payload.limit ?? req.query.limit,
-    staleTrustedDays: payload.staleTrustedDays ?? req.query.staleTrustedDays,
-    dryRun: parseBoolean(payload.dryRun ?? req.query.dryRun, false),
-    persistAttention: parseBoolean(payload.persistAttention ?? req.query.persistAttention, true),
-    persistActivity: parseBoolean(payload.persistActivity ?? req.query.persistActivity, true),
-  };
-  const scan = await scanKnowledgebaseAgent(options);
-  res.json({
-    ok: true,
-    scan,
-  });
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const options = {
+      limit: payload.limit ?? req.query.limit,
+      staleTrustedDays: payload.staleTrustedDays ?? req.query.staleTrustedDays,
+      dryRun: parseBoolean(payload.dryRun ?? req.query.dryRun, false),
+      persistAttention: parseBoolean(payload.persistAttention ?? req.query.persistAttention, true),
+      persistActivity: parseBoolean(payload.persistActivity ?? req.query.persistActivity, true),
+    };
+    const willPersist = !options.dryRun && (options.persistAttention || options.persistActivity);
+    if (willPersist) {
+      assertKnowledgePermission(resolveKnowledgeActor(req), 'review');
+    }
+    const scan = await scanKnowledgebaseAgent(options);
+    return res.json({
+      ok: true,
+      scan,
+    });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_AGENT_SCAN_FAILED');
+  }
 });
 
 // GET /api/knowledge/records
@@ -81,6 +148,78 @@ router.get('/records', async (req, res) => {
     ok: true,
     ...result,
   });
+});
+
+// GET /api/knowledge/records/:recordId
+router.get('/records/:recordId', async (req, res) => {
+  const record = await getKnowledgeRecordById(req.params.recordId);
+  if (!record) {
+    return res.status(404).json({ ok: false, code: 'KNOWLEDGE_RECORD_NOT_FOUND', error: 'Knowledge record not found' });
+  }
+  return res.json({
+    ok: true,
+    record,
+  });
+});
+
+// PATCH /api/knowledge/records/:recordId
+router.patch('/records/:recordId', async (req, res) => {
+  try {
+    const result = await updateKnowledgeRecord(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_UPDATE_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/publish
+router.post('/records/:recordId/publish', async (req, res) => {
+  try {
+    const result = await publishKnowledgeRecord(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_PUBLISH_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/deprecate
+router.post('/records/:recordId/deprecate', async (req, res) => {
+  try {
+    const result = await deprecateKnowledgeRecord(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_DEPRECATE_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/redact
+router.post('/records/:recordId/redact', async (req, res) => {
+  try {
+    const record = await redactKnowledgeRecord(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, record });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_REDACT_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/relationships
+router.post('/records/:recordId/relationships', async (req, res) => {
+  try {
+    const record = await addKnowledgeRelationship(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, record });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_RELATIONSHIP_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/feedback
+router.post('/records/:recordId/feedback', async (req, res) => {
+  try {
+    const record = await recordKnowledgeFeedback(req.params.recordId, req.body || {}, resolveKnowledgeActor(req));
+    return res.json({ ok: true, record });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_FEEDBACK_FAILED');
+  }
 });
 
 // GET /api/knowledge/search?q=...

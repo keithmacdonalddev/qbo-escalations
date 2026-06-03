@@ -348,6 +348,48 @@ function buildDuplicateProposal(duplicateKey, candidates = []) {
   };
 }
 
+function normalizedResolutionKey(candidate = {}) {
+  return safeString(candidate.exactFix || candidate.escalationPath || candidate.rootCause, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter((token) => token.length >= 4)
+    .filter((token) => !['then', 'with', 'from', 'that', 'this', 'open', 'select'].includes(token))
+    .slice(0, 12)
+    .join('-');
+}
+
+function buildContradictionProposal(duplicateKey, candidates = []) {
+  const usable = candidates
+    .filter((candidate) => candidate && candidate.escalationId)
+    .slice(0, 6);
+  const resolutionKeys = new Set(usable.map(normalizedResolutionKey).filter(Boolean));
+  if (usable.length < 2 || resolutionKeys.size < 2) return null;
+
+  const first = usable[0];
+  return {
+    id: `kb-agent:contradiction:${duplicateKey}`,
+    agentId: KNOWLEDGEBASE_AGENT_ID,
+    type: 'contradiction-review',
+    severity: 'warning',
+    title: 'Potential conflicting knowledge guidance',
+    summary: `${usable.length} records appear related but describe different root causes or fixes for ${safeString(first.category, 'unknown')}.`,
+    sourceEvidence: usable.flatMap(buildCandidateEvidence).slice(0, 12),
+    recommendedAction: 'Review the records and mark whether one supersedes, narrows, contradicts, or duplicates another.',
+    duplicateKey,
+    candidateIds: usable.map((candidate) => objectIdString(candidate._id)).filter(Boolean),
+    attention: {
+      fingerprint: `knowledge-review:contradiction:${duplicateKey}`.slice(0, 240),
+      sourceEscalationId: objectIdString(first.escalationId),
+      sourceConversationId: objectIdString(first.conversationId) || null,
+      sourceLabel: 'Potential conflicting knowledge',
+      candidates: usable.map(buildAttentionCandidate),
+      signals: ['knowledgebase_agent_contradiction', `candidate_count_${usable.length}`],
+    },
+    createdAt: new Date().toISOString(),
+  };
+}
+
 function getCandidateAgeDays(candidate = {}, now = Date.now()) {
   const date = candidate.publishedAt || candidate.updatedAt || candidate.createdAt;
   const time = new Date(date || 0).getTime();
@@ -452,6 +494,31 @@ async function findDuplicateProposals(limit) {
     .filter(([, group]) => group.length >= 2)
     .slice(0, limit)
     .map(([key, group]) => buildDuplicateProposal(key, group))
+    .filter(Boolean);
+}
+
+async function findContradictionProposals(limit) {
+  const candidates = await KnowledgeCandidate.find({
+    reviewStatus: { $ne: 'rejected' },
+    deprecatedAt: null,
+  })
+    .sort('-updatedAt')
+    .limit(Math.min(limit * 4, 1000))
+    .lean();
+
+  const groups = new Map();
+  for (const candidate of candidates) {
+    const key = normalizeDuplicateKey(candidate);
+    if (!key) continue;
+    const group = groups.get(key) || [];
+    group.push(candidate);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()]
+    .filter(([, group]) => group.length >= 2)
+    .slice(0, limit)
+    .map(([key, group]) => buildContradictionProposal(key, group))
     .filter(Boolean);
 }
 
@@ -589,6 +656,7 @@ async function getKnowledgebaseAgentStatus() {
         missingDraftScan: true,
         candidateQualityScan: true,
         duplicateCandidateScan: true,
+        contradictionScan: true,
         staleTrustedScan: true,
         attentionItems: true,
         approvesKnowledge: false,
@@ -617,6 +685,7 @@ async function getKnowledgebaseAgentStatus() {
       missingDraftScan: true,
       candidateQualityScan: true,
       duplicateCandidateScan: true,
+      contradictionScan: true,
       staleTrustedScan: true,
       attentionItems: true,
       approvesKnowledge: false,
@@ -657,6 +726,7 @@ async function scanKnowledgebaseAgent(options = {}) {
         missingDraft: 0,
         candidateQuality: 0,
         duplicateCandidate: 0,
+        contradiction: 0,
         staleTrusted: 0,
         proposals: 0,
       },
@@ -671,11 +741,13 @@ async function scanKnowledgebaseAgent(options = {}) {
     missingDraftProposals,
     candidateQualityProposals,
     duplicateProposals,
+    contradictionProposals,
     staleTrustedProposals,
   ] = await Promise.all([
     findMissingDraftProposals(limit),
     findCandidateQualityProposals(limit),
     findDuplicateProposals(limit),
+    findContradictionProposals(limit),
     findStaleTrustedProposals(limit, staleTrustedDays, started),
   ]);
 
@@ -683,6 +755,7 @@ async function scanKnowledgebaseAgent(options = {}) {
     ...missingDraftProposals,
     ...candidateQualityProposals,
     ...duplicateProposals,
+    ...contradictionProposals,
     ...staleTrustedProposals,
   ];
   const attention = persistAttention
@@ -705,6 +778,7 @@ async function scanKnowledgebaseAgent(options = {}) {
       missingDraft: missingDraftProposals.length,
       candidateQuality: candidateQualityProposals.length,
       duplicateCandidate: duplicateProposals.length,
+      contradiction: contradictionProposals.length,
       staleTrusted: staleTrustedProposals.length,
       proposals: proposals.length,
     },
@@ -723,6 +797,7 @@ async function scanKnowledgebaseAgent(options = {}) {
 module.exports = {
   KNOWLEDGEBASE_AGENT_ID,
   buildCandidateQualityProposal,
+  buildContradictionProposal,
   buildDuplicateProposal,
   buildMissingDraftProposal,
   buildStaleTrustedProposal,

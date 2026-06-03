@@ -2,6 +2,23 @@ const mongoose = require('mongoose');
 
 const REVIEW_STATUSES = ['draft', 'approved', 'published', 'rejected'];
 const PUBLISH_TARGETS = ['category', 'edge-case', 'case-history-only'];
+const ALLOWED_USES = [
+  'agent-response',
+  'triage',
+  'similarity-search',
+  'pattern-detection',
+  'playbook-export',
+  'review-only',
+  'deprecated-warning',
+];
+const TRUST_STATES = [
+  'candidate',
+  'reviewed',
+  'trusted',
+  'rejected',
+  'restricted',
+  'deprecated',
+];
 const REUSABLE_OUTCOMES = [
   'canonical',
   'edge-case',
@@ -25,6 +42,96 @@ const sourceSnapshotSchema = new mongoose.Schema({
   conversationPreview: { type: String, default: '' },
   conversationMessageCount: { type: Number, default: 0 },
   resolvedAt: { type: Date, default: null },
+}, { _id: false });
+
+const evidenceRefSchema = new mongoose.Schema({
+  type: { type: String, default: 'note' },
+  id: { type: String, default: '' },
+  label: { type: String, default: '' },
+  status: { type: String, default: '' },
+  strength: { type: Number, default: 0.5, min: 0, max: 1 },
+  summary: { type: String, default: '' },
+  url: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const auditEventSchema = new mongoose.Schema({
+  eventId: { type: String, required: true },
+  action: { type: String, required: true },
+  actor: { type: String, default: 'system' },
+  role: { type: String, default: '' },
+  summary: { type: String, default: '' },
+  metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const reviewHistorySchema = new mongoose.Schema({
+  status: { type: String, default: '' },
+  actor: { type: String, default: 'system' },
+  notes: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const relationshipSchema = new mongoose.Schema({
+  type: {
+    type: String,
+    enum: ['duplicate-of', 'contradicts', 'supersedes', 'superseded-by', 'narrows', 'expands', 'related', 'same-root-cause'],
+    default: 'related',
+  },
+  targetRecordId: { type: String, required: true },
+  targetKnowledgeCandidateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KnowledgeCandidate',
+    default: null,
+  },
+  strength: { type: Number, default: 0.5, min: 0, max: 1 },
+  status: {
+    type: String,
+    enum: ['proposed', 'confirmed', 'rejected'],
+    default: 'proposed',
+  },
+  summary: { type: String, default: '' },
+  evidence: { type: [String], default: [] },
+  proposedBy: { type: String, default: 'system' },
+  reviewedBy: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+  reviewedAt: { type: Date, default: null },
+}, { _id: false });
+
+const scopeSchema = new mongoose.Schema({
+  appliesTo: { type: [String], default: [] },
+  excludes: { type: [String], default: [] },
+  versionNotes: { type: String, default: '' },
+  customerScope: { type: String, default: '' },
+  lastValidatedAt: { type: Date, default: null },
+}, { _id: false });
+
+const actionRecommendationSchema = new mongoose.Schema({
+  action: { type: String, default: '' },
+  priority: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
+  rationale: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const outcomeFeedbackSchema = new mongoose.Schema({
+  source: { type: String, default: 'manual' },
+  outcome: { type: String, enum: ['worked', 'did-not-work', 'partial', 'unknown'], default: 'unknown' },
+  notes: { type: String, default: '' },
+  actor: { type: String, default: 'user' },
+  escalationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Escalation',
+    default: null,
+  },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const redactionSchema = new mongoose.Schema({
+  customerIdentifiersRedacted: { type: Boolean, default: false },
+  fields: { type: [String], default: [] },
+  notes: { type: String, default: '' },
+  redactedBy: { type: String, default: '' },
+  redactedAt: { type: Date, default: null },
 }, { _id: false });
 
 const knowledgeCandidateSchema = new mongoose.Schema({
@@ -68,12 +175,39 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   keySignals: { type: [String], default: [] },
   confidence: { type: Number, default: 0.6, min: 0, max: 1 },
   reviewNotes: { type: String, default: '' },
+  allowedUsesOverride: {
+    type: [String],
+    enum: ALLOWED_USES,
+    default: [],
+  },
+  trustStateOverride: {
+    type: String,
+    enum: ['', ...TRUST_STATES],
+    default: '',
+  },
+  reviewedBy: { type: String, default: '' },
+  reviewedAt: { type: Date, default: null },
+  deprecatedAt: { type: Date, default: null, index: true },
+  deprecatedReason: { type: String, default: '' },
+  supersededBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KnowledgeCandidate',
+    default: null,
+  },
+  evidenceRefs: { type: [evidenceRefSchema], default: [] },
+  auditEvents: { type: [auditEventSchema], default: [] },
+  reviewHistory: { type: [reviewHistorySchema], default: [] },
+  relationships: { type: [relationshipSchema], default: [] },
+  scope: { type: scopeSchema, default: () => ({}) },
+  actionRecommendations: { type: [actionRecommendationSchema], default: [] },
+  outcomeFeedback: { type: [outcomeFeedbackSchema], default: [] },
+  redaction: { type: redactionSchema, default: () => ({}) },
   sourceSnapshot: { type: sourceSnapshotSchema, default: () => ({}) },
   generatedAt: { type: Date, default: null },
   publishedAt: { type: Date, default: null },
   publishedDocType: {
     type: String,
-    enum: ['', 'category', 'edge-case'],
+    enum: ['', 'database', 'category', 'edge-case', 'markdown-export'],
     default: '',
   },
   publishedDocPath: { type: String, default: '' },

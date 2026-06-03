@@ -64,7 +64,8 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   }
   if (path === '/dashboard' || path === '/escalations') return { view: 'dashboard' };
   if (path === '/attention') return { view: 'attention' };
-  if (path === '/knowledge') return { view: 'knowledge' };
+  if (path === '/knowledge') return { view: 'knowledge', knowledgeRecordId: null };
+  if (path.startsWith('/knowledge/')) return { view: 'knowledge', knowledgeRecordId: decodeURIComponent(path.slice('/knowledge/'.length)) };
   if (path === '/playbook') return { view: 'playbook' };
   if (path === '/agents') return { view: 'agents', agentId: null };
   if (path.startsWith('/agents/')) return { view: 'agents', agentId: path.slice('/agents/'.length) };
@@ -118,6 +119,10 @@ function getSidebarCurrentRoute(route) {
 
   if (route.view === 'agents') {
     return route.agentId ? `#/agents/${route.agentId}` : '#/agents';
+  }
+
+  if (route.view === 'knowledge') {
+    return route.knowledgeRecordId ? `#/knowledge/${encodeURIComponent(route.knowledgeRecordId)}` : '#/knowledge';
   }
 
   if (route.view === 'attention') {

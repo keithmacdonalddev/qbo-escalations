@@ -119,7 +119,8 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
             (item.hash === '#/sessions' && currentRoute.startsWith('#/sessions')) ||
             (item.hash === '#/workspace' && currentRoute.startsWith('#/workspace')) ||
             (item.hash === '#/rooms' && currentRoute.startsWith('#/rooms')) ||
-            (item.hash === '#/agents' && currentRoute.startsWith('#/agents'));
+            (item.hash === '#/agents' && currentRoute.startsWith('#/agents')) ||
+            (item.hash === '#/knowledge' && currentRoute.startsWith('#/knowledge'));
           return (
             <a
               key={item.hash}

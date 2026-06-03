@@ -229,7 +229,7 @@ function App() {
         return (
           <Profiler id="Knowledgebase" onRender={flame.onRender}>
           <motion.div key="knowledge" {...motionProps}>
-            <KnowledgebaseView />
+            <KnowledgebaseView recordIdFromRoute={route.knowledgeRecordId || null} />
           </motion.div>
           </Profiler>
         );
