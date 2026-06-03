@@ -107,7 +107,7 @@ const AGENT_PROMPT_DEFINITIONS = Object.freeze([
     promptType: 'default',
     usedBy: 'Claude SDK screenshot parser',
     description: 'Hidden compatibility alias for the canonical escalation template parser prompt.',
-    filePath: path.join(AGENT_PROMPTS_ROOT, 'sdk-image-parse.md'),
+    filePath: path.join(AGENT_PROMPTS_ROOT, 'escalation-template-parser.md'),
     visible: false,
   },
   {

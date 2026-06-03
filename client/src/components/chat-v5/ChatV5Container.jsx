@@ -1491,7 +1491,7 @@ function TriageOutput({ stage, card, testRun, onClearTest, onMarkTestResult, age
     }
   }
 
-  if (isFailed) {
+  if (isFailed && !displayCard) {
     return (
       <div className="v5-output-stack">
         <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
@@ -1587,7 +1587,9 @@ function TriageOutput({ stage, card, testRun, onClearTest, onMarkTestResult, age
       )}
       {fallbackUsed && (
         <div className="v5-dock-inline-status v5-dock-inline-status--warning">
-          Rule fallback used for this triage card.
+          {displayCard?.fallback?.reason
+            ? `Rule fallback used: ${displayCard.fallback.reason}`
+            : 'Rule fallback used for this triage card.'}
         </div>
       )}
     </div>

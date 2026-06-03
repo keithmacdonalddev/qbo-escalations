@@ -439,6 +439,82 @@ test('codex chat honors caller-supplied capture context and force-captures the C
   assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_confirmed'), true);
 });
 
+test('claude CLI harness force-captures the CLI package and confirms readback', async () => {
+  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  const spawnCalls = installSpawnMock();
+  const { sendClaudeCliPrompt } = requireFresh('../src/services/providers/claude-cli-provider-harness');
+  const providerEvents = [];
+
+  const promise = sendClaudeCliPrompt({
+    systemPrompt: 'Triage instructions',
+    messages: [{ role: 'user', content: 'Triage this canonical template.' }],
+    model: 'claude-opus-4-8',
+    reasoningEffort: 'high',
+    timeoutMs: 1000,
+    captureContext: {
+      providerId: 'claude',
+      providerResearchId: 'anthropic-cli',
+      providerPathType: 'cli',
+      callSite: 'triage',
+      operation: 'triage',
+      forceCapture: true,
+      source: {
+        file: 'server/src/services/triage.js',
+        functionName: 'runDirectTriageProviderCall',
+        helperName: 'sendClaudeCliPrompt',
+        spawnSite: 'claude-cli-provider-harness.sendClaudeCliPrompt',
+      },
+    },
+    onProviderEvent(eventType, payload) {
+      providerEvents.push({ eventType, payload });
+    },
+  });
+
+  assert.equal(spawnCalls.length, 1);
+  const { child, args } = spawnCalls[0];
+  assert.equal(args[0], '-p');
+  assert.ok(args.includes('--output-format'));
+  assert.ok(args.includes('stream-json'));
+  assert.ok(args.includes('--model'));
+  assert.ok(args.includes('claude-opus-4-8'));
+  emitStdoutLines(child, [
+    JSON.stringify({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Category: bank feeds\n' } },
+    }),
+    JSON.stringify({
+      type: 'stream_event',
+      event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Severity: P3\n' } },
+    }),
+    JSON.stringify({
+      type: 'result',
+      result: 'Category: bank feeds\nSeverity: P3\n',
+      model: 'claude-opus-4-8',
+      usage: { input_tokens: 11, output_tokens: 7 },
+    }),
+  ]);
+  closeChild(child, 0);
+
+  const result = await promise;
+  assert.equal(result.providerTrace.providerHarness, 'claude-cli');
+  assert.equal(result.providerTrace.providerPackageId.length, 24);
+  assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
+  assert.equal(result.providerTrace.packageReadbackStatus, 'confirmed');
+  assert.ok(providerEvents.some((event) => event.eventType === 'provider.package_capture_confirmed'));
+
+  const saved = await ProviderCallPackage.findOne({ callSite: 'triage' }).lean();
+  assert.ok(saved, 'expected a Claude CLI provider call package record');
+  assert.equal(saved.providerId, 'claude');
+  assert.equal(saved.providerResearchId, 'anthropic-cli');
+  assert.equal(saved.providerPathType, 'cli');
+  assert.equal(saved.operation, 'triage');
+  assert.equal(saved.cli.command, 'claude');
+  assert.equal(saved.cli.modelRequested, 'claude-opus-4-8');
+  assert.equal(saved.cli.reasoningEffort, 'high');
+  assert.equal(saved.cli.stdin.text, child.getStdinText());
+  assert.equal(saved.cli.stdout.jsonlEvents.length, 3);
+});
+
 test('codex chat records cleanup as an aborted CLI package', async () => {
   process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
   const spawnCalls = installSpawnMock();

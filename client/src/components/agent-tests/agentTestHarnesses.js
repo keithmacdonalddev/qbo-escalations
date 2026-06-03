@@ -174,20 +174,30 @@ async function retestImageParserFixtureTest(result, options = {}) {
   });
 }
 
-async function runTriageFixtureTest({ signal, onStageEvent } = {}) {
+async function runTriageFixtureTest({ signal, onStageEvent, request } = {}) {
   const runtime = await readPipelineProfileRuntimeStates();
   if (signal?.aborted) {
     throw new DOMException('Agent test was cancelled.', 'AbortError');
   }
 
+  // A specific approved case can be selected from the triage test assets list.
+  // When `caseId` is present we run exactly that real, operator-approved case;
+  // otherwise the server picks one at random from the same real pool. The id
+  // rides along on the modal request, so the modal's "New Test" button re-runs
+  // the same case automatically.
+  const caseId = typeof request?.caseId === 'string' ? request.caseId.trim() : '';
+
   const triageRuntime = runtime?.triage || runtime?.['triage-agent'] || {};
   emitClientEvent(onStageEvent, 'triage.client_request_started', {
     provider: triageRuntime.provider || '',
     model: triageRuntime.model || '',
+    caseId: caseId || null,
     testRun: true,
     status: 'sent',
     surfaceToUser: true,
-    displayMessage: 'Triage test request sent to server',
+    displayMessage: caseId
+      ? `Triage test request sent to server (case ${caseId})`
+      : 'Triage test request sent to server (random approved case)',
   });
 
   const res = await apiFetch('/api/triage-tests/run', {
@@ -198,6 +208,7 @@ async function runTriageFixtureTest({ signal, onStageEvent } = {}) {
     },
     body: JSON.stringify({
       stage: 'triage',
+      ...(caseId ? { caseId } : {}),
       runtime: buildPipelineRuntimePayload(runtime),
     }),
     signal,
@@ -394,6 +405,15 @@ function normalizeImageParserSavedResult(savedResult) {
   };
 }
 
+function triageSeverityTone(severity) {
+  const normalized = cleanText(severity).toUpperCase();
+  if (/^P?1$/.test(normalized) || normalized === 'CRITICAL') return 'fail';
+  if (/^P?2$/.test(normalized) || normalized === 'HIGH') return 'warn';
+  if (/^P?3$/.test(normalized) || normalized === 'MEDIUM') return 'info';
+  if (/^P?4$/.test(normalized) || normalized === 'LOW') return 'pass';
+  return 'neutral';
+}
+
 function triageRows(result) {
   const card = result?.triageCard || {};
   const rows = [
@@ -407,6 +427,34 @@ function triageRows(result) {
   return rows
     .map(([key, label, value]) => ({ key, label, value: cleanText(value) }))
     .filter((row) => row.value);
+}
+
+// Splits the triage card into a compact metadata strip (severity / category /
+// confidence as inline key-value pairs) and the long-form prose blocks (read /
+// action / missing info) so the modal can render them as one tight row plus
+// full-width stacked sections instead of a uniform two-column grid.
+function triageResultLayout(result) {
+  const card = result?.triageCard || {};
+  const meta = [
+    { key: 'severity', label: 'Severity', value: cleanText(card.severity), tone: triageSeverityTone(card.severity) },
+    { key: 'category', label: 'Category', value: cleanText(card.category) },
+    { key: 'confidence', label: 'Confidence', value: cleanText(card.confidence) },
+  ].filter((field) => field.value);
+
+  const blocks = [
+    { key: 'read', label: 'Read', value: cleanText(card.read) },
+    { key: 'action', label: 'Action', value: cleanText(card.action) },
+    {
+      key: 'missingInfo',
+      label: 'Missing Info',
+      value: Array.isArray(card.missingInfo)
+        ? cleanText(card.missingInfo.filter(Boolean).join('\n'))
+        : cleanText(card.missingInfo),
+    },
+  ].filter((block) => block.value);
+
+  if (!meta.length && !blocks.length) return null;
+  return { meta, blocks, status: savedStatePills(result) };
 }
 
 export const AGENT_TEST_HARNESSES = Object.freeze({
@@ -443,13 +491,13 @@ export const AGENT_TEST_HARNESSES = Object.freeze({
     stageEventMessage,
   },
   'triage-agent': {
-    id: 'triage-fixture',
+    id: 'triage-approved-case',
     agentId: 'triage-agent',
     agentLabel: 'Triage Agent',
     stageKey: 'triage',
     title: 'Triage Agent Test',
-    description: 'Random saved triage fixture classified through the configured triage runtime.',
-    runLabel: 'Running triage fixture',
+    description: 'A real, operator-approved escalation case classified through the configured triage runtime.',
+    runLabel: 'Running triage case',
     resultLabel: 'Triage Output',
     run: runTriageFixtureTest,
     recordResult: recordTriageFixtureTest,
@@ -458,6 +506,7 @@ export const AGENT_TEST_HARNESSES = Object.freeze({
     getFixture: (result) => result?.fixture || null,
     getValidationPills: savedStatePills,
     getResultRows: triageRows,
+    getResultLayout: triageResultLayout,
     getRawText: (result) => cleanText(result?.parserText),
     rawTextLabel: 'Fixture parser text',
     emptyResultLabel: 'No triage card returned.',

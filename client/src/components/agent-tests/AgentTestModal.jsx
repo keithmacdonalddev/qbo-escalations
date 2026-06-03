@@ -1041,6 +1041,7 @@ export default function AgentTestModal({ request, onClose }) {
     ? formatMs(runState.finishedAt - runState.startedAt)
     : '';
   const fixture = harness?.getFixture?.(result) || null;
+  const resultLayout = harness?.getResultLayout?.(result) || null;
   const imageUrl = cleanText(fixture?.url);
   const imageName = cleanText(fixture?.name);
   const rawOutputText = harness?.getOutputText?.(result) ?? harness?.getRawText?.(result);
@@ -1162,7 +1163,7 @@ export default function AgentTestModal({ request, onClose }) {
                   </div>
                 </div>
 
-                {(imageUrl || imageName || summaryPills.length > 0) && (
+                {!resultLayout && (imageUrl || imageName || summaryPills.length > 0) && (
                   <div className="agent-test-modal__summary">
                     {imageUrl && (
                       <a className="agent-test-modal__fixture" href={imageUrl} target="_blank" rel="noreferrer" title={imageName || 'Selected fixture'}>
@@ -1203,7 +1204,45 @@ export default function AgentTestModal({ request, onClose }) {
                   )
                 )}
 
-                {(rows.length > 0 || (!primaryTextOutput && !outputText)) && (
+                {resultLayout && (
+                  <div className="agent-test-modal__triage-layout">
+                    {(resultLayout.meta.length > 0 || resultLayout.status.length > 0) && (
+                      <div className="agent-test-modal__meta-strip">
+                        {resultLayout.meta.map((field) => (
+                          <div
+                            className={`agent-test-modal__meta-item${field.tone && field.tone !== 'neutral' ? ` is-${field.tone}` : ''}`}
+                            key={field.key}
+                          >
+                            <span className="agent-test-modal__meta-label">{field.label}</span>
+                            <span className="agent-test-modal__meta-value">{field.value}</span>
+                          </div>
+                        ))}
+                        {resultLayout.status.map((pill) => (
+                          <span
+                            className={`agent-test-modal__meta-status is-${pill.tone || 'neutral'}`}
+                            key={`status-${pill.tone || 'neutral'}-${pill.text}`}
+                          >
+                            {pill.text}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {resultLayout.blocks.length > 0 ? (
+                      <div className="agent-test-modal__content-blocks">
+                        {resultLayout.blocks.map((block) => (
+                          <section className="agent-test-modal__content-block" key={block.key}>
+                            <span className="agent-test-modal__content-label">{block.label}</span>
+                            <p className="agent-test-modal__content-text">{block.value}</p>
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="agent-test-modal__empty-result">{harness?.emptyResultLabel || 'No structured result returned.'}</div>
+                    )}
+                  </div>
+                )}
+
+                {!resultLayout && (rows.length > 0 || (!primaryTextOutput && !outputText)) && (
                   <div className="agent-test-modal__result-grid">
                     {rows.length ? rows.map((row) => (
                       <div className="agent-test-modal__field" key={row.key}>

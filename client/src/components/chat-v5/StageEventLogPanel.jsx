@@ -55,6 +55,16 @@ const KIND_TONE = {
   'triage.server_request_received': 'dim-cyan',
   'triage.client_request_started': 'cyan',
   'triage.client_result_received': 'green',
+  'triage.prompt_resolved': 'cyan',
+  'triage.provider_selected': 'cyan',
+  'triage.preflight_checked': 'cyan',
+  'triage.generation_started': 'cyan',
+  'triage.agent_handoff_to_provider': 'cyan',
+  'triage.provider_package_load_retry': 'cyan',
+  'triage.provider_package_loaded': 'green',
+  'triage.provider_package_load_failed': 'red',
+  'triage.fields_extracted': 'amber',
+  'triage.output_validated': 'amber',
   'triage.provider_content_sending_to_client': 'green',
   'triage.response_sent': 'green',
   'chunk.first_token': 'amber',
@@ -196,6 +206,72 @@ function summarizeData(kind, data) {
   } else if (kind === 'triage.context_built') {
     if (data.parseFieldCount != null) bits.push(`fields=${data.parseFieldCount}`);
     if (data.parserTextChars != null) bits.push(`chars=${data.parserTextChars}`);
+    if (data.promptInputChars != null) bits.push(`promptInput=${data.promptInputChars}`);
+  } else if (kind === 'triage.prompt_resolved') {
+    if (data.promptId) bits.push(`promptId=${data.promptId}`);
+    if (data.promptVersion) bits.push(`version=${data.promptVersion}`);
+    if (data.promptLength != null) bits.push(`promptChars=${data.promptLength}`);
+  } else if (kind === 'triage.provider_selected' || kind === 'triage.generation_started') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.model) bits.push(`model=${data.model}`);
+    if (data.reasoningEffort) bits.push(`effort=${data.reasoningEffort}`);
+    if (data.serviceTier) bits.push(`tier=${data.serviceTier}`);
+    if (data.timeoutMs != null) bits.push(`timeout=${data.timeoutMs}ms`);
+  } else if (kind === 'triage.preflight_checked') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.model) bits.push(`model=${data.model}`);
+    if (data.code) bits.push(`code=${data.code}`);
+    if (data.ok != null) bits.push(`ok=${data.ok}`);
+    if (data.reason) bits.push(data.reason);
+  } else if (kind === 'triage.agent_handoff_to_provider') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.model) bits.push(`model=${data.model}`);
+    if (data.operation) bits.push(`op=${data.operation}`);
+    if (data.forceCapture != null) bits.push(`capture=${data.forceCapture}`);
+  } else if (kind === 'triage.provider_package_load_retry') {
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.attempt != null) bits.push(`attempt=${data.attempt}`);
+    if (data.elapsedMs != null) bits.push(`elapsed=${data.elapsedMs}ms`);
+  } else if (kind === 'triage.provider_package_loaded') {
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.providerId) bits.push(`provider=${data.providerId}`);
+    if (data.providerPathType) bits.push(`path=${data.providerPathType}`);
+    if (data.attempts != null) bits.push(`attempts=${data.attempts}`);
+  } else if (kind === 'triage.provider_package_load_failed') {
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.attempts != null) bits.push(`attempts=${data.attempts}`);
+    if (data.timeoutMs != null) bits.push(`timeout=${data.timeoutMs}ms`);
+  } else if (kind === 'triage.fields_extracted') {
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.sourcePath) bits.push(`source=${data.sourcePath}`);
+    if (data.textLength != null) bits.push(`chars=${data.textLength}`);
+    if (data.fieldCount != null) bits.push(`fields=${data.fieldCount}`);
+  } else if (kind === 'triage.output_validated') {
+    if (data.passed != null) bits.push(`passed=${data.passed}`);
+    if (data.issueCount != null) bits.push(`issues=${data.issueCount}`);
+    if (data.severity) bits.push(`sev=${data.severity}`);
+    if (data.category) bits.push(`cat=${data.category}`);
+    if (data.confidence) bits.push(`conf=${data.confidence}`);
+  } else if (kind === 'triage.client_request_started') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.model) bits.push(`model=${data.model}`);
+    if (data.textLength != null) bits.push(`chars=${data.textLength}`);
+  } else if (kind === 'triage.client_result_received') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.model) bits.push(`model=${data.model}`);
+    if (data.elapsedMs != null) bits.push(`elapsed=${data.elapsedMs}ms`);
+    if (data.status) bits.push(`status=${data.status}`);
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.fallbackUsed) bits.push('fallback');
+  } else if (kind === 'triage.provider_content_sending_to_client') {
+    if (data.provider) bits.push(`provider=${data.provider}`);
+    if (data.providerPackageId) bits.push(`package=${data.providerPackageId}`);
+    if (data.status) bits.push(`status=${data.status}`);
+  } else if (kind === 'triage.response_sent') {
+    if (data.elapsedMs != null) bits.push(`elapsed=${data.elapsedMs}ms`);
+    if (data.streamMode != null) bits.push(`stream=${data.streamMode}`);
+    if (data.source) bits.push(`source=${data.source}`);
+    if (data.fallbackUsed) bits.push('fallback');
   } else if (kind === 'triage.decision') {
     if (data.cardBuilt != null) bits.push(`card=${data.cardBuilt}`);
     if (data.severity) bits.push(`sev=${data.severity}`);

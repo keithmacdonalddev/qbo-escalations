@@ -3,6 +3,7 @@ const {
   getCoreSystemPrompt,
   searchPlaybookChunks,
 } = require('./playbook-loader');
+const { buildAgentKnowledgeContext } = require('../services/knowledgebase-service');
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -135,6 +136,114 @@ function buildRetrievedKnowledgeText(chunks, maxChars) {
   };
 }
 
+function formatKnowledgeRecordForPrompt(record) {
+  const lines = [];
+  const trust = safeString(record.trustState, 'unknown').toUpperCase();
+  const title = safeString(record.title, 'Untitled knowledge record');
+  lines.push(`[KB ${trust}: ${record.id}] ${title}`);
+  if (record.category) lines.push(`Category: ${record.category}`);
+  if (record.reusableOutcome) lines.push(`Reusable outcome: ${record.reusableOutcome}`);
+  if (record.confidence !== undefined && record.confidence !== null) lines.push(`Confidence: ${record.confidence}`);
+  if (Array.isArray(record.allowedUses) && record.allowedUses.length > 0) {
+    lines.push(`Allowed uses: ${record.allowedUses.join(', ')}`);
+  }
+  if (record.summary) lines.push(`Summary: ${record.summary}`);
+  if (record.symptom) lines.push(`Symptom: ${record.symptom}`);
+  if (record.rootCause) lines.push(`Root cause: ${record.rootCause}`);
+  if (record.exactFix) lines.push(`Fix: ${record.exactFix}`);
+  if (Array.isArray(record.keySignals) && record.keySignals.length > 0) {
+    lines.push(`Signals: ${record.keySignals.join('; ')}`);
+  }
+  if (Array.isArray(record.evidence) && record.evidence.length > 0) {
+    const evidence = record.evidence
+      .slice(0, 3)
+      .map((item) => {
+        const label = safeString(item.label || item.id || item.type, '');
+        const status = safeString(item.evidenceStatus, '');
+        return status ? `${label} (${status})` : label;
+      })
+      .filter(Boolean);
+    if (evidence.length > 0) lines.push(`Evidence: ${evidence.join('; ')}`);
+  }
+  if (Array.isArray(record.warnings) && record.warnings.length > 0) {
+    lines.push(`Warnings: ${record.warnings.join(', ')}`);
+  }
+  return lines.join('\n');
+}
+
+function buildKnowledgebaseText(records, maxChars) {
+  const included = [];
+  let usedChars = 0;
+  const blocks = [];
+
+  for (const record of Array.isArray(records) ? records : []) {
+    const block = formatKnowledgeRecordForPrompt(record).trim();
+    if (!block) continue;
+    if (usedChars + block.length > maxChars) break;
+    blocks.push(block);
+    usedChars += block.length;
+    included.push({
+      id: record.id,
+      sourceType: record.sourceType,
+      sourceName: record.title || record.category || record.id,
+      title: record.title || null,
+      trustState: record.trustState || '',
+      reviewStatus: record.reviewStatus || '',
+      reusableOutcome: record.reusableOutcome || '',
+      allowedUses: Array.isArray(record.allowedUses) ? record.allowedUses : [],
+      warnings: Array.isArray(record.warnings) ? record.warnings : [],
+    });
+  }
+
+  return {
+    text: blocks.join('\n\n'),
+    included,
+    usedChars,
+  };
+}
+
+async function buildKnowledgebaseRetrievalBlock({ retrievalQuery, settings, retrievalCharsBudget }) {
+  const requestedTopK = settings.knowledge.retrievalTopK;
+
+  try {
+    const context = await buildAgentKnowledgeContext({
+      query: retrievalQuery,
+      allowedUse: 'agent-response',
+      limit: requestedTopK,
+      includeLegacy: true,
+      includeCandidates: false,
+      allowedCategories: settings.knowledge.allowedCategories,
+      allowedTemplates: settings.knowledge.allowedTemplates,
+      allowedTopLevel: settings.knowledge.allowedTopLevel,
+      minScore: settings.knowledge.retrievalMinScore,
+    });
+    const block = buildKnowledgebaseText(context.records || [], retrievalCharsBudget);
+    return {
+      ...block,
+      context,
+      source: 'knowledgebase',
+      fallbackUsed: false,
+      error: '',
+    };
+  } catch (err) {
+    const retrievalChunks = searchPlaybookChunks(retrievalQuery, {
+      topK: requestedTopK,
+      minScore: settings.knowledge.retrievalMinScore,
+      allowedCategories: settings.knowledge.allowedCategories,
+      allowedTemplates: settings.knowledge.allowedTemplates,
+      allowedTopLevel: settings.knowledge.allowedTopLevel,
+    });
+    const fallback = buildRetrievedKnowledgeText(retrievalChunks, retrievalCharsBudget);
+    return {
+      ...fallback,
+      context: null,
+      source: 'legacy-playbook-fallback',
+      fallbackUsed: true,
+      error: err?.message || 'Knowledgebase lookup failed',
+    };
+  }
+}
+
 function ensurePercent(value, fallback) {
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
@@ -172,10 +281,18 @@ function makeEmptyDebug(settings, maxInputChars) {
       includedTopK: 0,
       sources: [],
     },
+    knowledgebase: {
+      enabled: settings.knowledge.mode !== 'full-playbook',
+      source: '',
+      allowedUse: 'agent-response',
+      fallbackUsed: false,
+      error: '',
+      records: [],
+    },
   };
 }
 
-function buildChatModelContext({ normalizedMessages, settings }) {
+async function buildChatModelContext({ normalizedMessages, settings }) {
   const messages = Array.isArray(normalizedMessages) ? normalizedMessages : [];
   const maxInputChars = Math.max(1000, Math.floor(settings.context.maxInputTokens * 4));
   const debug = makeEmptyDebug(settings, maxInputChars);
@@ -239,30 +356,48 @@ function buildChatModelContext({ normalizedMessages, settings }) {
         ].join('\n')
       : safeString(getCoreSystemPrompt(), '');
 
-    const retrievalChunks = searchPlaybookChunks(retrievalQuery, {
-      topK: settings.knowledge.retrievalTopK,
-      minScore: settings.knowledge.retrievalMinScore,
-      allowedCategories: settings.knowledge.allowedCategories,
-      allowedTemplates: settings.knowledge.allowedTemplates,
-      allowedTopLevel: settings.knowledge.allowedTopLevel,
+    const retrievalBlock = await buildKnowledgebaseRetrievalBlock({
+      retrievalQuery,
+      settings,
+      retrievalCharsBudget,
     });
-
-    const retrievalBlock = buildRetrievedKnowledgeText(retrievalChunks, retrievalCharsBudget);
     retrievalCharsUsed = retrievalBlock.usedChars;
     retrievalIncluded = retrievalBlock.included;
+    debug.knowledgebase.source = retrievalBlock.source;
+    debug.knowledgebase.fallbackUsed = Boolean(retrievalBlock.fallbackUsed);
+    debug.knowledgebase.error = retrievalBlock.error || '';
+    debug.knowledgebase.records = retrievalIncluded.map((record) => ({
+      id: record.id,
+      sourceType: record.sourceType,
+      title: record.title,
+      trustState: record.trustState || '',
+      reviewStatus: record.reviewStatus || '',
+      reusableOutcome: record.reusableOutcome || '',
+      allowedUses: record.allowedUses || [],
+      warnings: record.warnings || [],
+    }));
 
     const sections = [];
     if (basePrompt.trim()) sections.push(truncateText(basePrompt, systemCharsBudget));
     if (retrievalBlock.text) {
-      sections.push('Retrieved Playbook Excerpts:\n' + retrievalBlock.text);
+      sections.push(
+        'Retrieved Knowledgebase Context:\n'
+        + 'Use TRUSTED knowledge as reviewed guidance only when directly relevant. '
+        + 'Use LEGACY-TRUSTED playbook knowledge as existing guidance with incomplete database evidence. '
+        + 'Do not treat candidate, rejected, restricted, or unsafe knowledge as final guidance.\n\n'
+        + retrievalBlock.text
+      );
     }
     if (settings.knowledge.includeCitations && retrievalIncluded.length > 0) {
       const sourceList = retrievalIncluded
-        .map((s, i) => `[${i + 1}] ${s.sourceType.toUpperCase()}: ${s.sourceName}${s.title ? ' :: ' + s.title : ''}`)
+        .map((s, i) => {
+          const trust = s.trustState ? ` (${s.trustState})` : '';
+          return `[${i + 1}] ${s.sourceType.toUpperCase()}: ${s.sourceName}${s.title ? ' :: ' + s.title : ''}${trust}`;
+        })
         .join('\n');
       sections.push(
         'Citation instructions:\n'
-        + 'When your answer draws from the reference sections above, naturally cite them using superscript numbers like [1], [2] corresponding to the numbered sources below. Only cite sections you actually used. Do not force citations — only include them when you directly reference playbook content.\n\n'
+        + 'When your answer draws from the reference sections above, naturally cite them using superscript numbers like [1], [2] corresponding to the numbered sources below. Only cite sections you actually used. Do not force citations — only include them when you directly reference knowledgebase or playbook content.\n\n'
         + 'Available sources:\n' + sourceList
       );
     }
@@ -304,6 +439,7 @@ function buildChatModelContext({ normalizedMessages, settings }) {
         sourceName: s.sourceName,
         title: s.title || null,
         id: s.id,
+        trustState: s.trustState || null,
       }))
     : [];
 

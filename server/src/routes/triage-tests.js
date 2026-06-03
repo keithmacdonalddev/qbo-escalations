@@ -1,26 +1,27 @@
 'use strict';
 
 const express = require('express');
-const fs = require('fs/promises');
-const path = require('path');
 const { randomUUID } = require('node:crypto');
 const { getAgentHealthSnapshot } = require('../services/agent-health-service');
-const { runTriageAgent } = require('../services/chat-request-service');
-const {
-  resolvePolicy,
-} = require('../services/chat-orchestrator');
-const {
-  getAlternateProvider,
-  getDefaultProvider,
-  normalizeProvider,
-} = require('../services/providers/registry');
+const { runTriage } = require('../services/triage');
 const { getProviderModelId, getProviderShortLabel } = require('../services/providers/catalog');
 const { createStageEventBus } = require('../lib/stage-events');
+const { parseEscalationText } = require('../lib/escalation-parser');
+// The triage agent test runs ONLY on real, operator-approved escalation parser
+// outputs — never synthetic fixtures. Those approved cases are projected from
+// the parser baseline store; this route consumes them through the shared lib
+// (case shape + random pick) and the parser route's asset pipeline (the SAME
+// list the "triage use cases" view shows).
+const {
+  listApprovedTriageCases,
+  getApprovedTriageCaseById,
+  chooseRandomCase,
+} = require('../lib/approved-triage-cases');
+const pipelineTestsRouter = require('./pipeline-tests');
 const TriageTestResult = require('../models/TriageTestResult');
 
 const router = express.Router();
 
-const FIXTURE_DIR = path.resolve(__dirname, '..', '..', 'fixtures', 'pipeline-tests', 'triage');
 const TEST_TIMEOUT_MS = 150_000;
 const TRIAGE_AGENT_ID = 'triage-agent';
 // Single-flight guard. Operator can only have one triage test in motion at a
@@ -29,10 +30,9 @@ const TRIAGE_AGENT_ID = 'triage-agent';
 let triageTestInFlight = false;
 
 // ---------------------------------------------------------------------------
-// Shared helpers copied from routes/pipeline-tests.js so the new route stays
-// self-contained. Per the plan, we intentionally do NOT extract a shared
-// module for these — the duplication keeps each test route file independent
-// and easy to read.
+// Generic request helpers. The escalation-parser-baseline resolution and the
+// approved-case shape live in ../lib/approved-triage-cases (shared with the
+// parser route) — only the small per-request utilities are local here.
 // ---------------------------------------------------------------------------
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -69,110 +69,89 @@ function getAgentRuntime(runtimeMap, agentId) {
   return isPlainObject(source) ? source : {};
 }
 
-function getChatRuntime(runtimeMap) {
-  return getAgentRuntime(runtimeMap, 'chat');
+// ---------------------------------------------------------------------------
+// Approved-case loader. The triage test input comes from REAL parser outputs an
+// operator has approved — the exact same list surfaced as "triage use cases".
+// We reuse the parser route's asset pipeline (one owner for "list image
+// fixtures + resolve their approved templates") and the shared lib's case shape.
+// No synthetic fixtures, no disk JSON.
+// ---------------------------------------------------------------------------
+function loadTriageTemplateAssets() {
+  if (typeof pipelineTestsRouter.listTriageTemplateAssets !== 'function') {
+    throw new Error('Parser route did not expose listTriageTemplateAssets.');
+  }
+  return pipelineTestsRouter.listTriageTemplateAssets();
 }
 
-function buildFallbackPolicy(runtimeMap) {
-  const chat = getChatRuntime(runtimeMap);
-  const provider = normalizeProvider(chat.provider || getDefaultProvider());
-  return resolvePolicy({
-    mode: chat.mode || 'single',
-    primaryProvider: provider,
-    primaryModel: safeString(chat.model, ''),
-    fallbackProvider: chat.fallbackProvider || getAlternateProvider(provider),
-    fallbackModel: safeString(chat.fallbackModel, ''),
-  });
+async function listApprovedCases() {
+  return listApprovedTriageCases(loadTriageTemplateAssets);
 }
 
-function getReasoningEffort(runtimeMap) {
-  return safeString(getChatRuntime(runtimeMap).reasoningEffort, 'high') || 'high';
+async function getApprovedCaseById(id) {
+  return getApprovedTriageCaseById(loadTriageTemplateAssets, id);
 }
 
-function buildAgentRuntimeMap(runtimeMap, agentId, runtime) {
+// Build the TriageTestResult.fixture object for an approved case. The `name`
+// MUST be the stable case id (`${sourceFixtureName}#${outputIndex}`) so the
+// stats aggregation groups every run of the same approved case together; if it
+// drifted, historical grouping by fixture.name would shatter.
+function fixtureFromApprovedCase(triageCase, selectionMode) {
   return {
-    ...runtimeMap,
-    [agentId]: {
-      ...(isPlainObject(runtime) ? runtime : {}),
-      configured: runtime?.configured !== false && Boolean(runtime?.provider),
-    },
+    name: triageCase.id,
+    label: triageCase.label,
+    sourceFixtureName: triageCase.sourceFixtureName,
+    outputIndex: triageCase.outputIndex,
+    kind: 'approved-parser-template',
+    source: triageCase.source || 'approved-parser-output',
+    selectionMode,
+    sourceProvider: triageCase.provider,
+    sourceModel: triageCase.model,
+    confirmedBy: triageCase.confirmedBy,
+    approvedAt: triageCase.approvedAt,
+    sourceImageUrl: triageCase.sourceImageUrl,
+    thumbnailUrl: triageCase.thumbnailUrl,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Fixture loader. Reads every *.json file in the triage fixture folder at
-// request time (no caching) so adding a new fixture does not require a
-// server restart. Malformed JSON files are skipped with a warning, never
-// crash the request — operators may be mid-edit on a new fixture.
-// ---------------------------------------------------------------------------
-async function listTriageFixtures(dir = FIXTURE_DIR) {
-  let entries = [];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch (err) {
-    if (err?.code === 'ENOENT') return [];
-    throw err;
-  }
-  const fixtures = [];
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    if (path.extname(entry.name).toLowerCase() !== '.json') continue;
-    const filePath = path.join(dir, entry.name);
-    try {
-      const raw = await fs.readFile(filePath, 'utf8');
-      const payload = JSON.parse(raw);
-      if (!isPlainObject(payload)) {
-        console.warn(`[triage-tests] Skipped fixture ${entry.name}: not a JSON object.`);
-        continue;
-      }
-      const name = safeString(payload.name, '').trim() || path.basename(entry.name, '.json');
-      const description = safeString(payload.description, '');
-      const tags = Array.isArray(payload.tags) ? payload.tags.map((tag) => safeString(tag)).filter(Boolean) : [];
-      const schemaVersion = safeNumber(payload.schemaVersion, 1);
-      const parserText = safeString(payload.parserText, '');
-      const parseFields = isPlainObject(payload.parseFields) ? payload.parseFields : {};
-      if (!parserText && Object.keys(parseFields).length === 0) {
-        console.warn(`[triage-tests] Skipped fixture ${entry.name}: parserText and parseFields are both empty.`);
-        continue;
-      }
-      fixtures.push({
-        name,
-        description,
-        tags,
-        schemaVersion,
-        parserText,
-        parseFields,
-        fileName: entry.name,
-      });
-    } catch (err) {
-      console.warn(`[triage-tests] Skipped fixture ${entry.name}: ${err.message}`);
+// Resolve which approved case a /run request should execute. `{ caseId }` picks
+// that specific case; no/empty caseId picks one at random from the real pool.
+// Returns { fixture, payload } mirroring the old loader shape, or a structured
+// error object the caller maps to a response.
+async function resolveRunCase(body = {}) {
+  const requestedId = safeString(body.caseId, '').trim();
+  if (requestedId) {
+    const triageCase = await getApprovedCaseById(requestedId);
+    if (!triageCase) {
+      return {
+        error: {
+          statusCode: 404,
+          code: 'APPROVED_CASE_NOT_FOUND',
+          error: `No approved triage case found for id "${requestedId}". It may have been un-approved.`,
+        },
+      };
     }
+    return {
+      fixture: fixtureFromApprovedCase(triageCase, 'specific'),
+      payload: { parserText: triageCase.parserText },
+      caseCount: undefined,
+    };
   }
-  return fixtures.sort((a, b) => a.fileName.localeCompare(b.fileName));
-}
 
-function chooseRandomFixture(fixtures) {
-  if (!Array.isArray(fixtures) || fixtures.length === 0) return null;
-  return fixtures[Math.floor(Math.random() * fixtures.length)];
-}
-
-// readRandomTriageFixture is split out so tests can swap the directory and
-// call the loader with a tmp folder.
-async function readRandomTriageFixture(dir = FIXTURE_DIR) {
-  const fixtures = await listTriageFixtures(dir);
-  if (!fixtures.length) return { fixture: null, fixtureCount: 0 };
-  const picked = chooseRandomFixture(fixtures);
+  const cases = await listApprovedCases();
+  if (!cases.length) {
+    return {
+      error: {
+        statusCode: 409,
+        code: 'NO_APPROVED_CASES',
+        error: 'No approved escalation cases are available yet. Approve a parser output to add one.',
+      },
+    };
+  }
+  const picked = chooseRandomCase(cases);
   return {
-    fixture: {
-      name: picked.name,
-      description: picked.description,
-      tags: picked.tags,
-      schemaVersion: picked.schemaVersion,
-      fileName: picked.fileName,
-      fixtureCount: fixtures.length,
-    },
-    payload: { parserText: picked.parserText, parseFields: picked.parseFields },
-    fixtureCount: fixtures.length,
+    fixture: fixtureFromApprovedCase(picked, 'random'),
+    payload: { parserText: picked.parserText },
+    caseCount: cases.length,
   };
 }
 
@@ -247,9 +226,11 @@ async function createTriageTestResultRecord({
 function serializeTriageTestResult(doc) {
   if (!doc) return null;
   const result = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+  const publicResult = { ...result };
+  delete publicResult.parseFields;
   return {
-    ...result,
-    id: String(result._id || result.id || ''),
+    ...publicResult,
+    id: String(publicResult._id || publicResult.id || ''),
   };
 }
 
@@ -357,6 +338,45 @@ async function buildTriageTestStats() {
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+// GET /cases — the real, operator-approved escalation cases the triage test can
+// run against. Powers the operator's pick-a-case list, "Run all", and the
+// random pool. Returns a short label/preview per case (no full parserText).
+router.get('/cases', async (req, res) => {
+  if (typeof req.setResponseTimeout === 'function') {
+    req.setResponseTimeout(30_000);
+  }
+  let cases;
+  try {
+    cases = await listApprovedCases();
+  } catch (err) {
+    return res.status(err?.statusCode || 500).json({
+      ok: false,
+      code: err?.code || 'TRIAGE_CASES_FAILED',
+      error: err?.message || 'Failed to load approved triage cases.',
+    });
+  }
+  return res.json({
+    ok: true,
+    cases: cases.map((entry) => ({
+      id: entry.id,
+      sourceFixtureName: entry.sourceFixtureName,
+      outputIndex: entry.outputIndex,
+      label: entry.label,
+      provider: entry.provider,
+      model: entry.model,
+      confirmedBy: entry.confirmedBy,
+      approvedAt: entry.approvedAt,
+      thumbnailUrl: entry.thumbnailUrl,
+      sourceImageUrl: entry.sourceImageUrl,
+    })),
+    stats: {
+      caseCount: cases.length,
+      sourceImageCount: new Set(cases.map((entry) => entry.sourceFixtureName).filter(Boolean)).size,
+    },
+  });
+});
+
 router.post('/status', async (req, res) => {
   if (typeof req.setResponseTimeout === 'function') {
     req.setResponseTimeout(60_000);
@@ -497,30 +517,33 @@ router.post('/run', async (req, res) => {
     });
   }
 
-  // Pick a fixture before we mark the in-flight flag — if there are zero
-  // fixtures we want a clean 409, not a stuck flag.
+  // Resolve the approved case to run BEFORE we mark the in-flight flag — a
+  // missing case or empty pool should yield a clean error, not a stuck flag.
+  // `{ caseId }` runs that specific approved case; no/empty caseId runs one at
+  // random from the real approved pool.
   let fixturePayload;
   try {
-    fixturePayload = await readRandomTriageFixture();
+    fixturePayload = await resolveRunCase(req.body);
   } catch (err) {
     return respondRun(500, {
       ok: false,
-      code: 'TRIAGE_FIXTURE_READ_FAILED',
-      error: err.message || 'Failed to read triage fixture folder.',
+      code: 'TRIAGE_CASE_READ_FAILED',
+      error: err.message || 'Failed to load approved triage cases.',
     });
   }
-  if (!fixturePayload.fixture) {
-    return respondRun(409, {
+  if (fixturePayload.error) {
+    return respondRun(fixturePayload.error.statusCode || 409, {
       ok: false,
-      code: 'NO_TRIAGE_FIXTURES',
-      error: 'No triage fixtures are available. Add a JSON fixture to server/fixtures/pipeline-tests/triage/.',
+      code: fixturePayload.error.code,
+      error: fixturePayload.error.error,
+      stage: 'triage',
     });
   }
 
   const runtime = getAgentRuntime(runtimeMap, TRIAGE_AGENT_ID);
-  const fallbackPolicy = buildFallbackPolicy(runtimeMap);
-  const reasoningEffort = getReasoningEffort(runtimeMap);
-  const enrichedRuntimeMap = buildAgentRuntimeMap(runtimeMap, TRIAGE_AGENT_ID, runtime);
+  const provider = safeString(runtime.provider, '') || 'lm-studio';
+  const model = safeString(runtime.model, '');
+  const reasoningEffort = safeString(runtime.reasoningEffort, '') || 'high';
 
   triageTestInFlight = true;
   const bus = streamMode
@@ -540,16 +563,25 @@ router.post('/run', async (req, res) => {
 
   const startedAt = Date.now();
   try {
-    const { context, policy } = await runTriageAgent({
-      runtimeMap: enrichedRuntimeMap,
-      fallbackPolicy,
+    const result = await runTriage(fixturePayload.payload.parserText, {
+      provider,
+      model,
       reasoningEffort,
-      parserText: fixturePayload.payload.parserText,
-      parseFields: fixturePayload.payload.parseFields,
       timeoutMs: TEST_TIMEOUT_MS,
       eventBus: bus,
     });
+    const context = {
+      triageCard: result.card || null,
+      triageMeta: result.triageMeta || null,
+    };
+    const policy = {
+      mode: 'single',
+      primaryProvider: result.providerUsed || provider,
+      primaryModel: result.modelUsed || model,
+      reasoningEffort,
+    };
     const elapsedMs = Date.now() - startedAt;
+    const derivedParseFields = parseEscalationText(fixturePayload.payload.parserText);
     const providerUsed = safeString(context?.triageMeta?.providerUsed || policy?.primaryProvider || '', '');
     const modelUsed = safeString(context?.triageMeta?.model || policy?.primaryModel || '', '')
       || getProviderModelId(providerUsed)
@@ -563,7 +595,7 @@ router.post('/run', async (req, res) => {
       policy,
       elapsedMs,
       parserText: fixturePayload.payload.parserText,
-      parseFields: fixturePayload.payload.parseFields,
+      parseFields: derivedParseFields,
     });
 
     const providerPackageId = safeString(context?.triageMeta?.providerPackageId, '');
@@ -597,7 +629,6 @@ router.post('/run', async (req, res) => {
       triageCard: context?.triageCard || null,
       triageMeta: context?.triageMeta || null,
       parserText: fixturePayload.payload.parserText,
-      parseFields: fixturePayload.payload.parseFields,
     };
     return respondRun(200, responseBody);
   } catch (err) {
@@ -619,10 +650,11 @@ router.post('/run', async (req, res) => {
 });
 
 module.exports = router;
-// Exported for tests that want to drive the loader directly without a route
-// round-trip.
+// Exported for tests that want to drive the approved-case loader directly
+// without a route round-trip.
 module.exports.__internals = {
-  listTriageFixtures,
-  readRandomTriageFixture,
-  chooseRandomFixture,
+  listApprovedCases,
+  getApprovedCaseById,
+  resolveRunCase,
+  loadTriageTemplateAssets,
 };

@@ -570,6 +570,97 @@ test('GET /image-fixtures/:name serves parser fixture images', async () => {
   assert.match(res.headers['Content-Type'], /^image\//);
 });
 
+test('GET /test-assets/:agentId lists parser image fixtures with official templates', async () => {
+  const router = loadRouteWithMocks();
+  const handler = findHandler(router, 'get', '/test-assets/:agentId');
+  const fileName = fs.readdirSync(IMAGE_FIXTURE_DIR).find((entry) => /\.(png|jpe?g|webp)$/i.test(entry));
+  assert.ok(fileName, 'expected at least one image parser fixture');
+
+  mockBaselineStore = [{
+    _id: 'parser-baseline-assets',
+    fixtureName: fileName,
+    expectedText: 'OFFICIAL OUTPUT ONE',
+    acceptableOutputs: [{ expectedText: 'OFFICIAL OUTPUT TWO', sourceProvider: 'gemini' }],
+    updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+  }];
+
+  const res = makeRes();
+  await handler(makeReq({}, { params: { agentId: 'escalation-template-parser' } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.assetType, 'image-fixtures');
+  assert.equal(res.payload.supportsUpload, true);
+  assert.ok(res.payload.stats.imageCount >= 1);
+  assert.ok(res.payload.stats.approvedTemplateCount >= 2);
+
+  const asset = res.payload.assets.find((entry) => entry.name === fileName);
+  assert.ok(asset, `expected ${fileName} asset`);
+  assert.equal(asset.hasApprovedTemplates, true);
+  assert.equal(asset.approvedTemplateCount, 2);
+  assert.match(asset.url, /^\/api\/pipeline-tests\/image-fixtures\//);
+  assert.deepEqual(
+    asset.approvedTemplates.map((output) => output.expectedText),
+    ['OFFICIAL OUTPUT TWO', 'OFFICIAL OUTPUT ONE']
+  );
+});
+
+test('GET /test-assets/:agentId mirrors parser approved templates for triage', async () => {
+  const router = loadRouteWithMocks();
+  const handler = findHandler(router, 'get', '/test-assets/:agentId');
+  const fileName = fs.readdirSync(IMAGE_FIXTURE_DIR).find((entry) => /\.(png|jpe?g|webp)$/i.test(entry));
+  assert.ok(fileName, 'expected at least one image parser fixture');
+
+  mockBaselineStore = [{
+    _id: 'parser-baseline-triage-assets',
+    fixtureName: fileName,
+    expectedText: 'TRIAGE CANONICAL OUTPUT ONE',
+    acceptableOutputs: [{ expectedText: 'TRIAGE CANONICAL OUTPUT TWO', sourceProvider: 'openai' }],
+    updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+  }];
+
+  const res = makeRes();
+  await handler(makeReq({}, { params: { agentId: 'triage-agent' } }), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.payload.ok, true);
+  assert.equal(res.payload.assetType, 'approved-parser-templates');
+  assert.equal(res.payload.supportsUpload, false);
+  assert.equal(res.payload.sourceAgentId, 'escalation-template-parser');
+
+  const mirrored = res.payload.assets.filter((entry) => entry.sourceFixtureName === fileName);
+  assert.equal(mirrored.length, 2);
+  assert.deepEqual(
+    mirrored.map((entry) => entry.expectedText),
+    ['TRIAGE CANONICAL OUTPUT TWO', 'TRIAGE CANONICAL OUTPUT ONE']
+  );
+  assert.ok(mirrored.every((entry) => entry.imageUrl.includes('/api/pipeline-tests/image-fixtures/')));
+});
+
+test('POST /image-fixtures saves uploaded parser image assets', async () => {
+  const router = loadRouteWithMocks();
+  const handler = findHandler(router, 'post', '/image-fixtures');
+  const fileName = `codex-upload-test-${Date.now()}.png`;
+  const filePath = path.join(IMAGE_FIXTURE_DIR, fileName);
+  const dataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  try {
+    const res = makeRes();
+    await handler(makeReq({ fileName, dataUrl }), res);
+
+    assert.equal(res.statusCode, 201);
+    assert.equal(res.payload.ok, true);
+    assert.equal(res.payload.fixture.name, fileName);
+    assert.equal(res.payload.fixture.mimeType, 'image/png');
+    assert.equal(res.payload.fixture.randomizedForTests, true);
+    assert.equal(fs.existsSync(filePath), true);
+  } finally {
+    await fsp.unlink(filePath).catch((err) => {
+      if (err?.code !== 'ENOENT') throw err;
+    });
+  }
+});
+
 test('POST /parser-results/:id/programmatic-check uses built-in confirmed output and records pass', async () => {
   const router = loadRouteWithMocks();
   const handler = findHandler(router, 'post', '/parser-results/:id/programmatic-check');

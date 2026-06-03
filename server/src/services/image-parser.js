@@ -9,9 +9,15 @@ const crypto = require('crypto');
 const codex = require('./codex');
 const { getLoadedModel, getModelSnapshot } = require('./lm-studio');
 const {
+  getClaudeProviderIds,
   getCodexProviderIds,
   getProviderModelId,
 } = require('./providers/catalog');
+const {
+  buildClaudePayloadFromEvents,
+  checkClaudeCliAvailability,
+  sendClaudeCliPrompt,
+} = require('./providers/claude-cli-provider-harness');
 const {
   sendLlmGatewayChatCompletion,
 } = require('./providers/llm-gateway-provider-harness');
@@ -111,6 +117,14 @@ const DIRECT_IMAGE_PARSER_PROVIDER_IDS = Object.freeze([
   'kimi',
   'gemini',
 ]);
+const CLAUDE_IMAGE_PARSER_PROVIDER_IDS = Object.freeze(getClaudeProviderIds());
+const CLAUDE_IMAGE_PARSER_PROVIDER_ID_SET = new Set(CLAUDE_IMAGE_PARSER_PROVIDER_IDS);
+const CLAUDE_IMAGE_PARSER_PROVIDER_MODELS = Object.freeze(
+  CLAUDE_IMAGE_PARSER_PROVIDER_IDS.reduce((acc, providerId) => {
+    acc[providerId] = getProviderModelId(providerId) || providerId;
+    return acc;
+  }, {})
+);
 const CODEX_IMAGE_PARSER_PROVIDER_IDS = Object.freeze(getCodexProviderIds());
 const CODEX_IMAGE_PARSER_PROVIDER_ID_SET = new Set(CODEX_IMAGE_PARSER_PROVIDER_IDS);
 const CODEX_IMAGE_PARSER_PROVIDER_MODELS = Object.freeze(
@@ -121,6 +135,7 @@ const CODEX_IMAGE_PARSER_PROVIDER_MODELS = Object.freeze(
 );
 const VALID_IMAGE_PARSER_PROVIDERS = Object.freeze([
   ...DIRECT_IMAGE_PARSER_PROVIDER_IDS,
+  ...CLAUDE_IMAGE_PARSER_PROVIDER_IDS,
   ...CODEX_IMAGE_PARSER_PROVIDER_IDS,
 ]);
 const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
@@ -562,6 +577,16 @@ function getRemoteProviderLabel(provider) {
 
 function isCodexImageParserProvider(provider) {
   return CODEX_IMAGE_PARSER_PROVIDER_ID_SET.has(provider);
+}
+
+function isClaudeImageParserProvider(provider) {
+  return CLAUDE_IMAGE_PARSER_PROVIDER_ID_SET.has(provider);
+}
+
+function getClaudeImageParserModel(provider, model) {
+  const requested = typeof model === 'string' ? model.trim() : '';
+  if (requested) return requested;
+  return CLAUDE_IMAGE_PARSER_PROVIDER_MODELS[provider] || process.env.CLAUDE_PARSE_MODEL || 'claude-opus-4-8';
 }
 
 function getCodexImageParserModel(provider, model) {
@@ -1722,6 +1747,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
   const body = {
     model: effectiveModel,
     max_tokens: 4096,
+    temperature: 1,
     thinking: { type: 'disabled' },
     messages: [
       { role: 'system', content: systemPrompt },
@@ -1784,6 +1810,93 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
   );
 
   const payloadResult = await buildKimiImageParserResultFromProviderPackage(result.providerTrace, {
+    eventBus,
+    model: effectiveModel,
+    signal,
+  });
+
+  return {
+    ...result,
+    text: payloadResult.text,
+    usage: payloadResult.usage || null,
+    providerTrace: {
+      ...(result.providerTrace || {}),
+      providerPayload: payloadResult.providerPayloadTrace,
+    },
+  };
+}
+
+async function callClaudeCli(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+  throwIfAborted(signal);
+  const effectiveModel = getClaudeImageParserModel(provider, model);
+
+  emitUserVisibleStatus(
+    eventBus,
+    'parser.agent_handoff_to_provider',
+    'Escalation image parsing agent hand off payload to Claude CLI Agent',
+    'started',
+    { provider, model: effectiveModel || '' }
+  );
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_payload_received',
+    'Claude CLI provider harness received payload',
+    'received',
+    {
+      provider,
+      operation: 'image-parse',
+      model: effectiveModel,
+    }
+  );
+
+  const result = await sendClaudeCliPrompt({
+    systemPrompt,
+    messages: [
+      {
+        role: 'user',
+        content: 'Read the image and output only the parser result required by the system instructions.',
+      },
+    ],
+    images: [imageDataUrl],
+    model: effectiveModel,
+    reasoningEffort: reasoningEffort || process.env.CLAUDE_PARSE_REASONING_EFFORT || process.env.CLAUDE_REASONING_EFFORT || '',
+    timeoutMs,
+    captureContext: {
+      providerId: provider || 'claude',
+      providerResearchId: 'anthropic-cli',
+      providerPathType: 'cli',
+      callSite: 'image-parser:callClaudeCli',
+      operation: 'image-parse',
+      functionName: 'callClaudeCli',
+      forceCapture: true,
+      modelRequested: effectiveModel,
+      reasoningEffort: reasoningEffort || process.env.CLAUDE_PARSE_REASONING_EFFORT || process.env.CLAUDE_REASONING_EFFORT || '',
+      source: {
+        file: 'server/src/services/image-parser.js',
+        functionName: 'callClaudeCli',
+        helperName: 'sendClaudeCliPrompt',
+        spawnSite: 'claude-cli-provider-harness.sendClaudeCliPrompt',
+      },
+      metadata: {
+        imageDataUrlBytes: Buffer.byteLength(imageDataUrl || '', 'utf8'),
+      },
+    },
+    onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
+    signal,
+  });
+
+  emitUserVisibleStatus(
+    eventBus,
+    'provider.agent_handoff_to_parser',
+    'Claude CLI provider harness handed off payload to Escalation image parsing agent',
+    'complete',
+    {
+      provider,
+      providerPackageId: result?.providerTrace?.providerPackageId || null,
+    }
+  );
+
+  const payloadResult = await buildClaudeImageParserResultFromProviderPackage(result.providerTrace, {
     eventBus,
     model: effectiveModel,
     signal,
@@ -2439,6 +2552,36 @@ async function buildCodexImageParserResultFromProviderPackage(providerTrace, { e
   };
 }
 
+async function buildClaudeImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
+  const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
+  if (providerPackage.providerResearchId !== 'anthropic-cli' && providerPackage.providerPathType !== 'cli') {
+    throw createProviderPackageError(`Unsupported provider package for Claude image parser extraction: ${providerPackage.providerId || 'unknown'}`);
+  }
+
+  const events = await loadCodexStdoutJsonlEventsFromPackage(providerPackage);
+  const payload = buildClaudePayloadFromEvents(events, providerTrace?.model || model);
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath: 'cli.stdout.jsonlEvents[stream_event.content_block_delta.delta.text]',
+    textLength: payload.text.length,
+    usagePresent: Boolean(payload.usage),
+  });
+
+  return {
+    text: payload.text,
+    usage: payload.usage,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath: 'cli.stdout.jsonlEvents[stream_event.content_block_delta.delta.text]',
+      eventCount: events.length,
+    },
+  };
+}
+
 async function buildImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
   const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerId !== 'llm-gateway') {
@@ -2672,9 +2815,9 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
  * @param {string} [options.model] - Model ID override
  * @param {string} [options.reasoningEffort] - Provider-specific reasoning effort override
  * @param {number} [options.timeoutMs=120000] - Request timeout
- * @param {boolean} [options.structured=true] - Legacy option name. When
- *   provider is 'anthropic', any value other than false uses the Anthropic SDK
- *   provider adapter; false uses the direct Anthropic HTTP path.
+ * @param {boolean} [options.useAnthropicSdk=false] - Legacy escape hatch. When
+ *   provider is 'anthropic', true uses the old SDK adapter; default uses the
+ *   direct Anthropic API provider harness.
  * @returns {Promise<{
  *   text: string,
  *   role: 'escalation'|'inv-list'|'unknown',
@@ -2687,10 +2830,9 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
 async function parseImage(imageBase64, options = {}) {
   const { provider, model, reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus, signal } = options;
   throwIfAborted(signal);
-  // Legacy structured flag: false opts out of the Anthropic SDK adapter.
-  // The SDK adapter now returns provider answer text only; downstream parser
-  // validation owns all decisions about whether that text is useful.
-  const useStructured = options.structured !== false;
+  // Legacy SDK adapter is now explicit opt-in. The normal Anthropic provider
+  // route uses the direct API harness so it gets ProviderCallPackage parity.
+  const useAnthropicSdk = options.useAnthropicSdk === true;
   const promptId = normalizeImageParsePromptId(options.promptId || options.parserPromptId);
   const systemPrompt = getRenderedAgentPrompt(promptId);
   const promptTrace = buildPromptTrace(promptId, systemPrompt);
@@ -2759,6 +2901,8 @@ async function parseImage(imageBase64, options = {}) {
       timeoutMs,
       signal,
     });
+  } else if (isClaudeImageParserProvider(provider)) {
+    result = await callClaudeCli(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus, signal);
   } else if (isCodexImageParserProvider(provider)) {
     result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal);
     await requireProviderPackageCapture({
@@ -2890,7 +3034,7 @@ async function parseImage(imageBase64, options = {}) {
         result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
         break;
       case 'anthropic':
-        if (useStructured) {
+        if (useAnthropicSdk) {
           eventBus?.emit('parser.sdk_path_selected', {
             provider,
             engine: 'anthropic-agent-sdk',
@@ -2899,7 +3043,7 @@ async function parseImage(imageBase64, options = {}) {
         } else {
           eventBus?.emit('parser.sdk_path_skipped', {
             provider,
-            reason: 'opt_out_legacy_structured_false',
+            reason: 'direct_anthropic_provider_harness_default',
           });
           result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
         }
@@ -3031,6 +3175,7 @@ const PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS = 5_000;
 
 async function resolveProviderAvailability(trace = null) {
   const remoteProviderNames = ['anthropic', 'openai', 'kimi', 'gemini'];
+  const claudeProviderIds = [...CLAUDE_IMAGE_PARSER_PROVIDER_IDS];
   const codexProviderIds = [...CODEX_IMAGE_PARSER_PROVIDER_IDS];
 
   // Kick everything off concurrently. Each probe resolves to a tuple of
@@ -3146,9 +3291,21 @@ async function resolveProviderAvailability(trace = null) {
     return [provider, result];
   })());
 
-  // Codex CLI check is a single shared probe whose result is fanned out
-  // across all configured codex image-parser provider ids. Run it once,
-  // concurrently with everything else.
+  // CLI checks are shared probes whose result is fanned out across configured
+  // model preset ids. Run them once, concurrently with everything else.
+  const claudeProbe = claudeProviderIds.length
+    ? (async () => {
+      const claudeAvailability = await traceAvailabilityCall(trace, {
+        name: 'Check Claude image-provider CLI availability',
+        functionName: 'checkClaudeCliAvailability',
+        check: 'claude --version completes before timeout',
+        summary: 'Claude image-provider CLI availability check completed.',
+        metadata: { providerCount: claudeProviderIds.length },
+      }, () => checkClaudeCliAvailability(''));
+      return ['__claude__', claudeAvailability];
+    })()
+    : Promise.resolve(['__claude__', null]);
+
   const codexProbe = codexProviderIds.length
     ? (async () => {
       const codexAvailability = await traceAvailabilityCall(trace, {
@@ -3162,7 +3319,7 @@ async function resolveProviderAvailability(trace = null) {
     })()
     : Promise.resolve(['__codex__', null]);
 
-  const allProbes = [llmGatewayProbe, lmStudioProbe, ...remoteProbes, codexProbe];
+  const allProbes = [llmGatewayProbe, lmStudioProbe, ...remoteProbes, claudeProbe, codexProbe];
 
   // Fix B: race the whole batch against an outer ceiling. Any probe that
   // hasn't settled by the deadline is reported as OUTER_TIMEOUT below.
@@ -3218,9 +3375,36 @@ async function resolveProviderAvailability(trace = null) {
 
   // Assemble results. Iterate the original probe order so we know which
   // logical provider each slot corresponds to.
-  const probeKeys = ['llm-gateway', 'lm-studio', ...remoteProviderNames, '__codex__'];
+  const probeKeys = ['llm-gateway', 'lm-studio', ...remoteProviderNames, '__claude__', '__codex__'];
   probeKeys.forEach((logicalKey, idx) => {
     const outcome = probeOutcomes[idx];
+
+    if (logicalKey === '__claude__') {
+      let claudeAvailability = null;
+      if (outcome && outcome.status === 'fulfilled') {
+        claudeAvailability = outcome.value;
+      } else if (outcome && outcome.status === 'rejected') {
+        const reason = outcome.reason?.message || 'Claude CLI availability check failed.';
+        claudeAvailability = { available: false, reason, code: 'PROVIDER_VALIDATION_THREW' };
+      } else if (claudeProviderIds.length) {
+        claudeAvailability = markOuterTimeout('claude');
+      }
+      for (const providerId of claudeProviderIds) {
+        providers[providerId] = {
+          ...claudeAvailability,
+          model: CLAUDE_IMAGE_PARSER_PROVIDER_MODELS[providerId] || providerId,
+        };
+        emitAvailabilityTrace(trace, {
+          name: `Map Claude availability to ${providerId}`,
+          functionName: 'resolveProviderAvailability',
+          check: 'Claude availability result is assigned to configured Claude image parser provider ids',
+          status: claudeAvailability?.available ? 'success' : 'warning',
+          summary: `${providerId} availability mapped from Claude CLI check.`,
+          metadata: { provider: providerId, available: Boolean(claudeAvailability?.available) },
+        });
+      }
+      return;
+    }
 
     // Codex slot is special — its single result is fanned out across the
     // configured codex provider ids.

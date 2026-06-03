@@ -9,10 +9,9 @@ const { parseImage } = require('../services/image-parser');
 const { getAgentHealthSnapshot, refreshAgentHealth } = require('../services/agent-health-service');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const {
-  buildAgentBackedTriageContext,
   resolveKnownIssueAgentPolicy,
-  resolveTriageAgentPolicy,
 } = require('../services/chat-request-service');
+const { runTriage } = require('../services/triage');
 const {
   knownIssueSearchToInvMatchResult,
   runKnownIssueSearchAgent,
@@ -34,7 +33,20 @@ const {
 const { createStageEventBus } = require('../lib/stage-events');
 const { calculateCost, nanosToUsd, PRICING_VERSION } = require('../lib/pricing');
 const { buildExactOutputComparison } = require('../lib/exact-output-check');
-const { getBuiltInConfirmedOutput } = require('../lib/image-parser-confirmed-outputs');
+// Approved parser outputs → confirmed-output resolution + serialization lives in
+// a shared lib so the triage test route can consume the SAME real, operator-
+// approved data without a cross-route import. Behavior here is unchanged: these
+// are the exact functions that previously lived inline in this file.
+const {
+  imageParserBaselineDbAvailable,
+  serializeAcceptedOutput,
+  collectAcceptedOutputsFromBaseline,
+  serializeImageParserBaseline,
+  findBaselineByFixtureName,
+  resolveConfirmedOutputSetForFixture,
+  resolveConfirmedOutputForFixture,
+  flattenTemplatesFromFixtureAssets,
+} = require('../lib/approved-triage-cases');
 const ImageParserTestResult = require('../models/ImageParserTestResult');
 const ImageParserFixtureBaseline = require('../models/ImageParserFixtureBaseline');
 
@@ -45,6 +57,7 @@ const IMAGE_FIXTURE_DIR = path.join(FIXTURE_DIR, 'image-parser');
 const TEMPLATE_SVG_PATH = path.join(FIXTURE_DIR, 'escalation-template.svg');
 const CASE_FIXTURE_PATH = path.join(FIXTURE_DIR, 'escalation-case.json');
 const TEST_TIMEOUT_MS = 150_000;
+const MAX_IMAGE_FIXTURE_BYTES = 20 * 1024 * 1024;
 let parserTestInFlight = false;
 const STAGE_AGENT_IDS = Object.freeze({
   parser: 'escalation-template-parser',
@@ -169,10 +182,6 @@ function imageParserTestDbAvailable() {
   return Boolean(ImageParserTestResult.db && ImageParserTestResult.db.readyState === 1);
 }
 
-function imageParserBaselineDbAvailable() {
-  return Boolean(ImageParserFixtureBaseline.db && ImageParserFixtureBaseline.db.readyState === 1);
-}
-
 async function readTemplateImageDataUrl() {
   const svg = await fs.readFile(TEMPLATE_SVG_PATH);
   const png = await sharp(svg).png().toBuffer();
@@ -238,6 +247,126 @@ function buildImageFixtureUrl(name) {
   const clean = safeString(name, '').trim();
   if (!clean) return '';
   return `/api/pipeline-tests/image-fixtures/${encodeURIComponent(clean)}`;
+}
+
+function imageFixtureRelativePath(name) {
+  const clean = normalizeImageFixtureName(name);
+  if (!clean) return '';
+  return path.relative(FIXTURE_DIR, path.join(IMAGE_FIXTURE_DIR, clean)).replace(/\\/g, '/');
+}
+
+function isCompatibleImageFixtureExtension(ext, mimeType) {
+  const normalizedExt = safeString(ext, '').toLowerCase();
+  const normalizedMime = safeString(mimeType, '').toLowerCase();
+  if (normalizedMime === 'image/jpeg') return normalizedExt === '.jpg' || normalizedExt === '.jpeg';
+  return IMAGE_FIXTURE_MIME_TYPES[normalizedExt] === normalizedMime;
+}
+
+function defaultImageFixtureExtension(mimeType) {
+  if (mimeType === 'image/png') return '.png';
+  if (mimeType === 'image/webp') return '.webp';
+  return '.jpg';
+}
+
+function parseImageFixtureDataUrl(value) {
+  const raw = safeString(value, '').trim();
+  const match = raw.match(/^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i);
+  if (!match) {
+    const err = new Error('Image asset must be a PNG, JPEG, or WebP data URL.');
+    err.statusCode = 400;
+    err.code = 'INVALID_IMAGE_DATA_URL';
+    throw err;
+  }
+
+  const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+  const buffer = Buffer.from(match[2].replace(/\s/g, ''), 'base64');
+  if (!buffer.length) {
+    const err = new Error('Image asset is empty.');
+    err.statusCode = 400;
+    err.code = 'EMPTY_IMAGE_ASSET';
+    throw err;
+  }
+  if (buffer.length > MAX_IMAGE_FIXTURE_BYTES) {
+    const err = new Error(`Image asset is too large. Maximum size is ${Math.round(MAX_IMAGE_FIXTURE_BYTES / 1024 / 1024)} MB.`);
+    err.statusCode = 413;
+    err.code = 'IMAGE_ASSET_TOO_LARGE';
+    throw err;
+  }
+  return { mimeType, buffer };
+}
+
+function sanitizeImageFixtureUploadName(fileName, mimeType) {
+  const fallbackExt = defaultImageFixtureExtension(mimeType);
+  const base = path.basename(safeString(fileName, '').trim()) || `image-parser-fixture-${Date.now()}${fallbackExt}`;
+  const ext = path.extname(base).toLowerCase() || fallbackExt;
+  if (!Object.prototype.hasOwnProperty.call(IMAGE_FIXTURE_MIME_TYPES, ext)) {
+    const err = new Error('Image asset filename must end in .png, .jpg, .jpeg, or .webp.');
+    err.statusCode = 400;
+    err.code = 'INVALID_IMAGE_EXTENSION';
+    throw err;
+  }
+  if (!isCompatibleImageFixtureExtension(ext, mimeType)) {
+    const err = new Error('Image asset filename extension does not match the uploaded image type.');
+    err.statusCode = 400;
+    err.code = 'IMAGE_EXTENSION_MISMATCH';
+    throw err;
+  }
+  const rawStem = path.basename(base, path.extname(base)) || 'image-parser-fixture';
+  const stem = rawStem
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[.-]+|[.-]+$/g, '')
+    || 'image-parser-fixture';
+  return `${stem}${ext}`;
+}
+
+async function getUniqueImageFixtureName(preferredName) {
+  const clean = normalizeImageFixtureName(preferredName);
+  if (!clean) {
+    const err = new Error('Invalid image fixture name.');
+    err.statusCode = 400;
+    err.code = 'INVALID_FIXTURE_NAME';
+    throw err;
+  }
+
+  const ext = path.extname(clean);
+  const stem = path.basename(clean, ext);
+  let candidate = clean;
+  for (let index = 2; index < 1000; index += 1) {
+    try {
+      await fs.access(path.join(IMAGE_FIXTURE_DIR, candidate));
+      candidate = `${stem}-${index}${ext}`;
+    } catch (err) {
+      if (err?.code === 'ENOENT') return candidate;
+      throw err;
+    }
+  }
+
+  const err = new Error('Could not create a unique image fixture filename.');
+  err.statusCode = 409;
+  err.code = 'FIXTURE_NAME_CONFLICT';
+  throw err;
+}
+
+async function verifyImageFixtureBuffer(buffer, expectedMimeType) {
+  try {
+    const metadata = await sharp(buffer).metadata();
+    const actualMimeType = metadata.format === 'jpeg' ? 'image/jpeg' : `image/${metadata.format}`;
+    if (actualMimeType !== expectedMimeType) {
+      const err = new Error('Uploaded image bytes do not match the declared image type.');
+      err.statusCode = 400;
+      err.code = 'IMAGE_BYTES_MISMATCH';
+      throw err;
+    }
+    return metadata;
+  } catch (err) {
+    if (err?.statusCode) throw err;
+    const invalid = new Error('Uploaded image could not be decoded as a supported image.');
+    invalid.statusCode = 400;
+    invalid.code = 'INVALID_IMAGE_BYTES';
+    throw invalid;
+  }
 }
 
 function getParserValidationSummary(parseMeta) {
@@ -387,72 +516,6 @@ function serializeImageParserTestResultWithConfirmedOutput(doc, confirmedOutput)
   };
 }
 
-function serializeAcceptedOutput(output, fixtureName, fallback = {}) {
-  if (!output) return null;
-  const expectedText = safeString(output.expectedText, fallback.expectedText || '');
-  if (!expectedText) return null;
-  return {
-    id: String(output._id || output.id || fallback.id || ''),
-    fixtureName: safeString(output.fixtureName, fixtureName),
-    expectedText,
-    source: safeString(output.source, fallback.source || 'saved') || 'saved',
-    sourceResultId: safeString(output.sourceResultId, fallback.sourceResultId || ''),
-    sourceProvider: safeString(output.sourceProvider, fallback.sourceProvider || ''),
-    sourceModel: safeString(output.sourceModel, fallback.sourceModel || ''),
-    promptId: safeString(output.promptId, fallback.promptId || 'escalation-template-parser') || 'escalation-template-parser',
-    promptVersion: safeString(output.promptVersion, fallback.promptVersion || ''),
-    promptSha256: safeString(output.promptSha256, fallback.promptSha256 || ''),
-    confirmedBy: safeString(output.confirmedBy, fallback.confirmedBy || 'operator') || 'operator',
-    operatorNote: safeString(output.operatorNote, fallback.operatorNote || ''),
-    createdAt: output.createdAt || fallback.createdAt || null,
-    updatedAt: output.updatedAt || fallback.updatedAt || null,
-  };
-}
-
-function collectAcceptedOutputsFromBaseline(baseline) {
-  if (!baseline) return [];
-  const fixtureName = safeString(baseline.fixtureName, '');
-  const outputs = [];
-  const seenText = new Set();
-
-  function addOutput(output, fallback = {}) {
-    const serialized = serializeAcceptedOutput(output, fixtureName, fallback);
-    if (!serialized || seenText.has(serialized.expectedText)) return;
-    seenText.add(serialized.expectedText);
-    outputs.push({
-      ...serialized,
-      outputIndex: outputs.length,
-    });
-  }
-
-  if (Array.isArray(baseline.acceptableOutputs)) {
-    baseline.acceptableOutputs.forEach((output) => addOutput(output, {
-      source: 'saved',
-      updatedAt: output?.updatedAt || baseline.updatedAt || null,
-    }));
-  }
-
-  addOutput(baseline, {
-    source: 'saved',
-    updatedAt: baseline.updatedAt || null,
-  });
-
-  return outputs;
-}
-
-function serializeImageParserBaseline(doc) {
-  if (!doc) return null;
-  const baseline = typeof doc.toObject === 'function' ? doc.toObject() : doc;
-  const outputs = collectAcceptedOutputsFromBaseline(baseline);
-  return {
-    ...baseline,
-    id: String(baseline._id || baseline.id || ''),
-    outputs,
-    outputCount: outputs.length,
-    expectedText: outputs[0]?.expectedText || safeString(baseline.expectedText, ''),
-  };
-}
-
 function outputForStorage(output) {
   const stored = {
     expectedText: safeString(output.expectedText, ''),
@@ -484,67 +547,39 @@ async function findImageParserTestResultById(id) {
   return null;
 }
 
-async function findBaselineByFixtureName(fixtureName) {
-  if (!imageParserBaselineDbAvailable() || typeof ImageParserFixtureBaseline.findOne !== 'function') {
-    return null;
-  }
-  const query = ImageParserFixtureBaseline.findOne({ fixtureName });
-  return query && typeof query.lean === 'function' ? query.lean() : query;
-}
-
-async function resolveConfirmedOutputSetForFixture(fixtureName) {
-  const cleanFixtureName = safeString(fixtureName, '').trim();
-  if (!cleanFixtureName) return null;
-
-  const saved = await findBaselineByFixtureName(cleanFixtureName);
-  if (saved) {
-    const baseline = serializeImageParserBaseline(saved);
-    if (baseline?.outputs?.length) {
-      return {
-        fixtureName: cleanFixtureName,
-        expectedText: baseline.outputs[0].expectedText,
-        outputs: baseline.outputs,
-        outputCount: baseline.outputs.length,
-        source: 'saved',
-        updatedAt: baseline.updatedAt || null,
-        baseline,
-      };
-    }
-  }
-
-  const builtIn = getBuiltInConfirmedOutput(cleanFixtureName);
-  if (!builtIn) return null;
-  const builtInOutput = serializeAcceptedOutput({
-    fixtureName: cleanFixtureName,
-    expectedText: safeString(builtIn.expectedText, ''),
-    source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
-    confirmedBy: safeString(builtIn.confirmedBy, 'operator') || 'operator',
-  }, cleanFixtureName);
+async function serializeImageParserTestAsset(fixture) {
+  const stats = await fs.stat(fixture.filePath);
+  const confirmedOutput = await resolveConfirmedOutputSetForFixture(fixture.name);
+  const approvedTemplates = Array.isArray(confirmedOutput?.outputs) ? confirmedOutput.outputs : [];
   return {
-    fixtureName: cleanFixtureName,
-    expectedText: builtInOutput?.expectedText || '',
-    outputs: builtInOutput ? [{ ...builtInOutput, outputIndex: 0 }] : [],
-    outputCount: builtInOutput ? 1 : 0,
-    source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
-    updatedAt: null,
-    baseline: {
-      fixtureName: cleanFixtureName,
-      source: safeString(builtIn.source, 'built-in-seed') || 'built-in-seed',
-      confirmedBy: safeString(builtIn.confirmedBy, 'operator') || 'operator',
-      expectedText: builtInOutput?.expectedText || '',
-      outputs: builtInOutput ? [{ ...builtInOutput, outputIndex: 0 }] : [],
-      outputCount: builtInOutput ? 1 : 0,
-    },
+    kind: 'image-fixture',
+    agentId: STAGE_AGENT_IDS.parser,
+    name: fixture.name,
+    fileName: fixture.name,
+    path: imageFixtureRelativePath(fixture.name),
+    url: buildImageFixtureUrl(fixture.name),
+    thumbnailUrl: buildImageFixtureUrl(fixture.name),
+    mimeType: fixture.mimeType,
+    sizeBytes: stats.size,
+    updatedAt: stats.mtime?.toISOString?.() || null,
+    randomizedForTests: true,
+    programmaticCheckReady: approvedTemplates.length > 0,
+    hasApprovedTemplates: approvedTemplates.length > 0,
+    approvedTemplateCount: approvedTemplates.length,
+    approvedTemplates,
+    confirmedOutputSource: safeString(confirmedOutput?.source, ''),
+    confirmedOutputUpdatedAt: confirmedOutput?.updatedAt || null,
   };
 }
 
-async function resolveConfirmedOutputForFixture(fixtureName) {
-  const outputSet = await resolveConfirmedOutputSetForFixture(fixtureName);
-  if (!outputSet?.outputs?.length) return null;
-  return {
-    ...outputSet,
-    expectedText: outputSet.outputs[0].expectedText,
-  };
+async function listImageParserTestAssets() {
+  const fixtures = await listImageParserFixtures();
+  return Promise.all(fixtures.map((fixture) => serializeImageParserTestAsset(fixture)));
+}
+
+async function listTriageTemplateAssets() {
+  const parserAssets = await listImageParserTestAssets();
+  return flattenTemplatesFromFixtureAssets(parserAssets, { triageAgentId: STAGE_AGENT_IDS.triage });
 }
 
 async function saveConfirmedOutputFromResult(result, body = {}) {
@@ -1037,6 +1072,104 @@ router.post('/status', async (req, res) => {
       main: toPipelineHealth('chat'),
     },
   });
+});
+
+router.get('/test-assets/:agentId', async (req, res) => {
+  try {
+    const agentId = safeString(req.params?.agentId, '').trim();
+    if (agentId === STAGE_AGENT_IDS.parser) {
+      const assets = await listImageParserTestAssets();
+      const approvedImageCount = assets.filter((asset) => asset.hasApprovedTemplates).length;
+      const approvedTemplateCount = assets.reduce((sum, asset) => sum + safeNumber(asset.approvedTemplateCount, 0), 0);
+      return res.json({
+        ok: true,
+        agentId,
+        assetType: 'image-fixtures',
+        supportsUpload: true,
+        uploadPath: '/api/pipeline-tests/image-fixtures',
+        fixtureDir: path.relative(process.cwd(), IMAGE_FIXTURE_DIR).replace(/\\/g, '/'),
+        assets,
+        stats: {
+          imageCount: assets.length,
+          approvedImageCount,
+          unapprovedImageCount: Math.max(0, assets.length - approvedImageCount),
+          approvedTemplateCount,
+        },
+      });
+    }
+
+    if (agentId === STAGE_AGENT_IDS.triage) {
+      const assets = await listTriageTemplateAssets();
+      return res.json({
+        ok: true,
+        agentId,
+        assetType: 'approved-parser-templates',
+        supportsUpload: false,
+        sourceAgentId: STAGE_AGENT_IDS.parser,
+        assets,
+        stats: {
+          templateCount: assets.length,
+          sourceImageCount: new Set(assets.map((asset) => asset.sourceFixtureName).filter(Boolean)).size,
+        },
+      });
+    }
+
+    return res.json({
+      ok: true,
+      agentId,
+      assetType: 'none',
+      supportsUpload: false,
+      assets: [],
+      stats: {
+        assetCount: 0,
+      },
+    });
+  } catch (err) {
+    return res.status(err?.statusCode || 500).json({
+      ok: false,
+      code: err?.code || 'TEST_ASSETS_FAILED',
+      error: err?.message || 'Failed to load test assets.',
+    });
+  }
+});
+
+router.post('/image-fixtures', async (req, res) => {
+  try {
+    const { mimeType, buffer } = parseImageFixtureDataUrl(req.body?.dataUrl);
+    const metadata = await verifyImageFixtureBuffer(buffer, mimeType);
+    const preferredName = sanitizeImageFixtureUploadName(req.body?.fileName, mimeType);
+    const fileName = await getUniqueImageFixtureName(preferredName);
+    const filePath = path.join(IMAGE_FIXTURE_DIR, fileName);
+
+    await fs.mkdir(IMAGE_FIXTURE_DIR, { recursive: true });
+    await fs.writeFile(filePath, buffer, { flag: 'wx' });
+
+    return res.status(201).json({
+      ok: true,
+      fixture: {
+        name: fileName,
+        fileName,
+        path: imageFixtureRelativePath(fileName),
+        url: buildImageFixtureUrl(fileName),
+        thumbnailUrl: buildImageFixtureUrl(fileName),
+        mimeType,
+        sizeBytes: buffer.length,
+        width: metadata.width || null,
+        height: metadata.height || null,
+        randomizedForTests: true,
+        hasApprovedTemplates: false,
+        approvedTemplateCount: 0,
+        approvedTemplates: [],
+      },
+    });
+  } catch (err) {
+    const statusCode = err?.code === 'EEXIST' ? 409 : err?.statusCode || 500;
+    return res.status(statusCode).json({
+      ok: false,
+      code: err?.code === 'EEXIST' ? 'FIXTURE_NAME_CONFLICT' : err?.code || 'IMAGE_FIXTURE_UPLOAD_FAILED',
+      error: err?.message || 'Failed to save image fixture.',
+    });
+  }
 });
 
 router.get('/image-fixtures/:name', async (req, res) => {
@@ -1593,35 +1726,28 @@ router.post('/run', async (req, res) => {
   if (stage === 'triage') {
     const fixture = await readCaseFixture();
     const runtime = getAgentRuntime(runtimeMap, 'triage-agent');
-    const fallbackPolicy = buildFallbackPolicy(runtimeMap);
-    const policy = resolveTriageAgentPolicy({
-      agentRuntime: buildAgentRuntimeMap(runtimeMap, 'triage-agent', runtime),
-      fallbackPolicy,
-      fallbackReasoningEffort: getReasoningEffort(runtimeMap),
-    });
-    const context = await buildAgentBackedTriageContext({
-      parserText: fixture.parserText,
-      parserProvider: 'pipeline-test-fixture',
-      parserModel: 'fixture',
-      parseFieldsOverride: fixture.parseFields,
-      elapsedMs: 0,
-      triageAgentRuntime: buildAgentRuntimeMap(runtimeMap, 'triage-agent', runtime),
-      fallbackPolicy,
+    const provider = safeString(runtime.provider, '') || 'lm-studio';
+    const model = safeString(runtime.model, '');
+    const result = await runTriage(fixture.parserText, {
+      provider,
+      model,
       reasoningEffort: getReasoningEffort(runtimeMap),
       timeoutMs: TEST_TIMEOUT_MS,
-      emitStatus: async () => {},
-      runKnownIssueSearch: false,
     });
     return res.json({
-      ok: Boolean(context?.triageCard),
+      ok: Boolean(result?.card),
       stage,
       testRun: true,
-      alert: 'Test result only - not saved to the database.',
-      providerUsed: context?.triageMeta?.providerUsed || policy.primaryProvider,
-      modelUsed: context?.triageMeta?.model || policy.primaryModel || getProviderModelId(policy.primaryProvider) || '',
-      elapsedMs: context?.elapsedMs || context?.triageMeta?.latencyMs || 0,
-      triageCard: context?.triageCard || null,
-      context,
+      alert: 'Test result only - not part of the live escalation log.',
+      providerUsed: result?.providerUsed || provider,
+      modelUsed: result?.modelUsed || model || getProviderModelId(provider) || '',
+      elapsedMs: result?.elapsedMs || result?.triageMeta?.latencyMs || 0,
+      triageCard: result?.card || null,
+      triageMeta: result?.triageMeta || null,
+      context: {
+        triageCard: result?.card || null,
+        triageMeta: result?.triageMeta || null,
+      },
     });
   }
 
@@ -1659,3 +1785,9 @@ router.post('/run', async (req, res) => {
 });
 
 module.exports = router;
+// Reuse hooks for sibling routes (e.g. routes/triage-tests.js). Attaching these
+// to the router keeps a single owner for "list image fixtures + resolve their
+// approved templates" — the triage test route consumes the SAME real, operator-
+// approved asset pipeline instead of re-deriving it.
+module.exports.listImageParserTestAssets = listImageParserTestAssets;
+module.exports.listTriageTemplateAssets = listTriageTemplateAssets;

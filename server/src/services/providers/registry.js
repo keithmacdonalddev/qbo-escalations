@@ -115,15 +115,18 @@ const PROVIDER_DEFS = Object.freeze(
     const transport = meta?.transport || 'claude';
     const model = getProviderModelId(id);
     const service = getServiceForTransport(transport);
+    const catalogSupportsImageInput = typeof meta?.supportsImageInput === 'boolean'
+      ? meta.supportsImageInput
+      : false;
     const supportsImageInput = typeof service?.transcribeImage === 'function'
       ? transport === 'lm-studio'
-        ? toBool(process.env.LM_STUDIO_SUPPORTS_IMAGE_INPUT, true)
+        ? toBool(process.env.LM_STUDIO_SUPPORTS_IMAGE_INPUT, catalogSupportsImageInput || true)
         : transport === 'codex'
-          ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, true)
+          ? toBool(process.env.CODEX_SUPPORTS_IMAGE_INPUT, catalogSupportsImageInput || true)
           : transport === 'claude'
-            ? toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, false)
-            : false
-      : false;
+            ? toBool(process.env.CLAUDE_SUPPORTS_IMAGE_INPUT, catalogSupportsImageInput)
+            : catalogSupportsImageInput
+      : catalogSupportsImageInput;
 
     function withDefaultModel(fn) {
       if (typeof fn !== 'function') return null;

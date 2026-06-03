@@ -209,6 +209,25 @@ export async function listImageParserTestResults(options = {}) {
   return apiFetchJson(`/api/pipeline-tests/parser-results${query}`, {}, 'Failed to load image parser test results');
 }
 
+export async function listAgentTestAssets(agentId) {
+  return apiFetchJson(
+    `/api/pipeline-tests/test-assets/${encodeURIComponent(agentId || '')}`,
+    {},
+    'Failed to load agent test assets',
+  );
+}
+
+export async function uploadImageParserTestAsset(payload) {
+  const data = await apiFetchJson('/api/pipeline-tests/image-fixtures', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+    timeout: 120_000,
+    noRetry: true,
+  }, 'Failed to upload image parser test asset');
+  return data.fixture;
+}
+
 export async function updateImageParserTestResult(id, payload) {
   const data = await apiFetchJson(`/api/pipeline-tests/parser-results/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -295,4 +314,16 @@ export async function updateTriageTestResult(id, payload) {
     body: JSON.stringify(payload || {}),
   }, 'Failed to update triage agent test result');
   return data.result;
+}
+
+// The real, operator-approved escalation cases the triage test can run against.
+// These are projected from approved Image Parser outputs (the same "triage use
+// cases" list), never synthetic fixtures. Powers the pick-a-case picker plus the
+// "Run all" / "Run random" controls.
+export async function listTriageTestCases() {
+  const data = await apiFetchJson('/api/triage-tests/cases', {}, 'Failed to load approved triage cases');
+  return {
+    cases: Array.isArray(data.cases) ? data.cases : [],
+    stats: data.stats || { caseCount: 0, sourceImageCount: 0 },
+  };
 }

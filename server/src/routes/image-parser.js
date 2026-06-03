@@ -148,11 +148,10 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   // Request body shape:
   //   image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId,
   //   parserPromptId — standard parse fields (existing).
-  //   structured (optional legacy boolean, default true) — when provider is
-  //   'anthropic', any value other than false uses the Agent SDK provider
-  //   adapter. Send `structured: false` to opt out and force the direct
-  //   Anthropic HTTP path. Both paths return the model answer as text.
-  const { image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId, parserPromptId, structured } = req.body || {};
+  //   useAnthropicSdk (optional legacy boolean, default false) — when provider
+  //   is 'anthropic', true uses the old Agent SDK adapter. The default path is
+  //   the direct Anthropic API provider harness with package capture.
+  const { image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId, parserPromptId, useAnthropicSdk } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
 
@@ -246,9 +245,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       timeoutMs: effectiveTimeout,
       promptId: effectivePromptId,
       eventBus: bus,
-      // Forward the legacy SDK opt-out down to parseImage. Only the literal
-      // boolean false disables the SDK path; everything else keeps it on.
-      structured: structured !== false,
+      useAnthropicSdk: useAnthropicSdk === true,
     });
     const elapsedMs = Date.now() - startedAt;
 

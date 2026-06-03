@@ -181,6 +181,75 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
 }
 
 /**
+ * Run the standalone Triage Agent harness and consume its SSE stream.
+ * @param {{ text: string, provider?: string, model?: string, reasoningEffort?: string, serviceTier?: string, timeoutMs?: number }} body
+ * @param {{ onStageEvent?: Function, onComplete?: Function, onError?: Function }} handlers
+ * @returns {{ abort: Function }}
+ */
+export function sendTriageRequest(body, { onStageEvent, onComplete, onError } = {}) {
+  const controller = new AbortController();
+  const url = `${BASE}/triage`;
+  const requestBody = {
+    text: body?.text || '',
+    provider: body?.provider || undefined,
+    model: body?.model || undefined,
+    reasoningEffort: body?.reasoningEffort || undefined,
+    serviceTier: body?.serviceTier || undefined,
+    timeoutMs: body?.timeoutMs,
+  };
+
+  (async () => {
+    try {
+      let completed = null;
+      const res = await apiFetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+        timeout: STREAM_TIMEOUT_MS,
+        noRetry: true,
+      });
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/event-stream')) {
+        await consumeSSEStream(res, (eventType, data) => {
+          if (eventType === 'stage_event') onStageEvent?.(data);
+          else if (eventType === 'triage_complete') completed = data;
+          else if (eventType === 'error') onError?.(normalizeError(data, data?.error || 'Triage failed'));
+        });
+        if (completed) {
+          onComplete?.(completed);
+        } else if (!controller.signal.aborted) {
+          onError?.(normalizeError({
+            code: 'STREAM_INCOMPLETE',
+            error: 'The triage stream ended before completion.',
+          }, 'The triage stream ended before completion.'));
+        }
+        return;
+      }
+
+      const data = await res.json().catch(() => ({ ok: false, error: res.statusText }));
+      if (!res.ok && !data?.fallbackCard) {
+        onError?.(normalizeError({ ...data, status: res.status, statusText: res.statusText, url: res.url }, data?.error || 'Triage failed'));
+        return;
+      }
+      onComplete?.(data);
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        window.dispatchEvent(new CustomEvent('sse-stream-error', {
+          detail: { url, error: err.message },
+        }));
+        onError?.(normalizeError({ message: err.message }, err.message));
+      }
+    }
+  })();
+
+  return { abort: () => controller.abort() };
+}
+
+/**
  * Parse escalation text/image into structured fields and triage metadata.
  * @param {{ text?: string, image?: string, provider?: string, primaryProvider?: string, fallbackProvider?: string, reasoningEffort?: string, timeoutMs?: number, persist?: boolean }} body
  */

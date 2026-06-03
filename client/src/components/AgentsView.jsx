@@ -5,9 +5,11 @@ import {
   getAgentIdentityHistory,
   importAgentIdentities,
   deleteImageParserTestResult,
+  listAgentTestAssets,
   listImageParserTestResults,
   listImageParserHistory,
   listTriageTestResults,
+  listTriageTestCases,
   listAgentIdentities,
   programmaticCheckImageParserTestResult,
   recordAgentHarnessRun,
@@ -18,6 +20,7 @@ import {
   updateAgentIdentity,
   updateAgentEnabled,
   updateAgentRuntime,
+  uploadImageParserTestAsset,
 } from '../api/agentIdentitiesApi.js';
 import {
   getAgentPrompt,
@@ -43,18 +46,17 @@ import {
 } from '../lib/agentRuntimeSettings.js';
 import { dispatchAgentProfileUpdated } from '../lib/agentIdentityEvents.js';
 import {
-  IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserDeterminismProfile,
-  getImageParserReasoningEffortOptions,
 } from '../lib/imageParserCatalog.js';
 import {
   CODEX_SERVICE_TIER_OPTIONS,
   PROVIDER_OPTIONS,
-  REASONING_EFFORT_OPTIONS,
   getProviderMeta,
+  getReasoningEffortOptions,
   providerSupportsCodexServiceTier,
 } from '../lib/providerCatalog.js';
 import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
+import useTriageBatchRun from '../hooks/useTriageBatchRun.js';
 import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import { useAgentRegistry } from '../context/AgentRegistryContext.jsx';
 import { useAgentTestModal } from './agent-tests/AgentTestModalProvider.jsx';
@@ -103,6 +105,7 @@ const PROFILE_TABS = [
   { id: 'configuration', label: 'Configuration' },
   { id: 'prompt', label: 'Prompt' },
   { id: 'harness', label: 'Harness' },
+  { id: 'test-assets', label: 'Test Assets' },
   { id: 'memory', label: 'Memory' },
   { id: 'monitoring', label: 'Monitoring' },
   { id: 'workflows', label: 'Workflows' },
@@ -111,20 +114,20 @@ const PROFILE_TABS = [
 ];
 
 const IMAGE_PARSER_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 4),
+  ...PROFILE_TABS.slice(0, 5),
   { id: 'test-results', label: 'Test Results' },
   { id: 'event-streams', label: 'Event Streams' },
   { id: 'chat-sessions', label: 'Chat Sessions' },
-  ...PROFILE_TABS.slice(4),
+  ...PROFILE_TABS.slice(5),
 ];
 
 // Stage 4 Triage Agent gets its own Test Results tab now that there is a
 // dedicated /api/triage-tests/run endpoint persisting each test run for
 // operator review. Same slot position as the parser's test-results tab.
 const TRIAGE_AGENT_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 4),
+  ...PROFILE_TABS.slice(0, 5),
   { id: 'triage-test-results', label: 'Test Results' },
-  ...PROFILE_TABS.slice(4),
+  ...PROFILE_TABS.slice(5),
 ];
 
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
@@ -160,20 +163,6 @@ const AGENT_OPERATION_META = {
     channels: ['API', 'Workspace'],
     harnessType: 'Deterministic parser checks',
     latencyTarget: '< 2s',
-  },
-  'triage-agent': {
-    department: 'Support Intelligence',
-    owner: 'Olivia Chen',
-    team: 'Customer Support',
-    risk: 'Medium',
-    trust: 4.6,
-    reviewStatus: 'Human-reviewed',
-    permissions: 'Read: escalation context, investigations, templates',
-    escalationPolicy: 'Escalate when rules conflict, evidence is missing, or priority is high.',
-    workflows: ['Ticket Intake', 'Known Issue Scan', 'Policy Match', 'Priority Routing', 'Resolution Assist', 'Human Review'],
-    channels: ['Web', 'Email', 'Live Chat', 'API'],
-    harnessType: 'Tool-augmented triage',
-    latencyTarget: '< 12s',
   },
   'known-issue-search-agent': {
     department: 'Knowledge Ops',
@@ -308,6 +297,11 @@ function AgentsView({ agentIdFromRoute = null }) {
   const [triageTestResults, setTriageTestResults] = useState({ results: [], stats: null, dbAvailable: true });
   const [triageTestResultsLoading, setTriageTestResultsLoading] = useState(false);
   const [triageTestResultsError, setTriageTestResultsError] = useState(null);
+  const [testAssetsByAgentId, setTestAssetsByAgentId] = useState({});
+  const [testAssetsLoading, setTestAssetsLoading] = useState(false);
+  const [testAssetsError, setTestAssetsError] = useState(null);
+  const [testAssetUploadState, setTestAssetUploadState] = useState({ saving: false, error: '', message: '' });
+  const testAssetFileInputRef = useRef(null);
   const [parserHistory, setParserHistory] = useState({ results: [], total: 0 });
   const [parserSavedEvents, setParserSavedEvents] = useState([]);
   const [parserHistoryLoading, setParserHistoryLoading] = useState(false);
@@ -412,6 +406,48 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }, []);
 
+  // "Run all" batch runner for the triage test surface. Runs every approved
+  // escalation case sequentially (the server enforces single-flight) and shows
+  // live progress. We refresh the results table when the batch finishes so the
+  // operator sees all the new runs without a manual refresh.
+  const handleTriageBatchCaseComplete = useCallback(() => {
+    // Intentionally light: a per-case refetch of 15 results would thrash the
+    // table. The batch's done-handler below refreshes once at the end.
+  }, []);
+  const triageBatch = useTriageBatchRun({ onCaseComplete: handleTriageBatchCaseComplete });
+  const triageBatchRunningRef = useRef(false);
+  useEffect(() => {
+    // When the batch transitions running -> done, refresh the results table once.
+    if (triageBatch.progress.running) {
+      triageBatchRunningRef.current = true;
+      return;
+    }
+    if (triageBatchRunningRef.current && triageBatch.progress.done) {
+      triageBatchRunningRef.current = false;
+      loadTriageTestResults();
+    }
+  }, [triageBatch.progress.running, triageBatch.progress.done, loadTriageTestResults]);
+
+  const loadTestAssetsForAgent = useCallback(async (agentId = selectedAgentId) => {
+    const cleanAgentId = String(agentId || '').trim();
+    if (!cleanAgentId) return null;
+    try {
+      setTestAssetsLoading(true);
+      const data = await listAgentTestAssets(cleanAgentId);
+      setTestAssetsByAgentId((previous) => ({
+        ...previous,
+        [cleanAgentId]: data || { ok: true, agentId: cleanAgentId, assets: [], stats: {} },
+      }));
+      setTestAssetsError(null);
+      return data;
+    } catch (err) {
+      setTestAssetsError(err.message || 'Failed to load test assets.');
+      return null;
+    } finally {
+      setTestAssetsLoading(false);
+    }
+  }, [selectedAgentId]);
+
   const loadParserEventStreams = useCallback(async () => {
     try {
       setParserHistoryLoading(true);
@@ -498,6 +534,12 @@ function AgentsView({ agentIdFromRoute = null }) {
   }, [activeProfileTab, loadTriageTestResults, selectedAgentId]);
 
   useEffect(() => {
+    if (selectedAgentId && activeProfileTab === 'test-assets') {
+      loadTestAssetsForAgent(selectedAgentId);
+    }
+  }, [activeProfileTab, loadTestAssetsForAgent, selectedAgentId]);
+
+  useEffect(() => {
     if (selectedAgentId === 'escalation-template-parser' && activeProfileTab === 'event-streams') {
       loadParserEventStreams();
     }
@@ -519,6 +561,8 @@ function AgentsView({ agentIdFromRoute = null }) {
     setPreviewVersion(null);
     setRuntimeSaveStatus(null);
     setRuntimeRecheckResult(null);
+    setTestAssetsError(null);
+    setTestAssetUploadState({ saving: false, error: '', message: '' });
     if (runtimeRecheckTimeoutRef.current) {
       clearTimeout(runtimeRecheckTimeoutRef.current);
       runtimeRecheckTimeoutRef.current = null;
@@ -1102,6 +1146,47 @@ function AgentsView({ agentIdFromRoute = null }) {
     });
   }
 
+  // Run the triage agent against ONE specific approved escalation case, opening
+  // the rich result modal. `caseId` rides along on the modal request so the
+  // modal's "New Test" button re-runs the same case.
+  function handleRunTriageCase(caseId) {
+    const cleanCaseId = typeof caseId === 'string' ? caseId.trim() : '';
+    if (!cleanCaseId) return;
+    openAgentTest({
+      agentId: 'triage-agent',
+      caseId: cleanCaseId,
+      launchSurface: 'triage-test-assets',
+      onRecorded: () => loadTriageTestResults(),
+    });
+  }
+
+  // Run the triage agent against one RANDOM approved case (server picks from the
+  // real approved pool when no caseId is sent). Opens the rich result modal.
+  function handleRunRandomTriageCase() {
+    openAgentTest({
+      agentId: 'triage-agent',
+      launchSurface: 'triage-test-assets',
+      onRecorded: () => loadTriageTestResults(),
+    });
+  }
+
+  // Run EVERY approved case sequentially, headless, with live progress. Fetches
+  // the current real approved pool first so "Run all" always reflects the
+  // latest approvals without relying on a stale prop.
+  async function handleRunAllTriageCases() {
+    if (triageBatch.isRunning) return;
+    try {
+      const { cases } = await listTriageTestCases();
+      if (!cases.length) {
+        setError('No approved escalation cases are available to run yet.');
+        return;
+      }
+      triageBatch.runAll(cases.map((entry) => ({ id: entry.id, label: entry.label })));
+    } catch (err) {
+      setError(err.message || 'Failed to load approved triage cases.');
+    }
+  }
+
   async function handleUpdateParserTestResult(id, status) {
     try {
       const result = await updateImageParserTestResult(id, {
@@ -1206,6 +1291,56 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
   }
 
+  function requestTestAssetUpload() {
+    if (selectedAgent?.agentId !== 'escalation-template-parser') {
+      return;
+    }
+    setTestAssetUploadState({ saving: false, error: '', message: '' });
+    testAssetFileInputRef.current?.click();
+  }
+
+  function readTestAssetFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error || new Error('Failed to read image file.'));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleTestAssetFileSelected(event) {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+    if (!file || selectedAgent?.agentId !== 'escalation-template-parser') {
+      return;
+    }
+    try {
+      setTestAssetUploadState({ saving: true, error: '', message: '' });
+      const dataUrl = await readTestAssetFileAsDataUrl(file);
+      const fixture = await uploadImageParserTestAsset({
+        fileName: file.name,
+        dataUrl,
+      });
+      setTestAssetUploadState({
+        saving: false,
+        error: '',
+        message: `Added ${fixture?.name || file.name} to parser test assets.`,
+      });
+      setTestAssetsByAgentId((previous) => {
+        const next = { ...previous };
+        delete next['triage-agent'];
+        return next;
+      });
+      await loadTestAssetsForAgent('escalation-template-parser');
+    } catch (err) {
+      setTestAssetUploadState({
+        saving: false,
+        error: err.message || 'Failed to upload image asset.',
+        message: '',
+      });
+    }
+  }
+
   async function handleUpdateTriageTestResult(id, status) {
     try {
       const result = await updateTriageTestResult(id, {
@@ -1253,6 +1388,9 @@ function AgentsView({ agentIdFromRoute = null }) {
     }
     if (tabId === 'triage-test-results') {
       loadTriageTestResults();
+    }
+    if (tabId === 'test-assets') {
+      loadTestAssetsForAgent();
     }
     if (tabId === 'event-streams') {
       loadParserEventStreams();
@@ -1331,6 +1469,10 @@ function AgentsView({ agentIdFromRoute = null }) {
     triageTestResults,
     triageTestResultsLoading,
     triageTestResultsError,
+    testAssets: selectedAgent?.agentId ? testAssetsByAgentId[selectedAgent.agentId] : null,
+    testAssetsLoading,
+    testAssetsError,
+    testAssetUploadState,
     onPromptDraftChange: setPromptDraft,
     onPromptSummaryChange: setPromptSummary,
     onPromptSave: handleSavePrompt,
@@ -1358,6 +1500,15 @@ function AgentsView({ agentIdFromRoute = null }) {
     onCloseParserResultPreview: () => setParserResultPreview(null),
     onLoadTriageTestResults: loadTriageTestResults,
     onUpdateTriageTestResult: handleUpdateTriageTestResult,
+    onLoadTestAssets: () => loadTestAssetsForAgent(selectedAgent?.agentId),
+    onRequestTestAssetUpload: requestTestAssetUpload,
+    onTestAssetFileSelected: handleTestAssetFileSelected,
+    testAssetFileInputRef,
+    onRunTriageCase: handleRunTriageCase,
+    onRunRandomTriageCase: handleRunRandomTriageCase,
+    onRunAllTriageCases: handleRunAllTriageCases,
+    onCancelTriageBatch: triageBatch.cancel,
+    triageBatchProgress: triageBatch.progress,
     onLoadHistory: loadHistoryForSelectedAgent,
     onLoadPrompt: loadPromptForSelectedAgent,
     // The redesigned Overview tab navigates to sibling tabs (Harness / Test
@@ -2147,6 +2298,9 @@ function AgentProfileWorkspace(props) {
   }
   if (activeTab === 'harness') {
     return <AgentHarnessTab {...props} />;
+  }
+  if (activeTab === 'test-assets') {
+    return <AgentTestAssetsTab {...props} />;
   }
   if (activeTab === 'test-results') {
     return <ImageParserTestResultsTab {...props} />;
@@ -3694,6 +3848,485 @@ function RunFilterBar({ filters, totalCount }) {
   );
 }
 
+function AgentTestAssetsTab({
+  agent,
+  testAssets,
+  testAssetsLoading,
+  testAssetsError,
+  testAssetUploadState,
+  onLoadTestAssets,
+  onRequestTestAssetUpload,
+  onTestAssetFileSelected,
+  testAssetFileInputRef,
+  onRunTriageCase,
+  onRunRandomTriageCase,
+  onRunAllTriageCases,
+  onCancelTriageBatch,
+  triageBatchProgress,
+}) {
+  const agentId = agent?.agentId || '';
+  const isParser = agentId === 'escalation-template-parser';
+  const isTriage = agentId === 'triage-agent';
+  const assets = Array.isArray(testAssets?.assets) ? testAssets.assets : [];
+  const stats = testAssets?.stats || {};
+  const batch = triageBatchProgress || null;
+  const batchRunning = Boolean(batch?.running);
+  const [selectedAssetKey, setSelectedAssetKey] = useState('');
+  const assetEntries = useMemo(
+    () => assets.map((asset, index) => ({
+      asset,
+      key: testAssetKey(asset, index),
+    })),
+    [assets],
+  );
+  const selectedEntry = assetEntries.find((entry) => entry.key === selectedAssetKey) || assetEntries[0] || null;
+  const selectedAsset = selectedEntry?.asset || null;
+  const title = isParser
+    ? 'Parser Test Assets'
+    : isTriage
+      ? 'Triage Test Assets'
+      : 'Test Assets';
+
+  useEffect(() => {
+    if (!assetEntries.length) {
+      if (selectedAssetKey) setSelectedAssetKey('');
+      return;
+    }
+    if (!assetEntries.some((entry) => entry.key === selectedAssetKey)) {
+      setSelectedAssetKey(assetEntries[0].key);
+    }
+  }, [assetEntries, selectedAssetKey]);
+
+  const headerActions = (
+    <div className="test-assets-actions">
+      <button type="button" className="secondary-action" onClick={onLoadTestAssets}>
+        Refresh
+      </button>
+      {isParser && (
+        <>
+          <button
+            type="button"
+            className="primary-action"
+            disabled={testAssetUploadState?.saving}
+            onClick={onRequestTestAssetUpload}
+          >
+            {testAssetUploadState?.saving ? 'Adding...' : 'Add Image'}
+          </button>
+          <input
+            ref={testAssetFileInputRef}
+            className="test-assets-file-input"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={onTestAssetFileSelected}
+          />
+        </>
+      )}
+      {isTriage && (
+        <>
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={batchRunning || !assets.length}
+            onClick={onRunRandomTriageCase}
+          >
+            Run Random
+          </button>
+          <button
+            type="button"
+            className="primary-action"
+            disabled={batchRunning || !assets.length}
+            onClick={onRunAllTriageCases}
+          >
+            {batchRunning ? 'Running…' : `Run All${assets.length ? ` (${assets.length})` : ''}`}
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  return (
+    <section className="agent-tab-content test-assets-layout" aria-label={title}>
+      <header className="test-assets-topbar">
+        <div className="test-assets-heading">
+          <span>{isParser ? 'Image fixture library' : isTriage ? 'Approved parser outputs' : 'Asset library'}</span>
+          <strong>{title}</strong>
+        </div>
+        {!testAssetsLoading && !testAssetsError && (
+          <TestAssetsStats isParser={isParser} isTriage={isTriage} stats={stats} assetCount={assets.length} />
+        )}
+        {headerActions}
+      </header>
+
+      {testAssetUploadState?.message && (
+        <div className="test-assets-status is-success">{testAssetUploadState.message}</div>
+      )}
+      {testAssetUploadState?.error && (
+        <div className="test-assets-status is-error">{testAssetUploadState.error}</div>
+      )}
+
+      {isTriage && batch && (batch.running || batch.done) && (
+        <TriageBatchProgress batch={batch} onCancel={onCancelTriageBatch} />
+      )}
+
+      <section className="test-assets-main" aria-label="Agent test assets">
+        {testAssetsLoading ? (
+          <InlineLoading label="Loading test assets..." />
+        ) : testAssetsError ? (
+          <EmptyState title="Test assets unavailable" copy={testAssetsError} />
+        ) : assets.length ? (
+          <div className={`test-assets-workbench${isTriage ? ' is-triage' : ''}`}>
+            <aside className="test-assets-rail" aria-label="Test asset thumbnails">
+              <div className="test-assets-rail-head">
+                <span>{isParser ? 'Screenshots' : 'Templates'}</span>
+                <strong>{assets.length}</strong>
+              </div>
+              <div className="test-assets-rail-list">
+                {assetEntries.map((entry, index) => (
+                  <TestAssetRailItem
+                    asset={entry.asset}
+                    index={index}
+                    isParser={isParser}
+                    isTriage={isTriage}
+                    selected={entry.key === selectedEntry?.key}
+                    onSelect={() => setSelectedAssetKey(entry.key)}
+                    onRunCase={isTriage ? onRunTriageCase : undefined}
+                    runDisabled={batchRunning}
+                    runningCaseId={batch?.current?.id || ''}
+                    key={entry.key}
+                  />
+                ))}
+              </div>
+            </aside>
+            {isParser ? (
+              <ParserAssetDetail asset={selectedAsset} />
+            ) : isTriage ? (
+              <TriageAssetDetail
+                asset={selectedAsset}
+                onRunCase={onRunTriageCase}
+                runDisabled={batchRunning}
+              />
+            ) : (
+              <EmptyAssetDetail />
+            )}
+          </div>
+        ) : isParser ? (
+          <EmptyState title="No parser images found" copy="Add image assets to make them available to the random Image Parser test." />
+        ) : isTriage ? (
+          <EmptyState title="No approved parser templates yet" copy="Approved Image Parser outputs will appear here automatically for triage testing." />
+        ) : (
+          <EmptyState title="No test assets configured" copy="This agent does not have dedicated test assets yet." />
+        )}
+      </section>
+    </section>
+  );
+}
+
+function TestAssetsStats({ isParser, isTriage, stats, assetCount }) {
+  const items = isParser
+    ? [
+        ['Images', stats.imageCount || assetCount],
+        ['Approved', stats.approvedImageCount || 0],
+        ['Templates', stats.approvedTemplateCount || 0],
+      ]
+    : isTriage
+      ? [
+          ['Templates', stats.templateCount || assetCount],
+          ['Images', stats.sourceImageCount || 0],
+        ]
+      : [
+          ['Assets', stats.assetCount || assetCount],
+        ];
+
+  return (
+    <div className="test-assets-stats" aria-label="Test asset summary">
+      {items.map(([label, value]) => (
+        <span key={label}>
+          <strong>{value}</strong>
+          {label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function TestAssetRailItem({
+  asset,
+  index,
+  isParser,
+  isTriage,
+  selected,
+  onSelect,
+  onRunCase,
+  runDisabled = false,
+  runningCaseId = '',
+}) {
+  const templates = Array.isArray(asset.approvedTemplates) ? asset.approvedTemplates : [];
+  const templateCount = isParser ? templates.length : 1;
+  const imageUrl = asset.thumbnailUrl || asset.url || asset.imageUrl || asset.sourceImageUrl || '';
+  const label = isTriage
+    ? `${asset.sourceFixtureName || asset.name || 'Template'} · template ${(asset.outputIndex ?? 0) + 1}`
+    : asset.name || `Asset ${index + 1}`;
+  const caseId = isTriage ? (asset.id || '') : '';
+  const isThisRunning = Boolean(caseId && runningCaseId && caseId === runningCaseId);
+
+  const inner = (
+    <>
+      <span className="test-assets-thumb">
+        {imageUrl ? (
+          <img src={imageUrl} alt="" />
+        ) : (
+          <span>No image</span>
+        )}
+      </span>
+      <span className="test-assets-rail-copy">
+        <strong>{label}</strong>
+        <small>
+          {isParser
+            ? `${templateCount} approved template${templateCount === 1 ? '' : 's'}`
+            : `Parser template ${(asset.outputIndex ?? 0) + 1}`}
+        </small>
+      </span>
+    </>
+  );
+
+  // Triage rail items get an inline per-case Run control. A button cannot nest
+  // inside a button, so the selectable area and the Run action are sibling
+  // buttons inside a div wrapper (vs. the parser path's single button).
+  if (isTriage && onRunCase) {
+    return (
+      <div className={`test-assets-rail-item is-runnable${selected ? ' is-selected' : ''}${isThisRunning ? ' is-running' : ''}`}>
+        <button
+          type="button"
+          className="test-assets-rail-select"
+          onClick={onSelect}
+          aria-pressed={selected}
+          aria-label={`Select ${label}`}
+        >
+          {inner}
+        </button>
+        <button
+          type="button"
+          className="test-assets-rail-run"
+          onClick={() => onRunCase(caseId)}
+          disabled={runDisabled || !caseId}
+          title={`Run triage on ${label}`}
+          aria-label={`Run triage on ${label}`}
+        >
+          {isThisRunning ? (
+            <span className="test-assets-rail-run-spinner" aria-hidden="true" />
+          ) : (
+            <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          )}
+          <span>Run</span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className={`test-assets-rail-item${selected ? ' is-selected' : ''}`}
+      onClick={onSelect}
+      aria-pressed={selected}
+    >
+      {inner}
+      <span className={`test-assets-state${templateCount ? ' is-ready' : ' is-missing'}`}>
+        {templateCount ? 'Ready' : 'Needs template'}
+      </span>
+    </button>
+  );
+}
+
+// Live progress for the "Run all" batch on the triage test surface. Shows a thin
+// determinate bar plus a running count and the current case label. GPU-friendly
+// (only transform/opacity animate via CSS). Stays mounted briefly after the
+// batch finishes to show the final tally.
+function TriageBatchProgress({ batch, onCancel }) {
+  if (!batch) return null;
+  const total = Math.max(0, Number(batch.total) || 0);
+  const completed = Math.max(0, Number(batch.completed) || 0);
+  const pct = total > 0 ? Math.min(100, Math.round((completed / total) * 100)) : 0;
+  const running = Boolean(batch.running);
+  const cancelled = Boolean(batch.cancelled);
+  const tone = batch.error
+    ? 'is-error'
+    : !running && batch.done
+      ? (cancelled ? 'is-warn' : 'is-done')
+      : 'is-running';
+
+  const headline = running
+    ? `Running approved cases ${completed} / ${total}`
+    : batch.error
+      ? batch.error
+      : cancelled
+        ? `Stopped — ${completed} of ${total} run`
+        : `Finished — ${completed} of ${total} cases run`;
+
+  return (
+    <div className={`triage-batch-progress ${tone}`} role="status" aria-live="polite">
+      <div className="triage-batch-progress-row">
+        <div className="triage-batch-progress-copy">
+          <strong>{headline}</strong>
+          {running && batch.current?.label ? (
+            <small>Now: {batch.current.label}</small>
+          ) : !running && (batch.passed || batch.failed) ? (
+            <small>{batch.passed} produced a card · {batch.failed} errored</small>
+          ) : null}
+        </div>
+        {running && onCancel && (
+          <button type="button" className="triage-batch-cancel" onClick={onCancel}>
+            Stop
+          </button>
+        )}
+      </div>
+      <div className="triage-batch-progress-track" aria-hidden="true">
+        <span className="triage-batch-progress-fill" style={{ transform: `scaleX(${pct / 100})` }} />
+      </div>
+    </div>
+  );
+}
+
+function ParserAssetDetail({ asset }) {
+  const templates = Array.isArray(asset?.approvedTemplates) ? asset.approvedTemplates : [];
+  return (
+    <article className="test-assets-detail" aria-label="Selected parser asset">
+      <section className="test-assets-preview-pane">
+        <div className="test-assets-preview-frame">
+          {asset?.url || asset?.thumbnailUrl ? (
+            <img src={asset.url || asset.thumbnailUrl} alt={asset.name || 'Selected parser screenshot'} />
+          ) : (
+            <span>No image</span>
+          )}
+        </div>
+        <div className="test-assets-preview-meta">
+          <div>
+            <span>Screenshot</span>
+            <strong>{asset?.name || 'No asset selected'}</strong>
+          </div>
+          <div className="test-assets-meta-row">
+            <span>{asset.mimeType || 'image'}</span>
+            <span>{formatAssetBytes(asset.sizeBytes)}</span>
+            <span>{formatDate(asset.updatedAt)}</span>
+          </div>
+        </div>
+      </section>
+
+      <section className="test-assets-template-pane">
+        <div className="test-assets-pane-head">
+          <span>Official approved text</span>
+          <strong>{templates.length}</strong>
+        </div>
+        {templates.length ? (
+          <div className="test-assets-template-stack">
+          {templates.map((template, index) => (
+            <OfficialTemplateBlock
+              template={template}
+              index={index}
+              key={template.id || `${asset.name}-template-${index}`}
+            />
+          ))}
+          </div>
+        ) : (
+          <div className="test-assets-template-empty">No official approved text template saved for programmatic checking.</div>
+        )}
+      </section>
+    </article>
+  );
+}
+
+function TriageAssetDetail({ asset, onRunCase, runDisabled = false }) {
+  if (!asset) return <EmptyAssetDetail />;
+  const template = asset.approvedTemplate || {};
+  const caseId = asset.id || '';
+  const canRun = Boolean(onRunCase && caseId);
+  return (
+    <article className="test-assets-detail is-template" aria-label="Selected triage template">
+      <section className="test-assets-preview-pane">
+        <div className="test-assets-preview-frame">
+          {asset.thumbnailUrl || asset.imageUrl ? (
+            <img src={asset.imageUrl || asset.thumbnailUrl} alt={asset.sourceFixtureName || 'Source parser image'} />
+          ) : (
+            <span>No image</span>
+          )}
+        </div>
+        <div className="test-assets-preview-meta">
+          <div>
+            <span>Source screenshot</span>
+            <strong>{asset.sourceFixtureName || asset.name || 'Parser-approved template'}</strong>
+          </div>
+          <div className="test-assets-meta-row">
+            <span>Template {(asset.outputIndex ?? 0) + 1}</span>
+            <span>{asset.source || template.source || 'approved'}</span>
+            <span>{formatDate(asset.updatedAt || template.updatedAt)}</span>
+          </div>
+        </div>
+      </section>
+      <section className="test-assets-template-pane">
+        <div className="test-assets-pane-head">
+          <span>Triage input text</span>
+          {canRun ? (
+            <button
+              type="button"
+              className="test-assets-run-case"
+              onClick={() => onRunCase(caseId)}
+              disabled={runDisabled}
+              title="Run the triage agent on this approved case"
+            >
+              <svg aria-hidden="true" focusable="false" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+              <span>Run triage on this case</span>
+            </button>
+          ) : (
+            <strong>1</strong>
+          )}
+        </div>
+        <div className="test-assets-template-stack">
+          <OfficialTemplateBlock template={{ ...template, expectedText: asset.expectedText || template.expectedText }} index={asset.outputIndex || 0} compact />
+        </div>
+      </section>
+    </article>
+  );
+}
+
+function EmptyAssetDetail() {
+  return (
+    <article className="test-assets-detail">
+      <EmptyState title="No test assets configured" copy="This agent does not have dedicated test assets yet." />
+    </article>
+  );
+}
+
+function OfficialTemplateBlock({ template, index, compact = false }) {
+  const sourceParts = [
+    template.sourceProvider,
+    template.sourceModel,
+    template.promptVersion,
+  ].filter(Boolean);
+  return (
+    <div className={`test-asset-template${compact ? ' is-compact' : ''}`}>
+      <div className="test-asset-template-head">
+        <span>Official template {index + 1}</span>
+        <small>{sourceParts.join(' / ') || template.source || 'approved output'}</small>
+      </div>
+      <pre>{template.expectedText || 'No template text saved.'}</pre>
+    </div>
+  );
+}
+
+function testAssetKey(asset, index) {
+  return [
+    asset?.id,
+    asset?.name,
+    asset?.sourceFixtureName,
+    asset?.outputIndex,
+    index,
+  ].filter((value) => value !== null && value !== undefined && value !== '').join('::');
+}
+
 function ImageParserTestResultsTab({
   parserTestResults,
   parserTestResultsLoading,
@@ -4645,9 +5278,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
     );
   }
 
-  const providerOptions = definition.kind === 'image-parser'
-    ? IMAGE_PARSER_PROVIDER_OPTIONS
-    : PROVIDER_OPTIONS;
+  const providerOptions = PROVIDER_OPTIONS;
   const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
   const currentRuntime = {
     provider,
@@ -4664,9 +5295,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
   });
   const modelListId = `${definition.id}-model-suggestions`;
   const fallbackModelListId = `${definition.id}-fallback-model-suggestions`;
-  const reasoningOptions = definition.kind === 'image-parser'
-    ? getImageParserReasoningEffortOptions(provider)
-    : REASONING_EFFORT_OPTIONS;
+  const reasoningOptions = provider ? getReasoningEffortOptions(provider) : [];
   const supportsServiceTier = providerSupportsCodexServiceTier(provider)
     || (definition.supportsModes && mode === 'fallback' && providerSupportsCodexServiceTier(fallbackProvider));
   const determinismProfile = definition.kind === 'image-parser' && (provider || model)
@@ -4702,7 +5331,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
                 value={option.value}
                 disabled={isMissingKey(option.value)}
               >
-                {option.shortLabel || option.label}
+                {option.label}
               </option>
             ))}
           </select>
@@ -4752,7 +5381,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
                   value={option.value}
                   disabled={isMissingKey(option.value)}
                 >
-                  {option.shortLabel || option.label}
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -5446,21 +6075,28 @@ function buildOperationalProfile(agent, runtimeState, liveStatus) {
   const latestReview = latestAgentReview(agent);
   const latestHarnessRun = latestAgentHarnessRun(agent);
   const reviewStatus = resolveReviewStatus(meta, latestReview);
-  const trust = clamp(
-    meta.trust
-      + Math.min(0.15, toolCount * 0.015)
-      + Math.min(0.08, activityCount * 0.01)
-      + (latestReview?.status === 'approved' ? 0.06 : 0)
-      + (latestHarnessRun?.status === 'pass' ? 0.06 : 0)
-      - (status === 'review' ? 0.25 : 0),
-    3.4,
-    4.9
-  );
-  const workflowFit = clamp(trust / 5 + Math.min(0.12, toolCount * 0.02), 0.45, 0.98);
+  const hasTrustScore = Number.isFinite(Number(meta.trust));
+  const trust = hasTrustScore
+    ? clamp(
+        Number(meta.trust)
+          + Math.min(0.15, toolCount * 0.015)
+          + Math.min(0.08, activityCount * 0.01)
+          + (latestReview?.status === 'approved' ? 0.06 : 0)
+          + (latestHarnessRun?.status === 'pass' ? 0.06 : 0)
+          - (status === 'review' ? 0.25 : 0),
+        3.4,
+        4.9
+      )
+    : 0;
+  const workflowFit = hasTrustScore
+    ? clamp(trust / 5 + Math.min(0.12, toolCount * 0.02), 0.45, 0.98)
+    : 0;
   const workflows = meta.workflows.length ? meta.workflows : ['Profile Review', 'Runtime Verification', 'Human Handoff'];
   const midpoint = Math.ceil(workflows.length / 2);
-  const testCoverage = clamp(Math.round(72 + trust * 4 + Math.min(8, toolCount)), 72, 96);
-  const qualitySeed = Math.round(trust * 18);
+  const testCoverage = hasTrustScore
+    ? clamp(Math.round(72 + trust * 4 + Math.min(8, toolCount)), 72, 96)
+    : 0;
+  const qualitySeed = hasTrustScore ? Math.round(trust * 18) : 0;
   const lastUpdatedAt = latestAgentTimestamp(agent);
   const toolPermissions = buildToolPermissions(agent, meta);
   const promptContract = buildPromptContract(agent, meta, modelLabel);
@@ -5492,8 +6128,8 @@ function buildOperationalProfile(agent, runtimeState, liveStatus) {
     fallbackModel: runtimeDefinition?.providers?.[1]?.models?.[0]?.label || 'Configured provider default',
     observability: 'Activity log, runtime defaults, prompt versions',
     trust,
-    trustLabel: `${trust.toFixed(1)} / 5`,
-    qualityMetrics: [
+    trustLabel: hasTrustScore ? `${trust.toFixed(1)} / 5` : 'Not scored',
+    qualityMetrics: hasTrustScore ? [
       {
         label: 'Resolution Accuracy',
         value: `${clamp(qualitySeed + 7, 78, 96)}%`,
@@ -5529,7 +6165,7 @@ function buildOperationalProfile(agent, runtimeState, liveStatus) {
         deltaTone: 'positive',
         tone: 'teal',
       },
-    ],
+    ] : [],
     promptSummary: {
       goals: agent?.profile?.headline || 'Understand escalation context and recommend the next best action.',
       guardrails: agent?.profile?.boundaries || 'Prefer evidence-backed guidance and defer uncertain cases to review.',
@@ -5795,6 +6431,23 @@ function resolveReviewStatus(meta, latestReview) {
 }
 
 function getAgentMeta(agentId) {
+  if (agentId === 'triage-agent') {
+    return {
+      department: 'Standalone Triage Harness',
+      owner: 'Unassigned',
+      team: 'Escalation Support',
+      status: 'idle',
+      risk: 'Not scored',
+      trust: null,
+      reviewStatus: 'Runtime configured',
+      permissions: 'Read: parsed escalation template text',
+      escalationPolicy: 'Operator-facing card only; the triage card does not feed the analyst answer.',
+      workflows: ['Parser result intake', 'Direct provider handoff', 'Provider package readback', 'Soft validation', 'Operator card display'],
+      channels: ['Chat v5', '/api/triage'],
+      harnessType: 'Direct-provider API harness',
+      latencyTarget: 'Configured request timeout',
+    };
+  }
   return (
     AGENT_OPERATION_META[agentId] || {
       department: 'Agent Operations',
@@ -5932,6 +6585,14 @@ function labelAgent(agentId = '') {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+function formatAssetBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return 'size unknown';
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }
 
 function formatDate(value) {

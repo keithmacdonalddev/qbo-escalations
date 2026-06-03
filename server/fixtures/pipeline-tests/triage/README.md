@@ -1,49 +1,40 @@
-# Triage Agent Test Fixtures
+# Triage Agent Test Cases — No Fixtures Here
 
-The Stage 4 (Triage Agent) test route picks one of these JSON files at random
-each time the operator clicks the workflow card's three-dot menu and chooses
-"Test stage". The selected fixture supplies the `parserText` and `parseFields`
-that the triage agent will reason about, so each fixture is a self-contained
-representative escalation case.
+> **This directory no longer holds runtime triage fixtures.** The 5 synthetic
+> JSON fixtures that used to live here (`P1-payroll-outage.json`,
+> `P2-bank-feeds-stale.json`, `P2-invoicing-missing-fields.json`,
+> `P3-reports-permission.json`, `P4-reconciliation-question.json`) were removed
+> on **2026-06-02**. No code reads this folder for triage anymore.
 
-## Fixture shape
+## Where triage test input comes from now
 
-Every file in this folder must be valid JSON with the following keys:
+The Stage 4 (Triage Agent) test sources its input cases **exclusively from
+real, operator-approved image-parser outputs** — the approved-parser-output
+pool. There is no synthetic data in the triage test path.
 
-| Key            | Type                | Required | Notes                                                                                                                                                                                                                                                |
-| -------------- | ------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`         | string              | yes      | Short stable identifier shown in dashboards, e.g. `P2-bank-feeds-stale`. Operators see this in the AgentsView results breakdown.                                                                                                                      |
-| `description`  | string              | yes      | One-sentence explanation of the scenario so a reviewer can understand the fixture at a glance.                                                                                                                                                       |
-| `tags`         | array of strings    | yes      | Free-form labels like `severity-p1`, `category-payroll`, `deadline-today`. Used as hints in the AgentsView panel and to drive future filtering.                                                                                                       |
-| `schemaVersion`| number              | yes      | Versioning hook. Always `1` today. Bump when the loader needs new required keys.                                                                                                                                                                     |
-| `parserText`   | string (multiline)  | yes      | The full canonical 9-label escalation template text the parser would have returned. Treat this as if the image parser already ran.                                                                                                                  |
-| `parseFields`  | object              | yes      | The structured parse fields (coid, mid, caseNumber, clientContact, attemptingTo, expectedOutcome, actualOutcome, kbToolsUsed, triedTestAccount, tsSteps, category) that the parser would have extracted from the same template.                       |
+- The pool is resolved by `server/src/lib/approved-triage-cases.js` (the single
+  source of truth: it flattens each approved parser output into a runnable
+  triage case with a stable id `${sourceFixtureName}#${outputIndex}`).
+- `GET /api/triage-tests/cases` serves that list to the operator's pick-a-case
+  UI (each entry is a short label/preview, not the full `parserText`).
+- `POST /api/triage-tests/run` executes a case:
+  - `{ "caseId": "<id>" }` runs that **specific** approved case.
+  - **no body** runs **one approved case at random** from the pool.
+  - **"Run all"** loops the case ids **client-side**, calling `/run` once per
+    case in sequence (the server enforces a single-flight triage test guard, so
+    runs are sequential, not parallel).
 
-The triage agent reads `parserText` and `parseFields` together — both must
-agree. If they disagree, the test is still valid (it exercises the agent's
-recovery behavior) but the operator note should call that out.
+## DO NOT add fake fixtures
 
-## Starter fixtures
+**Do not add synthetic / fake `*.json` fixtures here — or anywhere else in the
+triage test path.** No loader reads this directory, so a dropped file would
+either do nothing or, worse, mislead a future contributor into re-wiring fake
+data back in. That is exactly what must not happen.
 
-| File                              | Why it exists                                                                                                                                            |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `P1-payroll-outage.json`          | Final paycheck blocked by PSE_TERM_DATE_AFTER_PERIOD on termination day. Tests that the agent picks P1 + payroll + deadline-today framing.               |
-| `P2-bank-feeds-stale.json`        | Connected bank feed stale 9 days, reconciliation deadline tomorrow. Tests P2 routing and missing-info handling where the customer already tried things.  |
-| `P3-reports-permission.json`      | Permission ambiguity: admin says permissions are on, user still blocked. Exercises the `categoryCheck` path between `reports` and `permissions`.         |
-| `P2-invoicing-missing-fields.json`| Recurring invoice template silently failed. `tsSteps` is the empty string, which exercises the rule-fallback path when the agent can't reach high confidence. |
-| `P4-reconciliation-question.json` | Pure how-to question about a $0.01 reconciliation discrepancy. Tests that the agent produces a brief, high-confidence answer rather than over-escalating.|
+**No fake data.** Triage testing uses real, operator-approved cases only.
 
-## Adding a new fixture
+### To add a new triage test case
 
-Drop a new `*.json` file in this folder that matches the shape above. The
-loader reads the directory at request time, so no server restart is needed —
-the next test run will see your fixture and may pick it.
-
-Conventions:
-
-- File name should start with the severity (`P1`/`P2`/`P3`/`P4`) so the
-  AgentsView breakdown sorts naturally.
-- Keep `description` to one sentence and put the "why this fixture exists"
-  detail in this README so the file itself stays small.
-- Use realistic but obviously synthetic COIDs/MIDs/case numbers. Never paste
-  real customer data.
+Approve a new **image-parser** output. Because the triage case pool is derived
+from approved parser outputs, the new approval automatically becomes an
+available triage case too — nothing needs to be added to this folder.

@@ -73,6 +73,7 @@ function createApp() {
   app.use('/api/chat', chatRouter);
   app.use('/api/conversations', conversationsRouter);
   app.use('/api/escalations', require('./routes/escalations'));
+  app.use('/api/knowledge', require('./routes/knowledge'));
   app.use('/api/playbook', require('./routes/playbook'));
   app.use('/api/agent-prompts', require('./routes/agent-prompts'));
   app.use('/api/agent-identities', require('./routes/agent-identities'));
@@ -88,6 +89,7 @@ function createApp() {
   app.use('/api/investigations', require('./routes/investigations'));
   app.use('/api/preferences', require('./routes/preferences'));
   app.use('/api/image-parser', require('./routes/image-parser'));
+  app.use('/api/triage', require('./routes/triage'));
   app.use('/api/pipeline-tests', require('./routes/pipeline-tests'));
   app.use('/api/triage-tests', require('./routes/triage-tests'));
   app.use('/api/live-call-assist', require('./routes/live-call-assist'));

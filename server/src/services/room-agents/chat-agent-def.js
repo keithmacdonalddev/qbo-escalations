@@ -50,7 +50,7 @@ module.exports = {
     const settings = ctx.aiSettings || DEFAULT_CHAT_RUNTIME_SETTINGS;
 
     const { systemPrompt, messagesForModel, contextDebug, citations } =
-      buildChatModelContext({ normalizedMessages, settings });
+      await buildChatModelContext({ normalizedMessages, settings });
 
     // Append image context when available so the analyst can reference the screenshot.
     const imageContextSection = buildRoomImageContextSection(ctx.parsedImageContext);

@@ -1548,6 +1548,700 @@
   grid-template-columns: auto minmax(130px, 1fr) minmax(180px, 1.4fr) 80px;
 }
 
+.test-assets-layout {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.test-assets-topbar {
+  display: grid;
+  grid-template-columns: minmax(230px, 1fr) auto auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(46, 47, 52, 0.92), rgba(33, 34, 38, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.test-assets-heading {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.test-assets-heading span,
+.test-assets-rail-head span,
+.test-assets-preview-meta span,
+.test-assets-pane-head span {
+  color: var(--agent-muted);
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.test-assets-heading strong {
+  color: var(--agent-text);
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-assets-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.test-assets-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  background: rgba(7, 12, 20, 0.48);
+  color: var(--agent-muted);
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.test-assets-stats strong {
+  color: var(--agent-text);
+  font-size: 1rem;
+}
+
+.test-assets-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.test-assets-actions .secondary-action,
+.test-assets-actions .primary-action {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 0.82rem;
+}
+
+.test-assets-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.test-assets-status {
+  padding: 9px 12px;
+  border: 1px solid var(--agent-line);
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.test-assets-status.is-success {
+  color: #d9ffe8;
+  border-color: color-mix(in srgb, var(--agent-green) 42%, var(--agent-line));
+  background: color-mix(in srgb, var(--agent-green) 10%, transparent);
+}
+
+.test-assets-status.is-error {
+  color: #ffe2e2;
+  border-color: color-mix(in srgb, var(--agent-red) 46%, var(--agent-line));
+  background: color-mix(in srgb, var(--agent-red) 10%, transparent);
+}
+
+.test-assets-main,
+.test-assets-workbench,
+.test-assets-detail,
+.test-assets-preview-pane,
+.test-assets-template-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.test-assets-main {
+  display: grid;
+  min-height: 520px;
+  height: min(760px, calc(100vh - 300px));
+}
+
+.test-assets-workbench {
+  display: grid;
+  grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+  gap: 10px;
+  min-height: 0;
+}
+
+.test-assets-workbench.is-triage {
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+}
+
+.test-assets-rail,
+.test-assets-detail {
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: #202126;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.test-assets-rail {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.test-assets-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.test-assets-rail-head strong,
+.test-assets-pane-head strong {
+  color: var(--agent-text);
+  font-size: 0.95rem;
+}
+
+.test-assets-rail-list {
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px;
+}
+
+.test-assets-rail-item {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 72px;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.test-assets-rail-item:hover,
+.test-assets-rail-item.is-selected {
+  border-color: rgba(110, 161, 247, 0.34);
+  background: rgba(110, 161, 247, 0.08);
+}
+
+.test-assets-rail-item.is-selected {
+  box-shadow: inset 3px 0 0 var(--agent-blue);
+}
+
+.test-assets-thumb {
+  display: grid;
+  place-items: center;
+  width: 78px;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: #080c12;
+  color: var(--agent-muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.test-assets-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.test-assets-rail-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.test-assets-rail-copy strong {
+  overflow: hidden;
+  color: var(--agent-text);
+  font-size: 0.82rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-assets-rail-copy small {
+  overflow: hidden;
+  color: var(--agent-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-assets-state {
+  align-self: start;
+  min-height: 22px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 999px;
+  color: var(--agent-muted);
+  font-size: 0.64rem;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.test-assets-state.is-ready {
+  color: #d9ffe8;
+  border-color: rgba(92, 208, 142, 0.44);
+  background: rgba(92, 208, 142, 0.12);
+}
+
+.test-assets-state.is-missing {
+  color: #ffe8bb;
+  border-color: rgba(240, 169, 64, 0.46);
+  background: rgba(240, 169, 64, 0.12);
+}
+
+.test-assets-detail {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.78fr) minmax(330px, 1.22fr);
+  gap: 0;
+  overflow: hidden;
+}
+
+.test-assets-detail.is-template {
+  grid-template-columns: minmax(280px, 0.72fr) minmax(340px, 1.28fr);
+}
+
+.test-assets-preview-pane {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: #16181d;
+  overflow: hidden;
+}
+
+.test-assets-preview-frame {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+  padding: 14px;
+}
+
+.test-assets-preview-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  object-fit: contain;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+}
+
+.test-assets-preview-frame span {
+  color: var(--agent-muted);
+  font-weight: 800;
+}
+
+.test-assets-preview-meta {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.test-assets-preview-meta strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--agent-text);
+  font-size: 0.9rem;
+}
+
+.test-assets-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.test-assets-meta-row span {
+  max-width: 100%;
+  padding: 4px 7px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 6px;
+  color: var(--agent-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-assets-template-pane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #1f2127;
+  overflow: hidden;
+}
+
+.test-assets-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ---------------------------------------------------------------------------
+   Triage "run approved case" controls. These sit on the real approved-case
+   picker (rail + detail) and the "Run all" batch progress strip. Every value is
+   pinned to the Apple-dark token system already used by this file. No class
+   here contains modal/dialog/title/overlay so the overhaul.css [class*=...]
+   pill + transparent-title traps cannot reach them; the global button rule only
+   adds transitions, which we are happy to inherit.
+   --------------------------------------------------------------------------- */
+
+/* "Run triage on this case" — the prominent action in the detail pane header. */
+.test-assets-run-case {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--accent-border, rgba(110, 161, 247, 0.34));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--agent-blue) 16%, transparent);
+  color: var(--agent-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.test-assets-run-case svg {
+  color: var(--agent-blue);
+}
+
+.test-assets-run-case:hover {
+  border-color: color-mix(in srgb, var(--agent-blue) 60%, var(--agent-line));
+  background: color-mix(in srgb, var(--agent-blue) 26%, transparent);
+}
+
+.test-assets-run-case:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Runnable rail item: selectable area + inline Run button as sibling buttons
+   inside a div (a button cannot legally nest inside a button). Re-uses the same
+   grid footprint as the plain .test-assets-rail-item. */
+.test-assets-rail-item.is-runnable {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  padding: 4px;
+}
+
+.test-assets-rail-item.is-runnable.is-selected {
+  border-color: rgba(110, 161, 247, 0.34);
+  background: rgba(110, 161, 247, 0.08);
+  box-shadow: inset 3px 0 0 var(--agent-blue);
+}
+
+.test-assets-rail-item.is-runnable.is-running {
+  border-color: color-mix(in srgb, var(--agent-blue) 50%, var(--agent-line));
+  background: rgba(110, 161, 247, 0.12);
+}
+
+.test-assets-rail-select {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 64px;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.test-assets-rail-select:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.test-assets-rail-run {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 56px;
+  border: 1px solid var(--accent-border, rgba(110, 161, 247, 0.3));
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--agent-blue) 14%, transparent);
+  color: var(--agent-text);
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.test-assets-rail-run svg {
+  color: var(--agent-blue);
+}
+
+.test-assets-rail-run:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--agent-blue) 58%, var(--agent-line));
+  background: color-mix(in srgb, var(--agent-blue) 24%, transparent);
+}
+
+.test-assets-rail-run:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.test-assets-rail-run-spinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid color-mix(in srgb, var(--agent-blue) 35%, transparent);
+  border-top-color: var(--agent-blue);
+  border-radius: 50%;
+  animation: triageRunSpin 720ms linear infinite;
+}
+
+@keyframes triageRunSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* "Run all" batch progress strip. */
+.triage-batch-progress {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(46, 47, 52, 0.92), rgba(33, 34, 38, 0.92));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.triage-batch-progress.is-running {
+  border-color: color-mix(in srgb, var(--agent-blue) 40%, var(--agent-line));
+}
+
+.triage-batch-progress.is-done {
+  border-color: color-mix(in srgb, var(--agent-green) 42%, var(--agent-line));
+}
+
+.triage-batch-progress.is-warn {
+  border-color: color-mix(in srgb, var(--agent-orange) 44%, var(--agent-line));
+}
+
+.triage-batch-progress.is-error {
+  border-color: color-mix(in srgb, var(--agent-red) 46%, var(--agent-line));
+}
+
+.triage-batch-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.triage-batch-progress-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.triage-batch-progress-copy strong {
+  color: var(--agent-text);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.triage-batch-progress-copy small {
+  overflow: hidden;
+  color: var(--agent-muted);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triage-batch-cancel {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--agent-red) 42%, var(--agent-line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--agent-red) 12%, transparent);
+  color: #ffe2e2;
+  font-size: 0.76rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.triage-batch-cancel:hover {
+  background: color-mix(in srgb, var(--agent-red) 22%, transparent);
+}
+
+.triage-batch-progress-track {
+  position: relative;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(7, 12, 20, 0.55);
+}
+
+.triage-batch-progress-fill {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--agent-blue), color-mix(in srgb, var(--agent-blue) 60%, var(--agent-green)));
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.triage-batch-progress.is-done .triage-batch-progress-fill {
+  background: var(--agent-green);
+}
+
+.triage-batch-progress.is-warn .triage-batch-progress-fill {
+  background: var(--agent-orange);
+}
+
+.test-assets-template-stack {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.test-asset-template,
+.test-assets-template-empty {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-radius: 8px;
+  background: #090e16;
+}
+
+.test-assets-template-empty {
+  color: var(--agent-muted);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.test-asset-template-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.test-asset-template-head span {
+  color: var(--agent-text);
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.test-asset-template-head small {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--agent-muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.test-asset-template pre {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  color: #e9f0ff;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.48;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.test-asset-template.is-compact pre {
+  max-height: none;
+}
+
+@media (max-width: 980px) {
+  .test-assets-workbench,
+  .test-assets-workbench.is-triage {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+
+  .test-assets-detail,
+  .test-assets-detail.is-template {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .test-assets-preview-pane {
+    min-height: 360px;
+    border-right: 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+}
+
+@media (max-width: 860px) {
+  .test-assets-layout {
+    min-height: 0;
+  }
+
+  .test-assets-topbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .test-assets-stats,
+  .test-assets-actions {
+    justify-content: flex-start;
+  }
+
+  .test-assets-workbench,
+  .test-assets-workbench.is-triage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .test-assets-rail {
+    max-height: 320px;
+  }
+
+  .test-assets-detail,
+  .test-assets-detail.is-template {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* =============================================================
    TEST RESULTS PAGE — redesign (`.tr-` scope)
    -------------------------------------------------------------

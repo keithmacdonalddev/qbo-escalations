@@ -28,6 +28,7 @@ function buildProviderOption(entry) {
     iconStrategy: entry.iconStrategy || null,
     availabilityNote: entry.availabilityNote || null,
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
+    supportsImageInput: typeof entry.supportsImageInput === 'boolean' ? entry.supportsImageInput : null,
     reasoningVisibility: entry.reasoningVisibility || null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
@@ -60,6 +61,15 @@ export const CODEX_SERVICE_TIER_OPTIONS = Object.freeze([
 ]);
 
 const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
+  claude: Object.freeze([
+    { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+  ]),
+  codex: Object.freeze([
+    { value: 'gpt-5.5', label: 'GPT-5.5' },
+    { value: 'gpt-5.4', label: 'GPT-5.4' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+  ]),
   'llm-gateway': Object.freeze([
     { value: 'auto', label: 'Auto-detect' },
   ]),
@@ -120,6 +130,11 @@ export function getProviderCapabilities(providerOrFamily) {
     iconLightPath: meta?.iconLightPath || null,
     iconSourceUrl: meta?.iconSourceUrl || null,
     iconStrategy: meta?.iconStrategy || null,
+    supportsImageInput: typeof meta?.supportsImageInput === 'boolean'
+      ? meta.supportsImageInput
+      : typeof defaultMeta?.supportsImageInput === 'boolean'
+        ? defaultMeta.supportsImageInput
+        : false,
     supportsThinking: typeof meta?.supportsThinking === 'boolean'
       ? meta.supportsThinking
       : typeof defaultMeta?.supportsThinking === 'boolean'
@@ -142,7 +157,7 @@ export function normalizeModelOverride(value) {
 export function isProviderModelPreset(provider) {
   const meta = getProviderMeta(provider);
   if (!meta) return false;
-  return meta.selectable === false && meta.transport === 'codex' && Boolean(meta.model);
+  return meta.selectable === false && Boolean(meta.model);
 }
 
 export function resolveProviderSelection(provider, model = '') {
@@ -152,6 +167,12 @@ export function resolveProviderSelection(provider, model = '') {
   if (meta?.transport === 'codex' && normalizedProvider !== 'codex' && getProviderMeta('codex')) {
     return {
       provider: 'codex',
+      model: normalizedModel || meta.model || '',
+    };
+  }
+  if (meta?.transport === 'claude' && normalizedProvider !== 'claude' && getProviderMeta('claude')) {
+    return {
+      provider: 'claude',
       model: normalizedModel || meta.model || '',
     };
   }

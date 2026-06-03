@@ -405,6 +405,189 @@
   color: #aab6c5;
 }
 
+/* Triage result layout: one compact metadata strip + full-width stacked
+   content blocks. Every class below contains "modal", so the global
+   overhaul.css `[class*="modal"]` rule tries to paint each one as a dark
+   #2c2c2e rounded pill — these wrappers opt back out with explicit
+   transparent surfaces (!important) and only the elements that should look
+   like chips/cards keep a surface. */
+.agent-test-modal .agent-test-modal__triage-layout {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+}
+
+.agent-test-modal .agent-test-modal__meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding: 0 0 13px;
+  background: none !important;
+  border: 0 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+}
+
+.agent-test-modal .agent-test-modal__meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+}
+
+/* These leaf text nodes also carry "modal" in their class, so the global
+   overhaul.css `[class*="modal"]` rule paints them as #2c2c2e rounded pills
+   (#f5f5f7 text) — verified live via getComputedStyle. Opt back out to the
+   intended transparent muted/readable text, matching the
+   `.agent-test-modal__provider` defense above. */
+.agent-test-modal .agent-test-modal__meta-label {
+  flex: 0 0 auto;
+  color: #93a3b6 !important;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.agent-test-modal .agent-test-modal__meta-value {
+  min-width: 0;
+  color: #f1f6fb !important;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.006em;
+  overflow-wrap: anywhere;
+}
+
+/* Severity carries a tone — render its value as a small inline accent pill so
+   the priority pops without turning the whole strip into boxes. These keep a
+   surface on purpose, so re-assert it with !important over both the global
+   #2c2c2e pill AND the `background:none` base reset added above. */
+.agent-test-modal .agent-test-modal__meta-item.is-fail .agent-test-modal__meta-value,
+.agent-test-modal .agent-test-modal__meta-item.is-warn .agent-test-modal__meta-value,
+.agent-test-modal .agent-test-modal__meta-item.is-info .agent-test-modal__meta-value,
+.agent-test-modal .agent-test-modal__meta-item.is-pass .agent-test-modal__meta-value {
+  padding: 2px 9px;
+  border: 0 !important;
+  border-radius: 999px !important;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
+.agent-test-modal .agent-test-modal__meta-item.is-fail .agent-test-modal__meta-value {
+  color: #ffd9d9 !important;
+  background: rgba(206, 71, 71, 0.2) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 112, 112, 0.4);
+}
+
+.agent-test-modal .agent-test-modal__meta-item.is-warn .agent-test-modal__meta-value {
+  color: #ffe6bd !important;
+  background: rgba(191, 125, 41, 0.22) !important;
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 96, 0.42);
+}
+
+.agent-test-modal .agent-test-modal__meta-item.is-info .agent-test-modal__meta-value {
+  color: #d7ecff !important;
+  background: rgba(35, 124, 204, 0.24) !important;
+  box-shadow: inset 0 0 0 1px rgba(82, 178, 255, 0.44);
+}
+
+.agent-test-modal .agent-test-modal__meta-item.is-pass .agent-test-modal__meta-value {
+  color: #d6f6e3 !important;
+  background: rgba(40, 148, 88, 0.22) !important;
+  box-shadow: inset 0 0 0 1px rgba(89, 210, 137, 0.42);
+}
+
+.agent-test-modal .agent-test-modal__meta-status {
+  margin-left: auto;
+  padding: 5px 11px;
+  border-radius: 999px !important;
+  color: #dbe5f0 !important;
+  background: rgba(255, 255, 255, 0.07) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.agent-test-modal .agent-test-modal__meta-status.is-warn {
+  color: #fff0d1 !important;
+  background: rgba(191, 125, 41, 0.17) !important;
+  border-color: rgba(255, 190, 96, 0.36) !important;
+}
+
+.agent-test-modal .agent-test-modal__meta-status.is-fail {
+  color: #ffe2e2 !important;
+  background: rgba(206, 71, 71, 0.15) !important;
+  border-color: rgba(255, 112, 112, 0.34) !important;
+}
+
+.agent-test-modal .agent-test-modal__content-blocks {
+  display: grid;
+  gap: 10px;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  color: inherit !important;
+}
+
+.agent-test-modal .agent-test-modal__content-block {
+  display: grid;
+  gap: 6px;
+  padding: 13px 14px;
+  background: rgba(255, 255, 255, 0.045) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 8px !important;
+  color: inherit !important;
+}
+
+/* Same global `[class*="modal"]` pill trap as the meta rows — these sit on the
+   parent `.agent-test-modal__content-block` card and must not grow their own
+   #2c2c2e inner pill. Opt back out to transparent overline/prose. */
+.agent-test-modal .agent-test-modal__content-label {
+  color: #93a3b6 !important;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.agent-test-modal .agent-test-modal__content-text {
+  max-width: 72ch;
+  margin: 0;
+  color: #eef4fa !important;
+  background: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: -0.006em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .agent-test-modal__text-output {
   border-radius: 8px;
   background: rgba(0, 0, 0, 0.24);
@@ -1450,6 +1633,15 @@
   .agent-test-modal__summary,
   .agent-test-modal__programmatic {
     grid-template-columns: 1fr;
+  }
+
+  .agent-test-modal .agent-test-modal__meta-strip {
+    gap: 8px 16px;
+  }
+
+  .agent-test-modal .agent-test-modal__meta-status {
+    margin-left: 0;
+    flex-basis: 100%;
   }
 
   .agent-test-modal__programmatic-state {

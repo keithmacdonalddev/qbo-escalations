@@ -37,6 +37,7 @@ function buildProviderOption(entry) {
     iconStrategy: entry.iconStrategy || null,
     availabilityNote: entry.availabilityNote || '',
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
+    supportsImageInput: typeof entry.supportsImageInput === 'boolean' ? entry.supportsImageInput : null,
     reasoningVisibility: entry.reasoningVisibility || null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
@@ -103,6 +104,11 @@ function getProviderCapabilities(providerOrFamily) {
     iconLightPath: meta?.iconLightPath || null,
     iconSourceUrl: meta?.iconSourceUrl || null,
     iconStrategy: meta?.iconStrategy || null,
+    supportsImageInput: typeof meta?.supportsImageInput === 'boolean'
+      ? meta.supportsImageInput
+      : typeof defaultMeta?.supportsImageInput === 'boolean'
+        ? defaultMeta.supportsImageInput
+        : false,
     supportsThinking: typeof meta?.supportsThinking === 'boolean'
       ? meta.supportsThinking
       : typeof defaultMeta?.supportsThinking === 'boolean'

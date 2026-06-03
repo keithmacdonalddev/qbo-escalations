@@ -1,8 +1,8 @@
 [
   {
     "id": "claude",
-    "label": "Claude CLI - Opus 4.8 (Default)",
-    "shortLabel": "Claude CLI Opus 4.8",
+    "label": "Claude CLI",
+    "shortLabel": "Claude CLI",
     "family": "claude",
     "iconPath": "/provider-icons/anthropic.png",
     "iconSourceUrl": "https://www.anthropic.com/",
@@ -13,6 +13,7 @@
     "default": true,
     "allowedEfforts": ["low", "medium", "high", "xhigh", "max"],
     "supportsThinking": true,
+    "supportsImageInput": true,
     "reasoningVisibility": "stream"
   },
   {
@@ -24,16 +25,17 @@
     "iconSourceUrl": "https://www.anthropic.com/",
     "transport": "claude",
     "model": "claude-opus-4-8",
-    "selectable": true,
+    "selectable": false,
     "order": 25,
     "allowedEfforts": ["low", "medium", "high", "xhigh", "max"],
     "supportsThinking": true,
+    "supportsImageInput": true,
     "reasoningVisibility": "stream"
   },
   {
     "id": "anthropic",
     "label": "Anthropic API",
-    "shortLabel": "Anthropic",
+    "shortLabel": "Anthropic API",
     "family": "anthropic",
     "iconPath": "/provider-icons/anthropic.png",
     "iconSourceUrl": "https://www.anthropic.com/",
@@ -42,7 +44,8 @@
     "selectable": true,
     "order": 27,
     "allowedEfforts": ["low", "medium", "high"],
-    "supportsThinking": false
+    "supportsThinking": false,
+    "supportsImageInput": true
   },
   {
     "id": "llm-gateway",
@@ -55,12 +58,13 @@
     "selectable": true,
     "order": 28,
     "allowedEfforts": ["low", "medium", "high", "xhigh"],
-    "supportsThinking": false
+    "supportsThinking": false,
+    "supportsImageInput": true
   },
   {
     "id": "codex",
-    "label": "OpenAI Codex CLI",
-    "shortLabel": "OpenAI Codex CLI",
+    "label": "Codex CLI",
+    "shortLabel": "Codex CLI",
     "family": "codex",
     "iconPath": "/provider-icons/openai-dark.svg",
     "iconLightPath": "/provider-icons/openai.svg",
@@ -70,6 +74,7 @@
     "order": 30,
     "allowedEfforts": ["low", "medium", "high", "xhigh"],
     "supportsThinking": true,
+    "supportsImageInput": true,
     "reasoningVisibility": "stream"
   },
   {
@@ -99,7 +104,8 @@
     "selectable": true,
     "order": 35,
     "allowedEfforts": ["none", "low", "medium", "high", "xhigh"],
-    "supportsThinking": false
+    "supportsThinking": false,
+    "supportsImageInput": true
   },
   {
     "id": "gpt-5.4",
@@ -143,7 +149,8 @@
     "selectable": true,
     "order": 46,
     "allowedEfforts": ["low", "medium", "high"],
-    "supportsThinking": false
+    "supportsThinking": false,
+    "supportsImageInput": true
   },
   {
     "id": "kimi",
@@ -157,7 +164,8 @@
     "selectable": true,
     "order": 47,
     "allowedEfforts": ["low", "medium", "high"],
-    "supportsThinking": false
+    "supportsThinking": false,
+    "supportsImageInput": true
   },
   {
     "id": "lm-studio",

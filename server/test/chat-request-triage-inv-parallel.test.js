@@ -3,8 +3,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const claude = require('../src/services/claude');
-const codex = require('../src/services/codex');
 const knownIssueSearchModule = require('../src/services/known-issue-search-agent');
 const { buildAgentBackedTriageContext } = require('../src/services/chat-request-service');
 
@@ -29,147 +27,34 @@ const FALLBACK_POLICY = {
   reasoningEffort: 'medium',
 };
 
-const TRIAGE_AGENT_OUTPUT = [
-  'severity: P3',
-  'category: payroll',
-  'fast read: customer needs T4 summary export support',
-  'next action: walk customer through re-exporting the T4 summary',
-  'missing info: none',
-  'confidence: high',
-].join('\n');
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-test('triage prompt no longer contains the INV Search Agent result block', async (t) => {
-  const originalClaudeChat = claude.chat;
-  const originalCodexChat = codex.chat;
+test('chat image augmentation context runs INV Search Agent without inline Triage Agent output', async (t) => {
   const originalRunKnownIssueSearchAgent = knownIssueSearchModule.runKnownIssueSearchAgent;
+  let capturedArgs = null;
 
-  let capturedSystemPrompt = '';
-  let capturedUserMessage = '';
-
-  claude.chat = ({ messages, systemPrompt, onChunk, onDone }) => {
-    capturedSystemPrompt = systemPrompt || '';
-    const lastUser = Array.isArray(messages)
-      ? messages.filter((m) => m && m.role === 'user').slice(-1)[0]
-      : null;
-    capturedUserMessage = (lastUser && lastUser.content) || '';
-    onChunk?.(TRIAGE_AGENT_OUTPUT);
-    onDone?.({
-      providerUsed: 'claude',
-      modelUsed: 'claude-stub',
-      fullResponse: TRIAGE_AGENT_OUTPUT,
-      attempts: [],
-      fallbackUsed: false,
-      usage: null,
-      mode: 'single',
-    });
-    return () => {};
-  };
-
-  knownIssueSearchModule.runKnownIssueSearchAgent = async () => ({
-    ok: true,
-    status: 'no-match',
-    searches: [],
-    matches: [],
-    rejectedCandidates: [],
-    noMatchReason: 'no candidates',
-    needsMoreInfo: [],
-    meta: { providerUsed: 'claude', model: 'claude-stub', durationMs: 1 },
-    summary: 'No INV match.',
-  });
-
-  t.after(() => {
-    claude.chat = originalClaudeChat;
-    codex.chat = originalCodexChat;
-    knownIssueSearchModule.runKnownIssueSearchAgent = originalRunKnownIssueSearchAgent;
-  });
-
-  await buildAgentBackedTriageContext({
-    parserText: CANONICAL_TEMPLATE,
-    parserProvider: 'gemini',
-    parserModel: 'gemini-3-flash-preview',
-    elapsedMs: 100,
-    triageAgentRuntime: null,
-    fallbackPolicy: FALLBACK_POLICY,
-    reasoningEffort: 'medium',
-    timeoutMs: 5000,
-  });
-
-  assert.equal(
-    capturedUserMessage.includes('INV Search Agent result JSON'),
-    false,
-    'triage user prompt must not include the legacy INV result block',
-  );
-  assert.equal(
-    capturedUserMessage.includes('Use the INV Search Agent result as retrieval evidence'),
-    false,
-    'triage user prompt must not include the legacy INV-evidence directive',
-  );
-  assert.ok(
-    capturedUserMessage.includes('Parsed fields JSON:'),
-    'triage user prompt should still contain parsed fields JSON',
-  );
-  assert.ok(
-    capturedSystemPrompt.length > 0,
-    'triage system prompt must still be supplied',
-  );
-});
-
-test('INV Search and Triage agents are kicked off in parallel (both started before either resolves)', async (t) => {
-  const originalClaudeChat = claude.chat;
-  const originalCodexChat = codex.chat;
-  const originalRunKnownIssueSearchAgent = knownIssueSearchModule.runKnownIssueSearchAgent;
-
-  const order = [];
-
-  // Triage: record start, hold for 50ms, then resolve.
-  claude.chat = ({ onChunk, onDone }) => {
-    order.push({ event: 'triage-start', at: Date.now() });
-    setTimeout(() => {
-      order.push({ event: 'triage-resolve', at: Date.now() });
-      onChunk?.(TRIAGE_AGENT_OUTPUT);
-      onDone?.({
-        providerUsed: 'claude',
-        modelUsed: 'claude-stub',
-        fullResponse: TRIAGE_AGENT_OUTPUT,
-        attempts: [],
-        fallbackUsed: false,
-        usage: null,
-        mode: 'single',
-      });
-    }, 50);
-    return () => {};
-  };
-
-  // INV: record start, hold for 50ms, then resolve.
-  knownIssueSearchModule.runKnownIssueSearchAgent = async () => {
-    order.push({ event: 'inv-start', at: Date.now() });
-    await delay(50);
-    order.push({ event: 'inv-resolve', at: Date.now() });
+  knownIssueSearchModule.runKnownIssueSearchAgent = async (args) => {
+    capturedArgs = args;
     return {
       ok: true,
-      status: 'no-match',
-      searches: [],
-      matches: [],
+      status: 'match',
+      searches: [{ query: 't4 xml summary missing', category: 'payroll', status: 'active', resultCount: 1 }],
+      matches: [{
+        invNumber: 'INV-149001',
+        confidence: 'high',
+        subject: 'Downloading T4 XML does not include the T4 summary',
+      }],
       rejectedCandidates: [],
-      noMatchReason: 'no candidates',
+      noMatchReason: '',
       needsMoreInfo: [],
-      meta: { providerUsed: 'claude', model: 'claude-stub', durationMs: 50 },
-      summary: 'No INV match.',
+      meta: { providerUsed: 'claude', model: 'claude-stub', durationMs: 1 },
+      summary: 'Likely INV match.',
     };
   };
 
   t.after(() => {
-    claude.chat = originalClaudeChat;
-    codex.chat = originalCodexChat;
     knownIssueSearchModule.runKnownIssueSearchAgent = originalRunKnownIssueSearchAgent;
   });
 
-  const startedAt = Date.now();
-  await buildAgentBackedTriageContext({
+  const context = await buildAgentBackedTriageContext({
     parserText: CANONICAL_TEMPLATE,
     parserProvider: 'gemini',
     parserModel: 'gemini-3-flash-preview',
@@ -179,32 +64,44 @@ test('INV Search and Triage agents are kicked off in parallel (both started befo
     reasoningEffort: 'medium',
     timeoutMs: 5000,
   });
-  const totalMs = Date.now() - startedAt;
 
-  const invStart = order.find((e) => e.event === 'inv-start');
-  const triageStart = order.find((e) => e.event === 'triage-start');
-  const invResolve = order.find((e) => e.event === 'inv-resolve');
-  const triageResolve = order.find((e) => e.event === 'triage-resolve');
+  assert.ok(capturedArgs, 'INV Search Agent should still run from chat-side parser context');
+  assert.match(capturedArgs.parserText, /COID\/MID/);
+  assert.equal(capturedArgs.parseFields.clientContact, 'Doug Mckensie');
+  assert.equal(context.knownIssueSearchResult.status, 'match');
+  assert.equal(context.knownIssueSearchResult.matches[0].invNumber, 'INV-149001');
+  assert.equal(context.triageCard, null);
+  assert.equal(context.triageMeta, null);
+});
 
-  assert.ok(invStart, 'INV agent must have been invoked');
-  assert.ok(triageStart, 'Triage agent must have been invoked');
-  assert.ok(invResolve, 'INV agent must have resolved');
-  assert.ok(triageResolve, 'Triage agent must have resolved');
+test('chat image augmentation context can skip INV Search Agent without manufacturing triage', async (t) => {
+  const originalRunKnownIssueSearchAgent = knownIssueSearchModule.runKnownIssueSearchAgent;
+  let called = false;
 
-  // Both must start before either resolves — the parallelization contract.
-  assert.ok(
-    invStart.at <= invResolve.at && invStart.at <= triageResolve.at,
-    'INV must start before any resolution',
-  );
-  assert.ok(
-    triageStart.at <= invResolve.at && triageStart.at <= triageResolve.at,
-    'Triage must start before any resolution',
-  );
+  knownIssueSearchModule.runKnownIssueSearchAgent = async () => {
+    called = true;
+    return { ok: true, status: 'no-match', matches: [], meta: {} };
+  };
 
-  // Wall-clock check: with each stub holding 50ms, sequential would be ~100ms;
-  // parallel should be ~50ms. Allow generous slack for CI jitter.
-  assert.ok(
-    totalMs < 95,
-    `combined wall-clock should be roughly max(inv, triage), got ${totalMs}ms`,
-  );
+  t.after(() => {
+    knownIssueSearchModule.runKnownIssueSearchAgent = originalRunKnownIssueSearchAgent;
+  });
+
+  const context = await buildAgentBackedTriageContext({
+    parserText: CANONICAL_TEMPLATE,
+    parserProvider: 'gemini',
+    parserModel: 'gemini-3-flash-preview',
+    elapsedMs: 100,
+    triageAgentRuntime: null,
+    fallbackPolicy: FALLBACK_POLICY,
+    reasoningEffort: 'medium',
+    timeoutMs: 5000,
+    runKnownIssueSearch: false,
+  });
+
+  assert.equal(called, false);
+  assert.equal(context.knownIssueSearchResult, null);
+  assert.equal(context.triageCard, null);
+  assert.equal(context.triageMeta, null);
+  assert.equal(context.parseFields.clientContact, 'Doug Mckensie');
 });

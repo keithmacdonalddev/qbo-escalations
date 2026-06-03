@@ -234,6 +234,7 @@ function buildCaseIntakeFromParsedEscalation({
     ''
   );
   const triageError = imageTriageContext?.error || null;
+  const hasTriageRun = Boolean(triageCard || triageMeta || triageError);
   const triageFallback = Boolean(triageCard?.fallback?.used || triageMeta?.usedRuleFallback);
   const triageFallbackReason = triageFallback
     ? safeString(triageCard?.fallback?.reason || triageMeta?.fallbackReason, 'Triage Agent did not produce a usable card; rule fallback is displayed.')
@@ -268,7 +269,7 @@ function buildCaseIntakeFromParsedEscalation({
     },
   });
 
-  const triageRun = createRun({
+  const triageRun = hasTriageRun ? createRun({
     agentId: 'triage-agent',
     agentName: 'Triage Agent',
     phase: 'triage',
@@ -300,7 +301,7 @@ function buildCaseIntakeFromParsedEscalation({
       },
       validation: triageMeta?.validation || null,
     },
-  });
+  }) : null;
 
   const knownIssueRun = knownIssueSearchResult ? createRun({
     agentId: 'known-issue-search-agent',
@@ -358,7 +359,7 @@ function buildCaseIntakeFromParsedEscalation({
     runs: [
       parserRun,
       ...(knownIssueRun ? [knownIssueRun] : []),
-      triageRun,
+      ...(triageRun ? [triageRun] : []),
       analystRun,
     ],
     activeRunId: analystRun.id,

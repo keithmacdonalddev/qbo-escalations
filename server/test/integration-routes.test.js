@@ -1367,7 +1367,7 @@ await t.test('P5: chat parse-escalation accepts new provider IDs', async () => {
   assert.equal(res.body.ok, true);
 });
 
-await t.test('POST /api/chat/parse-escalation returns triageCard payload', async () => {
+await t.test('POST /api/chat/parse-escalation returns parse payload without inline triage card', async () => {
   const res = await agent
     .post('/api/chat/parse-escalation')
     .send({
@@ -1387,17 +1387,13 @@ await t.test('POST /api/chat/parse-escalation returns triageCard payload', async
 
   assert.equal(res.status, 200);
   assert.equal(res.body.ok, true);
-  assert.ok(res.body.triageCard);
-  assert.equal(res.body.triageCard.agent, 'Jamie Agent');
-  assert.equal(res.body.triageCard.client, 'Example Client');
-  assert.equal(res.body.triageCard.category, 'technical');
-  assert.ok(['P2', 'P3'].includes(res.body.triageCard.severity));
-  assert.ok(typeof res.body.triageCard.read === 'string' && res.body.triageCard.read.length > 0);
-  assert.ok(typeof res.body.triageCard.action === 'string' && res.body.triageCard.action.length > 0);
+  assert.ok(res.body.escalation);
+  assert.equal(res.body.triageCard, null);
+  assert.equal(res.body.triageMeta, null);
   assert.ok(res.body._meta);
 });
 
-await t.test('POST /api/chat emits triage_card for parsedEscalationText handoff', async () => {
+await t.test('POST /api/chat does not emit triage_card for parsedEscalationText handoff', async () => {
   const extractedText = [
     'COID/MID: 12345 / 67890',
     'CASE: CS-2026-002001',
@@ -1428,16 +1424,9 @@ await t.test('POST /api/chat emits triage_card for parsedEscalationText handoff'
 
   const events = parseSseEvents(res.text);
   const triageEvent = events.find((event) => event.event === 'triage_card');
-  assert.ok(triageEvent, 'triage_card event should be present');
-  const triageData = JSON.parse(triageEvent.data);
-  assert.equal(triageData.agent, 'Jamie Agent');
-  assert.equal(triageData.client, 'Example Client');
-  assert.equal(triageData.category, 'technical');
-  assert.ok(['P2', 'P3'].includes(triageData.severity));
-  assert.ok(typeof triageData.read === 'string' && triageData.read.length > 0);
-  assert.ok(typeof triageData.action === 'string' && triageData.action.length > 0);
-  assert.equal(triageData.fallback.used, true);
-  assert.match(triageData.fallback.reason, /canonical escalation template/i);
+  assert.equal(triageEvent, undefined, 'triage_card event should be emitted only by /api/triage');
+  assert.ok(events.some((event) => event.event === 'start' || event.event === 'init'));
+  assert.ok(events.some((event) => event.event === 'done'));
 });
 
 // ---------- Phase 6: N-way parallelProviders route tests ----------

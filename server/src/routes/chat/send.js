@@ -600,7 +600,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   };
   const parserEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'parser' });
   const knownIssueEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'inv' });
-  const triageEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'triage' });
   const mainEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'main' });
 
   const {
@@ -615,7 +614,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     baseSystemPrompt: contextBundle.systemPrompt,
     parserEventBus,
     knownIssueEventBus,
-    triageEventBus,
     emitStatus: async (statusMessage) => {
       try {
         const payload = statusMessage && typeof statusMessage === 'object'
@@ -662,18 +660,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         message: 'Searching active INV investigations before triage.',
       }, traceStartedAt);
     },
-    onTriageStart: async (stageMeta) => {
-      const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
-      const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
-      await appendTraceEvent(trace?._id, {
-        key: 'triage_started',
-        label: 'Triage Agent started',
-        status: 'info',
-        provider: traceProvider,
-        model: traceModel,
-        message: 'Running the configured Triage Agent against parsed escalation text.',
-      }, traceStartedAt);
-    },
     imageParserConfig: req.body.imageParserProvider
       ? {
           provider: req.body.imageParserProvider,
@@ -710,12 +696,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       traceId: trace ? trace._id.toString() : null,
       startedAt: traceStartedAt,
     });
-    // Persist the buffered stage events from the parser / INV / triage legs
+    // Persist the buffered stage events from the parser / INV legs
     // onto the matching runs in caseIntake.runs[]. The popout reads these
     // events when the live SSE channel has already closed.
     conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'parser', parserEventBus.flush());
     conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'inv', knownIssueEventBus.flush());
-    conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'triage', triageEventBus.flush());
     conversation.markModified?.('caseIntake');
     recordCaseIntakeWorkflowActivities(conversation.caseIntake, {
       conversationId: conversation._id ? conversation._id.toString() : '',
@@ -879,42 +864,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       }) + '\n\n');
     } catch { /* client disconnected */ }
   }
-  // Triage is already awaited — emit trace events and triage card SSE synchronously.
-  if (imageTriageContext) {
-    const triageMeta = imageTriageContext.triageMeta || imageTriageContext.parseMeta;
-    const triageUsedRuleFallback = Boolean(triageMeta?.usedRuleFallback || imageTriageContext.triageCard?.fallback?.used);
-    patchTrace(trace?._id, {
-      triage: buildParseStage(
-        triageMeta,
-        triageMeta ? (triageUsedRuleFallback ? 'warning' : 'ok') : 'error',
-        {
-          latencyMs: imageTriageContext.elapsedMs || 0,
-          startedAt: traceStartedAt,
-          completedAt: new Date(),
-          card: imageTriageContext.triageCard || null,
-          providerUsed: triageMeta?.providerUsed || policy.primaryProvider,
-          modelUsed: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
-        }
-      ),
-    }).catch(() => {});
-    appendTraceEvent(trace?._id, {
-      key: triageMeta ? 'triage_completed' : 'triage_failed',
-      label: triageMeta ? (triageUsedRuleFallback ? 'Triage fallback used' : 'Triage Agent completed') : 'Image triage failed',
-      status: triageMeta ? (triageUsedRuleFallback ? 'warning' : 'success') : 'error',
-      provider: triageMeta?.providerUsed || policy.primaryProvider,
-      model: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
-      code: imageTriageContext.error?.code || '',
-      message: triageMeta
-        ? `${triageUsedRuleFallback ? 'Triage Agent fallback completed' : 'Triage Agent completed'} in ${imageTriageContext.elapsedMs || 0}ms.`
-        : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
-      detail: triageMeta?.validation || imageTriageContext.error || null,
-    }, traceStartedAt).catch(() => {});
-    if (!responseClosed && imageTriageContext.triageCard) {
-      try {
-        res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
-      } catch { /* client disconnected */ }
-    }
-  }
+  // Triage now runs through the standalone /api/triage harness. /api/chat keeps
+  // parser + INV context for the analyst answer but does not emit triage cards.
   // Emit INV matches SSE event so the client can show the InvMatchBanner.
   if (!responseClosed && invMatchResult.ssePayload.length > 0) {
     try {
@@ -2144,18 +2095,6 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         message: 'Searching active INV investigations before triage.',
       }, traceStartedAt);
     },
-    onTriageStart: async (stageMeta) => {
-      const traceProvider = safeString(stageMeta?.provider, policy.primaryProvider);
-      const traceModel = safeString(stageMeta?.model, '') || getProviderModelId(traceProvider);
-      await appendTraceEvent(trace?._id, {
-        key: 'triage_started',
-        label: 'Triage Agent started',
-        status: 'info',
-        provider: traceProvider,
-        model: traceModel,
-        message: 'Running the configured Triage Agent against parsed escalation text.',
-      }, traceStartedAt);
-    },
     imageParserConfig: req.body.imageParserProvider
       ? {
           provider: req.body.imageParserProvider,
@@ -2261,42 +2200,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       }) + '\n\n');
     } catch { /* client disconnected */ }
   }
-  // Triage already resolved — emit trace events and triage card SSE synchronously.
-  if (imageTriageContext) {
-    const triageMeta = imageTriageContext.triageMeta || imageTriageContext.parseMeta;
-    const triageUsedRuleFallback = Boolean(triageMeta?.usedRuleFallback || imageTriageContext.triageCard?.fallback?.used);
-    patchTrace(trace?._id, {
-      triage: buildParseStage(
-        triageMeta,
-        triageMeta ? (triageUsedRuleFallback ? 'warning' : 'ok') : 'error',
-        {
-          latencyMs: imageTriageContext.elapsedMs || 0,
-          startedAt: traceStartedAt,
-          completedAt: new Date(),
-          card: imageTriageContext.triageCard || null,
-          providerUsed: triageMeta?.providerUsed || policy.primaryProvider,
-          modelUsed: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
-        }
-      ),
-    }).catch(() => {});
-    appendTraceEvent(trace?._id, {
-      key: triageMeta ? 'triage_completed' : 'triage_failed',
-      label: triageMeta ? (triageUsedRuleFallback ? 'Triage fallback used' : 'Triage Agent completed') : 'Image triage failed',
-      status: triageMeta ? (triageUsedRuleFallback ? 'warning' : 'success') : 'error',
-      provider: triageMeta?.providerUsed || policy.primaryProvider,
-      model: safeString(triageMeta?.model, '') || getProviderModelId(triageMeta?.providerUsed || policy.primaryProvider),
-      code: imageTriageContext.error?.code || '',
-      message: triageMeta
-        ? `${triageUsedRuleFallback ? 'Triage Agent fallback completed' : 'Triage Agent completed'} in ${imageTriageContext.elapsedMs || 0}ms.`
-        : (imageTriageContext.error?.message || 'Image triage did not return structured fields.'),
-      detail: triageMeta?.validation || imageTriageContext.error || null,
-    }, traceStartedAt).catch(() => {});
-    if (!responseClosed && imageTriageContext.triageCard) {
-      try {
-        res.write('event: triage_card\ndata: ' + JSON.stringify(imageTriageContext.triageCard) + '\n\n');
-      } catch { /* gone */ }
-    }
-  }
+  // Triage now runs through the standalone /api/triage harness. /api/chat/retry
+  // keeps parser + INV context for the analyst answer but does not emit triage cards.
   // Emit INV matches SSE event (retry handler).
   if (!responseClosed && invMatchResult.ssePayload.length > 0) {
     try {

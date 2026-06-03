@@ -2,6 +2,7 @@ import {
   DEFAULT_PROVIDER,
   DEFAULT_CODEX_SERVICE_TIER,
   DEFAULT_REASONING_EFFORT,
+  PROVIDER_OPTIONS,
   PROVIDER_FAMILY,
   getAlternateProvider,
   getProviderDefaultModel,
@@ -19,7 +20,6 @@ import {
 import {
   DEFAULT_IMAGE_PARSER_MODELS,
   IMAGE_PARSER_MODEL_SUGGESTIONS,
-  IMAGE_PARSER_PROVIDER_OPTIONS,
   getImageParserModelPlaceholder,
   normalizeImageParserReasoningEffort,
   resolveImageParserSelection,
@@ -66,10 +66,12 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Fast category, severity, and next-step triage',
     color: '#ff9f0a',
     storagePrefix: 'qbo-triage-agent',
-    supportsModes: true,
+    supportsModes: false,
     supportsReasoning: true,
     defaultMode: 'single',
-    supportedModes: ['single', 'fallback'],
+    supportedModes: ['single'],
+    defaultProvider: 'lm-studio',
+    kind: 'triage',
   },
   {
     id: 'known-issue-search-agent',
@@ -143,12 +145,14 @@ const RUNTIME_BY_ID = Object.freeze(
   }, {})
 );
 
-const IMAGE_PARSER_PROVIDER_LABELS = Object.freeze(
-  IMAGE_PARSER_PROVIDER_OPTIONS.reduce((acc, option) => {
+const RUNTIME_PROVIDER_LABELS = Object.freeze(
+  PROVIDER_OPTIONS.reduce((acc, option) => {
     acc[option.value] = option.label;
     return acc;
   }, {})
 );
+
+export const TRIAGE_PROVIDER_OPTIONS = PROVIDER_OPTIONS;
 
 function storageKey(prefix, field) {
   return `${prefix}-${field}`;
@@ -164,15 +168,18 @@ function storageKeysForDefinition(definition) {
       storageKey(definition.storagePrefix, 'service-tier'),
     ];
   }
-  return [
+  const keys = [
     storageKey(definition.storagePrefix, 'provider'),
-    storageKey(definition.storagePrefix, 'mode'),
-    storageKey(definition.storagePrefix, 'fallback-provider'),
     storageKey(definition.storagePrefix, 'model'),
-    storageKey(definition.storagePrefix, 'fallback-model'),
     storageKey(definition.storagePrefix, 'reasoning-effort'),
     storageKey(definition.storagePrefix, 'service-tier'),
   ];
+  if (definition.supportsModes) {
+    keys.splice(1, 0, storageKey(definition.storagePrefix, 'mode'));
+    keys.splice(2, 0, storageKey(definition.storagePrefix, 'fallback-provider'));
+    keys.splice(4, 0, storageKey(definition.storagePrefix, 'fallback-model'));
+  }
+  return keys;
 }
 
 function cloneState(state) {
@@ -183,10 +190,20 @@ function isImageParser(definition) {
   return definition?.kind === 'image-parser';
 }
 
+function isTriage(definition) {
+  return definition?.kind === 'triage';
+}
+
 function normalizeImageParserProvider(provider) {
   const value = typeof provider === 'string' ? provider.trim() : '';
   if (!value) return '';
-  return IMAGE_PARSER_PROVIDER_OPTIONS.some((option) => option.value === value) ? value : '';
+  return PROVIDER_OPTIONS.some((option) => option.value === value) ? value : '';
+}
+
+function normalizeTriageProvider(provider, fallback = 'lm-studio') {
+  const value = typeof provider === 'string' ? provider.trim() : '';
+  if (value && PROVIDER_OPTIONS.some((option) => option.value === value)) return value;
+  return PROVIDER_OPTIONS.some((option) => option.value === fallback) ? fallback : (PROVIDER_OPTIONS[0]?.value || '');
 }
 
 function normalizeProviderModelOverride(provider, model) {
@@ -240,21 +257,40 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     };
   }
 
+  if (isTriage(definition)) {
+    const provider = normalizeTriageProvider(state.provider, definition.defaultProvider || 'lm-studio');
+    const primarySelection = resolveProviderSelection(provider, state.model);
+    const providerFamily = PROVIDER_FAMILY[provider] || 'claude';
+    return {
+      provider,
+      mode: 'single',
+      fallbackProvider: '',
+      model: normalizeProviderModelOverride(provider, primarySelection.model),
+      fallbackModel: '',
+      reasoningEffort: normalizeReasoningEffort(
+        state.reasoningEffort || DEFAULT_REASONING_EFFORT,
+        providerFamily
+      ),
+      serviceTier: normalizeProviderServiceTier(provider, state.serviceTier),
+    };
+  }
+
   const primarySelection = resolveProviderSelection(state.provider || DEFAULT_PROVIDER, state.model);
   const provider = primarySelection.provider;
-  const mode = normalizeSurfaceMode(
-    state.mode || definition.defaultMode,
-    definition.supportedModes,
-    definition.defaultMode
-  );
+  const mode = definition.supportsModes
+    ? normalizeSurfaceMode(
+        state.mode || definition.defaultMode,
+        definition.supportedModes,
+        definition.defaultMode
+      )
+    : 'single';
   const fallbackSelection = resolveProviderSelection(
     state.fallbackProvider || getAlternateProvider(provider),
     state.fallbackModel
   );
-  const fallbackProvider = normalizeSurfaceFallback(
-    provider,
-    fallbackSelection.provider
-  );
+  const fallbackProvider = definition.supportsModes
+    ? normalizeSurfaceFallback(provider, fallbackSelection.provider)
+    : '';
   const providerFamily = PROVIDER_FAMILY[provider] || 'claude';
   const reasoningEffort = normalizeReasoningEffort(
     state.reasoningEffort || DEFAULT_REASONING_EFFORT,
@@ -266,11 +302,11 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     mode,
     fallbackProvider,
     model: normalizeProviderModelOverride(provider, primarySelection.model),
-    fallbackModel: fallbackProvider === fallbackSelection.provider
+    fallbackModel: definition.supportsModes && fallbackProvider === fallbackSelection.provider
       ? normalizeProviderModelOverride(fallbackProvider, fallbackSelection.model)
       : '',
     reasoningEffort,
-    serviceTier: providerSupportsCodexServiceTier(provider) || providerSupportsCodexServiceTier(fallbackProvider)
+    serviceTier: providerSupportsCodexServiceTier(provider) || (definition.supportsModes && providerSupportsCodexServiceTier(fallbackProvider))
       ? normalizeCodexServiceTier(state.serviceTier || DEFAULT_CODEX_SERVICE_TIER)
       : '',
   };
@@ -292,7 +328,7 @@ export function readAgentRuntimeState(definitionOrId) {
     });
   }
 
-  const provider = readStoredPreference(storageKey(storagePrefix, 'provider')) || DEFAULT_PROVIDER;
+  const provider = readStoredPreference(storageKey(storagePrefix, 'provider')) || definition.defaultProvider || DEFAULT_PROVIDER;
   const fallbackProvider = readStoredPreference(storageKey(storagePrefix, 'fallback-provider'))
     || getAlternateProvider(provider);
 
@@ -325,10 +361,14 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
   }
 
   writeStoredPreference(storageKey(storagePrefix, 'provider'), normalized.provider);
-  writeStoredPreference(storageKey(storagePrefix, 'mode'), normalized.mode);
-  writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), normalized.fallbackProvider);
+  if (definition.supportsModes) {
+    writeStoredPreference(storageKey(storagePrefix, 'mode'), normalized.mode);
+    writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), normalized.fallbackProvider);
+  }
   writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
-  writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
+  if (definition.supportsModes) {
+    writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
+  }
   writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
   writeStoredPreference(storageKey(storagePrefix, 'service-tier'), normalized.serviceTier);
 
@@ -401,7 +441,10 @@ export function getAgentRuntimeProviderLabel(definitionOrId, state = {}) {
 
   if (isImageParser(definition)) {
     if (!normalized.provider) return 'Disabled';
-    return IMAGE_PARSER_PROVIDER_LABELS[normalized.provider] || normalized.provider;
+    return RUNTIME_PROVIDER_LABELS[normalized.provider] || normalized.provider;
+  }
+  if (isTriage(definition)) {
+    return RUNTIME_PROVIDER_LABELS[normalized.provider] || normalized.provider;
   }
 
   return getProviderShortLabel(normalized.provider);

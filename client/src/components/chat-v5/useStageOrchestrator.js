@@ -8,6 +8,7 @@ import {
   summarizeProviderPackageCaptureFailure,
 } from '../../lib/imageParserValidation.js';
 import { useToast } from '../../hooks/useToast.jsx';
+import useTriage from '../../hooks/useTriage.js';
 import { normalizeError } from '../../utils/normalizeError.js';
 import {
   readImageParserProfileRuntime,
@@ -247,12 +248,14 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
     modelUsed: data.modelUsed || data.usage?.model || cfg.model || '',
     reasoningEffortUsed: cfg.reasoningEffort || '',
     providerTrace: data.providerTrace || null,
+    role: data.role || '',
     elapsedMs: Date.now() - start,
   };
 }
 
 export function useStageOrchestrator() {
   const toast = useToast();
+  const { runTriageStream } = useTriage();
   const [imageCaptured, setImageCaptured] = useState(false);
   const [activeWidget, setActiveWidget] = useState('image');
   const [splitView, setSplitView] = useState(false);
@@ -276,6 +279,7 @@ export function useStageOrchestrator() {
 
   const abortRef = useRef(null);
   const parseAbortRef = useRef(null);
+  const triageAbortRef = useRef(null);
   const tokenRef = useRef(0);
   const streamingTextRef = useRef('');
   const toastedStageKeysRef = useRef(new Set());
@@ -293,6 +297,10 @@ export function useStageOrchestrator() {
     if (parseAbortRef.current) {
       try { parseAbortRef.current.abort(); } catch { /* noop */ }
       parseAbortRef.current = null;
+    }
+    if (triageAbortRef.current) {
+      try { triageAbortRef.current(); } catch { /* noop */ }
+      triageAbortRef.current = null;
     }
     if (widgetSwitchTimerRef.current) {
       clearTimeout(widgetSwitchTimerRef.current);
@@ -554,7 +562,7 @@ export function useStageOrchestrator() {
     const { abort } = sendChatMessage(payload, {
       onInit: (data) => { if (tokenRef.current === token) handleInit(data); },
       onStatus: () => {},
-      onTriageCard: (data) => { if (tokenRef.current === token) handleTriageCard(data); },
+      onTriageCard: () => {},
       onCaseIntake: (data) => { if (tokenRef.current === token) handleCaseIntake(data); },
       onInvMatches: (data) => { if (tokenRef.current === token) handleInvMatches(data); },
       onStageEvent: (data) => { if (tokenRef.current === token) handleStageEvent(data); },
@@ -567,7 +575,143 @@ export function useStageOrchestrator() {
       onLocalStage: () => {},
     });
     abortRef.current = abort;
-  }, [handleCaseIntake, handleChunk, handleDone, handleError, handleInit, handleInvMatches, handleStageEvent, handleTriageCard]);
+  }, [handleCaseIntake, handleChunk, handleDone, handleError, handleInit, handleInvMatches, handleStageEvent]);
+
+  const startTriageStream = useCallback((parseResult, runtimeByStage, token) => {
+    const text = (parseResult?.sourceText || parseResult?.text || '').trim();
+    const role = cleanRuntimeValue(parseResult?.role).toLowerCase();
+    const now = Date.now();
+
+    if (!text || (role && role !== 'escalation')) {
+      const reason = !text
+        ? 'Parser returned no escalation text for triage.'
+        : `Parser classified this image as ${role}.`;
+      pushLocalStageEvent('triage', 'stage.skipped', {
+        code: !text ? 'TRIAGE_EMPTY_INPUT' : 'TRIAGE_NON_ESCALATION_ROLE',
+        reason,
+      });
+      setStageState((prev) => ({
+        ...prev,
+        triage: {
+          ...prev.triage,
+          status: 'done',
+          startedAt: prev.triage.startedAt || now,
+          finishedAt: now,
+          durationMs: prev.triage.startedAt ? now - prev.triage.startedAt : 0,
+          error: null,
+          fallbackUsed: false,
+          fallbackReason: '',
+        },
+      }));
+      return;
+    }
+
+    if (triageAbortRef.current) {
+      try { triageAbortRef.current(); } catch { /* noop */ }
+      triageAbortRef.current = null;
+    }
+
+    const triageRuntime = runtimeByStage?.triage || runtimeByStage?.['triage-agent'] || {};
+    const provider = cleanRuntimeValue(triageRuntime.provider);
+    const model = cleanRuntimeValue(triageRuntime.model);
+    const reasoningEffort = cleanRuntimeValue(triageRuntime.reasoningEffort);
+    const serviceTier = cleanRuntimeValue(triageRuntime.serviceTier);
+    const startedAt = Date.now();
+
+    setStageState((prev) => ({
+      ...prev,
+      triage: {
+        ...prev.triage,
+        status: 'running',
+        startedAt: prev.triage.startedAt || startedAt,
+        finishedAt: null,
+        durationMs: null,
+        error: null,
+        fallbackUsed: false,
+        fallbackReason: '',
+      },
+    }));
+    pushLocalStageEvent('triage', 'triage.client_request_started', {
+      provider,
+      model,
+      reasoningEffort,
+      textLength: text.length,
+      status: 'sent',
+      surfaceToUser: true,
+      displayMessage: 'triage payload sent to server - sent',
+    });
+
+    const request = runTriageStream({
+      text,
+      provider,
+      model,
+      reasoningEffort,
+      serviceTier,
+      timeoutMs: 120_000,
+    }, {
+      onStageEvent: (data) => {
+        if (tokenRef.current === token) handleStageEvent(data);
+      },
+      onComplete: (data) => {
+        if (tokenRef.current !== token) return;
+        triageAbortRef.current = null;
+        const card = data?.card || data?.triageCard || data?.fallbackCard || null;
+        if (card) handleTriageCard(card);
+        const finishedAt = Date.now();
+        const failed = data?.ok === false && !data?.card && !data?.triageCard;
+        const fallbackUsed = Boolean(card?.fallback?.used || data?.triageMeta?.fallbackUsed || data?.status === 'degraded' || data?.fallbackCard);
+        pushLocalStageEvent('triage', 'triage.client_result_received', {
+          provider: data?.providerUsed || provider,
+          model: data?.modelUsed || model,
+          elapsedMs: data?.elapsedMs ?? (finishedAt - startedAt),
+          status: failed ? 'failed' : (fallbackUsed ? 'degraded' : 'success'),
+          providerPackageId: data?.triageMeta?.providerPackageId || '',
+          fallbackUsed,
+        });
+        setStageState((prev) => ({
+          ...prev,
+          triage: {
+            ...prev.triage,
+            status: failed ? 'failed' : 'done',
+            startedAt: prev.triage.startedAt || startedAt,
+            finishedAt,
+            durationMs: data?.elapsedMs ?? (finishedAt - (prev.triage.startedAt || startedAt)),
+            error: failed ? (data?.error || 'Triage failed.') : null,
+            fallbackUsed,
+            fallbackReason: card?.fallback?.reason || data?.triageMeta?.fallbackReason || '',
+          },
+        }));
+      },
+      onError: (err) => {
+        if (tokenRef.current !== token) return;
+        triageAbortRef.current = null;
+        const normalized = normalizeError(err);
+        pushLocalStageEvent('triage', 'error', {
+          code: normalized.code || 'TRIAGE_FAILED',
+          message: normalized.message || 'Triage failed',
+          status: 'error',
+          surfaceToUser: true,
+          displayMessage: normalized.message || 'Triage failed',
+        });
+        setStageState((prev) => {
+          const finishedAt = Date.now();
+          const stageStartedAt = prev.triage.startedAt || startedAt;
+          return {
+            ...prev,
+            triage: {
+              ...prev.triage,
+              status: 'failed',
+              startedAt: stageStartedAt,
+              finishedAt,
+              durationMs: finishedAt - stageStartedAt,
+              error: normalized.message || 'Triage failed',
+            },
+          };
+        });
+      },
+    });
+    triageAbortRef.current = request.abort;
+  }, [handleStageEvent, handleTriageCard, pushLocalStageEvent, runTriageStream]);
 
   const startRequestWithImage = useCallback(async (imageDataUrl) => {
     const token = ++tokenRef.current;
@@ -739,6 +883,7 @@ export function useStageOrchestrator() {
       elapsedMs: parseResult.elapsedMs ?? 0,
       textLength: (parseResult.sourceText || parseResult.text || '').length,
     });
+    startTriageStream(parseResult, runtimeByStage, token);
 
     // Submit to /api/chat with parsedEscalationText.
     const payload = buildPipelineChatPayload({
@@ -754,7 +899,7 @@ export function useStageOrchestrator() {
       parsedEscalationElapsedMs: parseResult.elapsedMs,
     }, runtimeByStage);
     runChatStream(payload, token);
-  }, [conversationId, handleStageEvent, pushLocalStageEvent, runChatStream]);
+  }, [conversationId, handleStageEvent, pushLocalStageEvent, runChatStream, startTriageStream]);
 
   const captureImage = useCallback((imageDataUrl, fileMeta) => {
     if (imageCaptured) return;
@@ -791,6 +936,10 @@ export function useStageOrchestrator() {
     if (abortRef.current) {
       try { abortRef.current(); } catch { /* noop */ }
       abortRef.current = null;
+    }
+    if (triageAbortRef.current) {
+      try { triageAbortRef.current(); } catch { /* noop */ }
+      triageAbortRef.current = null;
     }
 
     const runtimeByStage = await readPipelineRuntimeForExecution();
@@ -934,6 +1083,10 @@ export function useStageOrchestrator() {
     if (parseAbortRef.current) {
       try { parseAbortRef.current.abort(); } catch { /* noop */ }
       parseAbortRef.current = null;
+    }
+    if (triageAbortRef.current) {
+      try { triageAbortRef.current(); } catch { /* noop */ }
+      triageAbortRef.current = null;
     }
     if (widgetSwitchTimerRef.current) {
       clearTimeout(widgetSwitchTimerRef.current);

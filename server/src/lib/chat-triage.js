@@ -11,6 +11,8 @@ const TRIAGE_ALLOWED_CATEGORIES = Object.freeze([
   'technical',
   'invoicing',
 ]);
+const TRIAGE_ALLOWED_SEVERITIES = Object.freeze(['P1', 'P2', 'P3', 'P4']);
+const TRIAGE_ALLOWED_CONFIDENCE = Object.freeze(['high', 'medium', 'low']);
 const TRIAGE_CATEGORY_MAP = Object.freeze({
   payroll: 'payroll',
   'bank-feeds': 'bank-feeds',
@@ -31,6 +33,7 @@ const QUICK_PARSE_SECTION_TITLES = Object.freeze([
   'Steps for Agent',
   'Customer-Facing Explanation',
 ]);
+const TRIAGE_AGENT_ID = 'triage-agent';
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -56,6 +59,68 @@ function normalizeTriageCategory(rawCategory) {
   const mapped = TRIAGE_CATEGORY_MAP[normalized];
   if (mapped && TRIAGE_ALLOWED_CATEGORIES.includes(mapped)) return mapped;
   return 'technical';
+}
+
+function makeValidationIssue(code, field, message, extra = {}) {
+  return {
+    code,
+    field,
+    message,
+    ...extra,
+  };
+}
+
+function normalizeLooseTriageCategory(rawCategory) {
+  const raw = safeString(rawCategory, '').trim();
+  const normalized = raw.toLowerCase().replace(/_/g, '-').replace(/\s+/g, '-');
+  const mapped = TRIAGE_CATEGORY_MAP[normalized]
+    || TRIAGE_CATEGORY_MAP[normalized.replace(/-+/g, '-')]
+    || '';
+  return {
+    raw,
+    validated: mapped && TRIAGE_ALLOWED_CATEGORIES.includes(mapped) ? mapped : '',
+  };
+}
+
+function normalizeLooseTriageSeverity(rawSeverity) {
+  const raw = safeString(rawSeverity, '').trim();
+  const normalized = raw.toUpperCase();
+  const priority = normalized.match(/\bP\s*([1-4])\b/);
+  if (priority) return { raw, validated: `P${priority[1]}` };
+  if (/\b(SEV(?:ERITY)?\s*)?1\b/.test(normalized)) return { raw, validated: 'P1' };
+  if (/\b(SEV(?:ERITY)?\s*)?2\b/.test(normalized)) return { raw, validated: 'P2' };
+  if (/\b(SEV(?:ERITY)?\s*)?3\b/.test(normalized)) return { raw, validated: 'P3' };
+  if (/\b(SEV(?:ERITY)?\s*)?4\b/.test(normalized)) return { raw, validated: 'P4' };
+  if (/\b(CRITICAL|BROAD OUTAGE|SECURITY|DATA LOSS|CORRUPTION)\b/.test(normalized)) return { raw, validated: 'P1' };
+  if (/\b(HIGH|URGENT|IMMINENT|BLOCKER|BLOCKED|DEADLINE|PAY DATE TODAY)\b/.test(normalized)) return { raw, validated: 'P2' };
+  if (/\b(MEDIUM|MODERATE|NORMAL)\b/.test(normalized)) return { raw, validated: 'P3' };
+  if (/\b(LOW|INFO|INFORMATIONAL|COSMETIC|QUESTION)\b/.test(normalized)) return { raw, validated: 'P4' };
+  return { raw, validated: '' };
+}
+
+function normalizeLooseTriageConfidence(rawConfidence) {
+  const raw = safeString(rawConfidence, '').trim();
+  const normalized = raw.toLowerCase();
+  if (/\bhigh\b/.test(normalized)) return { raw, validated: 'high' };
+  if (/\bmedium\b/.test(normalized) || /\bmed\b/.test(normalized)) return { raw, validated: 'medium' };
+  if (/\blow\b/.test(normalized)) return { raw, validated: 'low' };
+  return { raw, validated: '' };
+}
+
+function hasPayrollPayDateSignal(fields, rawText = '') {
+  const outputSignalText = safeString(rawText, '')
+    .split(/\r?\n/)
+    .filter((line) => !/^\s*(missing info|missing information|gaps)\s*:/i.test(line))
+    .join(' ');
+  const haystack = [
+    buildFieldHaystack(fields),
+    outputSignalText,
+  ].join(' ').toLowerCase();
+  const isPayrollLike = /\b(payroll|direct deposit|paycheck|employee pay|pay date|pay run|pay schedule)\b/.test(haystack);
+  if (!isPayrollLike) return true;
+  return /\b(paid today|due today|deadline today|today|tomorrow|imminent|cannot pay|can't pay|unable to pay|employees? cannot be paid|employees? can't be paid)\b/.test(haystack)
+    || /\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/.test(haystack)
+    || /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+\d{1,2}\b/.test(haystack);
 }
 
 function normalizeSpacing(value) {
@@ -392,6 +457,78 @@ function isNonEscalationIntent(messageText) {
   return false;
 }
 
+function splitMissingInfo(value) {
+  const text = safeString(value, '').trim();
+  if (!text) return [];
+  if (/^(none|no obvious gaps|n\/a|na)$/i.test(text)) return ['None'];
+  return text
+    .split(/\n|;|\s+-\s+|\s+\|\s+/)
+    .map((item) => item.replace(/^[-*]\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function parseLabeledTriageOutput(output) {
+  const text = safeString(output, '').trim();
+  if (!text) return {};
+  const fieldMap = {
+    category: 'category',
+    cat: 'category',
+    severity: 'severity',
+    sev: 'severity',
+    priority: 'severity',
+    'fast read': 'read',
+    'fast-read': 'read',
+    read: 'read',
+    'quick read': 'read',
+    summary: 'read',
+    'immediate next step': 'action',
+    'immediate action': 'action',
+    'next step': 'action',
+    'next action': 'action',
+    action: 'action',
+    'missing info': 'missingInfo',
+    'missing information': 'missingInfo',
+    gaps: 'missingInfo',
+    confidence: 'confidence',
+    'category check': 'categoryCheck',
+    rationale: 'categoryCheck',
+  };
+  const result = {};
+  let activeKey = '';
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    const match = line.match(/^([A-Za-z][A-Za-z\s/-]{1,40}):\s*(.*)$/);
+    if (match) {
+      const label = match[1].trim().toLowerCase().replace(/\s+/g, ' ');
+      const key = fieldMap[label];
+      if (key) {
+        activeKey = key;
+        result[key] = match[2].trim();
+        continue;
+      }
+    }
+    if (activeKey && line.trim()) {
+      result[activeKey] = `${result[activeKey] ? `${result[activeKey]}\n` : ''}${line.trim()}`;
+    }
+  }
+
+  return result;
+}
+
+function buildTriageAgentPromptInput({ parserText }) {
+  return [
+    'Triage this parsed QBO escalation template.',
+    '',
+    'Use the parsed template as the source of truth. Do not assume external facts unless they are safe operational triage assumptions.',
+    'Return only the required labeled fields from your triage-agent prompt.',
+    '',
+    'Parsed escalation template:',
+    safeString(parserText, '').trim(),
+  ].join('\n');
+}
+
 function buildFallbackTriageCard() {
   return {
     agent: 'Unknown',
@@ -427,6 +564,116 @@ function buildServerTriageCard(fields) {
     missingInfo,
     confidence: inferTriageConfidence(sourceFields, category, missingInfo),
     categoryCheck: buildCategoryCheck(sourceFields, category),
+  };
+}
+
+function buildSoftValidatedTriageCardFromOutput(output, parseFields = {}) {
+  const rawOutput = safeString(output, '').trim();
+  const sourceFields = parseFields && typeof parseFields === 'object' ? parseFields : {};
+  const fallbackCard = buildServerTriageCard(sourceFields);
+  const parsed = parseLabeledTriageOutput(rawOutput);
+  const issues = [];
+
+  const category = normalizeLooseTriageCategory(parsed.category);
+  const displayedCategory = category.validated || fallbackCard.category || 'technical';
+  if (!category.raw) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'category', 'Category was missing from the model output.'));
+  } else if (!category.validated) {
+    issues.push(makeValidationIssue('TRIAGE_CATEGORY_INVALID', 'category', 'Category was outside the known triage category list.', {
+      raw: category.raw,
+      displayed: displayedCategory,
+    }));
+  }
+
+  const severity = normalizeLooseTriageSeverity(parsed.severity);
+  let validatedSeverity = severity.validated;
+  let displayedSeverity = validatedSeverity || fallbackCard.severity || 'P3';
+  if (!severity.raw) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'severity', 'Severity was missing from the model output.'));
+  } else if (!severity.validated) {
+    issues.push(makeValidationIssue('TRIAGE_SEVERITY_INVALID', 'severity', 'Severity was outside the P1-P4 rubric.', {
+      raw: severity.raw,
+      displayed: displayedSeverity,
+    }));
+  }
+  if (displayedSeverity === 'P2' && !hasPayrollPayDateSignal(sourceFields, rawOutput)) {
+    validatedSeverity = 'P3';
+    displayedSeverity = 'P3';
+    issues.push(makeValidationIssue(
+      'TRIAGE_PAYROLL_PAY_DATE_REQUIRED',
+      'severity',
+      'Payroll/direct-deposit cases need a today/imminent pay date or deadline before displaying P2.',
+      { raw: severity.raw, displayed: displayedSeverity }
+    ));
+  }
+
+  const confidence = normalizeLooseTriageConfidence(parsed.confidence);
+  const displayedConfidence = confidence.validated || fallbackCard.confidence || 'medium';
+  if (!confidence.raw) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'confidence', 'Confidence was missing from the model output.'));
+  } else if (!confidence.validated) {
+    issues.push(makeValidationIssue('TRIAGE_CONFIDENCE_INVALID', 'confidence', 'Confidence was outside High/Medium/Low.', {
+      raw: confidence.raw,
+      displayed: displayedConfidence,
+    }));
+  }
+
+  const read = safeString(parsed.read, '').trim() || fallbackCard.read || '';
+  const action = safeString(parsed.action, '').trim() || fallbackCard.action || '';
+  const missingInfo = splitMissingInfo(parsed.missingInfo);
+  const displayedMissingInfo = missingInfo.length > 0 ? missingInfo : fallbackCard.missingInfo || [];
+  const categoryCheck = safeString(parsed.categoryCheck, '').trim() || fallbackCard.categoryCheck || '';
+
+  if (!safeString(parsed.read, '').trim()) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'read', 'Fast read was missing; deterministic fallback text was used.'));
+  }
+  if (!safeString(parsed.action, '').trim()) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'action', 'Immediate next step was missing; deterministic fallback text was used.'));
+  }
+  if (!safeString(parsed.missingInfo, '').trim()) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'missingInfo', 'Missing info was missing; deterministic fallback gaps were used.'));
+  }
+  if (!safeString(parsed.categoryCheck, '').trim()) {
+    issues.push(makeValidationIssue('TRIAGE_FIELD_MISSING', 'categoryCheck', 'Category check was missing; deterministic fallback rationale was used.'));
+  }
+
+  const card = {
+    agent: firstNonEmpty([sourceFields.agentName], 'Unknown'),
+    client: firstNonEmpty([sourceFields.clientContact], 'Unknown'),
+    category: displayedCategory,
+    severity: displayedSeverity,
+    read,
+    action,
+    missingInfo: displayedMissingInfo,
+    confidence: displayedConfidence,
+    categoryCheck,
+    source: TRIAGE_AGENT_ID,
+    fallback: { used: false },
+  };
+
+  const foundKeys = ['category', 'severity', 'read', 'action', 'missingInfo', 'confidence', 'categoryCheck']
+    .filter((key) => safeString(parsed[key], '').trim()).length;
+  return {
+    card,
+    rawFields: parsed,
+    rawOutput,
+    severity: {
+      raw: severity.raw,
+      validated: validatedSeverity,
+      displayed: displayedSeverity,
+    },
+    category: {
+      raw: category.raw,
+      validated: category.validated,
+      displayed: displayedCategory,
+    },
+    validation: {
+      passed: issues.length === 0,
+      issues,
+      fieldsFound: foundKeys,
+      outputFormat: 'triage-agent-fields',
+      confidence: displayedConfidence,
+    },
   };
 }
 
@@ -649,7 +896,14 @@ module.exports = {
   buildImageTurnSystemPrompt,
   buildInvMatchRefBlock,
   buildKnownIssueSearchRefBlock,
+  buildSoftValidatedTriageCardFromOutput,
   buildServerTriageCard,
+  buildTriageAgentPromptInput,
   buildTriageRefBlock,
   isNonEscalationIntent,
+  parseLabeledTriageOutput,
+  splitMissingInfo,
+  TRIAGE_ALLOWED_CATEGORIES,
+  TRIAGE_ALLOWED_CONFIDENCE,
+  TRIAGE_ALLOWED_SEVERITIES,
 };

@@ -3,9 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
-const fsp = require('fs/promises');
 const path = require('path');
-const os = require('os');
 
 process.env.NODE_ENV = 'test';
 
@@ -15,33 +13,126 @@ process.env.NODE_ENV = 'test';
 // route's destructured imports bind to our stubs.
 // ---------------------------------------------------------------------------
 const ROUTE_PATH = require.resolve('../src/routes/triage-tests');
-const CHAT_SERVICE_PATH = require.resolve('../src/services/chat-request-service');
+const PIPELINE_ROUTE_PATH = require.resolve('../src/routes/pipeline-tests');
+const APPROVED_CASES_LIB_PATH = require.resolve('../src/lib/approved-triage-cases');
+const TRIAGE_SERVICE_PATH = require.resolve('../src/services/triage');
 const HEALTH_SERVICE_PATH = require.resolve('../src/services/agent-health-service');
+const IMAGE_SERVICE_PATH = require.resolve('../src/services/image-parser');
 const TRIAGE_MODEL_PATH = require.resolve('../src/models/TriageTestResult');
+const BASELINE_MODEL_PATH = require.resolve('../src/models/ImageParserFixtureBaseline');
+const CONFIRMED_SEED_PATH = require.resolve('../src/lib/image-parser-confirmed-outputs');
+const IMAGE_FIXTURE_DIR = path.resolve(__dirname, '..', 'fixtures', 'pipeline-tests', 'image-parser');
 
-let _mockRunTriageAgent = null;
+// First real on-disk image fixture name — the approved-case loader reads the
+// actual image-parser fixture directory, so we attach mock approved templates
+// to a name that exists there. Falls back gracefully if the dir is empty.
+function firstRealImageFixtureName() {
+  try {
+    return fs.readdirSync(IMAGE_FIXTURE_DIR).find((entry) => /\.(png|jpe?g|webp)$/i.test(entry)) || '';
+  } catch {
+    return '';
+  }
+}
+
+let _mockRunTriage = null;
 let _mockGetAgentHealthSnapshot = null;
 let _mockTriageStore = null; // null = simulate db unavailable
+let _mockBaselineStore = null; // null = simulate parser-baseline db unavailable
 let _nextDocId = 1;
+let _nextBaselineId = 1;
+
+// Mongo stand-in for ImageParserFixtureBaseline. The approved-case loader (via
+// the shared lib) only uses readyState + findOne.
+function makeMockBaselineModel() {
+  function store() { return _mockBaselineStore; }
+  return {
+    db: {
+      get readyState() { return store() ? 1 : 0; },
+    },
+    findOne(filter = {}) {
+      const apply = () => {
+        const rows = store() || [];
+        const found = rows.find((row) => row.fixtureName === filter.fixtureName);
+        return found ? { ...found } : null;
+      };
+      return { lean() { return Promise.resolve(apply()); } };
+    },
+    findOneAndUpdate(filter = {}, update = {}) {
+      const apply = () => {
+        const rows = store();
+        if (!rows) return null;
+        const set = update.$set || update;
+        let index = rows.findIndex((row) => row.fixtureName === filter.fixtureName);
+        if (index < 0) {
+          rows.push({ _id: `baseline-${_nextBaselineId++}`, ...set, updatedAt: new Date() });
+          index = rows.length - 1;
+        } else {
+          rows[index] = { ...rows[index], ...set, updatedAt: new Date() };
+        }
+        return { ...rows[index] };
+      };
+      return { lean() { return Promise.resolve(apply()); } };
+    },
+  };
+}
 
 function loadRouteWithMocks() {
   delete require.cache[ROUTE_PATH];
-  delete require.cache[CHAT_SERVICE_PATH];
+  delete require.cache[PIPELINE_ROUTE_PATH];
+  delete require.cache[APPROVED_CASES_LIB_PATH];
+  delete require.cache[TRIAGE_SERVICE_PATH];
   delete require.cache[HEALTH_SERVICE_PATH];
+  delete require.cache[IMAGE_SERVICE_PATH];
   delete require.cache[TRIAGE_MODEL_PATH];
+  delete require.cache[BASELINE_MODEL_PATH];
+  delete require.cache[CONFIRMED_SEED_PATH];
 
-  const realChat = require(CHAT_SERVICE_PATH);
+  const realTriage = require(TRIAGE_SERVICE_PATH);
   const realHealth = require(HEALTH_SERVICE_PATH);
+  const realImageService = require(IMAGE_SERVICE_PATH);
 
-  require.cache[CHAT_SERVICE_PATH] = {
-    id: CHAT_SERVICE_PATH,
-    filename: CHAT_SERVICE_PATH,
+  // The pipeline-tests route (required transitively by the triage route to
+  // reuse the approved-asset pipeline) imports the image-parser service; stub
+  // parseImage so requiring it never tries to spawn a real provider call.
+  require.cache[IMAGE_SERVICE_PATH] = {
+    id: IMAGE_SERVICE_PATH,
+    filename: IMAGE_SERVICE_PATH,
     loaded: true,
     exports: {
-      ...realChat,
-      runTriageAgent: (...args) => {
-        if (_mockRunTriageAgent) return _mockRunTriageAgent(...args);
-        return realChat.runTriageAgent(...args);
+      ...realImageService,
+      parseImage: async () => ({ text: '', parseFields: {}, parseMeta: {} }),
+    },
+  };
+
+  // Shared baseline model — one override covers BOTH pipeline-tests.js and the
+  // approved-triage-cases lib (they require the same module path).
+  require.cache[BASELINE_MODEL_PATH] = {
+    id: BASELINE_MODEL_PATH,
+    filename: BASELINE_MODEL_PATH,
+    loaded: true,
+    exports: makeMockBaselineModel(),
+  };
+
+  // Neutralize the built-in confirmed-output SEED so the approved pool is fully
+  // controlled by _mockBaselineStore in each test. (In production this seed is a
+  // legitimate read-time fallback for one fixture; here it would leak an
+  // uncontrolled extra case and make the empty-pool assertions flaky.)
+  require.cache[CONFIRMED_SEED_PATH] = {
+    id: CONFIRMED_SEED_PATH,
+    filename: CONFIRMED_SEED_PATH,
+    loaded: true,
+    exports: { getBuiltInConfirmedOutput: () => null },
+  };
+
+  require.cache[TRIAGE_SERVICE_PATH] = {
+    id: TRIAGE_SERVICE_PATH,
+    filename: TRIAGE_SERVICE_PATH,
+    loaded: true,
+    exports: {
+      ...realTriage,
+      runTriage: (...args) => {
+        if (_mockRunTriage) return _mockRunTriage(...args);
+        return realTriage.runTriage(...args);
       },
     },
   };
@@ -176,69 +267,148 @@ function makeRes() {
   };
 }
 
+// A baseline doc shape the approved-case loader understands. Each acceptable
+// output becomes one triage case (`${fixtureName}#${outputIndex}`).
+function seedBaselineWithOutputs(fixtureName, expectedTexts, extra = {}) {
+  return {
+    _id: `baseline-seed-${fixtureName}`,
+    fixtureName,
+    expectedText: expectedTexts[0] || '',
+    acceptableOutputs: expectedTexts.map((expectedText, index) => ({
+      expectedText,
+      sourceProvider: extra.sourceProvider || (index === 0 ? 'gemini' : 'openai'),
+      sourceModel: extra.sourceModel || 'test-model',
+      confirmedBy: 'operator',
+      source: 'saved',
+      createdAt: new Date('2026-05-31T00:00:00.000Z'),
+      updatedAt: new Date('2026-05-31T00:00:00.000Z'),
+    })),
+    updatedAt: new Date('2026-05-31T00:00:00.000Z'),
+  };
+}
+
+const CASE_TEXT_A = [
+  'COID/MID: 9130357569572816',
+  'CASE: 15154530935',
+  'CLIENT/CONTACT: Gayathri Manickavelu',
+  'CX IS ATTEMPTING TO: Reset a permission',
+].join('\n');
+const CASE_TEXT_B = [
+  'COID/MID: 9341452918781988',
+  'CASE: 15154480000',
+  'CLIENT/CONTACT: Bassam Ibrahim',
+  'CX IS ATTEMPTING TO: Fix bank feed',
+].join('\n');
+
 // ═══════════════════════════════════════════════════════════════════════════
-// Fixture loading
+// Approved-case loader (replaces the retired synthetic-fixture loader)
 // ═══════════════════════════════════════════════════════════════════════════
-test('readRandomTriageFixture', async (t) => {
+test('approved-case loader', async (t) => {
   const routerModule = loadRouteWithMocks();
-  const { readRandomTriageFixture, listTriageFixtures } = routerModule.__internals;
+  const { listApprovedCases, getApprovedCaseById } = routerModule.__internals;
+  const realFixture = firstRealImageFixtureName();
+  assert.ok(realFixture, 'expected at least one real image-parser fixture on disk');
 
-  await t.test('reads real triage fixture folder and returns at least one fixture', async () => {
-    const fixtures = await listTriageFixtures();
-    assert.ok(fixtures.length >= 1, 'should find at least one starter fixture');
-    for (const fix of fixtures) {
-      assert.ok(fix.name, `fixture must have a name (got ${fix.fileName})`);
-      assert.ok(typeof fix.parserText === 'string', 'parserText must be a string');
-      assert.ok(typeof fix.parseFields === 'object', 'parseFields must be an object');
-    }
-  });
-
-  await t.test('returns { fixture: null } when the folder is empty', async () => {
-    const emptyDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'triage-fixtures-empty-'));
+  await t.test('flattens approved parser outputs into runnable triage cases', async () => {
+    _mockBaselineStore = [seedBaselineWithOutputs(realFixture, [CASE_TEXT_A, CASE_TEXT_B])];
     try {
-      const result = await readRandomTriageFixture(emptyDir);
-      assert.equal(result.fixture, null);
-      assert.equal(result.fixtureCount, 0);
+      const cases = await listApprovedCases();
+      const mine = cases.filter((entry) => entry.sourceFixtureName === realFixture);
+      assert.equal(mine.length, 2, 'two approved outputs -> two cases');
+      // Stable id format.
+      assert.equal(mine[0].id, `${realFixture}#0`);
+      assert.equal(mine[1].id, `${realFixture}#1`);
+      // parserText is the approved expectedText, dropped in unchanged.
+      assert.equal(mine[0].parserText, CASE_TEXT_A);
+      assert.equal(mine[1].parserText, CASE_TEXT_B);
+      // Human label derives from CLIENT/CONTACT.
+      assert.equal(mine[0].label, 'Gayathri Manickavelu');
+      assert.equal(mine[1].label, 'Bassam Ibrahim');
+      // Provenance carried through.
+      assert.equal(mine[0].provider, 'gemini');
+      assert.equal(mine[0].confirmedBy, 'operator');
     } finally {
-      await fsp.rm(emptyDir, { recursive: true, force: true });
+      _mockBaselineStore = null;
     }
   });
 
-  await t.test('skips malformed JSON files with a warning instead of throwing', async () => {
-    const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'triage-fixtures-malformed-'));
+  await t.test('returns an empty list when no outputs are approved', async () => {
+    _mockBaselineStore = [];
     try {
-      await fsp.writeFile(path.join(tmpDir, 'bad.json'), '{ this is not json', 'utf8');
-      await fsp.writeFile(path.join(tmpDir, 'good.json'), JSON.stringify({
-        name: 'good',
-        description: 'valid fixture',
-        tags: [],
-        schemaVersion: 1,
-        parserText: 'something',
-        parseFields: { coid: '1' },
-      }), 'utf8');
-      const origWarn = console.warn;
-      const warnings = [];
-      console.warn = (...args) => { warnings.push(args.join(' ')); };
-      try {
-        const fixtures = await listTriageFixtures(tmpDir);
-        assert.equal(fixtures.length, 1, 'malformed fixture should be skipped');
-        assert.equal(fixtures[0].name, 'good');
-        assert.ok(warnings.some((line) => line.includes('bad.json')), 'should warn about bad.json');
-      } finally {
-        console.warn = origWarn;
-      }
+      const cases = await listApprovedCases();
+      assert.deepEqual(cases, []);
     } finally {
-      await fsp.rm(tmpDir, { recursive: true, force: true });
+      _mockBaselineStore = null;
     }
   });
 
-  await t.test('random fixture picker covers multiple distinct fixtures', async () => {
-    const seen = new Set();
-    for (let i = 0; i < 25; i++) {
-      const result = await readRandomTriageFixture();
-      if (result.fixture) seen.add(result.fixture.name);
+  await t.test('covers multiple distinct cases across the pool', async () => {
+    _mockBaselineStore = [seedBaselineWithOutputs(realFixture, [CASE_TEXT_A, CASE_TEXT_B])];
+    try {
+      const cases = await listApprovedCases();
+      const ids = new Set(cases.map((entry) => entry.id));
+      assert.ok(ids.size >= 2, `expected >= 2 distinct case ids, got ${ids.size}`);
+    } finally {
+      _mockBaselineStore = null;
     }
-    assert.ok(seen.size >= 3, `expected at least 3 distinct fixtures over 25 iterations, got ${seen.size}: ${[...seen].join(', ')}`);
+  });
+
+  await t.test('getApprovedCaseById resolves a specific case and null otherwise', async () => {
+    _mockBaselineStore = [seedBaselineWithOutputs(realFixture, [CASE_TEXT_A, CASE_TEXT_B])];
+    try {
+      const found = await getApprovedCaseById(`${realFixture}#1`);
+      assert.ok(found, 'should resolve the #1 case');
+      assert.equal(found.parserText, CASE_TEXT_B);
+      const missing = await getApprovedCaseById(`${realFixture}#999`);
+      assert.equal(missing, null);
+      const blank = await getApprovedCaseById('');
+      assert.equal(blank, null);
+    } finally {
+      _mockBaselineStore = null;
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GET /cases
+// ═══════════════════════════════════════════════════════════════════════════
+test('GET /cases', async (t) => {
+  const routerModule = loadRouteWithMocks();
+  const handler = findHandler(routerModule, 'get', '/cases');
+  const realFixture = firstRealImageFixtureName();
+
+  await t.test('returns the approved cases with labels and provenance, no full parserText', async () => {
+    _mockBaselineStore = [seedBaselineWithOutputs(realFixture, [CASE_TEXT_A, CASE_TEXT_B])];
+    try {
+      const res = makeRes();
+      await handler(makeReq({}), res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.payload.ok, true);
+      const mine = res.payload.cases.filter((entry) => entry.sourceFixtureName === realFixture);
+      assert.equal(mine.length, 2);
+      assert.equal(mine[0].id, `${realFixture}#0`);
+      assert.equal(mine[0].label, 'Gayathri Manickavelu');
+      assert.equal(mine[0].provider, 'gemini');
+      // The list endpoint intentionally omits the full parserText.
+      assert.equal(Object.prototype.hasOwnProperty.call(mine[0], 'parserText'), false);
+      assert.ok(res.payload.stats.caseCount >= 2);
+    } finally {
+      _mockBaselineStore = null;
+    }
+  });
+
+  await t.test('returns an empty list when nothing is approved', async () => {
+    _mockBaselineStore = [];
+    try {
+      const res = makeRes();
+      await handler(makeReq({}), res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.payload.ok, true);
+      assert.deepEqual(res.payload.cases, []);
+      assert.equal(res.payload.stats.caseCount, 0);
+    } finally {
+      _mockBaselineStore = null;
+    }
   });
 });
 
@@ -251,29 +421,39 @@ test('POST /run JSON response shape', async (t) => {
 
   await t.test('returns { ok, stage: triage, testRun: true, fixture, triageCard, savedTestResultId, ... }', async () => {
     _mockTriageStore = [];
-    _mockRunTriageAgent = async () => ({
-      context: {
-        triageCard: {
-          severity: 'P2',
-          category: 'bank-feeds',
-          confidence: 'medium',
-          read: 'Bank feed has not refreshed in 9 days.',
-          action: 'Open a bank-feeds backend ticket with the connection ID.',
-          missingInfo: ['connection-id', 'last-successful-pull-timestamp'],
-          categoryCheck: 'bank-feeds is the correct category — the symptom is connector lag, not a reconciliation question.',
-          source: 'triage-agent',
-          fallback: { used: false },
-          generation: { source: 'agent', label: 'Agent generated', latencyMs: 1200, provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
-        },
-        triageMeta: {
-          mode: 'single',
-          providerUsed: 'anthropic',
-          model: 'claude-sonnet-4-20250514',
-          latencyMs: 1200,
-        },
+    // No-body run = random from the real approved pool. Seed a baseline so the
+    // pool is non-empty and deterministic.
+    _mockBaselineStore = [seedBaselineWithOutputs(firstRealImageFixtureName(), [CASE_TEXT_A])];
+    let capturedTriageText = '';
+    let capturedTriageOptions = null;
+    _mockRunTriage = async (text, options) => {
+      capturedTriageText = text;
+      capturedTriageOptions = options;
+      return {
+      card: {
+        severity: 'P2',
+        category: 'bank-feeds',
+        confidence: 'medium',
+        read: 'Bank feed has not refreshed in 9 days.',
+        action: 'Open a bank-feeds backend ticket with the connection ID.',
+        missingInfo: ['connection-id', 'last-successful-pull-timestamp'],
+        categoryCheck: 'bank-feeds is the correct category — the symptom is connector lag, not a reconciliation question.',
+        source: 'triage-agent',
+        fallback: { used: false },
+        generation: { source: 'agent', label: 'Agent generated', latencyMs: 1200, provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
       },
-      policy: { primaryProvider: 'anthropic', primaryModel: 'claude-sonnet-4-20250514' },
-    });
+      triageMeta: {
+        mode: 'single',
+        providerUsed: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        latencyMs: 1200,
+      },
+      providerUsed: 'anthropic',
+      modelUsed: 'claude-sonnet-4-20250514',
+      elapsedMs: 1200,
+      status: 'success',
+      };
+    };
 
     try {
       const res = makeRes();
@@ -284,6 +464,11 @@ test('POST /run JSON response shape', async (t) => {
       assert.equal(res.payload.testRun, true);
       assert.ok(res.payload.fixture, 'response must include the chosen fixture metadata');
       assert.ok(res.payload.fixture.name, 'fixture must have a name');
+      // fixture.name is the stable approved-case id (sourceFixtureName#index)
+      // so historical stats grouping holds; selectionMode marks the random pick.
+      assert.match(res.payload.fixture.name, /#\d+$/);
+      assert.equal(res.payload.fixture.selectionMode, 'random');
+      assert.equal(res.payload.fixture.label, 'Gayathri Manickavelu');
       assert.ok(res.payload.triageCard, 'response must include the triage card');
       assert.equal(res.payload.triageCard.severity, 'P2');
       assert.equal(typeof res.payload.savedTestResultId, 'string');
@@ -291,6 +476,10 @@ test('POST /run JSON response shape', async (t) => {
       assert.equal(res.payload.providerUsed, 'anthropic');
       assert.equal(res.payload.modelUsed, 'claude-sonnet-4-20250514');
       assert.equal(typeof res.payload.elapsedMs, 'number');
+      assert.match(capturedTriageText, /COID\/MID:/);
+      assert.equal(Object.prototype.hasOwnProperty.call(capturedTriageOptions, 'parseFields'), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(res.payload, 'parseFields'), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(res.payload.savedTestResult, 'parseFields'), false);
       // The store should have one saved record with all the triage fields denormalized.
       assert.equal(_mockTriageStore.length, 1);
       const saved = _mockTriageStore[0];
@@ -300,20 +489,73 @@ test('POST /run JSON response shape', async (t) => {
       assert.deepEqual(saved.missingInfo, ['connection-id', 'last-successful-pull-timestamp']);
       assert.equal(saved.cardSource, 'triage-agent');
       assert.equal(saved.fallbackUsed, false);
+      assert.equal(saved.parseFields.clientContact.length > 0, true);
     } finally {
-      _mockRunTriageAgent = null;
+      _mockRunTriage = null;
       _mockTriageStore = null;
+      _mockBaselineStore = null;
+    }
+  });
+
+  await t.test('runs a SPECIFIC approved case when caseId is supplied', async () => {
+    _mockTriageStore = [];
+    const realFixture = firstRealImageFixtureName();
+    _mockBaselineStore = [seedBaselineWithOutputs(realFixture, [CASE_TEXT_A, CASE_TEXT_B])];
+    let capturedText = '';
+    _mockRunTriage = async (text) => {
+      capturedText = text;
+      return {
+        card: { severity: 'P3', category: 'bank-feeds', source: 'triage-agent', fallback: { used: false } },
+        triageMeta: { providerUsed: 'anthropic', model: 'claude-sonnet-4-20250514', latencyMs: 500 },
+        providerUsed: 'anthropic',
+        modelUsed: 'claude-sonnet-4-20250514',
+        elapsedMs: 500,
+        status: 'success',
+      };
+    };
+    try {
+      const res = makeRes();
+      await handler(makeReq({ caseId: `${realFixture}#1`, runtime: { 'triage-agent': { provider: 'anthropic' } } }), res);
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.payload.ok, true);
+      assert.equal(res.payload.fixture.name, `${realFixture}#1`);
+      assert.equal(res.payload.fixture.selectionMode, 'specific');
+      assert.equal(res.payload.fixture.label, 'Bassam Ibrahim');
+      // The exact approved text for case #1 was sent to the triage runtime.
+      assert.equal(capturedText, CASE_TEXT_B);
+      assert.equal(res.payload.parserText, CASE_TEXT_B);
+    } finally {
+      _mockRunTriage = null;
+      _mockTriageStore = null;
+      _mockBaselineStore = null;
+    }
+  });
+
+  await t.test('returns 404 APPROVED_CASE_NOT_FOUND for an unknown caseId', async () => {
+    _mockTriageStore = [];
+    _mockBaselineStore = [seedBaselineWithOutputs(firstRealImageFixtureName(), [CASE_TEXT_A])];
+    try {
+      const res = makeRes();
+      await handler(makeReq({ caseId: 'no-such-image.JPEG#7' }), res);
+      assert.equal(res.statusCode, 404);
+      assert.equal(res.payload.ok, false);
+      assert.equal(res.payload.code, 'APPROVED_CASE_NOT_FOUND');
+    } finally {
+      _mockTriageStore = null;
+      _mockBaselineStore = null;
     }
   });
 
   await t.test('still responds 200 with empty savedTestResultId when the database is offline', async () => {
     _mockTriageStore = null; // db unavailable
-    _mockRunTriageAgent = async () => ({
-      context: {
-        triageCard: { severity: 'P3', category: 'reports', confidence: 'low', source: 'triage-agent', fallback: { used: false } },
-        triageMeta: { providerUsed: 'openai', model: 'gpt-5.4-mini', latencyMs: 800 },
-      },
-      policy: { primaryProvider: 'openai', primaryModel: 'gpt-5.4-mini' },
+    _mockBaselineStore = [seedBaselineWithOutputs(firstRealImageFixtureName(), [CASE_TEXT_A])];
+    _mockRunTriage = async () => ({
+      card: { severity: 'P3', category: 'reports', confidence: 'low', source: 'triage-agent', fallback: { used: false } },
+      triageMeta: { providerUsed: 'openai', model: 'gpt-5.4-mini', latencyMs: 800 },
+      providerUsed: 'openai',
+      modelUsed: 'gpt-5.4-mini',
+      elapsedMs: 800,
+      status: 'success',
     });
     try {
       const res = makeRes();
@@ -322,7 +564,8 @@ test('POST /run JSON response shape', async (t) => {
       assert.equal(res.payload.ok, true);
       assert.equal(res.payload.savedTestResultId, '');
     } finally {
-      _mockRunTriageAgent = null;
+      _mockRunTriage = null;
+      _mockBaselineStore = null;
     }
   });
 });
@@ -351,27 +594,20 @@ test('POST /run guard rails', async (t) => {
     }
   });
 
-  await t.test('returns 409 NO_TRIAGE_FIXTURES when the fixture folder is empty', async () => {
-    // Swap the in-memory FIXTURE_DIR by replacing the loader for one call.
-    // We accomplish this by mocking runTriageAgent and pointing readdir at an
-    // empty directory through the internal loader. The cleanest way without
-    // modifying the route is to override fs.readdir to claim ENOENT.
-    const realReaddir = fs.promises.readdir;
-    fs.promises.readdir = async (dir, ...rest) => {
-      if (String(dir).includes(path.join('pipeline-tests', 'triage'))) {
-        const err = new Error('ENOENT');
-        err.code = 'ENOENT';
-        throw err;
-      }
-      return realReaddir(dir, ...rest);
-    };
+  await t.test('returns 409 NO_APPROVED_CASES when no parser outputs are approved', async () => {
+    // Empty approved pool (baseline db reachable but holds nothing). A random
+    // run has no real case to pick, so the route refuses with a clean 409
+    // rather than ever fabricating synthetic input.
+    _mockBaselineStore = [];
     try {
       const res = makeRes();
       await handler(makeReq({}), res);
       assert.equal(res.statusCode, 409);
-      assert.equal(res.payload.code, 'NO_TRIAGE_FIXTURES');
+      assert.equal(res.payload.ok, false);
+      assert.equal(res.payload.code, 'NO_APPROVED_CASES');
+      assert.equal(res.payload.stage, 'triage');
     } finally {
-      fs.promises.readdir = realReaddir;
+      _mockBaselineStore = null;
     }
   });
 
@@ -386,12 +622,20 @@ test('POST /run SSE event vocabulary', async (t) => {
 
   await t.test('emits server_request_received and response_sent events when client wants SSE', async () => {
     _mockTriageStore = [];
-    _mockRunTriageAgent = async () => ({
-      context: {
-        triageCard: { severity: 'P3', category: 'reports', source: 'triage-agent', fallback: { used: false } },
-        triageMeta: { providerUsed: 'anthropic', model: 'claude-sonnet-4-20250514', latencyMs: 950, providerPackageId: 'PKG-DEADBEEF' },
+    _mockBaselineStore = [seedBaselineWithOutputs(firstRealImageFixtureName(), [CASE_TEXT_A])];
+    _mockRunTriage = async () => ({
+      card: { severity: 'P3', category: 'reports', source: 'triage-agent', fallback: { used: false } },
+      triageMeta: {
+        source: 'agent',
+        providerUsed: 'anthropic',
+        model: 'claude-sonnet-4-20250514',
+        latencyMs: 950,
+        providerPackageId: 'PKG-DEADBEEF',
       },
-      policy: { primaryProvider: 'anthropic', primaryModel: 'claude-sonnet-4-20250514' },
+      providerUsed: 'anthropic',
+      modelUsed: 'claude-sonnet-4-20250514',
+      elapsedMs: 950,
+      status: 'success',
     });
     try {
       const res = makeRes();
@@ -410,8 +654,9 @@ test('POST /run SSE event vocabulary', async (t) => {
       assert.ok(joined.includes('triage.response_sent'), 'should mark the run complete');
       assert.ok(joined.includes('event: test_complete'), 'should emit a terminal test_complete frame');
     } finally {
-      _mockRunTriageAgent = null;
+      _mockRunTriage = null;
       _mockTriageStore = null;
+      _mockBaselineStore = null;
     }
   });
 });
@@ -545,7 +790,8 @@ test('GET /results', async (t) => {
 // Teardown.
 // ---------------------------------------------------------------------------
 test.after(() => {
-  _mockRunTriageAgent = null;
+  _mockRunTriage = null;
   _mockGetAgentHealthSnapshot = null;
   _mockTriageStore = null;
+  _mockBaselineStore = null;
 });

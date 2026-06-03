@@ -135,7 +135,7 @@ test('Anthropic SDK prompt uses the canonical escalation template contract', () 
   const sdkSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'sdk-image-parse.js'), 'utf8');
 
   assert.equal(sdkPrompt, canonicalPrompt);
-  assert.match(sdkPrompt, /PROMPT_VERSION: P24/);
+  assert.match(sdkPrompt, /PROMPT_VERSION: P35/);
   assert.match(sdkPrompt, /Return the completed form only/);
   assert.doesNotMatch(sdkPrompt, /Return ONLY the JSON/i);
   assert.match(sdkSource, /getRenderedAgentPrompt\('escalation-template-parser'\)/);
@@ -161,7 +161,43 @@ test.afterEach(async () => {
   delete process.env.ANTHROPIC_API_URL;
 });
 
-test('parseImage with provider=anthropic uses SDK adapter and forwards answer text', async () => {
+test('parseImage with provider=anthropic uses direct Anthropic API harness by default', async () => {
+  const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test-direct', KEYS_FILE);
+  installSdkSpy(async () => {
+    throw new Error('SDK path must not be invoked for default Anthropic');
+  });
+
+  try {
+    await withAnthropicServer((req, res) => {
+      assert.equal(req.url, '/v1/messages');
+      assert.equal(req.headers['x-api-key'], 'sk-ant-test-direct');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'msg_sdk_adapter_direct_default',
+        type: 'message',
+        content: [{ type: 'text', text: ANSWER_TEXT }],
+        model: 'claude-sonnet-4-20250514',
+        usage: { input_tokens: 1234, output_tokens: 256 },
+      }));
+    }, async () => {
+      const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+
+      assert.equal(sdkSpyState.calls.length, 0, 'parseImageWithSDK must not run for default Anthropic');
+      assert.equal(result.text, ANSWER_TEXT);
+      assert.equal(result.role, 'escalation');
+      assert.equal(result.parseFields.coid, '987654');
+      assert.equal(result.parseFields.mid, '321098');
+      assert.equal(result.usage.inputTokens, 1234);
+      assert.equal(result.usage.outputTokens, 256);
+      assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
+      assert.ok(result.providerTrace.providerPackageId);
+    });
+  } finally {
+    cleanupKey();
+  }
+});
+
+test('parseImage with useAnthropicSdk=true invokes SDK adapter and forwards answer text', async () => {
   const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test-sdk', KEYS_FILE);
   installSdkSpy(async () => ({
     text: ANSWER_TEXT,
@@ -170,10 +206,10 @@ test('parseImage with provider=anthropic uses SDK adapter and forwards answer te
   const httpsMock = mockHttpsRequest(200, { content: [{ type: 'text', text: 'DIRECT_HTTP_PATH_RAN' }] });
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', useAnthropicSdk: true });
 
-    assert.equal(sdkSpyState.calls.length, 1, 'parseImageWithSDK must be invoked once for default Anthropic');
-    assert.equal(httpsMock.getCallCount(), 0, 'default Anthropic path must not call direct https.request');
+    assert.equal(sdkSpyState.calls.length, 1, 'parseImageWithSDK must be invoked once for explicit SDK opt-in');
+    assert.equal(httpsMock.getCallCount(), 0, 'SDK opt-in path must not call direct https.request');
     assert.equal(result.text, ANSWER_TEXT);
     assert.equal(result.role, 'escalation');
     assert.equal(result.parseFields.coid, '987654');
@@ -186,13 +222,13 @@ test('parseImage with provider=anthropic uses SDK adapter and forwards answer te
   }
 });
 
-test('parseImage with provider=anthropic rejects non-template SDK output through normal validation', async () => {
+test('parseImage with useAnthropicSdk=true rejects non-template SDK output through normal validation', async () => {
   const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test-arbitrary', KEYS_FILE);
   const arbitraryText = '1 2 3 4 5\nthis is not a parser template';
   installSdkSpy(async () => ({ text: arbitraryText, usage: null }));
 
   try {
-    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic' });
+    const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', useAnthropicSdk: true });
 
     assert.equal(result.text, arbitraryText);
     assert.equal(result.role, 'escalation');
@@ -204,7 +240,7 @@ test('parseImage with provider=anthropic rejects non-template SDK output through
   }
 });
 
-test('parseImage with provider=anthropic and structured=false still uses direct Anthropic HTTP path', async () => {
+test('parseImage with provider=anthropic and structured=false remains direct Anthropic HTTP path', async () => {
   const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-test-prose', KEYS_FILE);
   installSdkSpy(async () => {
     throw new Error('SDK path must not be invoked when structured=false');
@@ -237,13 +273,13 @@ test('parseImage with provider=anthropic and structured=false still uses direct 
   }
 });
 
-test('parseImage with SDK path throws PROVIDER_ERROR when SDK returns no text envelope', async () => {
+test('parseImage with useAnthropicSdk=true throws PROVIDER_ERROR when SDK returns no text envelope', async () => {
   const cleanupKey = setupProviderKey('ANTHROPIC_API_KEY', 'sk-ant-fail', KEYS_FILE);
   installSdkSpy(async () => null);
 
   try {
     await assert.rejects(
-      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic' }),
+      () => parseImage(TINY_PNG_BASE64, { provider: 'anthropic', useAnthropicSdk: true }),
       (err) => {
         assert.equal(err.code, 'PROVIDER_ERROR');
         assert.match(err.message, /answer text/i);
