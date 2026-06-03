@@ -1,6 +1,6 @@
 # QBO Knowledgebase Implementation Plan
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 ## Purpose
 
@@ -70,8 +70,54 @@ Phase 2 is complete for the first backend integration slice.
 - Added `server/test/chat-context-builder-knowledge.test.js`.
 - Added `server/test/triage-knowledge-context.test.js`.
 
-Phase 2 does not include the future UI work, the Knowledgebase Agent, auth,
-audit logging, or ontology relationship modeling. Those remain later phases.
+### 2026-06-03
+
+Phase 3 is complete for the first backend monitor/proposer slice.
+
+- Added a built-in `knowledgebase-agent` profile in
+  `server/src/services/room-agents/agent-profiles.js`.
+- Added `server/src/services/knowledgebase-agent-service.js`.
+- Added `/api/knowledge/agent/status`.
+- Added `/api/knowledge/agent/scan`.
+- The scan route can run as a dry run or persist review work.
+- The scan detects:
+  - finalized cases with no knowledge draft
+  - draft/rejected candidates with quality issues
+  - potential duplicate candidates
+  - trusted published guidance that may be stale
+- Every proposal includes source evidence and a recommended reviewer action.
+- Persisted scan results create `knowledge-review` attention items so existing
+  review surfaces can show the work.
+- The agent records scan activity through the agent identity system when the
+  scan is not a dry run.
+- The shared knowledge review attention logic now flags missing root cause,
+  low confidence, and weak source evidence in addition to missing summary,
+  symptom, fix, or escalation path.
+- Added `server/test/knowledgebase-agent.test.js`.
+
+Phase 3 does not include autonomous background scheduling, a dedicated
+knowledgebase UI page, automatic approval, automatic publishing, auth,
+deployment permission hardening, or ontology relationship modeling. Those
+remain later phases.
+
+Phase 4 is started for the first dedicated UI slice.
+
+- Added `#/knowledge` routing in `client/src/lib/appRoute.js`.
+- Added a sidebar navigation entry for the Knowledgebase page.
+- Added `client/src/api/knowledgeApi.js`.
+- Added `client/src/components/KnowledgebaseView.jsx`.
+- Added `client/src/components/KnowledgebaseView.css`.
+- The page can load KB summary metrics, list/search normalized records, filter
+  by review status, trust state, allowed use, and legacy inclusion, and open
+  source escalations.
+- The page shows Knowledgebase Agent readiness/counts and can run dry-run or
+  persisted scans through `/api/knowledge/agent/scan`.
+- Persisted scans link back to the existing attention center when review items
+  are opened.
+
+Phase 4 is not complete yet. The remaining UI work includes deeper record
+detail editing, reviewer workflow polish, pagination, dedicated deprecated /
+rejected views, and full evidence-history presentation.
 
 ## Product Direction
 

@@ -314,6 +314,7 @@ function getMissingKnowledgeFields(knowledge) {
   const missing = [];
   if (!compactText(knowledge && knowledge.summary)) missing.push('summary');
   if (!compactText(knowledge && knowledge.symptom)) missing.push('symptom');
+  if (!compactText(knowledge && knowledge.rootCause)) missing.push('root_cause');
   if (
     !compactText(knowledge && knowledge.exactFix)
     && !compactText(knowledge && knowledge.escalationPath)
@@ -349,21 +350,40 @@ function buildKnowledgeReviewAttentionItem(knowledge, escalation) {
   }
 
   const missingFields = getMissingKnowledgeFields(knowledge);
+  const confidence = Number(knowledge && knowledge.confidence);
+  const lowConfidence = Number.isFinite(confidence) && confidence > 0 && confidence < 0.55;
+  const snapshot = (knowledge && knowledge.sourceSnapshot) || {};
+  const hasSourceEvidence = Boolean(firstNonEmpty([
+    snapshot.resolution,
+    snapshot.resolutionNotes,
+    snapshot.resolvedAt,
+    snapshot.caseNumber,
+    snapshot.attemptingTo,
+    snapshot.actualOutcome,
+  ]));
+  const qualitySignals = [
+    ...missingFields.map((field) => `missing_${field}`),
+    ...(lowConfidence ? ['low_confidence'] : []),
+    ...(!hasSourceEvidence ? ['weak_source_evidence'] : []),
+  ];
   return {
     kind: 'knowledge-review',
-    severity: missingFields.length ? 'warning' : 'info',
+    severity: qualitySignals.length ? 'warning' : 'info',
     fingerprint,
     title: 'Knowledge draft needs review',
-    summary: missingFields.length
-      ? `${label} has a knowledge draft waiting for review; missing ${missingFields.join(', ')}.`
+    summary: qualitySignals.length
+      ? `${label} has a knowledge draft waiting for review; flagged ${qualitySignals.join(', ')}.`
       : `${label} has a knowledge draft waiting for human review before reuse.`,
     signals: [
       'knowledge_draft_review',
-      ...missingFields.map((field) => `missing_${field}`),
+      ...qualitySignals,
     ],
     metadata: {
       reviewStatus,
       missingFields,
+      confidence: Number.isFinite(confidence) ? confidence : null,
+      lowConfidence,
+      weakSourceEvidence: !hasSourceEvidence,
     },
   };
 }

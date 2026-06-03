@@ -16,6 +16,7 @@ function getDockModeForRoute(route = {}) {
     'dashboard',
     'gallery',
     'investigations',
+    'knowledge',
     'playbook',
     'sessions',
     'templates',
@@ -63,6 +64,7 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   }
   if (path === '/dashboard' || path === '/escalations') return { view: 'dashboard' };
   if (path === '/attention') return { view: 'attention' };
+  if (path === '/knowledge') return { view: 'knowledge' };
   if (path === '/playbook') return { view: 'playbook' };
   if (path === '/agents') return { view: 'agents', agentId: null };
   if (path.startsWith('/agents/')) return { view: 'agents', agentId: path.slice('/agents/'.length) };

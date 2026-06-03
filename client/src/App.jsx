@@ -28,6 +28,7 @@ import { tel, TEL } from './lib/devTelemetry.js';
 const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
 const ChatV5Container = lazy(() => import('./components/chat-v5/ChatV5Container.jsx'));
 const EscalationDashboard = lazy(() => import('./components/EscalationDashboard.jsx'));
+const KnowledgebaseView = lazy(() => import('./components/KnowledgebaseView.jsx'));
 const PlaybookEditor = lazy(() => import('./components/PlaybookEditor.jsx'));
 const AgentsView = lazy(() => import('./components/AgentsView.jsx'));
 const SessionsView = lazy(() => import('./components/SessionsView.jsx'));
@@ -221,6 +222,14 @@ function App() {
           <Profiler id="Playbook" onRender={flame.onRender}>
           <motion.div key="playbook" {...motionProps}>
             <PlaybookEditor />
+          </motion.div>
+          </Profiler>
+        );
+      case 'knowledge':
+        return (
+          <Profiler id="Knowledgebase" onRender={flame.onRender}>
+          <motion.div key="knowledge" {...motionProps}>
+            <KnowledgebaseView />
           </motion.div>
           </Profiler>
         );

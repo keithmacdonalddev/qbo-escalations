@@ -8,6 +8,10 @@ const {
   parseOffset,
   searchKnowledge,
 } = require('../services/knowledgebase-service');
+const {
+  getKnowledgebaseAgentStatus,
+  scanKnowledgebaseAgent,
+} = require('../services/knowledgebase-agent-service');
 
 const router = express.Router();
 
@@ -34,6 +38,33 @@ router.get('/summary', async (req, res) => {
     ok: true,
     summary,
     generatedAt: new Date().toISOString(),
+  });
+});
+
+// GET /api/knowledge/agent/status
+router.get('/agent/status', async (req, res) => {
+  const status = await getKnowledgebaseAgentStatus();
+  res.json({
+    ok: true,
+    status,
+    generatedAt: new Date().toISOString(),
+  });
+});
+
+// POST /api/knowledge/agent/scan
+router.post('/agent/scan', async (req, res) => {
+  const payload = req.body && typeof req.body === 'object' ? req.body : {};
+  const options = {
+    limit: payload.limit ?? req.query.limit,
+    staleTrustedDays: payload.staleTrustedDays ?? req.query.staleTrustedDays,
+    dryRun: parseBoolean(payload.dryRun ?? req.query.dryRun, false),
+    persistAttention: parseBoolean(payload.persistAttention ?? req.query.persistAttention, true),
+    persistActivity: parseBoolean(payload.persistActivity ?? req.query.persistActivity, true),
+  };
+  const scan = await scanKnowledgebaseAgent(options);
+  res.json({
+    ok: true,
+    scan,
   });
 });
 

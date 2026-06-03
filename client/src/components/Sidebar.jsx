@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { hash: '#/sessions', label: 'Sessions', short: 'Sess', icon: IconSessions },
   { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
   { hash: '#/attention', label: 'Attention', short: 'Attn', icon: IconBell },
+  { hash: '#/knowledge', label: 'Knowledge', short: 'KB', icon: IconKnowledge },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
@@ -216,6 +217,18 @@ function IconBook({ size = 16 }) {
     <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
+    </svg>
+  );
+}
+
+function IconKnowledge({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M9 7h7" />
+      <path d="M9 11h7" />
+      <path d="M9 15h4" />
     </svg>
   );
 }
