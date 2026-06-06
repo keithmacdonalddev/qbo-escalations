@@ -5169,7 +5169,15 @@ function AgentMemoryTab({ agent }) {
 function AgentMonitoringTab({ agent, operation, runtimeState }) {
   const latestHarness = latestEntryByDate(agent?.harness?.runs || [], ['completedAt', 'createdAt']);
   const latestActivity = latestEntryByDate(agent?.activity?.entries || [], ['createdAt']);
-  const runtimeSummary = getAgentRuntimeSummary(runtimeState || agent?.runtime || {});
+  // getAgentRuntimeSummary expects (definition, state) — pass the resolved
+  // runtime DEFINITION as the first arg (matching the correct call sites at
+  // buildOperationalProfile and the overview properties strip). Passing the
+  // STATE object here made every Monitoring tab read "No runtime mapping".
+  const runtimeDefinition = getAgentRuntimeDefinition(agent?.agentId);
+  const runtimeSummary = getAgentRuntimeSummary(
+    runtimeDefinition,
+    runtimeState || agent?.runtime || {},
+  );
   return (
     <section className="agent-tab-content single-column-layout">
       <Panel title="Monitoring Snapshot" actions={<span className="panel-status-text">{agent?.enabled === false ? 'Disabled' : 'Enabled'}</span>}>
@@ -5249,7 +5257,6 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
   const { providerStatus } = useProviderKeyStatus();
   const normalizedRuntimeState = normalizeAgentRuntimeState(definition, runtimeState || {});
   const [provider, setProvider] = useState(normalizedRuntimeState?.provider || '');
-  const [mode, setMode] = useState(normalizedRuntimeState?.mode || definition?.defaultMode || 'single');
   const [fallbackProvider, setFallbackProvider] = useState(normalizedRuntimeState?.fallbackProvider || '');
   const [model, setModel] = useState(normalizedRuntimeState?.model || '');
   const [fallbackModel, setFallbackModel] = useState(normalizedRuntimeState?.fallbackModel || '');
@@ -5261,7 +5268,6 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
   useEffect(() => {
     const normalized = normalizeAgentRuntimeState(definition, runtimeState || {});
     setProvider(normalized?.provider || '');
-    setMode(normalized?.mode || definition?.defaultMode || 'single');
     setFallbackProvider(normalized?.fallbackProvider || '');
     setModel(normalized?.model || '');
     setFallbackModel(normalized?.fallbackModel || '');
@@ -5280,9 +5286,12 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
 
   const providerOptions = PROVIDER_OPTIONS;
   const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
+  // Single-shot parser/triage agents run a single provider with no failover, so
+  // they show Provider + Model only. Every other agent now always shows a
+  // Primary + Fallback pair (failover is always on; there is no mode toggle).
+  const supportsFallback = definition.kind !== 'image-parser' && definition.kind !== 'triage';
   const currentRuntime = {
     provider,
-    mode,
     fallbackProvider,
     model,
     fallbackModel,
@@ -5297,7 +5306,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
   const fallbackModelListId = `${definition.id}-fallback-model-suggestions`;
   const reasoningOptions = provider ? getReasoningEffortOptions(provider) : [];
   const supportsServiceTier = providerSupportsCodexServiceTier(provider)
-    || (definition.supportsModes && mode === 'fallback' && providerSupportsCodexServiceTier(fallbackProvider));
+    || (supportsFallback && providerSupportsCodexServiceTier(fallbackProvider));
   const determinismProfile = definition.kind === 'image-parser' && (provider || model)
     ? getImageParserDeterminismProfile(provider, model)
     : null;
@@ -5306,7 +5315,13 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
     setProvider(nextProvider);
     setModel('');
     if (definition.kind === 'image-parser') setReasoningEffort('');
-    if (!providerSupportsCodexServiceTier(nextProvider)) setServiceTier('');
+    // Only clear the Codex service tier when neither the new primary nor the
+    // (always-present) fallback provider needs it — the fallback can still be a
+    // Codex provider that requires the tier.
+    const fallbackNeedsTier = supportsFallback && providerSupportsCodexServiceTier(fallbackProvider);
+    if (!providerSupportsCodexServiceTier(nextProvider) && !fallbackNeedsTier) {
+      setServiceTier('');
+    }
     if (providerSupportsCodexServiceTier(nextProvider) && !serviceTier) setServiceTier('fast');
   }
 
@@ -5323,7 +5338,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
     <div className="runtime-settings-panel">
       <div className="runtime-form-grid">
         <label>
-          <span>Provider</span>
+          <span>{supportsFallback ? 'Primary provider' : 'Provider'}</span>
           <select value={provider} onChange={(event) => handleProviderChange(event.target.value)}>
             {providerOptions.map((option) => (
               <option
@@ -5337,21 +5352,8 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
           </select>
         </label>
 
-        {definition.supportsModes && (
-          <label>
-            <span>Mode</span>
-            <select value={mode} onChange={(event) => setMode(event.target.value)}>
-              {(definition.supportedModes || ['single']).map((option) => (
-                <option key={option} value={option}>
-                  {option === 'fallback' ? 'Fallback' : 'Single provider'}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
         <label>
-          <span>Model</span>
+          <span>{supportsFallback ? 'Primary model' : 'Model'}</span>
           <input
             value={model}
             list={modelListId}
@@ -5368,7 +5370,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
           </datalist>
         </label>
 
-        {definition.supportsModes && mode === 'fallback' && (
+        {supportsFallback && (
           <label>
             <span>Fallback provider</span>
             <select
@@ -5388,7 +5390,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
           </label>
         )}
 
-        {definition.supportsModes && mode === 'fallback' && (
+        {supportsFallback && (
           <label>
             <span>Fallback model</span>
             <input
@@ -5458,9 +5460,11 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
           type="button"
           className="primary-action"
           onClick={() =>
+            // `mode` is no longer chosen here (failover is always on); the
+            // fallback provider/model are always sent so the server can persist
+            // a Primary + Fallback pair for every agent.
             onSave({
               provider,
-              mode,
               fallbackProvider,
               model,
               fallbackModel,

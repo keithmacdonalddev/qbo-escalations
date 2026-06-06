@@ -5,14 +5,24 @@ import ImageParserPopup from '../chat/ImageParserPopup.jsx';
 import '../chat/ImageParserPopup.css';
 import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
+import WorkflowLogPanel from './WorkflowLogPanel.jsx';
 import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
 import { apiFetch, apiFetchJson } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
-import { getEventStats } from '../../api/chatApi.js';
+import { getConversation, getConversationMeta, getEventStats } from '../../api/chatApi.js';
+import {
+  getEscalation,
+  getEscalationKnowledge,
+  transitionEscalation,
+} from '../../api/escalationsApi.js';
 import {
   getAgentRuntimeEffectiveModel,
   getAgentRuntimeProviderLabel,
 } from '../../lib/agentRuntimeSettings.js';
+import {
+  FINAL_ESCALATION_STATUSES,
+  getEscalationKnowledgeLifecycle,
+} from '../../lib/escalationKnowledgeLifecycle.js';
 import { getProviderMeta } from '../../lib/providerCatalog.js';
 import { AGENT_PROFILE_UPDATED_EVENT } from '../../lib/agentIdentityEvents.js';
 import { SURFACE_DEFAULTS_APPLIED_EVENT } from '../../lib/surfacePreferences.js';
@@ -34,6 +44,12 @@ const WORKFLOW_STEPS = [
   { key: 'main', number: 5, label: 'QBO Assistant', runtimeId: 'chat', agentId: 'chat' },
 ];
 const WORKFLOW_AGENT_IDS = new Set(WORKFLOW_STEPS.map((step) => step.agentId));
+const LINKED_CASE_BADGE_CLASS = {
+  open: 'badge-open',
+  'in-progress': 'badge-progress',
+  resolved: 'badge-resolved',
+  'escalated-further': 'badge-escalated',
+};
 
 const TEMPLATE_FIELDS = [
   {
@@ -1837,8 +1853,10 @@ function AnalystWorkbench({
   }, [messages, testRun?.data?.text, testRun?.status]);
 
   const mainTabActive = activeTabId === 'main';
+  const workflowTabActive = activeTabId === 'workflow';
+  const stageTabActive = !mainTabActive && !workflowTabActive;
   const mainAgentLabel = stageLabels.main || 'QBO Assistant';
-  const activeStageLogStep = !mainTabActive
+  const activeStageLogStep = stageTabActive
     ? workflowSteps.find((s) => s.key === activeTabId)
     : null;
   const emptyMainThread = !hasTestRun && !isBusy && messages.length === 0 && !requestError;
@@ -1915,6 +1933,26 @@ function AnalystWorkbench({
             onClick={() => onTabActivate?.('main')}
           >
             <span className="v5-workbench-tab__label">{workbenchOwnerLabel}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workflowTabActive}
+            className={`v5-workbench-tab v5-workbench-tab--accent-workflow${workflowTabActive ? ' is-active' : ''}`}
+            onClick={() => onTabActivate?.('workflow')}
+            title="View the full workflow event log — all four stages, this run and saved runs"
+          >
+            <span className="v5-workbench-tab__icon" aria-hidden="true">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+              </svg>
+            </span>
+            <span className="v5-workbench-tab__label">Workflow Log</span>
           </button>
           {openStageTabs.map((stageKey) => {
             const step = workflowSteps.find((s) => s.key === stageKey);
@@ -2053,6 +2091,14 @@ function AnalystWorkbench({
             </button>
           </footer>
         </>
+      ) : workflowTabActive ? (
+        <WorkflowLogPanel
+          conversation={{ caseIntake }}
+          liveEvents={stageEvents}
+          liveEventCounts={liveEventCounts}
+          eventEstimates={eventEstimates}
+          stageLabels={stageLabels}
+        />
       ) : (
         <StageEventLogPanel
           key={activeTabId}
@@ -2068,7 +2114,49 @@ function AnalystWorkbench({
   );
 }
 
-export default function ChatV5Container({ isActive = true }) {
+function LinkedCaseLifecycleBanner({ escalation, knowledge, resolving, onResolve }) {
+  if (!escalation) return null;
+
+  const lifecycle = getEscalationKnowledgeLifecycle({ escalation, knowledge });
+  const canResolve = !FINAL_ESCALATION_STATUSES.has(escalation.status);
+
+  return (
+    <section className="v5-linked-case" aria-label="Linked case lifecycle">
+      <span className={`badge ${LINKED_CASE_BADGE_CLASS[escalation.status] || 'badge-open'}`}>
+        {lifecycle.statusLabel}
+      </span>
+      <div className="v5-linked-case__body">
+        <strong>Linked case</strong>
+        <span>{lifecycle.nextAction}</span>
+      </div>
+      {escalation.coid && <span className="v5-linked-case__mono">COID: {escalation.coid}</span>}
+      {escalation.category && (
+        <span className={`cat-badge cat-${escalation.category}`}>
+          {escalation.category.replace(/-/g, ' ')}
+        </span>
+      )}
+      {canResolve && (
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={onResolve}
+          disabled={resolving}
+        >
+          {resolving ? 'Resolving...' : 'Mark Resolved'}
+        </button>
+      )}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={() => { window.location.hash = `#/escalations/${escalation._id}`; }}
+      >
+        Open Case
+      </button>
+    </section>
+  );
+}
+
+export default function ChatV5Container({ isActive = true, conversationIdFromRoute = null }) {
   const {
     imageCaptured,
     captureImage,
@@ -2087,6 +2175,7 @@ export default function ChatV5Container({ isActive = true }) {
     chatLog,
     sendOperatorMessage,
     requestError,
+    conversationId,
   } = useStageOrchestrator();
   const { workflowSteps, stageLabels } = usePipelineAgentLabels();
   const { openAgentTest } = useAgentTestModal();
@@ -2131,6 +2220,96 @@ export default function ChatV5Container({ isActive = true }) {
 
   const leftExpanded = useLeftSidebarExpanded();
   const isState4 = leftExpanded && !dockCollapsed;
+  const effectiveConversationId = cleanValue(conversationIdFromRoute || conversationId);
+  const [linkedEscalation, setLinkedEscalation] = useState(null);
+  const [linkedKnowledge, setLinkedKnowledge] = useState(null);
+  const [resolvingLinkedCase, setResolvingLinkedCase] = useState(false);
+  // Saved caseIntake for a PAST run opened from history. On mount the
+  // orchestrator only has live state, and the linked-escalation lookup above
+  // fetches /meta (which omits caseIntake), so a reopened conversation has no
+  // pipeline events to show until we pull the full conversation here. Only used
+  // as a fallback — a live run's own caseIntake always takes precedence.
+  const [pastCaseIntake, setPastCaseIntake] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadLinkedEscalation() {
+      if (!effectiveConversationId) {
+        setLinkedEscalation(null);
+        setLinkedKnowledge(null);
+        return;
+      }
+
+      try {
+        const conversation = await getConversationMeta(effectiveConversationId);
+        if (cancelled) return;
+        if (!conversation?.escalationId) {
+          setLinkedEscalation(null);
+          setLinkedKnowledge(null);
+          return;
+        }
+        const [escalation, knowledge] = await Promise.all([
+          getEscalation(conversation.escalationId),
+          getEscalationKnowledge(conversation.escalationId).catch(() => null),
+        ]);
+        if (!cancelled) {
+          setLinkedEscalation(escalation);
+          setLinkedKnowledge(knowledge);
+        }
+      } catch {
+        if (!cancelled) {
+          setLinkedEscalation(null);
+          setLinkedKnowledge(null);
+        }
+      }
+    }
+
+    loadLinkedEscalation();
+    return () => { cancelled = true; };
+  }, [effectiveConversationId]);
+
+  // Hydrate the Workflow Log for a PAST run. When a conversation is opened from
+  // history (route id present) and there's no live pipeline in this session,
+  // fetch the full conversation so its saved caseIntake.runs[].events render in
+  // the unified log. A live run supersedes this — once the orchestrator has its
+  // own caseIntake we drop the past copy so we never show stale saved events
+  // over a fresh run.
+  const hasLiveCaseIntake = Boolean(caseIntake);
+  useEffect(() => {
+    let cancelled = false;
+    const routeId = cleanValue(conversationIdFromRoute);
+    if (!routeId || hasLiveCaseIntake) {
+      setPastCaseIntake(null);
+      return () => { cancelled = true; };
+    }
+    (async () => {
+      try {
+        const conversation = await getConversation(routeId);
+        if (!cancelled) setPastCaseIntake(conversation?.caseIntake || null);
+      } catch {
+        if (!cancelled) setPastCaseIntake(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conversationIdFromRoute, hasLiveCaseIntake]);
+
+  // What the Workflow Log and evidence surfaces should read: the live run's
+  // caseIntake while a pipeline is active, otherwise the saved past run.
+  const effectiveCaseIntake = caseIntake || pastCaseIntake;
+
+  const handleResolveLinkedCase = useCallback(async () => {
+    if (!linkedEscalation?._id || resolvingLinkedCase) return;
+    setResolvingLinkedCase(true);
+    try {
+      const { escalation } = await transitionEscalation(linkedEscalation._id, 'resolved');
+      setLinkedEscalation(escalation);
+    } catch {
+      // Keep the banner visible; the detail page can still be opened for manual updates.
+    } finally {
+      setResolvingLinkedCase(false);
+    }
+  }, [linkedEscalation?._id, resolvingLinkedCase]);
 
   // Step-1 lifecycle: visible by default; when parser flips to running, kick
   // off the exit transition; after ~520ms unmount the step.
@@ -2610,6 +2789,12 @@ export default function ChatV5Container({ isActive = true }) {
   return (
     <div className={`v5-shell${started ? ' is-started' : ''}${dockCollapsed ? ' is-dock-collapsed' : ''}${isState4 ? ' is-state-4' : ''}`}>
       <main className="v5-console">
+        <LinkedCaseLifecycleBanner
+          escalation={linkedEscalation}
+          knowledge={linkedKnowledge}
+          resolving={resolvingLinkedCase}
+          onResolve={handleResolveLinkedCase}
+        />
         <WorkflowLane
           workflowSteps={workflowSteps}
           imageCaptured={imageCaptured}
@@ -2648,7 +2833,7 @@ export default function ChatV5Container({ isActive = true }) {
           onTabActivate={handleTabActivate}
           onTabClose={handleTabClose}
           stageEvents={stageEvents}
-          caseIntake={caseIntake}
+          caseIntake={effectiveCaseIntake}
           liveEventCounts={liveEventCounts}
           eventEstimates={eventEstimates}
         />

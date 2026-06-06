@@ -11,15 +11,13 @@ import {
 import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from './useToast.jsx';
 import { tel, TEL } from '../lib/devTelemetry.js';
+import {
+  ESCALATION_STATUS_LABELS as LIFECYCLE_ESCALATION_STATUS_LABELS,
+  KNOWLEDGE_REVIEW_LABELS,
+} from '../lib/escalationKnowledgeLifecycle.js';
 
 export const ESCALATION_STATUSES = ['', 'open', 'in-progress', 'resolved', 'escalated-further'];
-export const ESCALATION_STATUS_LABELS = {
-  '': 'All Statuses',
-  open: 'Open',
-  'in-progress': 'In Progress',
-  resolved: 'Resolved',
-  'escalated-further': 'Escalated',
-};
+export const ESCALATION_STATUS_LABELS = LIFECYCLE_ESCALATION_STATUS_LABELS;
 export const ESCALATION_CATEGORIES = ['', 'payroll', 'bank-feeds', 'reconciliation', 'permissions', 'billing', 'tax', 'invoicing', 'reporting', 'technical', 'general', 'unknown'];
 export const ESCALATION_STATUS_BADGE_MAP = {
   open: 'badge-open',
@@ -27,12 +25,7 @@ export const ESCALATION_STATUS_BADGE_MAP = {
   resolved: 'badge-resolved',
   'escalated-further': 'badge-escalated',
 };
-export const REVIEW_STATUS_LABELS = {
-  draft: 'Draft',
-  approved: 'Approved',
-  published: 'Published',
-  rejected: 'Rejected',
-};
+export const REVIEW_STATUS_LABELS = KNOWLEDGE_REVIEW_LABELS;
 export const REVIEW_STATUS_COLORS = {
   draft: 'var(--ink-secondary)',
   approved: 'var(--success, #22c55e)',

@@ -51,6 +51,7 @@ const {
   getParallelOpenTurnLimit,
   isParallelModeEnabled,
   prepareChatRequest,
+  resolveAnalystFailoverPolicy,
 } = require('../../services/chat-request-service');
 const {
   appendCaseIntakeFollowUp,
@@ -212,6 +213,7 @@ function startMainChatExecution({
       fallbackProvider: policy.fallbackProvider,
       fallbackModel: policy.fallbackModel,
       parallelProviders: policy.parallelProviders || undefined,
+      autoFailover: policy.autoFailover === true,
       messages,
       systemPrompt,
       images: [],
@@ -255,6 +257,7 @@ function startMainChatExecution({
         primaryModel: policy.primaryModel,
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
+        autoFailover: policy.autoFailover === true,
         reasoningEffort,
       },
       onChunk,
@@ -413,7 +416,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     effectiveReasoningEffort,
     effectiveTimeoutMs,
     guardrail,
-    policy,
+    policy: resolvedPolicy,
     policyError,
     requestedFallback,
     requestedFallbackModel,
@@ -437,6 +440,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   if (policyError) {
     return res.status(policyError.status).json(policyError.body);
   }
+  // Layer the QBO Assistant (AgentIdentity 'chat') per-agent runtime onto the
+  // resolved policy so the analyst leg fails over to its profile-configured
+  // backup when the primary provider crashes — even in single mode. The
+  // profile is the single source of truth for provider/model selection.
+  const analystIdentity = await getAgentIdentity('chat').catch(() => null);
+  const policy = resolveAnalystFailoverPolicy(resolvedPolicy, analystIdentity?.runtime || null);
   const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
   const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
 
@@ -840,8 +849,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     primaryModel: policy.primaryModel || null,
-    fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
-    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
+    fallbackProvider: policy.fallbackProvider || null,
+    fallbackModel: policy.fallbackModel || null,
     parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,
@@ -1868,7 +1877,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     effectiveReasoningEffort,
     effectiveTimeoutMs,
     guardrail,
-    policy,
+    policy: resolvedPolicy,
     policyError,
     requestedFallback,
     requestedFallbackModel,
@@ -1892,6 +1901,10 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (policyError) {
     return res.status(policyError.status).json(policyError.body);
   }
+  // Same analyst auto-failover layering as the main send path so retries keep
+  // the QBO Assistant profile's resilient backup.
+  const analystIdentity = await getAgentIdentity('chat').catch(() => null);
+  const policy = resolveAnalystFailoverPolicy(resolvedPolicy, analystIdentity?.runtime || null);
   const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
   const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
 
@@ -2182,8 +2195,8 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     primaryModel: policy.primaryModel || null,
-    fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
-    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
+    fallbackProvider: policy.fallbackProvider || null,
+    fallbackModel: policy.fallbackModel || null,
     parallelProviders: policy.mode === 'parallel' ? (policy.parallelProviders || [policy.primaryProvider, policy.fallbackProvider]) : null,
     mode: policy.mode,
     turnId: requestTurnId,

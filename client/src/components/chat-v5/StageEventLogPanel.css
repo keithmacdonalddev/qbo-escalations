@@ -457,3 +457,28 @@
 .v5-workbench-tab--accent-inv.is-active::after { background: rgba(180, 130, 255, 0.9); }
 .v5-workbench-tab--accent-triage.is-active::after { background: rgba(255, 180, 90, 0.9); }
 .v5-workbench-tab--accent-main.is-active::after { background: rgba(82, 198, 138, 0.9); }
+/* The always-visible Workflow Log tab spans all four stages, so its active
+   underline uses a neutral light accent rather than a single stage colour. */
+.v5-workbench-tab--accent-workflow.is-active::after { background: rgba(207, 210, 214, 0.85); }
+
+/* Icon glyph inside the Workflow Log tab. Doubled class to beat the legacy
+   `.v5-analyst-workbench__header span` rule (0,1,1) that would otherwise size
+   this span as 10px uppercase text — it only holds an SVG, but we keep it
+   from inheriting that styling and align/size it explicitly. */
+.v5-workbench-tab__icon.v5-workbench-tab__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--v5-muted, #b8bcc1) 82%, transparent);
+  font-size: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.v5-workbench-tab.is-active .v5-workbench-tab__icon,
+.v5-workbench-tab:hover .v5-workbench-tab__icon {
+  color: var(--v5-ink, #e6e8eb);
+}

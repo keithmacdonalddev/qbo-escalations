@@ -8,6 +8,16 @@ For each provider, document the full response package that reaches this app's se
 
 The mission is not to make the response useful yet. The mission is to prove what arrives.
 
+## Platform Role
+
+This work supports the proof layer of the operational intelligence platform.
+Provider packages can later explain why an agent said something, why confidence
+changed, why fallback happened, or why a reviewer accepted or rejected model
+output.
+
+This handoff still stops at preservation. Downstream intelligence, validation,
+workflow behavior, UI, and agent reasoning are separate layers.
+
 ## Deterministic Boundary
 
 Every provider research document must stop at this boundary:

@@ -17,13 +17,13 @@ import EscalationKnowledgePanel from './EscalationKnowledgePanel.jsx';
 import ChatMessage from './ChatMessage.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
+import WorkflowLogPanel from './chat-v5/WorkflowLogPanel.jsx';
+import {
+  ESCALATION_STATUS_LABELS as LIFECYCLE_STATUS_LABELS,
+  getEscalationKnowledgeLifecycle,
+} from '../lib/escalationKnowledgeLifecycle.js';
 
-const STATUS_LABELS = {
-  'open': 'Open',
-  'in-progress': 'In Progress',
-  'resolved': 'Resolved',
-  'escalated-further': 'Escalated',
-};
+const STATUS_LABELS = LIFECYCLE_STATUS_LABELS;
 
 const STATUS_BADGE_MAP = {
   'open': 'badge-open',
@@ -31,6 +31,54 @@ const STATUS_BADGE_MAP = {
   'resolved': 'badge-resolved',
   'escalated-further': 'badge-escalated',
 };
+
+function EscalationLifecyclePanel({ lifecycle }) {
+  return (
+    <section className="esc-lifecycle-panel" aria-label="Case lifecycle">
+      <div className="esc-lifecycle-summary">
+        <span className="eyebrow">Current stage</span>
+        <strong>{lifecycle.label}</strong>
+        <p>{lifecycle.detail}</p>
+      </div>
+      <div className="esc-lifecycle-next">
+        <span className="eyebrow">Next action</span>
+        <strong>{lifecycle.nextAction}</strong>
+      </div>
+      <ol className="esc-lifecycle-steps">
+        {lifecycle.steps.map((step) => (
+          <li key={step.key} className={`esc-lifecycle-step is-${step.status}`}>
+            <span aria-hidden="true" />
+            <div>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+// Unified workflow event log for the conversation linked to this escalation.
+// Reuses the chat-v5 WorkflowLogPanel against the already-loaded conversation's
+// saved caseIntake — no extra fetch, no live events. Renders nothing when the
+// linked conversation has no captured pipeline runs so the card never shows an
+// empty shell.
+function WorkflowLogCard({ conversation }) {
+  const runs = Array.isArray(conversation?.caseIntake?.runs) ? conversation.caseIntake.runs : [];
+  const hasAnyEvents = runs.some((run) => Array.isArray(run?.events) && run.events.length > 0);
+  if (!hasAnyEvents) return null;
+  return (
+    <div className="card" style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column' }}>
+      <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>
+        Workflow Log
+      </h2>
+      <div className="v5-workflow-log-host">
+        <WorkflowLogPanel conversation={conversation} liveEvents={{}} />
+      </div>
+    </div>
+  );
+}
 
 export default function EscalationDetail({ escalationId }) {
   const toast = useToast();
@@ -93,7 +141,7 @@ export default function EscalationDetail({ escalationId }) {
       // Clear the "done" banner after a few seconds
       setTimeout(() => setAutoGenBanner(null), 5000);
     } catch {
-      toastRef.current.error('Knowledge draft auto-generation failed — you can generate it manually below.');
+      toastRef.current.error('Review draft auto-generation failed. You can create it manually below.');
       setAutoGenBanner(null);
     }
     setKnowledgeBusy(false);
@@ -105,9 +153,9 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const draft = await generateEscalationKnowledge(escalation._id, { force });
       setKnowledge(draft);
-      showKnowledgeNotice(force ? 'Draft refreshed' : 'Draft generated');
+      showKnowledgeNotice(force ? 'Review draft refreshed' : 'Review draft created');
     } catch {
-      toastRef.current.error('Failed to generate knowledge draft');
+      toastRef.current.error('Failed to create review draft');
     }
     setKnowledgeBusy(false);
   }, [escalation, knowledgeBusy, showKnowledgeNotice]);
@@ -138,9 +186,9 @@ export default function EscalationDetail({ escalationId }) {
         reviewNotes: knowledge.reviewNotes,
       });
       setKnowledge(updated);
-      showKnowledgeNotice('Draft saved');
+      showKnowledgeNotice('Review draft saved');
     } catch {
-      toastRef.current.error('Failed to save knowledge draft');
+      toastRef.current.error('Failed to save review draft');
     }
     setKnowledgeBusy(false);
   }, [escalation, knowledge, knowledgeBusy, showKnowledgeNotice]);
@@ -151,16 +199,16 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const result = await publishEscalationKnowledge(escalation._id);
       setKnowledge(result.knowledge);
-      showKnowledgeNotice(result.publish?.inserted === false ? 'Already published' : 'Published to playbook');
+      showKnowledgeNotice(result.publish?.inserted === false ? 'Already published for agents' : 'Published for agents');
     } catch {
-      toastRef.current.error('Failed to publish knowledge draft');
+      toastRef.current.error('Failed to publish for agents');
     }
     setKnowledgeBusy(false);
   }, [escalation, knowledge, knowledgeBusy, showKnowledgeNotice]);
 
   const handleUnpublishKnowledge = useCallback(async () => {
     if (!escalation || !knowledge || knowledgeBusy) return;
-    if (!window.confirm('Unpublish this knowledge entry? It will be removed from the playbook and reset to draft status.')) return;
+    if (!window.confirm('Unpublish this knowledge record? Agents will stop using it, and it will return to review.')) return;
     setKnowledgeBusy(true);
     try {
       const result = await unpublishEscalationKnowledge(escalation._id);
@@ -227,6 +275,7 @@ export default function EscalationDetail({ escalationId }) {
     && knowledge.publishTarget !== 'case-history-only'
     && knowledge.reviewStatus !== 'published'
   );
+  const lifecycle = getEscalationKnowledgeLifecycle({ escalation, knowledge });
 
   if (loading) {
     return (
@@ -242,8 +291,8 @@ export default function EscalationDetail({ escalationId }) {
         <div className="empty-state">
           <div className="empty-state-title">Escalation Not Found</div>
           <div className="empty-state-desc">This escalation may have been deleted.</div>
-          <button className="btn btn-secondary" onClick={() => { window.location.hash = '#/dashboard'; }} type="button">
-            Back to Dashboard
+          <button className="btn btn-secondary" onClick={() => { window.location.hash = '#/escalations'; }} type="button">
+            Back to Escalations
           </button>
         </div>
       </div>
@@ -257,13 +306,13 @@ export default function EscalationDetail({ escalationId }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)' }}>
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => { window.location.hash = '#/dashboard'; }}
+            onClick={() => { window.location.hash = '#/escalations'; }}
             type="button"
           >
-            &larr; Dashboard
+            &larr; Escalations
           </button>
           <h1 className="page-title" style={{ margin: 0 }}>
-            Escalation Detail
+            Case Detail
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
@@ -278,6 +327,8 @@ export default function EscalationDetail({ escalationId }) {
           )}
         </div>
       </div>
+
+      <EscalationLifecyclePanel lifecycle={lifecycle} />
 
       {/* Two-column layout: escalation info (scrollable) + chat transcript (fixed) */}
       <div className="esc-detail-columns">
@@ -300,6 +351,7 @@ export default function EscalationDetail({ escalationId }) {
             knowledgeNotice={knowledgeNotice}
             autoGenBanner={autoGenBanner}
             canPublish={knowledgeCanPublish}
+            lifecycle={lifecycle}
             onGenerateKnowledge={handleGenerateKnowledge}
             onKnowledgeFieldChange={handleKnowledgeFieldChange}
             onSaveKnowledge={handleSaveKnowledge}
@@ -434,6 +486,8 @@ export default function EscalationDetail({ escalationId }) {
               </div>
             )}
           </div>
+
+          <WorkflowLogCard conversation={conversation} />
 
           <CopilotPanel escalationId={escalation._id} title="Escalation Co-pilot" />
         </div>

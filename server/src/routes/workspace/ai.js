@@ -3,6 +3,7 @@
 const express = require('express');
 const { normalizeModelOverride, resolvePolicy } = require('../../services/chat-orchestrator');
 const { getDefaultProvider, getAlternateProvider, isValidProvider, normalizeProvider } = require('../../services/providers/registry');
+const { resolveAgentBackup } = require('../../services/agent-failover');
 const { reportServerError } = require('../../lib/server-error-pipeline');
 const { getRenderedAgentPrompt } = require('../../lib/agent-prompt-store');
 const {
@@ -519,12 +520,25 @@ router.post('/ai', async (req, res) => {
   const useActionFlow = true;
   const requestedPrimaryProvider = normalizeProvider(primaryProvider || provider || WORKSPACE_PRIMARY_PROVIDER);
   const effectiveReasoningEffort = normalizeWorkspaceReasoningEffort(reasoningEffort);
+  // Backup precedence: an explicit request-body fallbackProvider wins; otherwise
+  // the Workspace agent profile (AgentIdentity 'workspace') runtime is the
+  // source of truth; otherwise the neutral global alternate. Failover is always
+  // on in the orchestrator, so a distinct backup here means the engine fails
+  // over on primary failure. (Shared, use-case-agnostic backup rule.)
+  const workspaceBackupIdentity = await getAgentIdentity('workspace').catch(() => null);
+  const workspaceBackup = resolveAgentBackup(requestedPrimaryProvider, workspaceBackupIdentity?.runtime || null);
+  const effectiveFallbackProvider = fallbackProvider
+    || (workspaceBackup.fromProfile ? workspaceBackup.provider : '')
+    || getAlternateProvider(requestedPrimaryProvider);
+  const effectiveFallbackModel = fallbackProvider
+    ? fallbackModel
+    : (workspaceBackup.fromProfile ? workspaceBackup.model : fallbackModel);
   const policy = resolvePolicy({
     mode: mode || 'fallback',
     primaryProvider: requestedPrimaryProvider,
     primaryModel: normalizeModelOverride(primaryModel),
-    fallbackProvider: fallbackProvider || getAlternateProvider(requestedPrimaryProvider),
-    fallbackModel: normalizeModelOverride(fallbackModel),
+    fallbackProvider: effectiveFallbackProvider,
+    fallbackModel: normalizeModelOverride(effectiveFallbackModel),
   });
 
   const persistentSessionId = conversationSessionId
@@ -549,8 +563,8 @@ router.post('/ai', async (req, res) => {
     provider: policy.primaryProvider,
     primaryProvider: policy.primaryProvider,
     primaryModel: policy.primaryModel || null,
-    fallbackProvider: policy.mode === 'fallback' ? policy.fallbackProvider : null,
-    fallbackModel: policy.mode === 'fallback' ? (policy.fallbackModel || null) : null,
+    fallbackProvider: policy.fallbackProvider || null,
+    fallbackModel: policy.fallbackModel || null,
     mode: policy.mode,
     reasoningEffort: effectiveReasoningEffort,
     sessionId,

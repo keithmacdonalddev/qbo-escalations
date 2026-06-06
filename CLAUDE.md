@@ -1,6 +1,20 @@
 # QBO Escalation Assistant
 
-Tool for QBO (QuickBooks Online) escalation specialists. Helps respond to phone agents faster and more accurately using Claude AI via CLI subprocess.
+Current QBO domain module for escalation specialists. It helps respond to phone agents faster and more accurately using Claude AI via CLI subprocess.
+
+## Product Framing
+
+This repo currently ships QBO escalation support, but the product direction is broader: an operational intelligence platform where expert AI agents help the user handle complex work and life situations using shared evidence, memory, workflows, decisions, actions, and human validation.
+
+Use `PRODUCT_NORTH_STAR.md` as the repo-level hierarchy. In practice:
+
+- QBO escalation support is the first domain module and proving ground, not the whole product.
+- The Knowledge/KB work is shared governed memory for expert agents and reviewers, not a standalone destination.
+- Provider harnesses preserve evidence and provenance for model/provider calls; they are not the downstream intelligence layer by themselves.
+- Observability is the proof layer for what happened, which agent/provider acted, and what changed.
+- Prompt files and the prompt editor are agent contracts. Keep extraction prompts narrow, and give reasoning/review/coordinator prompts enough shared operating frame to preserve evidence, uncertainty, handoffs, and human validation.
+
+When explaining or building features, separate the user goal, product workflow, agent-team responsibility, evidence/memory/validation need, and implementation detail. Do not present implementation machinery as the reason the user comes to the app.
 
 ## Architecture
 

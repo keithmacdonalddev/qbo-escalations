@@ -7,57 +7,36 @@
   display: inline-flex;
 }
 
-.tip-popover {
-  display: none;
-  position: absolute;
-  z-index: 50;
+/* The bubble is portalled to <body> and positioned with inline fixed
+   coordinates by useFloatingAnchor, so it can never be clipped by an
+   overflow:hidden / overflow:auto ancestor (e.g. the scrollable table card).
+   Positioning lives in JS; this rule only carries appearance.
+
+   NOTE: the class is intentionally "tip-bubble" (not "tip-popover"): a class
+   containing the substring "popover" is captured by overhaul.css global rules
+   ([class*="popover"]) which force a frosted-glass background AND a competing
+   `animation: fadeScale 200ms !important` that double-runs against the Framer
+   Motion enter animation below (a per-tooltip flicker). Avoiding the substring
+   keeps this component fully self-styled. */
+.tip-bubble {
+  position: fixed;
+  z-index: 1200;
   background: var(--bg-floating);
   border: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-xl), var(--shadow-inset-top);
+  /* Explicit shadow, not var(--shadow-xl): the active theme zeroes
+     --shadow-xl/--shadow-lg to `none`, so relying on the token would leave the
+     floating bubble flat. This self-owned value keeps it crisply elevated. */
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.24);
   padding: 6px 10px;
-  font-size: var(--text-xs);
+  font-size: 11px;
   font-weight: 400;
   color: var(--ink-secondary);
   white-space: normal;
   pointer-events: none;
   line-height: 1.4;
   max-width: 260px;
-}
-
-.tip-top .tip-popover {
-  bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.tip-bottom .tip-popover {
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.tip-left .tip-popover {
-  right: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.tip-right .tip-popover {
-  left: calc(100% + 6px);
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.tip-anchor:hover > .tip-popover {
-  display: block;
-  animation: popoverIn 0.15s ease-out;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .tip-anchor:hover > .tip-popover {
-    animation: none;
-  }
+  transform-origin: center;
 }
 
 /* ── Timestamp Hover Card ─────────────────────────────────────────── */

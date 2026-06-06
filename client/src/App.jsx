@@ -403,7 +403,10 @@ function App() {
             <div style={{ display: route.view === 'chat' ? 'flex' : 'none', height: '100%' }}>
               <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                 <Suspense fallback={<RouteLoadingFallback />}>
-                  <ChatV5Container isActive={route.view === 'chat'} />
+                  <ChatV5Container
+                    isActive={route.view === 'chat'}
+                    conversationIdFromRoute={route.view === 'chat' ? route.conversationId : null}
+                  />
                 </Suspense>
               </div>
             </div>

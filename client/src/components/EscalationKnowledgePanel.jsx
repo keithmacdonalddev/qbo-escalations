@@ -1,24 +1,25 @@
 import { forwardRef } from 'react';
+import { KNOWLEDGE_REVIEW_LABELS } from '../lib/escalationKnowledgeLifecycle.js';
 
 const KNOWLEDGE_REVIEW_OPTIONS = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'approved', label: 'Approved' },
-  { value: 'rejected', label: 'Rejected' },
+  { value: 'draft', label: KNOWLEDGE_REVIEW_LABELS.draft },
+  { value: 'approved', label: KNOWLEDGE_REVIEW_LABELS.approved },
+  { value: 'rejected', label: KNOWLEDGE_REVIEW_LABELS.rejected },
 ];
 
 const KNOWLEDGE_TARGET_OPTIONS = [
-  { value: 'category', label: 'Category playbook' },
-  { value: 'edge-case', label: 'Edge-case playbook' },
-  { value: 'case-history-only', label: 'Case history only' },
+  { value: 'category', label: 'Reusable category guidance' },
+  { value: 'edge-case', label: 'Reusable edge-case guidance' },
+  { value: 'case-history-only', label: 'Keep for case history only' },
 ];
 
 const KNOWLEDGE_REUSABLE_OPTIONS = [
-  { value: 'canonical', label: 'Canonical' },
-  { value: 'edge-case', label: 'Edge case' },
+  { value: 'canonical', label: 'Reusable fix' },
+  { value: 'edge-case', label: 'Reusable edge case' },
   { value: 'case-history-only', label: 'Case history only' },
-  { value: 'customer-specific', label: 'Customer specific' },
+  { value: 'customer-specific', label: 'Customer specific only' },
   { value: 'temporary-incident', label: 'Temporary incident' },
-  { value: 'unsafe-to-reuse', label: 'Unsafe to reuse' },
+  { value: 'unsafe-to-reuse', label: 'Do not reuse' },
 ];
 
 const KNOWLEDGE_CONFIDENCE_OPTIONS = [
@@ -52,6 +53,7 @@ function EscalationKnowledgePanel(
     knowledgeNotice,
     autoGenBanner,
     canPublish,
+    lifecycle,
     onGenerateKnowledge,
     onKnowledgeFieldChange,
     onSaveKnowledge,
@@ -83,34 +85,34 @@ function EscalationKnowledgePanel(
           {autoGenBanner === 'generating' && <span className="spinner spinner-sm" />}
           <span style={{ fontWeight: 600 }}>
             {autoGenBanner === 'generating'
-              ? 'Case resolved — generating a knowledge draft from your resolution...'
-              : 'Knowledge draft ready — review and approve it below, then publish to the playbook.'}
+              ? 'Case outcome recorded. Creating a review draft from the resolution...'
+              : 'Review draft ready. Confirm it below before agents can use it.'}
           </span>
         </div>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
         <div>
-          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, margin: 0 }}>Knowledge Promotion</h2>
+          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, margin: 0 }}>Knowledge Review</h2>
           <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--sp-1)' }}>
-            Turn a confirmed case into reviewed reusable knowledge.
+            Turn the final case outcome into reviewed knowledge. Agents cannot use the draft until it is approved and published.
           </div>
         </div>
         {knowledge && (
           <span className={`badge ${knowledge.reviewStatus === 'published' ? 'badge-resolved' : knowledge.reviewStatus === 'approved' ? 'badge-progress' : ''}`}>
-            {knowledge.reviewStatus}
+            {KNOWLEDGE_REVIEW_LABELS[knowledge.reviewStatus] || knowledge.reviewStatus}
           </span>
         )}
       </div>
 
       {!knowledgeEligible ? (
         <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-          Resolve or escalate this case further first. The reviewed knowledge draft is only available once the case outcome is final enough to review.
+          Add the final fix or handoff reason, then mark the case resolved or escalated further. After that, the app can create a review draft from the outcome.
         </div>
       ) : !knowledge ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-            Generate a draft from the escalation details and your resolution notes. You can review and edit it before publishing anything to the playbook.
+            {lifecycle?.nextAction || 'Create a review draft from the case details, resolution notes, source evidence, and linked conversation when available.'}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
@@ -119,7 +121,7 @@ function EscalationKnowledgePanel(
               disabled={knowledgeBusy}
               type="button"
             >
-              {knowledgeBusy ? 'Generating...' : 'Generate Draft'}
+              {knowledgeBusy ? 'Creating...' : 'Create Review Draft'}
             </button>
           </div>
         </div>
@@ -154,7 +156,7 @@ function EscalationKnowledgePanel(
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 'var(--sp-3)' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <span className="eyebrow">Review Status</span>
+              <span className="eyebrow">Review State</span>
               <select
                 value={knowledge.reviewStatus || 'draft'}
                 onChange={(e) => onKnowledgeFieldChange('reviewStatus', e.target.value)}
@@ -166,7 +168,7 @@ function EscalationKnowledgePanel(
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <span className="eyebrow">Publish Target</span>
+              <span className="eyebrow">Agent Use</span>
               <select
                 value={knowledge.publishTarget || 'case-history-only'}
                 onChange={(e) => onKnowledgeFieldChange('publishTarget', e.target.value)}
@@ -178,7 +180,7 @@ function EscalationKnowledgePanel(
               </select>
             </label>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-              <span className="eyebrow">Reusable Outcome</span>
+              <span className="eyebrow">Reuse Decision</span>
               <select
                 value={knowledge.reusableOutcome || 'case-history-only'}
                 onChange={(e) => onKnowledgeFieldChange('reusableOutcome', e.target.value)}
@@ -310,8 +312,8 @@ function EscalationKnowledgePanel(
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
             <div className="text-secondary" style={{ fontSize: 'var(--text-xs)', lineHeight: 1.6 }}>
               {knowledge.publishTarget === 'case-history-only'
-                ? 'Case-history-only drafts stay searchable later but are not written into the playbook.'
-                : 'Only approved drafts can be published into the playbook.'}
+                ? 'Case-history-only records remain useful evidence, but agents cannot use them as final guidance.'
+                : 'Only human-approved records can be published for agent use.'}
             </div>
             <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               {!knowledgeLocked && (
@@ -321,7 +323,7 @@ function EscalationKnowledgePanel(
                   disabled={knowledgeBusy}
                   type="button"
                 >
-                  Refresh Draft
+                  Refresh Review Draft
                 </button>
               )}
               {!knowledgeLocked && (
@@ -331,7 +333,7 @@ function EscalationKnowledgePanel(
                   disabled={knowledgeBusy}
                   type="button"
                 >
-                  {knowledgeBusy ? 'Saving...' : 'Save Draft'}
+                  {knowledgeBusy ? 'Saving...' : 'Save Review Draft'}
                 </button>
               )}
               {knowledgeLocked ? (
@@ -351,7 +353,7 @@ function EscalationKnowledgePanel(
                   disabled={!canPublish || knowledgeBusy}
                   type="button"
                 >
-                  {knowledgeBusy ? 'Publishing...' : 'Publish'}
+                  {knowledgeBusy ? 'Publishing...' : 'Publish For Agents'}
                 </button>
               )}
             </div>

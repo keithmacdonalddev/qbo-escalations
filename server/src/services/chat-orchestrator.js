@@ -86,10 +86,17 @@ function resolveProviderModel(providerId, modelOverride) {
   return normalizeModelOverride(modelOverride) || getProviderModelId(providerId) || '';
 }
 
-function resolvePolicy({ mode, primaryProvider, primaryModel, fallbackProvider, fallbackModel, parallelProviders }) {
+function resolvePolicy({ mode, primaryProvider, primaryModel, fallbackProvider, fallbackModel, parallelProviders, autoFailover }) {
   const resolvedMode = normalizeMode(mode);
   const resolvedPrimary = normalizeProvider(primaryProvider);
-  const resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
+  // Always resolve a DISTINCT backup so automatic failover can fire for every
+  // agent. When no fallback is configured we use the neutral global alternate;
+  // if the supplied/derived backup collapses to the primary we re-derive the
+  // global alternate (no use-case/capability logic — see agent-failover.js).
+  let resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
+  if (resolvedFallback === resolvedPrimary) {
+    resolvedFallback = normalizeProvider(getAlternateProvider(resolvedPrimary));
+  }
 
   // Reject unsafe model overrides before they can reach a CLI spawn.
   assertModelAllowed(primaryModel, 'primaryModel');
@@ -101,6 +108,11 @@ function resolvePolicy({ mode, primaryProvider, primaryModel, fallbackProvider, 
     primaryModel: normalizeModelOverride(primaryModel),
     fallbackProvider: resolvedFallback,
     fallbackModel: normalizeModelOverride(fallbackModel),
+    // Retained for backward compatibility with callers that still pass it.
+    // Failover is now ALWAYS ON for sequential (non-parallel) policies — see
+    // resolveSequentialProviders — so this flag no longer gates anything. It is
+    // kept only so existing `autoFailover: ...` call sites remain valid.
+    autoFailover: autoFailover === true,
   };
 
   if (parallelProviders && Array.isArray(parallelProviders) && parallelProviders.length >= 2) {
@@ -363,7 +375,13 @@ function toAttempt(result) {
 
 function resolveSequentialProviders(policy) {
   const hasDistinctFallback = policy.fallbackProvider !== policy.primaryProvider;
-  if (policy.mode !== 'fallback' || !hasDistinctFallback) {
+  // Automatic failover is ALWAYS ON. Every sequential policy attempts its
+  // (distinct) backup when the primary fails — there is no per-agent "mode" or
+  // flag that disables this. (`parallel` policies never reach here; they are
+  // handled separately in startChatOrchestration.) We still require a distinct
+  // fallback because there is no point retrying the provider that just failed;
+  // resolvePolicy guarantees one for every agent.
+  if (!hasDistinctFallback) {
     return [policy.primaryProvider];
   }
 
@@ -402,6 +420,7 @@ function startChatOrchestration({
   fallbackProvider,
   fallbackModel,
   parallelProviders,
+  autoFailover,
   messages,
   systemPrompt,
   images = [],
@@ -423,6 +442,7 @@ function startChatOrchestration({
     fallbackProvider,
     fallbackModel,
     parallelProviders,
+    autoFailover,
   });
 
   let cancelled = false;

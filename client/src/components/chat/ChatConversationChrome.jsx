@@ -1,3 +1,15 @@
+import {
+  FINAL_ESCALATION_STATUSES,
+  getEscalationKnowledgeLifecycle,
+} from '../../lib/escalationKnowledgeLifecycle.js';
+
+const ESCALATION_BADGE_CLASS = {
+  open: 'badge-open',
+  'in-progress': 'badge-progress',
+  resolved: 'badge-resolved',
+  'escalated-further': 'badge-escalated',
+};
+
 export default function ChatConversationChrome({
   linkedEscalation,
   handleResolveEscalation,
@@ -5,6 +17,9 @@ export default function ChatConversationChrome({
   forkInfo,
   children,
 }) {
+  const lifecycle = getEscalationKnowledgeLifecycle({ escalation: linkedEscalation });
+  const canResolve = linkedEscalation && !FINAL_ESCALATION_STATUSES.has(linkedEscalation.status);
+
   return (
     <>
       {linkedEscalation && (
@@ -12,16 +27,17 @@ export default function ChatConversationChrome({
           display: 'flex',
           alignItems: 'center',
           gap: 'var(--sp-3)',
-          padding: 'var(--sp-2) var(--sp-5)',
+          padding: 'var(--sp-3) var(--sp-5)',
           background: 'var(--bg-sunken)',
           borderBottom: '1px solid var(--line)',
           fontSize: 'var(--text-sm)',
         }}>
-          <span className={`badge badge-${linkedEscalation.status === 'open' ? 'open' : linkedEscalation.status === 'in-progress' ? 'progress' : linkedEscalation.status === 'resolved' ? 'resolved' : 'escalated'}`}>
-            {linkedEscalation.status}
+          <span className={`badge ${ESCALATION_BADGE_CLASS[linkedEscalation.status] || 'badge-open'}`}>
+            {lifecycle.statusLabel}
           </span>
           <span style={{ flex: 1, color: 'var(--ink-secondary)' }}>
-            Linked escalation
+            <strong style={{ color: 'var(--ink-primary)' }}>Linked case</strong>
+            <span style={{ marginLeft: 'var(--sp-2)' }}>{lifecycle.nextAction}</span>
             {linkedEscalation.coid && <span className="mono" style={{ marginLeft: 'var(--sp-2)' }}>COID: {linkedEscalation.coid}</span>}
             {linkedEscalation.category && (
               <span className={`cat-badge cat-${linkedEscalation.category}`} style={{ marginLeft: 'var(--sp-2)', fontSize: 'var(--text-xs)' }}>
@@ -29,7 +45,7 @@ export default function ChatConversationChrome({
               </span>
             )}
           </span>
-          {linkedEscalation.status !== 'resolved' && (
+          {canResolve && (
             <button
               className="btn btn-sm btn-primary"
               onClick={handleResolveEscalation}
@@ -41,10 +57,10 @@ export default function ChatConversationChrome({
           )}
           <button
             className="btn btn-sm btn-ghost"
-            onClick={() => { window.location.hash = '#/dashboard'; }}
+            onClick={() => { window.location.hash = `#/escalations/${linkedEscalation._id}`; }}
             type="button"
           >
-            View
+            Open Case
           </button>
         </div>
       )}

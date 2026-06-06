@@ -24,6 +24,7 @@ const {
   normalizeProvider,
 } = require('./providers/registry');
 const { getProviderModelId } = require('./providers/catalog');
+const { resolveAgentBackup } = require('./agent-failover');
 
 const DEFAULT_PARALLEL_OPEN_TURN_LIMIT = 8;
 const DEFAULT_PROVIDER = getDefaultProvider();
@@ -437,18 +438,21 @@ function resolveWorkflowAgentPolicy({
       ? raw.provider
       : (fallbackPolicy?.primaryProvider || DEFAULT_PROVIDER)
   );
-  const fallbackProvider = normalizeProvider(
-    runtimeConfigured
-      ? (raw.fallbackProvider || getAlternateProvider(provider))
-      : (fallbackPolicy?.fallbackProvider || getAlternateProvider(provider))
-  );
+  // Shared, use-case-agnostic backup resolution (same helper every leg uses).
+  // The selection's fallbackProvider/Model wins when distinct; otherwise the
+  // request policy's resolved fallback, else the neutral global alternate.
+  const backupSource = runtimeConfigured
+    ? raw
+    : { fallbackProvider: fallbackPolicy?.fallbackProvider, fallbackModel: fallbackPolicy?.fallbackModel };
+  const backup = resolveAgentBackup(provider, backupSource);
+  const fallbackProvider = backup.provider;
   const requestedMode = normalizeTriageMode(runtimeConfigured ? raw.mode : fallbackPolicy?.mode);
   const policy = applyChatFeatureFlags(resolvePolicy({
     mode: requestedMode,
     primaryProvider: provider,
     primaryModel: normalizeModelOverride(runtimeConfigured ? raw.model : fallbackPolicy?.primaryModel),
     fallbackProvider,
-    fallbackModel: normalizeModelOverride(runtimeConfigured ? raw.fallbackModel : fallbackPolicy?.fallbackModel),
+    fallbackModel: backup.model,
   }));
 
   if (policy.mode === 'fallback' && policy.fallbackProvider === policy.primaryProvider) {
@@ -481,6 +485,74 @@ function resolveKnownIssueAgentPolicy({ agentRuntime, fallbackPolicy, fallbackRe
     aliases: ['knownIssueSearch', 'knownIssueSearchAgent', 'invSearch', 'invSearchAgent'],
     defaultReasoningEffort: 'high',
   });
+}
+
+/**
+ * Layer the analyst ("QBO Assistant", AgentIdentity key `chat`) per-agent
+ * runtime backup onto the already-resolved request policy so the main-chat leg's
+ * backup is sourced from the agent's own Runtime Defaults (the profile is the
+ * single source of truth for provider/model selection).
+ *
+ * Automatic failover itself is no longer this function's job — it is now ALWAYS
+ * ON in the orchestrator for every sequential policy (see
+ * resolveSequentialProviders). This function only ensures the analyst's BACKUP
+ * provider/model reflects the profile rather than just the global default. It
+ * delegates the backup rule to the shared, use-case-agnostic
+ * `resolveAgentBackup` helper so the analyst resolves its backup exactly like
+ * every other leg — there is one mechanism, not two.
+ *
+ * Behavior:
+ *   - Primary selection is left untouched (request/conversation/global wins as
+ *     before — the profile does not steal the primary the user picked).
+ *   - The backup provider/model comes from the profile runtime's
+ *     `fallbackProvider`/`fallbackModel` when the profile supplies a distinct
+ *     provider; otherwise the neutral global alternate is used. A backup that
+ *     collapses to the primary is re-derived so a DISTINCT backup always exists.
+ *   - The success path is unchanged — the backup is only ever invoked if the
+ *     primary attempt fails (no extra cost/latency otherwise).
+ *
+ * Parallel-mode policies are returned unchanged (parallel has its own provider
+ * set and failover semantics). When the chat fallback feature flag is disabled
+ * we also leave the policy untouched, matching applyChatFeatureFlags.
+ *
+ * @param {object} policy        Resolved request policy from prepareChatRequest.
+ * @param {object|null} agentRuntime  AgentIdentity('chat').runtime (or null when
+ *                                    the profile has not configured a runtime).
+ */
+function resolveAnalystFailoverPolicy(policy, agentRuntime) {
+  if (!policy || policy.mode === 'parallel') return policy;
+  if (!isChatFallbackModeEnabled()) return policy;
+
+  // Shared, use-case-agnostic backup resolution (same helper every leg uses).
+  // When the profile supplies a distinct backup it wins; otherwise we fall back
+  // to whatever the request policy already resolved, else the global alternate.
+  const profileBackup = resolveAgentBackup(policy.primaryProvider, agentRuntime);
+  const backupProvider = profileBackup.fromProfile
+    ? profileBackup.provider
+    : (policy.fallbackProvider || profileBackup.provider);
+  const backupModel = profileBackup.fromProfile
+    ? profileBackup.model
+    : (backupProvider === policy.fallbackProvider ? (policy.fallbackModel || '') : '');
+
+  const hasDistinctFallback = backupProvider !== policy.primaryProvider;
+
+  // Rebuild through resolvePolicy so the model-override injection guard runs on
+  // any profile-supplied fallback model before it can reach a CLI spawn.
+  // resolvePolicy now guarantees a distinct backup and the engine always fails
+  // over, so no autoFailover flag is needed.
+  const augmented = resolvePolicy({
+    mode: policy.mode,
+    primaryProvider: policy.primaryProvider,
+    primaryModel: policy.primaryModel,
+    fallbackProvider: hasDistinctFallback ? backupProvider : policy.fallbackProvider,
+    fallbackModel: hasDistinctFallback ? backupModel : policy.fallbackModel,
+    parallelProviders: policy.parallelProviders,
+  });
+
+  return {
+    ...augmented,
+    analystFallbackSource: profileBackup.fromProfile ? 'agent-profile' : 'global-default',
+  };
 }
 
 function buildTriageCardFromAgentOutput(output, parseFields) {
@@ -1214,6 +1286,7 @@ module.exports = {
   isValidParseMode,
   normalizeReasoningEffort,
   prepareChatRequest,
+  resolveAnalystFailoverPolicy,
   resolveKnownIssueAgentPolicy,
   resolveParseMode,
   toParseResponseMeta,

@@ -4,6 +4,12 @@ Review date: 2026-05-17
 
 Scope: static source review of the local checkout. I did not start the app, restart services, connect to MongoDB, or exercise live browser flows. The claims below are based on the files on disk in this repo at review time.
 
+## Platform Role
+
+Observability is the proof layer for the operational intelligence platform. It should help the user and reviewers answer: which user, agent, provider, prompt, workflow, evidence, action, and result were involved?
+
+This is broader than developer logging. Logs and traces should support trust, review, debugging, governance, cost control, provider comparison, prompt review, and agent accountability.
+
 ## Plain-English Summary
 
 This app has a strong start for model observability. A durable log is a saved record that survives a terminal closing or server restart. For the main chat and parse flows, the app saves durable `AiTrace` records with request IDs, trace IDs, provider/model choices, fallback attempts, timing, token/cost summaries, image metadata, and a compact timeline of events. It also saves `UsageLog` records for token and cost tracking, and image parser runs are saved in `ImageParseResult`.

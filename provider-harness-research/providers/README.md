@@ -2,6 +2,10 @@
 
 Each file in this folder should cover exactly one provider id.
 
+These documents support provider evidence and provenance for the operational
+intelligence platform. They should prove what reached this server, not decide
+whether the model answer was correct or what the app should do next.
+
 Required filename:
 
 `<provider-id>.md`

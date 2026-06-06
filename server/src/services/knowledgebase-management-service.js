@@ -17,6 +17,9 @@ const {
   parseBoolean,
   parseLimit,
 } = require('./knowledgebase-service');
+const {
+  syncOperationalIntelligenceForKnowledgeCandidate,
+} = require('./operational-intelligence-service');
 
 const KNOWLEDGE_ROLES = Object.freeze({
   VIEWER: 'viewer',
@@ -227,6 +230,14 @@ async function syncReviewAttention(doc) {
   return syncKnowledgeReviewAttentionItem(doc, escalation || {});
 }
 
+async function syncOperationalIntelligence(doc, actor, trigger) {
+  return syncOperationalIntelligenceForKnowledgeCandidate({
+    knowledge: doc,
+    actor,
+    trigger,
+  });
+}
+
 async function assertCandidateRecordExists(recordId, code = 'INVALID_KNOWLEDGE_RECORD_ID') {
   const parsed = normalizeKnowledgeRecordId(recordId);
   if (!parsed.id || parsed.sourceType !== 'knowledge-candidate' || !mongoose.isValidObjectId(parsed.id)) {
@@ -328,8 +339,11 @@ async function updateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
     metadata: { fields: Object.keys(updates), previousStatus, nextStatus: doc.reviewStatus },
   });
   await doc.save();
-  const knowledgeReview = await syncReviewAttention(doc);
-  return { record: normalizeKnowledgeCandidate(doc), knowledgeReview };
+  const [knowledgeReview, operationalIntelligence] = await Promise.all([
+    syncReviewAttention(doc),
+    syncOperationalIntelligence(doc, actor, 'knowledge.record.update'),
+  ]);
+  return { record: normalizeKnowledgeCandidate(doc), knowledgeReview, operationalIntelligence };
 }
 
 async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
@@ -376,8 +390,11 @@ async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
     metadata: { exportMarkdown, publishTarget: doc.publishTarget, publish },
   });
   await doc.save();
-  const knowledgeReview = await syncReviewAttention(doc);
-  return { record: normalizeKnowledgeCandidate(doc), published: true, export: publish, knowledgeReview };
+  const [knowledgeReview, operationalIntelligence] = await Promise.all([
+    syncReviewAttention(doc),
+    syncOperationalIntelligence(doc, actor, 'knowledge.record.publish'),
+  ]);
+  return { record: normalizeKnowledgeCandidate(doc), published: true, export: publish, knowledgeReview, operationalIntelligence };
 }
 
 async function deprecateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
@@ -397,8 +414,11 @@ async function deprecateKnowledgeRecord(recordId, payload = {}, actorInput = {})
     metadata: { supersededBy: payload.supersededBy || '' },
   });
   await doc.save();
-  const knowledgeReview = await syncReviewAttention(doc);
-  return { record: normalizeKnowledgeCandidate(doc), knowledgeReview };
+  const [knowledgeReview, operationalIntelligence] = await Promise.all([
+    syncReviewAttention(doc),
+    syncOperationalIntelligence(doc, actor, 'knowledge.record.deprecate'),
+  ]);
+  return { record: normalizeKnowledgeCandidate(doc), knowledgeReview, operationalIntelligence };
 }
 
 async function redactKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
@@ -419,6 +439,7 @@ async function redactKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
     metadata: { fields: doc.redaction.fields },
   });
   await doc.save();
+  await syncOperationalIntelligence(doc, actor, 'knowledge.record.redact');
   return normalizeKnowledgeCandidate(doc);
 }
 

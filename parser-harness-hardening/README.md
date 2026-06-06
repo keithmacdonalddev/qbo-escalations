@@ -6,6 +6,17 @@ The QBO escalation app uses an image-parser pipeline that turns escalation-templ
 
 Out of scope: scale, concurrency, the INV-agent multi-agent pipeline, image-quality concerns.
 
+## Platform role
+
+The parser harness is evidence-intake reliability for the first QBO domain
+module. Its job is to preserve what the user supplied with deterministic
+fidelity so later agents, workflows, memory, reviews, and audits can reason from
+clean evidence.
+
+The parser should not decide case lifecycle, knowledge publication, ontology
+relationships, final fixes, or downstream workflow behavior. It creates
+trustworthy input for the coordinated agent team.
+
 ## START HERE
 
 **Next session: read `HANDOFF.md` first. It captures the full session state, all decisions, all memory rules, and the recommended next moves.**

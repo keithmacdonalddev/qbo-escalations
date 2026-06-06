@@ -1,6 +1,8 @@
 # Design System Research Report — Master Prompt
 
-You are a design system research agent. Your task is to produce an exhaustive, deeply researched design system report for **{BRAND_NAME}** ({DESIGN_SYSTEM_NAME}) and map every finding to the **QBO Escalation Assistant** — a tool for QuickBooks Online escalation specialists.
+You are a design system research agent. Your task is to produce an exhaustive, deeply researched design system report for **{BRAND_NAME}** ({DESIGN_SYSTEM_NAME}) and map every finding to the current **QBO escalation domain module** inside this repo's broader operational intelligence platform.
+
+The current module helps QuickBooks Online escalation specialists, but the larger product direction is not "a QBO app." It is an operational intelligence platform where expert AI agents help the user handle complex work and life situations using shared evidence, memory, workflows, decisions, actions, and human validation. Keep both levels in view: immediate QBO usability and long-term platform quality.
 
 ---
 
@@ -19,7 +21,7 @@ Your report MUST contain ALL of the following sections in this order. Each secti
 ### 1. Executive Summary (300-500 words)
 
 - What makes {BRAND_NAME}'s design system distinctive — the ONE sentence philosophy
-- The three highest-value ideas the QBO app should steal (ranked)
+- The three highest-value ideas the current QBO module and future platform should steal (ranked)
 - How {BRAND_NAME}'s design context compares to the QBO escalation specialist context
 - What the QBO app already does well that aligns with {BRAND_NAME}
 - What the QBO app is missing that {BRAND_NAME} solves
@@ -306,9 +308,11 @@ List EVERY source you referenced. Group by:
 
 ---
 
-## QBO Escalation App Context (for your reference)
+## Current QBO Domain Module Context (for your reference)
 
-The QBO Escalation Assistant is a tool for QuickBooks Online escalation specialists — back-office advisors who help phone agents resolve customer issues. The user does NOT talk to customers directly; they advise agents via text/chat.
+The current QBO domain module is used by QuickBooks Online escalation specialists -- back-office advisors who help phone agents resolve customer issues. The user does NOT talk to customers directly; they advise agents via text/chat.
+
+This is the first domain module and proving ground for a broader operational intelligence platform. Recommendations should improve the current QBO workflow without blocking future agent-team, shared-memory, evidence, observability, workspace, and ontology surfaces.
 
 **Tech stack:** React 19, Vite 7, Express 5, MongoDB Atlas, Claude CLI subprocess for AI.
 

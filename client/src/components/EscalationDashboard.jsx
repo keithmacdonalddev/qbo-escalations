@@ -3,6 +3,7 @@ import { getKnowledgeGaps } from '../api/escalationsApi.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import EscalationCard from './EscalationCard.jsx';
+import KnowledgeGapsFlyout from './KnowledgeGapsFlyout.jsx';
 import useEscalations, {
   ATTENTION_KIND_LABELS,
   ATTENTION_SORT_LABELS,
@@ -83,7 +84,6 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
   } = useEscalations({ initialTab });
 
   const [gaps, setGaps] = useState(null);
-  const [gapsOpen, setGapsOpen] = useState(false);
   const [gapsDays, setGapsDays] = useState(30);
 
   useEffect(() => {
@@ -111,15 +111,15 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
   return (
     <div className="app-content-constrained">
       <div className="page-header">
-        <h1 className="page-title">{initialTab === 'attention' ? 'Attention Center' : 'Escalation Dashboard'}</h1>
+        <h1 className="page-title">{initialTab === 'attention' ? 'Attention Center' : 'Escalations'}</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
           {activeTab === 'escalations'
-            ? 'All parsed escalations — filter, search, and track resolution status.'
+            ? 'Track captured cases from intake through outcome and review.'
             : activeTab === 'attention'
               ? 'Review workflow items that need a decision.'
-              : 'Review and track AI-generated knowledge drafts across all escalations.'}
+              : 'Review case lessons before agents can use them as trusted knowledge.'}
         </span>
-        <Tooltip text={activeTab === 'escalations' ? 'Reload escalation data' : activeTab === 'attention' ? 'Reload attention queue' : 'Reload knowledge queue'} level="medium">
+        <Tooltip text={activeTab === 'escalations' ? 'Reload case data' : activeTab === 'attention' ? 'Reload attention queue' : 'Reload knowledge review'} level="medium">
           <button className="btn btn-secondary" onClick={refresh} type="button">
             Refresh
           </button>
@@ -196,7 +196,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
             gap: 'var(--sp-2)',
           }}
         >
-          Knowledge Queue
+          Knowledge Review
           {kqTotalAll > 0 && (
             <span style={{
               background: kqCounts.draft > 0 ? 'var(--accent)' : 'var(--surface-raised, var(--bg-secondary))',
@@ -224,97 +224,18 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 'var(--sp-5)', marginBottom: 'var(--sp-8)' }}>
-            <StatCard label="Open" value={summary?.open ?? '--'} />
-            <StatCard label="In Progress" value={summary?.inProgress ?? '--'} />
+            <StatCard label="Captured" value={summary?.open ?? '--'} />
+            <StatCard label="Working" value={summary?.inProgress ?? '--'} />
             <StatCard label="Resolved" value={summary?.resolved ?? '--'} />
-            <StatCard label="Escalated" value={summary?.escalated ?? '--'} />
+            <StatCard label="Escalated Further" value={summary?.escalated ?? '--'} />
             <StatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
           </div>
 
-          {gaps && gaps.gaps && gaps.gaps.length > 0 && (
-            <div className="knowledge-gaps">
-              <button
-                className="kg-toggle"
-                onClick={() => setGapsOpen(prev => !prev)}
-                type="button"
-              >
-                <span className="kg-toggle-label">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3" />
-                    <line x1="12" y1="17" x2="12.01" y2="17" />
-                  </svg>
-                  Knowledge Gaps
-                  <span className="kg-count">
-                    {gaps.gaps.filter(g => g.gapScore < 50).length} need attention
-                  </span>
-                </span>
-                <span className="kg-toggle-controls">
-                  <select
-                    value={gapsDays}
-                    onChange={(e) => { e.stopPropagation(); setGapsDays(Number(e.target.value)); }}
-                    onClick={(e) => e.stopPropagation()}
-                    className="kg-days-select"
-                  >
-                    <option value={7}>7 days</option>
-                    <option value={14}>14 days</option>
-                    <option value={30}>30 days</option>
-                    <option value={60}>60 days</option>
-                    <option value={90}>90 days</option>
-                  </select>
-                  <svg
-                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    style={{ transform: gapsOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </button>
-              {gapsOpen && (
-                <div className="kg-body">
-                  {gaps.gaps.map(g => (
-                    <div key={g.category} className="kg-card">
-                      <span className={`kg-score ${g.gapScore < 40 ? 'critical' : g.gapScore < 70 ? 'warning' : 'good'}`}>
-                        {g.gapScore}
-                      </span>
-                      <div className="kg-info">
-                        <div className="kg-category">
-                          {g.category.replace(/-/g, ' ')}
-                          {g.hasPlaybook ? (
-                            <span className="kg-playbook-badge has" title="Has playbook coverage">PB</span>
-                          ) : (
-                            <span className="kg-playbook-badge missing" title="No playbook for this category">No PB</span>
-                          )}
-                        </div>
-                        <div className="kg-meta">
-                          <span>{g.resolutionRate}% resolved</span>
-                          <span>{g.total} total</span>
-                          {g.longConversations.length > 0 && (
-                            <span>{g.longConversations.length} long convo{g.longConversations.length !== 1 ? 's' : ''}</span>
-                          )}
-                          {g.uncertainPhrases > 0 && (
-                            <span>{g.uncertainPhrases} uncertain response{g.uncertainPhrases !== 1 ? 's' : ''}</span>
-                          )}
-                          {g.escalatedFurther > 0 && (
-                            <span>{g.escalatedFurther} re-escalated</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {gaps.unusedCategories && gaps.unusedCategories.length > 0 && (
-                    <div className="kg-unused">
-                      <span className="kg-unused-label">Playbook categories with no escalations:</span>
-                      {gaps.unusedCategories.map(c => (
-                        <span key={c} className="kg-unused-tag">{c}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          <KnowledgeGapsFlyout
+            gaps={gaps}
+            gapsDays={gapsDays}
+            onChangeDays={setGapsDays}
+          />
 
           <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
             <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
@@ -359,11 +280,11 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
               </div>
             ) : escalations.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-state-title">No Escalations Found</div>
+                <div className="empty-state-title">No Cases Found</div>
                 <div className="empty-state-desc">
                   {search || statusFilter || categoryFilter
                     ? 'Try adjusting your filters.'
-                    : 'Escalations appear here when you paste a screenshot into the chat — the AI parses it automatically. You can also create them manually in conversation.'}
+                    : 'Cases appear here after image intake captures a structured escalation from chat. Open a case to work it, record the outcome, and create reviewed knowledge.'}
                 </div>
               </div>
             ) : (
@@ -589,10 +510,10 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
               <select
                 value={kqStatusFilter}
                 onChange={(e) => setKqStatusFilter(e.target.value)}
-                aria-label="Filter by review status"
+                aria-label="Filter by review state"
                 style={{ width: 'auto', minWidth: 140 }}
               >
-                <option value="">All Statuses</option>
+                <option value="">All Review States</option>
                 {Object.entries(REVIEW_STATUS_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
@@ -621,11 +542,11 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
               </div>
             ) : kqCandidates.length === 0 ? (
               <div className="empty-state">
-                <div className="empty-state-title">No Knowledge Candidates</div>
+                <div className="empty-state-title">No Review Drafts</div>
                 <div className="empty-state-desc">
                   {kqStatusFilter || kqCategoryFilter
                     ? 'Try adjusting your filters.'
-                    : 'Knowledge drafts are generated when escalations are resolved. Resolve an escalation to see candidates here.'}
+                    : 'Review drafts are created from resolved or escalated cases. Add the final outcome to a case, then create a review draft for knowledge review.'}
                 </div>
               </div>
             ) : (
@@ -633,11 +554,11 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
                 <table className="table">
                   <thead>
                     <tr>
-                      <th>Review Status</th>
+                      <th>Review State</th>
                       <th>Title</th>
                       <th>Category</th>
                       <th>Confidence</th>
-                      <th>Case ID</th>
+                      <th>Source Case</th>
                       <th>Created</th>
                     </tr>
                   </thead>
@@ -777,7 +698,7 @@ function buildAttentionWorkflowRows(kindCounts = {}, refreshMeta = null) {
     { kind: 'missing-link', label: 'Link Integrity', detail: 'Escalation and conversation backlinks', count: kindCounts['missing-link'] || 0, scanned: (refreshMeta?.missingLinks?.scannedEscalations || 0) + (refreshMeta?.missingLinks?.scannedConversations || 0) },
     { kind: 'missing-resolution', label: 'Resolution Discipline', detail: 'Final notes and escalation reasons', count: kindCounts['missing-resolution'] || 0, scanned: 0 },
     { kind: 'stale-open', label: 'Stale Case Scanner', detail: 'Open and in-progress aging checks', count: kindCounts['stale-open'] || 0, scanned: refreshMeta?.stale?.scanned || 0 },
-    { kind: 'knowledge-review', label: 'Knowledge Review', detail: 'Reusable draft approval guard', count: kindCounts['knowledge-review'] || 0, scanned: 0 },
+    { kind: 'knowledge-review', label: 'Knowledge Review', detail: 'Human review before agent reuse', count: kindCounts['knowledge-review'] || 0, scanned: 0 },
     { kind: 'agent-review', label: 'Agent Review', detail: 'Profile approval and follow-up checks', count: kindCounts['agent-review'] || 0, scanned: 0 },
     { kind: 'agent-harness', label: 'Agent Harness', detail: 'Harness warning and failure checks', count: kindCounts['agent-harness'] || 0, scanned: 0 },
     { kind: 'possible-duplicate', label: 'Duplicate Safety', detail: 'Likely duplicate case detection', count: kindCounts['possible-duplicate'] || 0, scanned: 0 },
@@ -902,7 +823,7 @@ function AttentionCommandRail({ mission, workflows, recentItems, onFocusKind, on
           <span>Resources</span>
         </div>
         <div className="attention-resource-links">
-          <a href="#/dashboard">Dashboard</a>
+          <a href="#/escalations">Escalations</a>
           <a href="#/agents">Agents</a>
           <a href="#/playbook">Playbook</a>
           <a href="#/usage?tab=traces">Traces</a>
@@ -1013,7 +934,7 @@ function AttentionItemRow({ item, selected, busy, onToggleSelection, onStatusCha
         <div className="attention-meta">
           <span>Source: {item.sourceLabel || getEscalationLabel(item.sourceEscalationId)}</span>
           {primaryCandidate && (
-            <span>Candidate: {getEscalationLabel(primaryCandidate.escalationId)} ({primaryCandidate.score || 0})</span>
+            <span>Possible match: {getEscalationLabel(primaryCandidate.escalationId)} ({primaryCandidate.score || 0})</span>
           )}
           {item.signals?.length > 0 && <span>{formatSignals(item.signals)}</span>}
         </div>
@@ -1052,7 +973,7 @@ function AttentionItemRow({ item, selected, busy, onToggleSelection, onStatusCha
             className="btn btn-ghost btn-sm"
             onClick={() => { window.location.hash = `#/escalations/${candidateId}`; }}
           >
-            Candidate
+            Match
           </button>
         )}
         {isOpen ? (

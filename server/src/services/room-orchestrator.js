@@ -1103,8 +1103,10 @@ function startRoomOrchestration({
           mode: runtimePolicy.mode || 'single',
           primaryProvider: runtimePolicy.primaryProvider,
           primaryModel: runtimePolicy.primaryModel || undefined,
-          fallbackProvider: runtimePolicy.mode === 'fallback' ? runtimePolicy.fallbackProvider : undefined,
-          fallbackModel: runtimePolicy.mode === 'fallback' ? (runtimePolicy.fallbackModel || undefined) : undefined,
+          // Always pass the (distinct) backup so the engine fails over on primary
+          // failure — automatic failover is on regardless of mode.
+          fallbackProvider: runtimePolicy.fallbackProvider || undefined,
+          fallbackModel: runtimePolicy.fallbackModel || undefined,
           messages: contextResult.messagesForModel,
           systemPrompt: contextResult.systemPrompt,
           images: [],

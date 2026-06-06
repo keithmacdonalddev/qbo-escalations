@@ -517,18 +517,30 @@ function normalizeAgentRuntimeState(agentId, input = {}) {
   const provider = imageRuntime && !rawProvider
     ? ''
     : normalizeProvider(rawProvider || getDefaultProvider());
-  const fallbackProvider = imageRuntime
-    ? ''
-    : (mode === 'fallback'
-        ? normalizeProvider(source.fallbackProvider || getAlternateProvider(provider))
-        : getAlternateProvider(provider));
+  // Automatic failover is the DEFAULT for every agent: persist the operator's
+  // chosen backup unconditionally (no `mode === 'fallback'` gating, no
+  // image-runtime forcing of an empty backup), defaulting to the neutral global
+  // alternate when none is set so a distinct backup always exists for the engine
+  // to fail over to. A configured backup that collapses to the primary is
+  // re-derived to the global alternate. (No use-case/capability logic — the
+  // operator's choice is honored as-is; see agent-failover.js.)
+  let fallbackProvider = provider
+    ? normalizeProvider(source.fallbackProvider || getAlternateProvider(provider))
+    : '';
+  if (fallbackProvider && fallbackProvider === provider) {
+    fallbackProvider = normalizeProvider(getAlternateProvider(provider));
+  }
+  const sourcedCustomFallback = Boolean(source.fallbackProvider)
+    && normalizeProvider(source.fallbackProvider) !== provider;
 
   return {
     provider,
     mode,
     fallbackProvider,
     model: normalizeModelOverride(source.model || source.primaryModel || ''),
-    fallbackModel: imageRuntime ? '' : normalizeModelOverride(source.fallbackModel || ''),
+    // Keep the operator's backup model only when they supplied a distinct backup
+    // provider; a defaulted/re-derived global alternate has no operator model.
+    fallbackModel: sourcedCustomFallback ? normalizeModelOverride(source.fallbackModel || '') : '',
     reasoningEffort: imageRuntime
       ? normalizeImageRuntimeReasoningEffort(provider, source.reasoningEffort)
       : normalizeRuntimeReasoningEffort(provider, source.reasoningEffort),
@@ -540,11 +552,13 @@ function normalizeAgentRuntimeState(agentId, input = {}) {
 
 function buildRuntimeSummary(runtime) {
   if (!runtime?.configured) return 'Cleared agent runtime defaults.';
+  // Automatic failover is always on, so the backup is always part of the runtime
+  // and is always surfaced when present (no longer gated on mode === 'fallback').
   const parts = [
-    runtime.mode === 'fallback' ? 'Fallback runtime' : 'Runtime',
+    'Runtime',
     runtime.provider,
     runtime.model ? `model ${runtime.model}` : '',
-    runtime.mode === 'fallback' && runtime.fallbackProvider ? `fallback ${runtime.fallbackProvider}` : '',
+    runtime.fallbackProvider ? `fallback ${runtime.fallbackProvider}` : '',
     runtime.fallbackModel ? `fallback model ${runtime.fallbackModel}` : '',
     runtime.reasoningEffort ? `effort ${runtime.reasoningEffort}` : '',
     runtime.serviceTier ? `tier ${runtime.serviceTier}` : '',

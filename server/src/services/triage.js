@@ -34,7 +34,7 @@ const {
   TRIAGE_PROVIDER_CALL_SITE,
   TRIAGE_PROVIDER_OPERATION,
 } = require('./providers/provider-handoff');
-const { buildAgentKnowledgeContext } = require('./knowledgebase-service');
+const { buildOperationalIntelligenceContext } = require('./operational-intelligence-service');
 
 const TRIAGE_AGENT_ID = 'triage-agent';
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -205,6 +205,13 @@ function formatKnowledgeContextRecord(record) {
       .filter(Boolean);
     if (evidence.length > 0) lines.push(`Evidence: ${evidence.join('; ')}`);
   }
+  if (Array.isArray(record.operationalClaims) && record.operationalClaims.length > 0) {
+    const claims = record.operationalClaims
+      .slice(0, 5)
+      .map((claim) => `${claim.claimType}: ${claim.text}`)
+      .filter(Boolean);
+    if (claims.length > 0) lines.push(`Validated claims: ${claims.join(' | ')}`);
+  }
   if (Array.isArray(record.warnings) && record.warnings.length > 0) {
     lines.push(`Warnings: ${record.warnings.join(', ')}`);
   }
@@ -225,7 +232,7 @@ function formatTriageKnowledgeContext(context) {
 async function buildTriageKnowledgebaseContext(parserText, { eventBus = null, signal = null } = {}) {
   try {
     throwIfAborted(signal);
-    const context = await buildAgentKnowledgeContext({
+    const context = await buildOperationalIntelligenceContext({
       query: parserText,
       allowedUse: 'triage',
       limit: 5,
@@ -246,6 +253,7 @@ async function buildTriageKnowledgebaseContext(parserText, { eventBus = null, si
         reviewStatus: record.reviewStatus,
         reusableOutcome: record.reusableOutcome,
         warnings: record.warnings || [],
+        operationalClaimCount: Array.isArray(record.operationalClaims) ? record.operationalClaims.length : 0,
       })),
       fallbackUsed: false,
       error: '',

@@ -38,6 +38,46 @@
   gap: 22px;
 }
 
+.v5-linked-case {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--v5-border);
+  border-radius: 8px;
+  background: var(--v5-panel-sunken);
+}
+
+.v5-linked-case__body {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+}
+
+.v5-linked-case__body strong {
+  flex: 0 0 auto;
+  color: var(--ink-primary);
+}
+
+.v5-linked-case__body span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v5-linked-case__mono {
+  flex: 0 0 auto;
+  color: var(--ink-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
 .v5-workflow-lane {
   display: flex;
   align-items: center;

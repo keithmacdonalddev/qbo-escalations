@@ -1,6 +1,5 @@
 const express = require('express');
 const {
-  buildAgentKnowledgeContext,
   getKnowledgeRecordById,
   getKnowledgeSummary,
   listKnowledgeRecords,
@@ -9,6 +8,9 @@ const {
   parseOffset,
   searchKnowledge,
 } = require('../services/knowledgebase-service');
+const {
+  buildOperationalIntelligenceContext,
+} = require('../services/operational-intelligence-service');
 const {
   getKnowledgebaseAgentStatus,
   scanKnowledgebaseAgent,
@@ -247,7 +249,7 @@ router.get('/agent-context', async (req, res) => {
   });
   options.allowedUse = options.allowedUse || 'agent-response';
 
-  const context = await buildAgentKnowledgeContext(options);
+  const context = await buildOperationalIntelligenceContext(options);
   res.json({
     ok: true,
     context,

@@ -2,6 +2,13 @@
 
 Repo-aligned planning package for building stress and reliability harnesses in this project.
 
+## Platform Role
+
+Stress testing is the reliability proof layer for the current QBO domain module
+and future operational-intelligence surfaces. It should prove that agent work,
+shared evidence, memory, workflows, streaming, connected services, and
+observability stay usable under pressure.
+
 ## What changed
 
 The original draft assumed slices that do not exist in the repo today, including a generic app-auth/session layer and a QuickBooks outbound API layer. This package has been rewritten around the code that is actually present:

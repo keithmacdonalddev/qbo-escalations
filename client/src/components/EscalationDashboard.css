@@ -19,6 +19,92 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
+.esc-lifecycle-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1fr) minmax(360px, 1.6fr);
+  gap: var(--sp-4);
+  align-items: stretch;
+  flex-shrink: 0;
+  padding: var(--sp-4) var(--sp-6);
+  border-bottom: 1px solid var(--line-subtle);
+  background: var(--bg-sunken);
+}
+
+.esc-lifecycle-summary,
+.esc-lifecycle-next {
+  min-width: 0;
+}
+
+.esc-lifecycle-summary strong,
+.esc-lifecycle-next strong {
+  display: block;
+  margin-top: var(--sp-1);
+  color: var(--ink-primary);
+  font-size: var(--text-md);
+  line-height: 1.35;
+}
+
+.esc-lifecycle-summary p {
+  margin: var(--sp-2) 0 0;
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.esc-lifecycle-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(72px, 1fr));
+  gap: var(--sp-2);
+  align-items: start;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.esc-lifecycle-step {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: var(--sp-2);
+  min-width: 0;
+  color: var(--ink-secondary);
+}
+
+.esc-lifecycle-step > span {
+  width: 10px;
+  height: 10px;
+  margin-top: 3px;
+  border-radius: 50%;
+  background: var(--line);
+}
+
+.esc-lifecycle-step.is-done > span {
+  background: var(--success, #22c55e);
+}
+
+.esc-lifecycle-step.is-current > span {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.esc-lifecycle-step.is-blocked > span {
+  background: var(--danger, #ef4444);
+}
+
+.esc-lifecycle-step strong {
+  display: block;
+  color: var(--ink-primary);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+}
+
+.esc-lifecycle-step small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
 /* Two-column body fills remaining height */
 .esc-detail-columns {
   display: grid;
@@ -69,6 +155,15 @@
 
 /* Responsive: stack columns on narrow screens */
 @media (max-width: 900px) {
+  .esc-lifecycle-panel {
+    grid-template-columns: 1fr;
+    padding: var(--sp-4);
+  }
+
+  .esc-lifecycle-steps {
+    grid-template-columns: 1fr;
+  }
+
   .esc-detail-columns {
     grid-template-columns: 1fr;
     overflow-y: auto;

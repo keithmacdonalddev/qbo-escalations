@@ -6,6 +6,15 @@
 
 The user is a self-taught / solo hobbyist developer. Explain clearly, warn about risks, suggest next steps.
 
+### Product Framing For Codex
+
+- The current QBO escalation workflow is the first domain module of a broader operational intelligence platform.
+- Treat QBO escalation, Knowledge, provider harnesses, prompt editing, observability, agents, and workspace features as components serving a coordinated expert-agent system for the user's work and life.
+- Keep this explanation order: user goal, product workflow, agent-team responsibility, evidence/memory/validation, then implementation.
+- Do not describe implementation machinery, such as database records, KB pages, provider packages, trace logs, or prompt files, as the user's goal.
+- When working narrowly, state how the change supports the platform role and what it deliberately does not try to solve.
+- Use `PRODUCT_NORTH_STAR.md` as the repo-level product hierarchy when docs or UI labels drift toward treating one feature as the whole product.
+
 ### Runtime Ownership And Server Control
 
 - The user owns local runtime control. Do not start, stop, restart, reload, or replace the app server, client dev server, gateway, MongoDB process, or any long-running local service unless the user explicitly asks for that runtime action in the current conversation.

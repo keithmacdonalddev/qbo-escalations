@@ -12,11 +12,13 @@ import { getConversationTraces } from '../api/traceApi.js';
 import { getProviderLabel } from '../lib/providerCatalog.js';
 import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
+import WorkflowLogPanel from './chat-v5/WorkflowLogPanel.jsx';
 
 const TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'messages', label: 'Messages' },
   { id: 'events', label: 'Events' },
+  { id: 'workflow', label: 'Workflow Log' },
   { id: 'reasoning', label: 'Reasoning' },
   { id: 'io', label: 'Inputs & Outputs' },
   { id: 'latency', label: 'Latency' },
@@ -556,6 +558,7 @@ function renderTab(tab, session, traces, summary) {
   if (tab === 'overview') return <OverviewTab session={session} summary={summary} />;
   if (tab === 'messages') return <MessagesTab messages={messages} />;
   if (tab === 'events') return <EventsTab traces={traces} />;
+  if (tab === 'workflow') return <WorkflowLogTab session={session} />;
   if (tab === 'reasoning') return <ReasoningTab messages={messages} traces={traces} />;
   if (tab === 'io') return <InputsOutputsTab messages={messages} traces={traces} />;
   if (tab === 'latency') return <LatencyTab traces={traces} />;
@@ -627,6 +630,26 @@ function EventsTab({ traces }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function WorkflowLogTab({ session }) {
+  const runs = Array.isArray(session?.caseIntake?.runs) ? session.caseIntake.runs : [];
+  const hasAnyEvents = runs.some((run) => Array.isArray(run?.events) && run.events.length > 0);
+  if (!hasAnyEvents) {
+    return (
+      <EmptyPanel
+        text="No pipeline events were captured for this session."
+        planned="The unified workflow log shows every Image Parser, INV Search, Triage, and QBO Assistant event once a session runs the pipeline."
+      />
+    );
+  }
+  return (
+    <div className="session-stack">
+      <div className="v5-workflow-log-host">
+        <WorkflowLogPanel conversation={session} liveEvents={{}} />
+      </div>
+    </div>
   );
 }
 

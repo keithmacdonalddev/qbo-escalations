@@ -1,0 +1,401 @@
+/* ============================================================================
+   Knowledge Gaps flyout — Escalation Dashboard
+   ----------------------------------------------------------------------------
+   The panel is portalled to <body> and positioned with inline fixed coords by
+   useFloatingAnchor, so it can never be clipped by the dashboard table card's
+   overflow:hidden / overflow-x:auto.
+
+   Class names intentionally avoid the substrings "popover", "tooltip",
+   "dialog", "modal", "overlay", "menu" so global overhaul.css !important rules
+   that target those substrings (forced backgrounds, box-shadow:none, radius
+   resets) cannot reach this component. Everything here is fully self-owned.
+   ============================================================================ */
+
+.kgflyout-root {
+  display: inline-flex;
+  width: 100%;
+  margin-bottom: var(--sp-6, 16px);
+}
+
+/* ── Trigger row ─────────────────────────────────────────────────────────── */
+
+/* The frame is a <div>; the focusable trigger and the day-range <select> are
+   real DOM siblings inside it (no interactive content nested in a <button>). */
+.kgflyout-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4, 12px);
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-raised, #2c2c2e);
+  border: 1px solid var(--line, rgba(84, 84, 88, 0.35));
+  border-radius: 10px;
+  color: var(--ink, #f5f5f7);
+  font-size: var(--text-sm, 12px);
+  font-weight: 600;
+  text-align: left;
+  transition:
+    background 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 160ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 160ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.kgflyout-trigger:hover,
+.kgflyout-trigger.is-open {
+  background: var(--bg-elevated, #3a3a3c);
+  border-color: var(--line-strong, rgba(84, 84, 88, 0.55));
+}
+.kgflyout-trigger.is-pinned {
+  border-color: var(--accent-border, rgba(10, 132, 255, 0.45));
+  box-shadow: 0 0 0 1px var(--accent-border, rgba(10, 132, 255, 0.35)) inset;
+}
+/* Keyboard focus on the inner button lights up the whole frame. */
+.kgflyout-trigger:focus-within {
+  border-color: var(--accent, #0a84ff);
+  box-shadow: 0 0 0 2px var(--bg, #1c1c1e), 0 0 0 4px var(--accent, #0a84ff);
+}
+
+/* The primary trigger button — transparent, fills the left of the frame. */
+.kgflyout-trigger-main {
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.kgflyout-trigger-main:focus-visible {
+  outline: none;
+}
+
+.kgflyout-trigger-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4, 12px);
+  min-width: 0;
+}
+
+.kgflyout-trigger-icon {
+  color: var(--warning, #ffd60a);
+  flex-shrink: 0;
+}
+
+.kgflyout-trigger-label {
+  color: var(--ink, #f5f5f7);
+  letter-spacing: -0.006em;
+  white-space: nowrap;
+}
+
+.kgflyout-trigger-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--warning, #ffd60a);
+  background: var(--warning-subtle, rgba(255, 214, 10, 0.12));
+  white-space: nowrap;
+}
+.kgflyout-trigger-badge.is-clear {
+  color: var(--success, #30d158);
+  background: var(--success-subtle, rgba(48, 209, 88, 0.12));
+}
+
+.kgflyout-trigger-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-4, 12px);
+  color: var(--ink-secondary, #a1a1a6);
+  flex-shrink: 0;
+}
+
+.kgflyout-days-select {
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-subtle, rgba(84, 84, 88, 0.2));
+  border-radius: 6px;
+  background: var(--bg-sunken, #1c1c1e);
+  color: var(--ink-secondary, #a1a1a6);
+  cursor: pointer;
+  width: auto;
+  min-width: 0;
+}
+.kgflyout-days-select:focus-visible {
+  outline: none;
+  border-color: var(--accent, #0a84ff);
+  box-shadow: 0 0 0 2px var(--accent-subtle, rgba(10, 132, 255, 0.25));
+}
+
+.kgflyout-trigger-caret-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border: none;
+  color: var(--ink-secondary, #a1a1a6);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.kgflyout-trigger-caret-btn:focus-visible {
+  outline: none;
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--accent-subtle, rgba(10, 132, 255, 0.25));
+}
+
+.kgflyout-trigger-caret {
+  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+/* ── Floating panel ──────────────────────────────────────────────────────── */
+
+.kgflyout-panel {
+  position: fixed;
+  z-index: 1200;
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: var(--sp-7, 18px);
+  background: var(--bg-floating, #48484a);
+  border: 1px solid var(--line-strong, rgba(84, 84, 88, 0.55));
+  border-radius: 14px;
+  /* Self-owned premium depth — a popover-free class keeps overhaul.css's
+     box-shadow:none !important from reaching it. */
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.46),
+    0 4px 12px rgba(0, 0, 0, 0.30),
+    0 0 0 0.5px rgba(255, 255, 255, 0.05) inset;
+  color: var(--ink, #f5f5f7);
+  transform-origin: top center;
+}
+
+.kgflyout-panel::-webkit-scrollbar { width: 6px; }
+.kgflyout-panel::-webkit-scrollbar-track { background: transparent; }
+.kgflyout-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+}
+.kgflyout-panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+/* Panel header */
+.kgflyout-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4, 12px);
+  margin-bottom: 4px;
+}
+.kgflyout-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.kgflyout-head-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-secondary, #a1a1a6);
+}
+.kgflyout-head-heading {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--ink, #f5f5f7);
+}
+.kgflyout-head-window {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-secondary, #a1a1a6);
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Summary line */
+.kgflyout-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 14px;
+  font-size: var(--text-sm, 12px);
+  color: var(--ink, #f5f5f7);
+}
+.kgflyout-summary-stat strong {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.kgflyout-summary-stat.is-muted {
+  color: var(--ink-secondary, #a1a1a6);
+}
+.kgflyout-summary-sep {
+  width: 1px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+/* Gap list */
+.kgflyout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.kgflyout-item {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.kgflyout-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Score chip — the severity anchor for each row */
+.kgflyout-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  padding: 4px 0;
+  background: rgba(0, 0, 0, 0.22);
+}
+.kgflyout-score-value {
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.kgflyout-score-unit {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-secondary, #a1a1a6);
+  margin-top: 3px;
+}
+.kgflyout-score--critical .kgflyout-score-value { color: var(--danger, #ff453a); }
+.kgflyout-score--warning  .kgflyout-score-value { color: var(--warning, #ffd60a); }
+.kgflyout-score--good     .kgflyout-score-value { color: var(--success, #30d158); }
+
+.kgflyout-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+}
+.kgflyout-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.kgflyout-item-name {
+  font-size: var(--text-md, 14px);
+  font-weight: 600;
+  color: var(--ink, #f5f5f7);
+  text-transform: capitalize;
+  letter-spacing: -0.006em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kgflyout-pb {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.kgflyout-pb--has {
+  color: var(--success, #30d158);
+  background: var(--success-subtle, rgba(48, 209, 88, 0.12));
+}
+.kgflyout-pb--missing {
+  color: var(--danger, #ff453a);
+  background: var(--danger-subtle, rgba(255, 69, 58, 0.12));
+}
+
+.kgflyout-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 11px;
+  color: var(--ink-secondary, #a1a1a6);
+}
+.kgflyout-meta-item {
+  white-space: nowrap;
+}
+.kgflyout-meta-num {
+  font-weight: 700;
+  color: var(--ink, #f5f5f7);
+  font-variant-numeric: tabular-nums;
+}
+.kgflyout-meta-item--alert .kgflyout-meta-num {
+  color: var(--danger, #ff453a);
+}
+
+/* Unused categories footer */
+.kgflyout-unused {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.10);
+}
+.kgflyout-unused-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-secondary, #a1a1a6);
+  margin-bottom: 8px;
+}
+.kgflyout-unused-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kgflyout-unused-tag {
+  font-size: 11px;
+  color: var(--ink-secondary, #a1a1a6);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-transform: capitalize;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kgflyout-trigger,
+  .kgflyout-trigger-caret,
+  .kgflyout-item {
+    transition: none;
+  }
+}

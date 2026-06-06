@@ -10,6 +10,7 @@ const {
   isAllowedEffort,
   normalizeProvider,
 } = require('./providers/registry');
+const { resolveAgentBackup } = require('./agent-failover');
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
 
@@ -48,10 +49,12 @@ function normalizeRoomAgentRuntimeSelections(rawSelections = {}) {
       : fallbackPreferredProvider;
     const mode = raw.mode === 'fallback' ? 'fallback' : 'single';
     const primaryModel = normalizeModelOverride(raw.model || raw.primaryModel || '');
-    const fallbackProvider = mode === 'fallback'
-      ? normalizeProvider(raw.fallbackProvider || getAlternateProvider(primaryProvider))
-      : getAlternateProvider(primaryProvider);
-    const fallbackModel = normalizeModelOverride(raw.fallbackModel || '');
+    // Automatic failover is always on: carry the operator's chosen backup
+    // unconditionally (no mode gating), defaulting to the neutral global
+    // alternate. (Shared, use-case-agnostic backup rule.)
+    const backup = resolveAgentBackup(primaryProvider, raw);
+    const fallbackProvider = backup.provider;
+    const fallbackModel = backup.model;
     const requestedEffort = typeof raw.reasoningEffort === 'string'
       ? raw.reasoningEffort.trim().toLowerCase()
       : '';
@@ -86,10 +89,12 @@ function resolveAgentRuntimePolicy(agent, selections = {}) {
   const primaryProvider = selection?.primaryProvider || fallbackPreferredProvider;
   const primaryModel = selection?.primaryModel || '';
   const mode = selection?.mode === 'fallback' ? 'fallback' : 'single';
-  const fallbackProvider = mode === 'fallback'
-    ? (selection?.fallbackProvider || getAlternateProvider(primaryProvider))
-    : getAlternateProvider(primaryProvider);
-  const fallbackModel = mode === 'fallback' ? (selection?.fallbackModel || '') : '';
+  // Automatic failover is always on: carry the operator's chosen backup
+  // unconditionally (no mode gating), defaulting to the neutral global alternate.
+  // (Shared, use-case-agnostic backup rule.)
+  const backup = resolveAgentBackup(primaryProvider, selection);
+  const fallbackProvider = backup.provider;
+  const fallbackModel = backup.model;
   const requestedEffort = selection?.reasoningEffort || '';
   const defaultEffort = DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort || 'high';
   const reasoningEffort = requestedEffort && isAllowedEffort(primaryProvider, requestedEffort)

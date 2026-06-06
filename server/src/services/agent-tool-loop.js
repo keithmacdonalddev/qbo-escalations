@@ -38,6 +38,7 @@ async function runAgentToolLoop({
     primaryModel: normalizeModelOverride(runtimePolicy?.primaryModel || null),
     fallbackProvider: normalizeProvider(runtimePolicy?.fallbackProvider || getAlternateProvider(primaryProvider)),
     fallbackModel: normalizeModelOverride(runtimePolicy?.fallbackModel || null),
+    autoFailover: runtimePolicy?.autoFailover === true,
   });
 
   const allowedTools = Array.isArray(allowedToolNames)
@@ -85,6 +86,7 @@ async function runAgentToolLoop({
         primaryModel: policy.primaryModel,
         fallbackProvider: policy.fallbackProvider,
         fallbackModel: policy.fallbackModel,
+        autoFailover: policy.autoFailover === true,
         reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
         serviceTier: runtimePolicy?.serviceTier || '',
         onThinkingChunk: (thinking, provider) => {

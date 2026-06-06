@@ -74,6 +74,7 @@ function createApp() {
   app.use('/api/conversations', conversationsRouter);
   app.use('/api/escalations', require('./routes/escalations'));
   app.use('/api/knowledge', require('./routes/knowledge'));
+  app.use('/api/operational-intelligence', require('./routes/operational-intelligence'));
   app.use('/api/playbook', require('./routes/playbook'));
   app.use('/api/agent-prompts', require('./routes/agent-prompts'));
   app.use('/api/agent-identities', require('./routes/agent-identities'));

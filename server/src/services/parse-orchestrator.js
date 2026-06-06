@@ -22,7 +22,13 @@ function normalizeParseMode(mode) {
 function resolveParsePolicy({ mode, primaryProvider, fallbackProvider }) {
   const resolvedMode = normalizeParseMode(mode);
   const resolvedPrimary = normalizeProvider(primaryProvider);
-  const resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
+  // Always resolve a DISTINCT backup so automatic failover can fire (matches the
+  // chat substrate). The neutral global alternate is used when none is
+  // configured; a backup that collapses to the primary is re-derived.
+  let resolvedFallback = normalizeProvider(fallbackProvider || getAlternateProvider(resolvedPrimary));
+  if (resolvedFallback === resolvedPrimary) {
+    resolvedFallback = normalizeProvider(getAlternateProvider(resolvedPrimary));
+  }
   return {
     mode: resolvedMode,
     primaryProvider: resolvedPrimary,
@@ -354,7 +360,11 @@ async function parseWithPolicy({
     throw err;
   }
 
-  const sequence = policy.mode === 'fallback' && policy.fallbackProvider !== policy.primaryProvider
+  // Automatic failover is ALWAYS ON for parse too: a distinct backup is always
+  // attempted when the primary fails, regardless of "mode" (parallel is handled
+  // above). The regex last-resort fallback below still applies after both
+  // provider attempts fail.
+  const sequence = policy.fallbackProvider !== policy.primaryProvider
     ? [policy.primaryProvider, policy.fallbackProvider]
     : [policy.primaryProvider];
   const attempts = [];

@@ -310,7 +310,12 @@ await t.test('parallel mode threads usage into meta.candidates', async () => {
 });
 
 await t.test('parse error with null err does not crash — safe err._usage dereference', async () => {
+  // Always-on failover: single mode also attempts the distinct backup, so we
+  // make BOTH providers fail to keep the orchestration terminal.
   claude.parseEscalation = async () => {
+    throw null;
+  };
+  codex.parseEscalation = async () => {
     throw null;
   };
 
@@ -329,8 +334,15 @@ await t.test('parse error with null err does not crash — safe err._usage deref
 });
 
 await t.test('throws PARSE_FAILED when providers fail and there is no regex fallback path', async () => {
+  // Both the primary and the always-on backup fail; no text means no regex
+  // fallback, so the parse rejects.
   claude.parseEscalation = async () => {
     const err = new Error('claude failed');
+    err.code = 'PARSE_PROVIDER_FAILED';
+    throw err;
+  };
+  codex.parseEscalation = async () => {
+    const err = new Error('codex failed');
     err.code = 'PARSE_PROVIDER_FAILED';
     throw err;
   };

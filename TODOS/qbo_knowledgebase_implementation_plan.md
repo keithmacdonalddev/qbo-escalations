@@ -24,6 +24,27 @@ This plan is intentionally grounded in the current app. The existing
 `KnowledgeCandidate` flow is the seed. The implementation should evolve that
 flow instead of creating a disconnected second knowledge system.
 
+## Platform Role
+
+The knowledgebase is not the product, and it is not the user's destination.
+It is the first domain-specific shared governed memory layer for expert agents
+and human reviewers.
+
+In the current QBO module, it helps the agent team reuse lessons from resolved
+escalations safely: what worked, what did not work, what evidence supports the
+guidance, what scope it applies to, whether it is trusted, and what a human
+reviewer still needs to validate.
+
+In the larger platform, the same pattern should apply to future work and life
+domains. The reusable unit is not "a KB article"; it is reviewed operational
+memory with evidence, scope, trust state, allowed use, feedback, deprecation,
+and human validation.
+
+Success should not be measured as "we created a KB page." Success means the
+coordinated expert-agent team can support the user faster and more safely
+because reviewed memory is available at the right moment, with the right
+limits.
+
 ## Implementation Status
 
 ### 2026-06-02
@@ -188,8 +209,8 @@ Remaining deployment integration note:
 
 ## Product Direction
 
-The QBO knowledgebase should become the trusted memory of the QBO escalation
-workflow.
+The QBO knowledgebase is the first domain-specific trusted memory layer for the
+QBO escalation workflow.
 
 It should help the user answer:
 

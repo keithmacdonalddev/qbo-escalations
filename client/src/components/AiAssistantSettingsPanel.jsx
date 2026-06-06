@@ -1,70 +1,20 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useToast } from '../hooks/useToast.jsx';
-import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
-import { apiFetchJson } from '../api/http.js';
 import { DEFAULT_AI_SETTINGS } from '../hooks/useAiSettings.js';
-import {
-  DEFAULT_REASONING_EFFORT,
-  PROVIDER_OPTIONS,
-  getReasoningEffortOptions,
-  PROVIDER_FAMILY,
-  normalizeProvider,
-} from '../lib/providerCatalog.js';
-import {
-  SURFACE_DEFAULTS_APPLIED_EVENT,
-  normalizeSurfaceFallback,
-} from '../lib/surfacePreferences.js';
-import {
-  AGENT_RUNTIME_DEFINITIONS as AGENTS,
-  dispatchAgentRuntimeDefaultsApplied,
-  readAgentRuntimeState,
-  writeAgentRuntimeState,
-} from '../lib/agentRuntimeSettings.js';
 import { syncAiAssistantDefaultsToServer } from '../lib/aiAssistantPreferences.js';
-import {
-  IMAGE_PARSER_MODEL_SUGGESTIONS,
-  IMAGE_PARSER_PROVIDER_OPTIONS,
-  getImageParserModelPlaceholder,
-  getImageParserReasoningEffortOptions,
-} from '../lib/imageParserCatalog.js';
-import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
 import { staggerChild, staggerContainer, transitions } from '../utils/motion.js';
 
-const AGENT_ICONS = {
-  chat: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
-    </svg>
-  ),
-  workspace: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="3" width="20" height="14" rx="2" />
-      <path d="M8 21h8" /><path d="M12 17v4" />
-    </svg>
-  ),
-  copilot: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-    </svg>
-  ),
-  'image-parser': (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="3" y="3" width="18" height="18" rx="2" />
-      <circle cx="9" cy="9" r="2" />
-      <path d="m21 15-5-5L5 21" />
-    </svg>
-  ),
-};
-
 // ---------------------------------------------------------------------------
-// Image parser status check
+// NOTE: Per-agent provider / model / fallback editing lives ONLY on the Agents
+// profile page (AgentsView). That page is the single source of truth — it writes
+// the authoritative `AgentIdentity.runtime` store that the chat/triage/INV legs
+// actually read. The duplicate per-agent cards that used to live here wrote a
+// SEPARATE `UserPreferences` store that nothing on the runtime path consumed, so
+// edits made here silently never took effect. They have been removed. This panel
+// now owns only the cross-cutting AI settings (cost guardrails, context /
+// retrieval budgets, memory policy, debug telemetry).
 // ---------------------------------------------------------------------------
-const IMAGE_PARSER_PROVIDERS = [
-  { value: '', label: 'Disabled (use existing transcription)' },
-  ...IMAGE_PARSER_PROVIDER_OPTIONS,
-];
-const IMAGE_PARSER_MODEL_LIST_ID = 'agent-card-image-parser-model-list';
 
 // ---------------------------------------------------------------------------
 // Utility / icons
@@ -139,498 +89,6 @@ function parseCommaList(value) {
 }
 
 // ---------------------------------------------------------------------------
-// AgentSegmented — sliding thumb segmented control
-// ---------------------------------------------------------------------------
-function AgentSegmented({ options, value, onChange, agentColor, small = false }) {
-  const containerRef = useRef(null);
-  const [thumbStyle, setThumbStyle] = useState({ left: 0, width: 0, opacity: 0 });
-
-  useLayoutEffect(() => {
-    if (!containerRef.current) return;
-    const idx = options.findIndex((o) => (typeof o === 'object' ? o.value : o) === value);
-    const btns = containerRef.current.querySelectorAll('.agent-seg-btn');
-    if (btns[idx]) {
-      const btn = btns[idx];
-      setThumbStyle({
-        left: btn.offsetLeft,
-        width: btn.offsetWidth,
-        opacity: 1,
-      });
-    }
-  }, [value, options]);
-
-  return (
-    <div
-      className={`agent-segmented${small ? ' agent-segmented--small' : ''}`}
-      ref={containerRef}
-      style={{ '--thumb-color': agentColor }}
-    >
-      <span
-        className="agent-seg-thumb"
-        style={{
-          transform: `translateX(${thumbStyle.left}px)`,
-          width: thumbStyle.width,
-          opacity: thumbStyle.opacity,
-        }}
-      />
-      {options.map((opt) => {
-        const optValue = typeof opt === 'object' ? opt.value : opt;
-        const optLabel = typeof opt === 'object' ? opt.label : (opt === 'single' ? 'Single' : opt === 'fallback' ? 'Fallback' : opt);
-        const isActive = optValue === value;
-        return (
-          <button
-            key={optValue}
-            type="button"
-            className={`agent-seg-btn${isActive ? ' is-active' : ''}`}
-            onClick={() => onChange(optValue)}
-          >
-            {optLabel}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-function TestStatePanel({ state, color, idleCopy }) {
-  const status = state?.status || 'idle';
-  const message = state?.message || idleCopy;
-  const detail = state?.detail || '';
-
-  return (
-    <AnimatePresence mode="wait" initial={false}>
-      <motion.div
-        key={status}
-        className={`agent-card-test-panel is-${status}`}
-        style={{ '--agent-color': color }}
-        initial={{ opacity: 0, y: 6, scale: 0.985 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
-        exit={{ opacity: 0, y: -6, scale: 0.985 }}
-        transition={transitions.springGentle}
-      >
-        <div className="agent-card-test-panel-head">
-          <div className={`agent-card-test-indicator is-${status}`}>
-            {status === 'pass' ? '✓' : status === 'fail' ? '!' : null}
-          </div>
-          <div className="agent-card-test-copy">
-            <div className="agent-card-test-title">
-              {status === 'testing'
-                ? 'Running Diagnostic'
-                : status === 'pass'
-                  ? 'Model Online'
-                  : status === 'fail'
-                    ? 'Connection Failed'
-                    : 'Ready'}
-            </div>
-            <div className="agent-card-test-message">{message}</div>
-          </div>
-        </div>
-        {status === 'testing' ? (
-          <div className="agent-card-test-progress" aria-hidden="true">
-            <span />
-          </div>
-        ) : null}
-        {detail ? (
-          <div className="agent-card-test-detail">{detail}</div>
-        ) : null}
-      </motion.div>
-    </AnimatePresence>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// EffortArc — 270° SVG arc gauge overlaid on agent icon
-// ---------------------------------------------------------------------------
-function EffortArc({ effort, color }) {
-  const LEVELS = { low: 0.25, medium: 0.50, high: 0.75, xhigh: 1.0 };
-  const pct = LEVELS[effort] ?? 0.75;
-  const r = 13;
-  const cx = 18;
-  const cy = 18;
-  const circumference = 2 * Math.PI * r;
-  // Arc spans 270° (0.75 of circumference), starts at 135° (bottom-left)
-  const arcLength = circumference * 0.75;
-  const trackDash = `${arcLength} ${circumference}`;
-  const fillLength = arcLength * pct;
-  const fillDash = `${fillLength} ${circumference - fillLength}`;
-
-  return (
-    <svg
-      className="agent-effort-arc"
-      width="36"
-      height="36"
-      viewBox="0 0 36 36"
-      style={{ '--arc-color': color }}
-      aria-hidden="true"
-    >
-      {/* Track (background arc) */}
-      <circle
-        cx={cx} cy={cy} r={r}
-        fill="none"
-        stroke="rgba(255,255,255,0.08)"
-        strokeWidth="2.5"
-        strokeDasharray={trackDash}
-        strokeLinecap="round"
-        strokeDashoffset="0"
-        transform={`rotate(135 ${cx} ${cy})`}
-      />
-      {/* Fill (current level) */}
-      <circle
-        cx={cx} cy={cy} r={r}
-        fill="none"
-        stroke={color}
-        strokeWidth="2.5"
-        strokeDasharray={fillDash}
-        strokeLinecap="round"
-        strokeDashoffset="0"
-        transform={`rotate(135 ${cx} ${cy})`}
-        style={{
-          transition: 'stroke-dasharray 450ms cubic-bezier(0.32, 0.72, 0, 1)',
-          filter: `drop-shadow(0 0 3px ${color}88)`,
-        }}
-      />
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// AgentCard
-// ---------------------------------------------------------------------------
-function AgentCard({ agent, draft, onChange, color, testState, onTest }) {
-  const shouldReduceMotion = useReducedMotion();
-  const { providerStatus } = useProviderKeyStatus();
-  const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
-  const effortOptions = useMemo(
-    () => getReasoningEffortOptions(PROVIDER_FAMILY[draft.provider] || 'claude'),
-    [draft.provider]
-  );
-  const imageParserEffortOptions = useMemo(
-    () => getImageParserReasoningEffortOptions(draft.provider),
-    [draft.provider]
-  );
-
-  const EFFORT_INTENSITY = { none: 0.02, low: 0.04, medium: 0.12, high: 0.22, xhigh: 0.38 };
-  const EFFORT_PULSE_SPEED = { none: '5s', low: '4s', medium: '2.5s', high: '1.8s', xhigh: '1.1s' };
-  const effortIntensity = EFFORT_INTENSITY[draft.reasoningEffort] ?? 0.12;
-  const effortSpeed = EFFORT_PULSE_SPEED[draft.reasoningEffort] ?? '2.5s';
-
-  const handleMouseMove = (e) => {
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = (e.clientX - cx) / (rect.width / 2);
-    const dy = (e.clientY - cy) / (rect.height / 2);
-    const rotY =  dx * 7;
-    const rotX = -dy * 4;
-    const shineX = ((e.clientX - rect.left) / rect.width) * 100;
-    const shineY = ((e.clientY - rect.top) / rect.height) * 100;
-
-    el.style.setProperty('--rot-x', `${rotX}deg`);
-    el.style.setProperty('--rot-y', `${rotY}deg`);
-    el.style.setProperty('--shine-x', `${shineX}%`);
-    el.style.setProperty('--shine-y', `${shineY}%`);
-    el.style.setProperty('--mouse-x', `${e.clientX - rect.left}px`);
-    el.style.setProperty('--mouse-y', `${e.clientY - rect.top}px`);
-    el.style.transition = 'transform 80ms ease-out, box-shadow 80ms ease-out';
-  };
-
-  const handleMouseLeave = (e) => {
-    const el = e.currentTarget;
-    el.style.setProperty('--rot-x', '0deg');
-    el.style.setProperty('--rot-y', '0deg');
-    el.style.setProperty('--shine-x', '50%');
-    el.style.setProperty('--shine-y', '50%');
-    el.style.setProperty('--mouse-x', '-999px');
-    el.style.setProperty('--mouse-y', '-999px');
-    el.style.transition = 'transform 500ms cubic-bezier(0.32,0.72,0,1), box-shadow 300ms ease';
-  };
-
-  // Image Parser: 3-zone layout with provider, model override, and provider-specific effort.
-  if (agent.kind === 'image-parser') {
-    const modelSuggestions = draft.provider
-      ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((o) => o.provider === draft.provider)
-      : IMAGE_PARSER_MODEL_SUGGESTIONS;
-    const imageEffort = draft.reasoningEffort || 'medium';
-
-    return (
-      <div
-        className="agent-card"
-        data-agent={agent.id}
-        style={{
-          '--agent-color': color,
-          '--mouse-x': '-999px',
-          '--mouse-y': '-999px',
-          '--rot-x': '0deg',
-          '--rot-y': '0deg',
-          '--shine-x': '50%',
-          '--shine-y': '50%',
-          '--effort-intensity': EFFORT_INTENSITY[imageEffort] ?? 0.12,
-          '--effort-speed': EFFORT_PULSE_SPEED[imageEffort] ?? '2.5s',
-        }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
-      >
-        {/* Zone 1: Identity */}
-        <div className="agent-card-identity">
-            <div className="agent-card-icon-wrap">
-              <div className="agent-card-icon">{AGENT_ICONS[agent.id]}</div>
-            <EffortArc effort={imageEffort} color={color} />
-          </div>
-          <div className="agent-card-meta">
-            <div className="agent-card-name">{agent.label}</div>
-            <div className="agent-card-desc">{agent.description}</div>
-          </div>
-        </div>
-
-        <div className="agent-card-main">
-          <div className="agent-card-body agent-card-body--single">
-            <div className="agent-card-models">
-              <div className="agent-card-field">
-                <label className="agent-card-field-label">Provider</label>
-                <select
-                  className="agent-card-select"
-                  value={draft.provider}
-                  onChange={(e) => onChange({
-                    ...draft,
-                    provider: e.target.value,
-                    model: '',
-                    reasoningEffort: '',
-                  })}
-                >
-                  {IMAGE_PARSER_PROVIDERS.map((opt) => (
-                    <option
-                      key={opt.value}
-                      value={opt.value}
-                      disabled={isMissingKey(opt.value)}
-                    >
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="agent-card-field">
-                <label className="agent-card-field-label">Model Override</label>
-                <input
-                  className="agent-card-input"
-                  type="text"
-                  value={draft.model}
-                  placeholder={getImageParserModelPlaceholder(draft.provider)}
-                  list={IMAGE_PARSER_MODEL_LIST_ID}
-                  onChange={(e) => onChange({ ...draft, model: e.target.value })}
-                  disabled={isMissingKey(draft.provider)}
-                />
-                <datalist id={IMAGE_PARSER_MODEL_LIST_ID}>
-                  {modelSuggestions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </datalist>
-              </div>
-
-              {imageParserEffortOptions.length > 0 && (
-                <div className="agent-card-field">
-                  <label className="agent-card-field-label">Reasoning Effort</label>
-                  <select
-                    className="agent-card-select"
-                    value={draft.reasoningEffort || ''}
-                    onChange={(e) => onChange({ ...draft, reasoningEffort: e.target.value })}
-                  >
-                    <option value="">Default</option>
-                    {imageParserEffortOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-          </div>
-
-        </div>
-
-        {/* Zone 3: Connection Test footer */}
-        <div className="agent-card-footer">
-          <div className="agent-card-test-action">
-            <span className="agent-card-field-label">Connection Test</span>
-            <button
-              type="button"
-              className="agent-card-test-btn"
-              disabled={testState?.status === 'testing'}
-              onClick={() => onTest(agent)}
-            >
-              Test Model
-            </button>
-          </div>
-          <div className="agent-card-test-surface">
-            <TestStatePanel
-              state={testState}
-              color={color}
-              idleCopy="Run a live handshake with the configured image parser model."
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  const showFallback = draft.mode === 'fallback';
-
-  return (
-    <div
-      className="agent-card"
-      data-agent={agent.id}
-      style={{
-        '--agent-color': color,
-        '--mouse-x': '-999px',
-        '--mouse-y': '-999px',
-        '--rot-x': '0deg',
-        '--rot-y': '0deg',
-        '--shine-x': '50%',
-        '--shine-y': '50%',
-        '--effort-intensity': effortIntensity,
-        '--effort-speed': effortSpeed,
-      }}
-      onMouseMove={handleMouseMove}
-      onMouseLeave={handleMouseLeave}
-    >
-      {/* Zone 1: Identity */}
-      <div className="agent-card-identity">
-        <div className="agent-card-icon-wrap">
-          <div className="agent-card-icon">{AGENT_ICONS[agent.id]}</div>
-          <EffortArc effort={draft.reasoningEffort} color={color} />
-        </div>
-        <div className="agent-card-meta">
-          <div className="agent-card-name">{agent.label}</div>
-          <div className="agent-card-desc">{agent.description}</div>
-        </div>
-      </div>
-
-      <div className="agent-card-main">
-        <div className="agent-card-body">
-          <div className="agent-card-models">
-            <div className="agent-card-field">
-              <label className="agent-card-field-label">Provider</label>
-                <select
-                  className="agent-card-select"
-                  value={draft.provider}
-                  onChange={(e) => {
-                    const next = normalizeProvider(e.target.value);
-                    const nextFallback = normalizeSurfaceFallback(next, draft.fallbackProvider);
-                      onChange({
-                        ...draft,
-                        provider: next,
-                        fallbackProvider: nextFallback,
-                        model: '',
-                        fallbackModel: nextFallback === draft.fallbackProvider
-                          ? draft.fallbackModel
-                          : '',
-                      });
-                    }}
-                  >
-                  {PROVIDER_OPTIONS.map((opt) => (
-                    <option
-                      key={opt.value}
-                      value={opt.value}
-                      disabled={isMissingKey(opt.value)}
-                    >
-                      {opt.label}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            {/* Fallback model — animated reveal when Fallback mode active */}
-            <AnimatePresence initial={false}>
-              {showFallback && (
-                <motion.div
-                  key="fallback"
-                  className="agent-card-field agent-card-field--fallback"
-                  initial={shouldReduceMotion ? false : { opacity: 0, height: 0, overflow: 'hidden' }}
-                  animate={shouldReduceMotion ? {} : { opacity: 1, height: 'auto', overflow: 'visible' }}
-                  exit={shouldReduceMotion ? {} : { opacity: 0, height: 0, overflow: 'hidden' }}
-                  transition={transitions.springGentle}
-                >
-                  <label className="agent-card-field-label">Fallback Provider</label>
-                  <select
-                    className="agent-card-select"
-                    value={draft.fallbackProvider}
-                    onChange={(e) => {
-                      const next = normalizeProvider(e.target.value);
-                        onChange({
-                          ...draft,
-                          fallbackProvider: next,
-                          fallbackModel: '',
-                        });
-                      }}
-                    >
-                    {PROVIDER_OPTIONS.filter((opt) => opt.value !== draft.provider).map((opt) => (
-                      <option
-                        key={opt.value}
-                        value={opt.value}
-                        disabled={isMissingKey(opt.value)}
-                      >
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="agent-card-controls">
-            {agent.supportsModes && (
-              <div className="agent-card-field">
-                <label className="agent-card-field-label">Mode</label>
-                <AgentSegmented
-                  options={agent.supportedModes}
-                  value={draft.mode}
-                  onChange={(val) => onChange({ ...draft, mode: val })}
-                  agentColor={color}
-                />
-              </div>
-            )}
-
-            <div className="agent-card-field">
-              <AgentSegmented
-                options={effortOptions}
-                value={draft.reasoningEffort}
-                onChange={(val) => onChange({ ...draft, reasoningEffort: val })}
-                agentColor={color}
-                small
-              />
-            </div>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Connection Test footer */}
-      <div className="agent-card-footer">
-        <div className="agent-card-test-action">
-          <span className="agent-card-field-label">Connection Test</span>
-          <button
-            type="button"
-            className="agent-card-test-btn"
-            disabled={testState?.status === 'testing'}
-            onClick={() => onTest(agent)}
-          >
-            Test Model
-          </button>
-        </div>
-        <div className="agent-card-test-surface">
-          <TestStatePanel
-            state={testState}
-            color={color}
-            idleCopy="Verify the selected runtime is reachable and responding."
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
@@ -639,20 +97,11 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
   const aiSettings = aiProps?.aiSettings || DEFAULT_AI_SETTINGS;
   const setAiSettings = aiProps?.setAiSettings;
 
-  // Per-agent draft state — initialised from localStorage
-  const [agentDrafts, setAgentDrafts] = useState(() =>
-    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentRuntimeState(agent)]))
-  );
-  const [savedAgentState, setSavedAgentState] = useState(() =>
-    Object.fromEntries(AGENTS.map((agent) => [agent.id, readAgentRuntimeState(agent)]))
-  );
-
   // Global settings draft (context / memory / guardrails)
   const [draft, setDraft] = useState(() => cloneSettings(aiSettings));
   const [savedGlobalState, setSavedGlobalState] = useState(() => cloneSettings(aiSettings));
   const [saveState, setSaveState] = useState('idle');
   const [openSections, setOpenSections] = useState({ cost: false, context: false, memory: false });
-  const [testResults, setTestResults] = useState({});
 
   // Sync global draft when aiSettings prop changes (e.g. reset from outside)
   useEffect(() => {
@@ -660,26 +109,6 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
     setDraft(next);
     setSavedGlobalState(next);
   }, [aiSettings]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-
-    const handleDefaultsApplied = (event) => {
-      const surfaces = event?.detail?.surfaces;
-      if (!surfaces || typeof surfaces !== 'object') return;
-      const nextAgentState = Object.fromEntries(
-        AGENTS.map((agent) => [
-          agent.id,
-          surfaces[agent.id] || readAgentRuntimeState(agent),
-        ])
-      );
-      setAgentDrafts(nextAgentState);
-      setSavedAgentState(nextAgentState);
-    };
-
-    window.addEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
-    return () => window.removeEventListener(SURFACE_DEFAULTS_APPLIED_EVENT, handleDefaultsApplied);
-  }, []);
 
   // Reset save state timer after success — 1400ms matches the Dynamic Island hold duration
   useEffect(() => {
@@ -693,20 +122,11 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
     liveRegionRef.current.textContent = message;
   }, [liveRegionRef]);
 
-  // Dirty check — true if any agent draft or global draft differs from saved
-  const isDirty = useMemo(() => {
-    const agentChanged = AGENTS.some((agent) => {
-      const current = agentDrafts[agent.id];
-      const saved = savedAgentState[agent.id];
-      return JSON.stringify(current) !== JSON.stringify(saved);
-    });
-    const globalChanged = JSON.stringify(draft) !== JSON.stringify(savedGlobalState);
-    return agentChanged || globalChanged;
-  }, [agentDrafts, savedAgentState, draft, savedGlobalState]);
-
-  const handleAgentChange = useCallback((agentId, nextState) => {
-    setAgentDrafts((prev) => ({ ...prev, [agentId]: nextState }));
-  }, []);
+  // Dirty check — true if the global draft differs from saved
+  const isDirty = useMemo(
+    () => JSON.stringify(draft) !== JSON.stringify(savedGlobalState),
+    [draft, savedGlobalState]
+  );
 
   const updateField = useCallback((path, value) => {
     setDraft((previous) => {
@@ -721,36 +141,24 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
   }, [updateField]);
 
   const handleDiscard = useCallback(() => {
-    setAgentDrafts(Object.fromEntries(
-      AGENTS.map((agent) => [agent.id, { ...savedAgentState[agent.id] }])
-    ));
     setDraft(cloneSettings(savedGlobalState));
     setSaveState('idle');
     announce('Changes discarded.');
-  }, [savedAgentState, savedGlobalState, announce]);
+  }, [savedGlobalState, announce]);
 
   const handleSave = useCallback(async () => {
     setSaveState('saving');
     try {
-      // Persist per-agent state to localStorage
-      const newSaved = Object.fromEntries(
-        AGENTS.map((agent) => [
-          agent.id,
-          writeAgentRuntimeState(agent, agentDrafts[agent.id]),
-        ])
-      );
-
-      dispatchAgentRuntimeDefaultsApplied(newSaved);
-
-      // Persist global settings
+      // Persist global settings only. Per-agent runtime is owned by AgentsView
+      // (the authoritative AgentIdentity.runtime store), so we no longer send an
+      // `agents` map from here — doing so would write the orphaned
+      // UserPreferences agent store the runtime path ignores.
       const savedSettings = setAiSettings ? setAiSettings(draft) : draft;
 
       await syncAiAssistantDefaultsToServer({
         settings: savedSettings,
-        agents: newSaved,
       });
 
-      setSavedAgentState(newSaved);
       setSavedGlobalState(cloneSettings(savedSettings));
       setSaveState('success');
       const msg = 'AI settings saved.';
@@ -762,54 +170,7 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
       announce(msg);
       toast.error(msg, { duration: 5000 });
     }
-  }, [agentDrafts, draft, setAiSettings, announce, toast]);
-
-  const handleTestAgent = useCallback(async (agent) => {
-    const draftState = agentDrafts[agent.id];
-    const provider = draftState?.provider || '';
-    const model = agent.kind === 'image-parser' ? (draftState?.model || '') : '';
-    const reasoningEffort = agent.kind === 'image-parser'
-      ? (draftState?.reasoningEffort || 'medium')
-      : (draftState?.reasoningEffort || DEFAULT_REASONING_EFFORT);
-    setTestResults((current) => ({
-      ...current,
-      [agent.id]: { status: 'testing', message: 'Running live model check...' },
-    }));
-    try {
-      const data = await apiFetchJson('/api/agents/test-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider,
-          model,
-          reasoningEffort,
-        }),
-      }, 'Model test failed');
-      const modelLabel = data.model || provider;
-      const latencyMs = Math.round(Number(data.latencyMs) || 0);
-      const message = `Passed in ${latencyMs}ms using ${modelLabel}.`;
-      setTestResults((current) => ({
-        ...current,
-        [agent.id]: {
-          status: 'pass',
-          message,
-          detail: data.output ? `Probe response: ${data.output}` : '',
-        },
-      }));
-      announce(`${agent.label} test passed.`);
-    } catch (err) {
-      const message = err?.message || 'Model test failed.';
-      setTestResults((current) => ({
-        ...current,
-        [agent.id]: {
-          status: 'fail',
-          message,
-          detail: err?.detail || '',
-        },
-      }));
-      announce(`${agent.label} test failed.`);
-    }
-  }, [agentDrafts, announce]);
+  }, [draft, setAiSettings, announce, toast]);
 
   // Accordion section summaries
   const costSummary = [
@@ -845,29 +206,14 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
       {/* ── Header ── */}
       <motion.div className="agent-settings-header" {...itemMotion}>
         <div className="agent-settings-header-text">
-          <h2 className="agent-settings-title">AI Agents</h2>
-          <p className="agent-settings-subtitle">Configure each agent's model independently. Changes take effect on next request.</p>
+          <h2 className="agent-settings-title">AI Settings</h2>
+          <p className="agent-settings-subtitle">
+            Cross-cutting cost, context, memory, and debug controls for the AI agents.
+            Each agent&apos;s provider and model are configured on its profile in the
+            Agents page.
+          </p>
         </div>
       </motion.div>
-
-      {/* ── 2×2 Agent Cards ── */}
-      <motion.div className="agent-cards-grid" {...panelMotion}>
-        {AGENTS.map((agent) => (
-          <motion.div key={agent.id} {...itemMotion}>
-            <AgentCard
-              agent={agent}
-              draft={agentDrafts[agent.id]}
-              onChange={(next) => handleAgentChange(agent.id, next)}
-              color={agent.color}
-              testState={testResults[agent.id]}
-              onTest={handleTestAgent}
-            />
-          </motion.div>
-        ))}
-      </motion.div>
-
-      {/* ── Divider ── */}
-      <div className="agent-settings-divider" />
 
       {/* ── Accordions ── */}
       <motion.div className="agent-accordion-list" {...panelMotion}>

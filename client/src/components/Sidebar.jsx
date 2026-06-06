@@ -7,9 +7,9 @@ import { transitions } from '../utils/motion.js';
 const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/sessions', label: 'Sessions', short: 'Sess', icon: IconSessions },
-  { hash: '#/dashboard', label: 'Dashboard', short: 'Dash', icon: IconDashboard },
+  { hash: '#/escalations', label: 'Escalations', short: 'Esc', icon: IconDashboard },
   { hash: '#/attention', label: 'Attention', short: 'Attn', icon: IconBell },
-  { hash: '#/knowledge', label: 'Knowledge', short: 'KB', icon: IconKnowledge },
+  { hash: '#/knowledge', label: 'Knowledge', short: 'Know', icon: IconKnowledge },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
   { hash: '#/playbook', label: 'Playbook', short: 'Book', icon: IconBook },
@@ -127,6 +127,8 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
               href={item.hash}
               className={`sidebar-nav-item${isActive ? ' is-active' : ''}`}
               onClick={onClose}
+              aria-label={item.label}
+              title={item.label}
               style={{ position: 'relative' }}
             >
               {isActive && (

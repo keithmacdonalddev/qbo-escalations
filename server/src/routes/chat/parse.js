@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const Escalation = require('../../models/Escalation');
 const { createRateLimiter } = require('../../middleware/rate-limit');
 const { isValidProvider, getProvider } = require('../../services/providers/registry');
-const { parseWithPolicy } = require('../../services/parse-orchestrator');
+const { parseWithPolicy, resolveParsePolicy } = require('../../services/parse-orchestrator');
 const {
   createAiOperation,
   updateAiOperation,
@@ -135,6 +135,16 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
   const selectedProvider = primaryProvider || provider || DEFAULT_PROVIDER;
   const selectedProviderMeta = getProvider(selectedProvider);
   const fallbackProviderMeta = fallbackProvider ? getProvider(fallbackProvider) : null;
+  // Failover is always on: the parse engine runs [primary, distinct alternate]
+  // even when the request omits fallbackProvider. Resolve that same backup here
+  // (via the orchestrator's own policy resolver) so observability — the runtime
+  // operation's provider list and the trace's requested/resolved fields —
+  // reports what actually runs instead of an often-undefined request value.
+  const resolvedFallbackProvider = resolveParsePolicy({
+    mode: resolvedMode,
+    primaryProvider: selectedProvider,
+    fallbackProvider,
+  }).fallbackProvider;
   const requestedTimeoutMs = Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
     : Math.max(
@@ -155,7 +165,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
     promptPreview: text || '[image parse]',
     hasImages: Boolean(image),
     messageCount: text ? 1 : 0,
-    providers: [selectedProvider, fallbackProvider].filter(Boolean),
+    providers: [selectedProvider, resolvedFallbackProvider].filter(Boolean),
   });
   const parseRuntimeOperationId = parseRuntimeOperation.id;
   const trace = await createTrace({
@@ -179,7 +189,7 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
       reasoningEffort,
       timeoutMs,
       primaryProvider: selectedProvider,
-      fallbackProvider,
+      fallbackProvider: resolvedFallbackProvider,
     },
   }).catch(() => null);
   await appendTraceEvent(trace?._id, {

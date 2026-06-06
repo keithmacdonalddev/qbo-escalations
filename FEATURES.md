@@ -5,6 +5,14 @@
 -find way to have in app claude monitor chrome dev tools for all issues and act immediately
 ** ------------------ End User Notes ------------------ **
 
+# Product North-Star Note
+
+This backlog is for the broader operational intelligence platform, not only the
+current QBO escalation module. QBO escalation support is the first domain and
+proving ground. New feature ideas should strengthen the user's ability to handle
+complex work and life situations with expert AI agents, shared evidence,
+governed memory, workflows, actions, and human validation.
+
 # Unique Special Feature Ideas & Suggestions
 
 ---

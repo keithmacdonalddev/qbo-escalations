@@ -1,4 +1,12 @@
-Agents Page
+# Agents Page
+
+The Agents page should be mission control for the specialist agent team inside
+the operational intelligence platform.
+
+It is not a prompt gallery and not a separate product area. It should help the
+user understand which agents exist, what each one is responsible for, which
+tools and memories they can use, how they hand work to each other, what changed
+recently, and what needs human review before the user trusts the system.
 
 1. Real Agent Mission Control
    The index should not just be a gallery. It should answer: what agents exist, which are healthy, which are stale, which are risky, and which need your

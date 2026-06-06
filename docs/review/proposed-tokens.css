@@ -1,0 +1,140 @@
+/* ============================================================================
+   PROPOSED: single source-of-truth design tokens  (proposal — not yet wired)
+   ----------------------------------------------------------------------------
+   Replaces the competing :root blocks now spread across 7 files and the
+   3,196 `!important` overrides in overhaul.css.
+
+   Values below are the ones that ACTUALLY RENDER today (the "Apple" theme that
+   overhaul.css forces), captured from the live DOM — so adopting this changes
+   almost nothing visually. The point is to make it the ONLY definition, with
+   zero !important, plus three real fixes flagged inline.
+
+   HOW TO ADOPT (incremental, low-risk):
+     1. Import this first in main.jsx (before every other stylesheet).
+     2. Delete the `:root {…}` token blocks from App.css, overhaul.css,
+        design-system.css, design-system-v2.css, depth-effects.css,
+        console-density.css, themes/atmospherics.css.
+     3. Remove `!important` from overhaul.css in waves; nothing should regress
+        because the values here match what already wins.
+     4. Collapse the 19-palette system to 2–3 themes by swapping ONLY the
+        values inside [data-theme="…"] blocks like the one at the bottom.
+   ============================================================================ */
+
+:root {
+  /* ---- Surfaces (dark theme, currently active) ------------------------- */
+  --bg:            #1c1c1e;
+  --bg-sunken:     #151517;   /* FIX: was identical to --bg, so "sunken" had no depth */
+  --bg-sidebar:    #1c1c1e;
+  --bg-raised:     #2c2c2e;
+  --bg-elevated:   #3a3a3c;
+  --bg-floating:   #48484a;
+
+  /* ---- Hairlines ------------------------------------------------------- */
+  --line:          rgba(84, 84, 88, 0.35);
+  --line-subtle:   rgba(84, 84, 88, 0.20);
+  --line-strong:   rgba(84, 84, 88, 0.55);
+
+  /* ---- Text ------------------------------------------------------------ */
+  --ink:           #f5f5f7;   /* 16.8:1 on --bg  */
+  --ink-secondary: #a1a1a6;   /*  6.6:1 on --bg — OK */
+  --ink-tertiary:  #8e8e93;   /* FIX: was #636366 (2.8:1, fails WCAG). #8e8e93 = 5.2:1 */
+  --ink-quaternary:#636366;   /* the OLD tertiary — DECORATIVE / non-text use ONLY (icons, 1px rules) */
+
+  /* ---- Accent ---------------------------------------------------------- */
+  --accent:         #0a84ff;  /* 4.66:1 on --bg — passes AA for normal text */
+  --accent-hover:   #409cff;
+  --accent-emphasis:#409cff;
+  --accent-subtle:  rgba(10, 132, 255, 0.12);
+  --accent-muted:   rgba(10, 132, 255, 0.06);
+  --accent-border:  rgba(10, 132, 255, 0.30);
+
+  /* ---- Semantic -------------------------------------------------------- */
+  --success:        #30d158;
+  --success-subtle: rgba(48, 209, 88, 0.10);
+  --warning:        #ffd60a;
+  --warning-subtle: rgba(255, 214, 10, 0.10);
+  --danger:         #ff453a;
+  --danger-subtle:  rgba(255, 69, 58, 0.10);
+  --info:           #0a84ff;
+
+  /* NOTE: removed --tesla-red, --tesla-glow, and the purple --premium-gradient.
+     Mixing Apple blue + Tesla red + a purple gradient in one palette is why the
+     UI reads as three aesthetics stitched together. Keep one accent family. */
+
+  /* ---- Type families (FIX: pick ONE sans — was Inter vs SF Pro competing) */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+  /* ---- Type scale (px) ------------------------------------------------- */
+  --text-xs:  11px;   /* micro-labels ONLY — never body text */
+  --text-sm:  13px;
+  --text-base:14px;
+  --text-md:  15px;
+  --text-lg:  18px;
+  --text-xl:  22px;
+  --text-2xl: 28px;
+  --text-3xl: 36px;
+  /* RULE: there is no token below 11px. The 8px model badges on the chat
+     pipeline must move up to --text-xs. */
+
+  /* ---- Radius (FIX: was defined twice in overhaul.css — 8px AND 5px) ---- */
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:  12px;
+  --radius-xl:  16px;
+  --radius-pill:999px;
+
+  /* ---- Spacing (4px base grid) ----------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* ---- Elevation ------------------------------------------------------- */
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.24),  0 0 1px rgba(0,0,0,0.12);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.28), 0 0 1px rgba(0,0,0,0.12);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.32), 0 0 1px rgba(0,0,0,0.12);
+  --shadow-xl: 0 12px 48px rgba(0,0,0,0.40),0 0 1px rgba(0,0,0,0.12);
+  --shadow-focus: 0 0 0 3px var(--accent-subtle), 0 0 0 1px var(--accent);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring:  cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-out-expo:cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* ---- Standard responsive breakpoints --------------------------------- */
+  /* FIX: the app currently uses ~20 ad-hoc max-widths. Standardize on 4. */
+  --bp-sm: 600px;
+  --bp-md: 900px;
+  --bp-lg: 1200px;
+  --bp-xl: 1536px;
+}
+
+/* ---------------------------------------------------------------------------
+   Example of how a SECOND theme should look once the 19-palette system is
+   trimmed: override ONLY the values, never re-declare structure, never use
+   !important. This is the whole theming mechanism.
+   --------------------------------------------------------------------------- */
+:root[data-theme="light"] {
+  --bg:            #ffffff;
+  --bg-sunken:     #f5f5f7;
+  --bg-sidebar:    #fbfbfd;
+  --bg-raised:     #ffffff;
+  --bg-elevated:   #ffffff;
+  --bg-floating:   #ffffff;
+  --line:          rgba(0, 0, 0, 0.12);
+  --line-subtle:   rgba(0, 0, 0, 0.06);
+  --line-strong:   rgba(0, 0, 0, 0.20);
+  --ink:           #1d1d1f;
+  --ink-secondary: #515154;   /* ~7:1 on white */
+  --ink-tertiary:  #6e6e73;   /* ~5:1 on white */
+  --ink-quaternary:#aeaeb2;
+  --accent:        #0066cc;   /* darker blue: 0a84ff fails contrast on white */
+}

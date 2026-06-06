@@ -4,6 +4,16 @@ _Compiled: 2026-03-19 9:34 PM_
 
 ---
 
+## Scope Clarification
+
+This document describes the first QBO escalation domain module. It does not define the whole product.
+
+The larger product direction is in `PRODUCT_NORTH_STAR.md`: an operational intelligence platform where expert AI agents help the user handle complex work and life situations using shared evidence, memory, workflows, decisions, actions, and human validation.
+
+For the current module, the immediate user goal remains speed and accuracy under pressure while a phone agent has a customer waiting. The platform goal is larger: let a coordinated agent team reuse trusted evidence, reviewed memory, and workflow state across this and future domains.
+
+---
+
 ## 1. App Purpose
 
 This is a **back-office decision support tool** for a QuickBooks Online (QBO) escalation specialist. The user does NOT talk to customers directly. Phone agents (front-line support reps) have the customer on the line and escalate to the user when they can't solve a problem. The user receives the escalation (typically as a screenshot of a DM from the phone agent), diagnoses it with AI assistance, and sends back actionable instructions the phone agent can relay to the customer.

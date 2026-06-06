@@ -129,11 +129,23 @@ function normalizeProvider(providerId) {
 }
 
 function getAlternateProvider(providerId) {
-  const family = getProviderFamily(providerId);
+  const normalizedId = normalizeProvider(providerId);
+  const family = getProviderFamily(normalizedId);
   if (family === 'claude') {
     return isValidProvider(PREFERRED_CODEX_FALLBACK) ? PREFERRED_CODEX_FALLBACK : PROVIDER_IDS.find((id) => getProviderFamily(id) === 'codex') || DEFAULT_PROVIDER_ID;
   }
-  return DEFAULT_PROVIDER_ID;
+  // Failover is always on for every agent, so the alternate MUST be distinct
+  // from its input. The default branch normally returns the claude-family
+  // global default, but if an operator flips "default": true onto this same
+  // provider in the catalog, DEFAULT_PROVIDER_ID would collapse to the input
+  // and silently disable failover. Pick a different-family id in that case.
+  if (DEFAULT_PROVIDER_ID !== normalizedId) {
+    return DEFAULT_PROVIDER_ID;
+  }
+  const distinctFamily = PROVIDER_IDS.find((id) => id !== normalizedId && getProviderFamily(id) !== family);
+  return distinctFamily
+    || PROVIDER_IDS.find((id) => id !== normalizedId)
+    || normalizedId;
 }
 
 function getClaudeProviderIds() {

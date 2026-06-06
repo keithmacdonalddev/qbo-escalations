@@ -26,6 +26,10 @@ const {
   resolveKnowledgeActor,
   updateKnowledgeRecord,
 } = require('../services/knowledgebase-management-service');
+const {
+  deleteOperationalIntelligenceForRecord,
+  syncOperationalIntelligenceForKnowledgeCandidate,
+} = require('../services/operational-intelligence-service');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { createRateLimiter } = require('../middleware/rate-limit');
@@ -1126,17 +1130,28 @@ router.post('/:id/knowledge/generate', async (req, res) => {
   const existing = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
   if (existing && existing.reviewStatus === 'published' && !force) {
     const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
+    const operationalIntelligence = await syncOperationalIntelligenceForKnowledgeCandidate({
+      knowledge: existing,
+      actor: { actor: 'knowledge-generate', role: 'system' },
+      trigger: 'knowledge.generate.existing-published',
+    });
     return res.json({
       ok: true,
       knowledge: existing.toObject(),
       generated: false,
       published: true,
       knowledgeReview,
+      operationalIntelligence,
     });
   }
   if (existing && !force) {
     const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
-    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, knowledgeReview });
+    const operationalIntelligence = await syncOperationalIntelligenceForKnowledgeCandidate({
+      knowledge: existing,
+      actor: { actor: 'knowledge-generate', role: 'system' },
+      trigger: 'knowledge.generate.existing-draft',
+    });
+    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, knowledgeReview, operationalIntelligence });
   }
 
   const draftData = await buildKnowledgeDraftData(escalation, force ? existing : null);
@@ -1171,9 +1186,16 @@ router.post('/:id/knowledge/generate', async (req, res) => {
   knowledge.set(draftData);
   if (!knowledge.reviewStatus) knowledge.reviewStatus = 'draft';
   await knowledge.save();
-  const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
+  const [knowledgeReview, operationalIntelligence] = await Promise.all([
+    syncKnowledgeReviewAttentionItem(knowledge, escalation),
+    syncOperationalIntelligenceForKnowledgeCandidate({
+      knowledge,
+      actor: { actor: 'knowledge-generate', role: 'system' },
+      trigger: 'knowledge.generate',
+    }),
+  ]);
 
-  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview });
+  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview, operationalIntelligence });
 });
 
 // PATCH /api/escalations/:id/knowledge -- Update the reviewed knowledge draft
@@ -1206,7 +1228,12 @@ router.patch('/:id/knowledge', async (req, res) => {
       resolveKnowledgeActor(req)
     );
     const refreshed = await KnowledgeCandidate.findById(knowledge._id).lean();
-    return res.json({ ok: true, knowledge: refreshed, knowledgeReview: result.knowledgeReview });
+    return res.json({
+      ok: true,
+      knowledge: refreshed,
+      knowledgeReview: result.knowledgeReview,
+      operationalIntelligence: result.operationalIntelligence,
+    });
   } catch (err) {
     const code = err && err.code ? err.code : 'INVALID_KNOWLEDGE_UPDATE';
     const status = err?.status || (code.startsWith('INVALID_') ? 400 : 500);
@@ -1274,6 +1301,7 @@ router.post('/:id/knowledge/publish', async (req, res) => {
       published: result.published,
       idempotent: result.idempotent,
       knowledgeReview: result.knowledgeReview,
+      operationalIntelligence: result.operationalIntelligence,
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_PUBLISH_FAILED';
@@ -1334,13 +1362,21 @@ router.post('/:id/knowledge/unpublish', async (req, res) => {
       createdAt: new Date(),
     });
     await knowledge.save();
-    const knowledgeReview = await syncKnowledgeReviewAttentionItem(knowledge, escalation);
+    const [knowledgeReview, operationalIntelligence] = await Promise.all([
+      syncKnowledgeReviewAttentionItem(knowledge, escalation),
+      syncOperationalIntelligenceForKnowledgeCandidate({
+        knowledge,
+        actor,
+        trigger: 'knowledge.record.unpublish',
+      }),
+    ]);
 
     return res.json({
       ok: true,
       knowledge: knowledge.toObject(),
       unpublish: result,
       knowledgeReview,
+      operationalIntelligence,
     });
   } catch (err) {
     const code = err && err.code ? err.code : 'KNOWLEDGE_UNPUBLISH_FAILED';
@@ -1371,6 +1407,10 @@ router.delete('/:id', async (req, res) => {
   }
 
   cleanupEscalationScreenshots(escalation.toObject());
+  const deletedKnowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).select('_id').lean();
+  if (deletedKnowledge?._id) {
+    await deleteOperationalIntelligenceForRecord(`candidate:${deletedKnowledge._id}`).catch(() => {});
+  }
   await KnowledgeCandidate.deleteOne({ escalationId: escalation._id }).catch(() => {});
   await Escalation.findByIdAndDelete(req.params.id);
 

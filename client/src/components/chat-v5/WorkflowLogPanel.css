@@ -1,0 +1,199 @@
+/* Unified whole-workflow event log. Stacks the four pipeline stages, each
+   rendered with the shared StageEventLogPanel inside a collapsible section.
+   Lives in the analyst workbench body (a sibling of the header), and is also
+   reused on the Sessions detail and Escalation detail pages — so it never
+   relies on workbench-only context. Colours mirror StageEventLogPanel.css. */
+.v5-workflow-log {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #07080a;
+  color: #cfd2d6;
+  overflow: hidden;
+  /* The nested StageEventLogPanel reads --v5-* tokens that are only defined on
+     the chat-v5 `.v5-shell`. This panel is also reused on the light-themed
+     Sessions and Escalation pages, where those tokens are absent — so define
+     dark-surface values locally to keep the inner log readable everywhere
+     without touching the shared panel. Falls back to global --line tokens. */
+  --v5-border: var(--line, rgba(255, 255, 255, 0.08));
+  --v5-border-strong: var(--line-strong, rgba(255, 255, 255, 0.16));
+  --v5-panel-strong: #14171b;
+  --v5-muted: #b8bcc1;
+  --v5-dim: #8a8f97;
+  --v5-ink: #e6e8eb;
+}
+
+/* Bounded host used where the panel isn't already inside a flex column with a
+   defined height (Sessions detail tab, Escalation detail card). Gives the
+   flex:1 panel a frame to fill and a rounded dark surface so it reads as one
+   cohesive log rather than four loose blocks. */
+.v5-workflow-log-host {
+  display: flex;
+  flex-direction: column;
+  height: 560px;
+  max-height: 70vh;
+  min-height: 320px;
+  border: 1px solid var(--v5-border, var(--line, rgba(255, 255, 255, 0.08)));
+  border-radius: 10px;
+  overflow: hidden;
+  background: #07080a;
+}
+
+.v5-workflow-log__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--v5-border, var(--line));
+  background: var(--v5-panel-strong, #14171b);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  flex: 0 0 auto;
+}
+
+/* Named __heading (not __title) on purpose: a global rule reskins any header
+   descendant whose class contains "title" with transparent text-fill. This
+   panel isn't a header descendant, but the name stays clear of that trap. */
+.v5-workflow-log__heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: #b8bcc1;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.v5-workflow-log__total {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #cfd2d6;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+}
+
+.v5-workflow-log__stages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(255, 255, 255, 0.04);
+  scrollbar-width: thin;
+  scrollbar-color: #2a2d31 transparent;
+}
+
+.v5-workflow-log__stages::-webkit-scrollbar { width: 8px; }
+.v5-workflow-log__stages::-webkit-scrollbar-thumb { background: #2a2d31; border-radius: 4px; }
+.v5-workflow-log__stages::-webkit-scrollbar-track { background: transparent; }
+
+.v5-workflow-log__stage {
+  display: flex;
+  flex-direction: column;
+  background: #07080a;
+  flex: 0 0 auto;
+}
+
+/* When a stage is expanded, let it grow and give its inner log a usable,
+   bounded height so the section list stays scannable without each stage
+   eating the whole viewport. */
+.v5-workflow-log__stage.is-open {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+
+.v5-workflow-log__stage-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: var(--v5-panel-strong, #14171b);
+  color: var(--v5-ink, #e6e8eb);
+  font: inherit;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.v5-workflow-log__stage-toggle:hover {
+  background: #1a1e23;
+}
+
+.v5-workflow-log__stage--parser .v5-workflow-log__stage-toggle { border-left-color: rgba(83, 145, 255, 0.85); }
+.v5-workflow-log__stage--inv .v5-workflow-log__stage-toggle { border-left-color: rgba(180, 130, 255, 0.85); }
+.v5-workflow-log__stage--triage .v5-workflow-log__stage-toggle { border-left-color: rgba(255, 180, 90, 0.85); }
+.v5-workflow-log__stage--main .v5-workflow-log__stage-toggle { border-left-color: rgba(82, 198, 138, 0.85); }
+
+.v5-workflow-log__stage-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--v5-dim, #75808c);
+  transition: transform 140ms ease;
+  flex: 0 0 auto;
+}
+
+.v5-workflow-log__stage.is-open .v5-workflow-log__stage-caret {
+  transform: rotate(90deg);
+}
+
+.v5-workflow-log__stage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: #4a4e54;
+}
+
+.v5-workflow-log__stage--parser .v5-workflow-log__stage-dot { background: #5391ff; }
+.v5-workflow-log__stage--inv .v5-workflow-log__stage-dot { background: #b482ff; }
+.v5-workflow-log__stage--triage .v5-workflow-log__stage-dot { background: #ffb45a; }
+.v5-workflow-log__stage--main .v5-workflow-log__stage-dot { background: #52c68a; }
+
+.v5-workflow-log__stage-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d4d7db;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.v5-workflow-log__stage-count {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Roboto Mono', monospace;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--v5-dim, #8a8f97);
+  flex: 0 0 auto;
+}
+
+/* The shared StageEventLogPanel renders here. It already manages its own
+   sub-header, progress bar, scrolling thread and footer; we just give it a
+   bounded box so several stages can coexist in one scroll column. */
+.v5-workflow-log__stage-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.v5-workflow-log__stage-body .v5-stage-log-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Cap the inner thread so an event-heavy stage doesn't push the others far
+   below the fold; the thread keeps its own internal scroll. */
+.v5-workflow-log__stage-body .v5-stage-log-panel__thread {
+  max-height: 320px;
+}

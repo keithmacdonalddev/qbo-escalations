@@ -3,6 +3,10 @@
 **North-Star Vision Notes**
 **Date:** 2026-05-04
 
+See `PRODUCT_NORTH_STAR.md` for the repo-level hierarchy that maps this vision
+onto today's QBO module, Knowledge/KB work, provider harnesses, agents,
+observability, prompt editing, and future workspace/domain surfaces.
+
 ## Purpose
 
 This document preserves the larger product intention behind the word **ontology** so future planning, specs, coding-agent prompts, and architecture decisions do not collapse the idea into better tagging, semantic search, or MongoDB indexing.

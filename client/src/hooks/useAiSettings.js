@@ -8,11 +8,7 @@ import {
   readStoredAiSettings,
 } from '../lib/aiSettingsStore.js';
 import {
-  hasStoredAgentRuntimeDefaults,
-  readAllAgentRuntimeStatesBySurfaceId,
-} from '../lib/agentRuntimeSettings.js';
-import {
-  applyAgentRuntimeDefaults,
+  hydrateAgentRuntimeFromIdentities,
   loadAiAssistantDefaultsFromServer,
   syncAiAssistantDefaultsToServer,
 } from '../lib/aiAssistantPreferences.js';
@@ -30,6 +26,15 @@ export default function useAiSettings() {
   useEffect(() => {
     let cancelled = false;
 
+    // Seed per-agent runtime (provider / model / fallback) into localStorage
+    // from the AUTHORITATIVE AgentIdentity.runtime store — the same store
+    // AgentsView writes and the chat / triage / INV legs read. This replaces the
+    // old seed from UserPreferences.aiAssistantDefaults.agents, which was off the
+    // runtime path and could silently revert an AgentsView edit on reload. Fully
+    // self-contained and swallows its own errors, so it never blocks the global
+    // settings load below.
+    hydrateAgentRuntimeFromIdentities().catch(() => {});
+
     loadAiAssistantDefaultsFromServer()
       .then((defaults) => {
         if (cancelled) return;
@@ -40,16 +45,14 @@ export default function useAiSettings() {
           setAiSettingsState(normalized);
         }
 
-        if (defaults?.agents) {
-          applyAgentRuntimeDefaults(defaults.agents);
-        }
-
-        const serverHasAgents = Boolean(defaults?.agents);
+        // Back-fill the server's global AI settings from this browser's stored
+        // settings the first time (server has none yet). Agent runtime is NOT
+        // pushed here — its source of truth is AgentIdentity.runtime, edited via
+        // AgentsView, not this preferences store.
         const serverHasSettings = Boolean(defaults?.settings);
-        if ((!serverHasAgents && hasStoredAgentRuntimeDefaults()) || (!serverHasSettings && hasStoredAiSettings())) {
+        if (!serverHasSettings && hasStoredAiSettings()) {
           syncAiAssistantDefaultsToServer({
             settings: aiSettingsRef.current,
-            agents: readAllAgentRuntimeStatesBySurfaceId(),
           }).catch(() => {});
         }
       })

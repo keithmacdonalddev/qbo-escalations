@@ -4,6 +4,16 @@
 **Owner:** (user) + Claude Code
 **Scope:** Review and improve how agent profile pages are displayed in QBO Escalations. The review starts with the **Escalation Image Parser** (`escalation-template-parser`) profile, beginning at its **Overview** page, but findings apply to all agent profiles.
 
+## Platform role
+
+Agent profiles are mission-control documents for a coordinated expert-agent
+system. They should show each agent's purpose, responsibilities, boundaries,
+tools, memories, handoffs, runtime state, review status, and evidence of recent
+behavior.
+
+This work should not collapse into a prompt gallery. Prompt text is one part of
+an agent contract, not the whole contract.
+
 ## Why this folder exists
 This is a multi-session, possibly multi-agent effort. Conversations don't persist, so decisions, findings, and to-dos live here as the durable source of truth. Add more markdown files as the work grows (todos, refactor plans, per-tab reviews, etc.).
 

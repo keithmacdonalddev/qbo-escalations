@@ -10,6 +10,18 @@ Use `RESEARCH_PLAN.md` for the step-by-step research procedure.
 
 This is not parser-harness work.
 
+## Role In The Platform
+
+Provider harnesses are evidence and provenance capture for model/provider
+calls. They preserve what the provider path returned so later traces, reviews,
+confidence checks, regression checks, and agent reasoning can be audited
+against the actual package that reached the server.
+
+They are intentionally not the downstream intelligence layer. A provider
+package can become evidence for a case, prompt review, model comparison, or
+agent decision, but this folder stops at preservation and source-backed
+contract research.
+
 ## Boundary
 
 In scope:

@@ -148,7 +148,7 @@ export default function useChatConversationState({
     if (!linkedEscalation || resolvingEscalation) return;
     setResolvingEscalation(true);
     try {
-      const updated = await transitionEscalation(linkedEscalation._id, 'resolved');
+      const { escalation: updated } = await transitionEscalation(linkedEscalation._id, 'resolved');
       setLinkedEscalation(updated);
     } catch {
       toast.error('Failed to resolve escalation');

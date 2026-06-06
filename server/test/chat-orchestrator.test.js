@@ -163,8 +163,15 @@ await t.test('fallback mode returns terminal error when both providers fail', as
 });
 
 await t.test('timeout does not get overwritten by late provider success callback', async () => {
+  // Automatic failover is always on, so single mode now has a distinct backup
+  // (codex). To isolate the PRIMARY's timeout handling we make the backup also
+  // time out, keeping the orchestration terminal.
   claude.chat = ({ onDone }) => {
     setTimeout(() => onDone('late success'), 25);
+    return () => {};
+  };
+  codex.chat = ({ onDone }) => {
+    setTimeout(() => onDone('late backup success'), 25);
     return () => {};
   };
 
@@ -180,15 +187,23 @@ await t.test('timeout does not get overwritten by late provider success callback
   assert.equal(out.result, 'error');
   assert.equal(out.data.code, 'TIMEOUT');
 
-  await new Promise((resolve) => setTimeout(resolve, 40));
+  await new Promise((resolve) => setTimeout(resolve, 60));
   const health = getProviderHealth('claude');
   assert.equal(health.lastErrorCode, 'TIMEOUT');
-  assert.equal(health.consecutiveFailures, 1);
+  assert.equal(health.consecutiveFailures, 1, 'the primary timed out exactly once');
 });
 
 await t.test('synchronous provider throw increments failure only once', async () => {
+  // Always-on failover: the primary throws synchronously (recorded once) and the
+  // backup also throws, so the orchestration terminates in error while the
+  // PRIMARY's failure count stays at exactly one.
   claude.chat = () => {
     const err = new Error('sync spawn fail');
+    err.code = 'PROVIDER_EXEC_FAILED';
+    throw err;
+  };
+  codex.chat = () => {
+    const err = new Error('backup sync spawn fail');
     err.code = 'PROVIDER_EXEC_FAILED';
     throw err;
   };
@@ -207,7 +222,7 @@ await t.test('synchronous provider throw increments failure only once', async ()
 
   const health = getProviderHealth('claude');
   assert.equal(health.lastErrorCode, 'PROVIDER_EXEC_FAILED');
-  assert.equal(health.consecutiveFailures, 1);
+  assert.equal(health.consecutiveFailures, 1, 'the primary recorded exactly one failure');
 });
 
 await t.test('fallback mode prefers healthy provider when primary is unhealthy', async () => {
@@ -301,10 +316,21 @@ await t.test('single mode propagates usage in onDone', async () => {
 });
 
 await t.test('onError includes usage from err._usage on failure', async () => {
+  // Always-on failover means single mode now also attempts the backup. The
+  // PRIMARY's err._usage must surface on its own attempt (attempts[0]); the
+  // terminal usage reflects the LAST attempt (the backup), which we make fail
+  // with its own usage so the assertion is deterministic.
   claude.chat = ({ onError }) => {
     const err = new Error('fail');
     err.code = 'PROVIDER_EXEC_FAILED';
     err._usage = { inputTokens: 30, outputTokens: 0, model: 'claude-opus-4-8' };
+    onError(err);
+    return () => {};
+  };
+  codex.chat = ({ onError }) => {
+    const err = new Error('backup fail');
+    err.code = 'PROVIDER_EXEC_FAILED';
+    err._usage = { inputTokens: 12, outputTokens: 0, model: 'gpt-5.4' };
     onError(err);
     return () => {};
   };
@@ -318,12 +344,20 @@ await t.test('onError includes usage from err._usage on failure', async () => {
   });
 
   assert.equal(out.result, 'error');
-  assert.deepStrictEqual(out.data.usage, { inputTokens: 30, outputTokens: 0, model: 'claude-opus-4-8' });
+  // attempts[0] is the primary's failure, carrying ITS usage.
   assert.equal(out.data.attempts[0].inputTokens, 30);
+  // The terminal usage is the last (backup) attempt's usage.
+  assert.deepStrictEqual(out.data.usage, { inputTokens: 12, outputTokens: 0, model: 'gpt-5.4' });
 });
 
 await t.test('onError(null) does not crash — safe err._usage dereference', async () => {
+  // Both the primary and the always-on backup hit onError(null); the
+  // orchestration must terminate safely with null usage.
   claude.chat = ({ onError }) => {
+    onError(null);
+    return () => {};
+  };
+  codex.chat = ({ onError }) => {
     onError(null);
     return () => {};
   };
@@ -342,6 +376,10 @@ await t.test('onError(null) does not crash — safe err._usage dereference', asy
 
 await t.test('onError(undefined) does not crash — safe err._usage dereference', async () => {
   claude.chat = ({ onError }) => {
+    onError(undefined);
+    return () => {};
+  };
+  codex.chat = ({ onError }) => {
     onError(undefined);
     return () => {};
   };

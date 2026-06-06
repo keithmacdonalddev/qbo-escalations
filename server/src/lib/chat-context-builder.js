@@ -3,7 +3,7 @@ const {
   getCoreSystemPrompt,
   searchPlaybookChunks,
 } = require('./playbook-loader');
-const { buildAgentKnowledgeContext } = require('../services/knowledgebase-service');
+const { buildOperationalIntelligenceContext } = require('../services/operational-intelligence-service');
 
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
@@ -165,6 +165,13 @@ function formatKnowledgeRecordForPrompt(record) {
       .filter(Boolean);
     if (evidence.length > 0) lines.push(`Evidence: ${evidence.join('; ')}`);
   }
+  if (Array.isArray(record.operationalClaims) && record.operationalClaims.length > 0) {
+    const claims = record.operationalClaims
+      .slice(0, 5)
+      .map((claim) => `${claim.claimType}: ${claim.text}`)
+      .filter(Boolean);
+    if (claims.length > 0) lines.push(`Validated claims: ${claims.join(' | ')}`);
+  }
   if (Array.isArray(record.warnings) && record.warnings.length > 0) {
     lines.push(`Warnings: ${record.warnings.join(', ')}`);
   }
@@ -192,6 +199,7 @@ function buildKnowledgebaseText(records, maxChars) {
       reusableOutcome: record.reusableOutcome || '',
       allowedUses: Array.isArray(record.allowedUses) ? record.allowedUses : [],
       warnings: Array.isArray(record.warnings) ? record.warnings : [],
+      operationalClaimCount: Array.isArray(record.operationalClaims) ? record.operationalClaims.length : 0,
     });
   }
 
@@ -206,7 +214,7 @@ async function buildKnowledgebaseRetrievalBlock({ retrievalQuery, settings, retr
   const requestedTopK = settings.knowledge.retrievalTopK;
 
   try {
-    const context = await buildAgentKnowledgeContext({
+    const context = await buildOperationalIntelligenceContext({
       query: retrievalQuery,
       allowedUse: 'agent-response',
       limit: requestedTopK,
@@ -375,6 +383,7 @@ async function buildChatModelContext({ normalizedMessages, settings }) {
       reusableOutcome: record.reusableOutcome || '',
       allowedUses: record.allowedUses || [],
       warnings: record.warnings || [],
+      operationalClaimCount: record.operationalClaimCount || 0,
     }));
 
     const sections = [];

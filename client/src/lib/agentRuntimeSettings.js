@@ -28,7 +28,6 @@ import {
   SURFACE_DEFAULTS_APPLIED_EVENT,
   hasStoredPreference,
   normalizeSurfaceFallback,
-  normalizeSurfaceMode,
   readStoredPreference,
   writeStoredPreference,
 } from './surfacePreferences.js';
@@ -41,10 +40,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Main escalation assistant',
     color: '#0a84ff',
     storagePrefix: 'qbo-chat',
-    supportsModes: true,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single', 'fallback'],
   },
   {
     id: 'escalation-template-parser',
@@ -53,10 +49,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Strict screenshot-to-canonical-template parser',
     color: '#f0b232',
     storagePrefix: 'qbo-escalation-template-parser',
-    supportsModes: false,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single'],
     kind: 'image-parser',
   },
   {
@@ -66,10 +59,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Fast category, severity, and next-step triage',
     color: '#ff9f0a',
     storagePrefix: 'qbo-triage-agent',
-    supportsModes: false,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single'],
     defaultProvider: 'lm-studio',
     kind: 'triage',
   },
@@ -80,10 +70,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'INV lookup, candidate rejection, and no-match confirmation',
     color: '#34c759',
     storagePrefix: 'qbo-known-issue-search-agent',
-    supportsModes: true,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single', 'fallback'],
   },
   {
     id: 'follow-up-chat-parser',
@@ -92,10 +79,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Verbatim transcript parser for follow-up phone-agent chats',
     color: '#64d2ff',
     storagePrefix: 'qbo-follow-up-chat-parser',
-    supportsModes: false,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single'],
     kind: 'image-parser',
   },
   {
@@ -105,10 +89,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Inbox, calendar, and background actions',
     color: '#30d158',
     storagePrefix: 'qbo-workspace',
-    supportsModes: true,
     supportsReasoning: true,
-    defaultMode: 'fallback',
-    supportedModes: ['single', 'fallback'],
   },
   {
     id: 'copilot',
@@ -117,10 +98,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Search, templates, and trend analysis',
     color: '#bf5af2',
     storagePrefix: 'qbo-copilot',
-    supportsModes: true,
     supportsReasoning: true,
-    defaultMode: 'fallback',
-    supportedModes: ['single', 'fallback'],
   },
   {
     id: 'image-parser',
@@ -129,10 +107,7 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     description: 'Screenshot and document analysis',
     color: '#f0b232',
     storagePrefix: 'qbo-image-parser',
-    supportsModes: false,
     supportsReasoning: true,
-    defaultMode: 'single',
-    supportedModes: ['single'],
     kind: 'image-parser',
   },
 ]);
@@ -168,18 +143,19 @@ function storageKeysForDefinition(definition) {
       storageKey(definition.storagePrefix, 'service-tier'),
     ];
   }
-  const keys = [
+  // Every non-image-parser agent now carries a Primary + Fallback pair, so the
+  // fallback storage keys are always present (failover is always on; there is
+  // no single-vs-fallback mode toggle anymore). `mode` is retained only so a
+  // 'parallel' selection persisted elsewhere is not orphaned.
+  return [
     storageKey(definition.storagePrefix, 'provider'),
+    storageKey(definition.storagePrefix, 'mode'),
+    storageKey(definition.storagePrefix, 'fallback-provider'),
     storageKey(definition.storagePrefix, 'model'),
+    storageKey(definition.storagePrefix, 'fallback-model'),
     storageKey(definition.storagePrefix, 'reasoning-effort'),
     storageKey(definition.storagePrefix, 'service-tier'),
   ];
-  if (definition.supportsModes) {
-    keys.splice(1, 0, storageKey(definition.storagePrefix, 'mode'));
-    keys.splice(2, 0, storageKey(definition.storagePrefix, 'fallback-provider'));
-    keys.splice(4, 0, storageKey(definition.storagePrefix, 'fallback-model'));
-  }
-  return keys;
 }
 
 function cloneState(state) {
@@ -275,22 +251,22 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     };
   }
 
+  // Every conversational/orchestrated agent now always carries a Primary +
+  // Fallback pair — failover is always on and there is no single-vs-fallback
+  // mode toggle. The fallback defaults to a neutral global alternate (the other
+  // main engine) when the user has not picked one, and is freely overridable.
+  // No use-case/capability filtering is applied to which provider may back up
+  // which: any provider can be the primary and any provider can be the fallback.
   const primarySelection = resolveProviderSelection(state.provider || DEFAULT_PROVIDER, state.model);
   const provider = primarySelection.provider;
-  const mode = definition.supportsModes
-    ? normalizeSurfaceMode(
-        state.mode || definition.defaultMode,
-        definition.supportedModes,
-        definition.defaultMode
-      )
-    : 'single';
+  // `mode` is retained only as a marker so a 'parallel' selection persisted by
+  // another surface is preserved round-trip. It no longer gates the fallback.
+  const mode = state.mode === 'parallel' ? 'parallel' : 'fallback';
   const fallbackSelection = resolveProviderSelection(
     state.fallbackProvider || getAlternateProvider(provider),
     state.fallbackModel
   );
-  const fallbackProvider = definition.supportsModes
-    ? normalizeSurfaceFallback(provider, fallbackSelection.provider)
-    : '';
+  const fallbackProvider = normalizeSurfaceFallback(provider, fallbackSelection.provider);
   const providerFamily = PROVIDER_FAMILY[provider] || 'claude';
   const reasoningEffort = normalizeReasoningEffort(
     state.reasoningEffort || DEFAULT_REASONING_EFFORT,
@@ -302,11 +278,11 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     mode,
     fallbackProvider,
     model: normalizeProviderModelOverride(provider, primarySelection.model),
-    fallbackModel: definition.supportsModes && fallbackProvider === fallbackSelection.provider
+    fallbackModel: fallbackProvider === fallbackSelection.provider
       ? normalizeProviderModelOverride(fallbackProvider, fallbackSelection.model)
       : '',
     reasoningEffort,
-    serviceTier: providerSupportsCodexServiceTier(provider) || (definition.supportsModes && providerSupportsCodexServiceTier(fallbackProvider))
+    serviceTier: providerSupportsCodexServiceTier(provider) || providerSupportsCodexServiceTier(fallbackProvider)
       ? normalizeCodexServiceTier(state.serviceTier || DEFAULT_CODEX_SERVICE_TIER)
       : '',
   };
@@ -334,7 +310,7 @@ export function readAgentRuntimeState(definitionOrId) {
 
   return normalizeAgentRuntimeState(definition, {
     provider,
-    mode: readStoredPreference(storageKey(storagePrefix, 'mode')) || definition.defaultMode,
+    mode: readStoredPreference(storageKey(storagePrefix, 'mode')) || '',
     fallbackProvider,
     model: readStoredPreference(storageKey(storagePrefix, 'model')) || '',
     fallbackModel: readStoredPreference(storageKey(storagePrefix, 'fallback-model')) || '',
@@ -360,15 +336,13 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
     return normalized;
   }
 
+  // Failover is always on for these agents, so the fallback provider/model (and
+  // the retained `mode` marker) are always persisted alongside the primary.
   writeStoredPreference(storageKey(storagePrefix, 'provider'), normalized.provider);
-  if (definition.supportsModes) {
-    writeStoredPreference(storageKey(storagePrefix, 'mode'), normalized.mode);
-    writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), normalized.fallbackProvider);
-  }
+  writeStoredPreference(storageKey(storagePrefix, 'mode'), normalized.mode);
+  writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), normalized.fallbackProvider);
   writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
-  if (definition.supportsModes) {
-    writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
-  }
+  writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
   writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
   writeStoredPreference(storageKey(storagePrefix, 'service-tier'), normalized.serviceTier);
 
@@ -488,7 +462,10 @@ export function getAgentRuntimeSummary(definitionOrId, state = {}) {
   const primary = getProviderModelSummary(normalized.provider, normalized.model);
   const serviceTier = formatServiceTierSummary(normalized.serviceTier);
   const tier = serviceTier ? ` | ${serviceTier}` : '';
-  if (normalized.mode === 'fallback') {
+  // Failover is always on for agents that carry a fallback, so the summary
+  // always shows "primary + fallback". Triage (single provider, no fallback)
+  // has an empty fallbackProvider and so shows the primary only.
+  if (normalized.fallbackProvider) {
     return `${primary} + ${getProviderModelSummary(normalized.fallbackProvider, normalized.fallbackModel)}${tier}`;
   }
   return `${primary}${tier}`;
