@@ -569,6 +569,13 @@ router.post('/run', async (req, res) => {
       reasoningEffort,
       timeoutMs: TEST_TIMEOUT_MS,
       eventBus: bus,
+      // Wave 2 universal failover: the triage test honors the operator's
+      // configured backup too. runtime carries fallbackProvider/fallbackModel
+      // from the agent profile; runTriage defaults to the neutral global
+      // alternate when none is set. No capability filtering.
+      fallbackProvider: safeString(runtime.fallbackProvider, ''),
+      fallbackModel: safeString(runtime.fallbackModel, ''),
+      agentRuntime: runtime,
     });
     const context = {
       triageCard: result.card || null,

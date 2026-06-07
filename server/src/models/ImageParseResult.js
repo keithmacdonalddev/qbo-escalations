@@ -14,9 +14,11 @@ const ttlDays = (() => {
 
 const imageParseResultSchema = new mongoose.Schema({
   // Request context
-  provider:       { type: String, required: true },           // 'llm-gateway', 'lm-studio', 'anthropic', 'openai', 'kimi', 'gemini'
+  provider:       { type: String, required: true },           // provider that produced the parse (the backup, after a failover)
   model:          { type: String, default: '' },              // model ID actually used
   modelRequested: { type: String, default: '' },              // model ID user requested
+  fallbackUsed:   { type: Boolean, default: false },          // true when the primary provider failed and the backup produced this result
+  fallbackFrom:   { type: String, default: '' },              // the primary provider that was failed over from
   parserPromptId: { type: String, default: 'escalation-template-parser' },  // prompt/harness used for the parse
 
   // Image input stats

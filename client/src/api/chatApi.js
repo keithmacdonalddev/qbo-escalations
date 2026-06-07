@@ -182,7 +182,7 @@ export function retryChatMessage(body, { onInit, onChunk, onThinking, onDone, on
 
 /**
  * Run the standalone Triage Agent harness and consume its SSE stream.
- * @param {{ text: string, provider?: string, model?: string, reasoningEffort?: string, serviceTier?: string, timeoutMs?: number }} body
+ * @param {{ text: string, provider?: string, model?: string, reasoningEffort?: string, serviceTier?: string, fallbackProvider?: string, fallbackModel?: string, agentRuntime?: object, timeoutMs?: number }} body
  * @param {{ onStageEvent?: Function, onComplete?: Function, onError?: Function }} handlers
  * @returns {{ abort: Function }}
  */
@@ -195,6 +195,13 @@ export function sendTriageRequest(body, { onStageEvent, onComplete, onError } = 
     model: body?.model || undefined,
     reasoningEffort: body?.reasoningEffort || undefined,
     serviceTier: body?.serviceTier || undefined,
+    // Forward the configured backup so the server's failover gate
+    // (hasFailoverIntent) turns on. Stripping these here would make any caller's
+    // failover wiring inert. The triage route reads fallbackProvider/
+    // fallbackModel (explicit precedence) and agentRuntime (profile fallback).
+    fallbackProvider: body?.fallbackProvider || undefined,
+    fallbackModel: body?.fallbackModel || undefined,
+    agentRuntime: body?.agentRuntime && typeof body.agentRuntime === 'object' ? body.agentRuntime : undefined,
     timeoutMs: body?.timeoutMs,
   };
 

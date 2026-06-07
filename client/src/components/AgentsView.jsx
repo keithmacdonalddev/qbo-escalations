@@ -5286,10 +5286,11 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
 
   const providerOptions = PROVIDER_OPTIONS;
   const isMissingKey = (providerId) => isProviderMissingApiKey(providerId, providerStatus);
-  // Single-shot parser/triage agents run a single provider with no failover, so
-  // they show Provider + Model only. Every other agent now always shows a
-  // Primary + Fallback pair (failover is always on; there is no mode toggle).
-  const supportsFallback = definition.kind !== 'image-parser' && definition.kind !== 'triage';
+  // Failover is now ALWAYS on for EVERY agent — including the Image Parser and
+  // Triage (Wave 2). Every agent shows a Primary + Fallback pair so the operator
+  // can pick the backup the engine fails over to. There is no use-case/capability
+  // restriction on which provider may back up which.
+  const supportsFallback = true;
   const currentRuntime = {
     provider,
     fallbackProvider,

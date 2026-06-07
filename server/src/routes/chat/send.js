@@ -91,6 +91,27 @@ const SSE_SAFETY_TIMEOUT_MS = Number.isFinite(rawSseSafetyTimeoutMs) && rawSseSa
   : 180_000;
 const MAIN_CHAT_TOOL_AGENT_ID = 'main-chat-assistant';
 const CHAT_ACTIVITY_AGENT_ID = 'chat';
+// The image-parser leg of chat is owned by the `image-analyst` AgentIdentity
+// (see AGENT_RUNTIME_DEFINITIONS: id `image-parser` maps to agentId
+// `image-analyst`). Its persisted profile runtime carries the operator's
+// configured backup.
+const IMAGE_PARSER_AGENT_ID = 'image-analyst';
+
+// Resolve the operator's CONFIGURED image-parser backup from the `image-analyst`
+// profile runtime so the chat image-parse leg fails over to it (not just the
+// neutral global alternate) when the primary provider fails. No client sends the
+// image-parser fallback, so the server reads the profile directly. Returns empty
+// strings when nothing is configured, preserving parseImage's neutral default.
+async function resolveImageParserProfileBackup() {
+  const identity = await getAgentIdentity(IMAGE_PARSER_AGENT_ID).catch(() => null);
+  const runtime = identity && identity.runtime && typeof identity.runtime === 'object'
+    ? identity.runtime
+    : null;
+  return {
+    fallbackProvider: safeString(runtime?.fallbackProvider, ''),
+    fallbackModel: safeString(runtime?.fallbackModel, ''),
+  };
+}
 
 function recordCaseIntakeWorkflowActivities(caseIntake, { conversationId, traceId } = {}) {
   const runs = Array.isArray(caseIntake?.runs) ? caseIntake.runs : [];
@@ -611,6 +632,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   const knownIssueEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'inv' });
   const mainEventBus = createStageEventBus({ send: sendStageEvent, stageId: 'main' });
 
+  // Only read the image-parser profile when an image is actually being parsed.
+  const imageParserBackup = req.body.imageParserProvider
+    ? await resolveImageParserProfileBackup()
+    : { fallbackProvider: '', fallbackModel: '' };
+
   const {
     effectiveSystemPrompt,
     imageTranscription,
@@ -676,6 +702,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           reasoningEffort: req.body.imageParserReasoningEffort || undefined,
           serviceTier: req.body.imageParserServiceTier || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
+          // Wave 2 universal failover: carry the image-parser agent's backup so
+          // the chat image-parse leg fails over BEFORE the generic-transcription
+          // last resort. An explicit request fallback wins; otherwise the
+          // image-analyst profile's CONFIGURED backup is used (resolved
+          // server-side — no client sends it). parseImage still defaults to the
+          // neutral global alternate when neither is set. No capability filtering.
+          fallbackProvider: req.body.imageParserFallbackProvider || imageParserBackup.fallbackProvider || '',
+          fallbackModel: req.body.imageParserFallbackModel || imageParserBackup.fallbackModel || '',
+          agentRuntime,
         }
       : null,
     parsedEscalationText: safeString(parsedEscalationSource, '') === 'image-parser'
@@ -2052,6 +2087,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     'X-Accel-Buffering': 'no',
   });
 
+  // Only read the image-parser profile when an image is actually being parsed.
+  const imageParserBackup = req.body.imageParserProvider
+    ? await resolveImageParserProfileBackup()
+    : { fallbackProvider: '', fallbackModel: '' };
+
   const {
     effectiveSystemPrompt,
     imageTranscription,
@@ -2115,6 +2155,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           reasoningEffort: req.body.imageParserReasoningEffort || undefined,
           serviceTier: req.body.imageParserServiceTier || undefined,
           promptId: req.body.imageParserPromptId || 'escalation-template-parser',
+          // Wave 2 universal failover: carry the image-parser agent's backup so
+          // the chat image-parse leg fails over BEFORE the generic-transcription
+          // last resort. An explicit request fallback wins; otherwise the
+          // image-analyst profile's CONFIGURED backup is used (resolved
+          // server-side — no client sends it). parseImage still defaults to the
+          // neutral global alternate when neither is set. No capability filtering.
+          fallbackProvider: req.body.imageParserFallbackProvider || imageParserBackup.fallbackProvider || '',
+          fallbackModel: req.body.imageParserFallbackModel || imageParserBackup.fallbackModel || '',
+          agentRuntime,
         }
       : null,
     triageAgentRuntime: agentRuntime,

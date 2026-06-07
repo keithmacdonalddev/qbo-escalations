@@ -151,7 +151,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
   //   useAnthropicSdk (optional legacy boolean, default false) — when provider
   //   is 'anthropic', true uses the old Agent SDK adapter. The default path is
   //   the direct Anthropic API provider harness with package capture.
-  const { image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId, parserPromptId, useAnthropicSdk } = req.body || {};
+  const { image, provider, model, reasoningEffort, serviceTier, timeoutMs, promptId, parserPromptId, useAnthropicSdk, fallbackProvider, fallbackModel, agentRuntime } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
 
@@ -246,6 +246,14 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       promptId: effectivePromptId,
       eventBus: bus,
       useAnthropicSdk: useAnthropicSdk === true,
+      // Wave 2 universal failover: pass the operator's backup through so the
+      // parser can fail over on a primary-provider failure. An explicit
+      // request-body fallbackProvider wins; agentRuntime (the agent profile
+      // selection) is the source of truth otherwise; parseImage defaults to the
+      // neutral global alternate when neither is set. No capability filtering.
+      fallbackProvider: typeof fallbackProvider === 'string' ? fallbackProvider : '',
+      fallbackModel: typeof fallbackModel === 'string' ? fallbackModel : '',
+      agentRuntime: agentRuntime && typeof agentRuntime === 'object' ? agentRuntime : null,
     });
     const elapsedMs = Date.now() - startedAt;
 
@@ -257,6 +265,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parseFields: result.parseFields || {},
       elapsedMs,
     };
+    // After an automatic failover, result.providerUsed is the backup that
+    // actually produced the parse; fall back to the requested provider otherwise.
+    const providerUsed = result.providerUsed || provider;
     bus.emit('parser.result_built', {
       elapsedMs,
       providerLatencyMs: result.stats?.providerLatencyMs || 0,
@@ -265,6 +276,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       parseFieldCount: result.parseFields ? Object.keys(result.parseFields).length : 0,
       providerPackageId: result.providerTrace?.providerPackageId || null,
       providerHarness: result.providerTrace?.providerHarness || null,
+      providerUsed,
+      fallbackUsed: Boolean(result.fallbackUsed),
+      fallbackFrom: result.fallbackFrom || '',
     });
 
     // Fire-and-forget save to MongoDB + on-disk image archive
@@ -274,9 +288,11 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       role: result.role || '',
     });
     persistParseResult({
-      provider,
-      model: result.usage?.model || model || '',
+      provider: providerUsed,
+      model: result.usage?.model || result.modelUsed || model || '',
       modelRequested: model || '',
+      fallbackUsed: Boolean(result.fallbackUsed),
+      fallbackFrom: result.fallbackFrom || '',
       image: result.stats?.image || {},
       inputTokens: result.usage?.inputTokens || 0,
       outputTokens: result.usage?.outputTokens || 0,

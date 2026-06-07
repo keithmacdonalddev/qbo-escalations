@@ -1597,6 +1597,12 @@ router.post('/run', async (req, res) => {
         model: safeString(runtime.model, '') || undefined,
         reasoningEffort: safeString(runtime.reasoningEffort, '') || undefined,
         serviceTier: safeString(runtime.serviceTier, '') || undefined,
+        // Wave 2 universal failover: honor the operator's configured image-parser
+        // backup (defaults to the neutral global alternate server-side). No
+        // capability filtering — any provider may back up any provider.
+        fallbackProvider: safeString(runtime.fallbackProvider, ''),
+        fallbackModel: safeString(runtime.fallbackModel, ''),
+        agentRuntime: runtime,
         promptId: 'escalation-template-parser',
         timeoutMs: TEST_TIMEOUT_MS,
         eventBus: bus,
@@ -1733,6 +1739,11 @@ router.post('/run', async (req, res) => {
       model,
       reasoningEffort: getReasoningEffort(runtimeMap),
       timeoutMs: TEST_TIMEOUT_MS,
+      // Wave 2 universal failover: honor the operator's configured triage backup
+      // (defaults to the neutral global alternate server-side). No capability logic.
+      fallbackProvider: safeString(runtime.fallbackProvider, ''),
+      fallbackModel: safeString(runtime.fallbackModel, ''),
+      agentRuntime: runtime,
     });
     return res.json({
       ok: Boolean(result?.card),

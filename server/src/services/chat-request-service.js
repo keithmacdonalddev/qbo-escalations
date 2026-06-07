@@ -1055,6 +1055,14 @@ async function buildChatImageAugmentation({
           model: imageParserConfig.model || undefined,
           reasoningEffort: imageParserConfig.reasoningEffort || undefined,
           serviceTier: imageParserConfig.serviceTier || undefined,
+          // Wave 2 universal failover: fail over to the image-parser agent's
+          // backup on a primary-provider failure BEFORE the generic-transcription
+          // last resort below. agentRuntime signals failover intent (defaults to
+          // the neutral global alternate); an explicit fallback wins. No
+          // capability filtering.
+          fallbackProvider: imageParserConfig.fallbackProvider || '',
+          fallbackModel: imageParserConfig.fallbackModel || '',
+          agentRuntime: imageParserConfig.agentRuntime || null,
           promptId: imageParserConfig.promptId || 'escalation-template-parser',
           timeoutMs: 45_000,
         });
@@ -1064,9 +1072,14 @@ async function buildChatImageAugmentation({
           source: 'image-parser-agent',
           role: parserResult && parserResult.role ? parserResult.role : 'unknown',
           parseMeta: parserResult && parserResult.parseMeta ? parserResult.parseMeta : null,
-          providerUsed: imageParserConfig.provider,
+          // After an automatic failover, providerUsed is the backup that produced
+          // the parse; fall back to the requested provider otherwise.
+          providerUsed: safeString(parserResult && parserResult.providerUsed, '') || imageParserConfig.provider,
+          fallbackUsed: Boolean(parserResult && parserResult.fallbackUsed),
+          fallbackFrom: safeString(parserResult && parserResult.fallbackFrom, ''),
           model: safeString(
             (parserResult && parserResult.usage && parserResult.usage.model)
+              || (parserResult && parserResult.modelUsed)
               || imageParserConfig.model,
             ''
           ),

@@ -39,6 +39,9 @@ router.post('/', triageRateLimit, async (req, res) => {
     reasoningEffort,
     serviceTier,
     timeoutMs,
+    fallbackProvider,
+    fallbackModel,
+    agentRuntime,
   } = req.body || {};
   const streamMode = clientWantsSse(req);
   const runId = randomUUID();
@@ -117,6 +120,15 @@ router.post('/', triageRateLimit, async (req, res) => {
       serviceTier: safeString(serviceTier, ''),
       timeoutMs: effectiveTimeout,
       eventBus: bus,
+      // Wave 2 universal failover: pass the operator's backup through so triage
+      // can fail over on a primary-provider failure before the deterministic
+      // rule-card fallback. Request-body fallbackProvider wins; agentRuntime
+      // (the agent profile selection) is the source of truth otherwise; runTriage
+      // defaults to the neutral global alternate when neither is set. No
+      // capability filtering.
+      fallbackProvider: safeString(fallbackProvider, ''),
+      fallbackModel: safeString(fallbackModel, ''),
+      agentRuntime: agentRuntime && typeof agentRuntime === 'object' ? agentRuntime : null,
     });
     const elapsedMs = result.elapsedMs ?? (Date.now() - startedAt);
     const body = {
@@ -127,6 +139,8 @@ router.post('/', triageRateLimit, async (req, res) => {
       rawOutput: result.rawOutput || '',
       providerUsed: result.providerUsed || safeString(provider, ''),
       modelUsed: result.modelUsed || safeString(model, ''),
+      fallbackUsed: Boolean(result.fallbackUsed),
+      fallbackFrom: result.fallbackFrom || '',
       elapsedMs,
       status: result.status || 'success',
       savedResultId: result.savedResult?.id || result.triageMeta?.resultId || '',
@@ -151,7 +165,10 @@ router.post('/', triageRateLimit, async (req, res) => {
       durationMs: elapsedMs,
       provider: body.providerUsed,
       model: body.modelUsed,
-      fallbackUsed: Boolean(result.triageMeta?.fallbackUsed || result.card?.fallback?.used),
+      // A provider-to-provider failover (primary failed, backup produced the
+      // result) OR a deterministic rule-card fallback both count as "fallback".
+      fallbackUsed: Boolean(result.fallbackUsed || result.triageMeta?.fallbackUsed || result.card?.fallback?.used),
+      fallbackFrom: result.fallbackFrom || '',
     });
     return respond(200, body);
   } catch (err) {

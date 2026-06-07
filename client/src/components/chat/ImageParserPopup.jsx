@@ -76,6 +76,11 @@ function readParserRuntime(parserMode) {
       provider: state.provider || '',
       model: state.model || '',
       reasoningEffort: state.reasoningEffort || '',
+      // Wave 2 universal failover: the parser agent runtime now carries a backup
+      // (defaulting to the neutral global alternate). Forward it so the parse
+      // request can fail over on a primary-provider failure.
+      fallbackProvider: state.fallbackProvider || '',
+      fallbackModel: state.fallbackModel || '',
       source: 'agent-runtime',
     };
   }
@@ -89,6 +94,10 @@ function readParserRuntime(parserMode) {
     provider: sharedSelection.provider,
     model: sharedSelection.model,
     reasoningEffort: sharedReasoningEffort,
+    // The shared (non-agent) parser selection has no configured backup; the
+    // server will default to the neutral global alternate.
+    fallbackProvider: '',
+    fallbackModel: '',
     source: sharedSelection.provider ? 'shared-image-parser' : 'empty',
   };
 }
@@ -310,10 +319,16 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
         displayMessage: 'payload sent to server - sent',
       },
     });
+    // Source the operator's configured backup from the selected parser agent's
+    // runtime so the parse can fail over on a primary-provider failure. The
+    // server defaults to the neutral global alternate when none is provided.
+    const parserBackup = readParserRuntime(parserMode);
     const data = await parse(imageBase64, {
       provider,
       model: model || undefined,
       reasoningEffort: reasoningEffort || undefined,
+      fallbackProvider: parserBackup.fallbackProvider || undefined,
+      fallbackModel: parserBackup.fallbackModel || undefined,
       promptId: parserMode,
       onStageEvent: handleParserStageEvent,
     });

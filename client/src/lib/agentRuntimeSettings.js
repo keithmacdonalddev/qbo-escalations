@@ -136,9 +136,13 @@ function storageKey(prefix, field) {
 function storageKeysForDefinition(definition) {
   if (!definition?.storagePrefix) return [];
   if (isImageParser(definition)) {
+    // Failover is always on for the Image Parser too (Wave 2), so its fallback
+    // provider/model storage keys are persisted alongside the primary.
     return [
       storageKey(definition.storagePrefix, 'provider'),
+      storageKey(definition.storagePrefix, 'fallback-provider'),
       storageKey(definition.storagePrefix, 'model'),
+      storageKey(definition.storagePrefix, 'fallback-model'),
       storageKey(definition.storagePrefix, 'reasoning-effort'),
       storageKey(definition.storagePrefix, 'service-tier'),
     ];
@@ -225,9 +229,27 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
   if (isImageParser(definition)) {
     const selection = resolveImageParserSelection(state.provider, state.model);
     const provider = normalizeImageParserProvider(selection.provider);
+    // Wave 2 universal failover: the Image Parser now carries a Primary +
+    // Fallback pair like every other agent so the operator can pick the backup
+    // the engine fails over to. The fallback defaults to a neutral global
+    // alternate (the other main engine) when unset and is freely overridable.
+    // No use-case/capability filtering — any provider may back up any provider.
+    // It is only populated once a primary is selected (an empty/disabled parser
+    // has no backup to carry).
+    const fallbackSelection = resolveImageParserSelection(
+      state.fallbackProvider || (provider ? getAlternateProvider(provider) : ''),
+      state.fallbackModel
+    );
+    const fallbackProvider = provider
+      ? normalizeSurfaceFallback(provider, normalizeImageParserProvider(fallbackSelection.provider))
+      : '';
     return {
       provider,
       model: normalizeModelOverride(selection.model),
+      fallbackProvider,
+      fallbackModel: fallbackProvider === normalizeImageParserProvider(fallbackSelection.provider)
+        ? normalizeModelOverride(fallbackSelection.model)
+        : '',
       reasoningEffort: normalizeImageParserReasoningEffort(provider, state.reasoningEffort),
       serviceTier: normalizeProviderServiceTier(provider, state.serviceTier),
     };
@@ -237,12 +259,24 @@ export function normalizeAgentRuntimeState(definitionOrId, state = {}) {
     const provider = normalizeTriageProvider(state.provider, definition.defaultProvider || 'lm-studio');
     const primarySelection = resolveProviderSelection(provider, state.model);
     const providerFamily = PROVIDER_FAMILY[provider] || 'claude';
+    // Wave 2 universal failover: Triage now carries a Primary + Fallback pair
+    // like every other agent so the operator can pick the backup the engine
+    // fails over to before the deterministic rule-card fallback. The fallback
+    // defaults to a neutral global alternate when unset and is overridable. No
+    // use-case/capability filtering — any provider may back up any provider.
+    const fallbackSelection = resolveProviderSelection(
+      state.fallbackProvider || getAlternateProvider(provider),
+      state.fallbackModel
+    );
+    const fallbackProvider = normalizeSurfaceFallback(provider, fallbackSelection.provider);
     return {
       provider,
-      mode: 'single',
-      fallbackProvider: '',
+      mode: 'fallback',
+      fallbackProvider,
       model: normalizeProviderModelOverride(provider, primarySelection.model),
-      fallbackModel: '',
+      fallbackModel: fallbackProvider === fallbackSelection.provider
+        ? normalizeProviderModelOverride(fallbackProvider, fallbackSelection.model)
+        : '',
       reasoningEffort: normalizeReasoningEffort(
         state.reasoningEffort || DEFAULT_REASONING_EFFORT,
         providerFamily
@@ -298,7 +332,9 @@ export function readAgentRuntimeState(definitionOrId) {
   if (isImageParser(definition)) {
     return normalizeAgentRuntimeState(definition, {
       provider: readStoredPreference(storageKey(storagePrefix, 'provider')) || '',
+      fallbackProvider: readStoredPreference(storageKey(storagePrefix, 'fallback-provider')) || '',
       model: readStoredPreference(storageKey(storagePrefix, 'model')) || '',
+      fallbackModel: readStoredPreference(storageKey(storagePrefix, 'fallback-model')) || '',
       reasoningEffort: readStoredPreference(storageKey(storagePrefix, 'reasoning-effort')) || '',
       serviceTier: readStoredPreference(storageKey(storagePrefix, 'service-tier')) || DEFAULT_CODEX_SERVICE_TIER,
     });
@@ -330,7 +366,9 @@ export function writeAgentRuntimeState(definitionOrId, state = {}) {
 
   if (isImageParser(definition)) {
     writeStoredPreference(storageKey(storagePrefix, 'provider'), normalized.provider);
+    writeStoredPreference(storageKey(storagePrefix, 'fallback-provider'), normalized.fallbackProvider);
     writeStoredPreference(storageKey(storagePrefix, 'model'), normalized.model);
+    writeStoredPreference(storageKey(storagePrefix, 'fallback-model'), normalized.fallbackModel);
     writeStoredPreference(storageKey(storagePrefix, 'reasoning-effort'), normalized.reasoningEffort);
     writeStoredPreference(storageKey(storagePrefix, 'service-tier'), normalized.serviceTier);
     return normalized;
@@ -406,7 +444,7 @@ export function dispatchAgentRuntimeDefaultsApplied(statesById) {
   }));
 }
 
-export function getAgentRuntimeProviderLabel(definitionOrId, state = {}) {
+export function getAgentRuntimeProviderLabel(definitionOrId, state = {}, options = {}) {
   const definition = typeof definitionOrId === 'string'
     ? getAgentRuntimeDefinition(definitionOrId)
     : definitionOrId;
@@ -415,13 +453,16 @@ export function getAgentRuntimeProviderLabel(definitionOrId, state = {}) {
 
   if (isImageParser(definition)) {
     if (!normalized.provider) return 'Disabled';
-    return RUNTIME_PROVIDER_LABELS[normalized.provider] || normalized.provider;
+    const target = options.fallback ? normalized.fallbackProvider : normalized.provider;
+    if (!target) return options.fallback ? '' : 'Disabled';
+    return RUNTIME_PROVIDER_LABELS[target] || target;
   }
   if (isTriage(definition)) {
-    return RUNTIME_PROVIDER_LABELS[normalized.provider] || normalized.provider;
+    const target = options.fallback ? normalized.fallbackProvider : normalized.provider;
+    return RUNTIME_PROVIDER_LABELS[target] || target || '';
   }
 
-  return getProviderShortLabel(normalized.provider);
+  return getProviderShortLabel(options.fallback ? normalized.fallbackProvider : normalized.provider);
 }
 
 export function getAgentRuntimeEffectiveModel(definitionOrId, state = {}, options = {}) {
@@ -434,6 +475,10 @@ export function getAgentRuntimeEffectiveModel(definitionOrId, state = {}, option
 
   if (isImageParser(definition)) {
     if (!normalized.provider) return '';
+    if (fallback) {
+      if (!normalized.fallbackProvider) return '';
+      return normalized.fallbackModel || DEFAULT_IMAGE_PARSER_MODELS[normalized.fallbackProvider] || 'auto';
+    }
     return normalized.model || DEFAULT_IMAGE_PARSER_MODELS[normalized.provider] || 'auto';
   }
 
@@ -456,7 +501,14 @@ export function getAgentRuntimeSummary(definitionOrId, state = {}) {
     const effort = normalized.reasoningEffort ? ` | effort ${normalized.reasoningEffort}` : '';
     const serviceTier = formatServiceTierSummary(normalized.serviceTier);
     const tier = serviceTier ? ` | ${serviceTier}` : '';
-    return `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}${effort}${tier}`;
+    const primary = `${getAgentRuntimeProviderLabel(definition, normalized)}: ${getAgentRuntimeEffectiveModel(definition, normalized)}`;
+    // Failover is always on for the Image Parser too, so the summary shows
+    // "primary + fallback" whenever a distinct backup is configured.
+    if (normalized.fallbackProvider) {
+      const backup = `${getAgentRuntimeProviderLabel(definition, normalized, { fallback: true })}: ${getAgentRuntimeEffectiveModel(definition, normalized, { fallback: true })}`;
+      return `${primary} + ${backup}${effort}${tier}`;
+    }
+    return `${primary}${effort}${tier}`;
   }
 
   const primary = getProviderModelSummary(normalized.provider, normalized.model);
@@ -479,7 +531,7 @@ export function getAgentRuntimeModelPlaceholder(definitionOrId, state = {}, opti
   const normalized = normalizeAgentRuntimeState(definition, state);
 
   if (isImageParser(definition)) {
-    return getImageParserModelPlaceholder(normalized.provider);
+    return getImageParserModelPlaceholder(options.fallback ? normalized.fallbackProvider : normalized.provider);
   }
 
   const provider = options.fallback ? normalized.fallbackProvider : normalized.provider;
@@ -494,8 +546,9 @@ export function getAgentRuntimeModelSuggestions(definitionOrId, state = {}, opti
   const normalized = normalizeAgentRuntimeState(definition, state);
 
   if (isImageParser(definition)) {
-    return normalized.provider
-      ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === normalized.provider)
+    const target = options.fallback ? normalized.fallbackProvider : normalized.provider;
+    return target
+      ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === target)
       : IMAGE_PARSER_MODEL_SUGGESTIONS;
   }
 

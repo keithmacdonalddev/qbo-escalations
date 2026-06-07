@@ -964,6 +964,7 @@ function buildTriageMeta({
   errorCode,
   latencyMs,
   knowledgeContext,
+  attempted,
 } = {}) {
   return {
     source,
@@ -984,6 +985,11 @@ function buildTriageMeta({
     latencyMs: normalizeElapsedMs(latencyMs),
     parsedBy: source === 'agent' ? TRIAGE_AGENT_ID : 'rule-fallback',
     knowledgeContext: knowledgeContext || promptTrace?.knowledgebase || null,
+    // Ordered provenance of the provider attempts that led here. On a rule-card
+    // fallback this records the primary (and the backup, if a failover was tried)
+    // that failed, so the card does not mis-attribute the failure to whichever
+    // provider happened to be the active attempt when it threw.
+    attempted: Array.isArray(attempted) && attempted.length > 0 ? attempted : null,
   };
 }
 
@@ -1034,6 +1040,7 @@ async function buildFallbackRun({
   startedAt,
   eventBus,
   knowledgeContext,
+  attempted,
 } = {}) {
   const elapsedMs = Date.now() - startedAt;
   const card = buildFallbackCard(parseFields, reason);
@@ -1058,6 +1065,7 @@ async function buildFallbackRun({
     errorCode,
     latencyMs: elapsedMs,
     knowledgeContext,
+    attempted,
   });
   eventBus?.emit('error', {
     code: errorCode || 'TRIAGE_FALLBACK',
@@ -1136,8 +1144,13 @@ async function runTriage(text, options = {}) {
   }
   const runId = safeString(options.runId, '');
   const parseFields = deriveParseFieldsFromParserText(parserText);
-  const provider = safeString(options.provider, '').trim() || 'lm-studio';
-  const model = getEffectiveModel(provider, options.model);
+  const primaryProvider = safeString(options.provider, '').trim() || 'lm-studio';
+  const primaryModel = getEffectiveModel(primaryProvider, options.model);
+  // `provider`/`model` track the ACTIVE attempt. After an automatic failover
+  // they are reassigned to the backup so the card, persistence, and triageMeta
+  // describe the provider that actually produced the result.
+  let provider = primaryProvider;
+  let model = primaryModel;
   const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
     ? Math.min(Number(options.timeoutMs), 180_000)
     : DEFAULT_TIMEOUT_MS;
@@ -1196,48 +1209,137 @@ async function runTriage(text, options = {}) {
         startedAt,
         eventBus,
         knowledgeContext: knowledgeContextTrace,
+        // Only the primary was attempted (no failover before its own pre-flight).
+        attempted: [{ provider: primaryProvider, model: primaryModel, role: 'primary' }],
       });
     }
-
-    eventBus?.emit('triage.generation_started', {
-      provider,
-      model,
-      reasoningEffort: options.reasoningEffort || '',
-      serviceTier: options.serviceTier || '',
-    });
-    eventBus?.emit('triage.agent_handoff_to_provider', {
-      provider,
-      model,
-      forceCapture: true,
-      operation: TRIAGE_PROVIDER_OPERATION,
-    });
 
     const directCall = typeof options.runDirectTriageProviderCall === 'function'
       ? options.runDirectTriageProviderCall
       : runDirectTriageProviderCall;
-    const providerResult = await directCall({
-      provider,
-      model,
-      systemPrompt,
-      userPrompt,
-      reasoningEffort: options.reasoningEffort || '',
-      serviceTier: options.serviceTier || '',
-      timeoutMs,
-      promptTrace,
-      eventBus,
-      signal,
-    });
-    providerTrace = providerResult?.providerTrace || null;
     const waitForPackage = typeof options.waitForProviderPackage === 'function'
       ? options.waitForProviderPackage
       : waitForProviderPackage;
-    const providerPackage = await waitForPackage(providerTrace, eventBus, signal);
-    const payload = await extractTriageTextFromProviderPackage(providerPackage, providerTrace);
-    if (!payload.text) {
-      throw createTriageError('Provider package did not contain usable triage text', 'PROVIDER_PACKAGE_EMPTY_RESPONSE', {
-        providerPackageId: providerTrace?.providerPackageId || null,
+
+    // One full provider attempt: hand off to the provider, wait for its
+    // ProviderCallPackage to be readable, then extract the triage text. This is
+    // run once for the primary and — on failure — once for the configured
+    // backup. The capture pipeline keys off the providerTrace returned by THIS
+    // call, so each attempt produces and reads back its OWN package; the backup
+    // does not reuse the primary's trace. Returns { providerTrace, providerPackage, payload }.
+    async function attemptProviderTriage(attemptProvider, attemptModel) {
+      eventBus?.emit('triage.generation_started', {
+        provider: attemptProvider,
+        model: attemptModel,
+        reasoningEffort: options.reasoningEffort || '',
+        serviceTier: options.serviceTier || '',
       });
+      eventBus?.emit('triage.agent_handoff_to_provider', {
+        provider: attemptProvider,
+        model: attemptModel,
+        forceCapture: true,
+        operation: TRIAGE_PROVIDER_OPERATION,
+      });
+
+      const providerResult = await directCall({
+        provider: attemptProvider,
+        model: attemptModel,
+        systemPrompt,
+        userPrompt,
+        reasoningEffort: options.reasoningEffort || '',
+        serviceTier: options.serviceTier || '',
+        timeoutMs,
+        promptTrace,
+        eventBus,
+        signal,
+      });
+      const attemptTrace = providerResult?.providerTrace || null;
+      const attemptPackage = await waitForPackage(attemptTrace, eventBus, signal);
+      const attemptPayload = await extractTriageTextFromProviderPackage(attemptPackage, attemptTrace);
+      if (!attemptPayload.text) {
+        const emptyErr = createTriageError('Provider package did not contain usable triage text', 'PROVIDER_PACKAGE_EMPTY_RESPONSE', {
+          providerPackageId: attemptTrace?.providerPackageId || null,
+        });
+        emptyErr.providerTrace = attemptTrace;
+        throw emptyErr;
+      }
+      return { providerTrace: attemptTrace, providerPackage: attemptPackage, payload: attemptPayload };
     }
+
+    // Automatic provider-to-provider failover (Wave 2): Triage now fails over to
+    // a configured backup when its primary provider attempt fails, exactly like
+    // the chat and parse substrates. The backup is resolved by the shared,
+    // use-case-agnostic resolveAgentBackup helper — NO capability filtering; the
+    // operator's profile choice is honored as-is, defaulting to a neutral global
+    // alternate when unset. Precedence: an explicit request-body fallbackProvider
+    // wins, else the profile-configured backup, else the neutral alternate. If
+    // the backup ALSO fails, the error propagates to the catch below and the
+    // deterministic rule-card fallback (buildFallbackRun) stays the final resort.
+    let attempt;
+    try {
+      attempt = await attemptProviderTriage(primaryProvider, primaryModel);
+    } catch (primaryErr) {
+      // Failover is gated on the CALLER signalling failover intent (an explicit
+      // fallbackProvider OR an agentRuntime object). The agent routes ALWAYS pass
+      // the triage agent profile runtime (which defaults the fallback to the
+      // neutral alternate), so for every real triage flow failover is always on.
+      // Bare engine callers that pass a single provider and no runtime keep the
+      // original behavior: the primary failure flows straight to the rule card
+      // without a second provider attempt.
+      const requestFallbackProvider = safeString(options.fallbackProvider, '').trim();
+      const hasFailoverIntent = Boolean(requestFallbackProvider)
+        || (options.agentRuntime && typeof options.agentRuntime === 'object');
+      if (!hasFailoverIntent) {
+        throw primaryErr;
+      }
+      // eslint-disable-next-line global-require
+      const { resolveAgentBackup } = require('./agent-failover');
+      const profileBackup = resolveAgentBackup(primaryProvider, options.agentRuntime);
+      const requestFallbackModel = safeString(options.fallbackModel, '').trim();
+      const backupProviderRaw = requestFallbackProvider || profileBackup.provider;
+      const backupProvider = DIRECT_TRIAGE_PROVIDERS.includes(backupProviderRaw) ? backupProviderRaw : '';
+      const backupModelRaw = requestFallbackProvider ? requestFallbackModel : profileBackup.model;
+      const backupModel = getEffectiveModel(backupProvider, backupModelRaw);
+
+      // Only fail over to a DISTINCT, supported triage provider. Otherwise there
+      // is nothing usable to fail over to — let the original failure flow to the
+      // deterministic rule-card fallback below.
+      if (!backupProvider || backupProvider === primaryProvider) {
+        throw primaryErr;
+      }
+
+      // The backup must clear its own pre-flight before we hand off, mirroring
+      // the primary path so an unreachable backup degrades to the rule card
+      // rather than hanging on a dead provider.
+      const backupPreflight = typeof options.preflightProvider === 'function'
+        ? await options.preflightProvider({ provider: backupProvider, model: backupModel, timeoutMs: Math.min(timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS), signal })
+        : await preflightProvider({ provider: backupProvider, model: backupModel, timeoutMs: Math.min(timeoutMs, DEFAULT_PREFLIGHT_TIMEOUT_MS), signal });
+      if (!backupPreflight.ok) {
+        throw primaryErr;
+      }
+
+      eventBus?.emit('triage.provider_failover', {
+        from: primaryProvider,
+        fromModel: primaryModel || '',
+        to: backupProvider,
+        toModel: backupModel || '',
+        reason: primaryErr?.message || 'Primary triage provider failed',
+        code: primaryErr?.code || 'TRIAGE_PROVIDER_FAILED',
+        surfaceToUser: true,
+        displayMessage: `Triage primary ${primaryProvider} failed; failing over to ${backupProvider}`,
+      });
+
+      // Reassign the active attempt identity to the backup so the card,
+      // persistence, and triageMeta below all describe the backup that produced
+      // the result. If the backup throws, it propagates to the catch -> rule card.
+      provider = backupProvider;
+      model = backupModel;
+      attempt = await attemptProviderTriage(backupProvider, backupModel);
+    }
+
+    providerTrace = attempt.providerTrace;
+    const providerPackage = attempt.providerPackage;
+    const payload = attempt.payload;
     eventBus?.emit('triage.fields_extracted', {
       providerPackageId: providerTrace?.providerPackageId || null,
       sourcePath: payload.sourcePath,
@@ -1302,12 +1404,25 @@ async function runTriage(text, options = {}) {
       elapsedMs,
       providerUsed: provider,
       modelUsed: providerTrace?.model || model,
+      // Surface whether an automatic failover produced this result (provider now
+      // differs from the requested primary). fallbackFrom is the primary we left.
+      fallbackUsed: provider !== primaryProvider,
+      fallbackFrom: provider !== primaryProvider ? primaryProvider : '',
       savedResult: serializeTriageResultDoc(saved),
     };
   } catch (err) {
     providerTrace = err?.providerTrace || providerTrace || null;
     const code = err?.code || 'TRIAGE_PROVIDER_FAILED';
     const failureStage = code && code.startsWith('PROVIDER_PACKAGE') ? 'provider-package-readback' : 'provider-call';
+    // Accurate provenance for the rule card: the primary always failed to reach
+    // here, and if `provider` was reassigned to a backup (a failover was tried)
+    // that backup failed too. Record both in order so the card does not blame the
+    // backup alone when the active attempt happened to be the backup.
+    const failedOverToBackup = provider !== primaryProvider;
+    const attempted = [{ provider: primaryProvider, model: primaryModel, role: 'primary' }];
+    if (failedOverToBackup) {
+      attempted.push({ provider, model, role: 'backup' });
+    }
     return buildFallbackRun({
       runId,
       text: parserText,
@@ -1322,6 +1437,7 @@ async function runTriage(text, options = {}) {
       startedAt,
       eventBus,
       knowledgeContext: knowledgeContextTrace,
+      attempted,
     });
   }
 }

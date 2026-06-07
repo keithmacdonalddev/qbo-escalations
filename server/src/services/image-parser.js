@@ -2828,7 +2828,11 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
  * }>}
  */
 async function parseImage(imageBase64, options = {}) {
-  const { provider, model, reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus, signal } = options;
+  // `provider`/`model` are mutable: after an automatic failover they are
+  // reassigned to the backup attempt that actually produced the result, so all
+  // downstream stats/events/persistence describe the provider that succeeded.
+  let { provider, model } = options;
+  const { reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus, signal } = options;
   throwIfAborted(signal);
   // Legacy SDK adapter is now explicit opt-in. The normal Anthropic provider
   // route uses the direct API harness so it gets ProviderCallPackage parity.
@@ -2881,13 +2885,21 @@ async function parseImage(imageBase64, options = {}) {
 
   let result;
   const providerStartTime = Date.now();
-  eventBus?.emit('parser.generation_started', {
-    provider,
-    model: model || '',
-    reasoningEffort: reasoningEffort || '',
-    serviceTier: serviceTier || '',
-  });
-  if (isProvidersStubbed()) {
+
+  // Per-transport provider dispatch, parameterized by the ACTIVE provider/model
+  // so the same code runs for the primary attempt and the automatic backup
+  // attempt. `provider`/`model` are shadowed by the parameters within this
+  // function, so every event emission and capture context naturally reports the
+  // attempt actually in flight. Returns the raw provider result object.
+  async function dispatchProviderParse(provider, model) {
+    let result;
+    eventBus?.emit('parser.generation_started', {
+      provider,
+      model: model || '',
+      reasoningEffort: reasoningEffort || '',
+      serviceTier: serviceTier || '',
+    });
+    if (isProvidersStubbed()) {
     const stub = getProviderStub(provider, 'parseImage');
     if (!stub) throw new MissingProviderStubError(provider, 'parseImage');
     result = await stub({
@@ -3064,6 +3076,98 @@ async function parseImage(imageBase64, options = {}) {
       }
     }
   }
+    return result;
+  }
+
+  // Automatic provider-to-provider failover (Wave 2): the Image Parser fails
+  // over to a configured backup when its primary provider call fails, exactly
+  // like the chat and parse substrates. The backup is resolved by the shared,
+  // use-case-agnostic resolveAgentBackup helper — there is NO capability
+  // filtering (the backup is NOT required to be "image-capable"); the operator's
+  // profile choice is honored as-is, defaulting to a neutral global alternate
+  // when unset. Precedence mirrors the copilot route: an explicit request-body
+  // fallbackProvider wins, else the profile-configured backup, else the neutral
+  // alternate. The success path is unchanged — the backup fires ONLY on a real
+  // primary failure, and if the backup also fails the original error propagates
+  // so the route's existing error response remains the final resort.
+  //
+  // Failover is gated on the CALLER signalling failover intent (an explicit
+  // fallbackProvider OR an agentRuntime object). The agent routes ALWAYS pass
+  // the agent profile runtime (which itself defaults the fallback to the neutral
+  // alternate), so for every real agent flow failover is always on. Bare engine
+  // callers that pass a single provider and no runtime keep the original
+  // single-attempt behavior — they are not exercising an agent profile.
+  const requestFallbackProvider = typeof options.fallbackProvider === 'string'
+    ? options.fallbackProvider.trim()
+    : '';
+  const hasFailoverIntent = Boolean(requestFallbackProvider)
+    || (options.agentRuntime && typeof options.agentRuntime === 'object');
+  let activeProvider = provider;
+  let activeModel = model;
+  try {
+    result = await dispatchProviderParse(provider, model);
+  } catch (primaryErr) {
+    if (!hasFailoverIntent) {
+      throw primaryErr;
+    }
+    // eslint-disable-next-line global-require
+    const { resolveAgentBackup } = require('./agent-failover');
+    const profileBackup = resolveAgentBackup(provider, options.agentRuntime);
+    const requestFallbackModel = typeof options.fallbackModel === 'string'
+      ? options.fallbackModel.trim()
+      : '';
+    // Request-body fallback wins; otherwise use the resolved profile backup,
+    // which already defaults to the neutral global alternate when the operator
+    // configured none. The model is only carried when it pairs with its provider.
+    const backupProvider = requestFallbackProvider || profileBackup.provider;
+    const backupModel = requestFallbackProvider ? requestFallbackModel : profileBackup.model;
+
+    // Only fail over to a DISTINCT, valid image-parser provider. If the backup
+    // collapses to the failed primary or is not a usable parser provider, there
+    // is nothing to fail over to — surface the original primary error.
+    const canFailOver = backupProvider
+      && backupProvider !== provider
+      && VALID_IMAGE_PARSER_PROVIDERS.includes(backupProvider);
+    if (!canFailOver) {
+      throw primaryErr;
+    }
+
+    eventBus?.emit('parser.provider_failover', {
+      from: provider,
+      fromModel: model || '',
+      to: backupProvider,
+      toModel: backupModel || '',
+      reason: primaryErr?.message || 'Primary image-parser provider failed',
+      code: primaryErr?.code || 'PROVIDER_ERROR',
+      surfaceToUser: true,
+      displayMessage: `Image parser primary ${provider} failed; failing over to ${backupProvider}`,
+    });
+
+    try {
+      result = await dispatchProviderParse(backupProvider, backupModel);
+      activeProvider = backupProvider;
+      activeModel = backupModel;
+      if (result && typeof result === 'object') {
+        result.fallbackUsed = true;
+        result.fallbackFrom = provider;
+      }
+    } catch (backupErr) {
+      // Backup also failed: keep the original primary error as the surfaced
+      // failure (the route's error response is the final resort), but attach the
+      // backup attempt context for observability.
+      primaryErr.fallbackAttempted = true;
+      primaryErr.fallbackProvider = backupProvider;
+      primaryErr.fallbackError = backupErr?.message || '';
+      if (!primaryErr.providerTrace && backupErr?.providerTrace) {
+        primaryErr.providerTrace = backupErr.providerTrace;
+      }
+      throw primaryErr;
+    }
+  }
+  // From here on, the active attempt's provider/model describe the result that
+  // actually succeeded (primary by default, backup after a failover).
+  provider = activeProvider;
+  model = activeModel;
   throwIfAborted(signal);
   const providerLatencyMs = Date.now() - providerStartTime;
   eventBus?.emit('parser.generation_completed', {
@@ -3146,6 +3250,13 @@ async function parseImage(imageBase64, options = {}) {
     ...promptTrace,
     usage: result.usage,
     providerTrace: result.providerTrace || null,
+    // `provider`/`model` here are the ACTIVE attempt that produced this result
+    // (the backup, after an automatic failover). `fallbackUsed`/`fallbackFrom`
+    // let callers record and surface that a failover occurred.
+    providerUsed: provider,
+    modelUsed: model || '',
+    fallbackUsed: Boolean(result.fallbackUsed),
+    fallbackFrom: result.fallbackFrom || '',
     parseFields,
     parseMeta,
     stats: {

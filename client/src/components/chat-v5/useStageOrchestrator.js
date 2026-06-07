@@ -616,6 +616,13 @@ export function useStageOrchestrator() {
     const model = cleanRuntimeValue(triageRuntime.model);
     const reasoningEffort = cleanRuntimeValue(triageRuntime.reasoningEffort);
     const serviceTier = cleanRuntimeValue(triageRuntime.serviceTier);
+    // Wave 2 universal failover: forward the triage agent profile's configured
+    // backup so the server's failover gate (hasFailoverIntent) turns on. Without
+    // these, a primary-provider failure goes straight to the deterministic rule
+    // card with no second-provider attempt. triageRuntime always carries a
+    // fallbackProvider/fallbackModel pair (defaults to a neutral alternate).
+    const fallbackProvider = cleanRuntimeValue(triageRuntime.fallbackProvider);
+    const fallbackModel = cleanRuntimeValue(triageRuntime.fallbackModel);
     const startedAt = Date.now();
 
     setStageState((prev) => ({
@@ -647,6 +654,14 @@ export function useStageOrchestrator() {
       model,
       reasoningEffort,
       serviceTier,
+      // Carry the configured backup so the server gate enables failover. The
+      // standalone triage route + resolveAgentBackup read fallbackProvider/
+      // fallbackModel off the flat agentRuntime object, so we send triageRuntime
+      // itself (matching the triage-tests route's contract), with the explicit
+      // fallback pair taking precedence when set.
+      fallbackProvider,
+      fallbackModel,
+      agentRuntime: triageRuntime,
       timeoutMs: 120_000,
     }, {
       onStageEvent: (data) => {

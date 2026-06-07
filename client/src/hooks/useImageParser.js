@@ -7,6 +7,11 @@ import { summarizeProviderPackageCaptureFailure } from '../lib/imageParserValida
 const IMAGE_PARSER_PROVIDER_KEY = 'qbo-image-parser-provider';
 const IMAGE_PARSER_MODEL_KEY = 'qbo-image-parser-model';
 const IMAGE_PARSER_REASONING_EFFORT_KEY = 'qbo-image-parser-reasoning-effort';
+// The standalone Image Parser panel persists its backup alongside its primary
+// under the same `qbo-image-parser-*` prefix (the image-parser agent runtime).
+// Reading it here lets every parse from this hook fail over (Wave 2).
+const IMAGE_PARSER_FALLBACK_PROVIDER_KEY = 'qbo-image-parser-fallback-provider';
+const IMAGE_PARSER_FALLBACK_MODEL_KEY = 'qbo-image-parser-fallback-model';
 
 function readStoredConfig() {
   try {
@@ -18,9 +23,11 @@ function readStoredConfig() {
       provider: selection.provider,
       model: selection.model,
       reasoningEffort: localStorage.getItem(IMAGE_PARSER_REASONING_EFFORT_KEY) || '',
+      fallbackProvider: localStorage.getItem(IMAGE_PARSER_FALLBACK_PROVIDER_KEY) || '',
+      fallbackModel: localStorage.getItem(IMAGE_PARSER_FALLBACK_MODEL_KEY) || '',
     };
   } catch {
-    return { provider: '', model: '', reasoningEffort: '' };
+    return { provider: '', model: '', reasoningEffort: '', fallbackProvider: '', fallbackModel: '' };
   }
 }
 
@@ -43,6 +50,12 @@ export default function useImageParser() {
       const provider = overrides.provider || config.provider;
       const model = overrides.model || config.model;
       const reasoningEffort = overrides.reasoningEffort || config.reasoningEffort;
+      // Wave 2 universal failover: forward the operator's configured backup so
+      // the parser can fail over on a primary-provider failure. The caller (the
+      // parser popup) sources these from the selected parser agent's runtime; the
+      // server defaults to the neutral global alternate when none is provided.
+      const fallbackProvider = overrides.fallbackProvider || config.fallbackProvider || '';
+      const fallbackModel = overrides.fallbackModel || config.fallbackModel || '';
 
       if (!provider) throw new Error('No image parser provider configured');
 
@@ -57,6 +70,13 @@ export default function useImageParser() {
           provider,
           model: model || undefined,
           reasoningEffort: reasoningEffort || undefined,
+          fallbackProvider: fallbackProvider || undefined,
+          fallbackModel: fallbackModel || undefined,
+          // Always signal failover intent so the server attempts a backup on a
+          // primary failure (defaulting to the neutral global alternate when no
+          // explicit fallback is configured). Failover is always on for the
+          // Image Parser (Wave 2).
+          agentRuntime: { provider, fallbackProvider, fallbackModel, configured: true },
           promptId: overrides.promptId || overrides.parserPromptId || undefined,
           timeoutMs: overrides.timeoutMs,
         }),
