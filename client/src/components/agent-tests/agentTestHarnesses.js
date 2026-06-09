@@ -1,4 +1,6 @@
 import { apiFetch, apiFetchJson } from '../../api/http.js';
+import { recordAgentHarnessRun } from '../../api/agentIdentitiesApi.js';
+import { runKnowledgeAgentHarness } from '../../api/knowledgeApi.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import {
   buildPipelineRuntimePayload,
@@ -319,6 +321,56 @@ async function recordTriageFixtureTest(result, status) {
   return body?.result || null;
 }
 
+async function runKnowledgebaseAgentDraftTest({ signal, onStageEvent, request } = {}) {
+  if (signal?.aborted) {
+    throw new DOMException('Agent test was cancelled.', 'AbortError');
+  }
+  emitClientEvent(onStageEvent, 'knowledgebase.client_request_started', {
+    escalationId: cleanText(request?.escalationId || request?.caseId),
+    testRun: true,
+    status: 'sent',
+    surfaceToUser: true,
+    displayMessage: 'Knowledge Base Agent draft harness request sent to server',
+  });
+
+  const data = await runKnowledgeAgentHarness({
+    escalationId: cleanText(request?.escalationId || request?.caseId),
+  });
+
+  if (!data || data.ok === false) {
+    throw normalizeHarnessError(data || { message: 'Knowledge Base Agent harness failed.' });
+  }
+
+  emitClientEvent(onStageEvent, 'knowledgebase.client_result_received', {
+    escalationId: data.fixture?.escalationId || '',
+    caseNumber: data.fixture?.caseNumber || '',
+    status: data.status || '',
+    testRun: true,
+    displayMessage: 'Knowledge Base Agent draft harness result received',
+  });
+  return data;
+}
+
+async function recordKnowledgebaseAgentDraftTest(result, status) {
+  return recordAgentHarnessRun('knowledgebase-agent', {
+    status,
+    summary: result?.summary || `Knowledge Base draft harness ${status}.`,
+    completedAt: new Date().toISOString(),
+    cases: (Array.isArray(result?.checks) ? result.checks : []).map((check) => ({
+      id: check.id || check.label,
+      title: check.label || check.id || 'Harness check',
+      status: check.passed ? 'pass' : check.optional ? 'warn' : 'fail',
+      expected: check.optional ? 'Optional draft field is useful when source data has it.' : 'Required draft field should be present.',
+      actual: check.detail || '',
+    })),
+    metadata: {
+      fixture: result?.fixture || null,
+      draft: result?.draft || null,
+      harnessStatus: result?.status || '',
+    },
+  });
+}
+
 function objectRows(fields = {}) {
   if (!fields || typeof fields !== 'object') return [];
   return Object.entries(fields)
@@ -457,6 +509,32 @@ function triageResultLayout(result) {
   return { meta, blocks, status: savedStatePills(result) };
 }
 
+function knowledgebaseResultLayout(result) {
+  const draft = result?.draft || {};
+  const checks = Array.isArray(result?.checks) ? result.checks : [];
+  const meta = [
+    { key: 'status', label: 'Status', value: cleanText(result?.status), tone: result?.status === 'fail' ? 'fail' : result?.status === 'warn' ? 'warn' : 'pass' },
+    { key: 'case', label: 'Case', value: cleanText(result?.fixture?.caseNumber || result?.fixture?.escalationId) },
+    { key: 'category', label: 'Category', value: cleanText(result?.fixture?.category || draft.category) },
+  ].filter((field) => field.value);
+  const blocks = [
+    { key: 'title', label: 'Title / Subject', value: cleanText(draft.title) },
+    { key: 'customerGoal', label: 'Customer Goal', value: cleanText(draft.customerGoal) },
+    { key: 'reportedProblem', label: 'Reported Problem', value: cleanText(draft.reportedProblem) },
+    { key: 'evidenceFromCase', label: 'Evidence From Case', value: cleanText(draft.evidenceFromCase) },
+    { key: 'troubleshootingTried', label: 'Troubleshooting Already Tried', value: cleanText(draft.troubleshootingTried) },
+    { key: 'finalOutcome', label: 'Final Outcome', value: cleanText(draft.finalOutcome) },
+    { key: 'invEscalationStatus', label: 'INV / Escalation Status', value: cleanText(draft.invEscalationStatus) },
+    {
+      key: 'checks',
+      label: 'Harness Checks',
+      value: checks.map((check) => `${check.passed ? 'PASS' : check.optional ? 'WARN' : 'FAIL'} ${check.label}`).join('\n'),
+    },
+  ].filter((block) => block.value);
+
+  return { meta, blocks, status: [{ tone: result?.ok ? 'pass' : 'fail', text: result?.ok ? 'Draft contract passed' : 'Draft contract failed' }] };
+}
+
 export const AGENT_TEST_HARNESSES = Object.freeze({
   'escalation-template-parser': {
     id: 'image-parser-fixture',
@@ -511,6 +589,30 @@ export const AGENT_TEST_HARNESSES = Object.freeze({
     rawTextLabel: 'Fixture parser text',
     emptyResultLabel: 'No triage card returned.',
     passNote: 'Record the final triage decision.',
+    stageEventMessage,
+  },
+  'knowledgebase-agent': {
+    id: 'knowledgebase-qbo-draft',
+    agentId: 'knowledgebase-agent',
+    agentLabel: 'Knowledge Base Agent',
+    stageKey: 'knowledgebase',
+    title: 'Knowledge Base Agent Draft Harness',
+    description: 'A finalized QBO Canada escalation is converted into a KB review draft and checked for required draft fields.',
+    runLabel: 'Running KB draft harness',
+    resultLabel: 'KB Draft Output',
+    run: runKnowledgebaseAgentDraftTest,
+    recordResult: recordKnowledgebaseAgentDraftTest,
+    canRecordResult: (result) => Boolean(result?.checks),
+    savedResultId: (result) => cleanText(result?.fixture?.escalationId),
+    getFixture: (result) => result?.fixture || null,
+    getValidationPills: (result) => [{ tone: result?.ok ? 'pass' : 'fail', text: result?.ok ? 'Required draft fields present' : 'Required draft fields missing' }],
+    getResultRows: () => [],
+    getResultLayout: knowledgebaseResultLayout,
+    getOutputText: (result) => JSON.stringify(result?.draft || {}, null, 2),
+    outputTextLabel: 'Draft JSON',
+    primaryTextOutput: false,
+    emptyResultLabel: 'No KB draft returned.',
+    passNote: 'Record whether this KB draft harness output is acceptable.',
     stageEventMessage,
   },
 });
