@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Newton Post-Chat Escalation Workflow Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="rail" aria-label="Prototype sections">
+        <div class="brand-mark">N</div>
+        <button class="rail-button is-active" type="button" data-support="focus" aria-label="Current work">
+          <span class="rail-icon">01</span>
+          <span>Work</span>
+        </button>
+        <button class="rail-button" type="button" data-support="history" aria-label="History">
+          <span class="rail-icon">02</span>
+          <span>Hist</span>
+        </button>
+        <button class="rail-button" type="button" data-support="decisions" aria-label="Decisions">
+          <span class="rail-icon">03</span>
+          <span>Dec</span>
+        </button>
+        <button class="rail-button" type="button" data-support="knownIssues" aria-label="Known issues">
+          <span class="rail-icon">04</span>
+          <span>INV</span>
+        </button>
+        <button class="rail-button" type="button" data-support="teach" aria-label="Teach agents">
+          <span class="rail-icon">05</span>
+          <span>Teach</span>
+        </button>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Newton prototype</p>
+            <h1>Post-chat escalation workbench</h1>
+          </div>
+          <div class="topbar-state" aria-label="Current prototype state">
+            <span class="status-dot"></span>
+            <span id="topbarState">Ready for image intake</span>
+          </div>
+        </header>
+
+        <section class="pipeline-panel" aria-label="Expert-agent pipeline">
+          <div class="pipeline-intro">
+            <p class="eyebrow">One visible path</p>
+            <h2 id="pipelineHeadline">Upload image, then let the expert agents carry the work forward.</h2>
+          </div>
+          <ol class="pipeline" id="pipelineSteps"></ol>
+        </section>
+
+        <section class="main-grid">
+          <section class="active-task" aria-live="polite">
+            <div class="task-heading">
+              <div>
+                <p class="eyebrow" id="taskStage">Capture</p>
+                <h2 id="taskTitle">Start with the support screenshot</h2>
+              </div>
+              <div class="task-actions">
+                <button class="primary-action" id="stagePrimaryAction" type="button">Use sample screenshot</button>
+                <button class="secondary-action" id="resetFlow" type="button">Reset demo</button>
+              </div>
+            </div>
+
+            <div id="taskBody" class="task-body"></div>
+          </section>
+
+          <aside class="context-panel" aria-label="Supporting context">
+            <div class="context-header">
+              <div>
+                <p class="eyebrow">Supporting context</p>
+                <h2 id="supportTitle">What this replaces</h2>
+              </div>
+              <span class="context-pill" id="supportPill">Hidden until useful</span>
+            </div>
+
+            <div class="support-tabs" role="tablist" aria-label="Supporting views">
+              <button class="support-tab is-active" type="button" data-support="focus">Focus</button>
+              <button class="support-tab" type="button" data-support="history">History</button>
+              <button class="support-tab" type="button" data-support="decisions">Decisions</button>
+              <button class="support-tab" type="button" data-support="knownIssues">Known issues</button>
+              <button class="support-tab" type="button" data-support="teach">Teach agents</button>
+            </div>
+
+            <div id="supportBody" class="support-body"></div>
+          </aside>
+        </section>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

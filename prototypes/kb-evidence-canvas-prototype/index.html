@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KB Evidence Canvas Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar" aria-label="Knowledge evidence review">
+        <div class="brand-block">
+          <span class="product-label">Knowledge Review</span>
+          <h1>Decide what agents may use</h1>
+          <p>
+            Check a proposed KB entry against its source evidence, then choose whether it becomes guidance,
+            case history, rejected knowledge, or deprecated knowledge.
+          </p>
+        </div>
+
+        <div class="decision-status" aria-live="polite">
+          <span class="status-pill" id="topReadiness">Needs review</span>
+          <button class="primary-action" id="topAction" type="button">Keep as case history</button>
+        </div>
+      </header>
+
+      <section class="review-layout" aria-label="Evidence review canvas">
+        <aside class="library-pane" aria-label="Knowledge items">
+          <div class="pane-heading">
+            <span class="eyebrow">Work needing a call</span>
+            <strong id="itemCount">0 items</strong>
+          </div>
+
+          <label class="search-box" for="kbSearch">
+            <span>Search knowledge</span>
+            <input id="kbSearch" type="search" placeholder="Issue, source, scope..." autocomplete="off" />
+          </label>
+
+          <div class="filter-row" role="group" aria-label="Knowledge filters">
+            <button class="filter-button is-active" type="button" data-filter="all">All</button>
+            <button class="filter-button" type="button" data-filter="attention">Needs decision</button>
+            <button class="filter-button" type="button" data-filter="contradicted">Contradicted</button>
+            <button class="filter-button" type="button" data-filter="ready">Ready</button>
+          </div>
+
+          <div class="record-list" id="recordList" aria-label="Selectable knowledge records"></div>
+        </aside>
+
+        <section class="canvas-pane" aria-label="Selected knowledge evidence canvas">
+          <div class="canvas-title-row">
+            <div>
+              <span class="eyebrow">Evidence canvas</span>
+              <h2 id="recordTitle">Select a knowledge item</h2>
+              <p id="recordSource">Source and scope will appear here.</p>
+            </div>
+            <div class="strength-meter" aria-label="Evidence strength">
+              <span id="strengthLabel">Strength</span>
+              <div class="meter-track">
+                <span id="strengthFill"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="decision-question" id="decisionQuestion">
+            Review the selected draft and choose what agents can safely do with it.
+          </div>
+
+          <div class="canvas-grid">
+            <section class="source-pane" aria-label="Source evidence">
+              <div class="section-header">
+                <div>
+                  <span class="eyebrow">Source</span>
+                  <h3>What the original case actually says</h3>
+                </div>
+                <button class="text-button" id="compareButton" type="button">Show claim match</button>
+              </div>
+
+              <div class="artifact-preview" aria-label="Source document preview">
+                <div class="artifact-head">
+                  <span id="artifactType">Case source</span>
+                  <strong id="artifactName">Case record</strong>
+                </div>
+                <div class="artifact-body" id="artifactPreview"></div>
+              </div>
+
+              <div class="tab-row" role="tablist" aria-label="Evidence views">
+                <button class="tab-button is-active" type="button" data-tab="evidence">Evidence</button>
+                <button class="tab-button" type="button" data-tab="claims">Claims</button>
+                <button class="tab-button" type="button" data-tab="gaps">Gaps</button>
+              </div>
+
+              <div id="evidencePanel" class="tab-panel"></div>
+            </section>
+
+            <section class="guidance-pane" aria-label="Proposed guidance editor">
+              <div class="section-header">
+                <div>
+                  <span class="eyebrow">Proposed knowledge</span>
+                  <h3>What agents would learn</h3>
+                </div>
+                <button class="text-button" id="applySourceButton" type="button">Use source wording</button>
+              </div>
+
+              <div class="field-stack">
+                <label class="field-block">
+                  <span>Summary</span>
+                  <textarea id="summaryField" rows="3"></textarea>
+                </label>
+                <label class="field-block">
+                  <span>Root cause</span>
+                  <textarea id="rootCauseField" rows="2"></textarea>
+                </label>
+                <label class="field-block">
+                  <span>Exact fix</span>
+                  <textarea id="fixField" rows="4"></textarea>
+                </label>
+                <label class="field-block">
+                  <span>Scope</span>
+                  <textarea id="scopeField" rows="2"></textarea>
+                </label>
+                <label class="field-block">
+                  <span>Exclusions</span>
+                  <textarea id="exclusionsField" rows="2"></textarea>
+                </label>
+                <label class="field-block">
+                  <span>Reviewer note</span>
+                  <textarea id="notesField" rows="3"></textarea>
+                </label>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="decision-pane" aria-label="Decision and agent use">
+          <div class="pane-heading">
+            <span class="eyebrow">Decision needed</span>
+            <strong id="decisionNeed">Choose allowed use</strong>
+          </div>
+
+          <div class="decision-options" role="radiogroup" aria-label="Allowed knowledge use">
+            <button class="decision-option" type="button" data-decision="trusted">
+              <strong>Trusted guidance</strong>
+              <span>Agents may use it in answers.</span>
+            </button>
+            <button class="decision-option" type="button" data-decision="caseHistory">
+              <strong>Case history only</strong>
+              <span>Agents may compare, not recommend.</span>
+            </button>
+            <button class="decision-option" type="button" data-decision="rejected">
+              <strong>Reject</strong>
+              <span>Keep it out of agent answers.</span>
+            </button>
+            <button class="decision-option" type="button" data-decision="deprecated">
+              <strong>Deprecated</strong>
+              <span>Keep record, point to newer guidance.</span>
+            </button>
+          </div>
+
+          <div class="consequence-box" id="consequenceBox" aria-live="polite"></div>
+
+          <div class="requirements-block">
+            <div class="section-header compact">
+              <div>
+                <span class="eyebrow">Before publishing</span>
+                <h3>Requirements</h3>
+              </div>
+            </div>
+            <div id="requirementsList" class="requirements-list"></div>
+          </div>
+
+          <div class="issue-summary" id="issueSummary"></div>
+
+          <button class="primary-action full-width" id="primaryAction" type="button">Keep as case history</button>
+          <button class="secondary-action full-width" id="auditToggle" type="button" aria-expanded="false">
+            Reveal audit details
+          </button>
+
+          <div class="audit-panel" id="auditPanel" hidden>
+            <div class="section-header compact">
+              <div>
+                <span class="eyebrow">Audit details</span>
+                <h3>What changed and why</h3>
+              </div>
+            </div>
+            <div id="auditList" class="audit-list"></div>
+          </div>
+
+          <p class="action-feedback" id="actionFeedback" aria-live="polite"></p>
+        </aside>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

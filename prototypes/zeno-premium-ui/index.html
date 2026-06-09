@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zeno Premium UI Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-nav" aria-label="Prototype navigation">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <strong>Zeno</strong>
+            <small>Caseflow</small>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-link active" data-view-target="workflow">
+            <span class="nav-icon">1</span>
+            <span>Finish Case</span>
+          </button>
+          <button class="nav-link" data-view-target="intake">
+            <span class="nav-icon">2</span>
+            <span>Image Intake</span>
+          </button>
+          <button class="nav-link" data-view-target="sessions">
+            <span class="nav-icon">3</span>
+            <span>Saved Chats</span>
+          </button>
+          <button class="nav-link" data-view-target="escalations">
+            <span class="nav-icon">4</span>
+            <span>Cases</span>
+          </button>
+          <button class="nav-link" data-view-target="attention">
+            <span class="nav-icon">5</span>
+            <span>Decisions</span>
+          </button>
+          <button class="nav-link" data-view-target="knowledge">
+            <span class="nav-icon">6</span>
+            <span>Agent Guidance</span>
+          </button>
+          <button class="nav-link" data-view-target="investigations">
+            <span class="nav-icon">7</span>
+            <span>Known Issues</span>
+          </button>
+        </nav>
+
+        <div class="side-note">
+          <strong>Principle</strong>
+          <span>Every surface starts with the user's next job, not the system object.</span>
+        </div>
+      </aside>
+
+      <main class="main-stage">
+        <header class="top-bar">
+          <div>
+            <p class="eyebrow">Post-chat handoff</p>
+            <h1>Case 15154531492</h1>
+            <p class="subtitle">Missing T4 Summary after XML download for CRA filing.</p>
+          </div>
+          <div class="top-actions">
+            <span class="status-pill" id="globalStatus">Needs outcome</span>
+            <button class="secondary-button" data-view-target="intake">View source chat</button>
+          </div>
+        </header>
+
+        <section class="case-spine" aria-label="Current case workflow">
+          <button class="spine-step complete" data-view-target="intake">
+            <span>Captured</span>
+            <strong>Image became a case</strong>
+          </button>
+          <button class="spine-step active" data-view-target="workflow">
+            <span>Now</span>
+            <strong>Finish the escalation</strong>
+          </button>
+          <button class="spine-step" data-view-target="investigations">
+            <span>Support</span>
+            <strong>Check known issues</strong>
+          </button>
+          <button class="spine-step" data-view-target="knowledge">
+            <span>Later</span>
+            <strong>Review the lesson</strong>
+          </button>
+          <button class="spine-step locked" data-view-target="knowledge">
+            <span>Only if proven</span>
+            <strong>Teach agents</strong>
+          </button>
+        </section>
+
+        <section class="view active" id="view-workflow" aria-labelledby="workflow-title">
+          <div class="view-intro">
+            <p class="eyebrow">Your next job</p>
+            <h2 id="workflow-title">Finish this escalation before anything becomes guidance.</h2>
+            <p>Record what actually happened. This single step decides whether the case stays active, is handed off, or can later become trusted agent guidance.</p>
+          </div>
+
+          <div class="workspace-grid">
+            <section class="task-panel" aria-label="Finish escalation form">
+              <div class="case-summary-row">
+                <div>
+                  <span class="small-label">Source</span>
+                  <strong>Image Parser created the case from the chat screenshot.</strong>
+                </div>
+                <button class="ghost-button" data-view-target="sessions">Where did it go?</button>
+              </div>
+
+              <div class="decision-set" role="group" aria-label="Outcome decision">
+                <button class="decision-option selected" data-outcome="history">
+                  <span>No proven fix</span>
+                  <strong>Save as case history</strong>
+                  <small>Keep evidence searchable. Agents cannot recommend it as a fix.</small>
+                </button>
+                <button class="decision-option" data-outcome="resolved">
+                  <span>Proven fix found</span>
+                  <strong>Mark resolved</strong>
+                  <small>Add the actual fix and make the case eligible for review later.</small>
+                </button>
+                <button class="decision-option" data-outcome="handoff">
+                  <span>Still blocked</span>
+                  <strong>Hand off or keep working</strong>
+                  <small>Record the blocker and what the next person should check.</small>
+                </button>
+              </div>
+
+              <div class="guidance-banner" id="outcomeGuide">
+                The source shows failed attempted steps, not the final working fix. Save this as case history unless you can prove the actual fix.
+              </div>
+
+              <form class="finish-form">
+                <label>
+                  <span>Actual fix</span>
+                  <textarea id="fixInput" placeholder="Only enter a final fix if the source proves it or you personally know it."></textarea>
+                </label>
+                <label>
+                  <span>What did not work</span>
+                  <textarea id="failedInput">Deleting the archived T4 filing and regenerating the XML did not restore the T4 Summary.</textarea>
+                </label>
+                <label>
+                  <span>Blocker or handoff reason</span>
+                  <textarea id="blockerInput" placeholder="Example: final corrective action is not captured in the chat, so this should not become reusable guidance yet."></textarea>
+                </label>
+              </form>
+
+              <div class="primary-action-row">
+                <div>
+                  <strong id="actionReason">Recommended: preserve the case, but do not teach agents yet.</strong>
+                  <small id="actionDetail">This keeps the evidence available without letting future agents recommend an unproven fix.</small>
+                </div>
+                <button class="primary-button" id="saveOutcomeBtn">Save as case history</button>
+              </div>
+            </section>
+
+            <aside class="context-panel" aria-label="Outcome context">
+              <section class="context-block">
+                <p class="eyebrow">Why this matters</p>
+                <h3>Agent guidance is earned later.</h3>
+                <p>Cases do not become recommendations just because a chat ended. They become guidance only after the outcome is proven and reviewed.</p>
+              </section>
+
+              <section class="context-block">
+                <p class="eyebrow">Current evidence</p>
+                <ul class="evidence-list">
+                  <li><span class="dot success"></span> Case number and issue captured</li>
+                  <li><span class="dot success"></span> Chat source linked</li>
+                  <li><span class="dot warning"></span> Failed attempt recorded</li>
+                  <li><span class="dot danger"></span> Proven final fix missing</li>
+                </ul>
+              </section>
+
+              <section class="next-panel">
+                <p class="eyebrow">After save</p>
+                <ol>
+                  <li>Case history remains searchable.</li>
+                  <li>Known issues can be checked against it.</li>
+                  <li>Agent guidance unlocks only after a proven fix.</li>
+                </ol>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-intake" aria-labelledby="intake-title">
+          <div class="view-intro">
+            <p class="eyebrow">Successful baseline</p>
+            <h2 id="intake-title">Image intake stays simple: upload, parse, match, triage, answer.</h2>
+            <p>This is the pattern the rest of the app should follow: one input, visible agent pipeline, useful output.</p>
+          </div>
+
+          <div class="intake-workflow">
+            <button class="upload-tile" id="sampleImageBtn">
+              <span class="upload-arrow">UP</span>
+              <strong>Upload image</strong>
+              <small>Drop, paste, or click</small>
+            </button>
+            <div class="pipeline-card complete">
+              <span>2</span>
+              <strong>Escalation Image Parser</strong>
+              <small>Extracts case fields</small>
+            </div>
+            <div class="pipeline-card complete">
+              <span>3</span>
+              <strong>INV Search Agent</strong>
+              <small>Finds known issues</small>
+            </div>
+            <div class="pipeline-card complete">
+              <span>4</span>
+              <strong>Triage Agent</strong>
+              <small>Reads urgency and gaps</small>
+            </div>
+            <div class="pipeline-card waiting">
+              <span>5</span>
+              <strong>QBO Assistant</strong>
+              <small>Prepares support response</small>
+            </div>
+          </div>
+
+          <div class="drop-zone">
+            <strong>Drop image here</strong>
+            <span>Prototype state: image already produced Case 15154531492.</span>
+            <button class="primary-button" data-view-target="workflow">Continue to finish case</button>
+          </div>
+        </section>
+
+        <section class="view" id="view-sessions" aria-labelledby="sessions-title">
+          <div class="view-intro">
+            <p class="eyebrow">Where did the chat go?</p>
+            <h2 id="sessions-title">Saved chats show the case they created.</h2>
+            <p>The first row answers the handoff question directly. Audit metrics stay out of the way.</p>
+          </div>
+
+          <div class="handoff-layout">
+            <article class="work-item prominent">
+              <div>
+                <p class="eyebrow">Latest chat</p>
+                <h3>Image workflow created Case 15154531492</h3>
+                <p>Missing T4 Summary. Source chat, parsed image, and agent outputs are linked to this case.</p>
+              </div>
+              <button class="primary-button" data-view-target="workflow">Open case</button>
+            </article>
+
+            <details class="quiet-details">
+              <summary>Show older saved chats that need case links</summary>
+              <div class="compact-queue">
+                <div><strong>Screenshot intake from May 21</strong><span>Needs case link</span></div>
+                <div><strong>Agent run saved</strong><span>Open and link if relevant</span></div>
+                <div><strong>Unlinked conversation</strong><span>Review later</span></div>
+              </div>
+            </details>
+          </div>
+        </section>
+
+        <section class="view" id="view-escalations" aria-labelledby="escalations-title">
+          <div class="view-intro">
+            <p class="eyebrow">Case queue</p>
+            <h2 id="escalations-title">Cases are sorted by the next human action.</h2>
+            <p>No lifecycle inventory. Each case says what it needs and why.</p>
+          </div>
+
+          <div class="queue-list">
+            <article class="work-item prominent">
+              <div>
+                <p class="eyebrow">Needs outcome</p>
+                <h3>Case 15154531492: Missing T4 Summary</h3>
+                <p>Resolved status was claimed, but the final working fix is not proven in the source.</p>
+              </div>
+              <button class="primary-button" data-view-target="workflow">Finish case</button>
+            </article>
+            <article class="work-item">
+              <div>
+                <p class="eyebrow">Investigate</p>
+                <h3>Match T2 partial payment for one PD7A filing</h3>
+                <p>Needs evidence from a known issue before recommending a workaround.</p>
+              </div>
+              <button class="secondary-button" data-view-target="investigations">Check issues</button>
+            </article>
+            <article class="work-item">
+              <div>
+                <p class="eyebrow">Waiting</p>
+                <h3>Revenue recognition schedule review</h3>
+                <p>Current blocker is recorded. No human action is needed today.</p>
+              </div>
+              <button class="ghost-button">Open notes</button>
+            </article>
+          </div>
+        </section>
+
+        <section class="view" id="view-attention" aria-labelledby="attention-title">
+          <div class="view-intro">
+            <p class="eyebrow">Decision queue</p>
+            <h2 id="attention-title">Attention means a person must decide something.</h2>
+            <p>The page leads with the highest-risk item instead of engine metrics.</p>
+          </div>
+
+          <div class="attention-grid">
+            <article class="decision-focus">
+              <span class="risk-badge">Critical</span>
+              <h3>Parser output needs review</h3>
+              <p>The case is missing a proven final fix. Keep it as history or correct the lesson before agents can reuse it.</p>
+              <div class="button-row">
+                <button class="primary-button" data-view-target="workflow">Resolve decision</button>
+                <button class="secondary-button" data-view-target="knowledge">Review guidance gate</button>
+              </div>
+            </article>
+            <aside class="calm-list">
+              <h3>Other decisions</h3>
+              <button class="mini-row"><span>Possible duplicate</span><strong>51</strong></button>
+              <button class="mini-row"><span>Stale cases</span><strong>19</strong></button>
+              <button class="mini-row"><span>Knowledge review</span><strong>1</strong></button>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-knowledge" aria-labelledby="knowledge-title">
+          <div class="view-intro">
+            <p class="eyebrow">Agent guidance</p>
+            <h2 id="knowledge-title">Teach agents only after the outcome is proven.</h2>
+            <p>Knowledge is not the next step after chat. It is a later safety decision after the case outcome is finished.</p>
+          </div>
+
+          <div class="knowledge-layout">
+            <section class="task-panel">
+              <div class="knowledge-state" id="knowledgeState">
+                <span class="status-pill danger">Blocked</span>
+                <div>
+                  <h3>Agents cannot recommend this yet.</h3>
+                  <p>The source proves the symptom and failed attempt, but not the final working fix.</p>
+                </div>
+              </div>
+              <div class="decision-set compact">
+                <button class="decision-option selected">
+                  <span>Recommended now</span>
+                  <strong>Keep as case history</strong>
+                  <small>Searchable evidence, not agent guidance.</small>
+                </button>
+                <button class="decision-option">
+                  <span>If proven</span>
+                  <strong>Correct the lesson</strong>
+                  <small>Add final fix, scope, root cause, and evidence.</small>
+                </button>
+                <button class="decision-option">
+                  <span>If misleading</span>
+                  <strong>Reject draft</strong>
+                  <small>Do not let this become a recommendation.</small>
+                </button>
+              </div>
+              <button class="primary-button" id="knowledgePrimary">Save as case history only</button>
+            </section>
+
+            <aside class="context-panel">
+              <section class="context-block">
+                <p class="eyebrow">Publish gate</p>
+                <ul class="evidence-list" id="publishGate">
+                  <li><span class="dot success"></span> Source linked</li>
+                  <li><span class="dot warning"></span> Reusable scope unclear</li>
+                  <li><span class="dot danger"></span> Proven fix missing</li>
+                  <li><span class="dot danger"></span> Root cause missing</li>
+                </ul>
+              </section>
+              <section class="context-block">
+                <p class="eyebrow">Plain rule</p>
+                <p>Agents may search this case as evidence. They may not present the attempted steps as the recommended fix.</p>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-investigations" aria-labelledby="investigations-title">
+          <div class="view-intro">
+            <p class="eyebrow">Known issues</p>
+            <h2 id="investigations-title">Investigations support the current case first.</h2>
+            <p>The library is useful, but the first view should be the match that helps this escalation.</p>
+          </div>
+
+          <div class="investigation-layout">
+            <article class="work-item prominent">
+              <div>
+                <p class="eyebrow">Possible match</p>
+                <h3>Payroll year-end XML export issue</h3>
+                <p>Matches the symptom: T4 slips appear in XML while the T4 Summary is absent. No confirmed workaround is attached.</p>
+              </div>
+              <button class="primary-button">Attach as evidence</button>
+            </article>
+
+            <details class="quiet-details" open>
+              <summary>Browse known issue library</summary>
+              <div class="compact-queue">
+                <div><strong>INV-148433 Payroll export error</strong><span>Technical - active</span></div>
+                <div><strong>INV-148450 CPP and EI setup fields unavailable</strong><span>Payroll - active</span></div>
+                <div><strong>INV-148565 Billing cancellation and refund request</strong><span>Billing - active</span></div>
+              </div>
+            </details>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="./script.js"></script>
+  </body>
+</html>

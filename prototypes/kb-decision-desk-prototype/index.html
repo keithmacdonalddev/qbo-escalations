@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KB Decision Desk Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Knowledge / Human Review</p>
+        <h1>Decision Desk</h1>
+      </div>
+      <div class="topbar-focus" aria-live="polite">
+        <span class="focus-label">Now reviewing</span>
+        <strong id="topRecordTitle">Payroll tax agency notice blocks EFT setup</strong>
+      </div>
+      <button class="ghost-button" id="openAuditButton" type="button">Audit trail</button>
+    </header>
+
+    <main class="decision-layout">
+      <section class="queue-pane" aria-label="Knowledge items needing review">
+        <div class="pane-header">
+          <div>
+            <p class="eyebrow">Needs decision</p>
+            <h2 id="queueCount">4 records</h2>
+          </div>
+          <span class="small-pill urgent">2 urgent</span>
+        </div>
+
+        <label class="search-box">
+          <span>Search knowledge</span>
+          <input id="searchInput" type="search" placeholder="Case, issue, source, gap">
+        </label>
+
+        <div class="filter-row" role="group" aria-label="Filter records">
+          <button class="filter-button active" type="button" data-filter="all">All</button>
+          <button class="filter-button" type="button" data-filter="urgent">Urgent</button>
+          <button class="filter-button" type="button" data-filter="ready">Ready</button>
+          <button class="filter-button" type="button" data-filter="blocked">Blocked</button>
+        </div>
+
+        <div class="record-list" id="recordList"></div>
+      </section>
+
+      <section class="review-pane" aria-label="Selected knowledge review">
+        <div class="decision-brief">
+          <div class="decision-copy">
+            <p class="eyebrow" id="recordSource">Source case ESC-7842</p>
+            <h2 id="recordTitle">Payroll tax agency notice blocks EFT setup</h2>
+            <p id="recordAsk">Decide whether agents may reuse this as guidance or keep it as case evidence only.</p>
+          </div>
+          <div class="decision-status" id="decisionStatus">
+            <span class="status-dot"></span>
+            <strong>Decision required</strong>
+            <small>Missing exclusion confirmation</small>
+          </div>
+        </div>
+
+        <div class="review-grid">
+          <section class="field-panel" aria-label="Proposed guidance fields">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Agent proposed</p>
+                <h3>Reusable guidance</h3>
+              </div>
+              <button class="text-button" id="restoreButton" type="button">Restore proposal</button>
+            </div>
+
+            <label class="field">
+              <span>Summary</span>
+              <textarea id="summaryInput" rows="3"></textarea>
+            </label>
+
+            <div class="two-column-fields">
+              <label class="field">
+                <span>Root cause</span>
+                <textarea id="rootCauseInput" rows="3"></textarea>
+              </label>
+              <label class="field">
+                <span>Exact fix</span>
+                <textarea id="fixInput" rows="3"></textarea>
+              </label>
+            </div>
+
+            <div class="two-column-fields">
+              <label class="field">
+                <span>Applies when</span>
+                <textarea id="scopeInput" rows="3"></textarea>
+              </label>
+              <label class="field">
+                <span>Do not use when</span>
+                <textarea id="exclusionsInput" rows="3"></textarea>
+              </label>
+            </div>
+          </section>
+
+          <aside class="evidence-panel" aria-label="Evidence and missing information">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Proof</p>
+                <h3>Evidence and gaps</h3>
+              </div>
+              <button class="text-button" id="openAllEvidenceButton" type="button">Open evidence</button>
+            </div>
+            <div class="evidence-list" id="evidenceList"></div>
+
+            <div class="requirements" id="requirementsList"></div>
+          </aside>
+        </div>
+      </section>
+
+      <aside class="consequence-pane" aria-label="Review decision and agent use">
+        <div class="pane-header">
+          <div>
+            <p class="eyebrow">Decision</p>
+            <h2>What can this become?</h2>
+          </div>
+        </div>
+
+        <div class="outcome-options" id="outcomeOptions" role="group" aria-label="Review outcomes">
+          <button type="button" data-outcome="trusted">
+            <strong>Trusted guidance</strong>
+            <span>Agents may use it in answers.</span>
+          </button>
+          <button type="button" data-outcome="history">
+            <strong>Case history only</strong>
+            <span>Useful for similarity, not advice.</span>
+          </button>
+          <button type="button" data-outcome="reject">
+            <strong>Reject</strong>
+            <span>Keep agents away from it.</span>
+          </button>
+          <button type="button" data-outcome="deprecate">
+            <strong>Deprecate</strong>
+            <span>Old guidance, not for new cases.</span>
+          </button>
+        </div>
+
+        <button class="primary-action" id="applyDecisionButton" type="button">Approve for agents</button>
+        <p class="action-reason" id="actionReason">Confirm all publish requirements first.</p>
+
+        <div class="agent-use" id="agentUsePanel" aria-live="polite"></div>
+
+        <label class="field note-field">
+          <span>Reviewer note</span>
+          <textarea id="reviewerNoteInput" rows="4"></textarea>
+        </label>
+      </aside>
+    </main>
+  </div>
+
+  <aside class="drawer" id="evidenceDrawer" aria-hidden="true" aria-label="Evidence drawer">
+    <div class="drawer-scrim" data-close-drawer></div>
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
+      <div class="drawer-header">
+        <div>
+          <p class="eyebrow" id="drawerSource">Evidence</p>
+          <h2 id="drawerTitle">Evidence detail</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-drawer aria-label="Close evidence drawer">x</button>
+      </div>
+      <div class="drawer-body">
+        <p id="drawerExcerpt"></p>
+        <dl class="evidence-facts">
+          <div>
+            <dt>Supports</dt>
+            <dd id="drawerSupports"></dd>
+          </div>
+          <div>
+            <dt>Still missing</dt>
+            <dd id="drawerMissing"></dd>
+          </div>
+          <div>
+            <dt>Agent impact</dt>
+            <dd id="drawerImpact"></dd>
+          </div>
+        </dl>
+        <div class="audit-block">
+          <div class="section-heading compact">
+            <div>
+              <p class="eyebrow">Trail</p>
+              <h3>What changed</h3>
+            </div>
+          </div>
+          <ol id="drawerAudit"></ol>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="script.js"></script>
+</body>
+</html>

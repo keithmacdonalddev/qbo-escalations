@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trusted Guidance Library Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js" defer></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">KB</div>
+        <div>
+          <p class="eyebrow">Trusted guidance library</p>
+          <h1>Decide what agents may reuse</h1>
+        </div>
+      </div>
+      <div class="topbar-context" aria-live="polite">
+        <span>Today</span>
+        <strong id="focusCount">3 decisions need review</strong>
+      </div>
+    </header>
+
+    <section class="decision-banner" aria-labelledby="activeQuestion">
+      <div>
+        <div class="status-line">
+          <span id="activeRiskBadge" class="risk-badge">Ready</span>
+          <span id="activeSource">Source case</span>
+        </div>
+        <h2 id="activeQuestion">Publish this as trusted guidance?</h2>
+        <p id="activeWhy">Confirm the fix, scope, and evidence before agents can reuse it in final recommendations.</p>
+      </div>
+      <div class="banner-actions">
+        <button id="primaryDecision" class="button primary" type="button">
+          <i data-lucide="check-circle-2" aria-hidden="true"></i>
+          <span>Publish trusted guidance</span>
+        </button>
+        <button id="openEvidenceTop" class="button secondary" type="button">
+          <i data-lucide="folder-open" aria-hidden="true"></i>
+          <span>Evidence</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="workspace" aria-label="Knowledge review workspace">
+      <aside class="library-pane" aria-label="Knowledge library">
+        <div class="pane-heading">
+          <div>
+            <p class="eyebrow">Find knowledge</p>
+            <h2>Library and review queue</h2>
+          </div>
+          <button id="clearFilters" class="icon-button" type="button" aria-label="Clear filters" title="Clear filters">
+            <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+          </button>
+        </div>
+
+        <label class="search-label" for="searchInput">Search issue, fix, source, or note</label>
+        <div class="search-field">
+          <i data-lucide="search" aria-hidden="true"></i>
+          <input id="searchInput" type="search" placeholder="bank feed, sales tax, payroll...">
+        </div>
+
+        <div class="filter-group" role="group" aria-label="Library view">
+          <button class="filter-chip active" type="button" data-filter="attention">Needs decision</button>
+          <button class="filter-chip" type="button" data-filter="trusted">Trusted</button>
+          <button class="filter-chip" type="button" data-filter="case_history">Evidence only</button>
+          <button class="filter-chip" type="button" data-filter="rejected">Rejected</button>
+          <button class="filter-chip" type="button" data-filter="deprecated">Deprecated</button>
+          <button class="filter-chip" type="button" data-filter="all">All</button>
+        </div>
+
+        <label class="select-label" for="outcomeFilter">Human outcome</label>
+        <select id="outcomeFilter">
+          <option value="all">All outcomes</option>
+          <option value="Customer confirmed fix">Customer confirmed fix</option>
+          <option value="Refund granted">Refund granted</option>
+          <option value="Reconciliation completed">Reconciliation completed</option>
+          <option value="Escalation avoided">Escalation avoided</option>
+          <option value="Payroll correction">Payroll correction</option>
+          <option value="Tax filing unblocked">Tax filing unblocked</option>
+        </select>
+
+        <div id="listSummary" class="list-summary" aria-live="polite">Showing review items</div>
+        <div id="recordList" class="record-list" aria-label="Knowledge records"></div>
+      </aside>
+
+      <section class="detail-pane" aria-label="Selected knowledge item">
+        <div class="detail-header">
+          <div>
+            <p id="selectedOutcome" class="eyebrow">Customer confirmed fix</p>
+            <h2 id="selectedTitle">Bank-feed duplicates after reconnect</h2>
+          </div>
+          <div id="selectedDecision" class="decision-pill">Needs human decision</div>
+        </div>
+
+        <div class="source-strip">
+          <div>
+            <span>Source</span>
+            <strong id="sourceName">Case QBO-2419</strong>
+          </div>
+          <div>
+            <span>Proposed by</span>
+            <strong id="proposedBy">Escalation specialist agent</strong>
+          </div>
+          <div>
+            <span>Last checked</span>
+            <strong id="lastChecked">Today</strong>
+          </div>
+        </div>
+
+        <section class="guidance-panel" aria-labelledby="proposalHeading">
+          <div class="section-heading">
+            <h3 id="proposalHeading">Proposed reusable guidance</h3>
+            <span id="proposalReadiness" class="readiness-label">Ready with evidence</span>
+          </div>
+          <p id="proposedGuidance" class="proposal-text"></p>
+        </section>
+
+        <section class="editor-grid" aria-label="Correct the guidance">
+          <label>
+            <span>Summary</span>
+            <textarea id="fieldSummary" rows="3"></textarea>
+          </label>
+          <label>
+            <span>Root cause</span>
+            <textarea id="fieldRootCause" rows="3"></textarea>
+          </label>
+          <label>
+            <span>Exact fix</span>
+            <textarea id="fieldFix" rows="4"></textarea>
+          </label>
+          <label>
+            <span>Scope</span>
+            <textarea id="fieldScope" rows="4"></textarea>
+          </label>
+          <label>
+            <span>Exclusions</span>
+            <textarea id="fieldExclusions" rows="3"></textarea>
+          </label>
+          <label>
+            <span>Reviewer notes</span>
+            <textarea id="fieldNotes" rows="3"></textarea>
+          </label>
+        </section>
+      </section>
+
+      <aside class="decision-pane" aria-label="Decision and agent consequences">
+        <section class="decision-card">
+          <div class="section-heading">
+            <h3>Human decision</h3>
+            <span id="recommendedAction">Recommended: publish</span>
+          </div>
+          <div id="decisionButtons" class="decision-buttons" role="group" aria-label="Review decision"></div>
+        </section>
+
+        <section class="agent-card">
+          <h3>What agents may do</h3>
+          <div id="agentUseList" class="agent-use-list"></div>
+        </section>
+
+        <section class="requirements-card">
+          <h3>Publish requirements</h3>
+          <ul id="requirementsList" class="requirements-list"></ul>
+        </section>
+
+        <section class="compact-actions" aria-label="Supporting information">
+          <button id="openEvidenceSide" class="button secondary full" type="button">
+            <i data-lucide="folder-open" aria-hidden="true"></i>
+            <span>Open evidence</span>
+          </button>
+          <button id="openAudit" class="button ghost full" type="button">
+            <i data-lucide="history" aria-hidden="true"></i>
+            <span>Audit trail</span>
+          </button>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+  <aside id="evidenceDrawer" class="evidence-drawer" hidden aria-hidden="true" aria-labelledby="drawerTitle">
+    <div class="drawer-header">
+      <div>
+        <p class="eyebrow">Provenance</p>
+        <h2 id="drawerTitle">Evidence for selected guidance</h2>
+      </div>
+      <button id="closeDrawer" class="icon-button" type="button" aria-label="Close evidence drawer" title="Close">
+        <i data-lucide="x" aria-hidden="true"></i>
+      </button>
+    </div>
+
+    <div class="drawer-tabs" role="tablist" aria-label="Evidence views">
+      <button class="drawer-tab active" type="button" data-tab="evidence">Evidence</button>
+      <button class="drawer-tab" type="button" data-tab="audit">Audit trail</button>
+      <button class="drawer-tab" type="button" data-tab="agent">Agent boundaries</button>
+    </div>
+
+    <div id="drawerContent" class="drawer-content"></div>
+  </aside>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

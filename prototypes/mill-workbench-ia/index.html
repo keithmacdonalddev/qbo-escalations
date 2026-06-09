@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mill Workbench IA Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar" aria-label="Workbench header">
+        <div class="brand-lockup">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <p class="eyebrow">QBO Assist prototype</p>
+            <h1>Escalation Workbench</h1>
+          </div>
+        </div>
+        <div class="case-status" aria-label="Current case status">
+          <span class="status-dot"></span>
+          <span id="caseStatusLabel">Ready for intake</span>
+        </div>
+      </header>
+
+      <section class="pipeline-wrap" aria-label="Expert agent workflow">
+        <div class="pipeline-intro">
+          <p class="eyebrow">One active job</p>
+          <h2 id="pipelineTitle">Turn a screenshot into a finished escalation.</h2>
+        </div>
+        <nav class="pipeline" id="pipeline" aria-label="Workbench stages"></nav>
+      </section>
+
+      <section class="workbench" aria-label="Active escalation workbench">
+        <aside class="case-rail" aria-label="Active case context">
+          <div class="rail-section">
+            <p class="eyebrow">Active case</p>
+            <h2 id="caseTitle">No case captured yet</h2>
+            <p id="caseSummary">Start by uploading or pasting the escalation screenshot.</p>
+          </div>
+
+          <div class="rail-section compact-list">
+            <p class="eyebrow">What happened</p>
+            <ul id="eventList"></ul>
+          </div>
+
+          <div class="rail-section compact-list">
+            <p class="eyebrow">Missing before done</p>
+            <ul id="missingList"></ul>
+          </div>
+        </aside>
+
+        <section class="stage-panel" aria-live="polite">
+          <div class="stage-kicker">
+            <span id="stageNumber">1</span>
+            <p id="stageLabel">Intake</p>
+          </div>
+
+          <div class="stage-heading">
+            <div>
+              <p class="eyebrow">Where am I?</p>
+              <h2 id="stageTitle">Capture the issue</h2>
+              <p id="stageSubtitle">The work starts with the screenshot, not a dashboard.</p>
+            </div>
+            <button class="secondary-action" id="jumpNext" type="button">Next stage</button>
+          </div>
+
+          <div class="primary-card" id="primaryCard"></div>
+
+          <div class="answer-grid" aria-label="Screen answers">
+            <article>
+              <p class="eyebrow">What do I do now?</p>
+              <h3 id="nowTitle">Upload or paste the screenshot.</h3>
+              <p id="nowText">The parser cannot create case evidence until the image is captured.</p>
+            </article>
+            <article>
+              <p class="eyebrow">Why it matters</p>
+              <h3 id="whyTitle">The screenshot is the source of truth.</h3>
+              <p id="whyText">Agents should reason from the same captured facts the user saw.</p>
+            </article>
+            <article>
+              <p class="eyebrow">What happens next</p>
+              <h3 id="nextTitle">Parser extracts the template.</h3>
+              <p id="nextText">The case becomes structured enough for INV search and triage.</p>
+            </article>
+          </div>
+        </section>
+
+        <aside class="support-rail" aria-label="Supporting surfaces">
+          <div class="support-header">
+            <p class="eyebrow">Supporting surfaces</p>
+            <h2>Open only when useful</h2>
+          </div>
+          <div class="support-tabs" id="supportTabs" role="tablist" aria-label="Supporting surfaces"></div>
+          <section class="support-detail" id="supportDetail" role="tabpanel"></section>
+        </aside>
+      </section>
+
+      <section class="reference-strip" aria-label="Information architecture reference">
+        <article>
+          <p class="eyebrow">Sessions</p>
+          <h3>History, not a destination</h3>
+          <p>Saved chats live behind the active case as evidence and audit trail.</p>
+        </article>
+        <article>
+          <p class="eyebrow">Escalations</p>
+          <h3>The workbench object</h3>
+          <p>The case is the center of work: status, evidence, outcome, next action.</p>
+        </article>
+        <article>
+          <p class="eyebrow">Attention</p>
+          <h3>Decisions blocking progress</h3>
+          <p>Only appears when the case needs a human choice or missing information.</p>
+        </article>
+        <article>
+          <p class="eyebrow">Knowledge</p>
+          <h3>Teach agents later</h3>
+          <p>Agent guidance is optional after a proven outcome, never the default closeout.</p>
+        </article>
+        <article>
+          <p class="eyebrow">Investigations</p>
+          <h3>Known issue evidence</h3>
+          <p>INV records surface during investigation as matches, workarounds, and warnings.</p>
+        </article>
+      </section>
+    </main>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

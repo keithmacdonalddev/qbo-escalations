@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KB Agent Guidance Studio Prototype</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">Knowledge Base</p>
+          <h1>Agent Guidance Studio</h1>
+          <p class="subhead">Shape what specialist agents may safely reuse from reviewed knowledge.</p>
+        </div>
+        <div class="decision-banner" aria-live="polite">
+          <span class="banner-label">Most important now</span>
+          <strong id="nextActionText">Resolve publish blockers before final-answer agents can use this.</strong>
+        </div>
+        <div class="top-actions">
+          <button class="button ghost" id="auditButton" type="button">Audit</button>
+          <button class="button secondary" id="evidenceButton" type="button">Evidence</button>
+          <button class="button primary" id="publishButton" type="button">Publish guidance</button>
+        </div>
+      </header>
+
+      <main class="workspace" aria-label="Agent guidance studio workspace">
+        <aside class="library-pane" aria-label="Knowledge needing review">
+          <div class="pane-heading">
+            <div>
+              <p class="eyebrow">Needs Decision</p>
+              <h2>Knowledge work</h2>
+            </div>
+            <span class="work-count" id="visibleCount">0</span>
+          </div>
+
+          <label class="search-wrap" for="knowledgeSearch">
+            <span>Search knowledge</span>
+            <input id="knowledgeSearch" type="search" placeholder="Issue, source, fix, agent..." autocomplete="off" />
+          </label>
+
+          <div class="filter-row" role="group" aria-label="Knowledge filters">
+            <button class="filter-chip active" type="button" data-filter="all">All</button>
+            <button class="filter-chip" type="button" data-filter="decision">Needs decision</button>
+            <button class="filter-chip" type="button" data-filter="ready">Ready</button>
+            <button class="filter-chip" type="button" data-filter="blocked">Blocked</button>
+          </div>
+
+          <div class="record-list" id="recordList" aria-label="Knowledge records"></div>
+        </aside>
+
+        <section class="editor-pane" aria-label="Guidance editor">
+          <div class="focus-strip">
+            <div>
+              <p class="eyebrow" id="sourceLabel">Source case</p>
+              <h2 id="recordTitle">Loading record</h2>
+            </div>
+            <div class="status-stack">
+              <span class="status-pill" id="safetyPill">Draft</span>
+              <span class="status-note" id="selectedAgentCount">No agent permissions</span>
+            </div>
+          </div>
+
+          <div class="job-panel">
+            <div>
+              <span class="panel-kicker">Decision</span>
+              <p id="decisionPlainText">Decide if this can become reusable guidance, stay as evidence, or be rejected.</p>
+            </div>
+            <div class="decision-control" role="radiogroup" aria-label="Review decision">
+              <button class="decision-option active" type="button" data-decision="trusted">Trusted guidance</button>
+              <button class="decision-option" type="button" data-decision="case-history">Case history only</button>
+              <button class="decision-option" type="button" data-decision="rejected">Reject</button>
+              <button class="decision-option" type="button" data-decision="deprecated">Deprecate</button>
+            </div>
+          </div>
+
+          <form class="guidance-form" id="guidanceForm">
+            <div class="field-row two">
+              <label class="field">
+                <span>Guidance title</span>
+                <input id="titleInput" name="title" type="text" />
+              </label>
+              <label class="field">
+                <span>Reusable scope</span>
+                <input id="scopeInput" name="scope" type="text" />
+              </label>
+            </div>
+
+            <label class="field">
+              <span>Summary agents may reuse</span>
+              <textarea id="summaryInput" name="summary" rows="3"></textarea>
+            </label>
+
+            <div class="field-row two">
+              <label class="field">
+                <span>Root cause</span>
+                <textarea id="rootCauseInput" name="rootCause" rows="4"></textarea>
+              </label>
+              <label class="field">
+                <span>Exact fix</span>
+                <textarea id="fixInput" name="fix" rows="4"></textarea>
+              </label>
+            </div>
+
+            <div class="field-row two">
+              <label class="field">
+                <span>Exclusions</span>
+                <textarea id="exclusionsInput" name="exclusions" rows="4"></textarea>
+              </label>
+              <label class="field">
+                <span>Reviewer notes</span>
+                <textarea id="notesInput" name="notes" rows="4"></textarea>
+              </label>
+            </div>
+          </form>
+
+          <div class="permission-section" aria-labelledby="permissionTitle">
+            <div class="section-title-row">
+              <div>
+                <p class="eyebrow">Allowed Use</p>
+                <h3 id="permissionTitle">What agents can do with this</h3>
+              </div>
+              <span id="permissionSummary">Review permissions before publishing.</span>
+            </div>
+            <div class="permission-grid" id="permissionGrid"></div>
+          </div>
+        </section>
+
+        <aside class="agent-pane" aria-label="Agent preview and publish readiness">
+          <section class="preview-panel">
+            <div class="pane-heading compact">
+              <div>
+                <p class="eyebrow">Agent Preview</p>
+                <h2>What agents receive</h2>
+              </div>
+              <button class="button ghost slim" id="copyPreviewButton" type="button">Copy</button>
+            </div>
+            <div class="agent-preview" id="agentPreview" aria-live="polite"></div>
+          </section>
+
+          <section class="readiness-panel">
+            <div class="pane-heading compact">
+              <div>
+                <p class="eyebrow">Publish Readiness</p>
+                <h2 id="readinessTitle">Not ready</h2>
+              </div>
+              <span class="readiness-score" id="readinessScore">0/0</span>
+            </div>
+            <div class="blocker-list" id="blockerList"></div>
+            <button class="button secondary full" id="blockerHelpButton" type="button">Inspect blockers</button>
+          </section>
+
+          <section class="consequence-panel">
+            <p class="eyebrow">After Decision</p>
+            <p id="consequenceText">Agents cannot use this in final recommendations until it is published as trusted guidance.</p>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <div class="side-drawer" id="evidenceDrawer" aria-hidden="true">
+      <div class="drawer-backdrop" data-close-drawer></div>
+      <section class="drawer-panel" aria-label="Evidence and provenance">
+        <div class="drawer-header">
+          <div>
+            <p class="eyebrow" id="drawerKicker">Evidence</p>
+            <h2 id="drawerTitle">Supporting evidence</h2>
+          </div>
+          <button class="button ghost slim" type="button" data-close-drawer>Close</button>
+        </div>
+        <div id="drawerBody"></div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
