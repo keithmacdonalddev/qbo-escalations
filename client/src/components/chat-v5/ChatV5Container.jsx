@@ -13,16 +13,12 @@ import { getConversation, getConversationMeta, getEventStats } from '../../api/c
 import {
   getEscalation,
   getEscalationKnowledge,
-  transitionEscalation,
 } from '../../api/escalationsApi.js';
 import {
   getAgentRuntimeEffectiveModel,
   getAgentRuntimeProviderLabel,
 } from '../../lib/agentRuntimeSettings.js';
-import {
-  FINAL_ESCALATION_STATUSES,
-  getEscalationKnowledgeLifecycle,
-} from '../../lib/escalationKnowledgeLifecycle.js';
+import { getEscalationKnowledgeLifecycle } from '../../lib/escalationKnowledgeLifecycle.js';
 import { getProviderMeta } from '../../lib/providerCatalog.js';
 import { AGENT_PROFILE_UPDATED_EVENT } from '../../lib/agentIdentityEvents.js';
 import { SURFACE_DEFAULTS_APPLIED_EVENT } from '../../lib/surfacePreferences.js';
@@ -2114,11 +2110,10 @@ function AnalystWorkbench({
   );
 }
 
-function LinkedCaseLifecycleBanner({ escalation, knowledge, resolving, onResolve }) {
+function LinkedCaseLifecycleBanner({ escalation, knowledge }) {
   if (!escalation) return null;
 
   const lifecycle = getEscalationKnowledgeLifecycle({ escalation, knowledge });
-  const canResolve = !FINAL_ESCALATION_STATUSES.has(escalation.status);
 
   return (
     <section className="v5-linked-case" aria-label="Linked case lifecycle">
@@ -2135,22 +2130,12 @@ function LinkedCaseLifecycleBanner({ escalation, knowledge, resolving, onResolve
           {escalation.category.replace(/-/g, ' ')}
         </span>
       )}
-      {canResolve && (
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={onResolve}
-          disabled={resolving}
-        >
-          {resolving ? 'Resolving...' : 'Mark Resolved'}
-        </button>
-      )}
       <button
         type="button"
-        className="btn btn-secondary btn-sm"
+        className="btn btn-primary btn-sm"
         onClick={() => { window.location.hash = `#/escalations/${escalation._id}`; }}
       >
-        Open Case
+        Finish Case
       </button>
     </section>
   );
@@ -2223,7 +2208,6 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   const effectiveConversationId = cleanValue(conversationIdFromRoute || conversationId);
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [linkedKnowledge, setLinkedKnowledge] = useState(null);
-  const [resolvingLinkedCase, setResolvingLinkedCase] = useState(false);
   // Saved caseIntake for a PAST run opened from history. On mount the
   // orchestrator only has live state, and the linked-escalation lookup above
   // fetches /meta (which omits caseIntake), so a reopened conversation has no
@@ -2297,19 +2281,6 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   // What the Workflow Log and evidence surfaces should read: the live run's
   // caseIntake while a pipeline is active, otherwise the saved past run.
   const effectiveCaseIntake = caseIntake || pastCaseIntake;
-
-  const handleResolveLinkedCase = useCallback(async () => {
-    if (!linkedEscalation?._id || resolvingLinkedCase) return;
-    setResolvingLinkedCase(true);
-    try {
-      const { escalation } = await transitionEscalation(linkedEscalation._id, 'resolved');
-      setLinkedEscalation(escalation);
-    } catch {
-      // Keep the banner visible; the detail page can still be opened for manual updates.
-    } finally {
-      setResolvingLinkedCase(false);
-    }
-  }, [linkedEscalation?._id, resolvingLinkedCase]);
 
   // Step-1 lifecycle: visible by default; when parser flips to running, kick
   // off the exit transition; after ~520ms unmount the step.
@@ -2792,8 +2763,6 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
         <LinkedCaseLifecycleBanner
           escalation={linkedEscalation}
           knowledge={linkedKnowledge}
-          resolving={resolvingLinkedCase}
-          onResolve={handleResolveLinkedCase}
         />
         <WorkflowLane
           workflowSteps={workflowSteps}

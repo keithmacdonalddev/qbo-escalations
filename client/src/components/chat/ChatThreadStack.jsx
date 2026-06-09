@@ -597,14 +597,14 @@ export default function ChatThreadStack({
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               <span style={{ fontSize: 'var(--text-sm)', color: 'var(--success, #41a466)', fontWeight: 600, flex: 1 }}>
-                Case captured from this chat. Open it to add the final fix, mark the outcome, and create reviewed knowledge.
+                Case captured from this chat. Finish it by recording the result, what failed, and the final state.
               </span>
               <button
                 className="btn btn-sm btn-ghost"
                 onClick={() => { window.location.hash = `#/escalations/${savedEscalationId}`; }}
                 type="button"
               >
-                Open Case
+                Finish Case
               </button>
             </div>
           )}

@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { exportConversation, forkConversation, getConversationMeta } from '../../api/chatApi.js';
-import {
-  getEscalation,
-  transitionEscalation,
-} from '../../api/escalationsApi.js';
+import { getEscalation } from '../../api/escalationsApi.js';
 import { useToast } from '../../hooks/useToast.jsx';
 import { getProviderLabel } from '../../utils/markdown.jsx';
 
@@ -18,7 +15,6 @@ export default function useChatConversationState({
   const [exportCopied, setExportCopied] = useState(false);
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [forkInfo, setForkInfo] = useState(null);
-  const [resolvingEscalation, setResolvingEscalation] = useState(false);
   const [savedEscalationId, setSavedEscalationId] = useState(null);
   const [parseMeta, setParseMeta] = useState(null);
   const exportCopiedTimerRef = useRef(0);
@@ -27,7 +23,6 @@ export default function useChatConversationState({
     setExportCopied(false);
     setLinkedEscalation(null);
     setForkInfo(null);
-    setResolvingEscalation(false);
     setSavedEscalationId(null);
     setParseMeta(null);
     pendingImageParseRef.current = false;
@@ -144,19 +139,6 @@ export default function useChatConversationState({
     pendingImageParseRef,
   ]);
 
-  const handleResolveEscalation = useCallback(async () => {
-    if (!linkedEscalation || resolvingEscalation) return;
-    setResolvingEscalation(true);
-    try {
-      const { escalation: updated } = await transitionEscalation(linkedEscalation._id, 'resolved');
-      setLinkedEscalation(updated);
-    } catch {
-      toast.error('Failed to resolve escalation');
-    } finally {
-      setResolvingEscalation(false);
-    }
-  }, [linkedEscalation, resolvingEscalation, toast]);
-
   const handleCopyConversation = useCallback(async () => {
     if (!conversationId) return;
     try {
@@ -189,12 +171,10 @@ export default function useChatConversationState({
     exportCopied,
     linkedEscalation,
     forkInfo,
-    resolvingEscalation,
     savedEscalationId,
     parseMeta,
     setParseMeta,
     resetConversationState,
-    handleResolveEscalation,
     handleCopyConversation,
     handleFork,
   };

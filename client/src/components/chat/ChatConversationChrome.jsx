@@ -1,7 +1,4 @@
-import {
-  FINAL_ESCALATION_STATUSES,
-  getEscalationKnowledgeLifecycle,
-} from '../../lib/escalationKnowledgeLifecycle.js';
+import { getEscalationKnowledgeLifecycle } from '../../lib/escalationKnowledgeLifecycle.js';
 
 const ESCALATION_BADGE_CLASS = {
   open: 'badge-open',
@@ -12,13 +9,10 @@ const ESCALATION_BADGE_CLASS = {
 
 export default function ChatConversationChrome({
   linkedEscalation,
-  handleResolveEscalation,
-  resolvingEscalation,
   forkInfo,
   children,
 }) {
   const lifecycle = getEscalationKnowledgeLifecycle({ escalation: linkedEscalation });
-  const canResolve = linkedEscalation && !FINAL_ESCALATION_STATUSES.has(linkedEscalation.status);
 
   return (
     <>
@@ -45,22 +39,12 @@ export default function ChatConversationChrome({
               </span>
             )}
           </span>
-          {canResolve && (
-            <button
-              className="btn btn-sm btn-primary"
-              onClick={handleResolveEscalation}
-              disabled={resolvingEscalation}
-              type="button"
-            >
-              {resolvingEscalation ? 'Resolving...' : 'Mark Resolved'}
-            </button>
-          )}
           <button
-            className="btn btn-sm btn-ghost"
+            className="btn btn-sm btn-primary"
             onClick={() => { window.location.hash = `#/escalations/${linkedEscalation._id}`; }}
             type="button"
           >
-            Open Case
+            Finish Case
           </button>
         </div>
       )}

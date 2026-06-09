@@ -404,12 +404,10 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
     exportCopied,
     linkedEscalation,
     forkInfo,
-    resolvingEscalation,
     savedEscalationId,
     parseMeta,
     setParseMeta,
     resetConversationState,
-    handleResolveEscalation,
     handleCopyConversation,
     handleFork,
   } = useChatConversationState({
@@ -777,8 +775,6 @@ export function ChatView({ conversationIdFromRoute, chat, aiSettings = null, rou
       <div className="chat-container">
         <ChatConversationChrome
           linkedEscalation={linkedEscalation}
-          handleResolveEscalation={handleResolveEscalation}
-          resolvingEscalation={resolvingEscalation}
           forkInfo={forkInfo}
         >
           <ChatSurfaceShell
