@@ -117,6 +117,7 @@ const AGENT_PROMPT_MAP = Object.freeze({
   'escalation-template-parser': 'escalation-template-parser',
   'triage-agent': 'triage-agent',
   'known-issue-search-agent': 'known-issue-search-agent',
+  'knowledgebase-agent': 'knowledgebase-agent',
   'follow-up-chat-parser': 'follow-up-chat-parser',
   'workspace-action': 'workspace',
   'copilot-agent': 'copilot',

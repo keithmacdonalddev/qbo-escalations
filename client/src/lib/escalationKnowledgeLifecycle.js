@@ -120,9 +120,9 @@ export function getEscalationKnowledgeLifecycle({ escalation, knowledge } = {}) 
     detail = 'Agents can help with triage and similar-case lookup, but the case is not ready for knowledge review yet.';
   } else if (finalCase && !hasKnowledge) {
     phase = 'ready-for-knowledge';
-    label = 'Ready for review draft';
-    nextAction = 'Create a review draft from the final case outcome.';
-    detail = 'The case outcome is final enough to turn into human-reviewed knowledge.';
+    label = 'Preparing review draft';
+    nextAction = 'The KB agent is preparing a review draft from this case automatically.';
+    detail = 'A complete draft is generated for every case; it should appear here shortly.';
   } else if (rejected) {
     phase = 'knowledge-rejected';
     label = 'Rejected review draft';

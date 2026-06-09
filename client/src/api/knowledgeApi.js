@@ -44,6 +44,38 @@ export async function getKnowledgeRecord(id) {
   return data.record;
 }
 
+export async function getKnowledgeAgentRecordContext(id) {
+  const data = await apiFetchJson(
+    `${BASE}/records/${encodeURIComponent(id)}/agent-context`,
+    {},
+    'Failed to load Knowledge Base Agent context',
+  );
+  return {
+    context: data.context || null,
+    messages: data.messages || [],
+  };
+}
+
+export async function sendKnowledgeAgentMessage(id, message) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/agent-chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+    timeout: 120_000,
+    noRetry: true,
+  }, 'Knowledge Base Agent chat failed');
+  return {
+    answer: data.answer || '',
+    messages: data.messages || [],
+    context: data.context || null,
+    usage: data.usage || null,
+    appliedChanges: Array.isArray(data.appliedChanges) ? data.appliedChanges : [],
+    provider: data.provider || null,
+    model: data.model || null,
+    fallbackUsed: Boolean(data.fallbackUsed),
+  };
+}
+
 export async function updateKnowledgeRecord(id, fields) {
   const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -146,4 +178,17 @@ export async function scanKnowledgeAgent(options = {}) {
     timeout: 45_000,
   }, 'Failed to run knowledgebase agent scan');
   return data.scan;
+}
+
+export async function runKnowledgeAgentHarness(options = {}) {
+  const data = await apiFetchJson(`${BASE}/agent/harness/run`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      escalationId: options.escalationId || '',
+    }),
+    timeout: 45_000,
+    noRetry: true,
+  }, 'Failed to run knowledgebase agent harness');
+  return data.harness;
 }

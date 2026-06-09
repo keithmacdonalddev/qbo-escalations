@@ -384,6 +384,7 @@ function buildWorkspaceUsageSubdoc(usage, provider) {
 function startWorkspaceCollectedChat({
   messages,
   systemPrompt,
+  images = [],
   timeoutMs = WORKSPACE_CHAT_TIMEOUT_MS,
   mode = 'fallback',
   primaryProvider = WORKSPACE_PRIMARY_PROVIDER,
@@ -426,6 +427,7 @@ function startWorkspaceCollectedChat({
       autoFailover,
       messages,
       systemPrompt,
+      images,
       timeoutMs,
       reasoningEffort,
       serviceTier,

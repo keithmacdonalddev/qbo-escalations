@@ -32,6 +32,7 @@ const {
 } = require('../../services/chat-request-service');
 const { parseEscalationText } = require('../../lib/escalation-parser');
 const { logAttemptsUsage } = require('../../lib/chat-route-helpers');
+const { triggerKnowledgeDraftForEscalation } = require('../../services/knowledgebase-draft-trigger');
 
 const router = express.Router();
 const parseRateLimit = createRateLimiter({ name: 'chat-parse', limit: 12, windowMs: 60_000 });
@@ -314,6 +315,12 @@ router.post('/parse-escalation', parseRateLimit, async (req, res) => {
         },
       });
       await escalation.save();
+      // Flow every persisted pipeline escalation straight into the Knowledge
+      // Review queue — status-independent, idempotent, fire-and-forget so the
+      // parse response is never delayed.
+      triggerKnowledgeDraftForEscalation(escalation, {
+        trigger: 'knowledge.parse-persist.auto-draft',
+      });
       logAttemptsUsage(parseResult.meta.attempts, {
         requestId: parseRequestId,
         service: 'parse',

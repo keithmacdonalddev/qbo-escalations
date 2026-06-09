@@ -1,9 +1,6 @@
-import { useEffect, useState } from 'react';
-import { getKnowledgeGaps } from '../api/escalationsApi.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import EscalationCard from './EscalationCard.jsx';
-import KnowledgeGapsFlyout from './KnowledgeGapsFlyout.jsx';
 import useEscalations, {
   ATTENTION_KIND_LABELS,
   ATTENTION_SORT_LABELS,
@@ -79,18 +76,8 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
     deleteTarget,
     confirmDelete,
     cancelDelete,
-    handleStatusChange,
     refresh,
   } = useEscalations({ initialTab });
-
-  const [gaps, setGaps] = useState(null);
-  const [gapsDays, setGapsDays] = useState(30);
-
-  useEffect(() => {
-    getKnowledgeGaps(gapsDays)
-      .then(d => setGaps(d))
-      .catch(() => setGaps(null));
-  }, [gapsDays]);
 
   const attentionMission = buildAttentionMissionStats({
     counts: attentionCounts,
@@ -114,7 +101,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
         <h1 className="page-title">{initialTab === 'attention' ? 'Attention Center' : 'Escalations'}</h1>
         <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
           {activeTab === 'escalations'
-            ? 'Track captured cases from intake through outcome and review.'
+            ? 'Open a captured case, record the outcome, and finish the escalation record.'
             : activeTab === 'attention'
               ? 'Review workflow items that need a decision.'
               : 'Review case lessons before agents can use them as trusted knowledge.'}
@@ -231,12 +218,6 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
             <StatCard label="Avg Resolution" value={summary?.avgResolutionHours != null ? `${summary.avgResolutionHours}h` : '--'} />
           </div>
 
-          <KnowledgeGapsFlyout
-            gaps={gaps}
-            gapsDays={gapsDays}
-            onChangeDays={setGapsDays}
-          />
-
           <div className="card" style={{ marginBottom: 'var(--sp-5)' }}>
             <div className="filter-bar" style={{ border: 'none', padding: 0 }}>
               <select
@@ -284,7 +265,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
                 <div className="empty-state-desc">
                   {search || statusFilter || categoryFilter
                     ? 'Try adjusting your filters.'
-                    : 'Cases appear here after image intake captures a structured escalation from chat. Open a case to work it, record the outcome, and create reviewed knowledge.'}
+                    : 'Cases appear here after image intake captures a structured escalation from chat. Open a case, record the result, note what failed, and choose the final state.'}
                 </div>
               </div>
             ) : (
@@ -298,7 +279,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
                       <th>Issue</th>
                       <th>COID</th>
                       <th>Created</th>
-                      <th style={{ width: 80 }}></th>
+                      <th style={{ width: 150 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -309,7 +290,6 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
                         onOpen={() => {
                           window.location.hash = `#/escalations/${esc._id}`;
                         }}
-                        onChangeStatus={handleStatusChange}
                         onDelete={requestDelete}
                       />
                     ))}
@@ -546,7 +526,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
                 <div className="empty-state-desc">
                   {kqStatusFilter || kqCategoryFilter
                     ? 'Try adjusting your filters.'
-                    : 'Review drafts are created from resolved or escalated cases. Add the final outcome to a case, then create a review draft for knowledge review.'}
+                    : 'Review drafts are created automatically from every case that comes through the pipeline. Once a case is captured, its draft appears here for review.'}
                 </div>
               </div>
             ) : (

@@ -40,8 +40,37 @@ const FINAL_AGENT_USES = new Set([
   ALLOWED_USES.TRIAGE,
 ]);
 
+// Crown-jewel boundary (defense-in-depth, service level). AI agents that write
+// drafts through updateKnowledgeRecord may EDIT text/array fields only — they may
+// NEVER approve/publish or change governance/trust. The kb.updateDraft tool
+// already strips these before they reach here, but this guard makes the
+// guarantee structural: even an unsanitized governance payload from a future
+// agent caller is stripped at the service. Keyed on AGENT IDENTITY, not role —
+// human reviewers legitimately set these same fields with role 'reviewer'.
+const AGENT_ACTOR_IDS = new Set([
+  'knowledgebase-agent',
+]);
+const AGENT_GOVERNANCE_FORBIDDEN_FIELDS = [
+  'reviewStatus',
+  'publishTarget',
+  'reusableOutcome',
+  'allowedUsesOverride',
+  'trustStateOverride',
+];
+
+function isAgentActor(actor = {}) {
+  return AGENT_ACTOR_IDS.has(safeString(actor?.actor, '').trim());
+}
+
 const EDITABLE_TEXT_FIELDS = [
   'title',
+  'customerGoal',
+  'reportedProblem',
+  'evidenceFromCase',
+  'troubleshootingTried',
+  'confirmedCause',
+  'finalOutcome',
+  'invEscalationStatus',
   'summary',
   'symptom',
   'rootCause',
@@ -89,6 +118,49 @@ function compactText(value, maxChars = 500) {
   const text = safeString(value, '').replace(/\s+/g, ' ').trim();
   if (!text || text.length <= maxChars) return text;
   return `${text.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function looksUnprovenFix(value = '') {
+  const text = safeString(value, '').toLowerCase();
+  if (!text.trim()) return false;
+  return [
+    'did not produce',
+    'did not regenerate',
+    'did not restore',
+    'does not specify the final working fix',
+    'does not record the specific corrective action',
+    'underlying root cause is undetermined',
+    'root cause is undetermined',
+    'no final working fix',
+    'not produce the',
+  ].some((phrase) => text.includes(phrase));
+}
+
+function getPublishBlockers(doc = {}) {
+  const blockers = [];
+  const reusableOutcome = safeString(doc.reusableOutcome, 'case-history-only');
+  const publishTarget = safeString(doc.publishTarget, 'case-history-only');
+  const fixText = compactText(doc.exactFix || doc.escalationPath, 2000);
+  const hasSourceEvidence = Boolean(doc.escalationId)
+    || (Array.isArray(doc.evidenceRefs) && doc.evidenceRefs.length > 0);
+
+  if (!(reusableOutcome === 'canonical' || reusableOutcome === 'edge-case')) {
+    blockers.push('reusable outcome must be canonical or edge-case');
+  }
+  if (publishTarget === 'case-history-only') {
+    blockers.push('publish target cannot be case-history-only');
+  }
+  if (!compactText(doc.rootCause, 900)) {
+    blockers.push('root cause is required');
+  }
+  if (!fixText || looksUnprovenFix(fixText)) {
+    blockers.push('proven final fix is required');
+  }
+  if (!hasSourceEvidence) {
+    blockers.push('source evidence is required');
+  }
+
+  return blockers;
 }
 
 function normalizeStringArray(value, limit = 12) {
@@ -254,7 +326,7 @@ function sanitizeKnowledgePatch(payload = {}) {
   const updates = {};
   for (const field of EDITABLE_TEXT_FIELDS) {
     if (Object.prototype.hasOwnProperty.call(payload, field)) {
-      updates[field] = compactText(payload[field], field === 'exactFix' ? 2000 : 900);
+      updates[field] = compactText(payload[field], field === 'exactFix' || field === 'finalOutcome' ? 2000 : 900);
     }
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'reviewStatus')) {
@@ -277,6 +349,9 @@ function sanitizeKnowledgePatch(payload = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'keySignals')) {
     updates.keySignals = normalizeStringArray(payload.keySignals, 12);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, 'importantBoundaries')) {
+    updates.importantBoundaries = normalizeStringArray(payload.importantBoundaries, 20);
   }
   if (Object.prototype.hasOwnProperty.call(payload, 'allowedUsesOverride')) {
     const allowed = normalizeStringArray(payload.allowedUsesOverride, 12)
@@ -313,6 +388,33 @@ function sanitizeKnowledgePatch(payload = {}) {
       createdAt: item?.createdAt ? new Date(item.createdAt) : new Date(),
     })).filter((item) => item.action);
   }
+  if (updates.reportedProblem && !Object.prototype.hasOwnProperty.call(payload, 'symptom')) {
+    updates.symptom = updates.reportedProblem;
+  }
+  if (updates.symptom && !Object.prototype.hasOwnProperty.call(payload, 'reportedProblem')) {
+    updates.reportedProblem = updates.symptom;
+  }
+  if (updates.confirmedCause && !Object.prototype.hasOwnProperty.call(payload, 'rootCause')) {
+    updates.rootCause = updates.confirmedCause;
+  }
+  if (updates.rootCause && !Object.prototype.hasOwnProperty.call(payload, 'confirmedCause')) {
+    updates.confirmedCause = updates.rootCause;
+  }
+  if (updates.finalOutcome && !Object.prototype.hasOwnProperty.call(payload, 'exactFix')) {
+    updates.exactFix = updates.finalOutcome;
+  }
+  if (updates.exactFix && !Object.prototype.hasOwnProperty.call(payload, 'finalOutcome')) {
+    updates.finalOutcome = updates.exactFix;
+  }
+  if (Array.isArray(updates.importantBoundaries) && !(payload.scope && typeof payload.scope === 'object')) {
+    updates.scope = {
+      appliesTo: [],
+      excludes: updates.importantBoundaries,
+      versionNotes: '',
+      customerScope: '',
+      lastValidatedAt: null,
+    };
+  }
   return updates;
 }
 
@@ -325,6 +427,20 @@ async function updateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
   }
 
   const updates = sanitizeKnowledgePatch(payload);
+
+  // Defense-in-depth: an AGENT actor can never set governance/trust fields,
+  // regardless of what reached this service. Strip (mirror the tool's behavior)
+  // and audit-log the attempt. Human reviewers are unaffected — this is keyed on
+  // agent identity, not on the 'reviewer' role they share.
+  let strippedGovernanceForAgent = [];
+  if (isAgentActor(actor)) {
+    strippedGovernanceForAgent = AGENT_GOVERNANCE_FORBIDDEN_FIELDS
+      .filter((field) => Object.prototype.hasOwnProperty.call(updates, field));
+    for (const field of strippedGovernanceForAgent) {
+      delete updates[field];
+    }
+  }
+
   const previousStatus = doc.reviewStatus;
   doc.set(updates);
   if (updates.reviewStatus && updates.reviewStatus !== previousStatus) {
@@ -335,8 +451,17 @@ async function updateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
   appendAuditEvent(doc, {
     action: 'record.update',
     actor,
-    summary: 'Knowledge record updated.',
-    metadata: { fields: Object.keys(updates), previousStatus, nextStatus: doc.reviewStatus },
+    summary: strippedGovernanceForAgent.length
+      ? 'Knowledge record updated; agent governance fields stripped.'
+      : 'Knowledge record updated.',
+    metadata: {
+      fields: Object.keys(updates),
+      previousStatus,
+      nextStatus: doc.reviewStatus,
+      ...(strippedGovernanceForAgent.length
+        ? { agentStrippedGovernanceFields: strippedGovernanceForAgent }
+        : {}),
+    },
   });
   await doc.save();
   const [knowledgeReview, operationalIntelligence] = await Promise.all([
@@ -360,6 +485,14 @@ async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
   }
   if (doc.publishTarget === 'case-history-only') {
     throw createServiceError('KNOWLEDGE_NOT_PUBLISHABLE', 409, 'Case-history-only records are not publishable trusted guidance.');
+  }
+  const publishBlockers = getPublishBlockers(doc);
+  if (publishBlockers.length > 0) {
+    throw createServiceError(
+      'KNOWLEDGE_PUBLISH_BLOCKED',
+      409,
+      `Cannot publish trusted guidance until: ${publishBlockers.join(', ')}.`
+    );
   }
 
   let publish = null;
@@ -513,17 +646,29 @@ function markdownForRecord(record) {
     `- Reusable outcome: ${record.reusableOutcome}`,
     `- Allowed uses: ${(record.allowedUses || []).join(', ') || 'none'}`,
     '',
-    '## Summary',
+    '## Quick Overview',
     record.summary || 'No summary recorded.',
     '',
-    '## Symptom',
-    record.symptom || 'No symptom recorded.',
+    '## Customer Goal',
+    record.customerGoal || 'No customer goal recorded.',
     '',
-    '## Root Cause',
-    record.rootCause || 'No root cause recorded.',
+    '## Reported Problem',
+    record.reportedProblem || record.symptom || 'No reported problem recorded.',
     '',
-    '## Exact Fix',
-    record.exactFix || record.escalationPath || 'No fix recorded.',
+    '## Evidence From Case',
+    record.evidenceFromCase || 'No evidence summary recorded.',
+    '',
+    '## Troubleshooting Already Tried',
+    record.troubleshootingTried || 'No troubleshooting summary recorded.',
+    '',
+    '## Confirmed Cause',
+    record.confirmedCause || record.rootCause || 'No confirmed cause recorded.',
+    '',
+    '## Final Outcome',
+    record.finalOutcome || record.exactFix || record.escalationPath || 'No final outcome recorded.',
+    '',
+    '## INV / Escalation Status',
+    record.invEscalationStatus || 'No INV or escalation status recorded.',
     '',
     '## Evidence',
     ...(record.evidence || []).map((item) => `- ${item.label || item.type}: ${item.evidenceStatus || item.status || 'evidence'}`),
@@ -636,6 +781,9 @@ async function getKnowledgeOntologySummary() {
 
 module.exports = {
   KNOWLEDGE_ROLES,
+  EDITABLE_TEXT_FIELDS,
+  AGENT_ACTOR_IDS,
+  AGENT_GOVERNANCE_FORBIDDEN_FIELDS,
   addKnowledgeRelationship,
   assertKnowledgePermission,
   deprecateKnowledgeRecord,

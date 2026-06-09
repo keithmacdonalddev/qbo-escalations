@@ -62,6 +62,7 @@ const {
 } = require('../../lib/case-intake');
 const { createStageEventBus } = require('../../lib/stage-events');
 const { createLinkedEscalationFromConversation } = require('../../lib/escalation-dedup');
+const { triggerKnowledgeDraftForEscalation } = require('../../services/knowledgebase-draft-trigger');
 const {
   buildContextDebugPayload,
   deriveFallbackReasonCode,
@@ -1339,6 +1340,12 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
               linked.escalation._id,
               conversation._id
             );
+            // Flow every pipeline escalation straight into the Knowledge Review
+            // queue — status-independent, idempotent, and fire-and-forget so it
+            // never delays the chat response.
+            triggerKnowledgeDraftForEscalation(linked.escalation, {
+              trigger: 'knowledge.chat-triage.auto-draft',
+            });
           } catch (escErr) {
             // Non-fatal — do not break the chat flow if escalation persist fails
             console.warn('[chat] Failed to persist escalation from triage (non-fatal):', escErr.message);

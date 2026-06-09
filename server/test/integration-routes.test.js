@@ -276,6 +276,7 @@ await t.test('status update opens missing-resolution attention item and closes i
   assert.equal(resolved.status, 200);
   assert.equal(resolved.body.resolutionDiscipline.action, 'opened');
   assert.equal(resolved.body.resolutionDiscipline.item.kind, 'missing-resolution');
+  assert.equal(resolved.body.knowledgeDraft, null);
 
   let item = await EscalationAttentionItem.findOne({
     sourceEscalationId: escalationId,
@@ -297,6 +298,7 @@ await t.test('status update opens missing-resolution attention item and closes i
     .send({ resolutionNotes: 'Customer confirmed bank feed sync recovered after reconnecting the account.' });
   assert.equal(updated.status, 200);
   assert.equal(updated.body.resolutionDiscipline.action, 'closed');
+  assert.equal(updated.body.knowledgeDraft.generated, true);
 
   item = await EscalationAttentionItem.findOne({
     sourceEscalationId: escalationId,
@@ -307,7 +309,8 @@ await t.test('status update opens missing-resolution attention item and closes i
 
   const afterClose = await agent.get('/api/escalations/attention-items?status=open');
   assert.equal(afterClose.status, 200);
-  assert.equal(afterClose.body.total, 0);
+  assert.equal(afterClose.body.total, 1);
+  assert.equal(afterClose.body.items[0].kind, 'knowledge-review');
   assert.equal(afterClose.body.counts.resolved, 1);
 });
 

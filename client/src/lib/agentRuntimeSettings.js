@@ -110,6 +110,20 @@ export const AGENT_RUNTIME_DEFINITIONS = Object.freeze([
     supportsReasoning: true,
     kind: 'image-parser',
   },
+  {
+    // Normal conversational agent (no `kind`) so it gets the always-on
+    // Primary + Fallback picker. No `defaultProvider` — it uses the neutral
+    // global catalog default (DEFAULT_PROVIDER) until the operator picks one,
+    // per the app-agnostic rule. The Runtime Defaults picker auto-renders from
+    // this entry; no extra AgentsView wiring is needed.
+    id: 'knowledgebase-agent',
+    agentId: 'knowledgebase-agent',
+    label: 'Knowledge Base Agent',
+    description: 'Reviews and edits KB drafts',
+    color: '#5e5ce6',
+    storagePrefix: 'qbo-knowledgebase-agent',
+    supportsReasoning: true,
+  },
 ]);
 
 const RUNTIME_BY_ID = Object.freeze(
@@ -187,9 +201,18 @@ function normalizeTriageProvider(provider, fallback = 'lm-studio') {
 }
 
 function normalizeProviderModelOverride(provider, model) {
-  const normalized = normalizeModelOverride(model);
-  if (!hasCustomModelOverride(provider, normalized)) return '';
-  return normalized;
+  // Persistence rule: ONLY a truly empty/whitespace field means "no override →
+  // use the provider default" (field stays blank and follows the default). Any
+  // non-empty model the operator chose is stored verbatim — including a model
+  // that happens to equal the provider's current default. (Previously this
+  // collapsed a default-equal model to '' via hasCustomModelOverride, which made
+  // a deliberate pick — e.g. claude-opus-4-8 on the KB agent — vanish on save
+  // and reload, looking like the save failed.) Trade-off accepted by the user: a
+  // pinned default-equal model will NOT auto-follow a future change to the app's
+  // default model. `provider` is kept in the signature for call-site symmetry
+  // and possible future provider-specific normalization.
+  void provider;
+  return normalizeModelOverride(model);
 }
 
 function getProviderModelSummary(provider, model) {

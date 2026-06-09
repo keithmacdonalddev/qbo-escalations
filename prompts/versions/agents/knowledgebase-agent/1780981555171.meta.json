@@ -1,0 +1,11 @@
+{
+  "ts": 1780981555171,
+  "promptId": "knowledgebase-agent",
+  "promptVersion": "knowledgebase-agent-qbo-ca-v2",
+  "sha256": "86d5328c6164bfc22c4ba63a69dfcd59eeeed5494f6cd46b4aeaa25bcf6020e7",
+  "size": 3891,
+  "source": "file-watch",
+  "label": null,
+  "createdAt": "2026-06-09T05:05:55.171Z",
+  "fileModified": "2026-06-09T05:05:54.907Z"
+}

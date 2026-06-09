@@ -7,6 +7,10 @@ const { createApp } = require('../src/app');
 const Escalation = require('../src/models/Escalation');
 const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
 const KnowledgeCandidate = require('../src/models/KnowledgeCandidate');
+const {
+  clearProviderStubs,
+  registerProviderStub,
+} = require('../src/lib/harness-provider-gate');
 
 process.env.NODE_ENV = 'test';
 
@@ -163,6 +167,36 @@ test('knowledge management routes support review edits and database-first publis
     .query({ query: 'archived forms employer summary', allowedUse: 'agent-response', includeLegacy: 'false' });
   assert.equal(context.status, 200);
   assert.equal(context.body.context.records[0].id, `candidate:${candidate._id}`);
+});
+
+test('knowledge publish rejects attempted steps that are not a proven final fix', async () => {
+  const app = createApp();
+  const agent = request(app);
+  const escalation = await makeEscalation({
+    caseNumber: 'CASE-MGMT-UNPROVEN',
+    actualOutcome: 'T4 XML export is missing the T4 Summary',
+  });
+  const candidate = await makeCandidate(escalation, {
+    reviewStatus: 'approved',
+    publishTarget: 'category',
+    reusableOutcome: 'canonical',
+    title: 'Missing T4 summary',
+    summary: 'The XML export was missing the T4 Summary.',
+    symptom: 'T4 slips download in the XML but the T4 Summary section is absent.',
+    rootCause: 'The underlying root cause is undetermined.',
+    exactFix: 'Deleting the archived T4 and attempting to repopulate did not restore the summary. The data does not specify the final working fix.',
+    keySignals: ['T4 XML export missing T4 Summary'],
+  });
+
+  const publish = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/publish`)
+    .set('x-knowledge-role', 'publisher')
+    .set('x-knowledge-actor', 'publisher-a')
+    .send({ exportMarkdown: false });
+
+  assert.equal(publish.status, 409);
+  assert.equal(publish.body.code, 'KNOWLEDGE_PUBLISH_BLOCKED');
+  assert.match(publish.body.error, /proven final fix/i);
 });
 
 test('draft override data cannot enter final agent context', async () => {
@@ -591,4 +625,66 @@ test('legacy escalation knowledge publish can run database-only for web deployme
   assert.equal(res.body.knowledge.reviewStatus, 'published');
   assert.equal(res.body.knowledge.publishedDocType, 'database');
   assert.equal(res.body.knowledge.publishedDocPath, '');
+});
+
+test('agent-chat applies a kb.updateDraft edit and returns appliedChanges with prior values', async () => {
+  // The KB sidebar chat now runs through the tool loop. We stub the chat so the
+  // model emits an ACTION line that calls kb.updateDraft on turn 1, then a plain
+  // final answer on turn 2. The route must surface appliedChanges (with prior
+  // values) and the field must be saved — proving the agent can actually edit.
+  const previousStubbed = process.env.HARNESS_PROVIDERS_STUBBED;
+  process.env.HARNESS_PROVIDERS_STUBBED = '1';
+  let turn = 0;
+  registerProviderStub('claude', 'chat', ({ onDone }) => {
+    turn += 1;
+    if (turn === 1) {
+      onDone(
+        'I will fill in the customer goal.\nACTION: {"tool": "kb.updateDraft", "params": {"fields": {"customerGoal": "Confirm the archived employer payroll summary after filing."}, "mode": "explicit"}}',
+        { model: 'claude-test', usageAvailable: true }
+      );
+    } else {
+      onDone('I updated the Customer Goal field for you.', { model: 'claude-test', usageAvailable: true });
+    }
+    return () => {};
+  });
+
+  try {
+    const app = createApp();
+    const agent = request(app);
+    const escalation = await makeEscalation({ caseNumber: 'CASE-MGMT-AGENT-EDIT' });
+    const candidate = await makeCandidate(escalation, { customerGoal: '' });
+
+    const chat = await agent
+      .post(`/api/knowledge/records/candidate:${candidate._id}/agent-chat`)
+      .send({ message: 'Please fill in the customer goal.' });
+
+    assert.equal(chat.status, 200);
+    assert.equal(chat.body.ok, true);
+    assert.ok(Array.isArray(chat.body.appliedChanges));
+    assert.equal(chat.body.appliedChanges.length, 1);
+    assert.equal(chat.body.appliedChanges[0].field, 'customerGoal');
+    assert.equal(chat.body.appliedChanges[0].prior, ''); // prior value for undo
+    assert.match(chat.body.appliedChanges[0].next, /archived employer payroll summary/i);
+
+    const saved = await KnowledgeCandidate.findById(candidate._id).lean();
+    assert.match(saved.customerGoal, /archived employer payroll summary/i);
+    assert.equal(saved.reviewStatus, 'draft'); // never approved by the agent
+    // The conversation thread is still persisted alongside the edit.
+    assert.equal(saved.kbAgentMessages.length, 2);
+
+    // Undo: PATCH the prior value back (what the client's per-field Undo does).
+    const undo = await agent
+      .patch(`/api/knowledge/records/candidate:${candidate._id}`)
+      .send({ customerGoal: chat.body.appliedChanges[0].prior });
+    assert.equal(undo.status, 200);
+    const reverted = await KnowledgeCandidate.findById(candidate._id).lean();
+    assert.equal(reverted.customerGoal, '');
+  } finally {
+    clearProviderStubs();
+    if (previousStubbed === undefined) {
+      delete process.env.HARNESS_PROVIDERS_STUBBED;
+    } else {
+      process.env.HARNESS_PROVIDERS_STUBBED = previousStubbed;
+    }
+  }
 });

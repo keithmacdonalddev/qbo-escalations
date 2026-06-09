@@ -62,6 +62,10 @@ function objectIdString(value) {
   }
 }
 
+function isLikelyObjectId(value) {
+  return typeof value === 'string' && /^[a-fA-F0-9]{24}$/.test(value);
+}
+
 function isModelReady(model) {
   return Boolean(model && model.db && model.db.readyState === 1);
 }
@@ -135,9 +139,75 @@ function inferDraftTitle(escalation = {}) {
   return symptom ? `${category}: ${symptom}` : `${category} resolved case learning`;
 }
 
+function firstNonEmpty(values = [], fallback = '') {
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = compactText(value, 700);
+    if (text) return text;
+  }
+  return fallback;
+}
+
+function buildEvidenceFromCase(escalation = {}, { conversationSnapshot = null } = {}) {
+  const parts = [];
+  if (escalation.caseNumber) parts.push(`Case ${escalation.caseNumber}`);
+  if (escalation.category && escalation.category !== 'unknown') parts.push(`Category: ${escalation.category}`);
+  if (escalation.triedTestAccount && escalation.triedTestAccount !== 'unknown') {
+    parts.push(`Test account tried: ${escalation.triedTestAccount}`);
+  }
+  if (Array.isArray(escalation.screenshotPaths) && escalation.screenshotPaths.length > 0) {
+    parts.push(`${escalation.screenshotPaths.length} screenshot${escalation.screenshotPaths.length === 1 ? '' : 's'} attached`);
+  }
+  if (conversationSnapshot?.conversationPreview) {
+    parts.push(`Chat evidence: ${compactText(conversationSnapshot.conversationPreview, 360)}`);
+  }
+  if (escalation.resolution || escalation.resolutionNotes) {
+    parts.push(`Resolution evidence: ${compactText(escalation.resolution || escalation.resolutionNotes, 360)}`);
+  }
+  return compactText(parts.join(' | '), 1200);
+}
+
+function buildTroubleshootingTried(escalation = {}) {
+  const parts = [];
+  if (escalation.triedTestAccount && escalation.triedTestAccount !== 'unknown') {
+    parts.push(`Tried test account: ${escalation.triedTestAccount}`);
+  }
+  if (escalation.tsSteps) parts.push(compactText(escalation.tsSteps, 900));
+  return compactText(parts.join('\n'), 1200);
+}
+
+function inferInvEscalationStatus(escalation = {}, { conversationSnapshot = null } = {}) {
+  const haystack = [
+    escalation.attemptingTo,
+    escalation.actualOutcome,
+    escalation.tsSteps,
+    escalation.resolution,
+    escalation.resolutionNotes,
+    conversationSnapshot?.conversationPreview,
+  ].map((value) => safeString(value)).join('\n');
+  const invMatches = [...haystack.matchAll(/\bINV[-\s:]?(\d{3,})\b/gi)]
+    .map((match) => `INV-${match[1]}`)
+    .filter(Boolean);
+  const uniqueInvs = [...new Set(invMatches)];
+  if (uniqueInvs.length > 0) {
+    return `Existing INV mentioned in source work: ${uniqueInvs.join(', ')}. Confirm relevance before attaching future cases.`;
+  }
+  if (safeString(escalation.status) === 'escalated-further') {
+    return 'Escalated further. Review the final escalation owner, product response, or INV decision before marking this reusable.';
+  }
+  return 'No INV mentioned in the source escalation or linked chat.';
+}
+
+function buildQuickOverview({ customerGoal, reportedProblem, finalOutcome }) {
+  const pieces = [];
+  if (customerGoal) pieces.push(`Customer goal: ${customerGoal}`);
+  if (reportedProblem) pieces.push(`Reported problem: ${reportedProblem}`);
+  if (finalOutcome) pieces.push(`Final outcome: ${finalOutcome}`);
+  return compactText(pieces.join(' | '), 700);
+}
+
 function recommendReusableOutcome({ candidate = null, escalation = null } = {}) {
-  const rootCause = compactText(candidate && candidate.rootCause);
-  const exactFix = compactText((candidate && candidate.exactFix) || (escalation && escalation.resolution));
+  const rootCause = compactText((candidate && (candidate.confirmedCause || candidate.rootCause)));
+  const exactFix = compactText((candidate && (candidate.finalOutcome || candidate.exactFix)) || (escalation && escalation.resolution));
   const escalationPath = compactText(candidate && candidate.escalationPath);
   const confidence = Number(candidate && candidate.confidence);
   const status = safeString((escalation && escalation.status) || (candidate && candidate.sourceSnapshot && candidate.sourceSnapshot.status));
@@ -154,19 +224,34 @@ function recommendReusableOutcome({ candidate = null, escalation = null } = {}) 
   return 'customer-specific';
 }
 
-function buildSuggestedDraft(escalation = {}) {
+function buildSuggestedDraft(escalation = {}, options = {}) {
+  const conversationSnapshot = options.conversationSnapshot || null;
+  const customerGoal = firstNonEmpty([escalation.attemptingTo, escalation.expectedOutcome], '');
+  const reportedProblem = firstNonEmpty([escalation.actualOutcome], '');
+  const troubleshootingTried = buildTroubleshootingTried(escalation);
+  const finalOutcome = firstNonEmpty([
+    escalation.resolution,
+    escalation.resolutionNotes,
+    safeString(escalation.status) === 'escalated-further' ? 'Escalated further for specialist review.' : '',
+  ], '');
+  const evidenceFromCase = buildEvidenceFromCase(escalation, { conversationSnapshot });
+  const invEscalationStatus = inferInvEscalationStatus(escalation, { conversationSnapshot });
   return {
     title: inferDraftTitle(escalation),
     category: safeString(escalation.category, 'unknown') || 'unknown',
-    summary: compactText(
-      escalation.resolution || escalation.resolutionNotes || escalation.actualOutcome || escalation.attemptingTo,
-      700
-    ),
-    symptom: compactText(escalation.actualOutcome || escalation.attemptingTo, 700),
+    customerGoal,
+    reportedProblem,
+    evidenceFromCase,
+    troubleshootingTried,
+    confirmedCause: '',
+    finalOutcome,
+    invEscalationStatus,
+    summary: buildQuickOverview({ customerGoal, reportedProblem, finalOutcome }),
+    symptom: reportedProblem,
     rootCause: '',
-    exactFix: compactText(escalation.resolution || escalation.resolutionNotes, 1200),
+    exactFix: finalOutcome,
     escalationPath: escalation.status === 'escalated-further'
-      ? compactText(escalation.resolution || escalation.resolutionNotes, 700)
+      ? compactText(finalOutcome || escalation.resolution || escalation.resolutionNotes, 700)
       : '',
     recommendedReusableOutcome: recommendReusableOutcome({ escalation }),
     confidence: escalation.resolution || escalation.resolutionNotes ? 0.55 : 0.35,
@@ -208,7 +293,7 @@ function getCandidateQualityIssues(candidate = {}) {
   const snapshot = candidate.sourceSnapshot || {};
   const reviewStatus = safeString(candidate.reviewStatus, 'draft');
   const confidence = Number(candidate.confidence);
-  const hasFixOrPath = Boolean(compactText(candidate.exactFix) || compactText(candidate.escalationPath));
+  const hasFixOrPath = Boolean(compactText(candidate.finalOutcome) || compactText(candidate.exactFix) || compactText(candidate.escalationPath));
   const hasEvidence = Boolean(
     compactText(snapshot.resolution)
     || compactText(snapshot.resolutionNotes)
@@ -222,8 +307,8 @@ function getCandidateQualityIssues(candidate = {}) {
     issues.push('rejected_without_review_notes');
   }
   if (!compactText(candidate.summary)) issues.push('missing_summary');
-  if (!compactText(candidate.symptom)) issues.push('missing_symptom');
-  if (!compactText(candidate.rootCause)) issues.push('missing_root_cause');
+  if (!compactText(candidate.reportedProblem) && !compactText(candidate.symptom)) issues.push('missing_reported_problem');
+  if (!compactText(candidate.confirmedCause) && !compactText(candidate.rootCause)) issues.push('missing_confirmed_cause');
   if (!hasFixOrPath) issues.push('missing_fix_or_escalation_path');
   if (Number.isFinite(confidence) && confidence > 0 && confidence < LOW_CONFIDENCE_THRESHOLD) {
     issues.push('low_confidence');
@@ -590,9 +675,9 @@ async function upsertProposalAttentionItem(proposal = {}) {
         status: 'open',
         resolvedAt: null,
         sourceConversationId: attention.sourceConversationId || null,
-        sourceLabel: attention.sourceLabel || 'Knowledgebase Agent',
+        sourceLabel: attention.sourceLabel || 'Knowledge Base Agent',
         severity: proposal.severity || 'info',
-        title: proposal.title || 'Knowledgebase review proposal',
+        title: proposal.title || 'Knowledge Base review proposal',
         summary: compactText(proposal.summary, 500),
         candidates: Array.isArray(attention.candidates) ? attention.candidates.slice(0, 12) : [],
         candidateCount: Array.isArray(attention.candidates) ? attention.candidates.length : 0,
@@ -630,8 +715,8 @@ async function recordScanActivity(scan) {
       phase: scan.dryRun ? 'dry-run' : 'review-scan',
       status: scan.proposals.length ? 'review-needed' : 'ok',
       summary: scan.proposals.length
-        ? `Knowledgebase scan found ${scan.proposals.length} review proposal${scan.proposals.length === 1 ? '' : 's'}.`
-        : 'Knowledgebase scan found no review proposals.',
+        ? `Knowledge Base scan found ${scan.proposals.length} review proposal${scan.proposals.length === 1 ? '' : 's'}.`
+        : 'Knowledge Base scan found no review proposals.',
       detail: scan.proposals.slice(0, 12).map((proposal) => `${proposal.type}: ${proposal.summary}`).join('\n'),
       metadata: {
         scanId: scan.scanId,
@@ -653,6 +738,8 @@ async function getKnowledgebaseAgentStatus() {
       agentId: KNOWLEDGEBASE_AGENT_ID,
       dbReady: false,
       capabilities: {
+        qboCanadaDraftGeneration: true,
+        draftHarness: true,
         missingDraftScan: true,
         candidateQualityScan: true,
         duplicateCandidateScan: true,
@@ -682,6 +769,8 @@ async function getKnowledgebaseAgentStatus() {
     profileRoute: `/api/agent-identities/${KNOWLEDGEBASE_AGENT_ID}`,
     scanRoute: '/api/knowledge/agent/scan',
     capabilities: {
+      qboCanadaDraftGeneration: true,
+      draftHarness: true,
       missingDraftScan: true,
       candidateQualityScan: true,
       duplicateCandidateScan: true,
@@ -733,7 +822,7 @@ async function scanKnowledgebaseAgent(options = {}) {
       proposals: [],
       attention: { opened: 0, skipped: 0, results: [] },
       activity: { recorded: false, error: 'MongoDB is not connected.' },
-      warning: 'Knowledgebase agent scan skipped because MongoDB is not connected.',
+      warning: 'Knowledge Base Agent scan skipped because MongoDB is not connected.',
     };
   }
 
@@ -794,12 +883,171 @@ async function scanKnowledgebaseAgent(options = {}) {
   return scan;
 }
 
+function buildDraftHarnessChecks(draft = {}, escalation = {}) {
+  const checks = [
+    {
+      id: 'source-case',
+      label: 'Source escalation selected',
+      passed: Boolean(objectIdString(escalation._id)),
+      detail: labelEscalation(escalation),
+    },
+    {
+      id: 'title',
+      label: 'Title / Subject',
+      passed: Boolean(compactText(draft.title)),
+      detail: draft.title,
+    },
+    {
+      id: 'category',
+      label: 'Category',
+      passed: Boolean(compactText(draft.category)) && draft.category !== 'unknown',
+      detail: draft.category,
+    },
+    {
+      id: 'customer-goal',
+      label: 'Customer Goal',
+      passed: Boolean(compactText(draft.customerGoal)),
+      detail: draft.customerGoal,
+    },
+    {
+      id: 'reported-problem',
+      label: 'Reported Problem',
+      passed: Boolean(compactText(draft.reportedProblem)),
+      detail: draft.reportedProblem,
+    },
+    {
+      id: 'evidence-from-case',
+      label: 'Evidence From Case',
+      passed: Boolean(compactText(draft.evidenceFromCase)),
+      detail: draft.evidenceFromCase,
+    },
+    {
+      id: 'troubleshooting-tried',
+      label: 'Troubleshooting Already Tried',
+      passed: Boolean(compactText(draft.troubleshootingTried)),
+      detail: draft.troubleshootingTried || 'No troubleshooting captured in source template.',
+      optional: true,
+    },
+    {
+      id: 'final-outcome',
+      label: 'Final Outcome',
+      passed: Boolean(compactText(draft.finalOutcome)),
+      detail: draft.finalOutcome,
+    },
+    {
+      id: 'inv-escalation-status',
+      label: 'INV / Escalation Status',
+      passed: Boolean(compactText(draft.invEscalationStatus)),
+      detail: draft.invEscalationStatus,
+    },
+  ];
+  return checks;
+}
+
+async function selectHarnessEscalation(escalationId = '') {
+  const normalizedId = objectIdString(escalationId);
+  if (normalizedId) {
+    if (!isLikelyObjectId(normalizedId)) {
+      const err = new Error('Harness escalation id is invalid.');
+      err.code = 'INVALID_HARNESS_ESCALATION_ID';
+      err.status = 400;
+      throw err;
+    }
+    const escalation = await Escalation.findById(normalizedId).lean();
+    if (!escalation) {
+      const err = new Error('Harness escalation not found.');
+      err.code = 'HARNESS_ESCALATION_NOT_FOUND';
+      err.status = 404;
+      throw err;
+    }
+    return escalation;
+  }
+
+  return Escalation.findOne({
+    status: { $in: FINALIZED_ESCALATION_STATUSES },
+    $or: [
+      { resolution: /\S/ },
+      { resolutionNotes: /\S/ },
+      { actualOutcome: /\S/ },
+    ],
+  })
+    .sort('-updatedAt')
+    .lean();
+}
+
+async function runKnowledgebaseDraftHarness(options = {}) {
+  const started = Date.now();
+  const startedAt = new Date(started).toISOString();
+  if (!isKnowledgebaseAgentDbReady()) {
+    return {
+      ok: false,
+      agentId: KNOWLEDGEBASE_AGENT_ID,
+      status: 'skipped',
+      dbReady: false,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - started,
+      error: 'MongoDB is not connected.',
+      checks: [],
+      draft: null,
+      fixture: null,
+    };
+  }
+
+  const escalation = await selectHarnessEscalation(options.escalationId);
+  if (!escalation) {
+    return {
+      ok: false,
+      agentId: KNOWLEDGEBASE_AGENT_ID,
+      status: 'skipped',
+      dbReady: true,
+      startedAt,
+      completedAt: new Date().toISOString(),
+      durationMs: Date.now() - started,
+      error: 'No finalized escalation with enough source data is available for the KB draft harness.',
+      checks: [],
+      draft: null,
+      fixture: null,
+    };
+  }
+
+  const draft = buildSuggestedDraft(escalation);
+  const checks = buildDraftHarnessChecks(draft, escalation);
+  const requiredFailures = checks.filter((check) => !check.optional && !check.passed);
+  const optionalFailures = checks.filter((check) => check.optional && !check.passed);
+  const completedAt = new Date().toISOString();
+  const status = requiredFailures.length ? 'fail' : optionalFailures.length ? 'warn' : 'pass';
+
+  return {
+    ok: requiredFailures.length === 0,
+    agentId: KNOWLEDGEBASE_AGENT_ID,
+    status,
+    dbReady: true,
+    startedAt,
+    completedAt,
+    durationMs: Date.now() - started,
+    summary: requiredFailures.length
+      ? `KB draft harness failed ${requiredFailures.length} required check${requiredFailures.length === 1 ? '' : 's'}.`
+      : `KB draft harness produced a review-ready draft for ${labelEscalation(escalation)}.`,
+    fixture: {
+      escalationId: objectIdString(escalation._id),
+      caseNumber: safeString(escalation.caseNumber),
+      category: safeString(escalation.category),
+      status: safeString(escalation.status),
+    },
+    draft,
+    checks,
+  };
+}
+
 module.exports = {
   KNOWLEDGEBASE_AGENT_ID,
   buildCandidateQualityProposal,
   buildContradictionProposal,
+  buildDraftHarnessChecks,
   buildDuplicateProposal,
   buildMissingDraftProposal,
+  buildSuggestedDraft,
   buildStaleTrustedProposal,
   getCandidateQualityIssues,
   getKnowledgebaseAgentStatus,
@@ -808,5 +1056,6 @@ module.exports = {
   parseScanLimit,
   parseStaleTrustedDays,
   recommendReusableOutcome,
+  runKnowledgebaseDraftHarness,
   scanKnowledgebaseAgent,
 };

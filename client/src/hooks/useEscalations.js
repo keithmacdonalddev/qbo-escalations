@@ -6,7 +6,6 @@ import {
   listEscalations,
   listKnowledgeCandidates,
   updateAttentionItem,
-  updateEscalation,
 } from '../api/escalationsApi.js';
 import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from './useToast.jsx';
@@ -235,16 +234,6 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     setAttentionUpdatingId('');
   }, [attentionSelectedIds, attentionUpdatingId, loadAttentionQueue]);
 
-  const handleStatusChange = useCallback(async (id, newStatus) => {
-    tel(TEL.USER_ACTION, `Changed escalation status to ${newStatus}`, { escalationId: id, newStatus });
-    try {
-      await updateEscalation(id, { status: newStatus });
-      loadEscalations();
-    } catch (err) {
-      toastRef.current.error(err?.message || 'Failed to update status');
-    }
-  }, [loadEscalations]);
-
   const requestDelete = useCallback((id) => {
     setDeleteTarget(id);
   }, []);
@@ -329,7 +318,6 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     deleteTarget,
     confirmDelete,
     cancelDelete,
-    handleStatusChange,
     refresh,
   };
 }

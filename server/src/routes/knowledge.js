@@ -13,6 +13,7 @@ const {
 } = require('../services/operational-intelligence-service');
 const {
   getKnowledgebaseAgentStatus,
+  runKnowledgebaseDraftHarness,
   scanKnowledgebaseAgent,
 } = require('../services/knowledgebase-agent-service');
 const {
@@ -27,6 +28,10 @@ const {
   resolveKnowledgeActor,
   updateKnowledgeRecord,
 } = require('../services/knowledgebase-management-service');
+const {
+  answerKnowledgeBaseAgentQuestion,
+  getKnowledgeBaseAgentRecordContext,
+} = require('../services/knowledgebase-agent-context-service');
 
 const router = express.Router();
 
@@ -137,6 +142,19 @@ router.post('/agent/scan', async (req, res) => {
   }
 });
 
+// POST /api/knowledge/agent/harness/run
+router.post('/agent/harness/run', async (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const harness = await runKnowledgebaseDraftHarness({
+      escalationId: payload.escalationId || '',
+    });
+    return res.json({ ok: true, harness });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_AGENT_HARNESS_FAILED');
+  }
+});
+
 // GET /api/knowledge/records
 router.get('/records', async (req, res) => {
   const options = readCommonQuery(req, {
@@ -162,6 +180,27 @@ router.get('/records/:recordId', async (req, res) => {
     ok: true,
     record,
   });
+});
+
+// GET /api/knowledge/records/:recordId/agent-context
+router.get('/records/:recordId/agent-context', async (req, res) => {
+  try {
+    const result = await getKnowledgeBaseAgentRecordContext(req.params.recordId);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_AGENT_CONTEXT_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/agent-chat
+router.post('/records/:recordId/agent-chat', async (req, res) => {
+  try {
+    const payload = req.body && typeof req.body === 'object' ? req.body : {};
+    const result = await answerKnowledgeBaseAgentQuestion(req.params.recordId, payload.message);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_AGENT_CHAT_FAILED');
+  }
 });
 
 // PATCH /api/knowledge/records/:recordId

@@ -45,6 +45,11 @@ const KNOWLEDGE_CATEGORY_OPTIONS = [
   'unknown',
 ];
 
+function splitTextLines(value) {
+  if (Array.isArray(value)) return value.map((line) => String(line || '').trim()).filter(Boolean);
+  return String(value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
 function EscalationKnowledgePanel(
   {
     knowledgeEligible,
@@ -63,6 +68,11 @@ function EscalationKnowledgePanel(
   ref,
 ) {
   const knowledgeLocked = knowledge?.reviewStatus === 'published';
+  const updateField = (field, value) => onKnowledgeFieldChange(field, value);
+  const updateAliasedField = (field, alias, value) => {
+    onKnowledgeFieldChange(field, value);
+    if (alias) onKnowledgeFieldChange(alias, value);
+  };
 
   return (
     <div className="card" ref={ref}>
@@ -84,18 +94,20 @@ function EscalationKnowledgePanel(
         }}>
           {autoGenBanner === 'generating' && <span className="spinner spinner-sm" />}
           <span style={{ fontWeight: 600 }}>
-            {autoGenBanner === 'generating'
-              ? 'Case outcome recorded. Creating a review draft from the resolution...'
-              : 'Review draft ready. Confirm it below before agents can use it.'}
+            {autoGenBanner === 'ready'
+              ? 'Case saved. The KB agent prepares a draft automatically and keeps filling it in as the case progresses.'
+              : autoGenBanner === 'generating'
+                ? 'Creating a KB draft from the recorded outcome...'
+                : 'KB draft ready. Confirm it below before saving it for future cases.'}
           </span>
         </div>
       )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
         <div>
-          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, margin: 0 }}>Knowledge Review</h2>
+          <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, margin: 0 }}>QBO Canada KB Draft</h2>
           <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', marginTop: 'var(--sp-1)' }}>
-            Turn the final case outcome into reviewed knowledge. Agents cannot use the draft until it is approved and published.
+            Prepared from the finished escalation so the reviewer can clean up the answer before saving it for future QBO cases.
           </div>
         </div>
         {knowledge && (
@@ -107,12 +119,12 @@ function EscalationKnowledgePanel(
 
       {!knowledgeEligible ? (
         <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-          Add the final fix or handoff reason, then mark the case resolved or escalated further. After that, the app can create a review draft from the outcome.
+          Open or link a case first. The KB agent drafts an entry from whatever the case has so far.
         </div>
       ) : !knowledge ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
           <div className="text-secondary" style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-            {lifecycle?.nextAction || 'Create a review draft from the case details, resolution notes, source evidence, and linked conversation when available.'}
+            {lifecycle?.nextAction || 'The KB agent drafts an entry from the case details, source evidence, and linked conversation. It fills in more as the case progresses.'}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <button
@@ -121,7 +133,7 @@ function EscalationKnowledgePanel(
               disabled={knowledgeBusy}
               type="button"
             >
-              {knowledgeBusy ? 'Creating...' : 'Create Review Draft'}
+              {knowledgeBusy ? 'Creating...' : 'Create KB Draft'}
             </button>
           </div>
         </div>
@@ -229,10 +241,10 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            <span className="eyebrow">Summary</span>
+            <span className="eyebrow">Quick Overview</span>
             <textarea
               value={knowledge.summary || ''}
-              onChange={(e) => onKnowledgeFieldChange('summary', e.target.value)}
+              onChange={(e) => updateField('summary', e.target.value)}
               rows={2}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -240,10 +252,10 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            <span className="eyebrow">Symptom</span>
+            <span className="eyebrow">Customer Goal</span>
             <textarea
-              value={knowledge.symptom || ''}
-              onChange={(e) => onKnowledgeFieldChange('symptom', e.target.value)}
+              value={knowledge.customerGoal || ''}
+              onChange={(e) => updateField('customerGoal', e.target.value)}
               rows={2}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -251,10 +263,10 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            <span className="eyebrow">Root Cause</span>
+            <span className="eyebrow">Reported Problem</span>
             <textarea
-              value={knowledge.rootCause || ''}
-              onChange={(e) => onKnowledgeFieldChange('rootCause', e.target.value)}
+              value={knowledge.reportedProblem || knowledge.symptom || ''}
+              onChange={(e) => updateAliasedField('reportedProblem', 'symptom', e.target.value)}
               rows={2}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -262,10 +274,43 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            <span className="eyebrow">Exact Fix</span>
+            <span className="eyebrow">Evidence From Case</span>
             <textarea
-              value={knowledge.exactFix || ''}
-              onChange={(e) => onKnowledgeFieldChange('exactFix', e.target.value)}
+              value={knowledge.evidenceFromCase || ''}
+              onChange={(e) => updateField('evidenceFromCase', e.target.value)}
+              rows={3}
+              disabled={knowledgeBusy || knowledgeLocked}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+            <span className="eyebrow">Troubleshooting Already Tried</span>
+            <textarea
+              value={knowledge.troubleshootingTried || ''}
+              onChange={(e) => updateField('troubleshootingTried', e.target.value)}
+              rows={3}
+              disabled={knowledgeBusy || knowledgeLocked}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+            <span className="eyebrow">Confirmed Cause</span>
+            <textarea
+              value={knowledge.confirmedCause || knowledge.rootCause || ''}
+              onChange={(e) => updateAliasedField('confirmedCause', 'rootCause', e.target.value)}
+              rows={2}
+              disabled={knowledgeBusy || knowledgeLocked}
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+            <span className="eyebrow">Final Outcome</span>
+            <textarea
+              value={knowledge.finalOutcome || knowledge.exactFix || ''}
+              onChange={(e) => updateAliasedField('finalOutcome', 'exactFix', e.target.value)}
               rows={4}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -273,10 +318,10 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
-            <span className="eyebrow">Escalation Path</span>
+            <span className="eyebrow">INV / Escalation Status</span>
             <textarea
-              value={knowledge.escalationPath || ''}
-              onChange={(e) => onKnowledgeFieldChange('escalationPath', e.target.value)}
+              value={knowledge.invEscalationStatus || knowledge.escalationPath || ''}
+              onChange={(e) => updateField('invEscalationStatus', e.target.value)}
               rows={2}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -284,12 +329,24 @@ function EscalationKnowledgePanel(
           </label>
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+            <span className="eyebrow">Important Boundaries</span>
+            <textarea
+              value={Array.isArray(knowledge.importantBoundaries) ? knowledge.importantBoundaries.join('\n') : ''}
+              onChange={(e) => updateField('importantBoundaries', splitTextLines(e.target.value))}
+              rows={3}
+              disabled={knowledgeBusy || knowledgeLocked}
+              style={{ width: '100%', resize: 'vertical' }}
+              placeholder="One boundary per line"
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
             <span className="eyebrow">Signals To Look For</span>
             <textarea
               value={Array.isArray(knowledge.keySignals) ? knowledge.keySignals.join('\n') : ''}
-              onChange={(e) => onKnowledgeFieldChange(
+              onChange={(e) => updateField(
                 'keySignals',
-                e.target.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+                splitTextLines(e.target.value),
               )}
               rows={3}
               disabled={knowledgeBusy || knowledgeLocked}
@@ -302,7 +359,7 @@ function EscalationKnowledgePanel(
             <span className="eyebrow">Review Notes</span>
             <textarea
               value={knowledge.reviewNotes || ''}
-              onChange={(e) => onKnowledgeFieldChange('reviewNotes', e.target.value)}
+              onChange={(e) => updateField('reviewNotes', e.target.value)}
               rows={2}
               disabled={knowledgeBusy || knowledgeLocked}
               style={{ width: '100%', resize: 'vertical' }}
@@ -323,7 +380,7 @@ function EscalationKnowledgePanel(
                   disabled={knowledgeBusy}
                   type="button"
                 >
-                  Refresh Review Draft
+                  Refresh KB Draft
                 </button>
               )}
               {!knowledgeLocked && (
@@ -333,7 +390,7 @@ function EscalationKnowledgePanel(
                   disabled={knowledgeBusy}
                   type="button"
                 >
-                  {knowledgeBusy ? 'Saving...' : 'Save Review Draft'}
+                  {knowledgeBusy ? 'Saving...' : 'Save KB Draft'}
                 </button>
               )}
               {knowledgeLocked ? (

@@ -18,6 +18,7 @@ import ChatMessage from './ChatMessage.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
 import WorkflowLogPanel from './chat-v5/WorkflowLogPanel.jsx';
+import './EscalationDashboard.css';
 import {
   ESCALATION_STATUS_LABELS as LIFECYCLE_STATUS_LABELS,
   getEscalationKnowledgeLifecycle,
@@ -31,33 +32,6 @@ const STATUS_BADGE_MAP = {
   'resolved': 'badge-resolved',
   'escalated-further': 'badge-escalated',
 };
-
-function EscalationLifecyclePanel({ lifecycle }) {
-  return (
-    <section className="esc-lifecycle-panel" aria-label="Case lifecycle">
-      <div className="esc-lifecycle-summary">
-        <span className="eyebrow">Current stage</span>
-        <strong>{lifecycle.label}</strong>
-        <p>{lifecycle.detail}</p>
-      </div>
-      <div className="esc-lifecycle-next">
-        <span className="eyebrow">Next action</span>
-        <strong>{lifecycle.nextAction}</strong>
-      </div>
-      <ol className="esc-lifecycle-steps">
-        {lifecycle.steps.map((step) => (
-          <li key={step.key} className={`esc-lifecycle-step is-${step.status}`}>
-            <span aria-hidden="true" />
-            <div>
-              <strong>{step.label}</strong>
-              <small>{step.detail}</small>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
 
 // Unified workflow event log for the conversation linked to this escalation.
 // Reuses the chat-v5 WorkflowLogPanel against the already-loaded conversation's
@@ -93,7 +67,7 @@ export default function EscalationDetail({ escalationId }) {
   const [knowledge, setKnowledge] = useState(null);
   const [knowledgeBusy, setKnowledgeBusy] = useState(false);
   const [knowledgeNotice, setKnowledgeNotice] = useState('');
-  const [autoGenBanner, setAutoGenBanner] = useState(null); // 'generating' | 'done' | null
+  const [autoGenBanner, setAutoGenBanner] = useState(null);
   const knowledgeSectionRef = useRef(null);
 
   // Load escalation and linked conversation
@@ -126,26 +100,16 @@ export default function EscalationDetail({ escalationId }) {
     window.setTimeout(() => setKnowledgeNotice(''), 2500);
   }, []);
 
-  const handleStatusTransitionComplete = useCallback(async ({ updated, knowledgeEligible }) => {
-    if (!knowledgeEligible) return;
-    setAutoGenBanner('generating');
-    setKnowledgeBusy(true);
-    // Scroll the knowledge section into view after a tick so the banner is rendered
-    requestAnimationFrame(() => {
-      knowledgeSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
-    try {
-      const draft = await generateEscalationKnowledge(updated._id, { force: false, enrich: true });
+  const handleStatusTransitionComplete = useCallback((result = {}) => {
+    const draft = result.knowledgeDraft?.knowledge || null;
+    if (draft) {
       setKnowledge(draft);
       setAutoGenBanner('done');
-      // Clear the "done" banner after a few seconds
-      setTimeout(() => setAutoGenBanner(null), 5000);
-    } catch {
-      toastRef.current.error('Review draft auto-generation failed. You can create it manually below.');
-      setAutoGenBanner(null);
+      showKnowledgeNotice('KB draft created from the finished escalation');
+      return;
     }
-    setKnowledgeBusy(false);
-  }, [generateEscalationKnowledge, knowledgeSectionRef, setAutoGenBanner, setKnowledge, setKnowledgeBusy, toastRef]);
+    setAutoGenBanner(null);
+  }, [showKnowledgeNotice]);
 
   const handleGenerateKnowledge = useCallback(async (force = false) => {
     if (!escalation || knowledgeBusy) return;
@@ -155,7 +119,7 @@ export default function EscalationDetail({ escalationId }) {
       setKnowledge(draft);
       showKnowledgeNotice(force ? 'Review draft refreshed' : 'Review draft created');
     } catch {
-      toastRef.current.error('Failed to create review draft');
+      toastRef.current.error('Failed to create KB draft');
     }
     setKnowledgeBusy(false);
   }, [escalation, knowledgeBusy, showKnowledgeNotice]);
@@ -175,9 +139,19 @@ export default function EscalationDetail({ escalationId }) {
         category: knowledge.category,
         title: knowledge.title,
         summary: knowledge.summary,
-        symptom: knowledge.symptom,
-        rootCause: knowledge.rootCause,
-        exactFix: knowledge.exactFix,
+        customerGoal: knowledge.customerGoal,
+        reportedProblem: knowledge.reportedProblem || knowledge.symptom,
+        evidenceFromCase: knowledge.evidenceFromCase,
+        troubleshootingTried: knowledge.troubleshootingTried,
+        confirmedCause: knowledge.confirmedCause || knowledge.rootCause,
+        finalOutcome: knowledge.finalOutcome || knowledge.exactFix,
+        invEscalationStatus: knowledge.invEscalationStatus,
+        importantBoundaries: Array.isArray(knowledge.importantBoundaries)
+          ? knowledge.importantBoundaries
+          : String(knowledge.importantBoundaries || '').split(/\r?\n/),
+        symptom: knowledge.reportedProblem || knowledge.symptom,
+        rootCause: knowledge.confirmedCause || knowledge.rootCause,
+        exactFix: knowledge.finalOutcome || knowledge.exactFix,
         escalationPath: knowledge.escalationPath,
         keySignals: Array.isArray(knowledge.keySignals)
           ? knowledge.keySignals
@@ -188,7 +162,7 @@ export default function EscalationDetail({ escalationId }) {
       setKnowledge(updated);
       showKnowledgeNotice('Review draft saved');
     } catch {
-      toastRef.current.error('Failed to save review draft');
+      toastRef.current.error('Failed to save KB draft');
     }
     setKnowledgeBusy(false);
   }, [escalation, knowledge, knowledgeBusy, showKnowledgeNotice]);
@@ -266,9 +240,10 @@ export default function EscalationDetail({ escalationId }) {
     return () => { cancelled = true; };
   }, [escalation?._id]);
 
-  const knowledgeEligible = escalation
-    ? escalation.status === 'resolved' || escalation.status === 'escalated-further'
-    : false;
+  // Every case is eligible for a KB draft now — drafts auto-create from the
+  // pipeline regardless of status, and the reviewer can refresh/edit at any
+  // stage. The resolve-status gate is no longer the on-ramp into the KB queue.
+  const knowledgeEligible = Boolean(escalation);
   const knowledgeCanPublish = Boolean(
     knowledge
     && knowledge.reviewStatus === 'approved'
@@ -312,7 +287,7 @@ export default function EscalationDetail({ escalationId }) {
             &larr; Escalations
           </button>
           <h1 className="page-title" style={{ margin: 0 }}>
-            Case Detail
+            Escalation Case
           </h1>
         </div>
         <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
@@ -328,8 +303,6 @@ export default function EscalationDetail({ escalationId }) {
         </div>
       </div>
 
-      <EscalationLifecyclePanel lifecycle={lifecycle} />
-
       {/* Two-column layout: escalation info (scrollable) + chat transcript (fixed) */}
       <div className="esc-detail-columns">
 
@@ -343,153 +316,171 @@ export default function EscalationDetail({ escalationId }) {
             onStatusTransitionComplete={handleStatusTransitionComplete}
           />
 
-          <EscalationKnowledgePanel
-            ref={knowledgeSectionRef}
-            knowledgeEligible={knowledgeEligible}
-            knowledge={knowledge}
-            knowledgeBusy={knowledgeBusy}
-            knowledgeNotice={knowledgeNotice}
-            autoGenBanner={autoGenBanner}
-            canPublish={knowledgeCanPublish}
-            lifecycle={lifecycle}
-            onGenerateKnowledge={handleGenerateKnowledge}
-            onKnowledgeFieldChange={handleKnowledgeFieldChange}
-            onSaveKnowledge={handleSaveKnowledge}
-            onPublishKnowledge={handlePublishKnowledge}
-            onUnpublishKnowledge={handleUnpublishKnowledge}
-          />
+          <details className="esc-detail-secondary">
+            <summary>Optional: create agent guidance after the outcome is proven</summary>
+            <EscalationKnowledgePanel
+              ref={knowledgeSectionRef}
+              knowledgeEligible={knowledgeEligible}
+              knowledge={knowledge}
+              knowledgeBusy={knowledgeBusy}
+              knowledgeNotice={knowledgeNotice}
+              autoGenBanner={autoGenBanner}
+              canPublish={knowledgeCanPublish}
+              lifecycle={lifecycle}
+              onGenerateKnowledge={handleGenerateKnowledge}
+              onKnowledgeFieldChange={handleKnowledgeFieldChange}
+              onSaveKnowledge={handleSaveKnowledge}
+              onPublishKnowledge={handlePublishKnowledge}
+              onUnpublishKnowledge={handleUnpublishKnowledge}
+            />
+          </details>
 
-          <div className="card">
-            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Screenshots</h2>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
-              <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
-                Attach screenshots for this escalation record.
-              </span>
-              <Tooltip text="Upload a screenshot of the issue" level="medium">
-                <label className="btn btn-secondary btn-sm" style={{ cursor: uploadingScreenshots ? 'default' : 'pointer' }}>
-                  {uploadingScreenshots ? 'Uploading...' : 'Upload'}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    onChange={handleUploadScreenshots}
-                    style={{ display: 'none' }}
-                    disabled={uploadingScreenshots}
-                  />
-                </label>
-              </Tooltip>
+          <details className="esc-detail-secondary">
+            <summary>Screenshots</summary>
+            <div className="card esc-attachments-card">
+              <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Screenshots</h2>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-3)', marginBottom: 'var(--sp-3)' }}>
+                <span className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                  Attach screenshots for this escalation record.
+                </span>
+                <Tooltip text="Upload a screenshot of the issue" level="medium">
+                  <label className="btn btn-secondary btn-sm" style={{ cursor: uploadingScreenshots ? 'default' : 'pointer' }}>
+                    {uploadingScreenshots ? 'Uploading...' : 'Upload'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      onChange={handleUploadScreenshots}
+                      style={{ display: 'none' }}
+                      disabled={uploadingScreenshots}
+                    />
+                  </label>
+                </Tooltip>
+              </div>
+
+              {Array.isArray(escalation.screenshotPaths) && escalation.screenshotPaths.length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 'var(--sp-3)' }}>
+                  {escalation.screenshotPaths.map((relativePath) => {
+                    const fileName = relativePath.split('/').pop();
+                    const src = `/uploads/${relativePath}`;
+                    return (
+                      <div key={relativePath} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                        <a href={src} target="_blank" rel="noopener noreferrer">
+                          <img
+                            src={src}
+                            alt={fileName}
+                            style={{
+                              width: '100%',
+                              aspectRatio: '1 / 1',
+                              objectFit: 'cover',
+                              borderRadius: 'var(--radius-md)',
+                              border: '1px solid var(--line)',
+                            }}
+                          />
+                        </a>
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => handleDeleteScreenshot(fileName)}
+                          type="button"
+                          style={{ color: 'var(--danger)' }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                  No screenshots attached.
+                </div>
+              )}
             </div>
+          </details>
 
-            {Array.isArray(escalation.screenshotPaths) && escalation.screenshotPaths.length > 0 ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 'var(--sp-3)' }}>
-                {escalation.screenshotPaths.map((relativePath) => {
-                  const fileName = relativePath.split('/').pop();
-                  const src = `/uploads/${relativePath}`;
-                  return (
-                    <div key={relativePath} style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-                      <a href={src} target="_blank" rel="noopener noreferrer">
-                        <img
-                          src={src}
-                          alt={fileName}
-                          style={{
-                            width: '100%',
-                            aspectRatio: '1 / 1',
-                            objectFit: 'cover',
-                            borderRadius: 'var(--radius-md)',
-                            border: '1px solid var(--line)',
-                          }}
-                        />
-                      </a>
+          <details className="esc-detail-secondary">
+            <summary>Similar cases</summary>
+            <div className="card esc-similar-card">
+              <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Similar Cases</h2>
+              {similarLoading ? (
+                <div style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
+                  <span className="spinner spinner-sm" />
+                </div>
+              ) : similarEscalations.length === 0 ? (
+                <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
+                  No similar escalations found yet.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                  {similarEscalations.map((item) => (
+                    <Tooltip key={item._id} text="Click to view a similar past escalation" level="high">
                       <button
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => handleDeleteScreenshot(fileName)}
                         type="button"
-                        style={{ color: 'var(--danger)' }}
+                        className="esc-similar-case-card"
+                        onClick={() => { window.location.hash = `#/escalations/${item._id}`; }}
                       >
-                        Remove
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
+                          <span className={`cat-badge cat-${item.category || 'general'}`}>
+                            {(item.category || 'general').replace('-', ' ')}
+                          </span>
+                          <span className={`badge ${STATUS_BADGE_MAP[item.status] || ''}`} style={{ fontSize: 'var(--text-xs)' }}>
+                            {STATUS_LABELS[item.status] || item.status}
+                          </span>
+                        </div>
+                        <div className="truncate" style={{ marginTop: 'var(--sp-1)', fontSize: 'var(--text-sm)' }}>
+                          {item.attemptingTo || item.actualOutcome || 'Untitled issue'}
+                        </div>
                       </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
-                No screenshots attached.
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>Similar Cases</h2>
-            {similarLoading ? (
-              <div style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
-                <span className="spinner spinner-sm" />
-              </div>
-            ) : similarEscalations.length === 0 ? (
-              <div className="text-secondary" style={{ fontSize: 'var(--text-sm)' }}>
-                No similar escalations found yet.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-                {similarEscalations.map((item) => (
-                  <Tooltip key={item._id} text="Click to view a similar past escalation" level="high">
-                    <button
-                      type="button"
-                      className="card card-compact card-clickable"
-                      onClick={() => { window.location.hash = `#/escalations/${item._id}`; }}
-                      style={{ textAlign: 'left' }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--sp-2)' }}>
-                        <span className={`cat-badge cat-${item.category || 'general'}`}>
-                          {(item.category || 'general').replace('-', ' ')}
-                        </span>
-                        <span className={`badge ${STATUS_BADGE_MAP[item.status] || ''}`} style={{ fontSize: 'var(--text-xs)' }}>
-                          {STATUS_LABELS[item.status] || item.status}
-                        </span>
-                      </div>
-                      <div className="truncate" style={{ marginTop: 'var(--sp-1)', fontSize: 'var(--text-sm)' }}>
-                        {item.attemptingTo || item.actualOutcome || 'Untitled issue'}
-                      </div>
-                    </button>
-                  </Tooltip>
-                ))}
-              </div>
-            )}
-          </div>
+                    </Tooltip>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
         </div>
 
         {/* Right: Chat transcript + copilot — fixed in viewport */}
         <div className="esc-detail-right">
-          <div className="card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            <h2 style={{ fontSize: 'var(--text-md)', fontWeight: 700, marginBottom: 'var(--sp-3)' }}>
-              Chat Transcript
-            </h2>
-            {conversation && conversation.messages && conversation.messages.length > 0 ? (
-              <div style={{ overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
-                {conversation.messages.map((msg, i) => (
-                  <ChatMessage
-                    key={i}
-                    role={msg.role}
-                    content={msg.content}
-                    images={msg.images}
-                    provider={msg.provider || conversation.provider}
-                    timestamp={msg.timestamp}
-                    responseTimeMs={msg.responseTimeMs}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div style={{ textAlign: 'center', padding: 'var(--sp-6)', color: 'var(--ink-secondary)', fontSize: 'var(--text-sm)' }}>
-                {escalation.conversationId
-                  ? 'No messages in the linked conversation.'
-                  : 'No conversation linked to this escalation.'}
-              </div>
-            )}
-          </div>
+          <details className="esc-detail-secondary" open>
+            <summary>Linked chat evidence</summary>
+            <div className="card esc-transcript-card">
+              {conversation && conversation.messages && conversation.messages.length > 0 ? (
+                <div className="esc-transcript-list">
+                  {conversation.messages.map((msg, i) => (
+                    <ChatMessage
+                      key={i}
+                      role={msg.role}
+                      content={msg.content}
+                      images={msg.images}
+                      provider={msg.provider || conversation.provider}
+                      timestamp={msg.timestamp}
+                      responseTimeMs={msg.responseTimeMs}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 'var(--sp-6)', color: 'var(--ink-secondary)', fontSize: 'var(--text-sm)' }}>
+                  {escalation.conversationId
+                    ? 'No messages in the linked conversation.'
+                    : 'No conversation linked to this escalation.'}
+                </div>
+              )}
+            </div>
+          </details>
 
-          <WorkflowLogCard conversation={conversation} />
+          {conversation?.caseIntake?.runs?.some((run) => Array.isArray(run?.events) && run.events.length > 0) ? (
+            <details className="esc-detail-secondary">
+              <summary>Workflow log</summary>
+              <WorkflowLogCard conversation={conversation} />
+            </details>
+          ) : null}
 
-          <CopilotPanel escalationId={escalation._id} title="Escalation Co-pilot" />
+          <details className="esc-detail-secondary">
+            <summary>Agent help</summary>
+            <div className="esc-copilot-wrap">
+              <CopilotPanel escalationId={escalation._id} title="Escalation Co-pilot" />
+            </div>
+          </details>
         </div>
       </div>
     </div>

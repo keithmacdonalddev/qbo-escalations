@@ -134,6 +134,26 @@ const redactionSchema = new mongoose.Schema({
   redactedAt: { type: Date, default: null },
 }, { _id: false });
 
+const kbAgentMessageSchema = new mongoose.Schema({
+  role: {
+    type: String,
+    enum: ['user', 'assistant'],
+    required: true,
+  },
+  content: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now },
+}, { _id: false });
+
+const kbAgentContextSchema = new mongoose.Schema({
+  promptId: { type: String, default: '' },
+  promptVersion: { type: String, default: '' },
+  promptSha256: { type: String, default: '' },
+  sourceSummary: { type: String, default: '' },
+  sourceCounts: { type: mongoose.Schema.Types.Mixed, default: {} },
+  workflowAgents: { type: [String], default: [] },
+  lastBuiltAt: { type: Date, default: null },
+}, { _id: false });
+
 const knowledgeCandidateSchema = new mongoose.Schema({
   escalationId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -167,6 +187,14 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   },
   title: { type: String, default: '' },
   category: { type: String, default: 'unknown', index: true },
+  customerGoal: { type: String, default: '' },
+  reportedProblem: { type: String, default: '' },
+  evidenceFromCase: { type: String, default: '' },
+  troubleshootingTried: { type: String, default: '' },
+  confirmedCause: { type: String, default: '' },
+  finalOutcome: { type: String, default: '' },
+  invEscalationStatus: { type: String, default: '' },
+  importantBoundaries: { type: [String], default: [] },
   summary: { type: String, default: '' },
   symptom: { type: String, default: '' },
   rootCause: { type: String, default: '' },
@@ -202,6 +230,8 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   actionRecommendations: { type: [actionRecommendationSchema], default: [] },
   outcomeFeedback: { type: [outcomeFeedbackSchema], default: [] },
   redaction: { type: redactionSchema, default: () => ({}) },
+  kbAgent: { type: kbAgentContextSchema, default: () => ({}) },
+  kbAgentMessages: { type: [kbAgentMessageSchema], default: [] },
   sourceSnapshot: { type: sourceSnapshotSchema, default: () => ({}) },
   generatedAt: { type: Date, default: null },
   publishedAt: { type: Date, default: null },

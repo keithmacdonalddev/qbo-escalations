@@ -9,6 +9,7 @@ const UsageLog = require('./models/UsageLog');
 const { drainPendingWrites } = require('./lib/usage-writer');
 const { reportServerError, stopErrorPipeline } = require('./lib/server-error-pipeline');
 const { startScheduler: startBriefingScheduler, stopScheduler: stopBriefingScheduler } = require('./services/workspace-scheduler');
+const { startScheduler: startKbAgentScheduler, stopScheduler: stopKbAgentScheduler } = require('./services/knowledgebase-agent-scheduler');
 const { startMonitor: startWorkspaceMonitor, stopMonitor: stopWorkspaceMonitor } = require('./services/workspace-monitor');
 const {
   startBackgroundTask,
@@ -245,6 +246,12 @@ async function start(options = {}) {
           console.log('[startup] Workspace scheduler disabled');
         }
 
+        if (startupControls.kbAgentScheduler) {
+          startKbAgentScheduler();
+        } else {
+          console.log('[startup] Knowledge Base Agent scheduler disabled');
+        }
+
         if (startupControls.workspaceMonitor) {
           startWorkspaceMonitor();
         } else {
@@ -372,6 +379,7 @@ function shutdown(signal, { exitCode = 0 } = {}) {
   stopAgentHealthMonitor();
   stopImageParserHealthCheck();
   stopBriefingScheduler();
+  stopKbAgentScheduler();
   stopWorkspaceMonitor();
   stopRealtimeServer();
   stopLiveCallAssistServer();

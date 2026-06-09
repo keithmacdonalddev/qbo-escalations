@@ -19,6 +19,7 @@ test('resolveStartupControls defaults every startup task to enabled', () => {
   assert.deepEqual(controls, {
     providerWarmup: true,
     workspaceScheduler: true,
+    kbAgentScheduler: true,
     workspaceMonitor: true,
     agentHealthCheck: true,
     imageParserStartupCheck: true,
@@ -31,6 +32,7 @@ test('resolveStartupControls disables tasks from env flags and honors explicit o
   const env = {
     DISABLE_PROVIDER_WARMUP: '1',
     DISABLE_WORKSPACE_SCHEDULER: 'true',
+    DISABLE_KB_AGENT_SCHEDULER: '1',
     DISABLE_WORKSPACE_MONITOR: 'yes',
     DISABLE_AGENT_HEALTHCHECK: '1',
     DISABLE_IMAGE_PARSER_STARTUP_CHECK: 'on',
@@ -41,6 +43,7 @@ test('resolveStartupControls disables tasks from env flags and honors explicit o
   assert.deepEqual(resolveStartupControls(env), {
     providerWarmup: false,
     workspaceScheduler: false,
+    kbAgentScheduler: false,
     workspaceMonitor: false,
     agentHealthCheck: false,
     imageParserStartupCheck: false,
@@ -54,6 +57,7 @@ test('resolveStartupControls disables tasks from env flags and honors explicit o
   }), {
     providerWarmup: true,
     workspaceScheduler: false,
+    kbAgentScheduler: false,
     workspaceMonitor: true,
     agentHealthCheck: false,
     imageParserStartupCheck: false,

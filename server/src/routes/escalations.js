@@ -30,11 +30,17 @@ const {
   deleteOperationalIntelligenceForRecord,
   syncOperationalIntelligenceForKnowledgeCandidate,
 } = require('../services/operational-intelligence-service');
+const {
+  buildSuggestedDraft,
+} = require('../services/knowledgebase-agent-service');
+const {
+  applyKnowledgeBaseAgentSnapshot,
+  buildKnowledgeBaseAgentContext,
+  runKnowledgeBaseAgentDraftExtraction,
+} = require('../services/knowledgebase-agent-context-service');
 
 function escapeRegex(str) { return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 const { createRateLimiter } = require('../middleware/rate-limit');
-const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
-const { prompt: claudePrompt } = require('../services/claude');
 let sharp = null;
 try { sharp = require('sharp'); } catch { /* optional dependency */ }
 
@@ -282,16 +288,12 @@ function buildDraftSignals(escalation) {
 
 async function buildKnowledgeDraftData(escalation, existing = null) {
   const snapshot = await loadConversationSnapshot(escalation.conversationId);
+  const suggested = buildSuggestedDraft(escalation, { conversationSnapshot: snapshot });
   const category = safeString(existing && existing.category, '').trim()
+    || safeString(suggested.category, '').trim()
     || safeString(escalation.category, 'unknown').trim()
     || 'unknown';
   const defaultTarget = hasCategoryPlaybook(category) ? 'category' : 'edge-case';
-  const summary = firstNonEmpty([
-    escalation.resolution,
-    escalation.resolutionNotes,
-    escalation.actualOutcome,
-    escalation.attemptingTo,
-  ], '');
 
   return {
     escalationId: escalation._id,
@@ -305,17 +307,42 @@ async function buildKnowledgeDraftData(escalation, existing = null) {
     reusableOutcome: existing && existing.reusableOutcome
       ? existing.reusableOutcome
       : (defaultTarget === 'category' ? 'canonical' : 'edge-case'),
-    title: safeString(existing && existing.title, '').trim() || deriveKnowledgeTitle(escalation),
+    title: safeString(existing && existing.title, '').trim() || suggested.title || deriveKnowledgeTitle(escalation),
     category,
-    summary: safeString(existing && existing.summary, '').trim() || compactText(summary, 280),
+    customerGoal: safeString(existing && existing.customerGoal, '').trim() || suggested.customerGoal || '',
+    reportedProblem: safeString(existing && existing.reportedProblem, '').trim() || suggested.reportedProblem || '',
+    evidenceFromCase: safeString(existing && existing.evidenceFromCase, '').trim() || suggested.evidenceFromCase || '',
+    troubleshootingTried: safeString(existing && existing.troubleshootingTried, '').trim() || suggested.troubleshootingTried || '',
+    confirmedCause: safeString(existing && existing.confirmedCause, '').trim()
+      || safeString(existing && existing.rootCause, '').trim()
+      || suggested.confirmedCause
+      || '',
+    finalOutcome: safeString(existing && existing.finalOutcome, '').trim()
+      || safeString(existing && existing.exactFix, '').trim()
+      || suggested.finalOutcome
+      || '',
+    invEscalationStatus: safeString(existing && existing.invEscalationStatus, '').trim()
+      || suggested.invEscalationStatus
+      || '',
+    importantBoundaries: Array.isArray(existing && existing.importantBoundaries) && existing.importantBoundaries.length > 0
+      ? splitKeySignals(existing.importantBoundaries, 8)
+      : [],
+    summary: safeString(existing && existing.summary, '').trim() || suggested.summary || '',
     symptom: safeString(existing && existing.symptom, '').trim()
-      || firstNonEmpty([escalation.actualOutcome, escalation.attemptingTo], ''),
-    rootCause: safeString(existing && existing.rootCause, '').trim(),
+      || safeString(existing && existing.reportedProblem, '').trim()
+      || suggested.reportedProblem
+      || '',
+    rootCause: safeString(existing && existing.rootCause, '').trim()
+      || safeString(existing && existing.confirmedCause, '').trim()
+      || suggested.confirmedCause
+      || '',
     exactFix: safeString(existing && existing.exactFix, '').trim()
-      || firstNonEmpty([escalation.resolution, escalation.resolutionNotes], ''),
+      || safeString(existing && existing.finalOutcome, '').trim()
+      || suggested.finalOutcome
+      || '',
     escalationPath: safeString(existing && existing.escalationPath, '').trim()
       || (escalation.status === 'escalated-further'
-        ? firstNonEmpty([escalation.resolution, escalation.resolutionNotes], 'Escalated further for specialist review.')
+        ? firstNonEmpty([suggested.finalOutcome, escalation.resolution, escalation.resolutionNotes], 'Escalated further for specialist review.')
         : ''),
     keySignals: Array.isArray(existing && existing.keySignals) && existing.keySignals.length > 0
       ? splitKeySignals(existing.keySignals, 8)
@@ -345,104 +372,15 @@ async function buildKnowledgeDraftData(escalation, existing = null) {
 }
 
 /**
- * AI enrichment: load the full conversation, ask Claude to extract structured
- * knowledge fields, and return parsed results. Returns null if no conversation
- * exists or Claude returns unparseable output.
+ * Knowledge Base Agent draft pass: load the full conversation, ask the agent to
+ * extract the reviewer-facing KB fields, and return parsed results. Returns null
+ * if no source context exists or the model returns unparseable output.
  */
 async function enrichKnowledgeDraft(escalation, draftData) {
-  const Conversation = require('../models/Conversation');
-  const conversationId = escalation.conversationId
-    || (draftData && draftData.conversationId)
-    || null;
-
-  // Build context from escalation fields even if no conversation exists
-  const escalationContext = [
-    escalation.category && escalation.category !== 'unknown'
-      ? `Category: ${escalation.category}`
-      : '',
-    escalation.attemptingTo ? `Customer attempting: ${escalation.attemptingTo}` : '',
-    escalation.expectedOutcome ? `Expected outcome: ${escalation.expectedOutcome}` : '',
-    escalation.actualOutcome ? `Actual outcome: ${escalation.actualOutcome}` : '',
-    escalation.tsSteps ? `Troubleshooting steps taken: ${escalation.tsSteps}` : '',
-    escalation.resolution ? `Resolution: ${escalation.resolution}` : '',
-    escalation.resolutionNotes ? `Resolution notes: ${escalation.resolutionNotes}` : '',
-    escalation.status ? `Final status: ${escalation.status}` : '',
-  ].filter(Boolean).join('\n');
-
-  // Load conversation messages if available
-  let conversationTranscript = '';
-  if (isValidObjectId(conversationId)) {
-    const conversation = await Conversation.findById(conversationId)
-      .select('title messages')
-      .lean();
-    if (conversation && Array.isArray(conversation.messages) && conversation.messages.length > 0) {
-      // Take last 30 messages to avoid overwhelming the prompt
-      const recent = conversation.messages.slice(-30);
-      conversationTranscript = recent
-        .filter((m) => m && typeof m.content === 'string' && m.content.trim())
-        .map((m) => `${m.role === 'assistant' ? 'Assistant' : 'User'}: ${m.content.slice(0, 2000)}`)
-        .join('\n\n');
-    }
-  }
-
-  if (!escalationContext && !conversationTranscript) return null;
-
-  const promptText = buildEnrichmentPrompt(escalationContext, conversationTranscript);
-
-  const result = await claudePrompt(promptText, {
-    systemPrompt: getRenderedAgentPrompt('escalation-enrichment'),
-    reasoningEffort: 'low',
-    timeoutMs: 60000,
-  });
-
+  const result = await runKnowledgeBaseAgentDraftExtraction({ escalation, draftData });
   if (!result || !result.text) return null;
-  return parseEnrichmentResponse(result.text);
-}
-
-const ENRICHMENT_SYSTEM_PROMPT =
-  'You are a QBO (QuickBooks Online) escalation knowledge analyst. ' +
-  'Your job is to analyze resolved escalation cases and extract structured knowledge ' +
-  'that will help other QBO escalation specialists handle similar issues faster. ' +
-  'Be specific and practical. Use QBO terminology. Write for someone who already knows QBO ' +
-  'but needs to quickly understand this specific issue pattern.';
-
-function buildEnrichmentPrompt(escalationContext, conversationTranscript) {
-  const parts = [
-    'Analyze this resolved QBO escalation and extract structured knowledge.\n',
-    '--- ESCALATION DATA ---',
-    escalationContext,
-  ];
-
-  if (conversationTranscript) {
-    parts.push(
-      '',
-      '--- CONVERSATION TRANSCRIPT ---',
-      conversationTranscript,
-    );
-  }
-
-  parts.push(
-    '',
-    '--- INSTRUCTIONS ---',
-    'Return a JSON object with these fields (no markdown fences, just raw JSON):',
-    '{',
-    '  "title": "concise title for this knowledge entry (under 80 chars)",',
-    '  "symptom": "what the customer reported or what the agent described as the problem",',
-    '  "rootCause": "what was actually wrong — the underlying issue, not just the symptom",',
-    '  "exactFix": "step-by-step resolution that another specialist could follow",',
-    '  "keySignals": ["array of 2-5 clues that indicate this is the issue — things to look for in future cases"],',
-    '  "summary": "1-2 sentence overview of the issue and resolution"',
-    '}',
-    '',
-    'Rules:',
-    '- If the conversation does not reveal a clear root cause, set rootCause to an empty string',
-    '- exactFix must be actionable steps, not vague advice',
-    '- keySignals should be observable facts (error messages, account states, specific behaviors)',
-    '- Keep everything QBO-specific and practical',
-    '- Do not invent information that is not in the data',
-  );
-
-  return parts.join('\n');
+  const fields = parseEnrichmentResponse(result.text);
+  return fields ? { fields, contextBundle: result.contextBundle, usage: result.usage } : null;
 }
 
 function parseEnrichmentResponse(text) {
@@ -466,7 +404,22 @@ function parseEnrichmentResponse(text) {
 
 function validateEnrichmentFields(obj) {
   const result = {};
-  const stringFields = ['title', 'symptom', 'rootCause', 'exactFix', 'summary'];
+  const stringFields = [
+    'title',
+    'category',
+    'customerGoal',
+    'reportedProblem',
+    'evidenceFromCase',
+    'troubleshootingTried',
+    'confirmedCause',
+    'finalOutcome',
+    'invEscalationStatus',
+    'symptom',
+    'rootCause',
+    'exactFix',
+    'escalationPath',
+    'summary',
+  ];
   let hasContent = false;
 
   for (const field of stringFields) {
@@ -486,8 +439,24 @@ function validateEnrichmentFields(obj) {
       hasContent = true;
     }
   }
+  if (Array.isArray(obj.importantBoundaries)) {
+    const boundaries = obj.importantBoundaries
+      .filter((item) => typeof item === 'string' && item.trim())
+      .map((item) => item.trim())
+      .slice(0, 8);
+    if (boundaries.length > 0) {
+      result.importantBoundaries = boundaries;
+      hasContent = true;
+    }
+  }
 
   return hasContent ? result : null;
+}
+
+function shouldRunKnowledgeBaseAgentDraftPass(enrich) {
+  if (!enrich) return false;
+  if (process.env.NODE_ENV === 'test') return process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS === 'true';
+  return true;
 }
 
 function sanitizeKnowledgeCandidateUpdates(input) {
@@ -958,10 +927,16 @@ router.get('/', async (req, res) => {
 router.post('/', async (req, res) => {
   const allowed = ['coid', 'mid', 'caseNumber', 'clientContact', 'agentName',
     'attemptingTo', 'expectedOutcome', 'actualOutcome', 'tsSteps',
-    'triedTestAccount', 'category', 'resolution', 'resolutionNotes'];
+    'triedTestAccount', 'category', 'status', 'resolution', 'resolutionNotes'];
   const fields = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) fields[key] = req.body[key];
+  }
+  if (!fields.status && (compactText(fields.resolution) || compactText(fields.resolutionNotes))) {
+    fields.status = 'resolved';
+  }
+  if (fields.status === 'resolved') {
+    fields.resolvedAt = new Date();
   }
 
   if (req.body.conversationId) {
@@ -971,10 +946,14 @@ router.post('/', async (req, res) => {
         fields,
         source: deriveSourceFromPayload(req.body),
       });
+      const knowledgeDraft = await ensureKnowledgeDraftForFinalizedEscalation(linked.escalation, {
+        trigger: 'knowledge.escalation-created.auto-draft',
+      });
       return res.status(linked.reusedExisting ? 200 : 201).json({
         ok: true,
         escalation: linked.escalation.toObject(),
         duplicateSafety: linked.duplicateSafety,
+        knowledgeDraft,
       });
     } catch (err) {
       const response = workflowErrorResponse(err);
@@ -989,10 +968,14 @@ router.post('/', async (req, res) => {
   });
   await escalation.save();
   const duplicateSafety = await buildDuplicateSafetyForEscalation(escalation, { fields });
+  const knowledgeDraft = await ensureKnowledgeDraftForFinalizedEscalation(escalation, {
+    trigger: 'knowledge.escalation-created.auto-draft',
+  });
   res.status(201).json({
     ok: true,
     escalation: escalation.toObject(),
     duplicateSafety,
+    knowledgeDraft,
   });
 });
 
@@ -1033,7 +1016,11 @@ router.patch('/:id', async (req, res) => {
     resolutionDiscipline = await syncResolutionDisciplineAttentionItem(escalation);
   }
 
-  res.json({ ok: true, escalation: escalation.toObject(), resolutionDiscipline });
+  const knowledgeDraft = await ensureKnowledgeDraftForFinalizedEscalation(escalation, {
+    trigger: 'knowledge.escalation-updated.auto-draft',
+  });
+
+  res.json({ ok: true, escalation: escalation.toObject(), resolutionDiscipline, knowledgeDraft });
 });
 
 // GET /api/escalations/similar -- Find past escalations with similar category/symptoms
@@ -1104,66 +1091,78 @@ router.get('/:id/knowledge', async (req, res) => {
   return res.json({ ok: true, knowledge: knowledge || null });
 });
 
-// POST /api/escalations/:id/knowledge/generate -- Create or refresh a draft knowledge record
-// Query params:
-//   ?enrich=true  — run AI enrichment via Claude to produce high-quality structured fields
-//   ?enrich=false — deterministic draft only (default)
-router.post('/:id/knowledge/generate', async (req, res) => {
-  if (!isValidObjectId(req.params.id)) {
-    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
-  }
-
-  const force = req.body && req.body.force === true;
-  const enrich = (req.query.enrich || (req.body && req.body.enrich) || '').toString().toLowerCase() === 'true';
-  const escalation = await Escalation.findById(req.params.id);
-  if (!escalation) {
-    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
-  }
-  if (!ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status)) {
-    return res.status(409).json({
-      ok: false,
-      code: 'KNOWLEDGE_SOURCE_NOT_FINALIZED',
-      error: 'Only resolved or escalated-further escalations can generate reviewed knowledge',
-    });
-  }
-
+async function createKnowledgeDraftForEscalation(escalation, {
+  force = false,
+  enrich = true,
+  actor = { actor: 'knowledgebase-agent', role: 'system' },
+  trigger = 'knowledge.generate',
+} = {}) {
   const existing = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
   if (existing && existing.reviewStatus === 'published' && !force) {
     const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
     const operationalIntelligence = await syncOperationalIntelligenceForKnowledgeCandidate({
       knowledge: existing,
-      actor: { actor: 'knowledge-generate', role: 'system' },
-      trigger: 'knowledge.generate.existing-published',
+      actor,
+      trigger: `${trigger}.existing-published`,
     });
-    return res.json({
-      ok: true,
+    return {
       knowledge: existing.toObject(),
       generated: false,
       published: true,
       knowledgeReview,
       operationalIntelligence,
-    });
+    };
   }
   if (existing && !force) {
     const knowledgeReview = await syncKnowledgeReviewAttentionItem(existing, escalation);
     const operationalIntelligence = await syncOperationalIntelligenceForKnowledgeCandidate({
       knowledge: existing,
-      actor: { actor: 'knowledge-generate', role: 'system' },
-      trigger: 'knowledge.generate.existing-draft',
+      actor,
+      trigger: `${trigger}.existing-draft`,
     });
-    return res.json({ ok: true, knowledge: existing.toObject(), generated: false, knowledgeReview, operationalIntelligence });
+    return { knowledge: existing.toObject(), generated: false, knowledgeReview, operationalIntelligence };
   }
 
   const draftData = await buildKnowledgeDraftData(escalation, force ? existing : null);
 
-  // AI enrichment: analyze the full conversation to produce structured knowledge fields
+  // Knowledge Base Agent pass: analyze the source material to produce reviewer-facing draft fields.
   let enriched = false;
-  if (enrich) {
+  let kbAgentContextBundle = null;
+  if (shouldRunKnowledgeBaseAgentDraftPass(enrich)) {
     try {
-      const aiFields = await enrichKnowledgeDraft(escalation, draftData);
-      if (aiFields) {
+      const aiResult = await enrichKnowledgeDraft(escalation, draftData);
+      if (aiResult?.fields) {
+        const aiFields = aiResult.fields;
+        kbAgentContextBundle = aiResult.contextBundle || null;
         if (aiFields.title && (!draftData.title || draftData.title === 'Reviewed case learning')) {
           draftData.title = aiFields.title;
+        }
+        // Adopt the agent's category only when the case has none of its own
+        // (the deterministic draft seeded 'unknown'/empty). Normalize to a lower
+        // kebab token so it lines up with the reviewer's category picker.
+        if (aiFields.category && (!draftData.category || draftData.category === 'unknown')) {
+          const normalizedCategory = compactText(aiFields.category, 40).toLowerCase().replace(/\s+/g, '-');
+          if (normalizedCategory) draftData.category = normalizedCategory;
+        }
+        if (aiFields.customerGoal) draftData.customerGoal = aiFields.customerGoal;
+        if (aiFields.reportedProblem) {
+          draftData.reportedProblem = aiFields.reportedProblem;
+          draftData.symptom = aiFields.reportedProblem;
+        }
+        if (aiFields.evidenceFromCase) draftData.evidenceFromCase = aiFields.evidenceFromCase;
+        if (aiFields.troubleshootingTried) draftData.troubleshootingTried = aiFields.troubleshootingTried;
+        if (aiFields.confirmedCause) {
+          draftData.confirmedCause = aiFields.confirmedCause;
+          draftData.rootCause = aiFields.confirmedCause;
+        }
+        if (aiFields.finalOutcome) {
+          draftData.finalOutcome = aiFields.finalOutcome;
+          draftData.exactFix = aiFields.finalOutcome;
+        }
+        if (aiFields.invEscalationStatus) draftData.invEscalationStatus = aiFields.invEscalationStatus;
+        if (aiFields.escalationPath) draftData.escalationPath = aiFields.escalationPath;
+        if (Array.isArray(aiFields.importantBoundaries)) {
+          draftData.importantBoundaries = aiFields.importantBoundaries;
         }
         if (aiFields.symptom) draftData.symptom = aiFields.symptom;
         if (aiFields.rootCause) draftData.rootCause = aiFields.rootCause;
@@ -1172,30 +1171,104 @@ router.post('/:id/knowledge/generate', async (req, res) => {
         if (Array.isArray(aiFields.keySignals) && aiFields.keySignals.length > 0) {
           draftData.keySignals = splitKeySignals(aiFields.keySignals, 8);
         }
-        if (aiFields.rootCause && aiFields.exactFix) {
+        if ((aiFields.confirmedCause || aiFields.rootCause) && (aiFields.finalOutcome || aiFields.exactFix)) {
           draftData.confidence = Math.min(1, draftData.confidence + 0.1);
         }
         enriched = true;
       }
     } catch (enrichErr) {
-      console.warn('[knowledge/generate] AI enrichment failed, using deterministic draft:', enrichErr.message);
+      console.warn('[knowledge/generate] Knowledge Base Agent draft pass failed, using deterministic draft:', enrichErr.message);
     }
   }
 
   const knowledge = existing || new KnowledgeCandidate({ escalationId: escalation._id });
   knowledge.set(draftData);
   if (!knowledge.reviewStatus) knowledge.reviewStatus = 'draft';
+  if (!kbAgentContextBundle) {
+    try {
+      kbAgentContextBundle = await buildKnowledgeBaseAgentContext({
+        candidate: knowledge,
+        escalation,
+        draftData,
+        includeRawImages: false,
+        includeRelated: true,
+      });
+    } catch (contextErr) {
+      console.warn('[knowledge/generate] Knowledge Base Agent context snapshot failed:', contextErr.message);
+    }
+  }
+  applyKnowledgeBaseAgentSnapshot(knowledge, kbAgentContextBundle);
   await knowledge.save();
   const [knowledgeReview, operationalIntelligence] = await Promise.all([
     syncKnowledgeReviewAttentionItem(knowledge, escalation),
     syncOperationalIntelligenceForKnowledgeCandidate({
       knowledge,
-      actor: { actor: 'knowledge-generate', role: 'system' },
-      trigger: 'knowledge.generate',
+      actor,
+      trigger,
     }),
   ]);
 
-  return res.json({ ok: true, knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview, operationalIntelligence });
+  return { knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview, operationalIntelligence };
+}
+
+async function ensureKnowledgeDraftForFinalizedEscalation(escalation, options = {}) {
+  if (!escalation || !ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status)) return null;
+  const hasRecordedOutcome = Boolean(compactText(escalation.resolution) || compactText(escalation.resolutionNotes));
+  if (!hasRecordedOutcome) return null;
+  return createKnowledgeDraftForEscalation(escalation, {
+    force: false,
+    enrich: options.enrich !== false,
+    actor: { actor: 'knowledgebase-agent', role: 'system' },
+    trigger: options.trigger || 'knowledge.finalized.auto-draft',
+  });
+}
+
+// Status-INDEPENDENT auto-draft. Every escalation that comes through the
+// pipeline (chat triage persist, parse persist) gets a complete, review-ready
+// KB draft regardless of resolved/escalated status — the resolve-status gate is
+// no longer the KB on-ramp. Idempotent on the unique escalationId (re-trigger
+// returns the existing draft, never duplicates). The KB agent's full draft pass
+// fills every field it can justify from real case evidence; honest blanks
+// elsewhere. Callers run this fire-and-forget so live chat latency is unaffected.
+async function ensureKnowledgeDraftForEscalation(escalation, options = {}) {
+  if (!escalation || !escalation._id) return null;
+  return createKnowledgeDraftForEscalation(escalation, {
+    force: false,
+    enrich: options.enrich !== false,
+    actor: options.actor || { actor: 'knowledgebase-agent', role: 'system' },
+    trigger: options.trigger || 'knowledge.pipeline.auto-draft',
+  });
+}
+
+// POST /api/escalations/:id/knowledge/generate -- Create or refresh a draft knowledge record
+// Query params:
+//   ?enrich=true  — run the Knowledge Base Agent draft pass (default)
+//   ?enrich=false — deterministic draft only
+router.post('/:id/knowledge/generate', async (req, res) => {
+  if (!isValidObjectId(req.params.id)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_ESCALATION_ID', error: 'Invalid escalation id' });
+  }
+
+  const force = req.body && req.body.force === true;
+  const requestedEnrich = req.query.enrich ?? (req.body && req.body.enrich);
+  const enrich = requestedEnrich === undefined
+    ? true
+    : String(requestedEnrich).toLowerCase() !== 'false';
+  const escalation = await Escalation.findById(req.params.id);
+  if (!escalation) {
+    return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Escalation not found' });
+  }
+  // Status gate removed: every escalation can have a KB draft created/refreshed
+  // here, not just resolved/escalated-further ones. Drafts now auto-create from
+  // the pipeline, and the reviewer can manually (re)generate at any stage.
+
+  const result = await createKnowledgeDraftForEscalation(escalation, {
+    force,
+    enrich,
+    actor: { actor: 'knowledge-generate', role: 'system' },
+    trigger: 'knowledge.generate',
+  });
+  return res.json({ ok: true, ...result });
 });
 
 // PATCH /api/escalations/:id/knowledge -- Update the reviewed knowledge draft
@@ -1445,21 +1518,18 @@ router.post('/:id/transition', async (req, res) => {
 
   const resolutionDiscipline = await syncResolutionDisciplineAttentionItem(escalation);
 
-  // When resolving or escalating further, check whether a knowledge draft already exists.
-  // This tells the client whether to auto-generate one.
-  let knowledgeExists = false;
-  if (status === 'resolved' || status === 'escalated-further') {
-    const existing = await KnowledgeCandidate.findOne(
-      { escalationId: escalation._id },
-      { _id: 1 },
-    ).lean();
-    knowledgeExists = Boolean(existing);
-  }
+  const knowledgeDraft = await ensureKnowledgeDraftForFinalizedEscalation(escalation, {
+    trigger: 'knowledge.transition.auto-draft',
+  });
+  const knowledgeExists = Boolean(knowledgeDraft && !knowledgeDraft.generated);
 
   res.json({
     ok: true,
     escalation: escalation.toObject(),
-    knowledgeEligible: (status === 'resolved' || status === 'escalated-further') && !knowledgeExists,
+    knowledgeEligible: false,
+    knowledgeDraft,
+    knowledgeDraftCreated: Boolean(knowledgeDraft && knowledgeDraft.generated),
+    knowledgeAlreadyExisted: knowledgeExists,
     resolutionDiscipline,
   });
 });
@@ -1671,3 +1741,9 @@ router.post('/from-conversation', async (req, res) => {
 
 module.exports = router;
 module.exports._internal = { isPathWithinRoot };
+// Exposed for the pipeline draft trigger (server/src/services/knowledgebase-draft-trigger.js)
+// and tests. These are the single implementation of KB-draft creation; the
+// pipeline must not duplicate the draft-building logic.
+module.exports.createKnowledgeDraftForEscalation = createKnowledgeDraftForEscalation;
+module.exports.ensureKnowledgeDraftForEscalation = ensureKnowledgeDraftForEscalation;
+module.exports.ensureKnowledgeDraftForFinalizedEscalation = ensureKnowledgeDraftForFinalizedEscalation;

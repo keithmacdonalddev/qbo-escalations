@@ -27,12 +27,16 @@ export async function createEscalation(fields) {
   return data.escalation;
 }
 
-export async function updateEscalation(id, fields) {
-  const data = await apiFetchJson(`${BASE}/${id}`, {
+export async function updateEscalationWithMetadata(id, fields) {
+  return apiFetchJson(`${BASE}/${id}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
   }, 'Failed to update escalation');
+}
+
+export async function updateEscalation(id, fields) {
+  const data = await updateEscalationWithMetadata(id, fields);
   return data.escalation;
 }
 
@@ -79,14 +83,21 @@ export async function unpublishEscalationKnowledge(id) {
   }, 'Failed to unpublish knowledge');
 }
 
-/** Quick status transition — returns { escalation, knowledgeEligible } */
+/** Quick status transition — returns escalation plus KB draft metadata when finalized. */
 export async function transitionEscalation(id, status, resolution = '') {
   const data = await apiFetchJson(`${BASE}/${id}/transition`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status, resolution }),
   }, 'Failed to transition escalation');
-  return { escalation: data.escalation, knowledgeEligible: Boolean(data.knowledgeEligible) };
+  return {
+    escalation: data.escalation,
+    knowledgeEligible: Boolean(data.knowledgeEligible),
+    knowledgeDraft: data.knowledgeDraft || null,
+    knowledgeDraftCreated: Boolean(data.knowledgeDraftCreated),
+    knowledgeAlreadyExisted: Boolean(data.knowledgeAlreadyExisted),
+    resolutionDiscipline: data.resolutionDiscipline || null,
+  };
 }
 
 /** Link escalation to conversation */

@@ -61,6 +61,19 @@ export function renderMarkdown(text) {
       continue;
     }
 
+    // Blockquote — collect contiguous lines starting with '>'
+    if (/^\s*>/.test(line)) {
+      const quoteLines = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) {
+        quoteLines.push(lines[i].replace(/^\s*>\s?/, ''));
+        i++;
+      }
+      blocks.push(
+        <blockquote key={blocks.length}>{inlineFormat(quoteLines.join(' '))}</blockquote>
+      );
+      continue;
+    }
+
     // Heading
     const headingMatch = line.match(/^(#{1,3})\s+(.+)/);
     if (headingMatch) {

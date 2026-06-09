@@ -134,6 +134,12 @@ function App() {
     try { localStorage.setItem('sidebar-collapsed', String(sidebarCollapsed)); } catch {}
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    if (route.view !== 'knowledge') return;
+    setSidebarCollapsed(true);
+    setSidebarOpen(false);
+  }, [route.view]);
+
   // Persist dev tools flag
   useEffect(() => {
     try { localStorage.setItem('dev-tools-enabled', String(devToolsEnabled)); } catch {}
@@ -332,6 +338,7 @@ function App() {
   }), [usesEdgeToEdgeShell]);
 
   const sidebarCurrentRoute = getSidebarCurrentRoute(route);
+  const forceCompactSidebar = route.view === 'knowledge';
 
   return (
     <Profiler id="app" onRender={flame.onRender}>
@@ -374,7 +381,7 @@ function App() {
         onClose={() => setSidebarOpen(false)}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
-        hoverExpand={sidebarHoverExpand}
+        hoverExpand={forceCompactSidebar ? false : sidebarHoverExpand}
         showLabels={sidebarShowLabels}
       />
 

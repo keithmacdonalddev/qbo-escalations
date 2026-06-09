@@ -257,8 +257,8 @@ function buildWarnings(candidate, trustState, allowedUses) {
   if (candidate?.supersededBy) warnings.push('superseded_by_newer_guidance');
   if (candidate?.redaction?.customerIdentifiersRedacted) warnings.push('source_identifiers_redacted');
   if (!allowedUses.some((use) => FINAL_AGENT_USES.has(use))) warnings.push('not_allowed_for_final_agent_response');
-  if (!safeString(candidate?.exactFix, '').trim()) warnings.push('missing_exact_fix');
-  if (!safeString(candidate?.rootCause, '').trim()) warnings.push('missing_root_cause');
+  if (!safeString(candidate?.finalOutcome || candidate?.exactFix, '').trim()) warnings.push('missing_exact_fix');
+  if (!safeString(candidate?.confirmedCause || candidate?.rootCause, '').trim()) warnings.push('missing_root_cause');
   if (trustState === TRUST_STATES.RESTRICTED) warnings.push('restricted_trust_state');
   if (trustState === TRUST_STATES.DEPRECATED) warnings.push('deprecated_trust_state');
 
@@ -391,10 +391,18 @@ function normalizeKnowledgeCandidate(candidate) {
     },
     title: compactText(source.title || 'Reviewed case learning', 160),
     category: safeString(source.category, 'unknown'),
+    customerGoal: compactText(source.customerGoal || source.sourceSnapshot?.attemptingTo, 700),
+    reportedProblem: compactText(source.reportedProblem || source.symptom || source.sourceSnapshot?.actualOutcome, 700),
+    evidenceFromCase: compactText(source.evidenceFromCase, 1200),
+    troubleshootingTried: compactText(source.troubleshootingTried || source.sourceSnapshot?.tsSteps, 1200),
+    confirmedCause: compactText(source.confirmedCause || source.rootCause, 700),
+    finalOutcome: compactText(source.finalOutcome || source.exactFix || source.escalationPath, 1400),
+    invEscalationStatus: compactText(source.invEscalationStatus, 700),
+    importantBoundaries: normalizeStringArray(source.importantBoundaries || source.scope?.excludes, 12),
     summary: compactText(source.summary, 700),
-    symptom: compactText(source.symptom, 700),
-    rootCause: compactText(source.rootCause, 700),
-    exactFix: compactText(source.exactFix, 1400),
+    symptom: compactText(source.symptom || source.reportedProblem, 700),
+    rootCause: compactText(source.rootCause || source.confirmedCause, 700),
+    exactFix: compactText(source.exactFix || source.finalOutcome, 1400),
     escalationPath: compactText(source.escalationPath, 700),
     keySignals: normalizeStringArray(source.keySignals, 8),
     confidence: clampConfidence(source.confidence),
@@ -443,6 +451,21 @@ function normalizeKnowledgeCandidate(candidate) {
     actionRecommendations: normalizeActionRecommendations(source),
     outcomeFeedback: normalizeOutcomeFeedback(source),
     auditEvents: normalizeAuditEvents(source),
+    kbAgent: {
+      promptId: safeString(source.kbAgent?.promptId),
+      promptVersion: safeString(source.kbAgent?.promptVersion),
+      promptSha256: safeString(source.kbAgent?.promptSha256),
+      sourceSummary: compactText(source.kbAgent?.sourceSummary, 500),
+      sourceCounts: source.kbAgent?.sourceCounts && typeof source.kbAgent.sourceCounts === 'object'
+        ? source.kbAgent.sourceCounts
+        : {},
+      workflowAgents: normalizeStringArray(source.kbAgent?.workflowAgents, 20),
+      lastBuiltAt: toIso(source.kbAgent?.lastBuiltAt),
+      messageCount: Array.isArray(source.kbAgentMessages) ? source.kbAgentMessages.length : 0,
+      lastMessageAt: Array.isArray(source.kbAgentMessages) && source.kbAgentMessages.length
+        ? toIso(source.kbAgentMessages[source.kbAgentMessages.length - 1]?.createdAt)
+        : null,
+    },
     warnings,
     updatedAt: toIso(source.updatedAt),
   };
@@ -748,6 +771,14 @@ function toAgentContextRecord(record) {
     reusableOutcome: record.reusableOutcome,
     confidence: record.confidence,
     allowedUses: record.allowedUses,
+    customerGoal: record.customerGoal,
+    reportedProblem: record.reportedProblem,
+    evidenceFromCase: record.evidenceFromCase,
+    troubleshootingTried: record.troubleshootingTried,
+    confirmedCause: record.confirmedCause,
+    finalOutcome: record.finalOutcome,
+    invEscalationStatus: record.invEscalationStatus,
+    importantBoundaries: record.importantBoundaries,
     summary: record.summary,
     symptom: record.symptom,
     rootCause: record.rootCause,

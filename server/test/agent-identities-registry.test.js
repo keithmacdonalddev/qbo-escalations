@@ -297,3 +297,122 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.equal(runtimeDefaultsRes.body.runtimes['triage-agent'].runtime.mode, 'fallback');
   assert.equal(runtimeDefaultsRes.body.runtimes['escalation-template-parser'].runtime, null);
 });
+
+test('knowledgebase-agent runtime round-trips and resolveKbAgentRuntimePolicy reads it', async (t) => {
+  await connect();
+  const agent = request(createApp());
+  await AgentIdentity.deleteMany({});
+  const { resolveKbAgentRuntimePolicy } = require('../src/services/knowledgebase-agent-context-service');
+
+  t.after(async () => {
+    await AgentIdentity.deleteMany({});
+    await disconnect();
+  });
+
+  // Unconfigured -> neutral default policy with a distinct backup + failover on.
+  const defaultPolicy = await resolveKbAgentRuntimePolicy();
+  assert.ok(defaultPolicy.primaryProvider, 'neutral default has a primary provider');
+  assert.notEqual(defaultPolicy.primaryProvider, defaultPolicy.fallbackProvider, 'distinct backup');
+  assert.equal(defaultPolicy.autoFailover, true, 'failover always on');
+
+  // The generic runtime route (no special-casing) accepts the KB agent id.
+  const runtimeRes = await agent
+    .patch('/api/agent-identities/knowledgebase-agent/runtime')
+    .send({
+      runtime: {
+        provider: 'openai',
+        mode: 'fallback',
+        fallbackProvider: 'gemini',
+        model: 'gpt-5.5',
+        fallbackModel: 'auto',
+        reasoningEffort: 'high',
+      },
+      summary: 'Persisted KB agent runtime defaults.',
+    })
+    .expect(200);
+  assert.equal(runtimeRes.body.ok, true);
+  assert.equal(runtimeRes.body.runtime.provider, 'openai');
+  assert.equal(runtimeRes.body.runtime.configured, true);
+
+  const runtimeDefaultsRes = await agent
+    .get('/api/agent-identities/runtime-defaults?ids=knowledgebase-agent')
+    .expect(200);
+  assert.equal(runtimeDefaultsRes.body.runtimes['knowledgebase-agent'].runtime.provider, 'openai');
+
+  // The server-side resolver now reads the saved runtime.
+  const configuredPolicy = await resolveKbAgentRuntimePolicy();
+  assert.equal(configuredPolicy.primaryProvider, 'openai');
+  assert.equal(configuredPolicy.primaryModel, 'gpt-5.5');
+  assert.equal(configuredPolicy.fallbackProvider, 'gemini');
+  assert.equal(configuredPolicy.autoFailover, true);
+});
+
+test('knowledgebase-agent persists a non-default Claude CLI primary model', async (t) => {
+  // Regression guard for an operator-reported confusion: a primary model the
+  // operator picks for the Claude CLI provider must persist verbatim — even when
+  // it equals the CLI default (claude-opus-4-8). Only a truly empty/whitespace
+  // field means "no override → use the provider default". (The client previously
+  // collapsed a default-equal model to '' before sending, which made a deliberate
+  // pick on the KB agent vanish on save; that client-side collapse was removed so
+  // any non-empty model now round-trips like any other agent — see the second
+  // case below, where claude-opus-4-8 itself persists.)
+  await connect();
+  const agent = request(createApp());
+  await AgentIdentity.deleteMany({});
+
+  t.after(async () => {
+    await AgentIdentity.deleteMany({});
+    await disconnect();
+  });
+
+  // A distinct (non-default) Claude CLI model persists round-trip.
+  await agent
+    .patch('/api/agent-identities/knowledgebase-agent/runtime')
+    .send({
+      runtime: {
+        provider: 'claude',
+        mode: 'fallback',
+        fallbackProvider: 'gemini',
+        model: 'claude-sonnet-4-20250514',
+        reasoningEffort: 'high',
+      },
+      summary: 'Persisted KB agent Claude CLI primary model.',
+    })
+    .expect(200);
+
+  const distinctRes = await agent
+    .get('/api/agent-identities/runtime-defaults?ids=knowledgebase-agent')
+    .expect(200);
+  assert.equal(distinctRes.body.runtimes['knowledgebase-agent'].runtime.provider, 'claude');
+  assert.equal(
+    distinctRes.body.runtimes['knowledgebase-agent'].runtime.model,
+    'claude-sonnet-4-20250514',
+    'a non-default Claude CLI primary model must round-trip'
+  );
+
+  // The CLI default itself round-trips: neither the client nor the server strips
+  // a model against the catalog default anymore. The client now sends whatever
+  // non-empty model the operator chose, and the server persists it verbatim — so
+  // claude-opus-4-8 (the default) is stored and reloaded instead of vanishing.
+  await agent
+    .patch('/api/agent-identities/knowledgebase-agent/runtime')
+    .send({
+      runtime: {
+        provider: 'claude',
+        mode: 'fallback',
+        fallbackProvider: 'gemini',
+        model: 'claude-opus-4-8',
+      },
+      summary: 'Persisted KB agent runtime with explicit CLI default model.',
+    })
+    .expect(200);
+
+  const defaultRes = await agent
+    .get('/api/agent-identities/runtime-defaults?ids=knowledgebase-agent')
+    .expect(200);
+  assert.equal(
+    defaultRes.body.runtimes['knowledgebase-agent'].runtime.model,
+    'claude-opus-4-8',
+    'a default-equal Claude CLI model must persist verbatim (no longer stripped)'
+  );
+});

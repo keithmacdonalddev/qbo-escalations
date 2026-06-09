@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   addKnowledgeRelationship,
   deprecateKnowledgeRecord,
   exportKnowledge,
   getKnowledgeAgentStatus,
+  getKnowledgeAgentRecordContext,
   getKnowledgeOntologySummary,
   getKnowledgeRecord,
   getKnowledgeSummary,
@@ -13,6 +14,7 @@ import {
   redactKnowledgeRecord,
   scanKnowledgeAgent,
   searchKnowledge,
+  sendKnowledgeAgentMessage,
   updateKnowledgeRecord,
 } from '../api/knowledgeApi.js';
 import {
@@ -29,6 +31,7 @@ import {
   formatAllowedUses as formatLifecycleAllowedUses,
   getEscalationStatusLabel,
 } from '../lib/escalationKnowledgeLifecycle.js';
+import { renderMarkdown } from '../utils/markdown.jsx';
 import './KnowledgebaseView.css';
 
 const TRUST_LABELS = {
@@ -62,50 +65,90 @@ const WARNING_LABELS = {
   superseded_by_newer_guidance: 'Superseded by newer record',
   source_identifiers_redacted: 'Customer IDs redacted',
   not_allowed_for_final_agent_response: 'Agents cannot use it yet',
-  missing_exact_fix: 'Exact fix missing',
-  missing_root_cause: 'Root cause missing',
+  missing_exact_fix: 'Final outcome missing',
+  missing_root_cause: 'Confirmed cause missing',
+  missing_reported_problem: 'Reported problem missing',
+  missing_confirmed_cause: 'Confirmed cause missing',
   restricted_trust_state: 'Restricted trust',
   deprecated_trust_state: 'Deprecated trust',
 };
 
 const TAB_CONFIG = {
   review: {
-    label: 'Review Drafts',
-    description: 'Case lessons that still need human review before agents can use them.',
-    emptyTitle: 'No Review Drafts',
+    label: 'Needs a decision',
+    description: 'Lessons waiting for a human decision: publish for agents, keep as case history, or reject.',
+    emptyTitle: 'No lessons need a decision',
     emptyDescription: 'Create a review draft from a resolved case above, or run Create Review Tasks to find missing drafts.',
     trustState: 'candidate',
     includeCandidates: true,
     includeLegacy: false,
   },
   trusted: {
-    label: 'Trusted Knowledge',
-    description: 'Published records agents may retrieve during chat, triage, and similar-case work.',
-    emptyTitle: 'No Trusted Knowledge Yet',
+    label: 'Ready for agents',
+    description: 'Published lessons agents may retrieve during chat, triage, and similar-case work.',
+    emptyTitle: 'No agent-ready lessons yet',
     emptyDescription: 'Approve a reusable review draft, confirm its evidence and fix, then publish it for agents.',
     trustState: 'trusted',
     includeCandidates: false,
     includeLegacy: false,
   },
   all: {
-    label: 'All Records',
-    description: 'Every review draft, approved record, rejected record, trusted knowledge record, and legacy source.',
-    emptyTitle: 'No Knowledge Records',
+    label: 'All lessons',
+    description: 'Every draft, reviewed case-history lesson, rejected lesson, published lesson, and legacy source.',
+    emptyTitle: 'No lessons yet',
     emptyDescription: 'This starts filling after resolved cases are turned into review drafts.',
     trustState: '',
     includeCandidates: true,
     includeLegacy: false,
   },
   agent: {
-    label: 'Knowledge Quality',
-    description: 'Coverage, duplicate, stale, and weak-evidence signals from the knowledge monitor.',
-    emptyTitle: 'No Quality Records Match',
+    label: 'Quality issues',
+    description: 'Coverage, duplicate, stale, and weak-evidence signals from the lesson monitor.',
+    emptyTitle: 'No quality issues match',
     emptyDescription: 'Run Check Issues to preview quality problems, or Create Review Tasks to open them in Attention.',
     trustState: '',
     includeCandidates: true,
     includeLegacy: false,
   },
 };
+
+const CASE_LIFECYCLE_STEPS = [
+  {
+    key: 'chat',
+    label: 'Chat',
+    title: 'Capture the issue',
+    detail: 'Image intake turns the screenshot or pasted case into structured work.',
+    href: '#/chat',
+  },
+  {
+    key: 'escalations',
+    label: 'Escalations',
+    title: 'Work the case',
+    detail: 'Track status, evidence, attempted steps, and current owner.',
+    href: '#/escalations',
+  },
+  {
+    key: 'outcome',
+    label: 'Outcome',
+    title: 'Finalize the result',
+    detail: 'Record what actually fixed it, what failed, or why it moved on.',
+    href: '#/escalations',
+  },
+  {
+    key: 'knowledge',
+    label: 'Knowledgebase',
+    title: 'Review the lesson',
+    detail: 'Resolved cases become review drafts before agents can trust them.',
+    href: '#/knowledge',
+  },
+  {
+    key: 'agents',
+    label: 'Agents',
+    title: 'Reuse trusted guidance',
+    detail: 'Published records become evidence-backed guidance for specialist agents.',
+    href: '#/agents',
+  },
+];
 
 function formatCount(value) {
   const number = Number(value || 0);
@@ -145,6 +188,22 @@ function firstEvidenceLabel(record) {
   return first?.label || first?.id || 'Evidence pending';
 }
 
+function getRecordCaseQueueLabel(record) {
+  const evidence = Array.isArray(record?.evidence) ? record.evidence : [];
+  const sourceEvidence = evidence.find((item) => item?.type === 'escalation') || evidence[0] || null;
+  if (sourceEvidence?.label) return sourceEvidence.label;
+  if (sourceEvidence?.id) return `Case ${String(sourceEvidence.id).slice(-6)}`;
+  const escalationId = record?.sourceIds?.escalationId;
+  return escalationId ? `Case ${String(escalationId).slice(-6)}` : 'Case missing';
+}
+
+function isFinalizationQueueRecord(record) {
+  if (!record || record.sourceType !== 'knowledge-candidate') return false;
+  if (record.reviewStatus === 'published' || record.reviewStatus === 'rejected') return false;
+  if (record.trustState === 'trusted' || record.trustState === 'rejected' || record.trustState === 'deprecated') return false;
+  return true;
+}
+
 function formatCaseLabel(escalation = {}) {
   return escalation.caseNumber
     || escalation.coid
@@ -169,8 +228,95 @@ function sortEscalationsByFreshness(items = []) {
   });
 }
 
+function getKnowledgeNextMove({ metrics = {}, agentStatus = {}, sourceCases = [] } = {}) {
+  const draftCount = Number(metrics.draft || 0);
+  const approvedCount = Number(metrics.approved || 0);
+  const trustedCount = Number(metrics.trusted || metrics.published || 0);
+  const reviewCount = Number(agentStatus?.counts?.openKnowledgeReviewItems || 0);
+  const sourceCount = Array.isArray(sourceCases) ? sourceCases.length : 0;
+
+  if (draftCount > 0) {
+    return {
+      tone: 'current',
+      title: 'Review the draft queue',
+      detail: `${formatCount(draftCount)} draft${draftCount === 1 ? '' : 's'} need source checking, field cleanup, and approval.`,
+      label: 'Review Drafts',
+      action: 'review',
+    };
+  }
+
+  if (approvedCount > 0) {
+    return {
+      tone: 'current',
+      title: 'Publish approved records',
+      detail: `${formatCount(approvedCount)} approved record${approvedCount === 1 ? '' : 's'} can become trusted agent guidance once readiness checks pass.`,
+      label: 'Show Approved',
+      action: 'publish',
+    };
+  }
+
+  if (reviewCount > 0) {
+    const taskNoun = `Attention task${reviewCount === 1 ? '' : 's'}`;
+    const taskVerb = reviewCount === 1 ? 'needs' : 'need';
+    return {
+      tone: 'warning',
+      title: 'Open review work is waiting',
+      detail: `${formatCount(reviewCount)} ${taskNoun} ${taskVerb} a decision before the library is clean.`,
+      label: 'Open Attention',
+      href: '#/attention',
+    };
+  }
+
+  if (sourceCount > 0) {
+    return {
+      tone: 'ready',
+      title: 'Create a review draft',
+      detail: 'Pick a resolved source case above and create a human-review-only draft.',
+      label: 'Use Source Cases',
+      action: 'source',
+    };
+  }
+
+  if (trustedCount > 0) {
+    return {
+      tone: 'ready',
+      title: 'Monitor trusted guidance',
+      detail: 'Trusted records are available to agents. Watch feedback and deprecate anything that becomes wrong.',
+      label: 'Trusted Knowledge',
+      action: 'trusted',
+    };
+  }
+
+  return {
+    tone: 'blocked',
+    title: 'Resolve a case first',
+    detail: 'Knowledge review starts after a case has a final outcome or escalation reason.',
+    label: 'Open Escalations',
+    href: '#/escalations',
+  };
+}
+
+function looksUnprovenFix(value = '') {
+  const text = String(value || '').toLowerCase();
+  if (!text.trim()) return false;
+  return [
+    'did not produce',
+    'did not regenerate',
+    'did not restore',
+    'does not specify the final working fix',
+    'does not record the specific corrective action',
+    'underlying root cause is undetermined',
+    'root cause is undetermined',
+    'no final working fix',
+    'not produce the',
+  ].some((phrase) => text.includes(phrase));
+}
+
 function getPublishReadiness(record = {}) {
   const allowedOutcome = record.reusableOutcome === 'canonical' || record.reusableOutcome === 'edge-case';
+  const fixText = String(record.finalOutcome || record.exactFix || record.escalationPath || '').trim();
+  const hasProvenFix = Boolean(fixText) && !looksUnprovenFix(fixText);
+  const hasSourceEvidence = Array.isArray(record.evidence) && record.evidence.length > 0;
   const checks = [
     {
       key: 'approved',
@@ -184,18 +330,23 @@ function getPublishReadiness(record = {}) {
     },
     {
       key: 'root',
-      label: 'Root cause',
-      ok: Boolean(String(record.rootCause || '').trim()),
+      label: 'Confirmed cause',
+      ok: Boolean(String(record.confirmedCause || record.rootCause || '').trim()),
     },
     {
       key: 'fix',
-      label: 'Fix or path',
-      ok: Boolean(String(record.exactFix || record.escalationPath || '').trim()),
+      label: 'Final outcome',
+      ok: hasProvenFix,
     },
     {
       key: 'evidence',
-      label: 'Evidence',
-      ok: Array.isArray(record.evidence) && record.evidence.length > 0,
+      label: 'Source linked',
+      ok: hasSourceEvidence,
+    },
+    {
+      key: 'fixEvidence',
+      label: 'Fix supported',
+      ok: hasProvenFix && hasSourceEvidence,
     },
   ];
   const complete = checks.filter((check) => check.ok).length;
@@ -204,6 +355,88 @@ function getPublishReadiness(record = {}) {
     complete,
     total: checks.length,
     ready: complete === checks.length,
+  };
+}
+
+function getLessonReviewGuidance(record = {}, draft = {}, readiness = {}) {
+  const merged = { ...record, ...fromEditableDraft(draft), evidence: record.evidence };
+  const unprovenFix = looksUnprovenFix(merged.finalOutcome || merged.exactFix || merged.escalationPath);
+  const missing = Array.isArray(readiness.checks) ? readiness.checks.filter((check) => !check.ok) : [];
+  const rootMissing = missing.some((check) => check.key === 'root');
+  const approvalMissing = missing.some((check) => check.key === 'approved');
+  const scopeMissing = missing.some((check) => check.key === 'scope');
+  const evidenceMissing = missing.some((check) => check.key === 'evidence');
+
+  if (record.reviewStatus === 'published') {
+    return {
+      tone: 'ready',
+      title: 'This KB entry is available to agents.',
+      detail: 'Keep watching outcomes. If agents use this and it stops helping, deprecate it instead of editing history.',
+      userJob: 'Monitor whether the guidance still works.',
+    };
+  }
+
+  if (record.reviewStatus === 'rejected') {
+    return {
+      tone: 'blocked',
+      title: 'This KB draft is rejected.',
+      detail: 'Agents will not use it as guidance. Reopen only if the source case was misunderstood or new evidence appears.',
+      userJob: 'Leave it rejected unless there is better evidence.',
+    };
+  }
+
+  if (unprovenFix) {
+    return {
+      tone: 'warning',
+      title: 'Do not publish this as guidance yet.',
+      detail: 'The draft describes work that was tried, but does not clearly answer the original escalation.',
+      userJob: 'If you can state the final outcome, prepare the KB entry. Otherwise keep this as case history only.',
+    };
+  }
+
+  if (rootMissing) {
+    return {
+      tone: 'warning',
+      title: 'Add why the issue happened.',
+      detail: 'If the cause is truly unknown, write Unknown and explain the evidence gap before deciding whether this is reusable.',
+      userJob: 'Fill Confirmed Cause or keep this as case history only.',
+    };
+  }
+
+  if (scopeMissing) {
+    return {
+      tone: 'warning',
+      title: 'Decide whether this is reusable.',
+      detail: 'A one-off customer case should stay as case history. Reusable guidance needs a clear category or edge-case scope.',
+      userJob: 'Choose reusable guidance only if future agents should rely on the final outcome.',
+    };
+  }
+
+  if (evidenceMissing) {
+    return {
+      tone: 'warning',
+      title: 'Attach evidence before trusting it.',
+      detail: 'Agents should not use guidance that cannot be traced back to a case, conversation, or review source.',
+      userJob: 'Link source evidence or keep this out of trusted guidance.',
+    };
+  }
+
+  if (approvalMissing) {
+    return {
+      tone: 'current',
+      title: 'Ready for your review decision.',
+      detail: 'The core information is present. Confirm it is accurate, then approve it before publishing for agents.',
+      userJob: 'Approve, reject, or edit the fields below.',
+    };
+  }
+
+  return {
+    tone: readiness.ready ? 'ready' : 'current',
+    title: readiness.ready ? 'Ready to publish for agents.' : 'Complete the remaining blockers.',
+    detail: readiness.ready
+      ? 'This has reusable scope, source evidence, confirmed cause, and final outcome.'
+      : `Still needed: ${missing.map((check) => check.label.toLowerCase()).join(', ')}.`,
+    userJob: readiness.ready ? 'Publish it, or make edits before publishing.' : 'Finish the missing items below.',
   };
 }
 
@@ -230,6 +463,14 @@ function toEditableDraft(record = {}) {
     confidence: Number.isFinite(Number(record.confidence)) ? String(record.confidence) : '0.6',
     title: record.title || '',
     category: record.category || 'unknown',
+    customerGoal: record.customerGoal || record.sourceSnapshot?.attemptingTo || '',
+    reportedProblem: record.reportedProblem || record.symptom || '',
+    evidenceFromCase: record.evidenceFromCase || '',
+    troubleshootingTried: record.troubleshootingTried || '',
+    confirmedCause: record.confirmedCause || record.rootCause || '',
+    finalOutcome: record.finalOutcome || record.exactFix || '',
+    invEscalationStatus: record.invEscalationStatus || '',
+    importantBoundariesText: linesToText(record.importantBoundaries || record.scope?.excludes),
     summary: record.summary || '',
     symptom: record.symptom || '',
     rootCause: record.rootCause || '',
@@ -254,10 +495,18 @@ function fromEditableDraft(draft = {}) {
     confidence: Number(draft.confidence),
     title: draft.title,
     category: draft.category,
+    customerGoal: draft.customerGoal,
+    reportedProblem: draft.reportedProblem,
+    evidenceFromCase: draft.evidenceFromCase,
+    troubleshootingTried: draft.troubleshootingTried,
+    confirmedCause: draft.confirmedCause,
+    finalOutcome: draft.finalOutcome,
+    invEscalationStatus: draft.invEscalationStatus,
+    importantBoundaries: textToLines(draft.importantBoundariesText),
     summary: draft.summary,
-    symptom: draft.symptom,
-    rootCause: draft.rootCause,
-    exactFix: draft.exactFix,
+    symptom: draft.reportedProblem || draft.symptom,
+    rootCause: draft.confirmedCause || draft.rootCause,
+    exactFix: draft.finalOutcome || draft.exactFix,
     escalationPath: draft.escalationPath,
     reviewNotes: draft.reviewNotes,
     keySignals: textToLines(draft.keySignalsText),
@@ -298,6 +547,14 @@ function getRecordAgentUseState(record = {}) {
       tone: 'ready',
       label: 'Published for agents',
       detail: `Allowed uses: ${formatAllowedUses(finalUses)}.`,
+    };
+  }
+
+  if (record.publishTarget === 'case-history-only' || record.reusableOutcome === 'case-history-only') {
+    return {
+      tone: 'current',
+      label: 'Case history only - not reusable guidance',
+      detail: 'This can preserve what happened in the case, but agents should not recommend it as a trusted fix.',
     };
   }
 
@@ -353,6 +610,127 @@ function getRecordNextAction(record = {}, readiness = {}) {
   return {
     label: 'Review the draft',
     detail: `Confirm the source case, remove anything speculative, fill the missing fields, then set Review to Approved.${missingText}`,
+  };
+}
+
+function getRecordSourceSummary(record = {}) {
+  const sourceIds = record.sourceIds || {};
+  const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+  const sourceEvidence = evidence.find((item) => item?.type === 'escalation');
+  const caseLabel = sourceEvidence?.label
+    || (sourceIds.escalationId ? `case ${sourceIds.escalationId.slice(-6)}` : '');
+  const created = record.lineage?.generatedAt || record.lineage?.createdAt || record.createdAt;
+
+  if (caseLabel) {
+    return `Review draft from ${caseLabel}${created ? ` / ${formatDate(created)}` : ''}`;
+  }
+
+  return created
+    ? `Review draft created ${formatDate(created)}`
+    : 'Review draft from resolved work';
+}
+
+function getRecordSourceLabel(record = {}) {
+  const sourceIds = record.sourceIds || {};
+  const evidence = Array.isArray(record.evidence) ? record.evidence : [];
+  const sourceEvidence = evidence.find((item) => item?.type === 'escalation');
+  if (sourceEvidence?.label) return sourceEvidence.label;
+  if (sourceIds.caseNumber) return `case ${sourceIds.caseNumber}`;
+  if (sourceIds.escalationId) return `case ${sourceIds.escalationId.slice(-6)}`;
+  return '';
+}
+
+function getRecordPageTitle(record = null) {
+  if (!record) return 'Case lessons';
+  const sourceLabel = getRecordSourceLabel(record);
+  return sourceLabel ? `Review outcome from ${sourceLabel}` : 'Review selected outcome';
+}
+
+function getRecordCardTask(record = {}) {
+  const readiness = getPublishReadiness(record);
+  const missing = Array.isArray(readiness.checks) ? readiness.checks.filter((check) => !check.ok) : [];
+  const missingFix = missing.some((check) => check.key === 'fix');
+  const missingRoot = missing.some((check) => check.key === 'root');
+  const missingScope = missing.some((check) => check.key === 'scope');
+
+  if (record.reviewStatus === 'published') {
+    return {
+      tone: 'ready',
+      label: 'Published for agents',
+      detail: 'No review action needed right now.',
+      button: 'View',
+    };
+  }
+
+  if (record.reviewStatus === 'rejected') {
+    return {
+      tone: 'blocked',
+      label: 'Rejected',
+      detail: 'Agents cannot use this as guidance.',
+      button: 'View',
+    };
+  }
+
+  if (record.reviewStatus === 'approved') {
+    return readiness.ready
+      ? {
+          tone: 'ready',
+          label: 'Ready to publish',
+          detail: 'Approved and ready for agent use.',
+          button: 'Publish',
+        }
+      : {
+          tone: 'warning',
+          label: 'Approved but blocked',
+          detail: missing.length ? `Missing ${missing.map((check) => check.label.toLowerCase()).join(', ')}.` : 'Readiness checks are incomplete.',
+          button: 'Fix',
+        };
+  }
+
+  if (missingFix) {
+    return {
+      tone: 'blocked',
+      label: 'Missing proven fix',
+      detail: 'Review the source before agents can reuse it.',
+      button: 'Review',
+    };
+  }
+
+  if (missingRoot) {
+    return {
+      tone: 'warning',
+      label: 'Root cause required',
+      detail: 'Say why it happened or keep it as history only.',
+      button: 'Review',
+    };
+  }
+
+  if (missingScope) {
+    return {
+      tone: 'warning',
+      label: 'Reuse decision needed',
+      detail: 'Choose reusable guidance or case history only.',
+      button: 'Decide',
+    };
+  }
+
+  return {
+    tone: 'current',
+    label: 'Waiting for your decision',
+    detail: 'Approve, reject, or keep it as case history.',
+    button: 'Review',
+  };
+}
+
+function getSelectedLessonMove(record = null, draft = null, readiness = null) {
+  if (!record || !draft) return null;
+  const guidance = getLessonReviewGuidance(record, draft, readiness || getPublishReadiness(record));
+  return {
+    tone: guidance.tone,
+    title: guidance.title.replace(/\.$/, ''),
+    detail: guidance.userJob,
+    label: 'Show Review Task',
+    action: 'selected',
   };
 }
 
@@ -466,6 +844,24 @@ function IconOpen({ size = 15 }) {
   );
 }
 
+function IconSend({ size = 15 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m22 2-7 20-4-9-9-4Z" />
+      <path d="M22 2 11 13" />
+    </svg>
+  );
+}
+
+function IconCopy({ size = 15 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
 export default function KnowledgebaseView({ recordIdFromRoute = null }) {
   const [activeTab, setActiveTab] = useState('review');
   const [summary, setSummary] = useState(null);
@@ -484,6 +880,7 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [recordDraft, setRecordDraft] = useState(null);
   const [recordActionBusy, setRecordActionBusy] = useState(false);
+  const [detailDismissed, setDetailDismissed] = useState(false);
   const [recordNotice, setRecordNotice] = useState('');
   const [ontologySummary, setOntologySummary] = useState(null);
   const [exportNotice, setExportNotice] = useState('');
@@ -495,6 +892,12 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
   const [operationalIntel, setOperationalIntel] = useState(null);
   const [operationalIntelLoading, setOperationalIntelLoading] = useState(false);
   const [operationalIntelError, setOperationalIntelError] = useState('');
+  const [agentRecordContext, setAgentRecordContext] = useState(null);
+  const [agentRecordMessages, setAgentRecordMessages] = useState([]);
+  const [agentRecordLoading, setAgentRecordLoading] = useState(false);
+  const [agentRecordError, setAgentRecordError] = useState('');
+  const [agentChatInput, setAgentChatInput] = useState('');
+  const [agentChatBusy, setAgentChatBusy] = useState(false);
 
   const activeConfig = TAB_CONFIG[activeTab] || TAB_CONFIG.review;
 
@@ -582,6 +985,31 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     }
   }, []);
 
+  const loadAgentRecordContext = useCallback(async (recordId) => {
+    if (!recordId) {
+      setAgentRecordContext(null);
+      setAgentRecordMessages([]);
+      setAgentRecordError('');
+      setAgentRecordLoading(false);
+      return null;
+    }
+    setAgentRecordLoading(true);
+    setAgentRecordError('');
+    try {
+      const result = await getKnowledgeAgentRecordContext(recordId);
+      setAgentRecordContext(result.context || null);
+      setAgentRecordMessages(result.messages || []);
+      return result;
+    } catch (err) {
+      setAgentRecordContext(null);
+      setAgentRecordMessages([]);
+      setAgentRecordError(err?.message || 'Knowledge Base Agent context unavailable');
+      return null;
+    } finally {
+      setAgentRecordLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const delay = query.trim() ? 250 : 0;
     const timer = setTimeout(() => {
@@ -603,6 +1031,8 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
       setSelectedRecord(null);
       setRecordDraft(null);
       loadOperationalIntel(null);
+      loadAgentRecordContext(null);
+      setAgentChatInput('');
       if (updateHash) window.location.hash = '#/knowledge';
       return;
     }
@@ -610,6 +1040,7 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     setRecordNotice('');
     try {
       const record = await getKnowledgeRecord(recordId);
+      setDetailDismissed(false);
       setSelectedRecord(record);
       setRecordDraft(toEditableDraft(record));
       if (updateHash) window.location.hash = `#/knowledge/${encodeURIComponent(record.id)}`;
@@ -618,10 +1049,13 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     } finally {
       setRecordActionBusy(false);
     }
-  }, [loadOperationalIntel]);
+  }, [loadAgentRecordContext, loadOperationalIntel]);
 
   useEffect(() => {
-    if (!recordIdFromRoute) return;
+    if (!recordIdFromRoute) {
+      openRecord(null, false);
+      return;
+    }
     openRecord(recordIdFromRoute, false);
   }, [openRecord, recordIdFromRoute]);
 
@@ -633,13 +1067,78 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     loadOperationalIntel(selectedRecord.id);
   }, [loadOperationalIntel, selectedRecord?.id]);
 
-  const refreshSelectedRecord = useCallback(async () => {
-    if (!selectedRecord?.id) return null;
-    const record = await getKnowledgeRecord(selectedRecord.id);
-    setSelectedRecord(record);
-    setRecordDraft(toEditableDraft(record));
-    return record;
-  }, [selectedRecord?.id]);
+  useEffect(() => {
+    if (!selectedRecord?.id) {
+      loadAgentRecordContext(null);
+      return;
+    }
+    setAgentChatInput('');
+    loadAgentRecordContext(selectedRecord.id);
+  }, [loadAgentRecordContext, selectedRecord?.id]);
+
+  const handleSendAgentChatMessage = useCallback(async () => {
+    if (!selectedRecord?.id || agentChatBusy) return;
+    const message = agentChatInput.trim();
+    if (!message) return;
+    setAgentChatInput('');
+    setAgentChatBusy(true);
+    setAgentRecordError('');
+    setAgentRecordMessages((current) => [
+      ...current,
+      { role: 'user', content: message, createdAt: new Date().toISOString(), pending: true },
+    ]);
+    try {
+      const result = await sendKnowledgeAgentMessage(selectedRecord.id, message);
+      const serverMessages = Array.isArray(result.messages) ? result.messages : [];
+      const appliedChanges = Array.isArray(result.appliedChanges) ? result.appliedChanges : [];
+      // Attach the applied-changes list to the final assistant turn so the change
+      // list + per-field undo render directly under that message.
+      const nextMessages = serverMessages.map((item, index) => {
+        const isLastAssistant = item.role === 'assistant' && index === serverMessages.length - 1;
+        return isLastAssistant && appliedChanges.length
+          ? { ...item, appliedChanges }
+          : item;
+      });
+      setAgentRecordMessages(nextMessages);
+      if (result.context) setAgentRecordContext(result.context);
+      // When the agent actually edited the draft, refresh the open record so the
+      // detail panel and readiness reflect the saved values.
+      if (appliedChanges.length) {
+        await openRecord(selectedRecord.id, false);
+        await loadKnowledge();
+      }
+    } catch (err) {
+      setAgentRecordError(err?.message || 'Knowledge Base Agent did not answer');
+      setAgentRecordMessages((current) => current.filter((item) => !item.pending));
+      setAgentChatInput(message);
+    } finally {
+      setAgentChatBusy(false);
+    }
+  }, [agentChatBusy, agentChatInput, loadKnowledge, openRecord, selectedRecord?.id]);
+
+  // Undo a single field the agent changed: PATCH the record with the field's
+  // prior value (reuses the existing update path, which requires review
+  // permission — the same gate the manual editor uses). After undo we mark that
+  // field undone in the in-thread change list and refresh the open record.
+  const handleUndoAgentFieldChange = useCallback(async (messageIndex, change) => {
+    if (!selectedRecord?.id || !change?.field) return;
+    try {
+      await updateKnowledgeRecord(selectedRecord.id, { [change.field]: change.prior });
+      setAgentRecordMessages((current) => current.map((item, index) => {
+        if (index !== messageIndex || !Array.isArray(item.appliedChanges)) return item;
+        return {
+          ...item,
+          appliedChanges: item.appliedChanges.map((entry) => (
+            entry.field === change.field ? { ...entry, undone: true } : entry
+          )),
+        };
+      }));
+      await openRecord(selectedRecord.id, false);
+      await loadKnowledge();
+    } catch (err) {
+      setAgentRecordError(err?.message || 'Undo failed');
+    }
+  }, [loadKnowledge, openRecord, selectedRecord?.id]);
 
   const metrics = useMemo(() => {
     const candidates = summary?.candidates || {};
@@ -828,6 +1327,67 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     }
   }, [loadKnowledge, loadOperationalIntel, selectedRecord?.id]);
 
+  const handleQuickReviewStatus = useCallback(async (reviewStatus) => {
+    if (!selectedRecord?.id || !recordDraft) return;
+    if (reviewStatus === 'approved') {
+      const readiness = getPublishReadiness({
+        ...selectedRecord,
+        ...fromEditableDraft(recordDraft),
+        evidence: selectedRecord.evidence,
+      });
+      const blockers = readiness.checks.filter((check) => check.key !== 'approved' && !check.ok);
+      if (blockers.length > 0) {
+        setRecordNotice(`Approval is blocked until this is safe for agent reuse: ${blockers.map((check) => check.label.toLowerCase()).join(', ')}.`);
+        return;
+      }
+    }
+    const nextDraft = { ...recordDraft, reviewStatus };
+    setRecordDraft(nextDraft);
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await updateKnowledgeRecord(selectedRecord.id, fromEditableDraft(nextDraft));
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      await loadOperationalIntel(record.id);
+      setRecordNotice(reviewStatus === 'approved'
+        ? 'Approved. Publish when readiness checks pass.'
+        : 'Rejected. Agents will not use this as guidance.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Review update failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, loadOperationalIntel, recordDraft, selectedRecord?.id]);
+
+  const handleSaveCaseHistoryOnly = useCallback(async () => {
+    if (!selectedRecord?.id || !recordDraft) return;
+    const nextDraft = {
+      ...recordDraft,
+      reviewStatus: recordDraft.reviewStatus === 'published' ? recordDraft.reviewStatus : 'approved',
+      publishTarget: 'case-history-only',
+      reusableOutcome: 'case-history-only',
+      allowedUsesText: 'review-only',
+      trustStateOverride: 'reviewed',
+    };
+    setRecordDraft(nextDraft);
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await updateKnowledgeRecord(selectedRecord.id, fromEditableDraft(nextDraft));
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      await loadOperationalIntel(record.id);
+      setRecordNotice('Saved as case history only. Agents can see it as context, but cannot recommend it as guidance.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Case-history save failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, loadOperationalIntel, recordDraft, selectedRecord?.id]);
+
   const handleExport = useCallback(async (format) => {
     setExportNotice('');
     try {
@@ -856,59 +1416,85 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     }
   }, []);
 
+  useEffect(() => {
+    if (recordIdFromRoute || detailDismissed || selectedRecord?.id || loading || records.length === 0) return;
+    openRecord(records[0].id, false);
+  }, [detailDismissed, loading, openRecord, recordIdFromRoute, records, selectedRecord?.id]);
+
+  const finalizationQueueRecords = useMemo(() => {
+    const queue = records.filter(isFinalizationQueueRecord);
+    if (selectedRecord && isFinalizationQueueRecord(selectedRecord) && !queue.some((record) => record.id === selectedRecord.id)) {
+      return [selectedRecord, ...queue];
+    }
+    return queue;
+  }, [records, selectedRecord]);
+
+  const selectedReadiness = selectedRecord && recordDraft
+    ? getPublishReadiness({
+        ...selectedRecord,
+        ...fromEditableDraft(recordDraft),
+        evidence: selectedRecord.evidence,
+      })
+    : null;
+  const nextMove = getSelectedLessonMove(selectedRecord, recordDraft, selectedReadiness)
+    || getKnowledgeNextMove({ metrics, agentStatus, sourceCases });
+  const pageTitle = getRecordPageTitle(selectedRecord);
+  const pageSubtitle = selectedRecord
+    ? 'This case was marked resolved. Confirm whether it contains a proven fix before any agent can reuse it.'
+    : 'Review lessons from resolved cases so the specialist agents only reuse evidence-backed guidance.';
+
+  const handleNextMove = useCallback(() => {
+    if (nextMove.href) {
+      window.location.hash = nextMove.href;
+      return;
+    }
+    if (nextMove.action === 'review') {
+      setActiveTab('review');
+      setReviewStatus('draft');
+      setTrustState('');
+      setAllowedUse('');
+      return;
+    }
+    if (nextMove.action === 'publish') {
+      setActiveTab('all');
+      setReviewStatus('approved');
+      setTrustState('');
+      setAllowedUse('');
+      return;
+    }
+    if (nextMove.action === 'trusted') {
+      setActiveTab('trusted');
+      setReviewStatus('');
+      setTrustState('trusted');
+      setAllowedUse('');
+      return;
+    }
+    if (nextMove.action === 'selected') {
+      document.querySelector('.knowledge-guided-review')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    document.getElementById('knowledge-source-cases')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [nextMove]);
+
   return (
-    <div className="app-content-constrained knowledgebase-page">
-      <div className="page-header knowledgebase-header">
-        <div>
-          <h1 className="page-title">Knowledgebase</h1>
-          <span className="text-secondary knowledgebase-subtitle">
-            Review lessons from resolved cases, confirm the evidence, and decide what the specialist agents can trust later.
-          </span>
+    <div className={`app-content-constrained knowledgebase-page${selectedRecord ? ' is-record-review' : ''}`}>
+      {!selectedRecord && (
+        <div className="page-header knowledgebase-header knowledgebase-command-header">
+          <div>
+            <h1 className="page-title">{pageTitle}</h1>
+            <span className="text-secondary knowledgebase-subtitle">
+              {pageSubtitle}
+            </span>
+          </div>
+          <div className={`knowledge-primary-action is-${nextMove.tone}`}>
+            <span>Next</span>
+            <strong>{nextMove.title}</strong>
+            <button className="btn btn-primary" type="button" onClick={handleNextMove}>
+              {nextMove.label}
+            </button>
+          </div>
         </div>
-        <div className="knowledgebase-header-actions">
-          <button className="btn btn-secondary" type="button" onClick={loadKnowledge} disabled={loading || scanLoading}>
-            <IconRefresh />
-            <span>Refresh</span>
-          </button>
-          <button className="btn btn-secondary" type="button" onClick={() => runScan({ dryRun: true })} disabled={scanLoading}>
-            <IconScan />
-            <span>Check Issues</span>
-          </button>
-          <button className="btn btn-primary" type="button" onClick={() => runScan({ dryRun: false })} disabled={scanLoading}>
-            <IconScan />
-            <span>{scanLoading ? 'Scanning' : 'Create Review Tasks'}</span>
-          </button>
-        </div>
-      </div>
-
-      <KnowledgeWorkflowBar
-        metrics={metrics}
-        agentStatus={agentStatus}
-        sourceCases={sourceCases}
-        sourceCasesLoading={sourceCasesLoading}
-        sourceCasesError={sourceCasesError}
-        sourceCaseQuery={sourceCaseQuery}
-        sourceCaseActionId={sourceCaseActionId}
-        onSourceCaseQueryChange={setSourceCaseQuery}
-        onCreateDraft={handleCreateDraftFromCase}
-        onGoReview={() => {
-          setActiveTab('review');
-          setReviewStatus('draft');
-          setTrustState('');
-        }}
-        onGoPublish={() => {
-          setActiveTab('all');
-          setReviewStatus('approved');
-          setTrustState('');
-        }}
-        onGoTrusted={() => {
-          setActiveTab('trusted');
-          setReviewStatus('');
-          setTrustState('trusted');
-        }}
-      />
-
-      <KnowledgeSystemGuide />
+      )}
 
       {error && (
         <div className="error-banner">
@@ -917,111 +1503,23 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
         </div>
       )}
 
-      <div className="knowledgebase-metrics">
-        <MetricTile label="Total Records" value={formatCount(metrics.total)} />
-        <MetricTile label="Needs Review" value={formatCount(metrics.draft)} tone={metrics.draft ? 'warning' : ''} />
-        <MetricTile label="Trusted Knowledge" value={formatCount(metrics.trusted || metrics.published)} tone="success" />
-        <MetricTile label="Rejected" value={formatCount(metrics.rejected)} />
-        <MetricTile label="Legacy Sources" value={formatCount(metrics.legacySources)} />
-        <MetricTile label="Attention Tasks" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} tone={agentStatus?.counts?.openKnowledgeReviewItems ? 'warning' : ''} />
-        <MetricTile label="Evidence Score" value={ontologySummary?.evidenceStrength?.average ?? '--'} />
-      </div>
+      <section className={`knowledge-review-board${selectedRecord ? ' is-focused' : ''}`} aria-label="KB draft review workflow">
+        {selectedRecord && (
+          <KnowledgeFinalizationRail
+            records={finalizationQueueRecords}
+            selectedRecord={selectedRecord}
+            loading={loading}
+          />
+        )}
 
-      <div className="knowledgebase-tabs" role="tablist" aria-label="Knowledgebase views">
-        {Object.entries(TAB_CONFIG).map(([id, tab]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === id}
-            className={`knowledgebase-tab${activeTab === id ? ' is-active' : ''}`}
-            onClick={() => setActiveTab(id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="knowledgebase-layout">
-        <section className="knowledgebase-main">
-          <div className="knowledgebase-filter-panel">
-            <label className="knowledgebase-search">
-              <IconSearch />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                aria-label="Search knowledge records"
-                placeholder="Search knowledge records"
-              />
-            </label>
-            <select value={reviewStatus} onChange={(event) => setReviewStatus(event.target.value)} aria-label="Filter by review state">
-              <option value="">Any review state</option>
-              <option value="draft">{REVIEW_LABELS.draft}</option>
-              <option value="approved">{REVIEW_LABELS.approved}</option>
-              <option value="published">{REVIEW_LABELS.published}</option>
-              <option value="rejected">{REVIEW_LABELS.rejected}</option>
-            </select>
-            <select value={trustState} onChange={(event) => setTrustState(event.target.value)} aria-label="Filter by trust state">
-              <option value="">Any trust state</option>
-              <option value="candidate">{TRUST_LABELS.candidate}</option>
-              <option value="reviewed">{TRUST_LABELS.reviewed}</option>
-              <option value="trusted">{TRUST_LABELS.trusted}</option>
-              <option value="rejected">{TRUST_LABELS.rejected}</option>
-              <option value="restricted">{TRUST_LABELS.restricted}</option>
-              <option value="deprecated">{TRUST_LABELS.deprecated}</option>
-              <option value="legacy-trusted">{TRUST_LABELS['legacy-trusted']}</option>
-            </select>
-            <select value={allowedUse} onChange={(event) => setAllowedUse(event.target.value)} aria-label="Filter by allowed use">
-              {Object.entries(ALLOWED_USE_LABELS).map(([value, label]) => (
-                <option key={value || 'any'} value={value}>{label}</option>
-              ))}
-            </select>
-            <label className="knowledgebase-toggle">
-              <input
-                type="checkbox"
-                checked={includeLegacy}
-                onChange={(event) => setIncludeLegacy(event.target.checked)}
-              />
-              <span>Legacy</span>
-            </label>
-          <button className="btn btn-ghost btn-sm" type="button" onClick={resetFilters}>
-              Clear
-            </button>
-          </div>
-
-          <div className="knowledgebase-list-header">
+        <section className="knowledge-board-panel knowledge-selected-column" aria-labelledby="knowledge-selected-heading">
+          <div className="knowledge-column-heading knowledge-main-heading">
+            <span>1</span>
             <div>
-              <span>{loading ? 'Loading records' : `${formatCount(total)} record${total === 1 ? '' : 's'}`}</span>
-              <small>{activeConfig.description}</small>
+              <h2 id="knowledge-selected-heading">Review the KB draft</h2>
+              <p>Edit the QBO Canada answer. Save as case history if the final outcome is not clear.</p>
             </div>
-            <strong>{activeConfig.label}</strong>
           </div>
-
-          {loading ? (
-            <div className="knowledgebase-loading" role="status">
-              <span className="spinner" />
-            </div>
-          ) : records.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-title">{activeConfig.emptyTitle || 'No Knowledge Records'}</div>
-              <div className="empty-state-desc">{activeConfig.emptyDescription || 'No records match this view.'}</div>
-            </div>
-          ) : (
-            <div className="knowledgebase-record-list">
-              {records.map((record) => (
-                <KnowledgeRecordRow
-                  key={record.id}
-                  record={record}
-                  selected={selectedRecord?.id === record.id}
-                  onOpen={() => openRecord(record.id)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-
-        <aside className="knowledgebase-agent-panel">
           <KnowledgeRecordDetail
             record={selectedRecord}
             draft={recordDraft}
@@ -1030,16 +1528,284 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
             operationalIntel={operationalIntel}
             operationalIntelLoading={operationalIntelLoading}
             operationalIntelError={operationalIntelError}
-            onClose={() => openRecord(null)}
+            onClose={() => {
+              setDetailDismissed(true);
+              openRecord(null);
+            }}
             onDraftChange={setRecordDraft}
             onSave={handleSaveRecord}
+            onQuickReviewStatus={handleQuickReviewStatus}
+            onSaveCaseHistoryOnly={handleSaveCaseHistoryOnly}
             onPublish={handlePublishRecord}
             onDeprecate={handleDeprecateRecord}
             onRedact={handleRedactRecord}
             onRelationship={handleAddRelationship}
             onFeedback={handleRecordFeedback}
           />
+        </section>
 
+        {selectedRecord && (
+          <KnowledgeBaseAgentSidebar
+            record={selectedRecord}
+            context={agentRecordContext}
+            messages={agentRecordMessages}
+            loading={agentRecordLoading}
+            error={agentRecordError}
+            input={agentChatInput}
+            busy={agentChatBusy}
+            onInputChange={setAgentChatInput}
+            onSend={handleSendAgentChatMessage}
+            onUndoFieldChange={handleUndoAgentFieldChange}
+            onRefresh={() => loadAgentRecordContext(selectedRecord.id)}
+          />
+        )}
+
+        {!selectedRecord && (
+        <aside className="knowledge-board-panel knowledge-queue-column" aria-labelledby="knowledge-queue-heading">
+          {selectedRecord && recordDraft ? (
+            <>
+              <div className="knowledge-column-heading">
+                <span>2</span>
+                <div>
+                  <h2 id="knowledge-queue-heading">
+                    {selectedReadiness?.ready ? 'Ready for agent use' : 'Source and readiness'}
+                  </h2>
+                  <p>
+                    {selectedReadiness?.ready
+                      ? 'Confirm the source one last time before publishing.'
+                      : 'Use this only to verify evidence and missing approval items.'}
+                  </p>
+                </div>
+              </div>
+              <SourceProofPanel
+                record={selectedRecord}
+                operationalIntel={operationalIntel}
+                operationalIntelLoading={operationalIntelLoading}
+              />
+              <PublishReadinessPanel readiness={selectedReadiness} />
+              <details className="knowledge-evidence-disclosure">
+                <summary>
+                  <span>Evidence saved for later</span>
+                  <strong>View searchable evidence</strong>
+                </summary>
+                <IndexedInformationPanel
+                  record={selectedRecord}
+                  draft={recordDraft}
+                  readiness={selectedReadiness}
+                  operationalIntel={operationalIntel}
+                  operationalIntelLoading={operationalIntelLoading}
+                />
+              </details>
+              {looksUnprovenFix(selectedRecord.exactFix) && (
+                <details className="knowledge-evidence-disclosure">
+                  <summary>
+                    <span>What the source really proved</span>
+                    <strong>View attempted steps</strong>
+                  </summary>
+                  <AttemptEvidencePanel
+                    sourceAttemptText={selectedRecord.exactFix}
+                    draft={recordDraft}
+                    record={selectedRecord}
+                  />
+                </details>
+              )}
+              <details className="knowledge-evidence-disclosure">
+                <summary>
+                  <span>Before publishing</span>
+                  <strong>Preview agent guidance</strong>
+                </summary>
+                <AgentPreviewPanel
+                  record={selectedRecord}
+                  draft={recordDraft}
+                  readiness={selectedReadiness}
+                />
+              </details>
+              <details className="knowledge-next-lesson-drawer">
+                <summary>
+                  <span>Other lessons</span>
+                  <strong>{formatCount(total)} record{total === 1 ? '' : 's'}</strong>
+                </summary>
+                <KnowledgeQueueContent
+                  activeConfig={activeConfig}
+                  activeTab={activeTab}
+                  setActiveTab={setActiveTab}
+                  query={query}
+                  setQuery={setQuery}
+                  reviewStatus={reviewStatus}
+                  setReviewStatus={setReviewStatus}
+                  trustState={trustState}
+                  setTrustState={setTrustState}
+                  allowedUse={allowedUse}
+                  setAllowedUse={setAllowedUse}
+                  includeLegacy={includeLegacy}
+                  setIncludeLegacy={setIncludeLegacy}
+                  resetFilters={resetFilters}
+                  loading={loading}
+                  total={total}
+                  records={records}
+                  selectedRecord={selectedRecord}
+                />
+              </details>
+            </>
+          ) : (
+            <>
+              <div className="knowledge-column-heading">
+                <span>2</span>
+                <div>
+                  <h2 id="knowledge-queue-heading">Drafts waiting for you</h2>
+                  <p>Open the next lesson and decide whether agents can reuse it.</p>
+                </div>
+              </div>
+              <KnowledgeQueueContent
+                activeConfig={activeConfig}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                query={query}
+                setQuery={setQuery}
+                reviewStatus={reviewStatus}
+                setReviewStatus={setReviewStatus}
+                trustState={trustState}
+                setTrustState={setTrustState}
+                allowedUse={allowedUse}
+                setAllowedUse={setAllowedUse}
+                includeLegacy={includeLegacy}
+                setIncludeLegacy={setIncludeLegacy}
+                resetFilters={resetFilters}
+                loading={loading}
+                total={total}
+                records={records}
+                selectedRecord={selectedRecord}
+              />
+            </>
+          )}
+        </aside>
+        )}
+
+        {!selectedRecord && (
+        <details className="knowledge-board-panel knowledge-source-column knowledge-source-drawer" id="knowledge-source-cases">
+          <summary className="knowledge-column-heading">
+            <span>+</span>
+            <div>
+              <h2>Pick a finished case</h2>
+              <p>Use this only when you need to create another review draft.</p>
+            </div>
+          </summary>
+
+          <label className="knowledge-source-search">
+            <IconSearch />
+            <input
+              type="search"
+              value={sourceCaseQuery}
+              onChange={(event) => setSourceCaseQuery(event.target.value)}
+              aria-label="Find resolved cases to turn into review drafts"
+              placeholder="Find source cases"
+            />
+          </label>
+
+          <div className="knowledge-source-list" aria-live="polite">
+            {sourceCasesLoading ? (
+              <div className="knowledge-source-empty" role="status">
+                <span className="spinner spinner-sm" />
+                <span>Loading source cases</span>
+              </div>
+            ) : sourceCasesError ? (
+              <div className="knowledge-source-empty">{sourceCasesError}</div>
+            ) : sourceCases.length === 0 ? (
+              <div className="knowledge-source-empty">
+                Resolve a case first, then use it here as evidence for a review draft.
+              </div>
+            ) : (
+              sourceCases.map((escalation) => {
+                const id = escalation._id || escalation.id;
+                const caseLabel = formatCaseLabel(escalation);
+                return (
+                  <article className="knowledge-source-case" key={id}>
+                    <div>
+                      <strong>{caseLabel}</strong>
+                      <span>{formatCaseMeta(escalation)}</span>
+                      <p>{escalation.actualOutcome || escalation.attemptingTo || escalation.resolution || 'No case summary recorded.'}</p>
+                    </div>
+                    <div className="knowledge-source-actions">
+                      <a
+                        className="btn btn-secondary btn-sm"
+                        href={`#/escalations/${encodeURIComponent(id)}`}
+                        aria-label={`Open source case ${caseLabel}`}
+                      >
+                        <IconOpen />
+                        <span>Case</span>
+                      </a>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        type="button"
+                        onClick={() => handleCreateDraftFromCase(id)}
+                        disabled={Boolean(sourceCaseActionId)}
+                        aria-label={`Create review draft from ${caseLabel}`}
+                      >
+                        {sourceCaseActionId === id ? 'Creating' : 'Create Draft'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        </details>
+        )}
+      </section>
+
+      <details className="knowledge-health-drawer">
+        <summary>
+          <span>Library health, lifecycle, exports, and agent connection</span>
+          <strong>{formatCount(metrics.total)} records</strong>
+        </summary>
+        <div className="knowledge-health-content">
+          <div className="knowledge-health-actions">
+            <button className="btn btn-secondary" type="button" onClick={loadKnowledge} disabled={loading || scanLoading}>
+              <IconRefresh />
+              <span>Refresh</span>
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => runScan({ dryRun: true })} disabled={scanLoading}>
+              <IconScan />
+              <span>Check Issues</span>
+            </button>
+            <button className="btn btn-secondary" type="button" onClick={() => runScan({ dryRun: false })} disabled={scanLoading}>
+              <IconScan />
+              <span>{scanLoading ? 'Scanning' : 'Create Review Tasks'}</span>
+            </button>
+          </div>
+
+          <div className="knowledgebase-metrics">
+            <MetricTile label="Total Records" value={formatCount(metrics.total)} />
+            <MetricTile label="Needs Review" value={formatCount(metrics.draft)} tone={metrics.draft ? 'warning' : ''} />
+            <MetricTile label="Trusted Knowledge" value={formatCount(metrics.trusted || metrics.published)} tone={metrics.trusted || metrics.published ? 'success' : ''} />
+            <MetricTile label="Rejected" value={formatCount(metrics.rejected)} />
+            <MetricTile label="Legacy Sources" value={formatCount(metrics.legacySources)} />
+            <MetricTile label="Attention Tasks" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} tone={agentStatus?.counts?.openKnowledgeReviewItems ? 'warning' : ''} />
+            <MetricTile label="Evidence Average" value={ontologySummary?.evidenceStrength?.average ?? '--'} />
+          </div>
+
+          <KnowledgeSystemGuide
+            metrics={metrics}
+            agentStatus={agentStatus}
+            sourceCases={sourceCases}
+            onGoReview={() => {
+              setActiveTab('review');
+              setReviewStatus('draft');
+              setTrustState('');
+            }}
+            onGoPublish={() => {
+              setActiveTab('all');
+              setReviewStatus('approved');
+              setTrustState('');
+            }}
+            onGoTrusted={() => {
+              setActiveTab('trusted');
+              setReviewStatus('');
+              setTrustState('trusted');
+            }}
+          />
+
+          <div className="knowledgebase-agent-panel">
           <section className="knowledgebase-agent-status">
             <div className="knowledgebase-agent-heading">
               <span className={`knowledgebase-agent-dot${agentStatus?.dbReady ? ' is-ready' : ''}`} />
@@ -1111,141 +1877,286 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
               <div className="knowledgebase-rail-empty">No scan results yet. Use Check Issues to preview problems before creating Attention tasks.</div>
             )}
           </section>
-        </aside>
-      </div>
+          </div>
+        </div>
+      </details>
     </div>
   );
 }
 
-function KnowledgeSystemGuide() {
+// Human-readable labels for the editable draft fields the agent can change.
+// Kept local to the sidebar so the change-list reads in plain language instead
+// of raw field keys. Falls back to the key when a label is missing.
+const KB_AGENT_FIELD_LABELS = {
+  title: 'Title',
+  category: 'Category',
+  customerGoal: 'Customer Goal',
+  reportedProblem: 'Reported Problem',
+  evidenceFromCase: 'Evidence From Case',
+  troubleshootingTried: 'Troubleshooting Tried',
+  confirmedCause: 'Confirmed Cause',
+  finalOutcome: 'Final Outcome',
+  invEscalationStatus: 'INV / Escalation Status',
+  summary: 'Summary',
+  symptom: 'Symptom',
+  rootCause: 'Root Cause',
+  exactFix: 'Exact Fix',
+  escalationPath: 'Escalation Path',
+  reviewNotes: 'Review Notes',
+  keySignals: 'Key Signals',
+  importantBoundaries: 'Important Boundaries',
+};
+
+function kbAgentFieldLabel(field) {
+  return KB_AGENT_FIELD_LABELS[field] || field;
+}
+
+function KnowledgeBaseAgentSidebar({
+  record,
+  context,
+  messages = [],
+  loading = false,
+  error = '',
+  input = '',
+  busy = false,
+  onInputChange,
+  onSend,
+  onUndoFieldChange,
+  onRefresh,
+}) {
+  const counts = context?.sourceCounts || record?.kbAgent?.sourceCounts || {};
+  const workflowAgents = context?.workflowAgents || record?.kbAgent?.workflowAgents || [];
+  const relatedKnowledge = Array.isArray(context?.relatedKnowledge) ? context.relatedKnowledge : [];
+  const coverageRows = [
+    ['Case', counts.hasEscalation ? 'Loaded' : 'Missing'],
+    ['Chat', formatCount(counts.conversationMessages || context?.conversation?.messageCount || 0)],
+    ['Images', formatCount((counts.conversationImages || 0) + (counts.escalationScreenshots || 0))],
+    ['Workflow', formatCount(counts.workflowRuns || workflowAgents.length || 0)],
+    ['Saved KB', formatCount(counts.relatedKnowledge || relatedKnowledge.length || 0)],
+    ['Prompt', context?.prompt?.version || record?.kbAgent?.promptVersion || 'Current'],
+  ];
+  const hasInput = input.trim().length > 0;
+  const hasMessages = messages.length > 0;
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyConversation = useCallback(() => {
+    if (!messages.length) return;
+    // Render the whole thread as readable plain text, role-labelled per turn.
+    const transcript = messages
+      .map((message) => {
+        const label = message.role === 'assistant' ? 'Knowledge Base Agent' : 'You';
+        return `${label}:\n${message.content || ''}`;
+      })
+      .join('\n\n');
+    const markCopied = () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(transcript).then(markCopied).catch(() => {
+        const textarea = document.createElement('textarea');
+        textarea.value = transcript;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        markCopied();
+      });
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = transcript;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      markCopied();
+    }
+  }, [messages]);
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (hasInput && !busy) onSend();
+  };
+
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      if (hasInput && !busy) onSend();
+    }
+  };
+
   return (
-    <section className="knowledge-system-guide" aria-label="How knowledge review works">
-      <div>
-        <span>Purpose</span>
-        <p>Knowledge records are reviewed learning from finished cases. They help the specialist agents support the user with evidence instead of rediscovering the same lesson.</p>
+    <aside className="knowledge-board-panel knowledge-agent-chat-sidebar" aria-labelledby="knowledge-agent-chat-heading">
+      <div className="knowledge-agent-chat-top">
+        <div className="knowledge-column-heading">
+          <span>2</span>
+          <div>
+            <h2 id="knowledge-agent-chat-heading">Knowledge Base Agent</h2>
+            <p>{getRecordCaseQueueLabel(record)}</p>
+          </div>
+        </div>
+        <div className="knowledge-agent-chat-actions">
+          <button
+            className={`btn btn-secondary btn-sm${copied ? ' is-copied' : ''}`}
+            type="button"
+            onClick={handleCopyConversation}
+            disabled={!hasMessages}
+            aria-label="Copy full conversation to clipboard"
+          >
+            <IconCopy />
+            <span>{copied ? 'Copied' : 'Copy'}</span>
+          </button>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={onRefresh} disabled={loading || busy} aria-label="Refresh Knowledge Base Agent context">
+            <IconRefresh />
+          </button>
+        </div>
       </div>
-      <div>
-        <span>Flow</span>
-        <p>Finished case to review draft to human approval to trusted knowledge. Drafts stay human-review-only until published.</p>
+
+      <div className="knowledge-agent-coverage-grid" aria-label="Knowledge Base Agent source coverage">
+        {coverageRows.map(([label, value]) => (
+          <div className="knowledge-agent-coverage-item" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
       </div>
-      <div>
-        <span>Integrations</span>
-        <p>Escalations provide evidence, Attention tracks review work, and Agents retrieve trusted knowledge during chat, triage, and similar-case search.</p>
+
+      <div className="knowledge-agent-source-line">
+        <span>Workflow Agents</span>
+        <strong>{workflowAgents.length ? workflowAgents.join(', ') : 'None recorded'}</strong>
       </div>
-    </section>
+
+      {relatedKnowledge.length > 0 && (
+        <details className="knowledge-agent-related">
+          <summary>
+            <span>Related saved KB</span>
+            <strong>{formatCount(relatedKnowledge.length)}</strong>
+          </summary>
+          <div>
+            {relatedKnowledge.slice(0, 5).map((item) => (
+              <a href={`#/knowledge/${encodeURIComponent(item.id)}`} key={item.id}>
+                <strong>{item.title || 'Untitled KB entry'}</strong>
+                <span>{item.category || 'unknown'} / {item.reviewStatus || 'draft'}</span>
+              </a>
+            ))}
+          </div>
+        </details>
+      )}
+
+      <div className="knowledge-agent-chat-thread" role="log" aria-live="polite" aria-busy={loading || busy}>
+        {loading ? (
+          <div className="knowledge-agent-chat-empty" role="status">
+            <span className="spinner spinner-sm" />
+            <span>Loading context</span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="knowledge-agent-chat-empty">
+            <strong>Ready</strong>
+            <span>{record?.kbAgent?.sourceSummary || 'Context will load from the selected draft.'}</span>
+          </div>
+        ) : (
+          messages.map((message, index) => (
+            <article className={`knowledge-agent-chat-message is-${message.role}`} key={`${message.createdAt || index}-${index}`}>
+              <strong>{message.role === 'assistant' ? 'Knowledge Base Agent' : 'You'}</strong>
+              {message.role === 'assistant' ? (
+                <div className="knowledge-agent-chat-markdown">{renderMarkdown(message.content)}</div>
+              ) : (
+                <p>{message.content}</p>
+              )}
+              {Array.isArray(message.appliedChanges) && message.appliedChanges.length > 0 && (
+                <div className="knowledge-agent-changes" aria-label="Changes applied by the Knowledge Base Agent">
+                  <span className="knowledge-agent-changes-title">Changes applied</span>
+                  <span className="knowledge-agent-changes-note">Undo available this session — edits and history are saved on the server.</span>
+                  {message.appliedChanges.map((change) => (
+                    <div className={`knowledge-agent-change-row${change.undone ? ' is-undone' : ''}`} key={change.field}>
+                      <span className="knowledge-agent-change-field">{kbAgentFieldLabel(change.field)}</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm knowledge-agent-change-undo"
+                        onClick={() => onUndoFieldChange?.(index, change)}
+                        disabled={busy || change.undone}
+                      >
+                        {change.undone ? 'Undone' : 'Undo'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {message.pending && <span>Sending</span>}
+            </article>
+          ))
+        )}
+        {busy && (
+          <div className="knowledge-agent-chat-empty" role="status">
+            <span className="spinner spinner-sm" />
+            <span>Thinking</span>
+          </div>
+        )}
+      </div>
+
+      {error && <div className="knowledge-agent-chat-error">{error}</div>}
+
+      <form className="knowledge-agent-chat-form" onSubmit={handleSubmit}>
+        <textarea
+          value={input}
+          onChange={(event) => onInputChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask about this draft"
+          rows={3}
+          disabled={busy}
+          aria-label="Message Knowledge Base Agent about this draft"
+        />
+        <button className="btn btn-primary btn-sm" type="submit" disabled={!hasInput || busy}>
+          <IconSend />
+          <span>{busy ? 'Sending' : 'Send'}</span>
+        </button>
+      </form>
+    </aside>
   );
 }
 
-function KnowledgeWorkflowBar({
-  metrics,
-  agentStatus,
-  sourceCases,
-  sourceCasesLoading,
-  sourceCasesError,
-  sourceCaseQuery,
-  sourceCaseActionId,
-  onSourceCaseQueryChange,
-  onCreateDraft,
-  onGoReview,
-  onGoPublish,
-  onGoTrusted,
-}) {
-  const draftCount = Number(metrics?.draft || 0);
-  const approvedCount = Number(metrics?.approved || 0);
-  const trustedCount = Number(metrics?.trusted || metrics?.published || 0);
-  const reviewCount = Number(agentStatus?.counts?.openKnowledgeReviewItems || 0);
-  const visibleCases = sourceCases.slice(0, 3);
+function KnowledgeSystemGuide({ metrics, agentStatus, sourceCases, onGoReview, onGoPublish, onGoTrusted }) {
+  const nextMove = getKnowledgeNextMove({ metrics, agentStatus, sourceCases });
+  const actionHandler = nextMove.action === 'review'
+    ? onGoReview
+    : nextMove.action === 'publish'
+      ? onGoPublish
+      : nextMove.action === 'trusted'
+        ? onGoTrusted
+        : nextMove.action === 'source'
+          ? () => document.getElementById('knowledge-source-cases')?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          : null;
 
   return (
-    <section className="knowledge-workbench" aria-label="Knowledge review workflow">
-      <div className="knowledge-add-strip">
-        <div className="knowledge-strip-heading">
-          <span>Create Review Draft</span>
-          <strong>Start from a resolved case</strong>
-          <small>Create a human-review-only draft with source evidence.</small>
-        </div>
-
-        <label className="knowledge-source-search">
-          <IconSearch />
-          <input
-            type="search"
-            value={sourceCaseQuery}
-            onChange={(event) => onSourceCaseQueryChange(event.target.value)}
-            aria-label="Find resolved cases to turn into knowledge review drafts"
-            placeholder="Search resolved cases"
-          />
-        </label>
-
-        <div className="knowledge-source-list" aria-live="polite">
-          {sourceCasesLoading ? (
-            <div className="knowledge-source-empty" role="status">
-              <span className="spinner spinner-sm" />
-              <span>Loading source cases</span>
-            </div>
-          ) : sourceCasesError ? (
-            <div className="knowledge-source-empty">{sourceCasesError}</div>
-          ) : sourceCases.length === 0 ? (
-            <div className="knowledge-source-empty">
-              No resolved source cases match this search.
-            </div>
-          ) : (
-            visibleCases.map((escalation) => {
-              const id = escalation._id || escalation.id;
-              const caseLabel = formatCaseLabel(escalation);
-              return (
-                <article className="knowledge-source-case" key={id}>
-                  <div>
-                    <strong>{caseLabel}</strong>
-                    <span>{formatCaseMeta(escalation)}</span>
-                    <p>{escalation.actualOutcome || escalation.attemptingTo || escalation.resolution || 'No case summary recorded.'}</p>
-                  </div>
-                  <div className="knowledge-source-actions">
-                    <a
-                      className="btn btn-secondary btn-sm"
-                      href={`#/escalations/${encodeURIComponent(id)}`}
-                      aria-label={`Open source case ${caseLabel}`}
-                    >
-                      <IconOpen />
-                      <span>Case</span>
-                    </a>
-                    <button
-                      className="btn btn-primary btn-sm"
-                      type="button"
-                      onClick={() => onCreateDraft(id)}
-                      disabled={Boolean(sourceCaseActionId)}
-                      aria-label={`Create review draft from ${caseLabel}`}
-                    >
-                      {sourceCaseActionId === id ? 'Creating' : 'Create Review Draft'}
-                    </button>
-                  </div>
-                </article>
-              );
-            })
-          )}
-        </div>
+    <section className="knowledge-system-guide" aria-label="Case lifecycle">
+      <div className={`knowledge-next-move is-${nextMove.tone}`}>
+        <span>Next Best Action</span>
+        <strong>{nextMove.title}</strong>
+        <p>{nextMove.detail}</p>
+        {actionHandler ? (
+          <button type="button" className="btn btn-primary btn-sm" onClick={actionHandler}>
+            {nextMove.label}
+          </button>
+        ) : (
+          <a className="btn btn-primary btn-sm" href={nextMove.href}>
+            {nextMove.label}
+          </a>
+        )}
       </div>
 
-      <div className="knowledge-stage-strip" aria-label="Knowledge review stages">
-        <button type="button" className="knowledge-stage-card" onClick={onGoReview}>
-          <span>Review</span>
-          <strong>{formatCount(draftCount)}</strong>
-          <small>Needs review</small>
-        </button>
-        <button type="button" className="knowledge-stage-card" onClick={onGoPublish}>
-          <span>Publish</span>
-          <strong>{formatCount(approvedCount)}</strong>
-          <small>Approved</small>
-        </button>
-        <button type="button" className="knowledge-stage-card" onClick={onGoTrusted}>
-          <span>Trusted</span>
-          <strong>{formatCount(trustedCount)}</strong>
-          <small>Trusted knowledge</small>
-        </button>
-        <a className="knowledge-stage-card" href="#/attention">
-          <span>Attention</span>
-          <strong>{formatCount(reviewCount)}</strong>
-          <small>Tasks</small>
-        </a>
+      <div className="knowledge-lifecycle-map">
+        {CASE_LIFECYCLE_STEPS.map((step, index) => (
+          <a
+            className={`knowledge-lifecycle-step${step.key === 'knowledge' ? ' is-current' : ''}`}
+            href={step.href}
+            key={step.key}
+          >
+            <b>{index + 1}</b>
+            <span>{step.label}</span>
+            <strong>{step.title}</strong>
+            <p>{step.detail}</p>
+          </a>
+        ))}
       </div>
     </section>
   );
@@ -1269,24 +2180,180 @@ function MiniMetric({ label, value }) {
   );
 }
 
-function KnowledgeRecordRow({ record, selected = false, onOpen }) {
+function KnowledgeFinalizationRail({ records = [], selectedRecord = null, loading = false }) {
+  return (
+    <aside className="knowledge-finalize-rail" aria-label="KB items needing finalization">
+      <div className="knowledge-finalize-rail-head">
+        <span>Finalize</span>
+        <strong>{loading ? 'Loading' : formatCount(records.length)}</strong>
+      </div>
+
+      <div className="knowledge-finalize-list" aria-live="polite">
+        {loading ? (
+          <div className="knowledge-finalize-empty" role="status">
+            <span className="spinner spinner-sm" />
+            <span>Loading queue</span>
+          </div>
+        ) : records.length === 0 ? (
+          <div className="knowledge-finalize-empty">No drafts need finalizing.</div>
+        ) : (
+          records.map((record) => {
+            const selected = selectedRecord?.id === record.id;
+            const href = record.id ? `#/knowledge/${encodeURIComponent(record.id)}` : '#/knowledge';
+            const task = getRecordCardTask(record);
+            return (
+              <a
+                className={`knowledge-finalize-item${selected ? ' is-selected' : ''}`}
+                href={href}
+                aria-current={selected ? 'page' : undefined}
+                key={record.id}
+              >
+                <strong>{getRecordCaseQueueLabel(record)}</strong>
+                <span>{record.title || 'Untitled KB draft'}</span>
+                <small>{task.label}</small>
+              </a>
+            );
+          })
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function KnowledgeQueueContent({
+  activeConfig,
+  activeTab,
+  setActiveTab,
+  query,
+  setQuery,
+  reviewStatus,
+  setReviewStatus,
+  trustState,
+  setTrustState,
+  allowedUse,
+  setAllowedUse,
+  includeLegacy,
+  setIncludeLegacy,
+  resetFilters,
+  loading,
+  total,
+  records,
+  selectedRecord,
+}) {
+  return (
+    <>
+      <div className="knowledgebase-tabs" aria-label="Lesson views">
+        {Object.entries(TAB_CONFIG).map(([id, tab]) => (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={activeTab === id}
+            className={`knowledgebase-tab${activeTab === id ? ' is-active' : ''}`}
+            onClick={() => setActiveTab(id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="knowledgebase-list-header">
+        <div>
+          <span>{loading ? 'Loading records' : `${formatCount(total)} record${total === 1 ? '' : 's'}`}</span>
+          <small>{activeConfig.description}</small>
+        </div>
+        <strong>{activeConfig.label}</strong>
+      </div>
+
+      <details className="knowledge-refine-drawer">
+        <summary>
+          <span>Refine queue</span>
+          <strong>{query || reviewStatus || trustState || allowedUse || includeLegacy ? 'Filters active' : 'Optional'}</strong>
+        </summary>
+        <div className="knowledgebase-filter-panel">
+          <label className="knowledgebase-search">
+            <IconSearch />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              aria-label="Search knowledge records"
+              placeholder={`Filter ${activeConfig.label.toLowerCase()}`}
+            />
+          </label>
+          <select value={reviewStatus} onChange={(event) => setReviewStatus(event.target.value)} aria-label="Filter by human decision">
+            <option value="">Any human decision</option>
+            <option value="draft">{REVIEW_LABELS.draft}</option>
+            <option value="approved">{REVIEW_LABELS.approved}</option>
+            <option value="published">{REVIEW_LABELS.published}</option>
+            <option value="rejected">{REVIEW_LABELS.rejected}</option>
+          </select>
+          <select value={trustState} onChange={(event) => setTrustState(event.target.value)} aria-label="Filter by agent availability">
+            <option value="">Any agent availability</option>
+            <option value="candidate">{TRUST_LABELS.candidate}</option>
+            <option value="reviewed">{TRUST_LABELS.reviewed}</option>
+            <option value="trusted">{TRUST_LABELS.trusted}</option>
+            <option value="rejected">{TRUST_LABELS.rejected}</option>
+            <option value="restricted">{TRUST_LABELS.restricted}</option>
+            <option value="deprecated">{TRUST_LABELS.deprecated}</option>
+            <option value="legacy-trusted">{TRUST_LABELS['legacy-trusted']}</option>
+          </select>
+          <select value={allowedUse} onChange={(event) => setAllowedUse(event.target.value)} aria-label="Filter by agent use">
+            {Object.entries(ALLOWED_USE_LABELS).map(([value, label]) => (
+              <option key={value || 'any'} value={value}>{label}</option>
+            ))}
+          </select>
+          <label className="knowledgebase-toggle">
+            <input
+              type="checkbox"
+              checked={includeLegacy}
+              onChange={(event) => setIncludeLegacy(event.target.checked)}
+            />
+            <span>Legacy</span>
+          </label>
+          <button className="btn btn-ghost btn-sm" type="button" onClick={resetFilters}>
+            Clear
+          </button>
+        </div>
+      </details>
+
+      {loading ? (
+        <div className="knowledgebase-loading" role="status">
+          <span className="spinner" />
+        </div>
+      ) : records.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-title">{activeConfig.emptyTitle || 'No Knowledge Records'}</div>
+          <div className="empty-state-desc">{activeConfig.emptyDescription || 'No records match this view.'}</div>
+        </div>
+      ) : (
+        <div className="knowledgebase-record-list">
+          {records.map((record) => (
+            <KnowledgeRecordRow
+              key={record.id}
+              record={record}
+              selected={selectedRecord?.id === record.id}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+function KnowledgeRecordRow({ record, selected = false }) {
   const escalationId = record?.sourceIds?.escalationId || '';
-  const warnings = Array.isArray(record.warnings) ? record.warnings : [];
+  const recordHref = record.id ? `#/knowledge/${encodeURIComponent(record.id)}` : '#/knowledge';
+  const task = getRecordCardTask(record);
   return (
     <article className={`knowledgebase-record${selected ? ' is-selected' : ''}`}>
       <div className="knowledgebase-record-top">
-        <span className={`knowledgebase-trust-badge trust-${trustClass(record.trustState)}`}>
-          {TRUST_LABELS[record.trustState] || record.trustState || TRUST_LABELS.candidate}
-        </span>
-        <span className="knowledgebase-review-state">
-          {REVIEW_LABELS[record.reviewStatus] || record.reviewStatus || 'Unknown'}
-        </span>
         <span className="knowledgebase-category">
           {(record.category || 'unknown').replace(/-/g, ' ')}
         </span>
-        <span className="knowledgebase-confidence">
-          {formatPercent(record.confidence)}
-        </span>
+      </div>
+      <div className={`knowledgebase-record-task is-${task.tone}`}>
+        <strong>{task.label}</strong>
+        <span>{task.detail}</span>
       </div>
       <div className="knowledgebase-record-body">
         <h2>{record.title || 'Untitled knowledge record'}</h2>
@@ -1297,17 +2364,18 @@ function KnowledgeRecordRow({ record, selected = false, onOpen }) {
         <span>Use: {formatAllowedUses((record.allowedUses || []).slice(0, 3))}</span>
         <span>Updated: {formatDate(record.updatedAt || record.lineage?.updatedAt)}</span>
       </div>
-      {warnings.length > 0 && (
-        <div className="knowledgebase-warning-row">
-          {warnings.slice(0, 4).map((warning) => (
-            <span key={warning}>{WARNING_LABELS[warning] || humanizeToken(warning)}</span>
-          ))}
-        </div>
-      )}
       <div className="knowledgebase-record-actions">
-        <button className="btn btn-primary btn-sm" type="button" onClick={onOpen}>
-          <span>{selected ? 'Open' : 'Details'}</span>
-        </button>
+        <a
+          className="btn btn-primary btn-sm"
+          href={recordHref}
+          aria-current={selected ? 'page' : undefined}
+          onClick={(event) => {
+            event.preventDefault();
+            window.location.hash = recordHref;
+          }}
+        >
+          <span>{selected ? 'Selected' : task.button}</span>
+        </a>
         {escalationId && (
           <a className="btn btn-secondary btn-sm" href={`#/escalations/${encodeURIComponent(escalationId)}`}>
             <IconOpen />
@@ -1330,6 +2398,8 @@ function KnowledgeRecordDetail({
   onClose,
   onDraftChange,
   onSave,
+  onQuickReviewStatus,
+  onSaveCaseHistoryOnly,
   onPublish,
   onDeprecate,
   onRedact,
@@ -1340,11 +2410,11 @@ function KnowledgeRecordDetail({
     return (
       <section className="knowledgebase-record-detail">
         <div className="knowledgebase-rail-heading">
-          <span>Knowledge Record Detail</span>
-          <strong>None</strong>
+          <span>Selected KB Draft</span>
+          <strong>Review queue</strong>
         </div>
         <div className="knowledgebase-rail-empty">
-          Select a record to review its source evidence, edit the fix, check publish readiness, and decide whether agents can trust it.
+          Select a KB draft from the queue, or create one from a resolved case.
         </div>
       </section>
     );
@@ -1365,6 +2435,7 @@ function KnowledgeRecordDetail({
   const auditEvents = Array.isArray(record.auditEvents) ? record.auditEvents : [];
   const actions = Array.isArray(record.actionRecommendations) ? record.actionRecommendations : [];
   const saveDisabled = busy || record.reviewStatus === 'published';
+  const guidance = getLessonReviewGuidance(record, draft, readiness);
 
   return (
     <section className="knowledgebase-record-detail">
@@ -1374,52 +2445,1044 @@ function KnowledgeRecordDetail({
             {TRUST_LABELS[record.trustState] || record.trustState || TRUST_LABELS.candidate}
           </span>
           <h2>{record.title || 'Untitled knowledge record'}</h2>
-          <p>{record.id}</p>
+          <p>{getRecordSourceSummary(record)}</p>
         </div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
-          Close
-        </button>
-      </div>
-
-      <div className="knowledgebase-detail-actions">
-        <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saveDisabled}>
-          Save
-        </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPublish(false)} disabled={disabledPublish}>
-          Publish For Agents
-        </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onPublish(true)} disabled={disabledPublish}>
-          Publish + Markdown
-        </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onDeprecate} disabled={busy || record.trustState === 'deprecated'}>
-          Deprecate
-        </button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onRedact} disabled={busy || record.redaction?.customerIdentifiersRedacted}>
-          Redact IDs
+          Back To Queue
         </button>
       </div>
 
       {notice && <div className="knowledgebase-detail-notice">{notice}</div>}
 
-      <KnowledgeOriginPanel
+      <LessonReviewGuide
         record={record}
+        draft={draft}
         readiness={readiness}
+        guidance={guidance}
         operationalIntel={operationalIntel}
         operationalIntelLoading={operationalIntelLoading}
+        busy={busy}
+        disabledPublish={disabledPublish}
+        saveDisabled={saveDisabled}
+        onDraftChange={updateDraft}
+        onSave={onSave}
+        onQuickReviewStatus={onQuickReviewStatus}
+        onSaveCaseHistoryOnly={onSaveCaseHistoryOnly}
+        onPublish={onPublish}
       />
 
-      <PublishReadinessPanel readiness={readiness} />
+      <details className="knowledge-system-review">
+        <summary>
+          <span>System fields</span>
+          <strong>Optional secondary review</strong>
+        </summary>
+        <SystemReviewTable
+          record={record}
+          draft={draft}
+          readiness={readiness}
+          operationalIntel={operationalIntel}
+          operationalIntelLoading={operationalIntelLoading}
+          evidence={evidence}
+          relationships={relationships}
+          feedback={feedback}
+          auditEvents={auditEvents}
+        />
+      </details>
 
-      <OperationalIntelligencePanel
-        intelligence={operationalIntel}
-        loading={operationalIntelLoading}
-        error={operationalIntelError}
-      />
+      <details className="knowledge-advanced-section">
+        <summary>
+          <span>Where this came from</span>
+          <strong>Use when you need to verify where this came from.</strong>
+        </summary>
+        <KnowledgeOriginPanel
+          record={record}
+          readiness={readiness}
+          operationalIntel={operationalIntel}
+          operationalIntelLoading={operationalIntelLoading}
+        />
+        <OperationalIntelligencePanel
+          intelligence={operationalIntel}
+          loading={operationalIntelLoading}
+          error={operationalIntelError}
+        />
+        <RecordDetailList
+          title="Evidence"
+          empty="No evidence"
+          items={evidence.map((item) => ({
+            key: `${item.type || 'evidence'}-${item.id || item.label}`,
+            label: item.label || item.type || 'Evidence',
+            detail: item.summary || item.text || item.preview || item.evidenceStatus || item.status || '',
+          }))}
+        />
+      </details>
 
+      <details className="knowledge-advanced-section">
+        <summary>
+          <span>Advanced settings</span>
+          <strong>Scope, trust override, feedback, and audit history.</strong>
+        </summary>
+        <AdvancedLessonSettings
+          draft={draft}
+          busy={busy}
+          onDraftChange={updateDraft}
+          onDeprecate={onDeprecate}
+          onRedact={onRedact}
+          onRelationship={onRelationship}
+          onFeedback={onFeedback}
+          record={record}
+        />
+        <RecordDetailList
+          title="Relationships"
+          empty="No relationships"
+          items={relationships.map((item) => ({
+            key: `${item.type}-${item.targetRecordId}`,
+            label: `${item.type} ${item.targetRecordId}`,
+            detail: `${item.status || 'proposed'} ${formatPercent(item.strength)} ${item.summary || ''}`.trim(),
+          }))}
+        />
+        <RecordDetailList
+          title="Recommended Actions"
+          empty="No recommendations"
+          items={actions.map((item, index) => ({
+            key: `${item.action}-${index}`,
+            label: `${item.priority || 'medium'} priority`,
+            detail: item.rationale ? `${item.action} - ${item.rationale}` : item.action,
+          }))}
+        />
+        <RecordDetailList
+          title="Outcome Feedback"
+          empty="No feedback"
+          items={feedback.map((item, index) => ({
+            key: `${item.createdAt}-${index}`,
+            label: `${item.outcome || 'unknown'} by ${item.actor || 'user'}`,
+            detail: item.notes || item.source || formatDate(item.createdAt),
+          }))}
+        />
+        <RecordDetailList
+          title="Audit History"
+          empty="No audit events"
+          items={auditEvents.map((item) => ({
+            key: item.eventId,
+            label: `${item.action} by ${item.actor || 'system'}`,
+            detail: `${formatDate(item.createdAt)} ${item.summary || ''}`.trim(),
+          }))}
+        />
+      </details>
+    </section>
+  );
+}
+
+function LessonReviewGuide({
+  record,
+  draft,
+  readiness,
+  guidance,
+  operationalIntel,
+  operationalIntelLoading,
+  busy,
+  disabledPublish,
+  saveDisabled,
+  onDraftChange,
+  onSave,
+  onQuickReviewStatus,
+  onSaveCaseHistoryOnly,
+  onPublish,
+}) {
+  const missingChecks = Array.isArray(readiness?.checks) ? readiness.checks.filter((check) => !check.ok) : [];
+  const approvalBlockers = missingChecks.filter((check) => check.key !== 'approved');
+  const finalOutcomeText = draft.finalOutcome || draft.exactFix || '';
+  const confirmedCauseText = draft.confirmedCause || draft.rootCause || '';
+  const unprovenFix = looksUnprovenFix(finalOutcomeText);
+  const sourceAttemptText = looksUnprovenFix(record.finalOutcome || record.exactFix)
+    ? (record.finalOutcome || record.exactFix)
+    : '';
+  const finalOutcomeValue = sourceAttemptText && looksUnprovenFix(finalOutcomeText) ? '' : finalOutcomeText;
+  const missingText = missingChecks.length
+    ? missingChecks.map((check) => check.label).join(', ')
+    : 'Nothing blocking publish';
+  const approvalBlockerText = approvalBlockers.length
+    ? `Approval is blocked until this is safe for agent reuse: ${approvalBlockers.map((check) => check.label.toLowerCase()).join(', ')}.`
+    : '';
+  const publishBlockerText = disabledPublish
+    ? `Publishing is blocked: ${missingText}.`
+    : 'Ready to publish for agent use.';
+  const domId = String(record.id || 'selected-lesson').replace(/[^a-z0-9_-]+/gi, '-');
+  const approvalBlockerId = `${domId}-approval-blocker`;
+  const publishBlockerId = `${domId}-publish-blocker`;
+  const approvalDisabled = busy
+    || record.reviewStatus === 'approved'
+    || record.reviewStatus === 'published'
+    || approvalBlockers.length > 0;
+  const isPublished = record.reviewStatus === 'published';
+  const saveLabel = record.reviewStatus === 'rejected'
+    ? 'Save And Reconsider'
+    : sourceAttemptText
+    ? 'Save Corrected KB Entry'
+    : 'Save KB Entry';
+  const defaultDecision = record.reviewStatus === 'rejected' ? 'reject' : 'fix';
+  const decisionSeed = String(record.id || record._id || record.sourceIds?.escalationId || record.title || '');
+  const [selectedDecision, setSelectedDecision] = useState(defaultDecision);
+
+  useEffect(() => {
+    setSelectedDecision(defaultDecision);
+  }, [decisionSeed]);
+
+  const readyForHumanApproval = approvalBlockers.length === 0;
+  const showApprovalButton = readyForHumanApproval
+    && record.reviewStatus !== 'approved'
+    && record.reviewStatus !== 'published';
+  const showPublishButton = !disabledPublish && record.reviewStatus === 'approved';
+  const lockedPublishMessage = approvalBlockers.length
+    ? `Publishing unavailable until this is safe for agent reuse: ${approvalBlockers.map((check) => check.label.toLowerCase()).join(', ')}.`
+    : 'Publishing unavailable until a human approves this KB entry.';
+
+  return (
+    <section className={`knowledge-guided-review is-${guidance.tone}`}>
+      <div className="knowledge-review-note">
+        <strong>{guidance.title}</strong>
+        <span>{guidance.detail}</span>
+      </div>
+
+      {isPublished ? (
+        <div className="knowledge-guided-actions is-published" aria-label="Published KB entry status">
+          <span className="knowledge-action-blocker">
+            Published and available to agents. Monitor outcomes; use Advanced settings if this guidance stops working.
+          </span>
+        </div>
+      ) : (
+        <div className="knowledge-decision-stage" aria-label="KB draft decision">
+          <div className="knowledge-decision-question">
+            <span>Review decision</span>
+            <h3>How should this draft be saved?</h3>
+            <p>
+              Keep it as evidence, reject it, or complete the QBO Canada fields below so it can be reviewed for agent use.
+            </p>
+          </div>
+
+          <div className="knowledge-decision-options" role="group" aria-label="Choose what should happen to this KB draft">
+            <button
+              type="button"
+              className={`knowledge-decision-card is-safe${selectedDecision === 'history' ? ' is-selected' : ''}`}
+              onClick={() => setSelectedDecision('history')}
+              disabled={busy}
+              aria-pressed={selectedDecision === 'history'}
+            >
+              <span>No clear outcome</span>
+              <strong>Keep as case history</strong>
+              <small>Evidence stays searchable, but agents cannot recommend it as an answer.</small>
+            </button>
+            <button
+              type="button"
+              className={`knowledge-decision-card${selectedDecision === 'fix' ? ' is-selected' : ''}`}
+              onClick={() => setSelectedDecision('fix')}
+              disabled={busy}
+              aria-pressed={selectedDecision === 'fix'}
+            >
+              <span>Yes, the outcome is clear</span>
+              <strong>Edit KB entry</strong>
+              <small>Clean up the generated fields before review.</small>
+            </button>
+            <button
+              type="button"
+              className={`knowledge-decision-card is-danger${selectedDecision === 'reject' ? ' is-selected' : ''}`}
+              onClick={() => setSelectedDecision('reject')}
+              disabled={busy || record.reviewStatus === 'rejected' || record.reviewStatus === 'published'}
+              aria-pressed={selectedDecision === 'reject'}
+            >
+              <span>Draft is wrong</span>
+              <strong>Reject AI draft</strong>
+              <small>Use when the generated KB draft is misleading or unsupported.</small>
+            </button>
+          </div>
+
+          <div className="knowledge-correction-intro">
+            <span>QBO Canada KB draft</span>
+            <strong>The KB agent should complete this table from the finished escalation.</strong>
+            <p>Review the entry, correct missing or unsupported details, then save your decision below.</p>
+          </div>
+
+          <KnowledgeEntryReviewTable
+            draft={draft}
+            busy={busy}
+            onDraftChange={onDraftChange}
+            confirmedCauseText={confirmedCauseText}
+            finalOutcomeValue={finalOutcomeValue}
+          />
+
+          {selectedDecision === 'history' && (
+            <div className="knowledge-decision-outcome is-safe">
+              <div>
+                <span>Recommended for this source</span>
+                <strong>Save it as case history, not reusable guidance.</strong>
+                <p>
+                  What happens next: the case, chat, reported problem, and attempted work remain searchable evidence.
+                  Specialist agents cannot present it as a final answer.
+                </p>
+              </div>
+              <button className="btn btn-primary" type="button" onClick={onSaveCaseHistoryOnly} disabled={busy}>
+                Save As Case History Only
+              </button>
+            </div>
+          )}
+
+          {selectedDecision === 'reject' && (
+            <div className="knowledge-decision-outcome is-danger">
+              <div>
+                <span>Remove from review queue</span>
+                <strong>Reject this KB-agent draft.</strong>
+                <p>
+                  What happens next: the draft is marked rejected and agents will not use it.
+                  The original escalation record remains intact.
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={() => {
+                  if (window.confirm('Reject this KB draft? Agents will not use it as guidance.')) {
+                    onQuickReviewStatus?.('rejected');
+                  }
+                }}
+                disabled={busy || record.reviewStatus === 'rejected' || record.reviewStatus === 'published'}
+              >
+                Reject AI Draft
+              </button>
+            </div>
+          )}
+
+          {selectedDecision === 'fix' && (
+            <>
+              <div className="knowledge-fix-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={onSave}
+                  disabled={saveDisabled}
+                >
+                  {saveLabel}
+                </button>
+                {showApprovalButton && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => onQuickReviewStatus?.('approved')}
+                    disabled={approvalDisabled}
+                    aria-describedby={approvalDisabled && approvalBlockerText ? approvalBlockerId : undefined}
+                  >
+                    Approve For Agent Use
+                  </button>
+                )}
+                {showPublishButton ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => onPublish(false)}
+                    title="Publish this KB entry for agent use"
+                  >
+                    Publish For Agents
+                  </button>
+                ) : (
+                  <div className="knowledge-publish-locked" id={publishBlockerId}>
+                    <span>Publishing locked</span>
+                    <strong>{lockedPublishMessage}</strong>
+                  </div>
+                )}
+              </div>
+              <span className="knowledge-action-blocker">
+                {approvalBlockerText && <span id={approvalBlockerId}>{approvalBlockerText}</span>}
+                <span>{publishBlockerText}</span>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      <details className="knowledge-secondary-fields">
+        <summary>
+          <span>Matching details</span>
+          <strong>Optional retrieval tuning</strong>
+        </summary>
+        <div className="knowledge-guided-fields">
+          <GuidedField
+            id="knowledge-symptom"
+            label="How agents recognize the issue"
+            status={draft.symptom?.trim() ? 'done' : 'missing'}
+            why="This is used to match future escalations to the right lesson."
+          >
+            <textarea
+              rows={3}
+              value={draft.symptom}
+              onChange={(event) => onDraftChange('symptom', event.target.value)}
+              disabled={busy}
+              placeholder="Describe the customer symptom, affected workflow, error, missing output, or visible behavior."
+            />
+          </GuidedField>
+
+          <GuidedField
+            id="knowledge-signals"
+            label="Reliable matching signals"
+            status={draft.keySignalsText?.trim() ? 'done' : 'missing'}
+            why="Short signals help agents retrieve this lesson without reading the whole case."
+          >
+            <textarea
+              rows={3}
+              value={draft.keySignalsText}
+              onChange={(event) => onDraftChange('keySignalsText', event.target.value)}
+              disabled={busy}
+              placeholder="One signal per line, for example: T4 XML export missing T4 Summary."
+            />
+          </GuidedField>
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function KnowledgeEntryReviewTable({
+  draft,
+  busy,
+  onDraftChange,
+  confirmedCauseText,
+  finalOutcomeValue,
+}) {
+  const rows = [
+    {
+      key: 'title',
+      label: 'Title / Subject',
+      meaning: 'Short name for the KB entry. Example: T4 XML missing T4 Summary.',
+      control: (
+        <input
+          type="text"
+          value={draft.title || ''}
+          onChange={(event) => onDraftChange('title', event.target.value)}
+          disabled={busy}
+          placeholder="Short KB title"
+        />
+      ),
+    },
+    {
+      key: 'category',
+      label: 'Category',
+      meaning: 'The QBO area: payroll, tax, bank feeds, payments, reporting, etc.',
+      control: (
+        <input
+          type="text"
+          value={draft.category || ''}
+          onChange={(event) => onDraftChange('category', event.target.value)}
+          disabled={busy}
+          placeholder="payroll, tax, bank-feeds, reporting..."
+        />
+      ),
+    },
+    {
+      key: 'customerGoal',
+      label: 'Customer Goal',
+      meaning: 'What the customer was trying to do. This comes from CS is attempting to.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.customerGoal || ''}
+          onChange={(event) => onDraftChange('customerGoal', event.target.value)}
+          disabled={busy}
+          placeholder="Summarize what the customer was trying to do."
+        />
+      ),
+    },
+    {
+      key: 'reportedProblem',
+      label: 'Reported Problem',
+      meaning: 'What went wrong or what the customer saw. This comes from actual outcome.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.reportedProblem || ''}
+          onChange={(event) => onDraftChange('reportedProblem', event.target.value)}
+          disabled={busy}
+          placeholder="Summarize what went wrong."
+        />
+      ),
+    },
+    {
+      key: 'evidenceFromCase',
+      label: 'Evidence From Case',
+      meaning: 'The proof from the escalation: template details, screenshots, chat, research, assistant notes, and INV-agent findings.',
+      control: (
+        <textarea
+          rows={3}
+          value={draft.evidenceFromCase || ''}
+          onChange={(event) => onDraftChange('evidenceFromCase', event.target.value)}
+          disabled={busy}
+          placeholder="Summarize the case evidence that supports this KB entry."
+        />
+      ),
+    },
+    {
+      key: 'troubleshootingTried',
+      label: 'Troubleshooting Already Tried',
+      meaning: 'What was already checked or attempted before the final answer.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.troubleshootingTried || ''}
+          onChange={(event) => onDraftChange('troubleshootingTried', event.target.value)}
+          disabled={busy}
+          placeholder="List what was already tried."
+        />
+      ),
+    },
+    {
+      key: 'confirmedCause',
+      label: 'Confirmed Cause',
+      meaning: 'Why the issue happened. If not proven, write Unknown and explain what is missing.',
+      control: (
+        <textarea
+          rows={2}
+          value={confirmedCauseText || ''}
+          onChange={(event) => onDraftChange('confirmedCause', event.target.value)}
+          disabled={busy}
+          placeholder="State the confirmed cause, or Unknown."
+        />
+      ),
+    },
+    {
+      key: 'finalOutcome',
+      label: 'Final Outcome',
+      meaning: 'The answer to the issue. It can be a fix, product limitation, expected behavior, known INV, new escalation needed, workaround, or user/setup error.',
+      control: (
+        <textarea
+          rows={3}
+          value={finalOutcomeValue || ''}
+          onChange={(event) => onDraftChange('finalOutcome', event.target.value)}
+          disabled={busy}
+          placeholder="Write the final answer to the escalation."
+        />
+      ),
+    },
+    {
+      key: 'invEscalationStatus',
+      label: 'INV / Escalation Status',
+      meaning: 'Whether an INV was involved, one already exists, one should be created or attached, or no INV was mentioned.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.invEscalationStatus || ''}
+          onChange={(event) => onDraftChange('invEscalationStatus', event.target.value)}
+          disabled={busy}
+          placeholder="INV status, escalation owner, or No INV mentioned."
+        />
+      ),
+    },
+    {
+      key: 'importantBoundaries',
+      label: 'Important Boundaries',
+      meaning: 'Optional notes for when this case should not be confused with a similar QBO issue.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.importantBoundariesText || ''}
+          onChange={(event) => onDraftChange('importantBoundariesText', event.target.value)}
+          disabled={busy}
+          placeholder="Optional. One boundary per line."
+        />
+      ),
+    },
+    {
+      key: 'keySignals',
+      label: 'Matching Signals',
+      meaning: 'Short search and retrieval clues that help agents find the KB entry later.',
+      control: (
+        <textarea
+          rows={2}
+          value={draft.keySignalsText || ''}
+          onChange={(event) => onDraftChange('keySignalsText', event.target.value)}
+          disabled={busy}
+          placeholder="One signal per line."
+        />
+      ),
+    },
+  ];
+
+  return (
+    <div className="knowledge-entry-table" role="group" aria-label="QBO Canada KB entry data points">
+      <div className="knowledge-entry-table-head" aria-hidden="true">
+        <span>Data point</span>
+        <span>Plain meaning</span>
+      </div>
+      {rows.map((row) => (
+        <div className="knowledge-entry-row" key={row.key}>
+          <div className="knowledge-entry-label">
+            <strong>{row.label}</strong>
+          </div>
+          <div className="knowledge-entry-value">
+            <p>{row.meaning}</p>
+            {row.control}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SystemReviewTable({
+  record,
+  draft,
+  readiness,
+  operationalIntel,
+  operationalIntelLoading,
+  evidence,
+  relationships,
+  feedback,
+  auditEvents,
+}) {
+  const snapshot = record?.sourceSnapshot || {};
+  const sourceIds = record?.sourceIds || {};
+  const claims = Array.isArray(operationalIntel?.claims) ? operationalIntel.claims : [];
+  const indexedEvidence = Array.isArray(operationalIntel?.evidence) ? operationalIntel.evidence : [];
+  const missingChecks = Array.isArray(readiness?.checks) ? readiness.checks.filter((check) => !check.ok) : [];
+  const latestAudit = Array.isArray(auditEvents) && auditEvents.length
+    ? auditEvents[auditEvents.length - 1]
+    : null;
+  const publishedParts = [
+    record?.publishedAt ? `Published ${formatDate(record.publishedAt)}` : 'Not published',
+    record?.publishedDocPath ? `Path: ${record.publishedDocPath}` : '',
+    record?.publishedSectionTitle ? `Section: ${record.publishedSectionTitle}` : '',
+  ].filter(Boolean);
+
+  const rows = [
+    {
+      label: 'Source snapshot',
+      value: [
+        snapshot.caseNumber ? `Case ${snapshot.caseNumber}` : sourceIds.escalationId ? `Escalation ${sourceIds.escalationId}` : 'No source case linked',
+        snapshot.coid ? `COID ${snapshot.coid}` : '',
+        snapshot.category ? `Category ${snapshot.category}` : record?.category ? `Category ${record.category}` : '',
+        snapshot.status ? `Status ${snapshot.status}` : '',
+        snapshot.resolvedAt ? `Resolved ${formatDate(snapshot.resolvedAt)}` : '',
+      ].filter(Boolean).join(' / '),
+      source: 'Copied automatically from the escalation and linked chat when the KB draft is created.',
+    },
+    {
+      label: 'Review status',
+      value: REVIEW_LABELS[draft.reviewStatus] || draft.reviewStatus || 'Draft',
+      source: 'Starts as draft. The reviewer changes it when saving, approving, rejecting, or publishing.',
+    },
+    {
+      label: 'Reuse decision',
+      value: draft.reusableOutcome || 'case-history-only',
+      source: 'Suggested by the KB agent/system, then confirmed or changed by the reviewer.',
+    },
+    {
+      label: 'Publish target',
+      value: draft.publishTarget || 'case-history-only',
+      source: 'Controls whether agents may use it broadly, as an edge case, or only as history.',
+    },
+    {
+      label: 'Confidence',
+      value: formatPercent(Number(draft.confidence)),
+      source: 'Estimated from source completeness and review state. It can be adjusted in advanced settings.',
+    },
+    {
+      label: 'Evidence refs',
+      value: [
+        `${formatCount(Array.isArray(evidence) ? evidence.length : 0)} saved evidence item${Array.isArray(evidence) && evidence.length === 1 ? '' : 's'}`,
+        operationalIntelLoading ? 'index loading' : `${formatCount(claims.length)} indexed claim${claims.length === 1 ? '' : 's'}`,
+        operationalIntelLoading ? '' : `${formatCount(indexedEvidence.length)} indexed evidence item${indexedEvidence.length === 1 ? '' : 's'}`,
+      ].filter(Boolean).join(' / '),
+      source: 'Generated from linked escalation, linked conversation, uploaded proof, and indexed operational evidence.',
+    },
+    {
+      label: 'Relationships',
+      value: Array.isArray(relationships) && relationships.length
+        ? relationships.map((item) => `${item.type || 'related'} ${item.targetRecordId || ''}`.trim()).slice(0, 3).join('; ')
+        : 'No related KB records recorded',
+      source: 'Suggested by the system or added by a reviewer when records duplicate, contradict, supersede, or relate to each other.',
+    },
+    {
+      label: 'Feedback',
+      value: Array.isArray(feedback) && feedback.length
+        ? feedback.map((item) => item.outcome || 'unknown').slice(0, 3).join('; ')
+        : 'No usage feedback yet',
+      source: 'Added later when someone records whether the KB answer worked, partly worked, failed, or is unknown.',
+    },
+    {
+      label: 'Audit history',
+      value: latestAudit
+        ? `${latestAudit.action || 'change'} by ${latestAudit.actor || 'system'} on ${formatDate(latestAudit.createdAt)}`
+        : 'No audit events recorded',
+      source: 'Recorded automatically whenever the KB record is created, changed, approved, rejected, or published.',
+    },
+    {
+      label: 'Publication metadata',
+      value: publishedParts.join(' / '),
+      source: 'Written automatically when the KB entry is published for agent use.',
+    },
+    {
+      label: 'Agent-use readiness',
+      value: readiness?.ready
+        ? 'Ready after publish'
+        : `Needs ${formatCount(missingChecks.length)} item${missingChecks.length === 1 ? '' : 's'}: ${missingChecks.map((check) => check.label).join(', ') || 'none'}`,
+      source: 'Computed by the app from review status, reuse decision, source evidence, confirmed cause, and final outcome.',
+    },
+  ];
+
+  return (
+    <div className="knowledge-system-table" role="group" aria-label="Secondary system fields for this KB entry">
+      <div className="knowledge-system-table-head" aria-hidden="true">
+        <span>System field</span>
+        <span>Current value and source</span>
+      </div>
+      {rows.map((row) => (
+        <div className="knowledge-system-row" key={row.label}>
+          <strong>{row.label}</strong>
+          <div>
+            <p>{row.value}</p>
+            <span>{row.source}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SourceProofPanel({ record, operationalIntel, operationalIntelLoading }) {
+  const sourceIds = record?.sourceIds || {};
+  const evidence = Array.isArray(record?.evidence) ? record.evidence : [];
+  const sourceEvidence = evidence.find((item) => item?.type === 'escalation');
+  const conversationEvidence = evidence.find((item) => item?.type === 'conversation');
+  const claims = Array.isArray(operationalIntel?.claims) ? operationalIntel.claims : [];
+  const indexedEvidence = Array.isArray(operationalIntel?.evidence) ? operationalIntel.evidence : [];
+  const sourceCaseLabel = sourceIds.escalationId
+    ? sourceEvidence?.label || `Source case ${sourceIds.escalationId.slice(-6)}`
+    : 'No source case linked';
+  const chatLabel = sourceIds.conversationId
+    ? conversationEvidence?.label || `Linked chat ${sourceIds.conversationId.slice(-6)}`
+    : 'No linked chat';
+  const indexedTotal = claims.length + indexedEvidence.length;
+  const indexedSummary = operationalIntelLoading
+    ? 'Checking index'
+    : `${formatCount(indexedTotal)} retrievable item${indexedTotal === 1 ? '' : 's'}`;
+
+  return (
+    <section className="knowledge-source-proof" aria-label="Source proof for selected KB draft">
+      <div className="knowledge-source-proof-head">
+        <div>
+          <span>Source check</span>
+          <strong>What evidence supports this draft?</strong>
+        </div>
+        <p>Use this to verify the answer. If the source only proves attempts, keep it as case history.</p>
+      </div>
+      <div className="knowledge-source-proof-grid">
+        <div className="knowledge-source-proof-item">
+          <span>Original case</span>
+          {sourceIds.escalationId ? (
+            <a href={`#/escalations/${encodeURIComponent(sourceIds.escalationId)}`}>
+              <IconOpen />
+              <strong>{sourceCaseLabel}</strong>
+            </a>
+          ) : (
+            <strong>{sourceCaseLabel}</strong>
+          )}
+        </div>
+        <div className="knowledge-source-proof-item">
+          <span>Chat evidence</span>
+          {sourceIds.conversationId ? (
+            <a href={`#/chat/${encodeURIComponent(sourceIds.conversationId)}`}>
+              <IconOpen />
+              <strong>{chatLabel}</strong>
+            </a>
+          ) : (
+            <strong>{chatLabel}</strong>
+          )}
+        </div>
+        <div className="knowledge-source-proof-item">
+          <span>Draft source</span>
+          <strong>{getRecordWriterSummary(record)}</strong>
+        </div>
+        <div className="knowledge-source-proof-item">
+          <span>Future agent use</span>
+          <strong>{getRecordAgentUseState(record).label}</strong>
+        </div>
+        <div className="knowledge-source-proof-item">
+          <span>Saved evidence</span>
+          <strong>{indexedSummary}</strong>
+        </div>
+        <div className="knowledge-source-proof-item">
+          <span>Saved as</span>
+          <strong>{formatAllowedUses(record.allowedUses || [])}</strong>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function splitAttemptEvidence(sourceAttemptText = '') {
+  const text = String(sourceAttemptText || '').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    return {
+      tried: '',
+      failed: '',
+      suggestion: '',
+      missing: 'Final confirmed fix',
+    };
+  }
+  const [beforeNote, afterNote = ''] = text.split(/Note:/i);
+  const tried = beforeNote
+    .replace(/^Steps attempted in this case:\s*/i, '')
+    .trim();
+  const failedMatch = text.match(/(?:did\s+not|did\s+NOT|does\s+not)[^.]+(?:\.|$)/g) || [];
+  const suggestionMatch = text.match(/Verify\s+[^.]+(?:\.[^.]+)?/i);
+  const missing = /does not specify the final working fix|does not record the specific corrective action|root cause is undetermined/i.test(text)
+    ? 'Final confirmed fix and root cause'
+    : 'Final confirmed fix';
+
+  return {
+    tried: tried || 'Attempted steps are recorded in the source text.',
+    failed: failedMatch.join(' ').trim() || afterNote.trim() || 'The source does not prove these steps solved the case.',
+    suggestion: suggestionMatch ? suggestionMatch[0].trim() : 'Treat suggested next checks as unproven until a case confirms them.',
+    missing,
+  };
+}
+
+function AttemptEvidencePanel({ sourceAttemptText, draft, record }) {
+  const parts = splitAttemptEvidence(sourceAttemptText);
+  const symptom = draft.symptom || record.symptom || record.summary || 'No symptom summary recorded.';
+
+  return (
+    <section className="knowledge-attempts-found" aria-label="Structured source evidence">
+      <div>
+        <span>Evidence from the source</span>
+        <strong>Failed attempts stay out of agent guidance</strong>
+      </div>
+      <div className="knowledge-attempt-grid">
+        <div>
+          <span>Tried and failed</span>
+          <p>{parts.tried}</p>
+        </div>
+        <div>
+          <span>Known symptom</span>
+          <p>{symptom}</p>
+        </div>
+        <div>
+          <span>Known failed action</span>
+          <p>{parts.failed}</p>
+        </div>
+        <div>
+          <span>Unproven suggestion</span>
+          <p>{parts.suggestion}</p>
+        </div>
+        <div>
+          <span>Missing before publish</span>
+          <p>{parts.missing}</p>
+        </div>
+      </div>
+      <details className="knowledge-raw-source">
+        <summary>View original source text</summary>
+        <p>{sourceAttemptText}</p>
+      </details>
+    </section>
+  );
+}
+
+function IndexedInformationPanel({ record, draft, readiness, operationalIntel, operationalIntelLoading }) {
+  const sourceEvidence = Array.isArray(record?.evidence) ? record.evidence : [];
+  const sourceAttemptText = looksUnprovenFix(record.finalOutcome || record.exactFix)
+    ? (record.finalOutcome || record.exactFix)
+    : '';
+  const attemptParts = splitAttemptEvidence(sourceAttemptText);
+  const blockers = Array.isArray(readiness?.checks)
+    ? readiness.checks.filter((check) => check.key !== 'approved' && !check.ok)
+    : [];
+  const policy = readiness?.ready ? 'Allowed after publish' : 'Evidence only';
+  const indexedItems = [
+    {
+      group: 'Customer goal',
+      text: draft.customerGoal || record.customerGoal || 'No customer goal recorded.',
+      policy,
+    },
+    {
+      group: 'Reported problem',
+      text: draft.reportedProblem || record.reportedProblem || record.symptom || 'No reported problem recorded.',
+      policy,
+    },
+    {
+      group: 'Evidence from case',
+      text: draft.evidenceFromCase || record.evidenceFromCase || 'No evidence summary recorded.',
+      policy: 'Evidence only',
+    },
+    {
+      group: 'Troubleshooting already tried',
+      text: draft.troubleshootingTried || record.troubleshootingTried || attemptParts.tried || 'No troubleshooting summary recorded.',
+      policy: 'Evidence only',
+    },
+    {
+      group: 'Quick overview',
+      text: draft.summary || record.summary || record.title || 'No problem summary recorded.',
+      policy,
+    },
+    {
+      group: 'Attempted steps',
+      text: attemptParts.tried || 'No attempted steps indexed.',
+      policy: 'Evidence only',
+    },
+    {
+      group: 'Known failed actions',
+      text: attemptParts.failed || 'No failed action identified.',
+      policy: 'Evidence only',
+    },
+    {
+      group: 'Possible signals',
+      text: textToLines(draft.keySignalsText).join('; ') || 'No retrieval signals recorded.',
+      policy,
+    },
+    {
+      group: 'Source evidence',
+      text: sourceEvidence.map((item) => item.label || item.type || 'Evidence').filter(Boolean).join('; ') || 'No source evidence linked.',
+      policy: 'Evidence only',
+    },
+    {
+      group: 'Not safe for agent guidance yet',
+      text: blockers.length ? blockers.map((check) => check.label).join(', ') : 'No non-approval blockers remain.',
+      policy: blockers.length ? 'Blocked' : 'Ready after publish',
+    },
+  ];
+
+  return (
+    <section className="knowledge-indexed-panel" aria-label="Indexed information">
+      <div className="knowledge-indexed-head">
+        <div>
+          <span>Saved for retrieval</span>
+          <strong>{operationalIntelLoading ? 'Checking index' : `${formatCount(indexedItems.length)} pieces agents may find later`}</strong>
+        </div>
+        <p>These items can help future searches. They stay evidence-only until a human confirms a proven fix.</p>
+      </div>
+      <div className="knowledge-indexed-list">
+        {indexedItems.map((item) => (
+          <article className={`knowledge-indexed-item is-${item.policy.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`} key={item.group}>
+            <div>
+              <strong>{item.group}</strong>
+              <span>{item.policy}</span>
+            </div>
+            <p>{item.text}</p>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentPreviewPanel({ record, draft, readiness }) {
+  const preview = {
+    ...record,
+    ...fromEditableDraft(draft),
+    evidence: record.evidence,
+    allowedUses: record.allowedUses,
+  };
+  const blockers = Array.isArray(readiness?.checks)
+    ? readiness.checks.filter((check) => check.key !== 'approved' && !check.ok)
+    : [];
+  const agentReady = blockers.length === 0;
+  const keySignals = Array.isArray(preview.keySignals) ? preview.keySignals.filter(Boolean).slice(0, 4) : [];
+  const excludes = Array.isArray(preview.scope?.excludes) ? preview.scope.excludes.filter(Boolean).slice(0, 3) : [];
+  const importantBoundaries = Array.isArray(preview.importantBoundaries) && preview.importantBoundaries.length
+    ? preview.importantBoundaries.filter(Boolean).slice(0, 3)
+    : excludes;
+
+  return (
+    <section className={`knowledge-agent-preview${agentReady ? ' is-ready' : ' is-blocked'}`} aria-label="Agent preview">
+      <div className="knowledge-agent-preview-head">
+        <div>
+          <span>Agent preview</span>
+          <strong>{agentReady ? 'This is what agents can receive after approval and publish' : 'No agent-ready guidance yet'}</strong>
+        </div>
+        <p>
+          {agentReady
+            ? 'Review this preview before publishing. It should read like a reliable specialist instruction, not a case transcript.'
+            : `Fix these blockers first: ${blockers.map((check) => check.label.toLowerCase()).join(', ')}.`}
+        </p>
+      </div>
+      <dl className="knowledge-agent-preview-grid">
+        <div>
+          <dt>Customer goal</dt>
+          <dd>{preview.customerGoal || 'No customer goal recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Reported problem</dt>
+          <dd>{preview.reportedProblem || preview.symptom || preview.summary || 'No reported problem recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Confirmed cause</dt>
+          <dd>{preview.confirmedCause || preview.rootCause || 'No confirmed cause recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Final outcome</dt>
+          <dd>{looksUnprovenFix(preview.finalOutcome || preview.exactFix) ? 'Blocked: current text describes attempted work, not the final outcome.' : (preview.finalOutcome || preview.exactFix || 'No final outcome recorded yet.')}</dd>
+        </div>
+        <div>
+          <dt>INV / escalation status</dt>
+          <dd>{preview.invEscalationStatus || 'No INV or escalation status recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Retrieve when</dt>
+          <dd>{keySignals.length ? keySignals.join('; ') : 'No reliable matching signals recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Important boundaries</dt>
+          <dd>{importantBoundaries.length ? importantBoundaries.join('; ') : 'No boundaries recorded yet.'}</dd>
+        </div>
+        <div>
+          <dt>Allowed use</dt>
+          <dd>{formatAllowedUses(preview.allowedUsesOverride?.length ? preview.allowedUsesOverride : preview.allowedUses || [])}</dd>
+        </div>
+      </dl>
+    </section>
+  );
+}
+
+function GuidedField({ id, label, why, status = 'missing', required = false, children }) {
+  const statusLabel = status === 'done'
+    ? 'Ready'
+    : status === 'blocked'
+      ? 'Needs correction'
+      : required
+        ? 'Required'
+        : 'Helpful';
+  const fieldId = id || `knowledge-field-${String(label || 'input').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+  const helpId = `${fieldId}-help`;
+  const statusId = `${fieldId}-status`;
+  const control = isValidElement(children)
+    ? cloneElement(children, {
+        id: children.props.id || fieldId,
+        'aria-describedby': [children.props['aria-describedby'], helpId, statusId].filter(Boolean).join(' '),
+      })
+    : children;
+
+  return (
+    <div className={`knowledge-guided-field is-${status}`}>
+      <div>
+        <label htmlFor={fieldId}>{label}</label>
+        <strong id={statusId}>{statusLabel}</strong>
+      </div>
+      <p id={helpId}>{why}</p>
+      {control}
+    </div>
+  );
+}
+
+function AdvancedLessonSettings({
+  draft,
+  busy,
+  onDraftChange,
+  onDeprecate,
+  onRedact,
+  onRelationship,
+  onFeedback,
+  record,
+}) {
+  return (
+    <>
       <div className="knowledgebase-detail-grid">
         <label className="knowledgebase-detail-field">
           <span>Review State</span>
-          <select value={draft.reviewStatus} onChange={(event) => updateDraft('reviewStatus', event.target.value)} disabled={busy}>
+          <select value={draft.reviewStatus} onChange={(event) => onDraftChange('reviewStatus', event.target.value)} disabled={busy}>
             <option value="draft">{REVIEW_LABELS.draft}</option>
             <option value="approved">{REVIEW_LABELS.approved}</option>
             <option value="published" disabled>{REVIEW_LABELS.published}</option>
@@ -1428,7 +3491,7 @@ function KnowledgeRecordDetail({
         </label>
         <label className="knowledgebase-detail-field">
           <span>Agent Use</span>
-          <select value={draft.publishTarget} onChange={(event) => updateDraft('publishTarget', event.target.value)} disabled={busy}>
+          <select value={draft.publishTarget} onChange={(event) => onDraftChange('publishTarget', event.target.value)} disabled={busy}>
             <option value="category">Reusable category guidance</option>
             <option value="edge-case">Reusable edge-case guidance</option>
             <option value="case-history-only">Keep for case history only</option>
@@ -1436,7 +3499,7 @@ function KnowledgeRecordDetail({
         </label>
         <label className="knowledgebase-detail-field">
           <span>Reuse Decision</span>
-          <select value={draft.reusableOutcome} onChange={(event) => updateDraft('reusableOutcome', event.target.value)} disabled={busy}>
+          <select value={draft.reusableOutcome} onChange={(event) => onDraftChange('reusableOutcome', event.target.value)} disabled={busy}>
             <option value="canonical">Reusable fix</option>
             <option value="edge-case">Reusable edge case</option>
             <option value="case-history-only">Case history only</option>
@@ -1447,11 +3510,11 @@ function KnowledgeRecordDetail({
         </label>
         <label className="knowledgebase-detail-field">
           <span>Confidence</span>
-          <input type="number" min="0" max="1" step="0.05" value={draft.confidence} onChange={(event) => updateDraft('confidence', event.target.value)} disabled={busy} />
+          <input type="number" min="0" max="1" step="0.05" value={draft.confidence} onChange={(event) => onDraftChange('confidence', event.target.value)} disabled={busy} />
         </label>
         <label className="knowledgebase-detail-field">
           <span>Trust Override</span>
-          <select value={draft.trustStateOverride} onChange={(event) => updateDraft('trustStateOverride', event.target.value)} disabled={busy}>
+          <select value={draft.trustStateOverride} onChange={(event) => onDraftChange('trustStateOverride', event.target.value)} disabled={busy}>
             <option value="">Derived</option>
             <option value="candidate">{TRUST_LABELS.candidate}</option>
             <option value="reviewed">{TRUST_LABELS.reviewed}</option>
@@ -1462,60 +3525,42 @@ function KnowledgeRecordDetail({
         </label>
         <label className="knowledgebase-detail-field">
           <span>Category</span>
-          <input type="text" value={draft.category} onChange={(event) => updateDraft('category', event.target.value)} disabled={busy} />
+          <input type="text" value={draft.category} onChange={(event) => onDraftChange('category', event.target.value)} disabled={busy} />
         </label>
       </div>
 
       <label className="knowledgebase-detail-field">
         <span>Title</span>
-        <input type="text" value={draft.title} onChange={(event) => updateDraft('title', event.target.value)} disabled={busy} />
+        <input type="text" value={draft.title} onChange={(event) => onDraftChange('title', event.target.value)} disabled={busy} />
       </label>
       <label className="knowledgebase-detail-field">
         <span>Summary</span>
-        <textarea rows={3} value={draft.summary} onChange={(event) => updateDraft('summary', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Symptom</span>
-        <textarea rows={3} value={draft.symptom} onChange={(event) => updateDraft('symptom', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Root Cause</span>
-        <textarea rows={3} value={draft.rootCause} onChange={(event) => updateDraft('rootCause', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Exact Fix</span>
-        <textarea rows={5} value={draft.exactFix} onChange={(event) => updateDraft('exactFix', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Signals</span>
-        <textarea rows={3} value={draft.keySignalsText} onChange={(event) => updateDraft('keySignalsText', event.target.value)} disabled={busy} />
+        <textarea rows={3} value={draft.summary} onChange={(event) => onDraftChange('summary', event.target.value)} disabled={busy} />
       </label>
       <label className="knowledgebase-detail-field">
         <span>Agent Use Override</span>
-        <textarea rows={3} value={draft.allowedUsesText} onChange={(event) => updateDraft('allowedUsesText', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Applies To</span>
-        <textarea rows={2} value={draft.scopeAppliesText} onChange={(event) => updateDraft('scopeAppliesText', event.target.value)} disabled={busy} />
-      </label>
-      <label className="knowledgebase-detail-field">
-        <span>Excludes</span>
-        <textarea rows={2} value={draft.scopeExcludesText} onChange={(event) => updateDraft('scopeExcludesText', event.target.value)} disabled={busy} />
+        <textarea rows={3} value={draft.allowedUsesText} onChange={(event) => onDraftChange('allowedUsesText', event.target.value)} disabled={busy} />
       </label>
       <label className="knowledgebase-detail-field">
         <span>Version Notes</span>
-        <textarea rows={2} value={draft.scopeVersionNotes} onChange={(event) => updateDraft('scopeVersionNotes', event.target.value)} disabled={busy} />
+        <textarea rows={2} value={draft.scopeVersionNotes} onChange={(event) => onDraftChange('scopeVersionNotes', event.target.value)} disabled={busy} />
       </label>
       <label className="knowledgebase-detail-field">
         <span>Customer Scope</span>
-        <input type="text" value={draft.scopeCustomerScope} onChange={(event) => updateDraft('scopeCustomerScope', event.target.value)} disabled={busy} />
+        <input type="text" value={draft.scopeCustomerScope} onChange={(event) => onDraftChange('scopeCustomerScope', event.target.value)} disabled={busy} />
       </label>
       <label className="knowledgebase-detail-field">
         <span>Review Notes</span>
-        <textarea rows={3} value={draft.reviewNotes} onChange={(event) => updateDraft('reviewNotes', event.target.value)} disabled={busy} />
+        <textarea rows={3} value={draft.reviewNotes} onChange={(event) => onDraftChange('reviewNotes', event.target.value)} disabled={busy} />
       </label>
 
       <div className="knowledgebase-detail-actions">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onDeprecate} disabled={busy || record.trustState === 'deprecated'}>
+          Deprecate
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onRedact} disabled={busy || record.redaction?.customerIdentifiersRedacted}>
+          Redact IDs
+        </button>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onRelationship} disabled={busy}>
           Add Relationship
         </button>
@@ -1529,53 +3574,7 @@ function KnowledgeRecordDetail({
           Did Not Work
         </button>
       </div>
-
-      <RecordDetailList
-        title="Evidence"
-        empty="No evidence"
-        items={evidence.map((item) => ({
-          key: `${item.type || 'evidence'}-${item.id || item.label}`,
-          label: item.label || item.type || 'Evidence',
-          detail: item.summary || item.text || item.preview || item.evidenceStatus || item.status || '',
-        }))}
-      />
-      <RecordDetailList
-        title="Relationships"
-        empty="No relationships"
-        items={relationships.map((item) => ({
-          key: `${item.type}-${item.targetRecordId}`,
-          label: `${item.type} ${item.targetRecordId}`,
-          detail: `${item.status || 'proposed'} ${formatPercent(item.strength)} ${item.summary || ''}`.trim(),
-        }))}
-      />
-      <RecordDetailList
-        title="Recommended Actions"
-        empty="No recommendations"
-        items={actions.map((item, index) => ({
-          key: `${item.action}-${index}`,
-          label: `${item.priority || 'medium'} priority`,
-          detail: item.rationale ? `${item.action} - ${item.rationale}` : item.action,
-        }))}
-      />
-      <RecordDetailList
-        title="Outcome Feedback"
-        empty="No feedback"
-        items={feedback.map((item, index) => ({
-          key: `${item.createdAt}-${index}`,
-          label: `${item.outcome || 'unknown'} by ${item.actor || 'user'}`,
-          detail: item.notes || item.source || formatDate(item.createdAt),
-        }))}
-      />
-      <RecordDetailList
-        title="Audit History"
-        empty="No audit events"
-        items={auditEvents.map((item) => ({
-          key: item.eventId,
-          label: `${item.action} by ${item.actor || 'system'}`,
-          detail: `${formatDate(item.createdAt)} ${item.summary || ''}`.trim(),
-        }))}
-      />
-    </section>
+    </>
   );
 }
 
@@ -1588,43 +3587,70 @@ function KnowledgeOriginPanel({ record, readiness, operationalIntel, operational
   const status = getRecordAgentUseState(record);
   const nextAction = getRecordNextAction(record, readiness);
   const journey = buildRecordJourney(record, readiness, operationalIntel, operationalIntelLoading);
+  const indexedClaims = Array.isArray(operationalIntel?.claims) ? operationalIntel.claims.length : 0;
+  const indexedEvidence = Array.isArray(operationalIntel?.evidence) ? operationalIntel.evidence.length : 0;
   const sourceCaseLabel = sourceIds.escalationId
     ? sourceEvidence?.label || `Source case ${sourceIds.escalationId.slice(-6)}`
     : 'No source case';
   const chatLabel = sourceIds.conversationId
     ? conversationEvidence?.label || `Linked chat ${sourceIds.conversationId.slice(-6)}`
     : 'No linked chat';
+  const writerSummary = getRecordWriterSummary(record);
+  const indexedSummary = operationalIntelLoading
+    ? 'Indexing now'
+    : `${formatCount(indexedClaims)} claims / ${formatCount(indexedEvidence)} evidence items`;
   const visibleWarnings = warnings.slice(0, 5);
 
   return (
     <section className={`knowledge-origin-panel is-${status.tone}`}>
       <div className="knowledge-origin-top">
         <div>
-          <span>Source & Review Path</span>
+          <span>Where this came from</span>
           <h3>{status.label}</h3>
           <p>{status.detail}</p>
         </div>
         <strong>{REVIEW_LABELS[record.reviewStatus] || record.reviewStatus || REVIEW_LABELS.draft}</strong>
       </div>
 
-      <div className="knowledge-origin-links">
-        {sourceIds.escalationId ? (
-          <a href={`#/escalations/${encodeURIComponent(sourceIds.escalationId)}`}>
-            <IconOpen />
-            <span>{sourceCaseLabel}</span>
-          </a>
-        ) : (
-          <span>{sourceCaseLabel}</span>
-        )}
-        {sourceIds.conversationId ? (
-          <a href={`#/chat/${encodeURIComponent(sourceIds.conversationId)}`}>
-            <IconOpen />
-            <span>{chatLabel}</span>
-          </a>
-        ) : (
-          <span>{chatLabel}</span>
-        )}
-        <span>Writer: {getRecordWriterSummary(record)}</span>
+      <div className="knowledge-origin-facts">
+        <div className="knowledge-origin-fact">
+          <span>Source Case</span>
+          {sourceIds.escalationId ? (
+            <a href={`#/escalations/${encodeURIComponent(sourceIds.escalationId)}`}>
+              <IconOpen />
+              <strong>{sourceCaseLabel}</strong>
+            </a>
+          ) : (
+            <strong>{sourceCaseLabel}</strong>
+          )}
+        </div>
+        <div className="knowledge-origin-fact">
+          <span>Linked Chat</span>
+          {sourceIds.conversationId ? (
+            <a href={`#/chat/${encodeURIComponent(sourceIds.conversationId)}`}>
+              <IconOpen />
+              <strong>{chatLabel}</strong>
+            </a>
+          ) : (
+            <strong>{chatLabel}</strong>
+          )}
+        </div>
+        <div className="knowledge-origin-fact">
+          <span>Draft Writer</span>
+          <strong>{writerSummary}</strong>
+        </div>
+        <div className="knowledge-origin-fact">
+          <span>Indexed For Retrieval</span>
+          <strong>{indexedSummary}</strong>
+        </div>
+        <div className="knowledge-origin-fact">
+          <span>Agent Permission</span>
+          <strong>{formatAllowedUses(record.allowedUses || [])}</strong>
+        </div>
+        <div className="knowledge-origin-fact">
+          <span>Required Action</span>
+          <strong>{nextAction.label}</strong>
+        </div>
       </div>
 
       <div className="knowledge-origin-journey" aria-label="Knowledge record lifecycle">
@@ -1709,17 +3735,19 @@ function OperationalIntelligencePanel({ intelligence, loading, error }) {
 
 function PublishReadinessPanel({ readiness }) {
   const pct = readiness.total ? Math.round((readiness.complete / readiness.total) * 100) : 0;
+  const missing = Array.isArray(readiness.checks) ? readiness.checks.filter((check) => !check.ok) : [];
+  const visibleChecks = missing.length ? missing : [{ key: 'ready', label: 'All checks passed', ok: true }];
   return (
     <div className={`knowledge-readiness${readiness.ready ? ' is-ready' : ''}`}>
       <div className="knowledge-readiness-top">
-        <span>Publish readiness</span>
-        <strong>{readiness.complete}/{readiness.total}</strong>
+        <span>Agent-use readiness</span>
+        <strong>{readiness.ready ? 'Ready after publish' : `Needs ${formatCount(missing.length)} item${missing.length === 1 ? '' : 's'}`}</strong>
       </div>
       <div className="knowledge-readiness-bar" aria-hidden="true">
         <span style={{ width: `${pct}%` }} />
       </div>
       <div className="knowledge-readiness-checks">
-        {readiness.checks.map((check) => (
+        {visibleChecks.map((check) => (
           <span key={check.key} className={check.ok ? 'is-ok' : ''}>
             {check.label}
           </span>

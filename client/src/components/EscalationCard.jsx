@@ -1,6 +1,5 @@
 import Tooltip from './Tooltip.jsx';
 import {
-  ESCALATION_STATUSES,
   ESCALATION_STATUS_BADGE_MAP,
   ESCALATION_STATUS_LABELS,
 } from '../hooks/useEscalations.js';
@@ -8,10 +7,10 @@ import {
 export default function EscalationCard({
   escalation,
   onOpen,
-  onChangeStatus,
   onDelete,
 }) {
   if (!escalation) return null;
+  const isFinished = escalation.status === 'resolved' || escalation.status === 'escalated-further';
 
   return (
     <tr
@@ -20,20 +19,9 @@ export default function EscalationCard({
       style={{ cursor: onOpen ? 'pointer' : 'default' }}
     >
       <td>
-        <select
-          value={escalation.status}
-          onChange={(e) => {
-            e.stopPropagation();
-            onChangeStatus(escalation._id, e.target.value);
-          }}
-          className={`badge ${ESCALATION_STATUS_BADGE_MAP[escalation.status] || ''}`}
-          style={{ border: 'none', cursor: 'pointer', fontSize: 'var(--text-xs)', padding: '2px 6px' }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {ESCALATION_STATUSES.slice(1).map(s => (
-            <option key={s} value={s}>{ESCALATION_STATUS_LABELS[s]}</option>
-          ))}
-        </select>
+        <span className={`badge ${ESCALATION_STATUS_BADGE_MAP[escalation.status] || ''}`}>
+          {ESCALATION_STATUS_LABELS[escalation.status] || escalation.status || 'Open'}
+        </span>
       </td>
       <td>
         <span className={`cat-badge cat-${escalation.category || 'general'}`}>
@@ -56,15 +44,24 @@ export default function EscalationCard({
         {new Date(escalation.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
       </td>
       <td>
-        <button
-          className="btn btn-ghost btn-sm"
-          onClick={(e) => { e.stopPropagation(); onDelete(escalation._id); }}
-          title="Delete escalation"
-          type="button"
-          style={{ color: 'var(--danger)', opacity: 0.6 }}
-        >
-          Delete
-        </button>
+        <div className="esc-row-actions">
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+            type="button"
+          >
+            {isFinished ? 'Open' : 'Finish'}
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={(e) => { e.stopPropagation(); onDelete(escalation._id); }}
+            title="Delete escalation"
+            type="button"
+            style={{ color: 'var(--danger)', opacity: 0.6 }}
+          >
+            Delete
+          </button>
+        </div>
       </td>
     </tr>
   );
