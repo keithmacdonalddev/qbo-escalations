@@ -474,7 +474,11 @@ async function updateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
 async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
   const actor = resolveKnowledgeActor(actorInput);
   assertKnowledgePermission(actor, 'publish');
-  const exportMarkdown = parseBoolean(options.exportMarkdown, false);
+  // Kill-switch: when KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED is set, force the
+  // markdown export off regardless of the caller's payload so the guard holds
+  // for every route (the legacy escalations route enforces the same flag).
+  const markdownPublishDisabled = envFlag('KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED', false);
+  const exportMarkdown = !markdownPublishDisabled && parseBoolean(options.exportMarkdown, false);
   const doc = await loadCandidateForRecord(recordId);
 
   if (doc.reviewStatus === 'published' && doc.publishedAt) {

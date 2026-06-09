@@ -627,6 +627,49 @@ test('legacy escalation knowledge publish can run database-only for web deployme
   assert.equal(res.body.knowledge.publishedDocPath, '');
 });
 
+test('publish kill-switch forces markdown export off for the knowledge records route', async () => {
+  // Regression: POST /api/knowledge/records/:recordId/publish previously ignored
+  // KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED, so { exportMarkdown: true } still wrote
+  // markdown into playbook/ while the legacy escalations route enforced the flag.
+  // The guard now lives in publishKnowledgeRecord so every caller is covered.
+  const app = createApp();
+  const agent = request(app);
+  process.env.KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED = '1';
+  try {
+    const escalation = await makeEscalation({ caseNumber: 'CASE-MGMT-KILL-SWITCH' });
+    const candidate = await makeCandidate(escalation, {
+      reviewStatus: 'approved',
+      publishTarget: 'category',
+      reusableOutcome: 'canonical',
+      title: 'Kill-switch markdown publish',
+      summary: 'Markdown export must stay off while the kill-switch is set.',
+      symptom: 'Publish requested with exportMarkdown true while disabled.',
+      rootCause: 'The env kill-switch must override the caller payload.',
+      exactFix: 'Publish the candidate as trusted database knowledge.',
+      confidence: 0.9,
+    });
+
+    const publish = await agent
+      .post(`/api/knowledge/records/candidate:${candidate._id}/publish`)
+      .set('x-knowledge-role', 'publisher')
+      .set('x-knowledge-actor', 'publisher-a')
+      .send({ exportMarkdown: true });
+
+    assert.equal(publish.status, 200);
+    assert.equal(publish.body.ok, true);
+    assert.equal(publish.body.published, true);
+    // The markdown promotion path must not run: no export payload, no doc path,
+    // and the audit trail records a database-only publish.
+    assert.equal(publish.body.export, null);
+    assert.equal(publish.body.record.lineage.publishedDocType, 'database');
+    assert.equal(publish.body.record.lineage.publishedDocPath, '');
+    assert.equal(publish.body.record.auditEvents[0].action, 'record.publish.database');
+    assert.equal(publish.body.record.auditEvents[0].metadata.exportMarkdown, false);
+  } finally {
+    delete process.env.KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED;
+  }
+});
+
 test('agent-chat applies a kb.updateDraft edit and returns appliedChanges with prior values', async () => {
   // The KB sidebar chat now runs through the tool loop. We stub the chat so the
   // model emits an ACTION line that calls kb.updateDraft on turn 1, then a plain
