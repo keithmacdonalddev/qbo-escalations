@@ -1783,10 +1783,10 @@ code, pre {
 
   /* Idle size — tiny */
   min-width: 80px !important;
-  max-width: 400px !important;
+  max-width: 320px !important;
   width: auto !important;
-  height: 28px !important;
-  padding: 0 14px !important;
+  height: 24px !important;
+  padding: 0 12px !important;
   margin: 0 !important;
 
   /* Shape */
@@ -1804,7 +1804,7 @@ code, pre {
 
   /* Content */
   color: #f5f5f7 !important;
-  font-size: 11px !important;
+  font-size: 10px !important;
   font-weight: 500 !important;
   display: flex !important;
   align-items: center !important;
@@ -1852,16 +1852,16 @@ code, pre {
 
 /* --- Warning state: expanded pill with amber accent --- */
 .health-banner--yellow {
-  min-width: 280px !important;
-  height: 32px !important;
-  padding: 0 18px !important;
-  background: rgba(0, 0, 0, 0.8) !important;
-  color: #f0b232 !important;
-  border-color: rgba(240, 178, 50, 0.2) !important;
+  min-width: 210px !important;
+  max-width: 320px !important;
+  height: 24px !important;
+  padding: 0 12px !important;
+  background: rgba(0, 0, 0, 0.68) !important;
+  color: #c79a35 !important;
+  border-color: rgba(199, 154, 53, 0.16) !important;
   box-shadow:
-    0 2px 12px rgba(0, 0, 0, 0.3),
-    0 0 20px rgba(240, 178, 50, 0.06),
-    0 0 0 0.5px rgba(255, 255, 255, 0.05) inset !important;
+    0 2px 8px rgba(0, 0, 0, 0.22),
+    0 0 0 0.5px rgba(255, 255, 255, 0.04) inset !important;
 }
 
 

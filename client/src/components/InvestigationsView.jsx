@@ -310,10 +310,10 @@ export default function InvestigationsView() {
     const activeCats = Object.entries(stats.byCategory || {}).filter(([cat, count]) => count > 0).length;
 
     return [
-      { label: 'Active INVs', value: activeCount, icon: 'alert' },
-      { label: 'With Workarounds', value: workaroundCount, icon: 'check' },
-      { label: 'Total Matches', value: totalMatches, icon: 'match' },
-      { label: 'Categories', value: activeCats, icon: 'grid' },
+      { label: 'Active Issues', value: activeCount, icon: 'alert' },
+      { label: 'Workarounds Ready', value: workaroundCount, icon: 'check' },
+      { label: 'Case Matches', value: totalMatches, icon: 'match' },
+      { label: 'Coverage Areas', value: activeCats, icon: 'grid' },
     ];
   }, [stats]);
 
@@ -321,10 +321,12 @@ export default function InvestigationsView() {
     <div className="inv-view">
       {/* Header */}
       <div className="inv-view-header">
-        <h1 className="inv-view-title">Investigations</h1>
-        <span className="inv-view-count">
-          {!loading && `Showing ${investigations.length} of ${total} investigation${total !== 1 ? 's' : ''}`}
-        </span>
+        <div className="inv-view-heading">
+          <h1 className="inv-view-title">Investigations</h1>
+          <p>
+            Known issue evidence that agents can match against active escalations. Keep status, workaround, and resolution current.
+          </p>
+        </div>
         <button
           className="inv-import-toggle-btn"
           onClick={() => setShowImport(prev => !prev)}
@@ -435,19 +437,13 @@ export default function InvestigationsView() {
         )}
       </AnimatePresence>
 
-      {/* Stats */}
       {statCards && (
-        <div className="inv-stats-grid">
-          {statCards.map(card => (
-            <div key={card.label} className="inv-stat-card">
-              <div className="inv-stat-icon">
-                <StatIcon type={card.icon} />
-              </div>
-              <div className="inv-stat-value">{card.value}</div>
-              <div className="inv-stat-label">{card.label}</div>
-            </div>
-          ))}
-        </div>
+        <InvestigationWorkStrip
+          cards={statCards}
+          loading={loading}
+          visibleCount={investigations.length}
+          total={total}
+        />
       )}
 
       {/* Filter bar */}
@@ -460,7 +456,7 @@ export default function InvestigationsView() {
           <input
             type="search"
             className="inv-search-input"
-            placeholder="Search INV number, subject, notes..."
+            placeholder="Search INV number, issue, workaround, resolution, or symptoms..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -557,6 +553,40 @@ export default function InvestigationsView() {
         onCancel={() => setDeleteTarget(null)}
       />
     </div>
+  );
+}
+
+function InvestigationWorkStrip({ cards, loading, visibleCount, total }) {
+  const active = cards.find(card => card.label === 'Active Issues')?.value || 0;
+  const workarounds = cards.find(card => card.label === 'Workarounds Ready')?.value || 0;
+  const nextAction = active > workarounds
+    ? 'Add missing workarounds to active investigations'
+    : 'Review matched investigations before using them in a case';
+  const detail = loading
+    ? 'Loading known issues...'
+    : `Showing ${visibleCount} of ${total} investigation${total === 1 ? '' : 's'}. ${active} active, ${workarounds} with usable workarounds.`;
+
+  return (
+    <section className="inv-work-strip" aria-label="Investigation work summary">
+      <div className="inv-next-card">
+        <span className="eyebrow">Next best action</span>
+        <strong>{nextAction}</strong>
+        <p>{detail}</p>
+      </div>
+      <div className="inv-stats-grid">
+        {cards.map(card => (
+          <div key={card.label} className="inv-stat-card">
+            <div className="inv-stat-icon">
+              <StatIcon type={card.icon} />
+            </div>
+            <div>
+              <div className="inv-stat-value">{card.value}</div>
+              <div className="inv-stat-label">{card.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -676,54 +706,50 @@ function InvCard({ inv, expanded, copiedId, onToggle, onCopy, onFieldSave, onBul
     >
       {/* Compact single-line summary row */}
       <div className="inv-card-summary" onClick={onToggle} title={tooltipLines}>
-        {/* INV badge */}
-        <span className="inv-badge">{inv.invNumber}</span>
-
-        {/* Copy button */}
-        <button
-          className={`inv-copy-btn${copiedId === inv.invNumber ? ' copied' : ''}`}
-          onClick={(e) => onCopy(e, inv.invNumber)}
-          title="Copy INV number"
-          type="button"
-        >
-          {copiedId === inv.invNumber ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-            </svg>
-          )}
-        </button>
-
-        {/* Category badge */}
-        <span className={`cat-badge cat-${inv.category || 'unknown'}`}>
-          {categoryLabel(inv.category)}
-        </span>
-
-        {/* Status dropdown — custom, dark-themed */}
-        <StatusDropdown
-          value={localStatus || 'new'}
-          onChange={(nextStatus) => {
-            setLocalStatus(nextStatus);
-            onFieldSave(inv._id, 'status', nextStatus);
-          }}
-        />
-
-        {/* Match count (inline, only if > 0) */}
-        {(inv.affectedCount || 0) > 0 && (
-          <span className="inv-match-count-inline">
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
-            {inv.affectedCount}
-          </span>
-        )}
-
-        {/* Truncated subject — takes remaining space */}
         <span className="inv-card-subject-compact">{inv.subject}</span>
+
+        <span className="inv-card-tags">
+          <span className="inv-badge">{inv.invNumber}</span>
+
+          <button
+            className={`inv-copy-btn${copiedId === inv.invNumber ? ' copied' : ''}`}
+            onClick={(e) => onCopy(e, inv.invNumber)}
+            title="Copy INV number"
+            type="button"
+          >
+            {copiedId === inv.invNumber ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+              </svg>
+            )}
+          </button>
+
+          <span className={`cat-badge cat-${inv.category || 'unknown'}`}>
+            {categoryLabel(inv.category)}
+          </span>
+
+          <StatusDropdown
+            value={localStatus || 'new'}
+            onChange={(nextStatus) => {
+              setLocalStatus(nextStatus);
+              onFieldSave(inv._id, 'status', nextStatus);
+            }}
+          />
+
+          {(inv.affectedCount || 0) > 0 && (
+            <span className="inv-match-count-inline">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+              </svg>
+              {inv.affectedCount}
+            </span>
+          )}
+        </span>
 
         {/* Right-aligned meta: date + agent */}
         <span className="inv-card-meta-compact">

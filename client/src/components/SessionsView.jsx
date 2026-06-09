@@ -112,6 +112,59 @@ function getCaseValue(session, key, fallback = 'Unlinked') {
   return fallback;
 }
 
+function getLinkedEscalationId(session) {
+  return session?.escalationId || session?.escalation?._id || session?.escalation?.id || '';
+}
+
+function hasLinkedCase(session) {
+  return Boolean(
+    getLinkedEscalationId(session)
+    || getCaseValue(session, 'caseNumber', '')
+    || getCaseValue(session, 'coid', ''),
+  );
+}
+
+function getCaseLabel(session) {
+  const caseNumber = getCaseValue(session, 'caseNumber', '');
+  if (caseNumber) return `Case ${caseNumber}`;
+  const coid = getCaseValue(session, 'coid', '');
+  if (coid) return `COID ${coid}`;
+  if (getLinkedEscalationId(session)) return 'Linked case';
+  return 'Needs case link';
+}
+
+function getSessionPreview(session) {
+  const issue = session?.escalation?.attemptingTo || session?.escalation?.actualOutcome || '';
+  const title = getSessionTitle(session);
+  return issue || title;
+}
+
+function getPipelineEventCount(session) {
+  const explicit = Number(session?.totalEventCount);
+  if (Number.isFinite(explicit) && explicit > 0) return explicit;
+  const runs = Array.isArray(session?.caseIntake?.runs) ? session.caseIntake.runs : [];
+  return runs.reduce((sum, run) => {
+    const eventCount = Number(run?.eventCount);
+    if (Number.isFinite(eventCount) && eventCount > 0) return sum + eventCount;
+    return sum + (Array.isArray(run?.events) ? run.events.filter((event) => event?.category !== 'ui').length : 0);
+  }, 0);
+}
+
+function getPipelineState(session) {
+  if (hasLinkedCase(session)) return 'Linked to case';
+  const intakeStatus = String(session?.caseIntake?.status || '').trim();
+  if (intakeStatus === 'ready' || intakeStatus === 'captured') return 'Case captured';
+  if (getPipelineEventCount(session) > 0) return 'Agent run saved';
+  return 'Chat saved';
+}
+
+function getSessionNextAction(session) {
+  if (!hasLinkedCase(session)) return 'Open and link case';
+  const status = session?.escalation?.status;
+  if (status === 'resolved' || status === 'escalated-further') return 'Review outcome';
+  return 'Continue case';
+}
+
 function PlannedBadge({ children }) {
   return <span className="session-planned-badge">{children}</span>;
 }
@@ -285,8 +338,11 @@ export default function SessionsView({ sessionId = null }) {
     <div className="sessions-page">
       <header className="sessions-header">
         <div>
-          <div className="eyebrow">Session History</div>
+          <div className="eyebrow">Conversation Handoff</div>
           <h1>Sessions</h1>
+          <p className="sessions-header-copy">
+            Saved chats, image intake runs, and agent work. Use this page to confirm which conversations became escalation cases.
+          </p>
         </div>
         <div className="sessions-header-actions">
           <a className="btn btn-secondary" href="#/chat">New Session</a>
@@ -296,14 +352,14 @@ export default function SessionsView({ sessionId = null }) {
 
       {!sessionId ? (
         <section className="sessions-list-card">
-          <EventStatsStrip stats={eventStats} />
+          <SessionWorkStrip sessions={sessions} loading={loadingList} stats={eventStats} />
           <div className="sessions-toolbar">
             <div className="sessions-search">
               <input
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search session titles and message content..."
+                placeholder="Search conversations, case numbers, customers, or issue text..."
                 aria-label="Search sessions by title and content"
               />
             </div>
@@ -374,79 +430,103 @@ function SessionsTable({
       <table className="table sessions-table">
         <thead>
           <tr>
-            <th>Case #</th>
-            <th>COID</th>
-            <th>Agent</th>
-            <th>Customer</th>
+            <th>Session</th>
+            <th>Case Link</th>
+            <th>Pipeline</th>
             <th>Provider</th>
-            <th>Messages</th>
-            <th>Events</th>
+            <th>Turns</th>
             <th>Updated</th>
             <th aria-label="Actions"></th>
           </tr>
         </thead>
         <tbody>
-          {sessions.map((session) => (
-            <tr
-              key={session._id}
-              className="table-clickable-row"
-              onClick={() => { window.location.hash = `#/sessions/${session._id}`; }}
-            >
-              <td>
-                {editingId === session._id ? (
-                  <input
-                    type="text"
-                    value={editTitle}
-                    onChange={(event) => setEditTitle(event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
-                    onBlur={submitRename}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') submitRename();
-                      if (event.key === 'Escape') cancelRename();
-                    }}
-                    autoFocus
-                  />
-                ) : (
-                  <div>
-                    <div className="sessions-title">{getCaseValue(session, 'caseNumber')}</div>
-                    <div className="sessions-preview">{session.escalation?.category || getSessionTitle(session)}</div>
+          {sessions.map((session) => {
+            const linked = hasLinkedCase(session);
+            const linkedEscalationId = getLinkedEscalationId(session);
+            const category = session?.escalation?.category;
+            const pipelineEvents = getPipelineEventCount(session);
+            return (
+              <tr
+                key={session._id}
+                className="table-clickable-row"
+                onClick={() => { window.location.hash = `#/sessions/${session._id}`; }}
+              >
+                <td>
+                  {editingId === session._id ? (
+                    <input
+                      type="text"
+                      value={editTitle}
+                      onChange={(event) => setEditTitle(event.target.value)}
+                      onClick={(event) => event.stopPropagation()}
+                      onBlur={submitRename}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') submitRename();
+                        if (event.key === 'Escape') cancelRename();
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <div>
+                      <div className="sessions-title">{getSessionTitle(session)}</div>
+                      <div className="sessions-preview">{getSessionPreview(session)}</div>
+                    </div>
+                  )}
+                </td>
+                <td>
+                  <div className={`sessions-case-cell${linked ? ' is-linked' : ' is-unlinked'}`}>
+                    <span className="sessions-case-label">{getCaseLabel(session)}</span>
+                    {category ? (
+                      <span className={`cat-badge cat-${category}`}>{category.replace('-', ' ')}</span>
+                    ) : null}
+                    {linkedEscalationId ? (
+                      <a
+                        href={`#/escalations/${linkedEscalationId}`}
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        Open case
+                      </a>
+                    ) : null}
                   </div>
-                )}
-              </td>
-              <td>{getCaseValue(session, 'coid', '--')}</td>
-              <td>{getCaseValue(session, 'agentName', '--')}</td>
-              <td>{getCaseValue(session, 'clientContact', '--')}</td>
-              <td><ProviderLogo provider={session.provider} /></td>
-              <td>{session.messageCount || 0}</td>
-              <td>{session.totalEventCount || 0}</td>
-              <td>{formatDateTime(session.updatedAt)}</td>
-              <td>
-                <div className="sessions-row-actions">
-                  <button className="session-action-btn" type="button" onClick={(event) => { event.stopPropagation(); startRename(session); }} title="Rename session" aria-label="Rename session">
-                    <IconEdit />
-                  </button>
-                  <button className="session-action-btn" type="button" onClick={(event) => { event.stopPropagation(); copySession(session); }} title="Copy session" aria-label="Copy session">
-                    <IconCopy />
-                  </button>
-                  <button className="session-action-btn session-action-btn--danger" type="button" onClick={(event) => { event.stopPropagation(); setDeleteTarget(session._id); }} title="Delete session" aria-label="Delete session">
-                    <IconTrash />
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td>
+                  <div className="sessions-pipeline-cell">
+                    <strong>{getPipelineState(session)}</strong>
+                    <span>{getSessionNextAction(session)}</span>
+                    <small>{pipelineEvents.toLocaleString()} event{pipelineEvents === 1 ? '' : 's'}</small>
+                  </div>
+                </td>
+                <td><ProviderLogo provider={session.provider} showLabel /></td>
+                <td>{session.messageCount || 0}</td>
+                <td>{formatDateTime(session.updatedAt)}</td>
+                <td>
+                  <div className="sessions-row-actions">
+                    <button className="session-action-btn" type="button" onClick={(event) => { event.stopPropagation(); startRename(session); }} title="Rename session" aria-label="Rename session">
+                      <IconEdit />
+                    </button>
+                    <button className="session-action-btn" type="button" onClick={(event) => { event.stopPropagation(); copySession(session); }} title="Copy session" aria-label="Copy session">
+                      <IconCopy />
+                    </button>
+                    <button className="session-action-btn session-action-btn--danger" type="button" onClick={(event) => { event.stopPropagation(); setDeleteTarget(session._id); }} title="Delete session" aria-label="Delete session">
+                      <IconTrash />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
   );
 }
 
-function EventStatsStrip({ stats }) {
+function SessionWorkStrip({ sessions, loading, stats }) {
   const totals = stats?.totals || {};
   const byStage = stats?.byStage || {};
   const allTime = Number(totals.allTime) || 0;
-  const perSession = Number(totals.perSession) || 0;
-  const sessionCount = Number(totals.sessionCount) || 0;
+  const linked = sessions.filter(hasLinkedCase).length;
+  const needsLink = sessions.length - linked;
+  const agentRuns = sessions.filter((session) => getPipelineEventCount(session) > 0).length;
   const windowSize = Number(stats?.windowSize) || 0;
   const stageLabels = [
     { key: 'parser', label: 'Image Parser' },
@@ -456,23 +536,38 @@ function EventStatsStrip({ stats }) {
   ];
   const stageHint = windowSize > 0 ? `Moving avg over the last ${windowSize} completed runs.` : 'No completed runs yet.';
   return (
-    <div className="sessions-event-stats" aria-label="Pipeline event totals">
-      <div className="sessions-event-stats__totals">
-        <div className="stat-card">
+    <div className="sessions-work-strip" aria-label="Session work summary">
+      <div className="sessions-work-next">
+        <span className="eyebrow">Next best action</span>
+        <strong>{needsLink > 0 ? 'Link conversations that produced cases' : 'Review recent case conversations'}</strong>
+        <p>
+          {loading
+            ? 'Loading saved sessions...'
+            : needsLink > 0
+              ? `${needsLink} saved conversation${needsLink === 1 ? '' : 's'} still need a clear case link.`
+              : 'Every visible conversation is linked to a case or ready for review.'}
+        </p>
+      </div>
+      <div className="sessions-work-metrics">
+        <div className="sessions-work-metric">
+          <div className="stat-card-value">{linked.toLocaleString()}</div>
+          <div className="stat-card-label">Linked cases</div>
+        </div>
+        <div className="sessions-work-metric">
+          <div className="stat-card-value">{needsLink.toLocaleString()}</div>
+          <div className="stat-card-label">Needs case link</div>
+        </div>
+        <div className="sessions-work-metric">
+          <div className="stat-card-value">{agentRuns.toLocaleString()}</div>
+          <div className="stat-card-label">Agent runs saved</div>
+        </div>
+        <div className="sessions-work-metric">
           <div className="stat-card-value">{allTime.toLocaleString()}</div>
-          <div className="stat-card-label">Total events (all sessions)</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-value">{perSession.toLocaleString()}</div>
-          <div className="stat-card-label">Avg events / session</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-card-value">{sessionCount.toLocaleString()}</div>
-          <div className="stat-card-label">Sessions with events</div>
+          <div className="stat-card-label">Pipeline events</div>
         </div>
       </div>
       <div className="sessions-event-stats__per-stage" title={stageHint}>
-        <span className="sessions-event-stats__per-stage-label">Avg per stage:</span>
+        <span className="sessions-event-stats__per-stage-label">Agent activity:</span>
         {stageLabels.map(({ key, label }) => {
           const avg = Number(byStage?.[key]?.avg) || 0;
           const samples = Number(byStage?.[key]?.samples) || 0;
@@ -492,12 +587,13 @@ function EventStatsStrip({ stats }) {
   );
 }
 
-function ProviderLogo({ provider }) {
+function ProviderLogo({ provider, showLabel = false }) {
   const iconPath = getProviderIconPath(provider);
   const label = getProviderLabel(provider || '');
   return (
-    <span className="session-provider-logo" title={label} aria-label={label}>
+    <span className={`session-provider-logo${showLabel ? ' session-provider-logo--text' : ''}`} title={label} aria-label={label}>
       {iconPath ? <img src={iconPath} alt="" /> : <span>{label.slice(0, 2).toUpperCase()}</span>}
+      {showLabel ? <span className="session-provider-name">{label}</span> : null}
     </span>
   );
 }
