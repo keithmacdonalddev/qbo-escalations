@@ -5,7 +5,7 @@ argument-hint: '[feature-name]'
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 
-<!-- Version: 0.2 — last edited 2026-04-19 -->
+<!-- Version: 0.3 — last edited 2026-06-09 -->
 
 # Implementation Plan
 
@@ -57,7 +57,7 @@ Do not pre-decide the plan. Use what you find to ask sharper questions.
 
 ## Step 3: Planning dialogue
 
-Conduct a dialogue with the user. Ask questions one at a time, or in small groups where answers inform each other. Do NOT dump every question at once.
+Conduct a dialogue with the user. Ask questions one at a time, or in small groups where answers inform each other, rather than all at once.
 
 Cover these areas. Adapt wording to the feature. If an answer makes a question redundant, skip it. If an answer reveals a gap, probe deeper before moving on.
 
@@ -85,7 +85,7 @@ Cover these areas. Adapt wording to the feature. If an answer makes a question r
 
 After gathering the initial list, probe each criterion with the reviewer-objectivity test: **"Could a reviewer answer yes or no about this criterion without interpretation, just by looking at the code and behavior?"**
 
-If a criterion fails the test, rewrite it. Vague criteria will be flagged as Missing or Partial during cto-review — that is a High-severity finding and will FAIL the gate. The time to sharpen wording is now, not at review time.
+If a criterion fails the test, rewrite it.
 
 ### Risks and edge cases
 
@@ -125,18 +125,7 @@ Iterate based on feedback before writing.
 
 ## Step 5: Self-check before writing
 
-Work through this checklist. If any item fails, return to Step 3 to close the gap.
-
-- [ ] Problem statement is concrete, not "improve X."
-- [ ] In-scope and out-of-scope are both explicitly listed.
-- [ ] Every acceptance criterion is a testable statement.
-- [ ] Every acceptance criterion passes the reviewer-objectivity test — a reviewer can verify it yes/no without interpretation.
-- [ ] Files to create and files to modify are named specifically.
-- [ ] At least one end-to-end data-flow description exists.
-- [ ] At least three risks or edge cases are identified with handling.
-- [ ] Exceeds bar lists concrete items, not vague aspirations.
-- [ ] Deferred items (if any) are called out under their own heading.
-- [ ] Patterns surfaced from past reviews (Step 2) have been addressed or consciously dismissed.
+Before writing, check the draft against the required sections in `references/plan-schema.md` and the quality bar in Step 4, and confirm that patterns surfaced from past reviews (Step 2) have been addressed or consciously dismissed. If anything fails, return to Step 3 to close the gap.
 
 ## Step 6: Write and report
 

@@ -1,46 +1,50 @@
 # QBO Escalation Assistant
 
-Current QBO domain module for escalation specialists. It helps respond to phone agents faster and more accurately using Claude AI via CLI subprocess.
+QBO domain module for escalation specialists: helps respond to phone agents faster and more accurately using Claude AI via CLI subprocess.
 
 ## Product Framing
 
-This repo currently ships QBO escalation support, but the product direction is broader: an operational intelligence platform where expert AI agents help the user handle complex work and life situations using shared evidence, memory, workflows, decisions, actions, and human validation.
-
-Use `PRODUCT_NORTH_STAR.md` as the repo-level hierarchy. In practice:
+This repo ships QBO escalation support, but the product direction is broader: an operational intelligence platform where expert AI agents help the user handle complex work and life situations using shared evidence, memory, workflows, decisions, actions, and human validation. `PRODUCT_NORTH_STAR.md` is the repo-level hierarchy.
 
 - QBO escalation support is the first domain module and proving ground, not the whole product.
-- The Knowledge/KB work is shared governed memory for expert agents and reviewers, not a standalone destination.
-- Provider harnesses preserve evidence and provenance for model/provider calls; they are not the downstream intelligence layer by themselves.
-- Observability is the proof layer for what happened, which agent/provider acted, and what changed.
-- Prompt files and the prompt editor are agent contracts. Keep extraction prompts narrow, and give reasoning/review/coordinator prompts enough shared operating frame to preserve evidence, uncertainty, handoffs, and human validation.
+- Knowledge/KB work is shared governed memory for expert agents and reviewers, not a standalone destination.
+- Provider harnesses preserve evidence and provenance for model/provider calls; observability is the proof layer for what happened, which agent/provider acted, and what changed.
+- Prompt files and the prompt editor are agent contracts: keep extraction prompts narrow; give reasoning/review/coordinator prompts enough shared operating frame to preserve evidence, uncertainty, handoffs, and human validation.
 
-When explaining or building features, separate the user goal, product workflow, agent-team responsibility, evidence/memory/validation need, and implementation detail. Do not present implementation machinery as the reason the user comes to the app.
+When explaining or building features, separate the user goal, product workflow, agent-team responsibility, evidence/memory/validation need, and implementation detail. Implementation machinery is not why the user comes to the app.
 
 ## Architecture
 
 ```
 qbo-escalations/
-├── client/          # Vite + React 19 (ESM, type: module)
-├── server/          # Express 5 + Mongoose 9 (CommonJS)
-├── playbook/        # QBO escalation knowledge base (markdown files)
-│   ├── categories/  # Topic-specific guides (payroll, bank-feeds, etc.)
-│   └── templates/   # Response templates (acknowledgment, resolution, etc.)
-├── prompts/         # Saved Claude/Codex prompt templates
-├── prototypes/      # Standalone HTML prototypes
-├── scripts/         # One-off migration/utility scripts
-├── shared/          # Shared config (ai-provider-catalog.json)
-└── docs/            # Planning docs
+├── client/                     # Vite + React 19 (ESM, type: module)
+├── server/                     # Express 5 + Mongoose 9 (CommonJS)
+├── playbook/                   # QBO escalation knowledge base (markdown; categories + templates)
+├── prompts/                    # Saved Claude/Codex prompt templates
+├── prototypes/                 # Standalone HTML prototypes
+├── scripts/                    # One-off migration/utility scripts
+├── shared/                     # Shared config (ai-provider-catalog.json)
+├── docs/                       # Planning docs
+├── review-screenshots/         # agent-browser screenshots from visual tests
+├── temp-audits/                # workspace: audit scratch notes
+├── temp-reviews/               # workspace: review scratch notes
+├── TODOS/                      # workspace: planning scratch
+├── AGENT-PROFILES/             # past-phase research: agent profiles
+├── agent-profiles-overhaul/    # past-phase workspace: profile rebuild
+├── parser-harness-hardening/   # past-phase research: parser harness
+├── provider-harness-research/  # past-phase research: provider harness
+└── stress-testing/             # past-phase research: stress tests
 ```
 
 ## Tech Stack
 
-| Layer    | Technology                                                      |
-| -------- | --------------------------------------------------------------- |
-| UI       | React 19, Vite 7, Framer Motion 12                              |
-| Server   | Express 5, Mongoose 9                                           |
-| Database | MongoDB Atlas                                                   |
+| Layer    | Technology                                                        |
+| -------- | ----------------------------------------------------------------- |
+| UI       | React 19, Vite 7, Framer Motion 12                                |
+| Server   | Express 5, Mongoose 9                                             |
+| Database | MongoDB Atlas                                                     |
 | AI       | Claude CLI subprocess + direct provider APIs (see AI Integration) |
-| Dev      | concurrently, nodemon                                           |
+| Dev      | concurrently, nodemon                                             |
 
 ## Commands
 
@@ -52,24 +56,9 @@ npm run build        # Vite production build (client only)
 npm start            # Production server
 ```
 
-## Runtime Ownership And Server Control
+## Runtime Ownership
 
-The user owns local runtime control. Agents must not start, stop, restart, reload, or replace the app server, client dev server, gateway, MongoDB process, or any long-running local service unless the user explicitly asks for that runtime action in the current conversation.
-
-This includes `npm run dev`, `npm run dev:server`, `npm --prefix server run dev`, `npm start`, `nodemon` restarts, typing `rs`, `Stop-Process`, `taskkill`, killing port owners, or launching hidden/background server processes.
-
-Allowed without changing runtime state:
-
-- Check ports and process owners.
-- Read logs.
-- Call health endpoints.
-- Explain what needs to be restarted.
-
-If a config/code change requires a restart, make the change and tell the user exactly what to restart. Do not perform the restart unless asked.
-
-If a port conflict such as `EADDRINUSE` occurs, first identify the current port owner and whether it is serving the app. Preserve a healthy live instance by default. Ask before killing or replacing it unless the user has already explicitly said to close that process.
-
-Test commands may run their own short-lived isolated test servers when that is part of the test runner, but do not leave persistent dev or production services running after verification.
+The user owns local runtime control — never start, stop, restart, or replace the app server, client dev server, MongoDB, or any long-running local service unless the user explicitly asks in the current conversation (a PreToolUse hook also enforces this). Allowed without asking: checking ports/process owners, reading logs, calling health endpoints. If a change requires a restart, make the change and say exactly what to restart. On `EADDRINUSE`, identify the port owner and ask before killing a healthy instance. Short-lived test servers inside test runners are fine, but leave nothing running after verification.
 
 ## Key Files
 
@@ -86,33 +75,13 @@ Test commands may run their own short-lived isolated test servers when that is p
 
 ## AI Integration
 
-The app uses **two independent transports** for talking to AI models. They run side by side; configure either or both.
+Two independent transports talk to AI models; configure either or both.
 
-### Transport 1 — Claude CLI subprocess
+**Transport 1 — Claude CLI subprocess.** Spawns `claude -p --output-format stream-json` as a fresh child process per request, authenticated via the user's Claude Max subscription (no API key). Used by the chat/triage/analyst pipeline legs. Playbook content is prepended to stdin as `System instructions:`; images go via temp files + `--add-dir` (paths appended to the prompt); conversation history is reconstructed from MongoDB. Wrapper: `server/src/services/claude.js`.
 
-Spawns `claude -p --output-format stream-json` as a child process, authenticated via the user's Claude Max subscription. No API key needed.
+**Transport 2 — Direct provider APIs.** Server makes HTTPS calls to provider endpoints using stored API keys or local server URLs. Used by the image parser and any agent picked from the provider catalog (Anthropic, OpenAI, Gemini, Kimi, LM Studio, Codex, LLM gateway, local AI server). Provider/model is chosen in the UI and persisted to `localStorage`; keys and base URLs come from server env. Images are sent inline as base64 in the JSON body. Catalog: `shared/ai-provider-catalog.json`; entrypoint: `server/src/services/image-parser.js`.
 
-- Used by: chat / triage / analyst legs of the pipeline
-- Streaming via `--output-format stream-json`
-- Playbook content prepended to stdin as `System instructions:`
-- Images via temp files + `--add-dir` (paths appended to prompt text)
-- Each request spawns a fresh process; conversation history reconstructed from MongoDB
-- Wrapper: `server/src/services/claude.js`
-
-### Transport 2 — Direct provider APIs
-
-Server makes HTTPS calls directly to provider endpoints using stored API keys or local server URLs.
-
-- Used by: image parser, and any agent the user picks from the provider catalog
-- Providers: Anthropic, OpenAI, Gemini, Kimi, LM Studio, Codex, LLM gateway, and the user's local AI server
-- Provider/model chosen via UI dropdown, persisted to `localStorage`; API keys / base URLs come from server env
-- Images sent inline as base64 in the JSON request body (not via temp files)
-- Provider catalog: `shared/ai-provider-catalog.json`
-- Image-parser entrypoint: `server/src/services/image-parser.js`
-
-### Mixing transports
-
-The two transports are independent. If you only have a local API server configured (no Anthropic/OpenAI key), the CLI-subprocess legs still work via Claude Max, and the direct-API legs work against whatever providers you have keys or URLs for.
+The transports are independent: the CLI-subprocess legs work via Claude Max even with no provider keys, and the direct-API legs work against whatever providers have keys or URLs configured.
 
 ## API Response Format
 
@@ -129,42 +98,14 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 
 ## Testing Policy
 
-Write tests for important or high-risk parts of the application. Do not over-test trivial changes.
+- Server tests: Node.js built-in `node:test` + `supertest` + `mongodb-memory-server`, in `server/test/`. Run with `npm --prefix server test` (or `npm test` at root).
+- Test new routes, critical business logic (chat flow, parsing, image archive, INV matching), and bug-fix regressions. Skip trivial CRUD wrappers, config changes, and one-off scripts.
+- Visual tests: use `agent-browser` against `localhost:5174` after significant UI changes; save screenshots to `review-screenshots/` with descriptive names; use `snapshot -i` to verify interactive elements; capture before/after pairs for visual bugs.
+- Run the test suite as a separate, explicit step — not mid-implementation. Don't block implementation progress on test completeness.
 
-### Server Tests
+## Verification
 
-- **Framework**: Node.js built-in `node:test` + `supertest` + `mongodb-memory-server`
-- **Location**: `server/test/`
-- **Run**: `npm test` (root) or `npm --prefix server test`
-- **Write tests for**: new routes, critical business logic (chat flow, parsing, image archive, INV matching), bug fix regressions
-- **Skip tests for**: trivial CRUD wrappers, config changes, one-off scripts
-
-### Visual Tests (agent-browser)
-
-- Use `agent-browser` to screenshot the UI at `localhost:5174` after significant UI changes
-- Save screenshots to `review-screenshots/` using descriptive filenames (e.g., `desktop-chat-after-fix.png`)
-- Use `agent-browser snapshot -i` to verify interactive elements are present and correctly labelled
-- Capture before/after pairs when fixing visual bugs
-
-### Rules
-
-- Do not run the test suite mid-implementation — run tests as a separate, explicit step
-- Do not write tests for every change — only when the change is high-risk or explicitly requested
-- Never block implementation progress waiting on test completeness
-- New server routes and critical logic changes should include or update a test file
-
-## Verification — MANDATORY (hardened 3x, 7+ failures logged)
-
-**If you have not verified it with a tool call in THIS conversation, do not state it as fact. Say "let me check." No exceptions. EVER.**
-
-This applies to EVERYTHING — code, APIs, product specs, pricing, hardware details, general knowledge, subagent output, recommendations, advice. There is no category of information exempt from verification.
-
-- **Do not parrot subagent/research output.** Critically review it first. Check if it accounts for user context (location, hardware, preferences).
-- **Do not rely on training data for facts.** Training data is stale and wrong often enough to destroy trust.
-- **When the user says you're wrong, investigate immediately.** Do not argue or repeat the same answer.
-- **Flag uncertainty explicitly.** "The search found X but I haven't independently verified it" is always better than presenting something as fact.
-- **Instruct ALL subagents** to verify their own findings and flag what they couldn't confirm.
-- **Accuracy over speed — ALWAYS.** A slower correct answer beats a fast wrong one. Nobody asked for speed.
+Before reporting completion or stating a fact, audit each claim against a tool result from this session; only report work you can point to evidence for. If something is unverified, say so explicitly. When the user says you're wrong, investigate before responding. Instruct subagents to do the same.
 
 ## Environment Variables
 
@@ -178,36 +119,17 @@ Copy `server/.env.example` to `server/.env`:
 
 ## Agent Browser
 
-`agent-browser` (v0.24.0) is installed globally and available to all agents for browser automation:
+`agent-browser` (v0.24.0) is installed globally for browser automation: visual UI testing at `localhost:5174`, accessibility-tree snapshots, element interaction via `@ref`s, screenshots and PDFs.
+Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot after navigation`.
+Skill: `~/.claude/skills/agent-browser/` (auto-triggers). Full docs: `C:/Users/NewAdmin/Desktop/PROJECTS/tools/agent-browser/`.
 
-- Visual UI testing of the React client at `localhost:5174`
-- Accessibility tree snapshots for understanding page structure
-- Element interaction (click, fill, select) using `@ref` system
-- Screenshots and PDFs for review
-- Automated navigation and form testing
+## Memory
 
-**Skill**: installed at `~/.claude/skills/agent-browser/` — auto-triggers for browser automation requests.
-**Source + full docs**: `C:/Users/NewAdmin/Desktop/PROJECTS/tools/agent-browser/`
+Shared memory hooks run at user-level — project hooks handle PM rules, config freshness, and the runtime guard.
 
-Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot after navigation`
+## Working Rules
 
-## Claude Code
-
-### Quick Reference
-
-- Full dev: `npm run dev` (server + client concurrently)
-- Server only: `npm run dev:server`
-- Client only: `npm run dev:client`
-- Build client: `npm run build`
-- Image parser test: `npm run test:image-parser`
-
-### Memory
-
-- Shared memory hooks run at user-level — project hooks handle PM rules and config freshness only.
-
-## More Rules
-
-- Think before coding Don't assume. Don't hide confusion. State ambiguity explicitly. Present multiple interpretations rather than silently picking one. Push back if a simpler approach exists. Stop and ask rather than guess.
-- Simplicity first. The test: would a senior engineer say this is overcomplicated? If yes, rewrite it.
-- Surgical changes. Don't "improve" adjacent code. Don't refactor things that aren't broken. Match the existing style even if you'd do it differently. If you notice unrelated dead code, mention it, don't delete it. Every changed line should trace directly to the request.
-- Goal-driven execution. Transform "fix the bug" into "write a test that reproduces it, then make it pass." Transform "add validation" into "write tests for invalid inputs, then make them pass." Give it success criteria and watch it loop until done.
+- State ambiguity instead of silently picking an interpretation; push back when a simpler approach exists.
+- Simplicity first — if a senior engineer would call it overcomplicated, rewrite it.
+- Surgical changes: every changed line traces to the request. Don't refactor adjacent code; mention unrelated dead code rather than deleting it.
+- Turn vague asks into verifiable success criteria (e.g. "fix the bug" becomes "write a test that reproduces it, then make it pass").

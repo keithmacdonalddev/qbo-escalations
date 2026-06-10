@@ -7,7 +7,7 @@ context: fork
 agent: general-purpose
 ---
 
-<!-- Version: 0.2 — last edited 2026-04-19 -->
+<!-- Version: 0.3 — last edited 2026-06-09 -->
 
 # Skill Audit
 
@@ -17,7 +17,7 @@ Audit the skill family across three modes. Each mode produces findings in a shar
 - **Static mode** (always): reads each skill folder and checks against the best-practices checklist in `references/best-practices-checklist.md`. Runs regardless of corpus size.
 - **Research mode** (opt-in): fetches current Claude Code skill documentation, proposes updates to the static checklist, and flags skill-level findings where current docs contradict existing skill patterns. WebFetch is only invoked when research mode is enabled.
 
-This skill does NOT edit any other skills. It produces a report. Applying recommendations is a separate deliberate action by the user (see Step 7).
+This skill does not edit any other skills. It produces a report. Applying recommendations is a separate deliberate action by the user (see Step 7).
 
 If repository policy in `CLAUDE.md` or `.claude/rules/` conflicts with this skill, follow repository policy.
 
@@ -78,7 +78,7 @@ For each unique feature-slug:
 - Plans: all files whose base name starts with the slug (`<slug>.md`, `<slug>-v1.md`, `<slug>-v2.md`). Sort by file modification time (oldest to newest). Most recent is "current."
 - Reviews: all files matching `cto-review-<slug>-<timestamp>.md`. Sort by the timestamp in the filename.
 
-**Read every plan and review file completely.** Full reads — the analysis depends on specific content.
+Read every plan and review file completely — the analysis depends on specific content.
 
 **Apply each dimension from `references/analysis-dimensions.md`.** Record findings with evidence; every claim must cite specific files or excerpts.
 
@@ -88,12 +88,7 @@ Dimensions checked: finding specificity, severity calibration, finding recurrenc
 
 Always runs.
 
-For each skill folder found in Step 2:
-
-1. Read the skill's `SKILL.md` completely.
-2. Read any reference files in the skill's `references/` directory.
-3. Read any sample files in the skill's `examples/` directory.
-4. Read any script files in the skill's `scripts/` directory.
+For each skill folder found in Step 2, read it completely: `SKILL.md` plus everything in `references/`, `examples/`, and `scripts/`.
 
 Apply every rule from `references/best-practices-checklist.md`. Each rule specifies:
 

@@ -7,7 +7,7 @@ context: fork
 agent: general-purpose
 ---
 
-<!-- Version: 0.5 — last edited 2026-05-20 -->
+<!-- Version: 0.6 — last edited 2026-06-09 -->
 
 # CTO Production Gate Review
 
@@ -53,7 +53,7 @@ The script emits a markdown scope package containing:
 
 The review covers committed and staged changes. Treat the script's output as a starting map, not truth:
 
-- You must still read every modified file yourself in Step 4. If a read contradicts the script's classification, trust the read.
+- Read every modified file yourself in Step 4. If a read contradicts the script's classification, trust the read.
 - The unplanned-candidates list is a hint. Plans often describe behavior, not files — a file's absence from the plan text does not guarantee it was unplanned. Verify by reading the plan for matching intent.
 - Files deferred in the plan are excluded from review regardless of what the script reports.
 
@@ -83,14 +83,11 @@ Record a Plan Fidelity table in the report:
 
 ## Step 4: Read and trace
 
-Read every modified file completely. No skimming. A change is best understood in the context of the whole file — the bug often lives in the interaction between new code and the existing surrounding code.
+Read every modified file completely. A change is best understood in the context of the whole file — the bug often lives in the interaction between new code and the existing surrounding code.
 
 If more than 20 files were modified, read the top 15 by lines changed completely, and read the rest without tracing callers. Note the abbreviated files in the report.
 
-For each modified file, record:
-
-- Who imports it (grep the codebase for the filename).
-- What it imports (read the file's import/require statements).
+For each modified file, note who imports it (grep the codebase for the filename) and what it imports.
 
 After reading, trace **at least one complete data path** across file boundaries. Pick the most complex path touched by the feature and follow it end-to-end — for example, route handler → service → model → response → client fetch → component render. At each boundary, verify the producer and consumer agree on the data shape.
 
@@ -124,22 +121,17 @@ If a section has no findings, write "No findings." Do not pad sections with obse
 
 ## Step 6: Verification gate
 
-Before finalizing any HIGH or CRITICAL finding, verify it is real:
-
-1. Trace the execution path from trigger to completion.
-2. Read 50 lines above and below the finding for context.
-3. Walk through the exact steps a user would take.
-4. Grep for every caller of the modified function.
+Before finalizing any HIGH or CRITICAL finding, verify it is real: trace the execution path from trigger to completion, and grep for every caller of the modified function.
 
 If the complete execution path cannot be traced, downgrade from HIGH/CRITICAL to MEDIUM with the note "Potential issue — verify with runtime testing."
 
-**Severity calibration:** Before marking any finding MEDIUM, answer: "Can a QA engineer reproduce this in under 60 seconds?" If yes, it is HIGH, not MEDIUM. Review agents systematically underrate findings.
+**Severity calibration:** Before marking any finding MEDIUM, answer: "Can a QA engineer reproduce this in under 60 seconds?" If yes, it is HIGH, not MEDIUM.
 
 ## Step 7: Exceeds expectations assessment
 
 This is the primary evaluation criterion, not an optional section.
 
-Answer honestly:
+Answer:
 
 1. Would a senior engineer be impressed by this code?
 2. Are error messages actionable? Would a user know what went wrong and what to do?
@@ -163,16 +155,7 @@ Include a "Recommendations to Exceed Intent" table in the report:
 
 ## Step 8: Self-check before writing the report
 
-Work through this checklist before writing anything to disk. If any item fails, fix it first. Do not ship a report with gaps.
-
-- [ ] Every Critical and High finding has a `file:line` reference.
-- [ ] Every finding has a concrete reproduction scenario, not "this might break."
-- [ ] Every finding has a code-level fix, not vague advice like "consider refactoring."
-- [ ] The cross-boundary data flow trace is documented and specific.
-- [ ] The Plan Fidelity table covers every distinct item in the plan.
-- [ ] All eight framework sections are addressed — sections without findings say "No findings" explicitly.
-- [ ] The overall score equals the minimum of the eight section scores.
-- [ ] The intent gate has been applied (score capped at 7 if Exceeds Expectations #5 is "no").
+Before writing, confirm the report satisfies the contract: every finding carries `file:line`, a reproduction scenario, and a code-level fix; the cross-boundary trace is documented; the Plan Fidelity table covers every plan item; all eight framework sections are addressed; the overall score is the minimum of the section scores; and the intent gate is applied. Fix any gap before writing.
 
 ## Step 9: Gate Decision, score, and write the report
 

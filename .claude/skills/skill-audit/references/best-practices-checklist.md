@@ -76,6 +76,18 @@ When research mode proposes a new rule or a reworded rule, it ends up here after
 **Check:** Body does not present many alternatives for the same task ("you could use A, or B, or C, or..."). Provide a default with an escape hatch for exceptions.
 **Source:** Skill authoring best practices — Anti-patterns.
 
+### B08 — No reasoning-transcription instructions [HIGH]
+**Check:** The body does not instruct Claude to expose its internal reasoning process — phrases like "show your thinking," "include your chain of thought," "transcribe your reasoning," or "explain your internal reasoning step by step." On current models these can trigger the reasoning-extraction safety classifier and silently degrade output. Asking for justification in the deliverable (rationale for a recommendation, why a risk is rated high) is normal output and not a violation.
+**Source:** Claude Fable 5 migration guidance — reasoning-extraction classifier risk.
+
+### B09 — No all-caps emphasis [LOW]
+**Check:** The body does not use all-caps emphasis words (IMPORTANT, MANDATORY, NEVER, ALWAYS) to steer behavior. Plain declarative statements carry the same weight on current models. Status and severity tokens (PASS/FAIL, HIGH/CRITICAL), acronyms, and markdown or table headers do not count.
+**Source:** Claude Fable 5 migration guidance — heavy emphasis no longer needed.
+
+### B10 — Every instruction earns its place [MEDIUM]
+**Check:** For each instruction, ask: would removing it cause worse output, or is it steering an older model? Remove instructions that restate what a competent model does by default ("read the file before editing," "be thorough," "double-check your work") or that repeat a requirement already stated elsewhere in the skill. Keep genuine domain methodology: rubrics, schemas, gate criteria, output formats, and concrete verification procedures.
+**Source:** Claude Fable 5 migration guidance — skills developed for prior models are often too prescriptive and can degrade output quality.
+
 ---
 
 ## Reference file rules
@@ -148,6 +160,6 @@ When research mode proposes a new rule or a reworded rule, it ends up here after
 
 ## How to add new rules
 
-When research mode proposes a new rule, it arrives as a block under the appropriate category. Each proposed rule has a placeholder ID (F10, B08, etc.) that the user can accept as-is or renumber during review.
+When research mode proposes a new rule, it arrives as a block under the appropriate category. Each proposed rule has a placeholder ID (F10, B11, etc.) that the user can accept as-is or renumber during review.
 
 The user reviews proposed additions and either accepts or rejects before the rule becomes active in future static audits.
