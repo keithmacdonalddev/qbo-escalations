@@ -478,8 +478,14 @@ async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
   // markdown export off regardless of the caller's payload so the guard holds
   // for every route (the legacy escalations route enforces the same flag).
   const markdownPublishDisabled = envFlag('KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED', false);
-  const exportMarkdown = !markdownPublishDisabled && parseBoolean(options.exportMarkdown, false);
   const doc = await loadCandidateForRecord(recordId);
+  // Redacted records are masked on READ, but the markdown publisher writes the
+  // RAW stored text to the playbook filesystem — so a redacted record must
+  // never export markdown. Force a database-only publish instead.
+  const recordRedacted = Boolean(doc.redaction?.customerIdentifiersRedacted);
+  const exportMarkdown = !markdownPublishDisabled
+    && !recordRedacted
+    && parseBoolean(options.exportMarkdown, false);
 
   if (doc.reviewStatus === 'published' && doc.publishedAt) {
     return { record: normalizeKnowledgeCandidate(doc), published: false, idempotent: true, export: null };
@@ -558,6 +564,11 @@ async function deprecateKnowledgeRecord(recordId, payload = {}, actorInput = {})
   return { record: normalizeKnowledgeCandidate(doc), knowledgeReview, operationalIntelligence };
 }
 
+// Redaction is NON-DESTRUCTIVE: this only sets the redaction marker. The
+// stored body text is never modified; every read path masks it via
+// normalizeKnowledgeCandidate (and the other redaction-aware serializers)
+// while the flag is set. Sending { customerIdentifiersRedacted: false }
+// lifts the redaction and restores full read access to the original text.
 async function redactKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
   const actor = resolveKnowledgeActor(actorInput);
   assertKnowledgePermission(actor, 'redact');
@@ -572,8 +583,13 @@ async function redactKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
   appendAuditEvent(doc, {
     action: 'record.redact',
     actor,
-    summary: 'Knowledge record source identifiers marked for redaction.',
-    metadata: { fields: doc.redaction.fields },
+    summary: doc.redaction.customerIdentifiersRedacted
+      ? 'Knowledge record redacted: body content and source identifiers are masked on every read path; original text preserved in the database.'
+      : 'Knowledge record redaction lifted: original content is readable again.',
+    metadata: {
+      customerIdentifiersRedacted: doc.redaction.customerIdentifiersRedacted,
+      fields: doc.redaction.fields,
+    },
   });
   await doc.save();
   await syncOperationalIntelligence(doc, actor, 'knowledge.record.redact');

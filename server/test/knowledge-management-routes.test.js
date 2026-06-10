@@ -458,7 +458,10 @@ test('knowledge export uses normalized redacted records', async () => {
     .query({ format: 'markdown', includeCandidates: 'true', includeLegacy: 'false' });
   assert.equal(markdown.status, 200);
   assert.equal(markdown.body.export.count, 1);
-  assert.match(markdown.body.export.content, /# Redacted export candidate/);
+  // Redaction masks body/free-text content on read — the raw title must not
+  // appear in the markdown export (the old assertion here encoded the bug).
+  assert.doesNotMatch(markdown.body.export.content, /Redacted export candidate/);
+  assert.match(markdown.body.export.content, /# \[redacted\]/);
 });
 
 test('knowledge management writes are role gated for deployed defaults', async () => {

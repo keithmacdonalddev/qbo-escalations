@@ -31,6 +31,14 @@ const FINAL_AGENT_USES = new Set([
 
 const FINAL_AGENT_OUTCOMES = new Set(['canonical', 'edge-case']);
 
+// Read-time redaction mask. When a record is redacted
+// (redaction.customerIdentifiersRedacted), every read path that goes through
+// normalizeKnowledgeCandidate returns this marker instead of the stored
+// free-text body content. The original text is NEVER modified in MongoDB —
+// masking is applied on read only, so lifting the redaction restores the
+// original content.
+const REDACTION_MASK = '[redacted]';
+
 function safeString(value, fallback = '') {
   if (typeof value === 'string') return value;
   if (value === null || value === undefined) return fallback;
@@ -136,6 +144,18 @@ function parseOffset(value) {
 
 function isKnowledgeCandidateDbReady() {
   return Boolean(KnowledgeCandidate.db && KnowledgeCandidate.db.readyState === 1);
+}
+
+function isRedactedCandidate(candidate) {
+  return Boolean(candidate?.redaction?.customerIdentifiersRedacted);
+}
+
+function maskRedactedText(value) {
+  return safeString(value, '').trim() ? REDACTION_MASK : '';
+}
+
+function maskRedactedStringArray(values) {
+  return Array.isArray(values) && values.length > 0 ? [REDACTION_MASK] : [];
 }
 
 function emptyKnowledgeRecordPage({ limit = 50, offset = 0 } = {}) {
@@ -289,8 +309,10 @@ function buildCandidateEvidence(candidate) {
     evidence.push({
       type: 'conversation',
       id: safeString(candidate.conversationId),
-      label: snapshot.conversationTitle || 'Linked conversation',
-      preview: compactText(snapshot.conversationPreview, 320),
+      label: redacted ? 'Linked conversation' : (snapshot.conversationTitle || 'Linked conversation'),
+      preview: redacted
+        ? maskRedactedText(snapshot.conversationPreview)
+        : compactText(snapshot.conversationPreview, 320),
       messageCount: Number(snapshot.conversationMessageCount || 0),
       evidenceStatus: 'conversation-snapshot',
     });
@@ -300,7 +322,9 @@ function buildCandidateEvidence(candidate) {
     evidence.push({
       type: 'resolution',
       label: 'Resolution text',
-      text: compactText(snapshot.resolution || snapshot.resolutionNotes, 500),
+      text: redacted
+        ? REDACTION_MASK
+        : compactText(snapshot.resolution || snapshot.resolutionNotes, 500),
       evidenceStatus: 'review-source',
     });
   }
@@ -310,11 +334,11 @@ function buildCandidateEvidence(candidate) {
     evidence.push({
       type: safeString(ref.type, 'note'),
       id: safeString(ref.id),
-      label: compactText(ref.label || ref.summary || ref.type, 160),
+      label: redacted ? REDACTION_MASK : compactText(ref.label || ref.summary || ref.type, 160),
       status: safeString(ref.status),
       strength: clampConfidence(ref.strength),
-      summary: compactText(ref.summary, 400),
-      url: safeString(ref.url),
+      summary: redacted ? maskRedactedText(ref.summary) : compactText(ref.summary, 400),
+      url: redacted ? maskRedactedText(ref.url) : safeString(ref.url),
       evidenceStatus: safeString(ref.status, 'supporting-evidence'),
     });
   }
@@ -374,13 +398,73 @@ function normalizeActionRecommendations(candidate) {
   }));
 }
 
+// Free-text fields on the NORMALIZED record that carry case/customer-derived
+// content. When a record is redacted, all of them are masked on read.
+// Deliberately NOT masked (governance/operational metadata, no case body):
+// category, trust/review/outcome states, allowedUses, warnings, lineage,
+// auditEvents (machine-generated summaries + field lists), redaction.notes
+// (authored by the redactor to document the redaction), kbAgent.sourceSummary
+// (machine-generated source counts).
+const REDACTED_RECORD_TEXT_FIELDS = [
+  'title',
+  'customerGoal',
+  'reportedProblem',
+  'evidenceFromCase',
+  'troubleshootingTried',
+  'confirmedCause',
+  'finalOutcome',
+  'invEscalationStatus',
+  'summary',
+  'symptom',
+  'rootCause',
+  'exactFix',
+  'escalationPath',
+  'reviewNotes',
+  'deprecatedReason',
+];
+const REDACTED_RECORD_ARRAY_FIELDS = ['keySignals', 'importantBoundaries'];
+
+// Single masking chokepoint for normalized records. Evidence entries are
+// masked in buildCandidateEvidence (which sees the same redaction flag);
+// everything else free-text is masked here. The stored document is untouched.
+function applyRedactionMaskToRecord(record) {
+  for (const field of REDACTED_RECORD_TEXT_FIELDS) {
+    record[field] = maskRedactedText(record[field]);
+  }
+  for (const field of REDACTED_RECORD_ARRAY_FIELDS) {
+    record[field] = maskRedactedStringArray(record[field]);
+  }
+  record.scope = {
+    ...record.scope,
+    appliesTo: maskRedactedStringArray(record.scope?.appliesTo),
+    excludes: maskRedactedStringArray(record.scope?.excludes),
+    versionNotes: maskRedactedText(record.scope?.versionNotes),
+    customerScope: maskRedactedText(record.scope?.customerScope),
+  };
+  record.relationships = (record.relationships || []).map((item) => ({
+    ...item,
+    summary: maskRedactedText(item.summary),
+    evidence: maskRedactedStringArray(item.evidence),
+  }));
+  record.outcomeFeedback = (record.outcomeFeedback || []).map((item) => ({
+    ...item,
+    notes: maskRedactedText(item.notes),
+  }));
+  record.actionRecommendations = (record.actionRecommendations || []).map((item) => ({
+    ...item,
+    action: maskRedactedText(item.action),
+    rationale: maskRedactedText(item.rationale),
+  }));
+  return record;
+}
+
 function normalizeKnowledgeCandidate(candidate) {
   const source = candidate?.toObject ? candidate.toObject() : (candidate || {});
   const trustState = deriveTrustState(source);
   const allowedUses = deriveAllowedUses(source);
   const warnings = buildWarnings(source, trustState, allowedUses);
 
-  return {
+  const record = {
     id: `candidate:${safeString(source._id)}`,
     sourceType: 'knowledge-candidate',
     recordType: 'case-learning',
@@ -469,6 +553,8 @@ function normalizeKnowledgeCandidate(candidate) {
     warnings,
     updatedAt: toIso(source.updatedAt),
   };
+
+  return isRedactedCandidate(source) ? applyRedactionMaskToRecord(record) : record;
 }
 
 function normalizePlaybookChunk(chunk) {
@@ -557,7 +643,14 @@ function buildCandidateFilter({ query, reviewStatus, category, reusableOutcome }
         { 'sourceSnapshot.conversationPreview': regex },
       );
     }
-    filter.$or = clauses;
+    // Redacted records are masked on read, so free-text matching against
+    // their RAW stored content would let a caller confirm hidden content by
+    // probing queries. Exclude them from text search entirely; they remain
+    // visible in unqueried lists and by direct id.
+    filter.$and = [
+      { $or: clauses },
+      { 'redaction.customerIdentifiersRedacted': { $ne: true } },
+    ];
   }
 
   return filter;
@@ -866,40 +959,43 @@ async function getKnowledgeSummary() {
     };
   }
 
-  const [
-    reviewStatusCounts,
-    reusableOutcomeCounts,
-    publishTargetCounts,
-    deprecatedCount,
-    restrictedCount,
-  ] = await Promise.all([
-    KnowledgeCandidate.aggregate([{ $group: { _id: '$reviewStatus', count: { $sum: 1 } } }]),
-    KnowledgeCandidate.aggregate([{ $group: { _id: '$reusableOutcome', count: { $sum: 1 } } }]),
-    KnowledgeCandidate.aggregate([{ $group: { _id: '$publishTarget', count: { $sum: 1 } } }]),
-    KnowledgeCandidate.countDocuments({ deprecatedAt: { $ne: null } }),
-    KnowledgeCandidate.countDocuments({ reusableOutcome: 'unsafe-to-reuse' }),
-  ]);
+  // Trust-state counts MUST come from deriveTrustState — the same single
+  // source of truth every read path uses — so each record lands in exactly
+  // ONE bucket. The previous version mapped reviewStatus buckets straight
+  // onto trust states (counting published-but-unsafe records as TRUSTED) and
+  // layered overlapping countDocuments on top (double-booking restricted and
+  // deprecated records). One projection over the governance fields keeps all
+  // four breakdowns and the total consistent by construction.
+  const docs = await KnowledgeCandidate.find({})
+    .select('reviewStatus reusableOutcome publishTarget deprecatedAt trustStateOverride')
+    .lean();
 
   const byReviewStatus = {};
   const byReusableOutcome = {};
   const byPublishTarget = {};
-
-  for (const item of reviewStatusCounts) byReviewStatus[item._id || 'unknown'] = item.count;
-  for (const item of reusableOutcomeCounts) byReusableOutcome[item._id || 'unknown'] = item.count;
-  for (const item of publishTargetCounts) byPublishTarget[item._id || 'unknown'] = item.count;
-
   const trustState = {
-    [TRUST_STATES.CANDIDATE]: byReviewStatus.draft || 0,
-    [TRUST_STATES.REVIEWED]: byReviewStatus.approved || 0,
-    [TRUST_STATES.TRUSTED]: byReviewStatus.published || 0,
-    [TRUST_STATES.REJECTED]: byReviewStatus.rejected || 0,
-    [TRUST_STATES.RESTRICTED]: restrictedCount || 0,
-    [TRUST_STATES.DEPRECATED]: deprecatedCount || 0,
+    [TRUST_STATES.CANDIDATE]: 0,
+    [TRUST_STATES.REVIEWED]: 0,
+    [TRUST_STATES.TRUSTED]: 0,
+    [TRUST_STATES.REJECTED]: 0,
+    [TRUST_STATES.RESTRICTED]: 0,
+    [TRUST_STATES.DEPRECATED]: 0,
   };
+
+  for (const doc of docs) {
+    const reviewStatus = safeString(doc.reviewStatus, '') || 'unknown';
+    const reusableOutcome = safeString(doc.reusableOutcome, '') || 'unknown';
+    const publishTarget = safeString(doc.publishTarget, '') || 'unknown';
+    byReviewStatus[reviewStatus] = (byReviewStatus[reviewStatus] || 0) + 1;
+    byReusableOutcome[reusableOutcome] = (byReusableOutcome[reusableOutcome] || 0) + 1;
+    byPublishTarget[publishTarget] = (byPublishTarget[publishTarget] || 0) + 1;
+    const derived = deriveTrustState(doc);
+    trustState[derived] = (trustState[derived] || 0) + 1;
+  }
 
   return {
     candidates: {
-      total: Object.values(byReviewStatus).reduce((sum, count) => sum + count, 0),
+      total: docs.length,
       byReviewStatus,
       byReusableOutcome,
       byPublishTarget,
@@ -923,6 +1019,7 @@ async function getKnowledgeSummary() {
 
 module.exports = {
   ALLOWED_USES,
+  REDACTION_MASK,
   TRUST_STATES,
   buildAgentKnowledgeContext,
   deriveAllowedUses,

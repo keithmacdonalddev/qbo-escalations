@@ -78,6 +78,28 @@ function escapeRegex(value) {
   return safeString(value, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Read-time redaction mask, mirrored from knowledgebase-service. Evidence and
+// claim text is copied OUT of the knowledge candidate into the operational
+// intelligence collections at sync time, so a redacted candidate must sync
+// masked text. Keys (claimKey/evidenceKey) keep hashing the RAW text so the
+// redact-time re-sync overwrites the SAME persisted docs in place — and an
+// unredact re-sync restores the original text from the untouched candidate.
+const REDACTION_MASK = '[redacted]';
+
+function isRedactedCandidate(candidate) {
+  return Boolean(candidate?.redaction?.customerIdentifiersRedacted);
+}
+
+function maskRedactedText(redacted, value) {
+  if (!redacted) return value;
+  return safeString(value, '').trim() ? REDACTION_MASK : '';
+}
+
+function maskRedactedStringArray(redacted, values) {
+  if (!redacted) return values;
+  return Array.isArray(values) && values.length > 0 ? [REDACTION_MASK] : [];
+}
+
 function sourceRecordIdFor(candidate) {
   const id = safeString(candidate?._id || candidate?.id, '').replace(/^candidate:/, '');
   return id ? `candidate:${id}` : '';
@@ -142,13 +164,13 @@ function buildEvidenceSpecs(candidate) {
       summary: compactText([
         snapshot.status ? `Status: ${snapshot.status}` : '',
         snapshot.category ? `Category: ${snapshot.category}` : '',
-        snapshot.actualOutcome ? `Outcome: ${snapshot.actualOutcome}` : '',
+        snapshot.actualOutcome ? `Outcome: ${redacted ? REDACTION_MASK : snapshot.actualOutcome}` : '',
       ].filter(Boolean).join(' | '), 500),
-      text: compactText([
+      text: maskRedactedText(redacted, compactText([
         snapshot.attemptingTo,
         snapshot.actualOutcome,
         snapshot.tsSteps,
-      ].filter(Boolean).join('\n'), 1600),
+      ].filter(Boolean).join('\n'), 1600)),
       evidenceStatus: snapshot.resolvedAt ? 'finalized-case' : 'case-snapshot',
       strength: snapshot.resolvedAt ? 0.85 : 0.55,
       metadata: {
@@ -167,9 +189,9 @@ function buildEvidenceSpecs(candidate) {
       evidenceKey: `${sourceRecordId}:evidence:conversation:${conversationId}`,
       sourceType: 'conversation',
       sourceId: safeString(conversationId),
-      label: compactText(snapshot.conversationTitle || 'Linked conversation', 180),
-      summary: compactText(snapshot.conversationPreview, 700),
-      text: compactText(snapshot.conversationPreview, 1600),
+      label: redacted ? 'Linked conversation' : compactText(snapshot.conversationTitle || 'Linked conversation', 180),
+      summary: maskRedactedText(redacted, compactText(snapshot.conversationPreview, 700)),
+      text: maskRedactedText(redacted, compactText(snapshot.conversationPreview, 1600)),
       evidenceStatus: 'conversation-snapshot',
       strength: snapshot.conversationPreview ? 0.65 : 0.4,
       metadata: {
@@ -187,12 +209,13 @@ function buildEvidenceSpecs(candidate) {
   if (resolutionText) {
     specs.push({
       ...base,
+      // evidenceKey hashes the RAW text on purpose — see REDACTION_MASK note.
       evidenceKey: `${sourceRecordId}:evidence:resolution:${hashText(resolutionText)}`,
       sourceType: 'resolution',
       sourceId: safeString(escalationId),
       label: 'Resolution text',
-      summary: compactText(snapshot.resolution || snapshot.resolutionNotes || candidate?.exactFix, 700),
-      text: resolutionText,
+      summary: maskRedactedText(redacted, compactText(snapshot.resolution || snapshot.resolutionNotes || candidate?.exactFix, 700)),
+      text: maskRedactedText(redacted, resolutionText),
       evidenceStatus: 'review-source',
       strength: 0.8,
       metadata: {
@@ -205,16 +228,17 @@ function buildEvidenceSpecs(candidate) {
   const refs = Array.isArray(candidate?.evidenceRefs) ? candidate.evidenceRefs : [];
   for (const ref of refs.slice(0, 20)) {
     const label = compactText(ref?.label || ref?.summary || ref?.id || ref?.type || 'Supporting evidence', 180);
+    // keySource uses the RAW ref content on purpose — see REDACTION_MASK note.
     const keySource = `${ref?.type || 'note'}:${ref?.id || label}:${ref?.summary || ''}`;
     specs.push({
       ...base,
       evidenceKey: `${sourceRecordId}:evidence:ref:${hashText(keySource)}`,
       sourceType: 'knowledge-ref',
       sourceId: compactText(ref?.id, 200),
-      label,
-      summary: compactText(ref?.summary, 700),
-      text: compactText(ref?.summary, 1200),
-      url: compactText(ref?.url, 1000),
+      label: maskRedactedText(redacted, label),
+      summary: maskRedactedText(redacted, compactText(ref?.summary, 700)),
+      text: maskRedactedText(redacted, compactText(ref?.summary, 1200)),
+      url: maskRedactedText(redacted, compactText(ref?.url, 1000)),
       evidenceStatus: compactText(ref?.status || 'supporting-evidence', 120),
       strength: clampConfidence(ref?.strength, 0.5),
       metadata: {
@@ -231,14 +255,17 @@ function pushClaim(specs, candidate, claimType, text, metadata = {}) {
   const sourceRecordId = sourceRecordIdFor(candidate);
   const value = compactText(text, claimType === 'fix' ? 1600 : 900);
   if (!sourceRecordId || !value) return;
+  const redacted = isRedactedCandidate(candidate);
   specs.push({
+    // claimKey hashes the RAW text on purpose so a redact-time re-sync masks
+    // the SAME persisted claim doc in place (and unredact restores it).
     claimKey: `${sourceRecordId}:claim:${claimType}:${hashText(value)}`,
     sourceRecordId,
     knowledgeCandidateId: objectIdOrNull(candidate?._id),
     escalationId: objectIdOrNull(candidate?.escalationId),
     conversationId: objectIdOrNull(candidate?.conversationId),
     claimType,
-    text: value,
+    text: redacted ? REDACTION_MASK : value,
     metadata,
   });
 }
@@ -333,6 +360,7 @@ async function upsertClaim(spec, candidate, policy, evidenceDocs, now, actor = {
   const evidenceIds = evidenceDocs.map((doc) => doc._id);
   const evidenceKeys = evidenceDocs.map((doc) => doc.evidenceKey);
   const scope = candidate?.scope || {};
+  const redacted = isRedactedCandidate(candidate);
   return OperationalClaim.findOneAndUpdate(
     { claimKey: spec.claimKey },
     {
@@ -350,10 +378,10 @@ async function upsertClaim(spec, candidate, policy, evidenceDocs, now, actor = {
         notAllowedUses: policy.notAllowedUses,
         agentSafe: policy.agentSafe,
         scope: {
-          appliesTo: normalizeStringArray(scope.appliesTo, 20),
-          excludes: normalizeStringArray(scope.excludes, 20),
-          customerScope: compactText(scope.customerScope, 240),
-          versionNotes: compactText(scope.versionNotes, 500),
+          appliesTo: maskRedactedStringArray(redacted, normalizeStringArray(scope.appliesTo, 20)),
+          excludes: maskRedactedStringArray(redacted, normalizeStringArray(scope.excludes, 20)),
+          customerScope: maskRedactedText(redacted, compactText(scope.customerScope, 240)),
+          versionNotes: maskRedactedText(redacted, compactText(scope.versionNotes, 500)),
         },
         evidenceIds,
         evidenceKeys,

@@ -72,5 +72,6 @@
     ]
   },
   "outputStyle": "Explanatory",
-  "spinnerTipsEnabled": false
+  "spinnerTipsEnabled": false,
+  "prefersReducedMotion": false
 }

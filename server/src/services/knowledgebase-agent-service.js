@@ -76,6 +76,20 @@ function isKnowledgebaseAgentDbReady() {
     && isModelReady(EscalationAttentionItem);
 }
 
+// Read-time redaction mask, mirrored from knowledgebase-service: scan results
+// and attention previews are built from the RAW candidate document, so they
+// must mask identifiers/content for redacted records too.
+const REDACTION_MASK = '[redacted]';
+
+function isRedactedCandidate(candidate) {
+  return Boolean(candidate?.redaction?.customerIdentifiersRedacted);
+}
+
+function maskRedactedText(redacted, value) {
+  if (!redacted) return value;
+  return safeString(value, '').trim() ? REDACTION_MASK : '';
+}
+
 function labelEscalation(escalation = {}) {
   const caseNumber = compactText(escalation.caseNumber, 80);
   if (caseNumber) return `case ${caseNumber}`;
@@ -108,10 +122,11 @@ function buildEscalationEvidence(escalation = {}) {
 
 function buildCandidateEvidence(candidate = {}) {
   const snapshot = candidate.sourceSnapshot || {};
+  const redacted = isRedactedCandidate(candidate);
   return [{
     type: 'knowledge-candidate',
     id: objectIdString(candidate._id),
-    label: compactText(candidate.title, 120) || 'Knowledge candidate',
+    label: maskRedactedText(redacted, compactText(candidate.title, 120)) || 'Knowledge candidate',
     reviewStatus: safeString(candidate.reviewStatus),
     reusableOutcome: safeString(candidate.reusableOutcome),
     category: safeString(candidate.category),
@@ -119,10 +134,10 @@ function buildCandidateEvidence(candidate = {}) {
   }, {
     type: 'source-snapshot',
     id: objectIdString(candidate.escalationId),
-    label: snapshot.caseNumber ? `Case ${snapshot.caseNumber}` : 'Source escalation snapshot',
+    label: snapshot.caseNumber ? `Case ${redacted ? REDACTION_MASK : snapshot.caseNumber}` : 'Source escalation snapshot',
     status: safeString(snapshot.status),
     category: safeString(snapshot.category || candidate.category),
-    caseNumber: safeString(snapshot.caseNumber),
+    caseNumber: maskRedactedText(redacted, safeString(snapshot.caseNumber)),
     resolvedAt: toIso(snapshot.resolvedAt),
     fieldsPresent: [
       snapshot.attemptingTo ? 'attemptingTo' : '',
@@ -319,6 +334,7 @@ function getCandidateQualityIssues(candidate = {}) {
 }
 
 function buildAttentionCandidate(candidate = {}) {
+  const redacted = isRedactedCandidate(candidate);
   return {
     escalationId: candidate.escalationId,
     conversationId: candidate.conversationId || null,
@@ -327,14 +343,14 @@ function buildAttentionCandidate(candidate = {}) {
     signals: ['knowledge_candidate_review'],
     status: safeString(candidate.reviewStatus),
     source: 'knowledge-candidate',
-    coid: safeString(candidate.sourceSnapshot && candidate.sourceSnapshot.coid),
-    caseNumber: safeString(candidate.sourceSnapshot && candidate.sourceSnapshot.caseNumber),
+    coid: maskRedactedText(redacted, safeString(candidate.sourceSnapshot && candidate.sourceSnapshot.coid)),
+    caseNumber: maskRedactedText(redacted, safeString(candidate.sourceSnapshot && candidate.sourceSnapshot.caseNumber)),
     category: safeString(candidate.category),
-    attemptingToPreview: compactText(candidate.sourceSnapshot && candidate.sourceSnapshot.attemptingTo, 160),
-    actualOutcomePreview: compactText(
+    attemptingToPreview: maskRedactedText(redacted, compactText(candidate.sourceSnapshot && candidate.sourceSnapshot.attemptingTo, 160)),
+    actualOutcomePreview: maskRedactedText(redacted, compactText(
       candidate.symptom || (candidate.sourceSnapshot && candidate.sourceSnapshot.actualOutcome),
       160
-    ),
+    )),
     createdAt: candidate.createdAt || null,
   };
 }
@@ -346,9 +362,12 @@ function buildCandidateQualityProposal(candidate = {}) {
   const escalationId = objectIdString(candidate.escalationId);
   if (!escalationId) return null;
 
-  const label = compactText(candidate.sourceSnapshot && candidate.sourceSnapshot.caseNumber, 80)
-    ? `case ${candidate.sourceSnapshot.caseNumber}`
-    : compactText(candidate.title, 80) || 'Knowledge candidate';
+  const redacted = isRedactedCandidate(candidate);
+  const label = redacted
+    ? 'Redacted knowledge candidate'
+    : (compactText(candidate.sourceSnapshot && candidate.sourceSnapshot.caseNumber, 80)
+      ? `case ${candidate.sourceSnapshot.caseNumber}`
+      : compactText(candidate.title, 80) || 'Knowledge candidate');
   const fingerprint = `knowledge-review:${escalationId}`;
   const reviewStatus = safeString(candidate.reviewStatus, 'draft') || 'draft';
   const isRejectedWithoutNotes = issues.includes('rejected_without_review_notes');

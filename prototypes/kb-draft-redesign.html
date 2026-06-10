@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KB Draft Review — Redesign Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ============ Tokens ============ */
+  :root {
+    /* Surfaces — Apple warm gray ramp */
+    --bg-base: #1c1c1e;
+    --bg-surface: #2c2c2e;
+    --bg-raised: #3a3a3c;
+    --bg-elevated: #48484a;
+
+    /* Text */
+    --text-primary: #f5f5f7;
+    --text-secondary: #a1a1a6;
+    --text-muted: #636366;
+
+    /* Lines */
+    --border: rgba(84, 84, 88, 0.35);
+
+    /* Accent — app blue (#0a84ff) lightened + desaturated for dark bg */
+    --accent: #4a9eff;
+    --accent-strong: #6cb0ff;
+    --accent-soft: rgba(74, 158, 255, 0.13);
+    --accent-faint: rgba(74, 158, 255, 0.07);
+    --accent-border: rgba(74, 158, 255, 0.35);
+    --accent-ring: rgba(74, 158, 255, 0.22);
+
+    /* Semantic — status dots only */
+    --success: #30d158;
+    --warning: #f0b232;
+    --error: #ff453a;
+
+    /* Type */
+    --font: 'Inter', system-ui, -apple-system, sans-serif;
+    --fs-h1: 30px;
+    --fs-h4: 16px;
+    --fs-body: 15px;
+    --fs-caption: 12px;
+    --fs-overline: 11px;
+
+    /* Spacing — 4px grid */
+    --sp-1: 8px;
+    --sp-2: 12px;
+    --sp-3: 16px;
+    --sp-4: 24px;
+    --sp-5: 32px;
+
+    /* Geometry */
+    --r-sm: 6px;
+    --r-md: 8px;
+    --topbar-h: 56px;
+    --rail-w: 280px;
+    --chat-w: 360px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-size: var(--fs-body);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  button {
+    font-family: var(--font);
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: inherit;
+  }
+
+  /* ============ App frame ============ */
+  .app {
+    display: grid;
+    grid-template-rows: var(--topbar-h) 1fr;
+    grid-template-columns: var(--rail-w) 1fr var(--chat-w);
+    grid-template-areas:
+      "topbar topbar topbar"
+      "rail   doc    chat";
+    height: 100vh;
+  }
+
+  /* ============ Top bar ============ */
+  .topbar {
+    grid-area: topbar;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+    padding: 0 var(--sp-4);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+  .breadcrumb .sep { color: var(--text-muted); }
+  .breadcrumb .current {
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .topbar-spacer { flex: 1; }
+
+  /* Lifecycle stepper — real states: draft → approved → published */
+  .stepper {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 99px;
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .step .step-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--text-muted);
+  }
+  .step.is-current {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 600;
+  }
+  .step.is-current .step-dot { background: var(--accent); }
+  .step-link {
+    width: 14px; height: 1px;
+    background: var(--border);
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+  }
+
+  .btn-ghost {
+    padding: 7px 12px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .btn-ghost:hover { background: var(--bg-raised); color: var(--text-primary); }
+
+  .btn-primary {
+    padding: 7px 16px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--accent);
+    color: #08233f;
+    transition: background 0.15s ease;
+  }
+  .btn-primary:hover { background: var(--accent-strong); }
+
+  /* ============ Left rail — draft queue ============ */
+  .rail {
+    grid-area: rail;
+    background: var(--bg-surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: var(--sp-3) 0 var(--sp-4);
+  }
+
+  .rail-group-label {
+    font-size: var(--fs-overline);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: var(--sp-3) var(--sp-3) var(--sp-1);
+  }
+
+  .queue-item {
+    position: relative;
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: var(--sp-2) var(--sp-3);
+    border-left: 3px solid transparent;
+    transition: background 0.15s ease;
+  }
+  .queue-item:hover { background: rgba(255, 255, 255, 0.03); }
+
+  /* Needs operator attention: accent edge + slightly raised bg */
+  .queue-item.needs-attention {
+    border-left-color: var(--accent);
+    background: var(--bg-raised);
+  }
+  .queue-item.needs-attention:hover { background: var(--bg-elevated); }
+
+  /* Active item: accent-tinted, clearly selected */
+  .queue-item.is-active,
+  .queue-item.is-active:hover {
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .queue-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    margin-bottom: 2px;
+  }
+  .queue-case {
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+  }
+  .queue-item.is-active .queue-case { color: var(--accent-strong); }
+
+  .status-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex: none;
+    margin-left: auto;
+  }
+  .status-dot.draft { background: var(--warning); }
+  .status-dot.approved { background: var(--success); }
+  .status-dot.published { background: var(--text-muted); }
+  .status-dot.rejected { background: var(--error); }
+
+  .queue-title {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .queue-item.needs-attention .queue-title { color: var(--text-primary); }
+  .queue-item.is-active .queue-title { color: var(--text-primary); }
+
+  /* ============ Center — the document ============ */
+  .doc-wrap {
+    grid-area: doc;
+    overflow-y: auto;
+    background: var(--bg-base);
+  }
+
+  .doc {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: var(--sp-5);
+  }
+
+  .doc h1 {
+    font-size: var(--fs-h1);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
+    color: var(--text-primary);
+  }
+
+  .doc-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    margin-top: var(--sp-2);
+    padding-bottom: var(--sp-4);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .doc-meta .dot-sep { color: var(--text-muted); }
+  .doc-meta .meta-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--text-secondary);
+  }
+  .doc-meta .meta-status::before {
+    content: '';
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--warning);
+  }
+
+  /* Document sections */
+  .doc-section {
+    position: relative;
+    margin-top: var(--sp-4);
+    padding: var(--sp-2) var(--sp-3);
+    margin-left: calc(-1 * var(--sp-3));
+    margin-right: calc(-1 * var(--sp-3));
+    border-radius: var(--r-md);
+    transition: background 0.15s ease;
+  }
+  .doc-section h4 {
+    font-size: var(--fs-h4);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    margin-bottom: var(--sp-1);
+  }
+  .doc-section p,
+  .doc-section li {
+    font-size: var(--fs-body);
+    font-weight: 400;
+    line-height: 1.6;
+    color: var(--text-secondary);
+  }
+  .doc-section ul {
+    padding-left: 22px;
+    display: grid;
+    gap: 4px;
+  }
+
+  /* Invisible-until-hover edit affordance */
+  .doc-section:hover { background: rgba(255, 255, 255, 0.03); }
+  .edit-affordance {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-2);
+    padding: 3px 10px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--accent);
+    background: var(--accent-faint);
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .doc-section:hover .edit-affordance { opacity: 1; }
+  .edit-affordance:hover { background: var(--accent-soft); }
+
+  /* Editing state — one section shown mid-edit */
+  .doc-section.is-editing {
+    background: var(--bg-elevated);
+    box-shadow: 0 0 0 1px var(--accent-border), 0 0 0 4px var(--accent-ring);
+  }
+  .doc-section.is-editing:hover { background: var(--bg-elevated); }
+  .doc-section.is-editing p { color: var(--text-primary); }
+  .editing-controls {
+    position: absolute;
+    top: var(--sp-2);
+    right: var(--sp-2);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .editing-controls .mini-btn {
+    padding: 3px 10px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-caption);
+    font-weight: 600;
+  }
+  .mini-btn.save { color: #08233f; background: var(--accent); }
+  .mini-btn.save:hover { background: var(--accent-strong); }
+  .mini-btn.cancel { color: var(--text-secondary); }
+  .mini-btn.cancel:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
+
+  /* Empty section — the only place helper text lives */
+  .doc-section.is-empty p {
+    color: var(--text-muted);
+  }
+
+  .doc-footer-pad { height: 64px; }
+
+  /* ============ Right panel — agent conversation ============ */
+  .chat {
+    grid-area: chat;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-surface);
+    border-left: 1px solid var(--border);
+    min-height: 0;
+  }
+
+  /* The only telemetry that survives: one status strip */
+  .chat-status {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    height: 36px;
+    flex: none;
+    padding: 0 var(--sp-3);
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .chat-status::before {
+    content: '';
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--success);
+    flex: none;
+  }
+
+  .chat-scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    min-height: 0;
+  }
+
+  .msg { max-width: 88%; }
+
+  .msg .msg-author {
+    font-size: var(--fs-overline);
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  .msg-body {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+
+  /* Operator messages: raised bubbles, right-aligned */
+  .msg.from-operator {
+    align-self: flex-end;
+  }
+  .msg.from-operator .msg-body {
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    padding: var(--sp-1) var(--sp-2);
+    border-radius: 10px;
+    border-bottom-right-radius: 4px;
+  }
+
+  /* Agent messages: plain prose, receded */
+  .msg.from-agent { align-self: flex-start; }
+
+  /* Applied-edit reference chip */
+  .edit-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: var(--sp-1);
+    padding: 4px 10px;
+    border-radius: 99px;
+    border: 1px solid var(--border);
+    background: var(--bg-raised);
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .edit-chip::before {
+    content: '';
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--success);
+  }
+  .edit-chip .undo {
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .edit-chip .undo:hover { color: var(--accent-strong); }
+
+  /* Composer */
+  .composer {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  }
+  .composer input {
+    flex: 1;
+    height: 40px;
+    padding: 0 var(--sp-2);
+    border-radius: var(--r-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-raised);
+    color: var(--text-primary);
+    font-family: var(--font);
+    font-size: 14px;
+    outline: none;
+    transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .composer input::placeholder { color: var(--text-muted); }
+  .composer input:focus {
+    border-color: var(--accent-border);
+    box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .composer .send {
+    width: 40px; height: 40px;
+    flex: none;
+    border-radius: var(--r-sm);
+    background: var(--accent);
+    color: #08233f;
+    font-size: 16px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
+  }
+  .composer .send:hover { background: var(--accent-strong); }
+
+  /* Scrollbars — quiet */
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--bg-raised);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ Top bar ============ -->
+  <header class="topbar">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
+      <span>Knowledge base</span>
+      <span class="sep">/</span>
+      <span>Review queue</span>
+      <span class="sep">/</span>
+      <span class="current">Case 15734531492</span>
+    </nav>
+
+    <div class="topbar-spacer"></div>
+
+    <!-- Real lifecycle: draft → approved → published (rejected is a branch via ghost action) -->
+    <div class="stepper" aria-label="Draft lifecycle">
+      <span class="step is-current"><span class="step-dot"></span>Draft</span>
+      <span class="step-link"></span>
+      <span class="step"><span class="step-dot"></span>Approved</span>
+      <span class="step-link"></span>
+      <span class="step"><span class="step-dot"></span>Published</span>
+    </div>
+
+    <div class="topbar-actions">
+      <button class="btn-ghost" type="button">Keep as case history</button>
+      <button class="btn-ghost" type="button">Reject draft</button>
+      <button class="btn-primary" type="button">Approve for agent use</button>
+    </div>
+  </header>
+
+  <!-- ============ Left rail: draft queue ============ -->
+  <aside class="rail" aria-label="Draft queue">
+    <div class="rail-group-label">Needs review</div>
+
+    <button class="queue-item is-active" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15734531492</span>
+        <span class="status-dot draft"></span>
+      </span>
+      <span class="queue-title">T4 XML download for CRA filing is missing the T4 Summary</span>
+    </button>
+
+    <button class="queue-item needs-attention" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15734498105</span>
+        <span class="status-dot draft"></span>
+      </span>
+      <span class="queue-title">ROE web export rejected for an employee with two pay groups</span>
+    </button>
+
+    <button class="queue-item needs-attention" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15733967240</span>
+        <span class="status-dot draft"></span>
+      </span>
+      <span class="queue-title">RBC chequing bank feed stopped importing after April 18</span>
+    </button>
+
+    <button class="queue-item" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15734120877</span>
+        <span class="status-dot draft"></span>
+      </span>
+      <span class="queue-title">GST/HST return shows filed period as open after NETFILE</span>
+    </button>
+
+    <div class="rail-group-label">Recent decisions</div>
+
+    <button class="queue-item" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15733850114</span>
+        <span class="status-dot approved"></span>
+      </span>
+      <span class="queue-title">Duplicate direct-deposit run after a payroll correction</span>
+    </button>
+
+    <button class="queue-item" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15733791562</span>
+        <span class="status-dot approved"></span>
+      </span>
+      <span class="queue-title">Invoice payments deposited to the wrong clearing account</span>
+    </button>
+
+    <button class="queue-item" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15733610433</span>
+        <span class="status-dot published"></span>
+      </span>
+      <span class="queue-title">Sales tax rate missing on imported estimates</span>
+    </button>
+
+    <button class="queue-item" type="button">
+      <span class="queue-meta">
+        <span class="queue-case">15733544209</span>
+        <span class="status-dot rejected"></span>
+      </span>
+      <span class="queue-title">Payroll tax table did not update for July 1 changes</span>
+    </button>
+  </aside>
+
+  <!-- ============ Center: the draft as a document ============ -->
+  <main class="doc-wrap">
+    <article class="doc">
+      <h1>T4 XML download for CRA filing is missing the T4 Summary</h1>
+
+      <div class="doc-meta">
+        <span>Payroll</span>
+        <span class="dot-sep">·</span>
+        <span>Case 15734531492</span>
+        <span class="dot-sep">·</span>
+        <span>Agent Greg McKenzie</span>
+        <span class="dot-sep">·</span>
+        <span>Received Apr 30, 2026</span>
+        <span class="dot-sep">·</span>
+        <span class="meta-status">Draft — needs review</span>
+      </div>
+
+      <section class="doc-section">
+        <h4>Customer Goal</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <p>
+          The customer wants to download the T4 XML file from QuickBooks Online
+          Payroll to file with the CRA. They expected the downloaded XML package
+          to include the T4 Summary alongside the T4 slips.
+        </p>
+      </section>
+
+      <!-- Editing state: in-place edit of one section -->
+      <section class="doc-section is-editing">
+        <h4>Reported Problem</h4>
+        <div class="editing-controls">
+          <button class="mini-btn cancel" type="button">Cancel</button>
+          <button class="mini-btn save" type="button">Save</button>
+        </div>
+        <p>
+          Repopulating the archived T4 filing did not regenerate the T4 Summary —
+          the downloaded XML still contains only the T4 slips. The customer first
+          noticed the summary was missing while preparing the CRA upload.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h4>Evidence from Case</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <p>
+          One screenshot of the T4 XML download screen is attached. The case
+          conversation contains two messages: the intake summary and one assistant
+          reply. No customer reply was recorded, no INV output is attached, and no
+          workflow runs were executed.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h4>Troubleshooting Already Tried</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <p>
+          The agent deleted the archived T4 filing and triggered the archive to
+          repopulate. The T4 package regenerated, but the T4 Summary was still
+          missing from the downloaded XML.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h4>Confirmed Cause</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <p>
+          Unknown. Archive repopulation regenerates the slips but not the summary,
+          which points at the summary-generation step upstream of the XML export —
+          but no root cause was confirmed in the case.
+        </p>
+      </section>
+
+      <!-- Empty state: the only place helper text lives -->
+      <section class="doc-section is-empty">
+        <h4>Final Outcome</h4>
+        <button class="edit-affordance" type="button">Add</button>
+        <p>
+          No final outcome recorded yet. When the case closes, capture the answer
+          here: the fix, the workaround, a product limitation, expected behavior,
+          or the INV this was escalated to.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h4>INV / Escalation Status</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <p>
+          No INV was mentioned in the case and no investigation output is attached.
+          If the summary-generation failure reproduces on a second company, this
+          should be escalated as a new INV.
+        </p>
+      </section>
+
+      <section class="doc-section">
+        <h4>Important Boundaries</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <ul>
+          <li>
+            Not the same as T4 slips failing to generate — the slips render
+            correctly in this case.
+          </li>
+          <li>
+            Does not apply to T4A or RL-1 packages; only the T4 XML bundle for
+            the CRA was affected.
+          </li>
+        </ul>
+      </section>
+
+      <section class="doc-section">
+        <h4>Matching Signals</h4>
+        <button class="edit-affordance" type="button">Edit</button>
+        <ul>
+          <li>T4 XML export missing T4 Summary</li>
+          <li>CRA T4 download has slips but no summary</li>
+          <li>Archived T4 filing repopulate does not regenerate the summary</li>
+        </ul>
+      </section>
+
+      <div class="doc-footer-pad"></div>
+    </article>
+  </main>
+
+  <!-- ============ Right panel: agent conversation ============ -->
+  <aside class="chat" aria-label="Knowledge Base Agent">
+    <div class="chat-status">Knowledge Base Agent · claude-sonnet-4-6 · Ready</div>
+
+    <div class="chat-scroll">
+      <div class="msg from-operator">
+        <div class="msg-body">
+          Tighten the summary — the agent already tried repopulating the archive,
+          lead with that.
+        </div>
+      </div>
+
+      <div class="msg from-agent">
+        <div class="msg-author">Knowledge Base Agent</div>
+        <div class="msg-body">
+          Done — Reported Problem now leads with the repopulation attempt and keeps
+          the CRA filing context to one sentence.
+        </div>
+        <span class="edit-chip">Updated · Reported Problem <button class="undo" type="button">Undo</button></span>
+      </div>
+
+      <div class="msg from-operator">
+        <div class="msg-body">
+          Good. Add a boundary so this doesn't get matched to T4A packages.
+        </div>
+      </div>
+
+      <div class="msg from-agent">
+        <div class="msg-author">Knowledge Base Agent</div>
+        <div class="msg-body">
+          Added: "Does not apply to T4A or RL-1 packages." The draft still has no
+          final outcome — that's the only section I'd flag before you approve.
+        </div>
+        <span class="edit-chip">Updated · Important Boundaries <button class="undo" type="button">Undo</button></span>
+      </div>
+    </div>
+
+    <div class="composer">
+      <input type="text" placeholder="Direct an edit or ask about this draft…" aria-label="Message the Knowledge Base Agent">
+      <button class="send" type="button" aria-label="Send">↑</button>
+    </div>
+  </aside>
+
+</div>
+</body>
+</html>

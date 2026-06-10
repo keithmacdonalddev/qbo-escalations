@@ -78,10 +78,28 @@ function isFieldEmpty(value) {
   return safeString(value, '').trim().length === 0;
 }
 
+const REDACTION_MASK = '[redacted]';
+// Fields whose values are governance/taxonomy metadata, not case-derived
+// body text — they stay readable on a redacted record.
+const REDACTION_EXEMPT_FIELDS = new Set(['category']);
+
+function isRedactedCandidate(candidate) {
+  return Boolean(candidate?.redaction?.customerIdentifiersRedacted);
+}
+
+// Snapshots read the RAW document (they bypass normalizeKnowledgeCandidate),
+// so redaction masking must be applied here too: kb.readDraft field values
+// and kb.updateDraft "prior" (undo) values both come through this function.
 function snapshotFieldValue(candidate, field) {
   const value = candidate?.[field];
-  if (Array.isArray(value)) return value.map((item) => safeString(item, ''));
-  return safeString(value, '');
+  const masked = isRedactedCandidate(candidate) && !REDACTION_EXEMPT_FIELDS.has(field);
+  if (Array.isArray(value)) {
+    if (masked && value.length > 0) return [REDACTION_MASK];
+    return value.map((item) => safeString(item, ''));
+  }
+  const text = safeString(value, '');
+  if (masked && text.trim()) return REDACTION_MASK;
+  return text;
 }
 
 function readEditableFields(candidate) {
@@ -175,6 +193,7 @@ function createKbAgentToolHandlers({ recordId, candidateId } = {}) {
         ok: true,
         recordId: `candidate:${objectIdString(candidate._id)}`,
         reviewStatus: safeString(candidate.reviewStatus, 'draft'),
+        redacted: isRedactedCandidate(candidate),
         fields: readEditableFields(candidate),
         qualityIssues: getCandidateQualityIssues(candidate),
       };

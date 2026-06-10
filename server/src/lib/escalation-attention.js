@@ -104,6 +104,18 @@ function knowledgeReviewFingerprint(knowledge, escalation) {
   return id ? `knowledge-review:${id}` : '';
 }
 
+// Distinct fingerprint from knowledgeReviewFingerprint so the periodic
+// knowledge-review sync (which rebuilds its item from current draft state)
+// can never clobber or close a reconcile flag, and vice versa.
+function knowledgeResolutionReconcileFingerprint(knowledge, escalation) {
+  const id = objectIdString(
+    knowledge && knowledge.escalationId
+      ? knowledge.escalationId
+      : escalation && escalation._id
+  );
+  return id ? `knowledge-resolution-reconcile:${id}` : '';
+}
+
 function buildMissingResolutionAttentionItem(escalation) {
   const status = safeString(escalation && escalation.status, '').trim();
   const fingerprint = missingResolutionFingerprint(escalation);
@@ -786,6 +798,94 @@ async function syncKnowledgeReviewAttentionItem(knowledge, escalation) {
   return { action: 'opened', item: attentionItemSummary(item) };
 }
 
+// Finish-time resolution refresh reconciliation flag.
+//
+// When an escalation is finalized, the deterministic draft refresh
+// (routes/escalations.js refreshKnowledgeDraftWithResolution) folds the
+// recorded resolution into the existing KB draft — but it NEVER overwrites
+// fields a human reviewer or the KB agent edited. When such edited fields are
+// preserved while fresh resolution data arrived (or the refresh had to run in
+// fill-empty-only mode), this item tells the reviewer the draft may need
+// manual reconciliation. When a later refresh finds no remaining conflict,
+// the item auto-closes.
+async function syncKnowledgeResolutionReconcileAttentionItem(knowledge, escalation, details = {}) {
+  const fingerprint = knowledgeResolutionReconcileFingerprint(knowledge, escalation);
+  if (!fingerprint) return { action: 'skipped', item: null };
+
+  const preservedFields = Array.isArray(details.preservedFields)
+    ? details.preservedFields.map((field) => safeString(field, '').trim()).filter(Boolean)
+    : [];
+  const updatedFields = Array.isArray(details.updatedFields)
+    ? details.updatedFields.map((field) => safeString(field, '').trim()).filter(Boolean)
+    : [];
+  const strategy = safeString(details.strategy, '').trim();
+
+  if (preservedFields.length === 0) {
+    const item = await EscalationAttentionItem.findOneAndUpdate(
+      { fingerprint, kind: 'knowledge-review', status: { $ne: 'resolved' } },
+      {
+        $set: {
+          status: 'resolved',
+          resolutionNote: 'Finish-time resolution data no longer conflicts with reviewer-edited draft fields.',
+          resolvedAt: new Date(),
+        },
+      },
+      { returnDocument: 'after', runValidators: true }
+    );
+    return { action: item ? 'closed' : 'none', item: attentionItemSummary(item) };
+  }
+
+  const label = getEscalationLabel(escalation || (knowledge && knowledge.sourceSnapshot) || {});
+  const item = await EscalationAttentionItem.findOneAndUpdate(
+    { fingerprint },
+    {
+      $setOnInsert: {
+        kind: 'knowledge-review',
+        sourceEscalationId: escalation && escalation._id ? escalation._id : knowledge && knowledge.escalationId,
+        sourceType: 'escalation',
+        fingerprint,
+      },
+      $set: {
+        status: 'open',
+        resolvedAt: null,
+        resolutionNote: '',
+        sourceConversationId: (
+          (knowledge && knowledge.conversationId)
+          || (escalation && escalation.conversationId)
+          || null
+        ),
+        sourceLabel: label,
+        severity: 'warning',
+        title: 'Knowledge draft needs resolution reconciliation',
+        summary: compactText(
+          `${label} finished with recorded resolution data, but the draft field(s) ${preservedFields.join(', ')} `
+          + 'were edited by a reviewer or the KB agent and were preserved — reconcile them with the final resolution manually.',
+          500
+        ),
+        candidates: [],
+        signals: [
+          'knowledge_resolution_reconcile',
+          ...(strategy === 'fill-empty-only' ? ['knowledge_refresh_fill_empty_only'] : []),
+          ...preservedFields.map((field) => `preserved_${field.replace(/[^a-z0-9]+/gi, '_').toLowerCase()}`),
+        ],
+        candidateCount: 0,
+        metadata: {
+          knowledgeId: objectIdString(knowledge && knowledge._id),
+          strategy,
+          preservedFields,
+          updatedFields,
+          trigger: safeString(details.trigger, ''),
+        },
+        lastDetectedAt: new Date(),
+      },
+      $inc: { occurrenceCount: 1 },
+    },
+    { upsert: true, returnDocument: 'after', runValidators: true }
+  );
+
+  return { action: 'opened', item: attentionItemSummary(item) };
+}
+
 module.exports = {
   buildMissingResolutionAttentionItem,
   buildKnowledgeReviewAttentionItem,
@@ -796,5 +896,6 @@ module.exports = {
   syncParserTriageAttentionItems,
   syncStaleEscalationAttentionItems,
   syncKnowledgeReviewAttentionItem,
+  syncKnowledgeResolutionReconcileAttentionItem,
   syncResolutionDisciplineAttentionItem,
 };

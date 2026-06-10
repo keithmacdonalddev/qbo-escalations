@@ -73,6 +73,26 @@ const WARNING_LABELS = {
   deprecated_trust_state: 'Deprecated trust',
 };
 
+const KNOWLEDGE_DRAFT_FIELD_LABELS = {
+  title: 'Title',
+  category: 'Category',
+  customerGoal: 'Customer Goal',
+  reportedProblem: 'Reported Problem',
+  evidenceFromCase: 'Evidence from Case',
+  troubleshootingTried: 'Troubleshooting Already Tried',
+  confirmedCause: 'Confirmed Cause',
+  finalOutcome: 'Final Outcome',
+  invEscalationStatus: 'INV / Escalation Status',
+  importantBoundariesText: 'Important Boundaries',
+  keySignalsText: 'Matching Signals',
+  summary: 'Summary',
+  symptom: 'Symptom',
+  rootCause: 'Root Cause',
+  exactFix: 'Exact Fix',
+  escalationPath: 'Escalation Path',
+  reviewNotes: 'Review Notes',
+};
+
 const TAB_CONFIG = {
   review: {
     label: 'Needs a decision',
@@ -162,6 +182,13 @@ function formatDate(value) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+function formatShortDate(value) {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 function formatPercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return '--';
@@ -186,6 +213,41 @@ function firstEvidenceLabel(record) {
   const evidence = Array.isArray(record?.evidence) ? record.evidence : [];
   const first = evidence[0] || null;
   return first?.label || first?.id || 'Evidence pending';
+}
+
+function formatCategory(value) {
+  const text = String(value || 'unknown').replace(/[-_]+/g, ' ').trim();
+  return text ? humanizeToken(text) : 'Unknown';
+}
+
+function formatRecordStatus(record = {}) {
+  const status = record.reviewStatus || 'draft';
+  if (status === 'draft') return 'Draft - needs review';
+  return REVIEW_LABELS[status] || humanizeToken(status);
+}
+
+function getRecordStatusDot(record = {}) {
+  const status = record.reviewStatus || 'draft';
+  if (record.trustState === 'trusted') return 'published';
+  if (status === 'approved' || status === 'published' || status === 'rejected') return status;
+  return 'draft';
+}
+
+function getRecordReceivedAt(record = {}) {
+  return record.sourceSnapshot?.createdAt
+    || record.sourceSnapshot?.resolvedAt
+    || record.lineage?.generatedAt
+    || record.lineage?.createdAt
+    || record.createdAt
+    || record.updatedAt;
+}
+
+function getRecordAuthor(record = {}) {
+  return record.reviewedBy
+    || record.lineage?.createdBy
+    || record.kbAgent?.promptId
+    || record.sourceSnapshot?.owner
+    || 'Knowledge Base Agent';
 }
 
 function getRecordCaseQueueLabel(record) {
@@ -863,7 +925,7 @@ function IconCopy({ size = 15 }) {
 }
 
 export default function KnowledgebaseView({ recordIdFromRoute = null }) {
-  const [activeTab, setActiveTab] = useState('review');
+  const [activeTab, setActiveTab] = useState('all');
   const [summary, setSummary] = useState(null);
   const [agentStatus, setAgentStatus] = useState(null);
   const [records, setRecords] = useState([]);
@@ -1223,6 +1285,72 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     }
   }, [loadKnowledge, loadOperationalIntel, recordDraft, selectedRecord?.id]);
 
+  const handleSaveRecordField = useCallback(async (field, value) => {
+    if (!selectedRecord?.id || !recordDraft || !field) return;
+    const nextDraft = {
+      ...recordDraft,
+      [field]: value,
+    };
+    setRecordDraft(nextDraft);
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await updateKnowledgeRecord(selectedRecord.id, fromEditableDraft(nextDraft));
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      await loadOperationalIntel(record.id);
+      setRecordNotice(`${KNOWLEDGE_DRAFT_FIELD_LABELS[field] || 'Section'} saved.`);
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Section save failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, loadOperationalIntel, recordDraft, selectedRecord?.id]);
+
+  const handleApproveForAgentUse = useCallback(async () => {
+    if (!selectedRecord?.id || !recordDraft) return;
+    const nextDraft = {
+      ...recordDraft,
+      reviewStatus: 'approved',
+      publishTarget: recordDraft.publishTarget === 'case-history-only'
+        ? 'category'
+        : recordDraft.publishTarget,
+      reusableOutcome: ['canonical', 'edge-case'].includes(recordDraft.reusableOutcome)
+        ? recordDraft.reusableOutcome
+        : 'canonical',
+      allowedUsesText: recordDraft.allowedUsesText?.trim()
+        ? recordDraft.allowedUsesText
+        : 'agent-response\ntriage\nsimilarity-search',
+    };
+    const readiness = getPublishReadiness({
+      ...selectedRecord,
+      ...fromEditableDraft(nextDraft),
+      evidence: selectedRecord.evidence,
+    });
+    const blockers = readiness.checks.filter((check) => check.key !== 'approved' && !check.ok);
+    if (blockers.length > 0) {
+      setRecordNotice(`Approval is blocked until this is safe for agent reuse: ${blockers.map((check) => check.label.toLowerCase()).join(', ')}.`);
+      return;
+    }
+
+    setRecordDraft(nextDraft);
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await updateKnowledgeRecord(selectedRecord.id, fromEditableDraft(nextDraft));
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      await loadOperationalIntel(record.id);
+      setRecordNotice('Approved for agent use. Publish when you are ready to move it into trusted guidance.');
+      await loadKnowledge();
+    } catch (err) {
+      setRecordNotice(err?.message || 'Approval failed.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, loadOperationalIntel, recordDraft, selectedRecord]);
+
   const handlePublishRecord = useCallback(async (exportMarkdown = false) => {
     if (!selectedRecord?.id) return;
     setRecordActionBusy(true);
@@ -1418,16 +1546,9 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
 
   useEffect(() => {
     if (recordIdFromRoute || detailDismissed || selectedRecord?.id || loading || records.length === 0) return;
-    openRecord(records[0].id, false);
+    const firstReviewRecord = records.find(isFinalizationQueueRecord) || records[0];
+    openRecord(firstReviewRecord.id, false);
   }, [detailDismissed, loading, openRecord, recordIdFromRoute, records, selectedRecord?.id]);
-
-  const finalizationQueueRecords = useMemo(() => {
-    const queue = records.filter(isFinalizationQueueRecord);
-    if (selectedRecord && isFinalizationQueueRecord(selectedRecord) && !queue.some((record) => record.id === selectedRecord.id)) {
-      return [selectedRecord, ...queue];
-    }
-    return queue;
-  }, [records, selectedRecord]);
 
   const selectedReadiness = selectedRecord && recordDraft
     ? getPublishReadiness({
@@ -1436,272 +1557,410 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
         evidence: selectedRecord.evidence,
       })
     : null;
-  const nextMove = getSelectedLessonMove(selectedRecord, recordDraft, selectedReadiness)
-    || getKnowledgeNextMove({ metrics, agentStatus, sourceCases });
-  const pageTitle = getRecordPageTitle(selectedRecord);
-  const pageSubtitle = selectedRecord
-    ? 'This case was marked resolved. Confirm whether it contains a proven fix before any agent can reuse it.'
-    : 'Review lessons from resolved cases so the specialist agents only reuse evidence-backed guidance.';
-
-  const handleNextMove = useCallback(() => {
-    if (nextMove.href) {
-      window.location.hash = nextMove.href;
-      return;
-    }
-    if (nextMove.action === 'review') {
-      setActiveTab('review');
-      setReviewStatus('draft');
-      setTrustState('');
-      setAllowedUse('');
-      return;
-    }
-    if (nextMove.action === 'publish') {
-      setActiveTab('all');
-      setReviewStatus('approved');
-      setTrustState('');
-      setAllowedUse('');
-      return;
-    }
-    if (nextMove.action === 'trusted') {
-      setActiveTab('trusted');
-      setReviewStatus('');
-      setTrustState('trusted');
-      setAllowedUse('');
-      return;
-    }
-    if (nextMove.action === 'selected') {
-      document.querySelector('.knowledge-guided-review')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      return;
-    }
-    document.getElementById('knowledge-source-cases')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  }, [nextMove]);
 
   return (
-    <div className={`app-content-constrained knowledgebase-page${selectedRecord ? ' is-record-review' : ''}`}>
-      {!selectedRecord && (
-        <div className="page-header knowledgebase-header knowledgebase-command-header">
-          <div>
-            <h1 className="page-title">{pageTitle}</h1>
-            <span className="text-secondary knowledgebase-subtitle">
-              {pageSubtitle}
-            </span>
-          </div>
-          <div className={`knowledge-primary-action is-${nextMove.tone}`}>
-            <span>Next</span>
-            <strong>{nextMove.title}</strong>
-            <button className="btn btn-primary" type="button" onClick={handleNextMove}>
-              {nextMove.label}
-            </button>
-          </div>
-        </div>
-      )}
+    <div className={`app-content-constrained knowledgebase-page is-redesign${selectedRecord ? ' is-record-review' : ''}`}>
+      <KnowledgeDraftTopbar
+        record={selectedRecord}
+        draft={recordDraft}
+        readiness={selectedReadiness}
+        busy={recordActionBusy}
+        onClose={() => {
+          setDetailDismissed(true);
+          openRecord(null);
+        }}
+        onSaveCaseHistoryOnly={handleSaveCaseHistoryOnly}
+        onReject={() => {
+          if (window.confirm('Reject this KB draft? Agents will not use it as guidance.')) {
+            handleQuickReviewStatus('rejected');
+          }
+        }}
+        onApprove={handleApproveForAgentUse}
+        onPublish={() => handlePublishRecord(false)}
+      />
 
       {error && (
-        <div className="error-banner">
+        <div className="error-banner knowledge-draft-error">
           <span>{error}</span>
           <button type="button" onClick={loadKnowledge}>Retry</button>
         </div>
       )}
 
-      <section className={`knowledge-review-board${selectedRecord ? ' is-focused' : ''}`} aria-label="KB draft review workflow">
-        {selectedRecord && (
-          <KnowledgeFinalizationRail
-            records={finalizationQueueRecords}
-            selectedRecord={selectedRecord}
-            loading={loading}
-          />
-        )}
+      <section className="knowledge-draft-app" aria-label="KB draft review workspace">
+        <KnowledgeDraftReviewRail
+          records={records}
+          selectedRecord={selectedRecord}
+          loading={loading}
+          total={total}
+        />
 
-        <section className="knowledge-board-panel knowledge-selected-column" aria-labelledby="knowledge-selected-heading">
-          <div className="knowledge-column-heading knowledge-main-heading">
-            <span>1</span>
-            <div>
-              <h2 id="knowledge-selected-heading">Review the KB draft</h2>
-              <p>Edit the QBO Canada answer. Save as case history if the final outcome is not clear.</p>
-            </div>
+        <KnowledgeRecordDetail
+          record={selectedRecord}
+          draft={recordDraft}
+          busy={recordActionBusy}
+          notice={recordNotice}
+          operationalIntel={operationalIntel}
+          operationalIntelLoading={operationalIntelLoading}
+          operationalIntelError={operationalIntelError}
+          onDraftChange={setRecordDraft}
+          onSave={handleSaveRecord}
+          onSaveField={handleSaveRecordField}
+          onDeprecate={handleDeprecateRecord}
+          onRedact={handleRedactRecord}
+          onRelationship={handleAddRelationship}
+          onFeedback={handleRecordFeedback}
+        />
+
+        <KnowledgeBaseAgentSidebar
+          record={selectedRecord}
+          context={agentRecordContext}
+          messages={agentRecordMessages}
+          loading={agentRecordLoading}
+          error={agentRecordError}
+          input={agentChatInput}
+          busy={agentChatBusy}
+          onInputChange={setAgentChatInput}
+          onSend={handleSendAgentChatMessage}
+          onUndoFieldChange={handleUndoAgentFieldChange}
+          onRefresh={() => selectedRecord?.id && loadAgentRecordContext(selectedRecord.id)}
+        />
+      </section>
+
+      <KnowledgeUtilityDrawer
+        activeConfig={activeConfig}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        query={query}
+        setQuery={setQuery}
+        reviewStatus={reviewStatus}
+        setReviewStatus={setReviewStatus}
+        trustState={trustState}
+        setTrustState={setTrustState}
+        allowedUse={allowedUse}
+        setAllowedUse={setAllowedUse}
+        includeLegacy={includeLegacy}
+        setIncludeLegacy={setIncludeLegacy}
+        resetFilters={resetFilters}
+        loading={loading}
+        scanLoading={scanLoading}
+        total={total}
+        metrics={metrics}
+        agentStatus={agentStatus}
+        ontologySummary={ontologySummary}
+        lastScan={lastScan}
+        exportNotice={exportNotice}
+        sourceCases={sourceCases}
+        sourceCasesLoading={sourceCasesLoading}
+        sourceCasesError={sourceCasesError}
+        sourceCaseQuery={sourceCaseQuery}
+        sourceCaseActionId={sourceCaseActionId}
+        onSourceCaseQueryChange={setSourceCaseQuery}
+        onCreateDraftFromCase={handleCreateDraftFromCase}
+        onRefresh={loadKnowledge}
+        onRunScan={runScan}
+        onExport={handleExport}
+        onGoReview={() => {
+          setActiveTab('review');
+          setReviewStatus('draft');
+          setTrustState('');
+        }}
+        onGoPublish={() => {
+          setActiveTab('all');
+          setReviewStatus('approved');
+          setTrustState('');
+        }}
+        onGoTrusted={() => {
+          setActiveTab('trusted');
+          setReviewStatus('');
+          setTrustState('trusted');
+        }}
+        records={records}
+        selectedRecord={selectedRecord}
+      />
+    </div>
+  );
+}
+
+function KnowledgeDraftTopbar({
+  record,
+  draft,
+  readiness,
+  busy = false,
+  onClose,
+  onSaveCaseHistoryOnly,
+  onReject,
+  onApprove,
+  onPublish,
+}) {
+  const isPublished = record?.reviewStatus === 'published';
+  const isRejected = record?.reviewStatus === 'rejected';
+  const canPublish = record?.reviewStatus === 'approved' && readiness?.ready;
+  const caseLabel = record ? getRecordCaseQueueLabel(record) : 'No draft selected';
+  const primaryLabel = isPublished
+    ? 'Published'
+    : canPublish
+      ? 'Publish for agent use'
+      : 'Approve for agent use';
+
+  return (
+    <header className="knowledge-draft-topbar">
+      <nav className="knowledge-draft-breadcrumb" aria-label="Breadcrumb">
+        <span>Knowledge base</span>
+        <span className="sep">/</span>
+        <span>Review queue</span>
+        <span className="sep">/</span>
+        <span className="current">{caseLabel}</span>
+      </nav>
+
+      <div className="knowledge-draft-topbar-spacer" />
+
+      <div className="knowledge-draft-stepper" aria-label="Draft lifecycle">
+        {['draft', 'approved', 'published'].map((status, index) => {
+          const currentStatus = draft?.reviewStatus || record?.reviewStatus || 'draft';
+          const currentIndex = currentStatus === 'published' ? 2 : currentStatus === 'approved' ? 1 : 0;
+          const isCurrent = index === currentIndex;
+          const isDone = index < currentIndex;
+          return (
+            <span className="knowledge-draft-step-wrap" key={status}>
+              {index > 0 && <span className="knowledge-draft-step-link" />}
+              <span className={`knowledge-draft-step${isCurrent ? ' is-current' : ''}${isDone ? ' is-done' : ''}`}>
+                <span className="knowledge-draft-step-dot" />
+                {REVIEW_LABELS[status] || humanizeToken(status)}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+
+      <div className="knowledge-draft-topbar-actions">
+        <button
+          className="knowledge-draft-btn ghost"
+          type="button"
+          onClick={onSaveCaseHistoryOnly}
+          disabled={!record || busy || isPublished}
+        >
+          Keep as case history
+        </button>
+        <button
+          className="knowledge-draft-btn ghost"
+          type="button"
+          onClick={onReject}
+          disabled={!record || busy || isRejected || isPublished}
+        >
+          Reject draft
+        </button>
+        <button
+          className="knowledge-draft-btn primary"
+          type="button"
+          onClick={canPublish ? onPublish : onApprove}
+          disabled={!record || busy || isRejected || isPublished}
+        >
+          {primaryLabel}
+        </button>
+        <button
+          className="knowledge-draft-btn icon"
+          type="button"
+          onClick={onClose}
+          disabled={!record || busy}
+          aria-label="Back to queue"
+          title="Back to queue"
+        >
+          <IconOpen size={14} />
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading = false, total = 0 }) {
+  const selectedNeedsReview = selectedRecord && isFinalizationQueueRecord(selectedRecord);
+  const needsReview = records.filter(isFinalizationQueueRecord);
+  const needsReviewRecords = selectedNeedsReview && !needsReview.some((record) => record.id === selectedRecord.id)
+    ? [selectedRecord, ...needsReview]
+    : needsReview;
+  const recentDecisionRecords = records
+    .filter((record) => !isFinalizationQueueRecord(record))
+    .filter((record) => !selectedRecord || record.id !== selectedRecord.id)
+    .slice(0, 12);
+
+  return (
+    <aside className="knowledge-draft-rail" aria-label="Draft queue">
+      <div className="knowledge-draft-rail-group-label">Needs review</div>
+      <div className="knowledge-draft-rail-list" aria-live="polite">
+        {loading ? (
+          <div className="knowledge-draft-rail-empty" role="status">
+            <span className="spinner spinner-sm" />
+            <span>Loading queue</span>
           </div>
-          <KnowledgeRecordDetail
-            record={selectedRecord}
-            draft={recordDraft}
-            busy={recordActionBusy}
-            notice={recordNotice}
-            operationalIntel={operationalIntel}
-            operationalIntelLoading={operationalIntelLoading}
-            operationalIntelError={operationalIntelError}
-            onClose={() => {
-              setDetailDismissed(true);
-              openRecord(null);
-            }}
-            onDraftChange={setRecordDraft}
-            onSave={handleSaveRecord}
-            onQuickReviewStatus={handleQuickReviewStatus}
-            onSaveCaseHistoryOnly={handleSaveCaseHistoryOnly}
-            onPublish={handlePublishRecord}
-            onDeprecate={handleDeprecateRecord}
-            onRedact={handleRedactRecord}
-            onRelationship={handleAddRelationship}
-            onFeedback={handleRecordFeedback}
-          />
-        </section>
-
-        {selectedRecord && (
-          <KnowledgeBaseAgentSidebar
-            record={selectedRecord}
-            context={agentRecordContext}
-            messages={agentRecordMessages}
-            loading={agentRecordLoading}
-            error={agentRecordError}
-            input={agentChatInput}
-            busy={agentChatBusy}
-            onInputChange={setAgentChatInput}
-            onSend={handleSendAgentChatMessage}
-            onUndoFieldChange={handleUndoAgentFieldChange}
-            onRefresh={() => loadAgentRecordContext(selectedRecord.id)}
-          />
+        ) : needsReviewRecords.length === 0 ? (
+          <div className="knowledge-draft-rail-empty">No drafts need review.</div>
+        ) : (
+          needsReviewRecords.map((record) => (
+            <KnowledgeDraftQueueItem
+              key={record.id}
+              record={record}
+              selected={selectedRecord?.id === record.id}
+            />
+          ))
         )}
+      </div>
 
-        {!selectedRecord && (
-        <aside className="knowledge-board-panel knowledge-queue-column" aria-labelledby="knowledge-queue-heading">
-          {selectedRecord && recordDraft ? (
-            <>
-              <div className="knowledge-column-heading">
-                <span>2</span>
-                <div>
-                  <h2 id="knowledge-queue-heading">
-                    {selectedReadiness?.ready ? 'Ready for agent use' : 'Source and readiness'}
-                  </h2>
-                  <p>
-                    {selectedReadiness?.ready
-                      ? 'Confirm the source one last time before publishing.'
-                      : 'Use this only to verify evidence and missing approval items.'}
-                  </p>
-                </div>
-              </div>
-              <SourceProofPanel
-                record={selectedRecord}
-                operationalIntel={operationalIntel}
-                operationalIntelLoading={operationalIntelLoading}
-              />
-              <PublishReadinessPanel readiness={selectedReadiness} />
-              <details className="knowledge-evidence-disclosure">
-                <summary>
-                  <span>Evidence saved for later</span>
-                  <strong>View searchable evidence</strong>
-                </summary>
-                <IndexedInformationPanel
-                  record={selectedRecord}
-                  draft={recordDraft}
-                  readiness={selectedReadiness}
-                  operationalIntel={operationalIntel}
-                  operationalIntelLoading={operationalIntelLoading}
-                />
-              </details>
-              {looksUnprovenFix(selectedRecord.exactFix) && (
-                <details className="knowledge-evidence-disclosure">
-                  <summary>
-                    <span>What the source really proved</span>
-                    <strong>View attempted steps</strong>
-                  </summary>
-                  <AttemptEvidencePanel
-                    sourceAttemptText={selectedRecord.exactFix}
-                    draft={recordDraft}
-                    record={selectedRecord}
-                  />
-                </details>
-              )}
-              <details className="knowledge-evidence-disclosure">
-                <summary>
-                  <span>Before publishing</span>
-                  <strong>Preview agent guidance</strong>
-                </summary>
-                <AgentPreviewPanel
-                  record={selectedRecord}
-                  draft={recordDraft}
-                  readiness={selectedReadiness}
-                />
-              </details>
-              <details className="knowledge-next-lesson-drawer">
-                <summary>
-                  <span>Other lessons</span>
-                  <strong>{formatCount(total)} record{total === 1 ? '' : 's'}</strong>
-                </summary>
-                <KnowledgeQueueContent
-                  activeConfig={activeConfig}
-                  activeTab={activeTab}
-                  setActiveTab={setActiveTab}
-                  query={query}
-                  setQuery={setQuery}
-                  reviewStatus={reviewStatus}
-                  setReviewStatus={setReviewStatus}
-                  trustState={trustState}
-                  setTrustState={setTrustState}
-                  allowedUse={allowedUse}
-                  setAllowedUse={setAllowedUse}
-                  includeLegacy={includeLegacy}
-                  setIncludeLegacy={setIncludeLegacy}
-                  resetFilters={resetFilters}
-                  loading={loading}
-                  total={total}
-                  records={records}
-                  selectedRecord={selectedRecord}
-                />
-              </details>
-            </>
-          ) : (
-            <>
-              <div className="knowledge-column-heading">
-                <span>2</span>
-                <div>
-                  <h2 id="knowledge-queue-heading">Drafts waiting for you</h2>
-                  <p>Open the next lesson and decide whether agents can reuse it.</p>
-                </div>
-              </div>
-              <KnowledgeQueueContent
-                activeConfig={activeConfig}
-                activeTab={activeTab}
-                setActiveTab={setActiveTab}
-                query={query}
-                setQuery={setQuery}
-                reviewStatus={reviewStatus}
-                setReviewStatus={setReviewStatus}
-                trustState={trustState}
-                setTrustState={setTrustState}
-                allowedUse={allowedUse}
-                setAllowedUse={setAllowedUse}
-                includeLegacy={includeLegacy}
-                setIncludeLegacy={setIncludeLegacy}
-                resetFilters={resetFilters}
-                loading={loading}
-                total={total}
-                records={records}
-                selectedRecord={selectedRecord}
-              />
-            </>
-          )}
-        </aside>
+      <div className="knowledge-draft-rail-group-label">Recent decisions</div>
+      <div className="knowledge-draft-rail-list">
+        {recentDecisionRecords.length === 0 ? (
+          <div className="knowledge-draft-rail-empty">{loading ? 'Loading decisions' : `${formatCount(total)} records loaded.`}</div>
+        ) : (
+          recentDecisionRecords.map((record) => (
+            <KnowledgeDraftQueueItem
+              key={record.id}
+              record={record}
+              selected={selectedRecord?.id === record.id}
+            />
+          ))
         )}
+      </div>
+    </aside>
+  );
+}
 
-        {!selectedRecord && (
-        <details className="knowledge-board-panel knowledge-source-column knowledge-source-drawer" id="knowledge-source-cases">
-          <summary className="knowledge-column-heading">
-            <span>+</span>
-            <div>
-              <h2>Pick a finished case</h2>
-              <p>Use this only when you need to create another review draft.</p>
-            </div>
-          </summary>
+function KnowledgeDraftQueueItem({ record, selected = false }) {
+  const href = record.id ? `#/knowledge/${encodeURIComponent(record.id)}` : '#/knowledge';
+  const task = getRecordCardTask(record);
+  const needsAttention = !selected && (task.tone === 'warning' || task.tone === 'blocked');
+  return (
+    <a
+      className={`knowledge-draft-queue-item${selected ? ' is-active' : ''}${needsAttention ? ' needs-attention' : ''}`}
+      href={href}
+      aria-current={selected ? 'page' : undefined}
+    >
+      <span className="knowledge-draft-queue-meta">
+        <span className="knowledge-draft-queue-case">{getRecordCaseQueueLabel(record)}</span>
+        <span className={`knowledge-draft-status-dot ${getRecordStatusDot(record)}`} />
+      </span>
+      <span className="knowledge-draft-queue-title">{record.title || 'Untitled KB draft'}</span>
+    </a>
+  );
+}
 
+function KnowledgeUtilityDrawer({
+  activeConfig,
+  activeTab,
+  setActiveTab,
+  query,
+  setQuery,
+  reviewStatus,
+  setReviewStatus,
+  trustState,
+  setTrustState,
+  allowedUse,
+  setAllowedUse,
+  includeLegacy,
+  setIncludeLegacy,
+  resetFilters,
+  loading,
+  scanLoading,
+  total,
+  metrics,
+  agentStatus,
+  ontologySummary,
+  lastScan,
+  exportNotice,
+  sourceCases,
+  sourceCasesLoading,
+  sourceCasesError,
+  sourceCaseQuery,
+  sourceCaseActionId,
+  onSourceCaseQueryChange,
+  onCreateDraftFromCase,
+  onRefresh,
+  onRunScan,
+  onExport,
+  onGoReview,
+  onGoPublish,
+  onGoTrusted,
+  records,
+  selectedRecord,
+}) {
+  return (
+    <details className="knowledge-health-drawer knowledge-utility-drawer">
+      <summary>
+        <span>Library tools</span>
+        <strong>{formatCount(metrics.total)} records</strong>
+      </summary>
+      <div className="knowledge-health-content">
+        <div className="knowledge-health-actions">
+          <button className="btn btn-secondary" type="button" onClick={onRefresh} disabled={loading || scanLoading}>
+            <IconRefresh />
+            <span>Refresh</span>
+          </button>
+          <button className="btn btn-secondary" type="button" onClick={() => onRunScan({ dryRun: true })} disabled={scanLoading}>
+            <IconScan />
+            <span>Check Issues</span>
+          </button>
+          <button className="btn btn-secondary" type="button" onClick={() => onRunScan({ dryRun: false })} disabled={scanLoading}>
+            <IconScan />
+            <span>{scanLoading ? 'Scanning' : 'Create Review Tasks'}</span>
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => onExport('json')}>JSON Export</button>
+          <button type="button" className="btn btn-secondary" onClick={() => onExport('markdown')}>Markdown Export</button>
+        </div>
+
+        {exportNotice && <div className="knowledgebase-rail-empty">{exportNotice}</div>}
+
+        <KnowledgeQueueContent
+          activeConfig={activeConfig}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          query={query}
+          setQuery={setQuery}
+          reviewStatus={reviewStatus}
+          setReviewStatus={setReviewStatus}
+          trustState={trustState}
+          setTrustState={setTrustState}
+          allowedUse={allowedUse}
+          setAllowedUse={setAllowedUse}
+          includeLegacy={includeLegacy}
+          setIncludeLegacy={setIncludeLegacy}
+          resetFilters={resetFilters}
+          loading={loading}
+          total={total}
+          records={records}
+          selectedRecord={selectedRecord}
+        />
+
+        <div className="knowledgebase-metrics">
+          <MetricTile label="Total Records" value={formatCount(metrics.total)} />
+          <MetricTile label="Needs Review" value={formatCount(metrics.draft)} tone={metrics.draft ? 'warning' : ''} />
+          <MetricTile label="Trusted Knowledge" value={formatCount(metrics.trusted || metrics.published)} tone={metrics.trusted || metrics.published ? 'success' : ''} />
+          <MetricTile label="Rejected" value={formatCount(metrics.rejected)} />
+          <MetricTile label="Attention Tasks" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} tone={agentStatus?.counts?.openKnowledgeReviewItems ? 'warning' : ''} />
+          <MetricTile label="Evidence Average" value={ontologySummary?.evidenceStrength?.average ?? '--'} />
+        </div>
+
+        <KnowledgeSystemGuide
+          metrics={metrics}
+          agentStatus={agentStatus}
+          sourceCases={sourceCases}
+          onGoReview={onGoReview}
+          onGoPublish={onGoPublish}
+          onGoTrusted={onGoTrusted}
+        />
+
+        <section className="knowledgebase-scan-panel" id="knowledge-source-cases">
+          <div className="knowledgebase-rail-heading">
+            <span>Create from finished case</span>
+            <strong>{formatCount(sourceCases.length)}</strong>
+          </div>
           <label className="knowledge-source-search">
             <IconSearch />
             <input
               type="search"
               value={sourceCaseQuery}
-              onChange={(event) => setSourceCaseQuery(event.target.value)}
+              onChange={(event) => onSourceCaseQueryChange(event.target.value)}
               aria-label="Find resolved cases to turn into review drafts"
               placeholder="Find source cases"
             />
           </label>
-
           <div className="knowledge-source-list" aria-live="polite">
             {sourceCasesLoading ? (
               <div className="knowledge-source-empty" role="status">
@@ -1711,9 +1970,7 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
             ) : sourceCasesError ? (
               <div className="knowledge-source-empty">{sourceCasesError}</div>
             ) : sourceCases.length === 0 ? (
-              <div className="knowledge-source-empty">
-                Resolve a case first, then use it here as evidence for a review draft.
-              </div>
+              <div className="knowledge-source-empty">No finished source cases match.</div>
             ) : (
               sourceCases.map((escalation) => {
                 const id = escalation._id || escalation.id;
@@ -1726,20 +1983,15 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
                       <p>{escalation.actualOutcome || escalation.attemptingTo || escalation.resolution || 'No case summary recorded.'}</p>
                     </div>
                     <div className="knowledge-source-actions">
-                      <a
-                        className="btn btn-secondary btn-sm"
-                        href={`#/escalations/${encodeURIComponent(id)}`}
-                        aria-label={`Open source case ${caseLabel}`}
-                      >
+                      <a className="btn btn-secondary btn-sm" href={`#/escalations/${encodeURIComponent(id)}`}>
                         <IconOpen />
                         <span>Case</span>
                       </a>
                       <button
                         className="btn btn-primary btn-sm"
                         type="button"
-                        onClick={() => handleCreateDraftFromCase(id)}
+                        onClick={() => onCreateDraftFromCase(id)}
                         disabled={Boolean(sourceCaseActionId)}
-                        aria-label={`Create review draft from ${caseLabel}`}
                       >
                         {sourceCaseActionId === id ? 'Creating' : 'Create Draft'}
                       </button>
@@ -1749,138 +2001,38 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
               })
             )}
           </div>
-        </details>
-        )}
-      </section>
+        </section>
 
-      <details className="knowledge-health-drawer">
-        <summary>
-          <span>Library health, lifecycle, exports, and agent connection</span>
-          <strong>{formatCount(metrics.total)} records</strong>
-        </summary>
-        <div className="knowledge-health-content">
-          <div className="knowledge-health-actions">
-            <button className="btn btn-secondary" type="button" onClick={loadKnowledge} disabled={loading || scanLoading}>
-              <IconRefresh />
-              <span>Refresh</span>
-            </button>
-            <button className="btn btn-secondary" type="button" onClick={() => runScan({ dryRun: true })} disabled={scanLoading}>
-              <IconScan />
-              <span>Check Issues</span>
-            </button>
-            <button className="btn btn-secondary" type="button" onClick={() => runScan({ dryRun: false })} disabled={scanLoading}>
-              <IconScan />
-              <span>{scanLoading ? 'Scanning' : 'Create Review Tasks'}</span>
-            </button>
+        <section className="knowledgebase-scan-panel">
+          <div className="knowledgebase-rail-heading">
+            <span>Quality Scan</span>
+            {lastScan && <strong>{lastScan.status}</strong>}
           </div>
-
-          <div className="knowledgebase-metrics">
-            <MetricTile label="Total Records" value={formatCount(metrics.total)} />
-            <MetricTile label="Needs Review" value={formatCount(metrics.draft)} tone={metrics.draft ? 'warning' : ''} />
-            <MetricTile label="Trusted Knowledge" value={formatCount(metrics.trusted || metrics.published)} tone={metrics.trusted || metrics.published ? 'success' : ''} />
-            <MetricTile label="Rejected" value={formatCount(metrics.rejected)} />
-            <MetricTile label="Legacy Sources" value={formatCount(metrics.legacySources)} />
-            <MetricTile label="Attention Tasks" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} tone={agentStatus?.counts?.openKnowledgeReviewItems ? 'warning' : ''} />
-            <MetricTile label="Evidence Average" value={ontologySummary?.evidenceStrength?.average ?? '--'} />
-          </div>
-
-          <KnowledgeSystemGuide
-            metrics={metrics}
-            agentStatus={agentStatus}
-            sourceCases={sourceCases}
-            onGoReview={() => {
-              setActiveTab('review');
-              setReviewStatus('draft');
-              setTrustState('');
-            }}
-            onGoPublish={() => {
-              setActiveTab('all');
-              setReviewStatus('approved');
-              setTrustState('');
-            }}
-            onGoTrusted={() => {
-              setActiveTab('trusted');
-              setReviewStatus('');
-              setTrustState('trusted');
-            }}
-          />
-
-          <div className="knowledgebase-agent-panel">
-          <section className="knowledgebase-agent-status">
-            <div className="knowledgebase-agent-heading">
-              <span className={`knowledgebase-agent-dot${agentStatus?.dbReady ? ' is-ready' : ''}`} />
-              <div>
-                <strong>Agent Connection</strong>
-                <small>{agentStatus?.dbReady ? 'Ready to retrieve trusted knowledge' : 'Database unavailable'}</small>
+          {lastScan ? (
+            <>
+              <div className="knowledgebase-scan-grid">
+                <MiniMetric label="Missing Review Drafts" value={formatCount(lastScan.counts?.missingDraft)} />
+                <MiniMetric label="Draft Quality" value={formatCount(lastScan.counts?.candidateQuality)} />
+                <MiniMetric label="Duplicates" value={formatCount(lastScan.counts?.duplicateCandidate)} />
+                <MiniMetric label="Stale Trusted Knowledge" value={formatCount(lastScan.counts?.staleTrusted)} />
               </div>
-            </div>
-            <p className="knowledgebase-rail-note">
-              Published records become the trusted knowledge layer used by chat, triage, and future case matching.
-            </p>
-            <div className="knowledgebase-agent-grid">
-              <MiniMetric label="Needs Review" value={formatCount(agentStatus?.counts?.candidates)} />
-              <MiniMetric label="Final Cases" value={formatCount(agentStatus?.counts?.finalizedEscalations)} />
-              <MiniMetric label="Review Tasks" value={formatCount(agentStatus?.counts?.openKnowledgeReviewItems)} />
-            </div>
-            <a className="btn btn-secondary btn-sm" href="#/agents/knowledgebase-agent">
-              <IconOpen />
-              <span>Agent Profile</span>
-            </a>
-          </section>
-
-          <section className="knowledgebase-scan-panel">
-            <div className="knowledgebase-rail-heading">
-              <span>Library Health</span>
-              <strong>{formatCount(ontologySummary?.totalRecords)} records</strong>
-            </div>
-            <p className="knowledgebase-rail-note">
-              Health checks show whether records have evidence, relationships, feedback, and coverage gaps.
-            </p>
-            <div className="knowledgebase-scan-grid">
-              <MiniMetric label="Weak Evidence" value={formatCount(ontologySummary?.evidenceStrength?.weak)} />
-              <MiniMetric label="Relationships" value={formatCount(Object.values(ontologySummary?.relationshipCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0))} />
-              <MiniMetric label="Feedback" value={formatCount(Object.values(ontologySummary?.feedbackCounts || {}).reduce((sum, value) => sum + Number(value || 0), 0))} />
-              <MiniMetric label="Gaps" value={formatCount(ontologySummary?.coverageGaps?.length)} />
-            </div>
-            <div className="knowledgebase-export-actions">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleExport('json')}>JSON Export</button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleExport('markdown')}>Markdown Export</button>
-            </div>
-            {exportNotice && <div className="knowledgebase-rail-empty">{exportNotice}</div>}
-          </section>
-
-          <section className="knowledgebase-scan-panel">
-            <div className="knowledgebase-rail-heading">
-              <span>Quality Scan</span>
-              {lastScan && <strong>{lastScan.status}</strong>}
-            </div>
-            {lastScan ? (
-              <>
-                <div className="knowledgebase-scan-grid">
-              <MiniMetric label="Missing Review Drafts" value={formatCount(lastScan.counts?.missingDraft)} />
-              <MiniMetric label="Draft Quality" value={formatCount(lastScan.counts?.candidateQuality)} />
-              <MiniMetric label="Duplicates" value={formatCount(lastScan.counts?.duplicateCandidate)} />
-              <MiniMetric label="Stale Trusted Knowledge" value={formatCount(lastScan.counts?.staleTrusted)} />
-                </div>
-                <div className="knowledgebase-scan-meta">
-                  <span>{lastScan.dryRun ? 'Dry run' : 'Persisted review work'}</span>
-                  <span>{formatDate(lastScan.completedAt)}</span>
-                </div>
-                {lastScan.attention?.opened > 0 && (
-                  <a className="knowledgebase-attention-link" href="#/attention">
-                    {lastScan.attention.opened} review item{lastScan.attention.opened === 1 ? '' : 's'} opened
-                  </a>
-                )}
-                <ProposalList proposals={lastScan.proposals || []} />
-              </>
-            ) : (
-              <div className="knowledgebase-rail-empty">No scan results yet. Use Check Issues to preview problems before creating Attention tasks.</div>
-            )}
-          </section>
-          </div>
-        </div>
-      </details>
-    </div>
+              <div className="knowledgebase-scan-meta">
+                <span>{lastScan.dryRun ? 'Dry run' : 'Persisted review work'}</span>
+                <span>{formatDate(lastScan.completedAt)}</span>
+              </div>
+              {lastScan.attention?.opened > 0 && (
+                <a className="knowledgebase-attention-link" href="#/attention">
+                  {lastScan.attention.opened} review item{lastScan.attention.opened === 1 ? '' : 's'} opened
+                </a>
+              )}
+              <ProposalList proposals={lastScan.proposals || []} />
+            </>
+          ) : (
+            <div className="knowledgebase-rail-empty">No scan results yet.</div>
+          )}
+        </section>
+      </div>
+    </details>
   );
 }
 
@@ -1888,22 +2040,8 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
 // Kept local to the sidebar so the change-list reads in plain language instead
 // of raw field keys. Falls back to the key when a label is missing.
 const KB_AGENT_FIELD_LABELS = {
-  title: 'Title',
-  category: 'Category',
-  customerGoal: 'Customer Goal',
-  reportedProblem: 'Reported Problem',
-  evidenceFromCase: 'Evidence From Case',
-  troubleshootingTried: 'Troubleshooting Tried',
-  confirmedCause: 'Confirmed Cause',
-  finalOutcome: 'Final Outcome',
-  invEscalationStatus: 'INV / Escalation Status',
-  summary: 'Summary',
-  symptom: 'Symptom',
-  rootCause: 'Root Cause',
-  exactFix: 'Exact Fix',
-  escalationPath: 'Escalation Path',
-  reviewNotes: 'Review Notes',
-  keySignals: 'Key Signals',
+  ...KNOWLEDGE_DRAFT_FIELD_LABELS,
+  keySignals: 'Matching Signals',
   importantBoundaries: 'Important Boundaries',
 };
 
@@ -1924,54 +2062,9 @@ function KnowledgeBaseAgentSidebar({
   onUndoFieldChange,
   onRefresh,
 }) {
-  const counts = context?.sourceCounts || record?.kbAgent?.sourceCounts || {};
-  const workflowAgents = context?.workflowAgents || record?.kbAgent?.workflowAgents || [];
-  const relatedKnowledge = Array.isArray(context?.relatedKnowledge) ? context.relatedKnowledge : [];
-  const coverageRows = [
-    ['Case', counts.hasEscalation ? 'Loaded' : 'Missing'],
-    ['Chat', formatCount(counts.conversationMessages || context?.conversation?.messageCount || 0)],
-    ['Images', formatCount((counts.conversationImages || 0) + (counts.escalationScreenshots || 0))],
-    ['Workflow', formatCount(counts.workflowRuns || workflowAgents.length || 0)],
-    ['Saved KB', formatCount(counts.relatedKnowledge || relatedKnowledge.length || 0)],
-    ['Prompt', context?.prompt?.version || record?.kbAgent?.promptVersion || 'Current'],
-  ];
   const hasInput = input.trim().length > 0;
-  const hasMessages = messages.length > 0;
-  const [copied, setCopied] = useState(false);
-
-  const handleCopyConversation = useCallback(() => {
-    if (!messages.length) return;
-    // Render the whole thread as readable plain text, role-labelled per turn.
-    const transcript = messages
-      .map((message) => {
-        const label = message.role === 'assistant' ? 'Knowledge Base Agent' : 'You';
-        return `${label}:\n${message.content || ''}`;
-      })
-      .join('\n\n');
-    const markCopied = () => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    };
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(transcript).then(markCopied).catch(() => {
-        const textarea = document.createElement('textarea');
-        textarea.value = transcript;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textarea);
-        markCopied();
-      });
-    } else {
-      const textarea = document.createElement('textarea');
-      textarea.value = transcript;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      markCopied();
-    }
-  }, [messages]);
+  const promptVersion = context?.prompt?.version || record?.kbAgent?.promptVersion || 'Current';
+  const statusLabel = loading ? 'Loading' : busy ? 'Working' : record ? 'Ready' : 'No draft';
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -1986,68 +2079,26 @@ function KnowledgeBaseAgentSidebar({
   };
 
   return (
-    <aside className="knowledge-board-panel knowledge-agent-chat-sidebar" aria-labelledby="knowledge-agent-chat-heading">
-      <div className="knowledge-agent-chat-top">
-        <div className="knowledge-column-heading">
-          <span>2</span>
-          <div>
-            <h2 id="knowledge-agent-chat-heading">Knowledge Base Agent</h2>
-            <p>{getRecordCaseQueueLabel(record)}</p>
-          </div>
-        </div>
-        <div className="knowledge-agent-chat-actions">
-          <button
-            className={`btn btn-secondary btn-sm${copied ? ' is-copied' : ''}`}
-            type="button"
-            onClick={handleCopyConversation}
-            disabled={!hasMessages}
-            aria-label="Copy full conversation to clipboard"
-          >
-            <IconCopy />
-            <span>{copied ? 'Copied' : 'Copy'}</span>
+    <aside className="knowledge-agent-chat-sidebar" aria-labelledby="knowledge-agent-chat-heading">
+      <div className="knowledge-agent-chat-status" id="knowledge-agent-chat-heading">
+        Knowledge Base Agent / {promptVersion} / {statusLabel}
+        {record && (
+          <button type="button" onClick={onRefresh} disabled={loading || busy} aria-label="Refresh Knowledge Base Agent context">
+            <IconRefresh size={12} />
           </button>
-          <button className="btn btn-secondary btn-sm" type="button" onClick={onRefresh} disabled={loading || busy} aria-label="Refresh Knowledge Base Agent context">
-            <IconRefresh />
-          </button>
-        </div>
+        )}
       </div>
-
-      <div className="knowledge-agent-coverage-grid" aria-label="Knowledge Base Agent source coverage">
-        {coverageRows.map(([label, value]) => (
-          <div className="knowledge-agent-coverage-item" key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-          </div>
-        ))}
-      </div>
-
-      <div className="knowledge-agent-source-line">
-        <span>Workflow Agents</span>
-        <strong>{workflowAgents.length ? workflowAgents.join(', ') : 'None recorded'}</strong>
-      </div>
-
-      {relatedKnowledge.length > 0 && (
-        <details className="knowledge-agent-related">
-          <summary>
-            <span>Related saved KB</span>
-            <strong>{formatCount(relatedKnowledge.length)}</strong>
-          </summary>
-          <div>
-            {relatedKnowledge.slice(0, 5).map((item) => (
-              <a href={`#/knowledge/${encodeURIComponent(item.id)}`} key={item.id}>
-                <strong>{item.title || 'Untitled KB entry'}</strong>
-                <span>{item.category || 'unknown'} / {item.reviewStatus || 'draft'}</span>
-              </a>
-            ))}
-          </div>
-        </details>
-      )}
 
       <div className="knowledge-agent-chat-thread" role="log" aria-live="polite" aria-busy={loading || busy}>
         {loading ? (
           <div className="knowledge-agent-chat-empty" role="status">
             <span className="spinner spinner-sm" />
             <span>Loading context</span>
+          </div>
+        ) : !record ? (
+          <div className="knowledge-agent-chat-empty">
+            <strong>No draft selected</strong>
+            <span>Open a draft to work with the Knowledge Base Agent.</span>
           </div>
         ) : messages.length === 0 ? (
           <div className="knowledge-agent-chat-empty">
@@ -2056,8 +2107,11 @@ function KnowledgeBaseAgentSidebar({
           </div>
         ) : (
           messages.map((message, index) => (
-            <article className={`knowledge-agent-chat-message is-${message.role}`} key={`${message.createdAt || index}-${index}`}>
-              <strong>{message.role === 'assistant' ? 'Knowledge Base Agent' : 'You'}</strong>
+            <article
+              className={`knowledge-agent-chat-message ${message.role === 'assistant' ? 'from-agent' : 'from-operator'}`}
+              key={`${message.createdAt || index}-${index}`}
+            >
+              {message.role === 'assistant' && <strong>Knowledge Base Agent</strong>}
               {message.role === 'assistant' ? (
                 <div className="knowledge-agent-chat-markdown">{renderMarkdown(message.content)}</div>
               ) : (
@@ -2065,20 +2119,18 @@ function KnowledgeBaseAgentSidebar({
               )}
               {Array.isArray(message.appliedChanges) && message.appliedChanges.length > 0 && (
                 <div className="knowledge-agent-changes" aria-label="Changes applied by the Knowledge Base Agent">
-                  <span className="knowledge-agent-changes-title">Changes applied</span>
-                  <span className="knowledge-agent-changes-note">Undo available this session — edits and history are saved on the server.</span>
                   {message.appliedChanges.map((change) => (
-                    <div className={`knowledge-agent-change-row${change.undone ? ' is-undone' : ''}`} key={change.field}>
-                      <span className="knowledge-agent-change-field">{kbAgentFieldLabel(change.field)}</span>
+                    <span className={`knowledge-agent-change-chip${change.undone ? ' is-undone' : ''}`} key={change.field}>
+                      Updated / {kbAgentFieldLabel(change.field)}
                       <button
                         type="button"
-                        className="btn btn-secondary btn-sm knowledge-agent-change-undo"
+                        className="knowledge-agent-change-undo"
                         onClick={() => onUndoFieldChange?.(index, change)}
                         disabled={busy || change.undone}
                       >
                         {change.undone ? 'Undone' : 'Undo'}
                       </button>
-                    </div>
+                    </span>
                   ))}
                 </div>
               )}
@@ -2097,18 +2149,17 @@ function KnowledgeBaseAgentSidebar({
       {error && <div className="knowledge-agent-chat-error">{error}</div>}
 
       <form className="knowledge-agent-chat-form" onSubmit={handleSubmit}>
-        <textarea
+        <input
+          type="text"
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask about this draft"
-          rows={3}
-          disabled={busy}
+          placeholder="Direct an edit or ask about this draft..."
+          disabled={busy || !record}
           aria-label="Message Knowledge Base Agent about this draft"
         />
-        <button className="btn btn-primary btn-sm" type="submit" disabled={!hasInput || busy}>
-          <IconSend />
-          <span>{busy ? 'Sending' : 'Send'}</span>
+        <button className="knowledge-agent-send" type="submit" disabled={!hasInput || busy || !record} aria-label="Send">
+          <IconSend size={15} />
         </button>
       </form>
     </aside>
@@ -2395,28 +2446,38 @@ function KnowledgeRecordDetail({
   operationalIntel,
   operationalIntelLoading,
   operationalIntelError,
-  onClose,
   onDraftChange,
   onSave,
-  onQuickReviewStatus,
-  onSaveCaseHistoryOnly,
-  onPublish,
+  onSaveField,
   onDeprecate,
   onRedact,
   onRelationship,
   onFeedback,
 }) {
+  const [editingField, setEditingField] = useState('');
+  const [editingValue, setEditingValue] = useState('');
+
+  useEffect(() => {
+    setEditingField('');
+    setEditingValue('');
+  }, [record?.id]);
+
   if (!record || !draft) {
     return (
-      <section className="knowledgebase-record-detail">
-        <div className="knowledgebase-rail-heading">
-          <span>Selected KB Draft</span>
-          <strong>Review queue</strong>
-        </div>
-        <div className="knowledgebase-rail-empty">
-          Select a KB draft from the queue, or create one from a resolved case.
-        </div>
-      </section>
+      <main className="knowledge-draft-doc-wrap">
+        <article className="knowledge-draft-doc is-empty">
+          <h1>Select a KB draft</h1>
+          <div className="knowledge-draft-doc-meta">
+            <span>Review queue</span>
+            <span className="dot-sep">/</span>
+            <span>No draft selected</span>
+          </div>
+          <section className="knowledge-draft-doc-section is-empty">
+            <h4>Draft Review</h4>
+            <p>Open a draft from the queue to review it as a document.</p>
+          </section>
+        </article>
+      </main>
     );
   }
 
@@ -2428,146 +2489,301 @@ function KnowledgeRecordDetail({
     ...fromEditableDraft(draft),
     evidence: record.evidence,
   });
-  const disabledPublish = busy || record.reviewStatus !== 'approved' || !readiness.ready;
   const evidence = Array.isArray(record.evidence) ? record.evidence : [];
   const relationships = Array.isArray(record.relationships) ? record.relationships : [];
   const feedback = Array.isArray(record.outcomeFeedback) ? record.outcomeFeedback : [];
   const auditEvents = Array.isArray(record.auditEvents) ? record.auditEvents : [];
   const actions = Array.isArray(record.actionRecommendations) ? record.actionRecommendations : [];
-  const saveDisabled = busy || record.reviewStatus === 'published';
-  const guidance = getLessonReviewGuidance(record, draft, readiness);
+  const sourceAttemptText = looksUnprovenFix(record.finalOutcome || record.exactFix)
+    ? (record.finalOutcome || record.exactFix)
+    : '';
+  const finalOutcomeText = sourceAttemptText && looksUnprovenFix(draft.finalOutcome || draft.exactFix)
+    ? ''
+    : (draft.finalOutcome || draft.exactFix || '');
+  const sections = [
+    {
+      field: 'customerGoal',
+      label: 'Customer Goal',
+      value: draft.customerGoal || '',
+      empty: 'No customer goal recorded yet.',
+      rows: 4,
+    },
+    {
+      field: 'reportedProblem',
+      label: 'Reported Problem',
+      value: draft.reportedProblem || '',
+      empty: 'No reported problem recorded yet.',
+      rows: 4,
+    },
+    {
+      field: 'evidenceFromCase',
+      label: 'Evidence from Case',
+      value: draft.evidenceFromCase || '',
+      empty: 'No case evidence summary recorded yet.',
+      rows: 4,
+    },
+    {
+      field: 'troubleshootingTried',
+      label: 'Troubleshooting Already Tried',
+      value: draft.troubleshootingTried || '',
+      empty: 'No troubleshooting attempts recorded yet.',
+      rows: 4,
+    },
+    {
+      field: 'confirmedCause',
+      label: 'Confirmed Cause',
+      value: draft.confirmedCause || draft.rootCause || '',
+      empty: 'Unknown. Add the cause only when the source proves it.',
+      rows: 3,
+    },
+    {
+      field: 'finalOutcome',
+      label: 'Final Outcome',
+      value: finalOutcomeText,
+      empty: 'No final outcome recorded yet. Capture the fix, workaround, product limitation, expected behavior, or INV outcome when the case closes.',
+      rows: 4,
+    },
+    {
+      field: 'invEscalationStatus',
+      label: 'INV / Escalation Status',
+      value: draft.invEscalationStatus || '',
+      empty: 'No INV or escalation status recorded yet.',
+      rows: 3,
+    },
+    {
+      field: 'importantBoundariesText',
+      label: 'Important Boundaries',
+      value: draft.importantBoundariesText || '',
+      empty: 'No boundaries recorded yet.',
+      rows: 4,
+      list: true,
+    },
+    {
+      field: 'keySignalsText',
+      label: 'Matching Signals',
+      value: draft.keySignalsText || '',
+      empty: 'No matching signals recorded yet.',
+      rows: 4,
+      list: true,
+    },
+  ];
+
+  const beginEdit = (field, value) => {
+    if (busy || record.reviewStatus === 'published') return;
+    setEditingField(field);
+    setEditingValue(value || '');
+  };
+
+  const cancelEdit = () => {
+    setEditingField('');
+    setEditingValue('');
+  };
+
+  const saveEdit = async () => {
+    if (!editingField) return;
+    await onSaveField?.(editingField, editingValue);
+    setEditingField('');
+    setEditingValue('');
+  };
 
   return (
-    <section className="knowledgebase-record-detail">
-      <div className="knowledgebase-detail-header">
-        <div>
-          <span className={`knowledgebase-trust-badge trust-${trustClass(record.trustState)}`}>
-            {TRUST_LABELS[record.trustState] || record.trustState || TRUST_LABELS.candidate}
-          </span>
-          <h2>{record.title || 'Untitled knowledge record'}</h2>
-          <p>{getRecordSourceSummary(record)}</p>
+    <main className="knowledge-draft-doc-wrap">
+      <article className="knowledge-draft-doc">
+        <h1>{draft.title || record.title || 'Untitled knowledge record'}</h1>
+
+        <div className="knowledge-draft-doc-meta">
+          <span>{formatCategory(draft.category || record.category)}</span>
+          <span className="dot-sep">/</span>
+          <span>{getRecordCaseQueueLabel(record)}</span>
+          <span className="dot-sep">/</span>
+          <span>{getRecordAuthor(record)}</span>
+          <span className="dot-sep">/</span>
+          <span>Received {formatShortDate(getRecordReceivedAt(record))}</span>
+          <span className="dot-sep">/</span>
+          <span className={`knowledge-draft-meta-status ${getRecordStatusDot(record)}`}>{formatRecordStatus(record)}</span>
         </div>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose} disabled={busy}>
-          Back To Queue
-        </button>
-      </div>
 
-      {notice && <div className="knowledgebase-detail-notice">{notice}</div>}
+        {notice && <div className="knowledgebase-detail-notice knowledge-draft-notice">{notice}</div>}
 
-      <LessonReviewGuide
-        record={record}
-        draft={draft}
-        readiness={readiness}
-        guidance={guidance}
-        operationalIntel={operationalIntel}
-        operationalIntelLoading={operationalIntelLoading}
-        busy={busy}
-        disabledPublish={disabledPublish}
-        saveDisabled={saveDisabled}
-        onDraftChange={updateDraft}
-        onSave={onSave}
-        onQuickReviewStatus={onQuickReviewStatus}
-        onSaveCaseHistoryOnly={onSaveCaseHistoryOnly}
-        onPublish={onPublish}
-      />
+        {sections.map((section) => (
+          <KnowledgeDraftDocumentSection
+            key={section.field}
+            section={section}
+            busy={busy}
+            published={record.reviewStatus === 'published'}
+            editing={editingField === section.field}
+            editingValue={editingValue}
+            onEdit={() => beginEdit(section.field, section.value)}
+            onEditValueChange={setEditingValue}
+            onCancel={cancelEdit}
+            onSave={saveEdit}
+          />
+        ))}
 
-      <details className="knowledge-system-review">
-        <summary>
-          <span>System fields</span>
-          <strong>Optional secondary review</strong>
-        </summary>
-        <SystemReviewTable
-          record={record}
-          draft={draft}
-          readiness={readiness}
-          operationalIntel={operationalIntel}
-          operationalIntelLoading={operationalIntelLoading}
-          evidence={evidence}
-          relationships={relationships}
-          feedback={feedback}
-          auditEvents={auditEvents}
-        />
-      </details>
+        <details className="knowledge-draft-disclosure">
+          <summary>
+            <span>Source and readiness</span>
+            <strong>{readiness.ready ? 'Ready after publish' : `Needs ${formatCount(readiness.checks.filter((check) => !check.ok).length)} item${readiness.checks.filter((check) => !check.ok).length === 1 ? '' : 's'}`}</strong>
+          </summary>
+          <SourceProofPanel
+            record={record}
+            operationalIntel={operationalIntel}
+            operationalIntelLoading={operationalIntelLoading}
+          />
+          <PublishReadinessPanel readiness={readiness} />
+          {sourceAttemptText && (
+            <AttemptEvidencePanel
+              sourceAttemptText={sourceAttemptText}
+              draft={draft}
+              record={record}
+            />
+          )}
+          <AgentPreviewPanel
+            record={record}
+            draft={draft}
+            readiness={readiness}
+          />
+        </details>
 
-      <details className="knowledge-advanced-section">
-        <summary>
-          <span>Where this came from</span>
-          <strong>Use when you need to verify where this came from.</strong>
-        </summary>
-        <KnowledgeOriginPanel
-          record={record}
-          readiness={readiness}
-          operationalIntel={operationalIntel}
-          operationalIntelLoading={operationalIntelLoading}
-        />
-        <OperationalIntelligencePanel
-          intelligence={operationalIntel}
-          loading={operationalIntelLoading}
-          error={operationalIntelError}
-        />
-        <RecordDetailList
-          title="Evidence"
-          empty="No evidence"
-          items={evidence.map((item) => ({
-            key: `${item.type || 'evidence'}-${item.id || item.label}`,
-            label: item.label || item.type || 'Evidence',
-            detail: item.summary || item.text || item.preview || item.evidenceStatus || item.status || '',
-          }))}
-        />
-      </details>
+        <details className="knowledge-draft-disclosure">
+          <summary>
+            <span>System fields</span>
+            <strong>Secondary review</strong>
+          </summary>
+          <SystemReviewTable
+            record={record}
+            draft={draft}
+            readiness={readiness}
+            operationalIntel={operationalIntel}
+            operationalIntelLoading={operationalIntelLoading}
+            evidence={evidence}
+            relationships={relationships}
+            feedback={feedback}
+            auditEvents={auditEvents}
+          />
+          <OperationalIntelligencePanel
+            intelligence={operationalIntel}
+            loading={operationalIntelLoading}
+            error={operationalIntelError}
+          />
+        </details>
 
-      <details className="knowledge-advanced-section">
-        <summary>
-          <span>Advanced settings</span>
-          <strong>Scope, trust override, feedback, and audit history.</strong>
-        </summary>
-        <AdvancedLessonSettings
-          draft={draft}
-          busy={busy}
-          onDraftChange={updateDraft}
-          onDeprecate={onDeprecate}
-          onRedact={onRedact}
-          onRelationship={onRelationship}
-          onFeedback={onFeedback}
-          record={record}
-        />
-        <RecordDetailList
-          title="Relationships"
-          empty="No relationships"
-          items={relationships.map((item) => ({
-            key: `${item.type}-${item.targetRecordId}`,
-            label: `${item.type} ${item.targetRecordId}`,
-            detail: `${item.status || 'proposed'} ${formatPercent(item.strength)} ${item.summary || ''}`.trim(),
-          }))}
-        />
-        <RecordDetailList
-          title="Recommended Actions"
-          empty="No recommendations"
-          items={actions.map((item, index) => ({
-            key: `${item.action}-${index}`,
-            label: `${item.priority || 'medium'} priority`,
-            detail: item.rationale ? `${item.action} - ${item.rationale}` : item.action,
-          }))}
-        />
-        <RecordDetailList
-          title="Outcome Feedback"
-          empty="No feedback"
-          items={feedback.map((item, index) => ({
-            key: `${item.createdAt}-${index}`,
-            label: `${item.outcome || 'unknown'} by ${item.actor || 'user'}`,
-            detail: item.notes || item.source || formatDate(item.createdAt),
-          }))}
-        />
-        <RecordDetailList
-          title="Audit History"
-          empty="No audit events"
-          items={auditEvents.map((item) => ({
-            key: item.eventId,
-            label: `${item.action} by ${item.actor || 'system'}`,
-            detail: `${formatDate(item.createdAt)} ${item.summary || ''}`.trim(),
-          }))}
-        />
-      </details>
+        <details className="knowledge-draft-disclosure">
+          <summary>
+            <span>Advanced settings</span>
+            <strong>Scope, feedback, and audit</strong>
+          </summary>
+          <AdvancedLessonSettings
+            draft={draft}
+            busy={busy}
+            onDraftChange={updateDraft}
+            onDeprecate={onDeprecate}
+            onRedact={onRedact}
+            onRelationship={onRelationship}
+            onFeedback={onFeedback}
+            record={record}
+          />
+          <div className="knowledge-draft-advanced-save">
+            <button className="btn btn-primary btn-sm" type="button" onClick={onSave} disabled={busy || record.reviewStatus === 'published'}>
+              Save Advanced Fields
+            </button>
+          </div>
+          <RecordDetailList
+            title="Relationships"
+            empty="No relationships"
+            items={relationships.map((item) => ({
+              key: `${item.type}-${item.targetRecordId}`,
+              label: `${item.type} ${item.targetRecordId}`,
+              detail: `${item.status || 'proposed'} ${formatPercent(item.strength)} ${item.summary || ''}`.trim(),
+            }))}
+          />
+          <RecordDetailList
+            title="Recommended Actions"
+            empty="No recommendations"
+            items={actions.map((item, index) => ({
+              key: `${item.action}-${index}`,
+              label: `${item.priority || 'medium'} priority`,
+              detail: item.rationale ? `${item.action} - ${item.rationale}` : item.action,
+            }))}
+          />
+          <RecordDetailList
+            title="Outcome Feedback"
+            empty="No feedback"
+            items={feedback.map((item, index) => ({
+              key: `${item.createdAt}-${index}`,
+              label: `${item.outcome || 'unknown'} by ${item.actor || 'user'}`,
+              detail: item.notes || item.source || formatDate(item.createdAt),
+            }))}
+          />
+          <RecordDetailList
+            title="Audit History"
+            empty="No audit events"
+            items={auditEvents.map((item) => ({
+              key: item.eventId,
+              label: `${item.action} by ${item.actor || 'system'}`,
+              detail: `${formatDate(item.createdAt)} ${item.summary || ''}`.trim(),
+            }))}
+          />
+        </details>
+
+        <div className="knowledge-draft-doc-footer-pad" />
+      </article>
+    </main>
+  );
+}
+
+function KnowledgeDraftDocumentSection({
+  section,
+  busy = false,
+  published = false,
+  editing = false,
+  editingValue = '',
+  onEdit,
+  onEditValueChange,
+  onCancel,
+  onSave,
+}) {
+  const value = String(section.value || '').trim();
+  const lines = section.list ? textToLines(value) : [];
+  const empty = !value || (section.list && lines.length === 0);
+
+  return (
+    <section className={`knowledge-draft-doc-section${editing ? ' is-editing' : ''}${empty ? ' is-empty' : ''}`}>
+      <h4>{section.label}</h4>
+      {editing ? (
+        <>
+          <div className="knowledge-draft-editing-controls">
+            <button className="knowledge-draft-mini-btn cancel" type="button" onClick={onCancel} disabled={busy}>
+              Cancel
+            </button>
+            <button className="knowledge-draft-mini-btn save" type="button" onClick={onSave} disabled={busy}>
+              Save
+            </button>
+          </div>
+          <textarea
+            rows={section.rows || 3}
+            value={editingValue}
+            onChange={(event) => onEditValueChange(event.target.value)}
+            disabled={busy}
+            aria-label={`Edit ${section.label}`}
+          />
+        </>
+      ) : (
+        <>
+          {!published && (
+            <button className="knowledge-draft-edit-affordance" type="button" onClick={onEdit} disabled={busy}>
+              {empty ? 'Add' : 'Edit'}
+            </button>
+          )}
+          {section.list && lines.length > 0 ? (
+            <ul>
+              {lines.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          ) : (
+            <p>{empty ? section.empty : value}</p>
+          )}
+        </>
+      )}
     </section>
   );
 }

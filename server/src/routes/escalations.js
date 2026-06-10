@@ -15,6 +15,7 @@ const {
 } = require('../lib/escalation-dedup');
 const {
   syncKnowledgeReviewAttentionItem,
+  syncKnowledgeResolutionReconcileAttentionItem,
   syncMissingLinkAttentionItems,
   syncParserTriageAttentionItems,
   syncResolutionDisciplineAttentionItem,
@@ -1211,16 +1212,185 @@ async function createKnowledgeDraftForEscalation(escalation, {
   return { knowledge: knowledge.toObject(), generated: true, enriched, knowledgeReview, operationalIntelligence };
 }
 
+// ---------------------------------------------------------------------------
+// Finish-time deterministic resolution refresh (draft staleness fix).
+//
+// Drafts auto-create at pipeline intake (status-independent), so by the time a
+// case is finished a draft usually already exists and
+// createKnowledgeDraftForEscalation (force:false) short-circuits without ever
+// folding the finish-time resolution in. This refresh closes that gap with
+// DETERMINISTIC data only (escalation.resolution / resolutionNotes / status —
+// no model or provider calls), so Finish stays fast and works with zero AI
+// providers configured.
+//
+// No-clobber guarantee (provenance-based): every human-reviewer and KB-agent
+// content edit goes through updateKnowledgeRecord
+// (services/knowledgebase-management-service.js), which appends a
+// 'record.update' audit event whose metadata.fields lists exactly the fields
+// written. Machine generation (createKnowledgeDraftForEscalation) records no
+// 'record.update' events. Therefore a field never named by any 'record.update'
+// event is provably machine-owned and safe to overwrite with fresher
+// deterministic data; a field that WAS named is editor-owned and is never
+// touched (only flagged for manual reconciliation). The audit trail is capped
+// at 120 events (appendAuditEvent slices to the newest 120) — at the cap old
+// edit events may have been evicted, so the proof no longer holds and the
+// refresh drops to fill-empty-only.
+// ---------------------------------------------------------------------------
+
+// All within the EDITABLE_TEXT_FIELDS boundary
+// (services/knowledgebase-management-service.js). Governance fields
+// (reviewStatus, publishTarget, reusableOutcome, trustStateOverride,
+// allowedUsesOverride) are NEVER written here.
+const KNOWLEDGE_RESOLUTION_REFRESH_FIELDS = ['finalOutcome', 'exactFix', 'escalationPath', 'summary'];
+// Mirror of the appendAuditEvent cap in knowledgebase-management-service.js.
+const KNOWLEDGE_AUDIT_EVENT_CAP = 120;
+
+function collectEditorTouchedKnowledgeFields(knowledge) {
+  const events = Array.isArray(knowledge && knowledge.auditEvents) ? knowledge.auditEvents : [];
+  const touched = new Set();
+  for (const event of events) {
+    if (!event || event.action !== 'record.update') continue;
+    const fields = event.metadata && Array.isArray(event.metadata.fields) ? event.metadata.fields : [];
+    for (const field of fields) {
+      const name = safeString(field, '').trim();
+      if (name) touched.add(name);
+    }
+  }
+  return { touched, capReached: events.length >= KNOWLEDGE_AUDIT_EVENT_CAP };
+}
+
+async function refreshKnowledgeDraftWithResolution(escalation, options = {}) {
+  if (!escalation || !escalation._id) return null;
+  if (!ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status)) return null;
+  const hasRecordedOutcome = Boolean(compactText(escalation.resolution) || compactText(escalation.resolutionNotes));
+  if (!hasRecordedOutcome) return null;
+
+  const knowledge = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  if (!knowledge) return null; // no draft yet — the normal create path handles it
+  if (knowledge.reviewStatus === 'published') return null; // published knowledge is locked
+
+  const trigger = options.trigger || 'knowledge.finalized.resolution-refresh';
+  // Deterministic field derivation — same builder the deterministic draft uses,
+  // so refreshed values match what generation would have produced post-finish.
+  const suggested = buildSuggestedDraft(escalation);
+  const candidateValues = {
+    finalOutcome: compactText(suggested.finalOutcome, 2000),
+    exactFix: compactText(suggested.exactFix, 2000),
+    escalationPath: compactText(suggested.escalationPath, 900),
+    summary: compactText(suggested.summary, 900),
+  };
+
+  const { touched, capReached } = collectEditorTouchedKnowledgeFields(knowledge);
+  const strategy = capReached ? 'fill-empty-only' : 'provenance';
+  const updatedFields = [];
+  const preservedFields = [];
+
+  for (const field of KNOWLEDGE_RESOLUTION_REFRESH_FIELDS) {
+    const nextValue = candidateValues[field];
+    if (!nextValue) continue; // never write empty values, never clear fields
+    const currentValue = safeString(knowledge[field], '').trim();
+    if (currentValue === nextValue) continue; // already current — idempotent
+    if (!currentValue) {
+      knowledge[field] = nextValue;
+      updatedFields.push(field);
+      continue;
+    }
+    if (strategy === 'provenance' && !touched.has(field)) {
+      // Provably machine-owned (no editor audit event ever named this field).
+      knowledge[field] = nextValue;
+      updatedFields.push(field);
+    } else {
+      // Editor-owned (or unprovable at the audit cap) — never clobber.
+      preservedFields.push(field);
+    }
+  }
+
+  // The source snapshot is system-owned provenance — no human/agent edit path
+  // writes it (sanitizeKnowledgePatch has no sourceSnapshot handling) — so it
+  // always tracks the case record's resolution data.
+  const snapshot = knowledge.sourceSnapshot || {};
+  const snapshotChanges = {};
+  const nextSnapshotValues = {
+    status: safeString(escalation.status, ''),
+    resolution: safeString(escalation.resolution, ''),
+    resolutionNotes: safeString(escalation.resolutionNotes, ''),
+  };
+  for (const [key, value] of Object.entries(nextSnapshotValues)) {
+    if (safeString(snapshot[key], '') !== value) snapshotChanges[key] = value;
+  }
+  const currentResolvedAtMs = snapshot.resolvedAt ? new Date(snapshot.resolvedAt).getTime() : 0;
+  const nextResolvedAtMs = escalation.resolvedAt ? new Date(escalation.resolvedAt).getTime() : 0;
+  if (currentResolvedAtMs !== nextResolvedAtMs) snapshotChanges.resolvedAt = escalation.resolvedAt || null;
+  const snapshotFields = Object.keys(snapshotChanges);
+  for (const key of snapshotFields) {
+    knowledge.set(`sourceSnapshot.${key}`, snapshotChanges[key]);
+  }
+
+  if (updatedFields.length === 0 && snapshotFields.length === 0) {
+    // Nothing to persist. Still sync the reconcile flag: it opens when edited
+    // fields conflict with fresh resolution data, and auto-closes once the
+    // reviewer has reconciled (no remaining preserved conflicts).
+    const reconcileAttention = await syncKnowledgeResolutionReconcileAttentionItem(knowledge, escalation, {
+      preservedFields, updatedFields, strategy, trigger,
+    });
+    if (preservedFields.length === 0) return null;
+    return { refreshed: false, strategy, updatedFields, preservedFields, snapshotFields, reconcileAttention };
+  }
+
+  knowledge.auditEvents = Array.isArray(knowledge.auditEvents) ? knowledge.auditEvents : [];
+  knowledge.auditEvents.push({
+    eventId: `kb-record-resolution-refresh-${Date.now().toString(36)}-${crypto.randomBytes(4).toString('hex')}`,
+    action: 'record.resolution-refresh',
+    actor: 'knowledge-resolution-refresh',
+    role: 'system',
+    summary: preservedFields.length
+      ? `Draft refreshed with finish-time resolution data (deterministic); preserved editor-owned field(s): ${preservedFields.join(', ')}.`
+      : 'Draft refreshed with finish-time resolution data (deterministic).',
+    metadata: {
+      trigger,
+      strategy,
+      updatedFields,
+      preservedFields,
+      snapshotFields,
+      escalationStatus: safeString(escalation.status, ''),
+    },
+    createdAt: new Date(),
+  });
+  if (knowledge.auditEvents.length > KNOWLEDGE_AUDIT_EVENT_CAP) {
+    knowledge.auditEvents = knowledge.auditEvents.slice(-KNOWLEDGE_AUDIT_EVENT_CAP);
+  }
+  await knowledge.save();
+
+  const reconcileAttention = await syncKnowledgeResolutionReconcileAttentionItem(knowledge, escalation, {
+    preservedFields, updatedFields, strategy, trigger,
+  });
+
+  return { refreshed: true, strategy, updatedFields, preservedFields, snapshotFields, reconcileAttention };
+}
+
 async function ensureKnowledgeDraftForFinalizedEscalation(escalation, options = {}) {
   if (!escalation || !ELIGIBLE_KNOWLEDGE_STATUSES.has(escalation.status)) return null;
   const hasRecordedOutcome = Boolean(compactText(escalation.resolution) || compactText(escalation.resolutionNotes));
   if (!hasRecordedOutcome) return null;
-  return createKnowledgeDraftForEscalation(escalation, {
+  // Fold the finish-time resolution into an existing intake draft BEFORE the
+  // create call (which short-circuits on existing drafts). Deterministic only;
+  // non-fatal — the Finish flow must never break because of a KB refresh.
+  let resolutionRefresh = null;
+  try {
+    resolutionRefresh = await refreshKnowledgeDraftWithResolution(escalation, {
+      trigger: options.trigger || 'knowledge.finalized.auto-draft',
+    });
+  } catch (refreshErr) {
+    console.warn('[knowledge/refresh] finish-time resolution refresh failed (non-fatal):', refreshErr.message);
+  }
+  const result = await createKnowledgeDraftForEscalation(escalation, {
     force: false,
     enrich: options.enrich !== false,
     actor: { actor: 'knowledgebase-agent', role: 'system' },
     trigger: options.trigger || 'knowledge.finalized.auto-draft',
   });
+  if (result && resolutionRefresh) return { ...result, resolutionRefresh };
+  return result;
 }
 
 // Status-INDEPENDENT auto-draft. Every escalation that comes through the
@@ -1232,12 +1402,25 @@ async function ensureKnowledgeDraftForFinalizedEscalation(escalation, options = 
 // elsewhere. Callers run this fire-and-forget so live chat latency is unaffected.
 async function ensureKnowledgeDraftForEscalation(escalation, options = {}) {
   if (!escalation || !escalation._id) return null;
-  return createKnowledgeDraftForEscalation(escalation, {
+  // If a pipeline re-trigger arrives for an already-finalized case with an
+  // existing draft, fold the resolution in here too. Self-gated: for
+  // non-finalized cases (the normal intake) this returns before any DB work.
+  let resolutionRefresh = null;
+  try {
+    resolutionRefresh = await refreshKnowledgeDraftWithResolution(escalation, {
+      trigger: options.trigger || 'knowledge.pipeline.auto-draft',
+    });
+  } catch (refreshErr) {
+    console.warn('[knowledge/refresh] pipeline resolution refresh failed (non-fatal):', refreshErr.message);
+  }
+  const result = await createKnowledgeDraftForEscalation(escalation, {
     force: false,
     enrich: options.enrich !== false,
     actor: options.actor || { actor: 'knowledgebase-agent', role: 'system' },
     trigger: options.trigger || 'knowledge.pipeline.auto-draft',
   });
+  if (result && resolutionRefresh) return { ...result, resolutionRefresh };
+  return result;
 }
 
 // POST /api/escalations/:id/knowledge/generate -- Create or refresh a draft knowledge record
@@ -1747,3 +1930,4 @@ module.exports._internal = { isPathWithinRoot };
 module.exports.createKnowledgeDraftForEscalation = createKnowledgeDraftForEscalation;
 module.exports.ensureKnowledgeDraftForEscalation = ensureKnowledgeDraftForEscalation;
 module.exports.ensureKnowledgeDraftForFinalizedEscalation = ensureKnowledgeDraftForFinalizedEscalation;
+module.exports.refreshKnowledgeDraftWithResolution = refreshKnowledgeDraftWithResolution;

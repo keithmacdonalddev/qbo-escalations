@@ -234,7 +234,7 @@ function App() {
       case 'knowledge':
         return (
           <Profiler id="Knowledgebase" onRender={flame.onRender}>
-          <motion.div key="knowledge" {...motionProps}>
+          <motion.div key="knowledge" {...motionProps} style={{ height: '100%' }}>
             <KnowledgebaseView recordIdFromRoute={route.knowledgeRecordId || null} />
           </motion.div>
           </Profiler>
@@ -328,7 +328,7 @@ function App() {
     }
   }, [route, motionProps, themeProps, aiProps, chat, workspaceAgentDockForShell, sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled, flame.onRender]);
 
-  const isFullHeightView = route.view === 'chat' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail' || route.view === 'rooms';
+  const isFullHeightView = route.view === 'chat' || route.view === 'settings' || route.view === 'workspace' || route.view === 'investigations' || route.view === 'escalation-detail' || route.view === 'rooms' || route.view === 'knowledge';
   const usesEdgeToEdgeShell = isFullHeightView;
   const mainStyle = useMemo(() => ({
     display: 'flex',

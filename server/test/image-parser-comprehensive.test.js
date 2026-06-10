@@ -24,7 +24,18 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
+const mongo = require('./_mongo-helper');
 const { clearProviderAvailabilityCache } = require('../src/services/image-parser');
+
+// The image parser FORCES provider-call-package capture (forceCapture: true)
+// in 'required' mode for every provider call — evidence persistence is a
+// production guarantee, and capture fails loudly (PROVIDER_PACKAGE_CAPTURE_FAILED)
+// when MongoDB is unavailable. These tests assert the REAL provider error
+// codes (ECONNREFUSED, TIMEOUT, ...), so MongoDB must be connected for the
+// capture layer to succeed and let those codes surface.
+test.before(async () => {
+  await mongo.connect();
+});
 
 // ---------------------------------------------------------------------------
 // Deterministic base64 test fixtures with correct magic bytes
@@ -219,13 +230,21 @@ function readKeysFile() {
   }
 }
 
-test.beforeEach(() => {
+test.beforeEach(async () => {
   clearProviderAvailabilityCache();
   clearInterceptors();
   removeKeysFile();
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.OPENAI_API_KEY;
   delete process.env.MOONSHOT_API_KEY;
+  // setStoredApiKey also upserts into the Mongo-backed key store when mongoose
+  // is connected; removeKeysFile() only clears the file copy. Clear the Mongo
+  // copy too so keys stored by one suite (PUT /keys) cannot leak into later
+  // suites (POST /keys/test expects "no key stored" to really mean none).
+  const ImageParserApiKey = require('../src/models/ImageParserApiKey');
+  if (ImageParserApiKey.db && ImageParserApiKey.db.readyState === 1) {
+    await ImageParserApiKey.deleteMany({});
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -778,7 +797,7 @@ test('parseImage — timeout behavior', async (t) => {
     assert.equal(result.text, 'parsed under timeout');
   });
 
-  await t.test('request exceeding timeout triggers TIMEOUT error', async () => {
+  await t.test('request exceeding timeout triggers PROVIDER_TIMEOUT error', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
     // Timeout = 2000ms, response arrives at 3000ms (over timeout)
     interceptHost('api.anthropic.com', {
@@ -789,7 +808,7 @@ test('parseImage — timeout behavior', async (t) => {
     await assert.rejects(
       () => parseImage(VALID_PNG_BASE64, { provider: 'anthropic', timeoutMs: 2000, structured: false }),
       (err) => {
-        assert.equal(err.code, 'TIMEOUT');
+        assert.equal(err.code, 'PROVIDER_TIMEOUT');
         return true;
       }
     );
@@ -807,7 +826,7 @@ test('parseImage — timeout behavior', async (t) => {
     await assert.rejects(
       () => parseImage(VALID_PNG_BASE64, { provider: 'anthropic', timeoutMs: 1500, structured: false }),
       (err) => {
-        assert.equal(err.code, 'TIMEOUT');
+        assert.equal(err.code, 'PROVIDER_TIMEOUT');
         return true;
       }
     );
@@ -1030,7 +1049,7 @@ test('timeout cascade — middleware vs provider', async (t) => {
     });
     assert.equal(res.status, 504);
     assert.equal(res.body.ok, false);
-    assert.equal(res.body.code, 'TIMEOUT');
+    assert.equal(res.body.code, 'PROVIDER_TIMEOUT');
   });
 });
 
@@ -1362,7 +1381,7 @@ test('response format — errors', async (t) => {
     delete process.env.ANTHROPIC_API_KEY;
   });
 
-  await t.test('TIMEOUT returns 504 with correct format', async () => {
+  await t.test('PROVIDER_TIMEOUT returns 504 with correct format', async () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
     interceptHost('api.anthropic.com', { timeout: true });
 
@@ -1374,7 +1393,7 @@ test('response format — errors', async (t) => {
     });
     assert.equal(res.status, 504);
     assert.equal(res.body.ok, false);
-    assert.equal(res.body.code, 'TIMEOUT');
+    assert.equal(res.body.code, 'PROVIDER_TIMEOUT');
     assert.equal(typeof res.body.error, 'string');
   });
 
@@ -1617,7 +1636,7 @@ test('real-delay timeout scenarios', { timeout: 15000 }, async (t) => {
     await assert.rejects(
       () => parseImage(VALID_PNG_BASE64, { provider: 'anthropic', timeoutMs: 2000, structured: false }),
       (err) => {
-        assert.equal(err.code, 'TIMEOUT');
+        assert.equal(err.code, 'PROVIDER_TIMEOUT');
         return true;
       }
     );
@@ -1698,7 +1717,7 @@ test('noRetry-relevant server behavior', async (t) => {
 // ===========================================================================
 // Cleanup
 // ===========================================================================
-test.after(() => {
+test.after(async () => {
   // Restore original http/https functions
   http.request = _origHttpRequest;
   https.request = _origHttpsRequest;
@@ -1707,4 +1726,6 @@ test.after(() => {
 
   // Clean up any test keys file
   removeKeysFile();
+
+  await mongo.disconnect();
 });

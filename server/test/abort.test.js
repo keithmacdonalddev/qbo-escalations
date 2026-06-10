@@ -336,6 +336,7 @@ async function createTestConversation(title) {
 
   test('client disconnect after error settlement does NOT call cleanup', async () => {
     let cleanupCalled = false;
+    let fallbackCleanupCalled = false;
 
     claude.chat = ({ onError }) => {
       const err = new Error('immediate failure');
@@ -343,6 +344,18 @@ async function createTestConversation(title) {
       onError(err);
       return () => {
         cleanupCalled = true;
+      };
+    };
+
+    // Failover is always on for sequential policies, so the primary failure
+    // automatically retries the alternate (codex-family) provider. Mock it to
+    // fail too so the stream genuinely settles via the SSE "error" event.
+    codex.chat = ({ onError }) => {
+      const err = new Error('fallback failure');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {
+        fallbackCleanupCalled = true;
       };
     };
 
@@ -358,6 +371,7 @@ async function createTestConversation(title) {
     await delay(300);
 
     assert.equal(cleanupCalled, false, 'cleanup must NOT be called after stream has settled via error');
+    assert.equal(fallbackCleanupCalled, false, 'fallback cleanup must NOT be called after stream has settled via error');
   });
 
   // -------------------------------------------------------------------------
