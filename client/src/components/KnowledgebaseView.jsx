@@ -39,6 +39,10 @@ import {
 } from '../lib/providerCatalog.js';
 // Same orange Anthropic starburst the app header shows next to the active model.
 import AnthropicMark from './icons/AnthropicMark.jsx';
+// Reused as-is for the KB draft's call-evidence overlay: the same pushed
+// "Model reasoning" page the triage dock shows for a ProviderCallPackage.
+import TriageReasoningView from './chat-v5/TriageReasoningView.jsx';
+import { apiFetchJson } from '../api/http.js';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import './KnowledgebaseView.css';
 
@@ -2531,6 +2535,20 @@ function KnowledgeRecordRow({ record, selected = false }) {
   );
 }
 
+// Call-evidence overlay state for KnowledgeRecordDetail. Mirrors the triage
+// dock's EMPTY_REASONING_VIEW shape so the reused TriageReasoningView gets the
+// exact props it expects.
+const EMPTY_GENERATION_EVIDENCE_VIEW = {
+  open: false,
+  loading: false,
+  error: '',
+  provider: '',
+  model: '',
+  blocks: [],
+  truncated: false,
+  packageId: '',
+};
+
 function KnowledgeRecordDetail({
   record,
   draft,
@@ -2549,10 +2567,14 @@ function KnowledgeRecordDetail({
 }) {
   const [editingField, setEditingField] = useState('');
   const [editingValue, setEditingValue] = useState('');
+  // Call-evidence overlay: the reused TriageReasoningView page for the
+  // ProviderCallPackage the draft's generation provenance points at.
+  const [evidenceView, setEvidenceView] = useState(EMPTY_GENERATION_EVIDENCE_VIEW);
 
   useEffect(() => {
     setEditingField('');
     setEditingValue('');
+    setEvidenceView(EMPTY_GENERATION_EVIDENCE_VIEW);
   }, [record?.id]);
 
   if (!record || !draft) {
@@ -2576,6 +2598,49 @@ function KnowledgeRecordDetail({
 
   const updateDraft = (field, value) => {
     onDraftChange((current) => ({ ...(current || draft), [field]: value }));
+  };
+
+  // The back link persisted on the draft's generation provenance — present only
+  // when a real extraction call composed this draft AND the capture survived
+  // (the package has a 30-day TTL, so old links can 404; the overlay shows the
+  // honest error in that case).
+  const generationPackageId = record.generation?.providerCallPackageId || '';
+  const closeGenerationEvidence = () => {
+    setEvidenceView((prev) => ({ ...prev, open: false }));
+  };
+  const openGenerationEvidence = async () => {
+    if (!generationPackageId) return;
+    setEvidenceView({
+      ...EMPTY_GENERATION_EVIDENCE_VIEW,
+      open: true,
+      loading: true,
+      packageId: generationPackageId,
+    });
+    try {
+      const data = await apiFetchJson(
+        `/api/provider-packages/${encodeURIComponent(generationPackageId)}/reasoning`,
+        {},
+        'Could not load the call evidence for this draft.'
+      );
+      setEvidenceView((prev) => (
+        prev.open && prev.packageId === generationPackageId
+          ? {
+            ...prev,
+            loading: false,
+            provider: data?.provider || record.generation?.provider || '',
+            model: data?.model || record.generation?.model || '',
+            blocks: Array.isArray(data?.reasoning) ? data.reasoning : [],
+            truncated: Boolean(data?.truncated),
+          }
+          : prev
+      ));
+    } catch (err) {
+      setEvidenceView((prev) => (
+        prev.open && prev.packageId === generationPackageId
+          ? { ...prev, loading: false, error: err?.message || 'Could not load the call evidence for this draft.' }
+          : prev
+      ));
+    }
   };
   const readiness = getPublishReadiness({
     ...record,
@@ -2697,11 +2762,33 @@ function KnowledgeRecordDetail({
             By Knowledge Base Agent
             {record.generation?.generator === 'agent' && record.generation?.provider && (
               <>
-                <KbAgentProviderMark provider={record.generation.provider} providerLabel="" />
-                {record.generation.model && (
-                  <span title={record.generation.model}>
-                    {kbAgentModelLabel(record.generation.provider, record.generation.model)}
-                  </span>
+                {/* When the draft carries a back link to its forensic
+                    ProviderCallPackage, the [mark + model] token opens that
+                    call's evidence; legacy/deterministic drafts keep the plain
+                    non-interactive rendering — no dead affordance. */}
+                {generationPackageId ? (
+                  <button
+                    type="button"
+                    className="knowledge-draft-meta-evidence-link"
+                    onClick={openGenerationEvidence}
+                    title={`${record.generation.model || 'Model'} — view the call evidence for this draft`}
+                  >
+                    <KbAgentProviderMark provider={record.generation.provider} providerLabel="" />
+                    {record.generation.model && (
+                      <span className="knowledge-draft-meta-evidence-model">
+                        {kbAgentModelLabel(record.generation.provider, record.generation.model)}
+                      </span>
+                    )}
+                  </button>
+                ) : (
+                  <>
+                    <KbAgentProviderMark provider={record.generation.provider} providerLabel="" />
+                    {record.generation.model && (
+                      <span title={record.generation.model}>
+                        {kbAgentModelLabel(record.generation.provider, record.generation.model)}
+                      </span>
+                    )}
+                  </>
                 )}
                 {record.generation.reasoningEffort && (
                   <>
@@ -2843,6 +2930,34 @@ function KnowledgeRecordDetail({
 
         <div className="knowledge-draft-doc-footer-pad" />
       </article>
+
+      {/* Call-evidence overlay: the same "Model reasoning" page the triage
+          dock pushes, presented as a centered modal over the review document.
+          The view owns Esc-to-close; the backdrop click closes too. */}
+      {evidenceView.open && (
+        <div
+          className="knowledge-evidence-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Call evidence for this draft"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeGenerationEvidence();
+          }}
+        >
+          <div className="knowledge-evidence-panel">
+            <TriageReasoningView
+              loading={evidenceView.loading}
+              error={evidenceView.error}
+              provider={evidenceView.provider}
+              model={evidenceView.model}
+              blocks={evidenceView.blocks}
+              truncated={evidenceView.truncated}
+              onBack={closeGenerationEvidence}
+              ariaLabel="Model reasoning for this draft's generation call"
+            />
+          </div>
+        </div>
+      )}
     </main>
   );
 }

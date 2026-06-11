@@ -37,6 +37,11 @@ export default function TriageReasoningView({
   blocks = [],
   truncated = false,
   onBack,
+  // The view itself is generic (header reads "Model reasoning" + provider ·
+  // model); only the accessible region label was triage-specific. Callers
+  // outside the triage dock (e.g. the KB draft evidence overlay) pass their
+  // own label here.
+  ariaLabel = 'Model reasoning for the latest triage run',
 }) {
   const backRef = useRef(null);
 
@@ -59,7 +64,7 @@ export default function TriageReasoningView({
   const hasBlocks = blocks.length > 0;
 
   return (
-    <section className="v5-reasoning-view" aria-label="Model reasoning for the latest triage run">
+    <section className="v5-reasoning-view" aria-label={ariaLabel}>
       <header className="v5-reasoning-head">
         <button
           type="button"
