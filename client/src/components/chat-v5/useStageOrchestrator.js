@@ -27,7 +27,7 @@ const UI_LOCAL_EVENT_KINDS = new Set([
 
 const INITIAL_STAGE_STATE = {
   parser: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
-  triage: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '' },
+  triage: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '', providerPackageId: '' },
   inv: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
   main: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
 };
@@ -79,6 +79,48 @@ function normalizeInvMatches(rawArray) {
       _raw: m,
     };
   });
+}
+
+// Saved-run lookup table: caseIntake.runs[].phase → pipeline stage key.
+const SAVED_RUN_PHASE_BY_STAGE_KEY = {
+  parser: 'parse-template',
+  inv: 'known-issue-search',
+  triage: 'triage',
+  main: 'analyst',
+};
+
+// Rebuild the INV-match display list from a saved caseIntake's
+// known-issue-search run, mirroring the server's live mapping
+// (known-issue-search-agent.js knownIssueSearchToInvMatchResult): matches
+// surface only when the run completed with detail.status 'match', filtered
+// to high/medium confidence, capped at 3, confidence converted to the legacy
+// labels (high→'high', medium→'likely' — what drives normalizeInvMatches'
+// note text), and the score the live ssePayload derives unconditionally
+// (high→45, medium→32). The persisted detail.matches are the agent's raw
+// matches (flat invNumber/subject/confidence — case-intake.js:323 stores
+// them without a joined investigation doc; the nested `investigation` read
+// below is purely defensive).
+function invMatchesFromSavedRuns(runs) {
+  const list = Array.isArray(runs) ? runs : [];
+  const run = list.find((r) => r && r.phase === SAVED_RUN_PHASE_BY_STAGE_KEY.inv);
+  if (!run || run.status !== 'completed' || run.detail?.status !== 'match') return [];
+  const raw = Array.isArray(run.detail?.matches) ? run.detail.matches : [];
+  return raw
+    .filter((m) => m && (m.confidence === 'high' || m.confidence === 'medium'))
+    .slice(0, 3)
+    .map((m) => {
+      const inv = m.investigation && typeof m.investigation === 'object' ? m.investigation : {};
+      return {
+        invNumber: m.invNumber || inv.invNumber || '',
+        subject: m.subject || inv.subject || '',
+        summary: m.summary || inv.summary || '',
+        status: m.status || inv.status || '',
+        lastUpdated: m.lastUpdated || inv.lastUpdated || null,
+        confidence: m.confidence === 'medium' ? 'likely' : m.confidence,
+        score: m.confidence === 'high' ? 45 : 32,
+      };
+    })
+    .filter((m) => m.invNumber || m.subject);
 }
 
 function formatRelative(value) {
@@ -253,7 +295,7 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
   };
 }
 
-export function useStageOrchestrator() {
+export function useStageOrchestrator({ resumeConversationId = null } = {}) {
   const toast = useToast();
   const { runTriageStream } = useTriage();
   const [imageCaptured, setImageCaptured] = useState(false);
@@ -270,6 +312,10 @@ export function useStageOrchestrator() {
   const [invMatches, setInvMatches] = useState([]);
   const [analyst, setAnalyst] = useState(buildEmptyAnalystState);
   const [conversationId, setConversationId] = useState(null);
+  // Saved-conversation id adopted from the route for true resume; see the
+  // effect below. Fallback target only — a server-assigned conversationId
+  // always takes precedence in outgoing payloads.
+  const [resumeTargetId, setResumeTargetId] = useState(null);
   const [requestError, setRequestError] = useState(null);
   const [chatLog, setChatLog] = useState([]);
   // Live stage events streamed from the server. Bucketed by stageId so the
@@ -280,6 +326,17 @@ export function useStageOrchestrator() {
   const abortRef = useRef(null);
   const parseAbortRef = useRef(null);
   const triageAbortRef = useRef(null);
+  // Synchronous mirror of imageCaptured for restoreCapturedImage(). A ref
+  // (flipped inline in captureImage/reset, not via effect) keeps that
+  // callback's identity stable across renders AND closes the same-tick race
+  // where a resume-restore resolving right after a live capture could read a
+  // stale false and clobber the live image.
+  const imageCapturedRef = useRef(false);
+  // Where the current caseIntake came from: null (none), 'saved' (hydrated
+  // from a resumed session's record), or 'live' (SSE case_intake). Lets
+  // hydrateFromSavedCaseIntake replace stale saved state when switching
+  // between saved sessions while NEVER overwriting a live run's state.
+  const caseIntakeSourceRef = useRef(null);
   const tokenRef = useRef(0);
   const streamingTextRef = useRef('');
   const toastedStageKeysRef = useRef(new Set());
@@ -308,6 +365,8 @@ export function useStageOrchestrator() {
     }
     streamingTextRef.current = '';
     toastedStageKeysRef.current.clear();
+    imageCapturedRef.current = false;
+    caseIntakeSourceRef.current = null;
     setImageCaptured(false);
     setActiveWidget('image');
     setSplitView(false);
@@ -320,13 +379,96 @@ export function useStageOrchestrator() {
     setInvMatches([]);
     setAnalyst(buildEmptyAnalystState());
     setConversationId(null);
+    setResumeTargetId(null);
     setRequestError(null);
     setChatLog([]);
     setStageEvents({});
   }, []);
 
+  // True resume: when the chat is opened at #/chat/{id} (a saved session),
+  // remember that id so new messages append to the saved Conversation record
+  // instead of creating a new one. Kept separate from `conversationId` (which
+  // is only ever set from server responses) so a live session's own id always
+  // wins — outgoing payloads use `conversationId || resumeTargetId`. The prop
+  // going null (navigating away from the chat view) keeps the current target,
+  // matching the always-mounted session-persistence semantics; reset() (the
+  // "New" button) clears it so a fresh workflow starts a fresh conversation.
+  useEffect(() => {
+    const clean = typeof resumeConversationId === 'string' ? resumeConversationId.trim() : '';
+    if (clean) setResumeTargetId(clean);
+  }, [resumeConversationId]);
+
+  // Poisoned-resume escape hatch: when the container's history fetch confirms
+  // the routed conversation no longer exists (404), it calls this so outgoing
+  // sends stop targeting the dead id and fall back to creating a fresh
+  // conversation. Guarded by id so a stale fetch resolving after the route
+  // moved on can never clear a newer, valid target.
+  const clearResumeTarget = useCallback((id) => {
+    const clean = typeof id === 'string' ? id.trim() : '';
+    setResumeTargetId((prev) => (!clean || prev === clean ? null : prev));
+  }, []);
+
+  // True resume: re-display a saved session's pipeline screenshot (dock
+  // thumbnail / parser popup seed). Display-only — imageCaptured stays false
+  // so a fresh upload into the resumed session still runs captureImage() and
+  // the full pipeline. Replaces (or clears, on '') whatever a previously
+  // resumed session restored, so switching between saved sessions never
+  // shows a stale thumbnail; a live capture (imageCaptured) is never touched.
+  const restoreCapturedImage = useCallback((src) => {
+    if (imageCapturedRef.current) return;
+    const clean = typeof src === 'string' ? src.trim() : '';
+    setCapturedImageSrc(clean || null);
+  }, []);
+
+  // True resume: hydrate the pipeline surfaces (stage-card outcomes, parsed
+  // template fields, triage card, INV matches) from a saved caseIntake when a
+  // session is reopened cold. Adopting the saved record as the orchestrator's
+  // own caseIntake unifies every consumer on one source — the container's
+  // pastCaseIntake fallback clears itself once a caseIntake exists, so the
+  // workflow/stage log panels keep reading the exact same record.
+  //
+  // Live always wins, twice over: (1) we bail when a capture is in flight, a
+  // chat stream is open, or the current caseIntake came from a live SSE
+  // event; (2) a real run starting later simply overwrites all of this via
+  // handleCaseIntake/handleTriageCard/handleInvMatches, same as before.
+  // Passing null (route points at a dead/unreadable record) clears previously
+  // hydrated state. Stages with no saved run — or a non-terminal saved status
+  // (e.g. a run interrupted mid-flight) — honestly stay 'pending'/Waiting;
+  // nothing is faked as completed, nothing is marked running, and no live
+  // events are emitted.
+  const hydrateFromSavedCaseIntake = useCallback((savedCaseIntake) => {
+    if (imageCapturedRef.current || abortRef.current || caseIntakeSourceRef.current === 'live') return;
+    const record = savedCaseIntake && typeof savedCaseIntake === 'object' ? savedCaseIntake : null;
+    const runs = Array.isArray(record?.runs) ? record.runs : [];
+    caseIntakeSourceRef.current = record ? 'saved' : null;
+    setCaseIntake(record);
+    setTriageCard(record?.triageCard && typeof record.triageCard === 'object' ? record.triageCard : null);
+    setInvMatches(normalizeInvMatches(invMatchesFromSavedRuns(runs)));
+    setStageState(() => {
+      const next = { ...INITIAL_STAGE_STATE };
+      for (const [stageKey, phase] of Object.entries(SAVED_RUN_PHASE_BY_STAGE_KEY)) {
+        const run = runs.find((r) => r && r.phase === phase);
+        if (!run) continue;
+        const status = run.status === 'completed' ? 'done' : (run.status === 'failed' ? 'failed' : null);
+        if (!status) continue;
+        const durationMs = Number.isFinite(Number(run.durationMs)) ? Number(run.durationMs) : null;
+        const fallbackUsed = Boolean(run.fallback?.used ?? run.fallbackUsed);
+        next[stageKey] = {
+          ...INITIAL_STAGE_STATE[stageKey],
+          status,
+          durationMs,
+          error: status === 'failed' ? (run.summary || 'Stage failed') : null,
+          fallbackUsed,
+          ...(stageKey === 'triage' ? { fallbackReason: fallbackUsed ? (run.fallback?.reason || run.summary || '') : '' } : {}),
+        };
+      }
+      return next;
+    });
+  }, []);
+
   const handleCaseIntake = useCallback((data) => {
     if (!data || typeof data !== 'object') return;
+    caseIntakeSourceRef.current = 'live';
     setCaseIntake(data);
 
     const runs = Array.isArray(data.runs) ? data.runs : [];
@@ -636,6 +778,7 @@ export function useStageOrchestrator() {
         error: null,
         fallbackUsed: false,
         fallbackReason: '',
+        providerPackageId: '',
       },
     }));
     pushLocalStageEvent('triage', 'triage.client_request_started', {
@@ -674,12 +817,17 @@ export function useStageOrchestrator() {
         if (card) handleTriageCard(card);
         const finishedAt = Date.now();
         const failed = data?.ok === false && !data?.card && !data?.triageCard;
-        const fallbackUsed = Boolean(card?.fallback?.used || data?.triageMeta?.fallbackUsed || data?.status === 'degraded' || data?.fallbackCard);
+        // fallbackUsed means a real substitute path produced the card (rule
+        // fallback or provider failover) — NOT a genuine model result that
+        // merely failed soft validation. The server reports the latter as
+        // status 'degraded' with fallbackUsed false, so keep the two separate.
+        const fallbackUsed = Boolean(card?.fallback?.used || data?.triageMeta?.fallbackUsed || data?.fallbackUsed || data?.fallbackCard);
+        const degraded = data?.status === 'degraded' || fallbackUsed;
         pushLocalStageEvent('triage', 'triage.client_result_received', {
           provider: data?.providerUsed || provider,
           model: data?.modelUsed || model,
           elapsedMs: data?.elapsedMs ?? (finishedAt - startedAt),
-          status: failed ? 'failed' : (fallbackUsed ? 'degraded' : 'success'),
+          status: failed ? 'failed' : (degraded ? 'degraded' : 'success'),
           providerPackageId: data?.triageMeta?.providerPackageId || '',
           fallbackUsed,
         });
@@ -694,6 +842,7 @@ export function useStageOrchestrator() {
             error: failed ? (data?.error || 'Triage failed.') : null,
             fallbackUsed,
             fallbackReason: card?.fallback?.reason || data?.triageMeta?.fallbackReason || '',
+            providerPackageId: data?.triageMeta?.providerPackageId || '',
           },
         }));
       },
@@ -720,6 +869,7 @@ export function useStageOrchestrator() {
               finishedAt,
               durationMs: finishedAt - stageStartedAt,
               error: normalized.message || 'Triage failed',
+              providerPackageId: '',
             },
           };
         });
@@ -747,7 +897,7 @@ export function useStageOrchestrator() {
     setStageState((prev) => ({
       ...prev,
       parser: { ...prev.parser, status: 'running', startedAt: Date.now(), finishedAt: null, durationMs: null, error: null },
-      triage: { ...prev.triage, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null },
+      triage: { ...prev.triage, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, providerPackageId: '' },
       inv: { ...prev.inv, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null },
       main: { ...prev.main, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null },
     }));
@@ -903,7 +1053,7 @@ export function useStageOrchestrator() {
     // Submit to /api/chat with parsedEscalationText.
     const payload = buildPipelineChatPayload({
       message: 'Escalation captured via screenshot. See parsed template below for full context.',
-      conversationId: conversationId || undefined,
+      conversationId: conversationId || resumeTargetId || undefined,
       images: [],
       imageMeta: [],
       mode: 'single',
@@ -914,7 +1064,7 @@ export function useStageOrchestrator() {
       parsedEscalationElapsedMs: parseResult.elapsedMs,
     }, runtimeByStage);
     runChatStream(payload, token);
-  }, [conversationId, handleStageEvent, pushLocalStageEvent, runChatStream, startTriageStream]);
+  }, [conversationId, resumeTargetId, handleStageEvent, pushLocalStageEvent, runChatStream, startTriageStream]);
 
   const captureImage = useCallback((imageDataUrl, fileMeta) => {
     if (imageCaptured) return;
@@ -925,6 +1075,7 @@ export function useStageOrchestrator() {
       sizeBytes: fileMeta?.size ?? null,
       via: 'chat-v5-upload',
     });
+    imageCapturedRef.current = true;
     setImageCaptured(true);
     setCapturedImageSrc(imageDataUrl);
     setCapturedFileMeta(fileMeta || null);
@@ -962,7 +1113,7 @@ export function useStageOrchestrator() {
 
     const { abort } = sendChatMessage(buildPipelineChatPayload({
       message: clean,
-      conversationId: conversationId || undefined,
+      conversationId: conversationId || resumeTargetId || undefined,
       images: [],
       mode: 'single',
     }, runtimeByStage), {
@@ -1026,7 +1177,7 @@ export function useStageOrchestrator() {
       onLocalStage: () => {},
     });
     abortRef.current = abort;
-  }, [conversationId, handleCaseIntake, handleInvMatches, handleStageEvent]);
+  }, [conversationId, resumeTargetId, handleCaseIntake, handleInvMatches, handleStageEvent]);
 
   useEffect(() => {
     if (manualNav) return undefined;
@@ -1188,5 +1339,8 @@ export function useStageOrchestrator() {
     sendOperatorMessage,
     requestError,
     conversationId,
+    clearResumeTarget,
+    restoreCapturedImage,
+    hydrateFromSavedCaseIntake,
   };
 }

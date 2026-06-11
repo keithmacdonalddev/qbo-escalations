@@ -226,11 +226,20 @@ async function start(options = {}) {
         console.log(`QBO Escalation API listening on http://${host}:${listeningPort}`);
 
         if (startupControls.providerWarmup) {
-          const { warmUp: warmClaude } = require('./services/claude');
+          // Boot check uses the cheap `claude --version` availability probe
+          // instead of the old warmUp() "hello" prompt: same non-fatal
+          // contract (the promise never rejects), but no uncaptured model
+          // call is made at startup.
+          const { checkClaudeCliAvailability } = require('./services/providers/claude-cli-provider-harness');
           const { warmUp: warmCodex } = require('./services/codex');
           const claudeWarmTaskId = startBackgroundTask('claude-warmup');
-          warmClaude()
-            .then(() => completeBackgroundTask(claudeWarmTaskId, { ok: true }))
+          checkClaudeCliAvailability()
+            .then((result) => {
+              if (!result.available) {
+                console.warn('Claude CLI availability check failed:', result.reason);
+              }
+              completeBackgroundTask(claudeWarmTaskId, { ok: result.available });
+            })
             .catch((err) => failBackgroundTask(claudeWarmTaskId, err, { ok: false }));
           const codexWarmTaskId = startBackgroundTask('codex-warmup');
           warmCodex()

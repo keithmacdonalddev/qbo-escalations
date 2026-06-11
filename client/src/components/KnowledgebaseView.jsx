@@ -31,6 +31,14 @@ import {
   formatAllowedUses as formatLifecycleAllowedUses,
   getEscalationStatusLabel,
 } from '../lib/escalationKnowledgeLifecycle.js';
+import {
+  REASONING_EFFORT_OPTIONS,
+  getProviderMeta,
+  getProviderModelSuggestions,
+  getSupportsThinking,
+} from '../lib/providerCatalog.js';
+// Same orange Anthropic starburst the app header shows next to the active model.
+import AnthropicMark from './icons/AnthropicMark.jsx';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import './KnowledgebaseView.css';
 
@@ -182,11 +190,13 @@ function formatDate(value) {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatShortDate(value) {
+function formatShortDateTime(value) {
   if (!value) return '--';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '--';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day} ${time}`;
 }
 
 function formatPercent(value) {
@@ -231,23 +241,6 @@ function getRecordStatusDot(record = {}) {
   if (record.trustState === 'trusted') return 'published';
   if (status === 'approved' || status === 'published' || status === 'rejected') return status;
   return 'draft';
-}
-
-function getRecordReceivedAt(record = {}) {
-  return record.sourceSnapshot?.createdAt
-    || record.sourceSnapshot?.resolvedAt
-    || record.lineage?.generatedAt
-    || record.lineage?.createdAt
-    || record.createdAt
-    || record.updatedAt;
-}
-
-function getRecordAuthor(record = {}) {
-  return record.reviewedBy
-    || record.lineage?.createdBy
-    || record.kbAgent?.promptId
-    || record.sourceSnapshot?.owner
-    || 'Knowledge Base Agent';
 }
 
 function getRecordCaseQueueLabel(record) {
@@ -1837,7 +1830,7 @@ function KnowledgeDraftQueueItem({ record, selected = false }) {
         <span className="knowledge-draft-queue-case">{getRecordCaseQueueLabel(record)}</span>
         <span className={`knowledge-draft-status-dot ${getRecordStatusDot(record)}`} />
       </span>
-      <span className="knowledge-draft-queue-title">{record.title || 'Untitled KB draft'}</span>
+      <span className="knowledge-draft-queue-title">{displayRecordTitle(record.title, record.category, 'Untitled KB draft')}</span>
     </a>
   );
 }
@@ -2049,6 +2042,80 @@ function kbAgentFieldLabel(field) {
   return KB_AGENT_FIELD_LABELS[field] || field;
 }
 
+// Older stored draft titles were generated as "<category>: <symptom>", which
+// duplicates the category badge shown next to the title. Strip the prefix for
+// display ONLY when it matches the record's own category, so titles that
+// legitimately start with a word + colon are left alone. Stored titles are
+// untouched (the edit form still shows the raw value).
+function displayRecordTitle(title, category, fallback = '') {
+  const text = (typeof title === 'string' ? title : '').trim();
+  if (!text) return fallback;
+  const cat = (typeof category === 'string' ? category : '').trim().toLowerCase();
+  if (cat && cat !== 'unknown' && text.toLowerCase().startsWith(`${cat}:`)) {
+    const stripped = text.slice(cat.length + 1).trim();
+    if (stripped) return stripped.charAt(0).toUpperCase() + stripped.slice(1);
+  }
+  return text;
+}
+
+// Human-friendly model label from the canonical provider catalog; falls back
+// to the raw model id so we never invent a name the catalog does not know.
+function kbAgentModelLabel(provider, modelId) {
+  if (!modelId) return '';
+  const match = getProviderModelSuggestions(provider).find((option) => option.value === modelId);
+  return match?.label || modelId;
+}
+
+function kbAgentEffortLabel(effort) {
+  if (!effort) return '';
+  const match = REASONING_EFFORT_OPTIONS.find((option) => option.value === effort);
+  return match?.label || effort;
+}
+
+// Small provider mark for the sidebar status row. Mirrors the app header's
+// ProviderLogo: claude/anthropic providers get the exact same orange Anthropic
+// starburst badge the header shows next to the active model; other providers
+// render their real catalog icon (light variant on this dark surface) or
+// degrade to a neutral monogram from the provider's real label — never a
+// fabricated logo.
+function KbAgentProviderMark({ provider, providerLabel }) {
+  const [errored, setErrored] = useState(false);
+  const meta = getProviderMeta(provider);
+  const iconSrc = meta?.iconLightPath || meta?.iconPath || '';
+  const altLabel = meta?.shortLabel || meta?.label || providerLabel || 'Provider';
+
+  const providerText = `${provider || ''} ${meta?.label || ''} ${meta?.family || ''}`.toLowerCase();
+  if (providerText.includes('claude') || providerText.includes('anthropic')) {
+    return (
+      <span className="knowledge-agent-provider-mark" title={altLabel}>
+        <AnthropicMark size={14} className="" />
+      </span>
+    );
+  }
+
+  if (iconSrc && !errored) {
+    return (
+      <span className="knowledge-agent-provider-mark" title={altLabel}>
+        <img
+          src={iconSrc}
+          alt=""
+          aria-hidden="true"
+          loading="lazy"
+          decoding="async"
+          onError={() => setErrored(true)}
+        />
+      </span>
+    );
+  }
+
+  const initial = (altLabel || '?').trim().charAt(0).toUpperCase() || '?';
+  return (
+    <span className="knowledge-agent-provider-mark is-fallback" title={altLabel} aria-hidden="true">
+      {initial}
+    </span>
+  );
+}
+
 function KnowledgeBaseAgentSidebar({
   record,
   context,
@@ -2063,8 +2130,14 @@ function KnowledgeBaseAgentSidebar({
   onRefresh,
 }) {
   const hasInput = input.trim().length > 0;
-  const promptVersion = context?.prompt?.version || record?.kbAgent?.promptVersion || 'Current';
   const statusLabel = loading ? 'Loading' : busy ? 'Working' : record ? 'Ready' : 'No draft';
+  // Runtime the agent will actually use (resolved server-side from the agent
+  // profile). Absent → honest empty state: name + status dot only.
+  const runtime = context?.runtime && context.runtime.provider ? context.runtime : null;
+  const modelLabel = runtime ? kbAgentModelLabel(runtime.provider, runtime.model) : '';
+  const effortLabel = runtime && getSupportsThinking(runtime.provider)
+    ? kbAgentEffortLabel(runtime.reasoningEffort)
+    : '';
 
   const handleSubmit = (event) => {
     event.preventDefault();
@@ -2080,8 +2153,28 @@ function KnowledgeBaseAgentSidebar({
 
   return (
     <aside className="knowledge-agent-chat-sidebar" aria-labelledby="knowledge-agent-chat-heading">
-      <div className="knowledge-agent-chat-status" id="knowledge-agent-chat-heading">
-        Knowledge Base Agent / {promptVersion} / {statusLabel}
+      <div
+        className={`knowledge-agent-chat-status${loading || busy ? ' is-busy' : ''}${!record ? ' is-off' : ''}`}
+        id="knowledge-agent-chat-heading"
+        title={statusLabel}
+      >
+        <span className="knowledge-agent-chat-status-name">Knowledge Base Agent</span>
+        {runtime && (
+          <span className="knowledge-agent-chat-status-detail is-model" title={runtime.model || undefined}>
+            <KbAgentProviderMark provider={runtime.provider} providerLabel={runtime.providerLabel} />
+            {modelLabel && <span className="knowledge-agent-chat-status-model-text">{modelLabel}</span>}
+          </span>
+        )}
+        {effortLabel && (
+          <span
+            className="knowledge-agent-chat-status-detail is-effort"
+            title={`Reasoning effort: ${effortLabel}`}
+          >
+            {effortLabel}
+            <span className="sr-only"> reasoning effort</span>
+          </span>
+        )}
+        <span className="sr-only">Status: {statusLabel}</span>
         {record && (
           <button type="button" onClick={onRefresh} disabled={loading || busy} aria-label="Refresh Knowledge Base Agent context">
             <IconRefresh size={12} />
@@ -2121,7 +2214,7 @@ function KnowledgeBaseAgentSidebar({
                 <div className="knowledge-agent-changes" aria-label="Changes applied by the Knowledge Base Agent">
                   {message.appliedChanges.map((change) => (
                     <span className={`knowledge-agent-change-chip${change.undone ? ' is-undone' : ''}`} key={change.field}>
-                      Updated / {kbAgentFieldLabel(change.field)}
+                      Updated · {kbAgentFieldLabel(change.field)}
                       <button
                         type="button"
                         className="knowledge-agent-change-undo"
@@ -2134,7 +2227,7 @@ function KnowledgeBaseAgentSidebar({
                   ))}
                 </div>
               )}
-              {message.pending && <span>Sending</span>}
+              {message.pending && <span className="knowledge-agent-chat-pending">Sending…</span>}
             </article>
           ))
         )}
@@ -2154,7 +2247,7 @@ function KnowledgeBaseAgentSidebar({
           value={input}
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Direct an edit or ask about this draft..."
+          placeholder="Direct an edit or ask about this draft…"
           disabled={busy || !record}
           aria-label="Message Knowledge Base Agent about this draft"
         />
@@ -2260,7 +2353,7 @@ function KnowledgeFinalizationRail({ records = [], selectedRecord = null, loadin
                 key={record.id}
               >
                 <strong>{getRecordCaseQueueLabel(record)}</strong>
-                <span>{record.title || 'Untitled KB draft'}</span>
+                <span>{displayRecordTitle(record.title, record.category, 'Untitled KB draft')}</span>
                 <small>{task.label}</small>
               </a>
             );
@@ -2407,7 +2500,7 @@ function KnowledgeRecordRow({ record, selected = false }) {
         <span>{task.detail}</span>
       </div>
       <div className="knowledgebase-record-body">
-        <h2>{record.title || 'Untitled knowledge record'}</h2>
+        <h2>{displayRecordTitle(record.title, record.category, 'Untitled knowledge record')}</h2>
         <p>{record.summary || record.symptom || record.exactFix || 'No summary recorded.'}</p>
       </div>
       <div className="knowledgebase-record-meta">
@@ -2469,7 +2562,7 @@ function KnowledgeRecordDetail({
           <h1>Select a KB draft</h1>
           <div className="knowledge-draft-doc-meta">
             <span>Review queue</span>
-            <span className="dot-sep">/</span>
+            <span className="dot-sep">·</span>
             <span>No draft selected</span>
           </div>
           <section className="knowledge-draft-doc-section is-empty">
@@ -2588,18 +2681,40 @@ function KnowledgeRecordDetail({
 
   return (
     <main className="knowledge-draft-doc-wrap">
-      <article className="knowledge-draft-doc">
-        <h1>{draft.title || record.title || 'Untitled knowledge record'}</h1>
+      {/* key: remount the document when the operator switches drafts so the
+          CSS entrance choreography (kb-enter-rise stagger) replays. */}
+      <article className="knowledge-draft-doc" key={record.id}>
+        <h1>{displayRecordTitle(draft.title || record.title, draft.category || record.category, 'Untitled knowledge record')}</h1>
 
         <div className="knowledge-draft-doc-meta">
           <span>{formatCategory(draft.category || record.category)}</span>
-          <span className="dot-sep">/</span>
+          <span className="dot-sep">·</span>
           <span>{getRecordCaseQueueLabel(record)}</span>
-          <span className="dot-sep">/</span>
-          <span>{getRecordAuthor(record)}</span>
-          <span className="dot-sep">/</span>
-          <span>Received {formatShortDate(getRecordReceivedAt(record))}</span>
-          <span className="dot-sep">/</span>
+          <span className="dot-sep">·</span>
+          <span>Created {formatShortDateTime(record.lineage?.createdAt || record.lineage?.generatedAt || record.updatedAt)}</span>
+          <span className="dot-sep">·</span>
+          <span className="knowledge-draft-meta-by">
+            By Knowledge Base Agent
+            {record.generation?.generator === 'agent' && record.generation?.provider && (
+              <>
+                <KbAgentProviderMark provider={record.generation.provider} providerLabel="" />
+                {record.generation.model && (
+                  <span title={record.generation.model}>
+                    {kbAgentModelLabel(record.generation.provider, record.generation.model)}
+                  </span>
+                )}
+                {record.generation.reasoningEffort && (
+                  <>
+                    <span className="dot-sep">·</span>
+                    <span title={`Reasoning effort: ${kbAgentEffortLabel(record.generation.reasoningEffort)}`}>
+                      {kbAgentEffortLabel(record.generation.reasoningEffort)}
+                    </span>
+                  </>
+                )}
+              </>
+            )}
+          </span>
+          <span className="dot-sep">·</span>
           <span className={`knowledge-draft-meta-status ${getRecordStatusDot(record)}`}>{formatRecordStatus(record)}</span>
         </div>
 

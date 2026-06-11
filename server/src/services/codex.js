@@ -55,7 +55,14 @@ function normalizeCodexServiceTier(value, fallback = 'fast') {
 
 function codexConfigArgs({ reasoningEffort, serviceTier = DEFAULT_SERVICE_TIER }) {
   return [
-    '-c', `reasoning_effort="${reasoningEffort}"`,
+    // NOTE: the codex CLI config key is `model_reasoning_effort` — the bare
+    // `reasoning_effort` key is silently ignored (verified via --strict-config,
+    // which we deliberately do NOT pass at runtime because it would also
+    // strict-validate the user's global ~/.codex/config.toml).
+    '-c', `model_reasoning_effort="${reasoningEffort}"`,
+    // Always request detailed reasoning summaries so reasoning items reliably
+    // land in the captured stdout JSONL for the reasoning viewer.
+    '-c', 'model_reasoning_summary="detailed"',
     '-c', `service_tier="${normalizeCodexServiceTier(serviceTier)}"`,
   ];
 }

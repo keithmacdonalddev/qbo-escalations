@@ -8,7 +8,6 @@ const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/sessions', label: 'Sessions', short: 'Sess', icon: IconSessions },
   { hash: '#/escalations', label: 'Escalations', short: 'Esc', icon: IconDashboard },
-  { hash: '#/attention', label: 'Attention', short: 'Attn', icon: IconBell },
   { hash: '#/knowledge', label: 'Knowledge', short: 'Know', icon: IconKnowledge },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
@@ -202,15 +201,6 @@ function IconSessions({ size = 16 }) {
       <path d="M3 12h18" />
       <path d="M3 19h18" />
       <path d="M7 5v14" />
-    </svg>
-  );
-}
-
-function IconBell({ size = 16 }) {
-  return (
-    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M18 8a6 6 0 00-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-      <path d="M13.73 21a2 2 0 01-3.46 0" />
     </svg>
   );
 }

@@ -467,6 +467,12 @@ const providerCallPackageSchema = new mongoose.Schema({
   operation: { type: String, required: true, index: true },
   source: { type: sourceSchema, default: null },
 
+  // Caller-supplied capture metadata (captureContext.metadata): the origin
+  // context that triggered this provider call — e.g. sourceAgent, prompt
+  // identity, and for the KB draft extraction the escalation Mongo _id +
+  // human case number. Free-form so each call site can stamp what it knows.
+  metadata: { type: mongoose.Schema.Types.Mixed, default: null },
+
   request: { type: mongoose.Schema.Types.Mixed, default: null },
   response: { type: mongoose.Schema.Types.Mixed, default: null },
   cli: { type: cliPackageSchema, default: null },

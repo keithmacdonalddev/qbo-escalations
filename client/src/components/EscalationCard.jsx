@@ -1,11 +1,16 @@
 import Tooltip from './Tooltip.jsx';
-import {
-  ESCALATION_STATUS_BADGE_MAP,
-  ESCALATION_STATUS_LABELS,
-} from '../hooks/useEscalations.js';
+import { ESCALATION_STATUS_LABELS } from '../hooks/useEscalations.js';
+
+const STATUS_DOT_CLASS = {
+  open: 'is-open',
+  'in-progress': 'is-working',
+  resolved: 'is-resolved',
+  'escalated-further': 'is-escalated',
+};
 
 export default function EscalationCard({
   escalation,
+  showAgent = true,
   onOpen,
   onDelete,
 }) {
@@ -19,17 +24,16 @@ export default function EscalationCard({
       style={{ cursor: onOpen ? 'pointer' : 'default' }}
     >
       <td>
-        <span className={`badge ${ESCALATION_STATUS_BADGE_MAP[escalation.status] || ''}`}>
+        <span className="esc-status">
+          <i className={`esc-status-dot ${STATUS_DOT_CLASS[escalation.status] || 'is-open'}`} aria-hidden="true" />
           {ESCALATION_STATUS_LABELS[escalation.status] || escalation.status || 'Open'}
         </span>
       </td>
-      <td>
-        <span className={`cat-badge cat-${escalation.category || 'general'}`}>
-          {(escalation.category || 'general').replace('-', ' ')}
-        </span>
-      </td>
-      <td className="truncate" style={{ maxWidth: 120 }}>{escalation.agentName || '--'}</td>
-      <td className="truncate" style={{ maxWidth: 250 }}>
+      <td className="esc-cat">{(escalation.category || 'general').replace('-', ' ')}</td>
+      {showAgent && (
+        <td className="truncate esc-cell-agent">{escalation.agentName || '--'}</td>
+      )}
+      <td className="truncate esc-cell-issue">
         {escalation.attemptingTo || '--'}
         {escalation.conversationId && (
           <Tooltip text="This escalation has a linked conversation" level="medium">
@@ -39,25 +43,26 @@ export default function EscalationCard({
           </Tooltip>
         )}
       </td>
-      <td><span className="mono">{escalation.coid || '--'}</span></td>
-      <td style={{ whiteSpace: 'nowrap', fontSize: 'var(--text-xs)', color: 'var(--ink-secondary)' }}>
+      <td className="esc-cell-coid" title={escalation.coid || undefined}>
+        <span className="mono">{escalation.coid || '--'}</span>
+      </td>
+      <td className="esc-cell-date">
         {new Date(escalation.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
       </td>
       <td>
         <div className="esc-row-actions">
           <button
-            className="btn btn-primary btn-sm"
+            className="btn btn-ghost btn-sm esc-quiet-action"
             onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
             type="button"
           >
             {isFinished ? 'Open' : 'Finish'}
           </button>
           <button
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost btn-sm esc-row-delete"
             onClick={(e) => { e.stopPropagation(); onDelete(escalation._id); }}
             title="Delete escalation"
             type="button"
-            style={{ color: 'var(--danger)', opacity: 0.6 }}
           >
             Delete
           </button>

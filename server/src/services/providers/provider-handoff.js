@@ -6,6 +6,8 @@ const DEFAULT_CAPTURE_READBACK_ATTEMPTS = 5;
 const DEFAULT_CAPTURE_READBACK_DELAY_MS = 50;
 const TRIAGE_PROVIDER_CALL_SITE = 'triage';
 const TRIAGE_PROVIDER_OPERATION = 'triage';
+const KNOWLEDGEBASE_PROVIDER_CALL_SITE = 'knowledgebase-draft';
+const KNOWLEDGEBASE_PROVIDER_OPERATION = 'kb-draft-extraction';
 
 function emitProviderEvent(onProviderEvent, type, data = {}) {
   if (typeof onProviderEvent !== 'function') return;
@@ -262,6 +264,8 @@ async function requireProviderPackageCapture({ providerTrace, onProviderEvent, p
 }
 
 module.exports = {
+  KNOWLEDGEBASE_PROVIDER_CALL_SITE,
+  KNOWLEDGEBASE_PROVIDER_OPERATION,
   TRIAGE_PROVIDER_CALL_SITE,
   TRIAGE_PROVIDER_OPERATION,
   attachProviderTraceToError,

@@ -234,6 +234,9 @@ function buildTaxFormExportSummaryTriage(formType, haystack) {
   const archiveMention = /archive|repopulate|delete/.test(haystack);
   return {
     category: 'payroll',
+    // Evidence tag for the category plausibility check: names what in the case
+    // text drove this keyword-based category override.
+    signal: `mentions: ${formType} export`,
     read: `${formType} export is incomplete because the ${formType} summary is missing from the download package.${archiveMention ? ' Clearing the archive and forcing repopulation did not restore it.' : ''} This looks more like a payroll tax-form generation or packaging defect than a simple browser download problem.`,
     action: `Confirm the tax year, payroll subscription status, and whether the ${formType} summary exists under Archived Forms, then run one fresh export and capture whether the package omits only the summary or fails more broadly.`,
   };
@@ -272,9 +275,13 @@ function detectSpecializedTriage(fields, category, haystack) {
     };
   }
 
-  if (category === 'permissions' || /(permission|access|role|admin|accountant access)/.test(haystack)) {
+  const permissionsMention = (haystack.match(/(permission|access|role|admin|accountant access)/) || [])[1] || '';
+  if (category === 'permissions' || permissionsMention) {
     return {
       category: 'permissions',
+      // Evidence tag for the category plausibility check; empty when this branch
+      // fired purely off the declared category rather than case-text wording.
+      signal: permissionsMention ? `mentions: ${permissionsMention}` : '',
       read: 'This looks like an access or role-permission block in QBO. The failing step is more consistent with a company-role restriction than a product outage.',
       action: 'Confirm the affected user role, verify whether a master or company admin can reproduce the same step, and capture the exact permission message.',
     };
@@ -677,6 +684,149 @@ function buildSoftValidatedTriageCardFromOutput(output, parseFields = {}) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// One-shot repair pass: helpers for re-asking the model for ONLY the labeled
+// lines that failed soft validation, then merging its reply into the original
+// answer without ever overwriting fields that were already valid.
+// ---------------------------------------------------------------------------
+
+// Canonical output labels per parsed field key, in the prompt's display order.
+const TRIAGE_FIELD_LABELS = Object.freeze({
+  category: 'Category',
+  severity: 'Severity',
+  read: 'Fast read',
+  action: 'Immediate next step',
+  missingInfo: 'Missing info',
+  confidence: 'Confidence',
+  categoryCheck: 'Category check',
+});
+
+// Issue codes that a repair pass can plausibly fix (a missing or malformed
+// labeled line). The payroll pay-date rule and the category plausibility
+// advisory are deliberately excluded — re-asking cannot fix those.
+const TRIAGE_REPAIRABLE_ISSUE_CODES = Object.freeze([
+  'TRIAGE_FIELD_MISSING',
+  'TRIAGE_CATEGORY_INVALID',
+  'TRIAGE_SEVERITY_INVALID',
+  'TRIAGE_CONFIDENCE_INVALID',
+]);
+
+function listRepairableTriageFields(issues) {
+  const fields = [];
+  for (const issue of Array.isArray(issues) ? issues : []) {
+    if (!TRIAGE_REPAIRABLE_ISSUE_CODES.includes(issue?.code)) continue;
+    if (!TRIAGE_FIELD_LABELS[issue?.field]) continue;
+    pushUnique(fields, issue.field);
+  }
+  return fields;
+}
+
+function describeRepairIssueLine(issue) {
+  const label = TRIAGE_FIELD_LABELS[issue.field];
+  if (issue.code === 'TRIAGE_FIELD_MISSING') return `- ${label}: was missing entirely`;
+  const raw = safeString(issue.raw, '').trim();
+  return `- ${label}: value ${raw ? `"${raw}" ` : ''}was invalid`;
+}
+
+function fillRepairTemplate(template, replacements) {
+  let output = safeString(template, '');
+  for (const [token, value] of Object.entries(replacements)) {
+    output = output.split(token).join(value);
+  }
+  return output;
+}
+
+function buildTriageRepairPromptInput({ template, issues, previousOutput, parserText, parseFields } = {}) {
+  const repairableIssues = (Array.isArray(issues) ? issues : [])
+    .filter((issue) => TRIAGE_REPAIRABLE_ISSUE_CODES.includes(issue?.code) && TRIAGE_FIELD_LABELS[issue?.field]);
+  const issueLines = repairableIssues.map(describeRepairIssueLine).join('\n');
+  // Compact escalation context: prefer the structured pre-parsed block; fall
+  // back to the raw parser text (bounded) when no fields parsed.
+  const refBlock = buildTriageRefBlock(parseFields).trim();
+  const context = refBlock || safeString(parserText, '').trim().slice(0, 4000);
+  return fillRepairTemplate(template, {
+    '{{ISSUE_LINES}}': issueLines || '- (none)',
+    '{{PREVIOUS_ANSWER}}': safeString(previousOutput, '').trim() || '(empty)',
+    '{{ESCALATION_CONTEXT}}': context || '(no parsed context available)',
+  });
+}
+
+// Merge the repair reply into the original output. Only fields listed in
+// `repairFields` (the previously missing/invalid ones) may be taken from the
+// repair reply; every field that was already valid keeps its original value,
+// even if the model disobeyed and re-emitted it. Returns the merged labeled
+// text (ready for a fresh soft-validation pass) plus the fields actually
+// repaired.
+function mergeTriageRepairOutput(originalOutput, repairOutput, repairFields) {
+  const original = parseLabeledTriageOutput(originalOutput);
+  const repaired = parseLabeledTriageOutput(repairOutput);
+  const allowed = new Set(Array.isArray(repairFields) ? repairFields : []);
+  const lines = [];
+  const repairedFields = [];
+  for (const [key, label] of Object.entries(TRIAGE_FIELD_LABELS)) {
+    const repairValue = allowed.has(key) ? safeString(repaired[key], '').trim() : '';
+    const value = repairValue || safeString(original[key], '').trim();
+    if (repairValue) repairedFields.push(key);
+    if (value) lines.push(`${label}: ${value}`);
+  }
+  return { mergedOutput: lines.join('\n'), repairedFields };
+}
+
+// ---------------------------------------------------------------------------
+// Category plausibility check: advisory cross-check of the model's category
+// against the same deterministic rule chain the fallback card uses
+// (escalation-parser keyword classification -> specialized keyword overrides).
+// It flags, never overrides.
+// ---------------------------------------------------------------------------
+
+function inferRuleTriageCategoryEvidence(parseFields) {
+  const sourceFields = parseFields && typeof parseFields === 'object' ? parseFields : {};
+  const haystack = buildFieldHaystack(sourceFields);
+  // The parsed template's category (escalation-parser keyword classification),
+  // mapped through the same table the fallback card uses. Unknown or
+  // unmappable classifications intentionally stay '' (no confident opinion).
+  const declared = normalizeLooseTriageCategory(sourceFields.category).validated;
+  const specialized = detectSpecializedTriage(sourceFields, declared || 'technical', haystack);
+  return {
+    category: normalizeTriageCategory(specialized.category || declared || 'technical'),
+    declared,
+    signal: safeString(specialized.signal, '').trim(),
+  };
+}
+
+// Returns an advisory validation issue when the deterministic rules have a
+// confident, internally consistent category that differs from the model's
+// validated category — otherwise null. Confidence bar (when in doubt, silent):
+// - model category missing/invalid: already flagged elsewhere, skip;
+// - rule category is the generic 'technical' default: not confident, skip;
+// - rule signals disagree with each other (declared vs keyword override): skip;
+// - the model's own Category check already names the rule category: it has
+//   acknowledged and justified the divergence, skip.
+function buildCategoryPlausibilityIssue(parseFields, modelCategory, { categoryCheck = '' } = {}) {
+  const validatedModel = safeString(modelCategory, '').trim();
+  if (!TRIAGE_ALLOWED_CATEGORIES.includes(validatedModel)) return null;
+
+  const evidence = inferRuleTriageCategoryEvidence(parseFields);
+  if (evidence.category === 'technical') return null;
+  if (evidence.category === validatedModel) return null;
+  if (evidence.declared && evidence.category !== evidence.declared) return null;
+
+  const checkText = safeString(categoryCheck, '').toLowerCase();
+  if (checkText.includes(evidence.category) || checkText.includes(evidence.category.replace(/-/g, ' '))) {
+    return null;
+  }
+
+  const because = evidence.signal
+    ? `the case text points at ${evidence.category} (${evidence.signal})`
+    : `the case text's keyword classification points at ${evidence.category}`;
+  return makeValidationIssue(
+    'TRIAGE_CATEGORY_PLAUSIBILITY',
+    'category',
+    `Category may be wrong — ${because}. The model chose ${validatedModel}.`,
+    { advisory: true, ruleCategory: evidence.category, modelCategory: validatedModel }
+  );
+}
+
 function buildTriageRefBlock(parseFields) {
   if (!parseFields || typeof parseFields !== 'object') return '';
   const f = parseFields;
@@ -892,6 +1042,7 @@ function applyImageResponseCompliance(data, triageContext) {
 
 module.exports = {
   applyImageResponseCompliance,
+  buildCategoryPlausibilityIssue,
   buildFallbackTriageCard,
   buildImageTurnSystemPrompt,
   buildInvMatchRefBlock,
@@ -900,10 +1051,14 @@ module.exports = {
   buildServerTriageCard,
   buildTriageAgentPromptInput,
   buildTriageRefBlock,
+  buildTriageRepairPromptInput,
   isNonEscalationIntent,
+  listRepairableTriageFields,
+  mergeTriageRepairOutput,
   parseLabeledTriageOutput,
   splitMissingInfo,
   TRIAGE_ALLOWED_CATEGORIES,
   TRIAGE_ALLOWED_CONFIDENCE,
   TRIAGE_ALLOWED_SEVERITIES,
+  TRIAGE_REPAIRABLE_ISSUE_CODES,
 };

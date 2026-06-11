@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import StageEventLogPanel from './StageEventLogPanel.jsx';
+import StageEventLogPanel, { getStageEventLogText } from './StageEventLogPanel.jsx';
 import './WorkflowLogPanel.css';
 
 // Unified whole-workflow event log. Stacks the four pipeline stages in run
@@ -38,6 +38,7 @@ export default function WorkflowLogPanel({
   liveEventCounts = {},
   eventEstimates = {},
   stageLabels = {},
+  onCopyText,
 }) {
   const caseIntake = conversation?.caseIntake || null;
 
@@ -55,6 +56,17 @@ export default function WorkflowLogPanel({
     () => stageCounts.reduce((sum, entry) => sum + entry.count, 0),
     [stageCounts],
   );
+  const workflowCopyText = useMemo(() => (
+    WORKFLOW_STAGES
+      .map((stage) => getStageEventLogText({
+        stageId: stage.key,
+        conversation,
+        liveEvents,
+        stageLabels,
+      }))
+      .filter(Boolean)
+      .join('\n\n')
+  ), [conversation, liveEvents, stageLabels]);
 
   // Track which stage sections are expanded. Default: expand every stage that
   // has events so the whole workflow is visible at a glance; if nothing has
@@ -100,9 +112,28 @@ export default function WorkflowLogPanel({
     <div className="v5-workflow-log" role="region" aria-label="Workflow event log">
       <div className="v5-workflow-log__summary">
         <strong className="v5-workflow-log__heading">Workflow Event Stream</strong>
-        <span className="v5-workflow-log__total" title="Run events across all four pipeline stages">
-          {totalEvents} event{totalEvents === 1 ? '' : 's'} · 4 stages
-        </span>
+        <div className="v5-workflow-log__summary-actions">
+          {onCopyText && (
+            <button
+              type="button"
+              className="v5-workflow-log__copy"
+              onClick={() => {
+                Promise.resolve(onCopyText(workflowCopyText, 'workflow event log')).catch(() => {});
+              }}
+              disabled={!totalEvents}
+              title="Copy all workflow event logs"
+              aria-label="Copy all workflow event logs"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </button>
+          )}
+          <span className="v5-workflow-log__total" title="Run events across all four pipeline stages">
+            {totalEvents} event{totalEvents === 1 ? '' : 's'} · 4 stages
+          </span>
+        </div>
       </div>
       <div className="v5-workflow-log__stages">
         {stageCounts.map(({ stage, count }) => {
@@ -139,6 +170,7 @@ export default function WorkflowLogPanel({
                     eventCount={liveEventCounts?.[stage.key] || 0}
                     estimatedEvents={eventEstimates?.byStage?.[stage.key]?.avg || 0}
                     stageLabels={stageLabels}
+                    onCopyText={onCopyText}
                   />
                 </div>
               )}

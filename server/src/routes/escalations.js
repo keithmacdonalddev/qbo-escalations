@@ -381,7 +381,23 @@ async function enrichKnowledgeDraft(escalation, draftData) {
   const result = await runKnowledgeBaseAgentDraftExtraction({ escalation, draftData });
   if (!result || !result.text) return null;
   const fields = parseEnrichmentResponse(result.text);
-  return fields ? { fields, contextBundle: result.contextBundle, usage: result.usage } : null;
+  return fields
+    ? {
+      fields,
+      contextBundle: result.contextBundle,
+      usage: result.usage,
+      // Generation provenance: what the extraction call ACTUALLY used, so the
+      // saved candidate can record real per-record provenance (never the
+      // agent's current config).
+      providerUsed: result.providerUsed || '',
+      modelUsed: result.modelUsed || '',
+      reasoningEffort: result.reasoningEffort || '',
+      // Back link to the captured ProviderCallPackage of the successful
+      // extraction attempt (the failover backup's own package when the
+      // primary failed), so the draft points at its forensic evidence.
+      providerPackageId: result.providerPackageId || '',
+    }
+    : null;
 }
 
 function parseEnrichmentResponse(text) {
@@ -1129,12 +1145,21 @@ async function createKnowledgeDraftForEscalation(escalation, {
   // Knowledge Base Agent pass: analyze the source material to produce reviewer-facing draft fields.
   let enriched = false;
   let kbAgentContextBundle = null;
+  let generationProvenance = null;
   if (shouldRunKnowledgeBaseAgentDraftPass(enrich)) {
     try {
       const aiResult = await enrichKnowledgeDraft(escalation, draftData);
       if (aiResult?.fields) {
         const aiFields = aiResult.fields;
         kbAgentContextBundle = aiResult.contextBundle || null;
+        generationProvenance = {
+          generator: 'agent',
+          agentId: 'knowledgebase-agent',
+          provider: aiResult.providerUsed || '',
+          model: aiResult.modelUsed || '',
+          reasoningEffort: aiResult.reasoningEffort || '',
+          providerCallPackageId: aiResult.providerPackageId || '',
+        };
         if (aiFields.title && (!draftData.title || draftData.title === 'Reviewed case learning')) {
           draftData.title = aiFields.title;
         }
@@ -1185,6 +1210,17 @@ async function createKnowledgeDraftForEscalation(escalation, {
   const knowledge = existing || new KnowledgeCandidate({ escalationId: escalation._id });
   knowledge.set(draftData);
   if (!knowledge.reviewStatus) knowledge.reviewStatus = 'draft';
+  // Record WHO/WHAT composed this draft's content. When the agent pass did not
+  // run (or failed), the draft is honest deterministic server composition —
+  // no provider/model is recorded because no LLM was involved.
+  knowledge.generation = generationProvenance || {
+    generator: 'deterministic',
+    agentId: 'knowledgebase-agent',
+    provider: '',
+    model: '',
+    reasoningEffort: '',
+    providerCallPackageId: '',
+  };
   if (!kbAgentContextBundle) {
     try {
       kbAgentContextBundle = await buildKnowledgeBaseAgentContext({

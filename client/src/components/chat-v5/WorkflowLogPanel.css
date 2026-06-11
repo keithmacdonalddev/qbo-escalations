@@ -74,6 +74,72 @@
   white-space: nowrap;
 }
 
+.v5-workflow-log__summary-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.v5-workflow-log__copy {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  color: #b8bcc1;
+  cursor: pointer;
+  flex: 0 0 auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transform: translateY(0) scale(1);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    color 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-workflow-log__copy:hover,
+.v5-workflow-log__copy:focus-visible {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(83, 145, 255, 0.22), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.04));
+  border-color: rgba(112, 166, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 0 3px rgba(83, 145, 255, 0.12);
+  color: #e6e8eb;
+  transform: translateY(-1px) scale(1.03);
+  outline: none;
+}
+
+.v5-workflow-log__copy:active {
+  transform: translateY(0) scale(0.95);
+  transition-duration: 80ms;
+}
+
+.v5-workflow-log__copy:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.v5-workflow-log__copy svg {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-workflow-log__copy:hover svg,
+.v5-workflow-log__copy:focus-visible svg {
+  transform: translateY(-0.5px);
+}
+
 .v5-workflow-log__stages {
   flex: 1 1 auto;
   min-height: 0;

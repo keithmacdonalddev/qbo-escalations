@@ -409,6 +409,43 @@ function summarizeData(kind, data) {
   return bits.join(' ');
 }
 
+function formatEventLine(event) {
+  if (!event) return '';
+  if (event._kind === 'llm.thinking-group') {
+    const joined = event.deltas.join('');
+    return [
+      `[${formatClock(event.ts)}]`,
+      event?._timing ? `[${formatImageParserElapsedPair(event._timing)}]` : '',
+      'llm.thinking:',
+      `${event.count} delta${event.count === 1 ? '' : 's'}`,
+      joined ? `\n${joined}` : '',
+    ].filter(Boolean).join(' ');
+  }
+  const summary = summarizeData(event?.kind, event?.data);
+  return [
+    `[${formatClock(event?.ts)}]`,
+    event?._timing ? `[${formatImageParserElapsedPair(event._timing)}]` : '',
+    `${event?.kind || 'event'}${summary ? `: ${summary}` : ''}`,
+  ].filter(Boolean).join(' ');
+}
+
+export function getStageEventLogText({
+  stageId,
+  conversation,
+  liveEvents,
+  stageLabels = {},
+}) {
+  const liveList = sortEvents(Array.isArray(liveEvents?.[stageId]) ? liveEvents[stageId] : []);
+  const savedList = sortEvents(eventsFromSavedRun(conversation, stageId));
+  const events = liveList.length > 0
+    ? liveList
+    : (savedList.length > 0 ? savedList : liveList);
+  const timedEvents = annotateEventTimings(events);
+  const resolvedLabel = stageLabels[stageId] || STAGE_LABELS[stageId] || stageId;
+  const lines = groupEvents(timedEvents).map(formatEventLine).filter(Boolean);
+  return [`${resolvedLabel} Event Stream`, ...lines].join('\n').trim();
+}
+
 function eventsFromSavedRun(conversation, stageId) {
   const intake = conversation?.caseIntake;
   if (!intake) return [];
@@ -518,6 +555,7 @@ export default function StageEventLogPanel({
   eventCount = 0,
   estimatedEvents = 0,
   stageLabels = {},
+  onCopyText,
 }) {
   const [autoScroll, setAutoScroll] = useState(true);
   const threadRef = useRef(null);
@@ -541,6 +579,12 @@ export default function StageEventLogPanel({
   const showSourceBadge = !(isParserStage && liveList.length > 0);
   const statusLabel = deriveStatusLabel(stageId, events, conversation?.caseIntake);
   const resolvedLabel = stageLabels[stageId] || STAGE_LABELS[stageId] || stageId;
+  const copyText = useMemo(() => getStageEventLogText({
+    stageId,
+    conversation,
+    liveEvents,
+    stageLabels,
+  }), [conversation, liveEvents, stageId, stageLabels]);
 
   // Counter + progress bar. Counts only `run`-category events — UI events
   // (popup open/close, replay-skipped) are still rendered in the thread for
@@ -597,6 +641,23 @@ export default function StageEventLogPanel({
       <div className="v5-stage-log-panel__sub-header">
         <strong className="v5-stage-log-panel__title">{`${resolvedLabel} Event Stream`}</strong>
         <div className="v5-stage-log-panel__meta">
+          {onCopyText && (
+            <button
+              type="button"
+              className="v5-stage-log-panel__copy"
+              onClick={() => {
+                Promise.resolve(onCopyText(copyText, `${resolvedLabel} event log`)).catch(() => {});
+              }}
+              disabled={!timedEvents.length}
+              title={`Copy ${resolvedLabel} event log`}
+              aria-label={`Copy ${resolvedLabel} event log`}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            </button>
+          )}
           <span
             className="v5-stage-log-panel__counter"
             title={counterTitle}

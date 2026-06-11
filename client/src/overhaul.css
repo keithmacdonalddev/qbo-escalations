@@ -7406,12 +7406,6 @@ body,
   scrollbar-gutter: stable !important;
 }
 
-.app-content-constrained {
-  width: 100% !important;
-  max-width: none !important;
-  margin: 0 !important;
-}
-
 .sidebar {
   padding: 4px 0 !important;
   box-shadow: none !important;
@@ -8331,13 +8325,6 @@ body:has(.case-workflow-surface) .chat-messages {
   margin-top: 4px !important;
   font-size: 10px !important;
   line-height: 1.15 !important;
-}
-
-.usage-dashboard-page,
-.analytics-page,
-.template-library-page,
-.playbook-editor-page {
-  padding: 0 !important;
 }
 
 .usage-tab-strip {

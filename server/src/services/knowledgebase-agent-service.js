@@ -150,8 +150,25 @@ function buildCandidateEvidence(candidate = {}) {
 
 function inferDraftTitle(escalation = {}) {
   const category = safeString(escalation.category, 'unknown');
-  const symptom = compactText(escalation.actualOutcome || escalation.attemptingTo, 80);
-  return symptom ? `${category}: ${symptom}` : `${category} resolved case learning`;
+  // No category prefix: the category is stored (and displayed) as its own
+  // field, so baking "category: ..." into the title duplicated it everywhere
+  // the title renders next to a category badge.
+  //
+  // Generous word-boundary cap instead of compactText's hard 80-char slice,
+  // which baked mid-word "a mis..." truncation into stored titles. Titles are
+  // short sentences and should read complete; 200 chars is a sanity ceiling
+  // only, and when it does apply we cut at the last word break with no
+  // ellipsis.
+  let symptom = safeString(escalation.actualOutcome || escalation.attemptingTo, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (symptom.length > 200) {
+    const cut = symptom.slice(0, 200);
+    const lastSpace = cut.lastIndexOf(' ');
+    symptom = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
+  }
+  if (symptom) return symptom.charAt(0).toUpperCase() + symptom.slice(1);
+  return `${category} resolved case learning`;
 }
 
 function firstNonEmpty(values = [], fallback = '') {

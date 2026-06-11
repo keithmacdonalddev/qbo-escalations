@@ -156,6 +156,18 @@ test('runTriage injects trusted KB context and records KB trace metadata', async
   assert.equal(result.triageMeta.knowledgeContext.allowedUse, 'triage');
   assert.ok(events.some((event) => event.kind === 'triage.knowledge_context_built'));
 
+  // The trace must explain WHY each record was chosen (relevance ranking).
+  const tracedTrusted = result.triageMeta.knowledgeContext.records
+    .find((record) => record.id === `candidate:${trusted._id}`);
+  assert.ok(tracedTrusted.relevance, 'trace records carry relevance metadata');
+  assert.ok(tracedTrusted.relevance.score > 0);
+  assert.ok(tracedTrusted.relevance.matchedTerms > 0);
+  assert.equal(tracedTrusted.relevance.legacy, false);
+  // Legacy playbook chunks may ride along, but never more than 2.
+  const legacyTraceCount = result.triageMeta.knowledgeContext.records
+    .filter((record) => record.relevance?.legacy).length;
+  assert.ok(legacyTraceCount <= 2, `legacy records capped at 2, saw ${legacyTraceCount}`);
+
   const saved = await TriageResult.findOne({ runId: 'triage-knowledge-context' }).lean();
   assert.ok(saved);
   assert.equal(saved.triageMeta.knowledgeContext.allowedUse, 'triage');

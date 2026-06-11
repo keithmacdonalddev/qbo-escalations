@@ -30,6 +30,15 @@ function buildProviderOption(entry) {
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
     supportsImageInput: typeof entry.supportsImageInput === 'boolean' ? entry.supportsImageInput : null,
     reasoningVisibility: entry.reasoningVisibility || null,
+    reasoningTerminology: entry.reasoningTerminology || null,
+    effortTerminology: entry.effortTerminology || null,
+    thinkingMode: entry.thinkingMode || null,
+    manualThinkingBudget: typeof entry.manualThinkingBudget === 'boolean' ? entry.manualThinkingBudget : null,
+    modelAlias: entry.modelAlias === true,
+    modelAliases: Array.isArray(entry.modelAliases) ? [...entry.modelAliases] : [],
+    featureNotes: Array.isArray(entry.featureNotes) ? [...entry.featureNotes] : [],
+    contextWindowTokens: Number.isFinite(entry.contextWindowTokens) ? entry.contextWindowTokens : null,
+    maxOutputTokens: Number.isFinite(entry.maxOutputTokens) ? entry.maxOutputTokens : null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
 }
@@ -62,8 +71,10 @@ export const CODEX_SERVICE_TIER_OPTIONS = Object.freeze([
 
 const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
   claude: Object.freeze([
+    { value: 'claude-fable-5', label: 'Claude Fable 5' },
     { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
-    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   ]),
   codex: Object.freeze([
     { value: 'gpt-5.5', label: 'GPT-5.5' },
@@ -141,6 +152,19 @@ export function getProviderCapabilities(providerOrFamily) {
         ? defaultMeta.supportsThinking
         : false,
     reasoningVisibility: meta?.reasoningVisibility || (meta?.supportsThinking ? 'stream' : 'none'),
+    reasoningTerminology: meta?.reasoningTerminology || defaultMeta?.reasoningTerminology || 'reasoning',
+    effortTerminology: meta?.effortTerminology || defaultMeta?.effortTerminology || 'reasoning effort',
+    thinkingMode: meta?.thinkingMode || defaultMeta?.thinkingMode || null,
+    manualThinkingBudget: typeof meta?.manualThinkingBudget === 'boolean'
+      ? meta.manualThinkingBudget
+      : typeof defaultMeta?.manualThinkingBudget === 'boolean'
+        ? defaultMeta.manualThinkingBudget
+        : null,
+    modelAlias: meta?.modelAlias === true,
+    modelAliases: Array.isArray(meta?.modelAliases) ? [...meta.modelAliases] : [],
+    featureNotes: Array.isArray(meta?.featureNotes) ? [...meta.featureNotes] : [],
+    contextWindowTokens: Number.isFinite(meta?.contextWindowTokens) ? meta.contextWindowTokens : null,
+    maxOutputTokens: Number.isFinite(meta?.maxOutputTokens) ? meta.maxOutputTokens : null,
     allowedEfforts,
     alternateProvider: getAlternateProvider(providerOrFamily),
   };
@@ -204,7 +228,7 @@ export function getProviderModelSuggestions(provider) {
   const normalizedProvider = normalizeProvider(provider);
   const family = getProviderFamily(normalizedProvider);
   const options = PROVIDER_CATALOG
-    .filter((entry) => entry.model && (entry.id === normalizedProvider || entry.family === family))
+    .filter((entry) => entry.model && entry.selectable === false && (entry.id === normalizedProvider || entry.family === family))
     .map((entry) => ({
       value: entry.model,
       label: entry.label,

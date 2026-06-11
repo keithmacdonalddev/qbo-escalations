@@ -3502,6 +3502,17 @@
   --kb-topbar-h: 56px;
   --kb-rail-w: 280px;
   --kb-chat-w: 360px;
+  /* Elevation + motion tokens (used by the "Premium elevation + motion layer"
+     block at the end of this redesign section). */
+  --kb-bg-sheet: #232326;
+  --kb-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 2px 10px rgba(0, 0, 0, 0.22);
+  --kb-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --kb-shadow-3: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --kb-edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  --kb-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --kb-dur-fast: 150ms;
+  --kb-dur-enter: 360ms;
+  position: relative;
   display: grid;
   grid-template-rows: var(--kb-topbar-h) minmax(0, 1fr) auto;
   gap: 0;
@@ -3525,6 +3536,24 @@
   padding: 0 24px;
   border-bottom: 1px solid var(--kb-border);
   background: var(--kb-bg-surface);
+}
+
+/* Guard: overhaul.css `header::before` injects a 20px fade strip under every
+   <header>. The prototype topbar ends in a clean 1px border — suppress it. */
+.knowledgebase-page.is-redesign .knowledge-draft-topbar::before {
+  content: none !important;
+}
+
+/* Guard: overhaul.css `header [class*="title"]` paints an animated holographic
+   gradient with `-webkit-text-fill-color: transparent !important`. No draft
+   class inside the topbar <header> contains "title" today, but pin the queue
+   titles (and any future "title" class inside the topbar) so a rename can't
+   silently wash them blue. */
+.knowledgebase-page.is-redesign .knowledge-draft-queue-title,
+.knowledgebase-page.is-redesign .knowledge-draft-topbar [class*='title'] {
+  background: none !important;
+  -webkit-text-fill-color: currentColor !important;
+  animation: none !important;
 }
 
 .knowledge-draft-breadcrumb {
@@ -3618,55 +3647,71 @@
   gap: 8px;
 }
 
-.knowledge-draft-btn {
+/* `!important` reclaims box metrics from overhaul.css
+   `button[class*="btn"] { padding/font-size/line-height !important }` (0,1,1).
+   Equal-importance conflicts resolve by specificity, so every rule carrying a
+   reclaimed metric is prefixed with `.knowledgebase-page.is-redesign` to win
+   at (0,3,0)+. The .primary and :disabled rules are prefixed too so their
+   font-weight/cursor keep outranking the promoted base rule. */
+.knowledgebase-page.is-redesign .knowledge-draft-btn {
   display: inline-flex;
-  min-height: 30px;
+  min-height: 30px !important;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: 6px;
+  border-radius: 6px !important;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: 13px !important;
   font-weight: 500;
+  line-height: 1.2 !important;
   transition: background 150ms ease, color 150ms ease;
 }
 
-.knowledge-draft-btn.ghost {
-  padding: 0 12px;
+.knowledgebase-page.is-redesign .knowledge-draft-btn.ghost {
+  padding: 0 12px !important;
   background: transparent;
   color: var(--kb-text-secondary);
 }
 
-.knowledge-draft-btn.ghost:hover:not(:disabled) {
+.knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:hover:not(:disabled) {
   background: var(--kb-bg-raised);
   color: var(--kb-text-primary);
 }
 
-.knowledge-draft-btn.primary {
-  padding: 0 16px;
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary {
+  padding: 0 16px !important;
   background: var(--kb-accent);
   color: #08233f;
-  font-weight: 700;
+  font-weight: 600;
 }
 
-.knowledge-draft-btn.primary:hover:not(:disabled) {
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary:hover:not(:disabled) {
   background: var(--kb-accent-strong);
 }
 
-.knowledge-draft-btn.icon {
+.knowledgebase-page.is-redesign .knowledge-draft-btn.icon {
   width: 30px;
-  padding: 0;
+  padding: 0 !important;
   background: transparent;
   color: var(--kb-text-secondary);
 }
 
-.knowledge-draft-btn.icon:hover:not(:disabled) {
+.knowledgebase-page.is-redesign .knowledge-draft-btn.icon:hover:not(:disabled) {
   background: var(--kb-bg-raised);
   color: var(--kb-text-primary);
 }
 
-.knowledge-draft-btn:disabled {
+.knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:active:not(:disabled),
+.knowledgebase-page.is-redesign .knowledge-draft-btn.icon:active:not(:disabled) {
+  background: var(--kb-bg-elevated);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary:active:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-accent) 88%, black);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -3701,7 +3746,7 @@
   padding: 16px 16px 8px;
   color: var(--kb-text-muted);
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -3728,6 +3773,19 @@
   color: inherit;
   outline: none;
   text-decoration: none;
+}
+
+.knowledge-draft-queue-item:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Inset ring: full-bleed list rows clip an outer ring against neighbors.
+   `!important` beats the global `:focus-visible` blue box-shadow ring in
+   overhaul.css AND the 2px blue outline in console-density.css (`a:focus-visible`,
+   both (0,1,1) — this rule wins at (0,4,0)). */
+.knowledgebase-page.is-redesign .knowledge-draft-queue-item:focus-visible {
+  outline: none !important;
+  box-shadow: inset 0 0 0 3px var(--kb-accent-ring) !important;
 }
 
 .knowledge-draft-queue-item.needs-attention {
@@ -3760,7 +3818,7 @@
   overflow: hidden;
   color: var(--kb-text-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3837,12 +3895,14 @@
   padding: 32px;
 }
 
+/* `!important` on weight/tracking reclaims them from overhaul.css
+   `h1, h2, ... { font-weight: 600 !important; letter-spacing: -0.02em !important }`. */
 .knowledge-draft-doc h1 {
   margin: 0;
   color: var(--kb-text-primary);
   font-size: 30px;
-  font-weight: 800;
-  letter-spacing: 0;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
   line-height: 1.25;
 }
 
@@ -3856,11 +3916,29 @@
   border-bottom: 1px solid var(--kb-border);
   color: var(--kb-text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-draft-doc-meta .dot-sep {
   color: var(--kb-text-muted);
+}
+
+/* Creation provenance group: "By Knowledge Base Agent [provider mark] model ·
+   effort" — the mark reuses the sidebar chip's .knowledge-agent-provider-mark
+   sizing and pairs directly with the model it labels. */
+.knowledge-draft-meta-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* In the 12px meta row the chip's 14px mark visibly overshoots the line —
+   shrink it to the meta text size HERE only (the sidebar chip keeps 14px). */
+.knowledge-draft-meta-by .knowledge-agent-provider-mark,
+.knowledge-draft-meta-by .knowledge-agent-provider-mark svg,
+.knowledge-draft-meta-by .knowledge-agent-provider-mark img {
+  width: 12px;
+  height: 12px;
 }
 
 .knowledge-draft-meta-status {
@@ -3910,9 +3988,9 @@
   padding-right: 72px;
   color: var(--kb-text-primary);
   font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0;
-  line-height: 1.3;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.6;
 }
 
 .knowledge-draft-doc-section p,
@@ -3940,6 +4018,9 @@
   z-index: 1;
   top: 12px;
   right: 12px;
+  /* !important: console-density.css `.app-content-constrained button` (0,1,1)
+     sets min-height: 28px and outranks this (0,1,0) rule's plain value. */
+  min-height: 0 !important;
   padding: 3px 10px;
   border: 0;
   border-radius: 6px;
@@ -3948,7 +4029,8 @@
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.6;
   opacity: 0;
   transition: opacity 150ms ease, background 150ms ease;
 }
@@ -3962,6 +4044,15 @@
   background: var(--kb-accent-soft);
 }
 
+.knowledge-draft-edit-affordance:active:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-accent) 20%, transparent);
+}
+
+.knowledge-draft-edit-affordance:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
 .knowledge-draft-doc-section.is-editing {
   background: var(--kb-bg-elevated);
   box-shadow: 0 0 0 1px var(--kb-accent-border), 0 0 0 4px var(--kb-accent-ring);
@@ -3971,24 +4062,29 @@
   background: var(--kb-bg-elevated);
 }
 
-.knowledge-draft-doc-section textarea {
+/* `!important` reclaims metrics from the global overhaul.css
+   `textarea { padding/font-size/line-height !important }` density rule. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section textarea {
   width: 100%;
   min-width: 0;
   resize: vertical;
-  padding: 8px 10px;
+  padding: 8px 10px !important;
   border: 1px solid var(--kb-border);
-  border-radius: 6px;
+  border-radius: 6px !important;
   background: var(--kb-bg-raised);
   color: var(--kb-text-primary);
   font: inherit;
-  font-size: 15px;
-  line-height: 1.55;
+  font-size: 15px !important;
+  line-height: 1.6 !important;
   outline: none;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
 }
 
-.knowledge-draft-doc-section textarea:focus {
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section textarea:focus,
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section textarea:focus-visible {
   border-color: var(--kb-accent-border);
-  box-shadow: 0 0 0 3px var(--kb-accent-ring);
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--kb-accent-ring) !important;
 }
 
 .knowledge-draft-editing-controls {
@@ -4000,14 +4096,21 @@
   gap: 4px;
 }
 
-.knowledge-draft-mini-btn {
-  padding: 3px 10px;
+/* `!important` reclaims box metrics from overhaul.css
+   `button[class*="btn"] { min-height: 30px; padding: 5px 10px; ... !important }`
+   (0,1,1); the `.knowledgebase-page.is-redesign` prefix (0,3,0) wins the
+   equal-importance specificity contest. */
+.knowledgebase-page.is-redesign .knowledge-draft-mini-btn {
+  min-height: 0 !important;
+  padding: 3px 10px !important;
   border: 0;
-  border-radius: 6px;
+  border-radius: 6px !important;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 12px !important;
+  font-weight: 600;
+  line-height: 1.6 !important;
+  transition: background 150ms ease, color 150ms ease;
 }
 
 .knowledge-draft-mini-btn.save {
@@ -4019,6 +4122,10 @@
   background: var(--kb-accent-strong);
 }
 
+.knowledge-draft-mini-btn.save:active:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-accent) 88%, black);
+}
+
 .knowledge-draft-mini-btn.cancel {
   background: transparent;
   color: var(--kb-text-secondary);
@@ -4027,6 +4134,15 @@
 .knowledge-draft-mini-btn.cancel:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: var(--kb-text-primary);
+}
+
+.knowledge-draft-mini-btn.cancel:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-mini-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .knowledge-draft-disclosure {
@@ -4043,8 +4159,23 @@
   justify-content: space-between;
   gap: 12px;
   padding: 0 12px;
+  border-radius: 7px;
   cursor: pointer;
   list-style: none;
+  transition: background 150ms ease;
+}
+
+.knowledge-draft-disclosure summary:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-disclosure summary:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--kb-accent-ring) !important;
+}
+
+.knowledge-draft-disclosure[open] summary {
+  border-radius: 7px 7px 0 0;
 }
 
 .knowledge-draft-disclosure summary::-webkit-details-marker {
@@ -4052,9 +4183,9 @@
 }
 
 .knowledge-draft-disclosure summary span {
-  color: var(--kb-text-secondary);
+  color: var(--kb-text-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
@@ -4062,7 +4193,7 @@
 .knowledge-draft-disclosure summary strong {
   color: var(--kb-text-primary);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .knowledge-draft-disclosure[open] {
@@ -4083,10 +4214,15 @@
 }
 
 .knowledge-agent-chat-sidebar {
+  /* position/top/max-height reset the legacy sticky-sidebar rule on the same
+     class earlier in this file; the redesign grid owns the geometry. */
+  position: static;
+  top: auto;
   display: flex;
   grid-area: chat;
   min-width: 0;
   min-height: 0;
+  max-height: none;
   flex-direction: column;
   border-left: 1px solid var(--kb-border);
   background: var(--kb-bg-surface);
@@ -4097,12 +4233,14 @@
   height: 36px;
   flex: 0 0 auto;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
+  /* Slightly tighter than the old 8px/16px so the provider mark + model label
+     + reasoning level all fit the narrow sidebar without truncation. */
+  gap: 5px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--kb-border);
   color: var(--kb-text-muted);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-agent-chat-status::before {
@@ -4114,10 +4252,100 @@
   background: var(--kb-success);
 }
 
+.knowledge-agent-chat-status.is-busy::before {
+  background: var(--kb-warning);
+}
+
+.knowledge-agent-chat-status.is-off::before {
+  background: var(--kb-text-muted);
+}
+
+/* Provider mark: real catalog icon, or a neutral monogram fallback. Sized to
+   sit inside the 36px row without stretching it. */
+.knowledge-agent-provider-mark {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.knowledge-agent-provider-mark svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.knowledge-agent-provider-mark img {
+  width: 14px;
+  height: 14px;
+  object-fit: contain;
+}
+
+.knowledge-agent-provider-mark.is-fallback {
+  border: 1px solid var(--kb-border);
+  border-radius: 4px;
+  color: var(--kb-text-muted);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.knowledge-agent-chat-status-name {
+  flex: 0 0 auto;
+  color: var(--kb-text-primary);
+  white-space: nowrap;
+}
+
+/* Model + reasoning level read as quiet metadata after the agent name; the
+   middot separator comes from ::before so the markup stays plain spans. */
+.knowledge-agent-chat-status-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--kb-text-muted);
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knowledge-agent-chat-status-detail::before {
+  content: '· ';
+  color: var(--kb-text-muted);
+}
+
+/* The reasoning level is short ("High", "Max") — keep it whole and let the
+   longer model label absorb any truncation in the narrow sidebar. */
+.knowledge-agent-chat-status-detail.is-effort {
+  flex: 0 0 auto;
+}
+
+/* Provider mark + model name travel as one group ("· [mark] Claude Fable 5"):
+   the icon labels the MODEL, so it sits directly against the model name with
+   no separator between them — same pairing the app header uses. The ellipsis
+   moves to the inner text span because text-overflow cannot truncate across
+   the flexed icon. */
+.knowledge-agent-chat-status-detail.is-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: visible;
+}
+
+.knowledge-agent-chat-status-model-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .knowledge-agent-chat-status button {
   display: inline-flex;
   width: 24px;
   height: 24px;
+  /* !important: console-density.css `.app-content-constrained button` (0,1,1)
+     ties this rule; a plain value would win only by stylesheet load order. */
+  min-height: 0 !important;
   align-items: center;
   justify-content: center;
   margin-left: auto;
@@ -4131,6 +4359,15 @@
 .knowledge-agent-chat-status button:hover:not(:disabled) {
   background: var(--kb-bg-raised);
   color: var(--kb-text-primary);
+}
+
+.knowledge-agent-chat-status button:active:not(:disabled) {
+  background: var(--kb-bg-elevated);
+}
+
+.knowledge-agent-chat-status button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .knowledge-agent-chat-thread {
@@ -4176,9 +4413,17 @@
   margin-bottom: 4px;
   color: var(--kb-text-muted);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.knowledge-agent-chat-pending {
+  display: block;
+  margin-top: 4px;
+  color: var(--kb-text-muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .knowledge-agent-chat-message p,
@@ -4213,7 +4458,7 @@
 .knowledge-agent-chat-markdown :is(h1, h2, h3) {
   color: var(--kb-text-primary);
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.3;
 }
 
@@ -4239,7 +4484,7 @@
   background: rgba(255, 69, 58, 0.08);
   color: var(--kb-error);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .knowledge-agent-changes {
@@ -4259,7 +4504,7 @@
   background: var(--kb-bg-raised);
   color: var(--kb-text-secondary);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .knowledge-agent-change-chip::before {
@@ -4275,17 +4520,27 @@
 }
 
 .knowledge-agent-change-undo {
+  /* !important: console-density.css `.app-content-constrained button` (0,1,1)
+     sets min-height: 28px and outranks this (0,1,0) rule's plain value. */
+  min-height: 0 !important;
   border: 0;
+  border-radius: 4px;
   background: transparent;
   color: var(--kb-accent);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
+  transition: color 150ms ease;
 }
 
 .knowledge-agent-change-undo:hover:not(:disabled) {
   color: var(--kb-accent-strong);
+}
+
+.knowledge-agent-change-undo:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .knowledgebase-page.is-redesign .knowledge-agent-chat-form {
@@ -4297,28 +4552,35 @@
   padding: 12px 16px 16px;
 }
 
+/* `!important` reclaims metrics from the global overhaul.css
+   `input[type="text"] { padding/font-size/line-height !important }` density rule. */
 .knowledgebase-page.is-redesign .knowledge-agent-chat-form input {
   width: 100%;
   min-width: 0;
   flex: 1 1 auto;
   height: 40px;
-  padding: 0 12px;
+  min-height: 40px !important;
+  padding: 0 12px !important;
   border: 1px solid var(--kb-border);
-  border-radius: 6px;
+  border-radius: 6px !important;
   background: var(--kb-bg-raised);
   color: var(--kb-text-primary);
   font: inherit;
-  font-size: 14px;
+  font-size: 14px !important;
+  line-height: 1.4 !important;
   outline: none;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
 }
 
 .knowledgebase-page.is-redesign .knowledge-agent-chat-form input::placeholder {
   color: var(--kb-text-muted);
 }
 
-.knowledgebase-page.is-redesign .knowledge-agent-chat-form input:focus {
+.knowledgebase-page.is-redesign .knowledge-agent-chat-form input:focus,
+.knowledgebase-page.is-redesign .knowledge-agent-chat-form input:focus-visible {
   border-color: var(--kb-accent-border);
-  box-shadow: 0 0 0 3px var(--kb-accent-ring);
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--kb-accent-ring) !important;
 }
 
 .knowledgebase-page.is-redesign .knowledge-agent-send {
@@ -4333,17 +4595,39 @@
   background: var(--kb-accent);
   color: #08233f;
   cursor: pointer;
-  font-weight: 800;
+  font-weight: 700;
+  transition: background 150ms ease;
 }
 
 .knowledgebase-page.is-redesign .knowledge-agent-send:hover:not(:disabled) {
   background: var(--kb-accent-strong);
 }
 
+.knowledgebase-page.is-redesign .knowledge-agent-send:active:not(:disabled) {
+  background: color-mix(in srgb, var(--kb-accent) 88%, black);
+}
+
 .knowledgebase-page.is-redesign .knowledge-agent-send:disabled,
 .knowledgebase-page.is-redesign .knowledge-agent-chat-form input:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+/* Focus rings: TWO globals fight here — overhaul.css forces a #0a84ff
+   `:focus-visible` box-shadow ring and console-density.css forces a 2px solid
+   rgba(59,130,246,.9) outline, both `!important` at (0,1,1). These
+   higher-specificity `!important` rules repaint the ring in the KB accent and
+   kill the outline (the accent box-shadow IS the focus indicator). */
+.knowledgebase-page.is-redesign :is(
+  .knowledge-draft-btn,
+  .knowledge-draft-mini-btn,
+  .knowledge-draft-edit-affordance,
+  .knowledge-agent-send,
+  .knowledge-agent-change-undo,
+  .knowledge-agent-chat-status button
+):focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--kb-accent-ring) !important;
 }
 
 .knowledge-utility-drawer {
@@ -4450,5 +4734,464 @@
 
   .knowledge-draft-doc h1 {
     font-size: 24px;
+  }
+}
+
+/* ============================================================
+   Premium elevation + motion layer (KB draft review redesign)
+   Dark-UI depth = layered shadows + inset top-edge highlights +
+   translucency, never heavy drops. Motion = opacity/transform
+   only; the only loop is the status-dot pulse. Every rule is
+   prefixed `.knowledgebase-page.is-redesign` so it both stays
+   scoped and outranks the earlier same-file base rules plus the
+   overhaul.css / console-density.css globals where needed.
+   ============================================================ */
+
+/* --- Keyframes ----------------------------------------------------------- */
+
+@keyframes kb-enter-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes kb-enter-slide-left {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes kb-dot-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--kb-warning) 40%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* --- Ambient light source (the doc well is lit from the top) -------------- */
+/* Exactly one light source. A faint page-root gradient used to sit under this,
+   but every grid child (topbar, rail, doc-wrap, chat sidebar) paints an opaque
+   background over the root, so it could never reach a pixel — deleted; the
+   root keeps plain var(--kb-bg-base) from the base redesign rule. The radial's
+   peak sits just above the wrap edge (-40px, not -160px off-screen) so the
+   alpha is spent inside the viewport: about +6 to +10/255 lightness at the top
+   of the well, faded out within ~250px. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc-wrap {
+  background:
+    radial-gradient(900px 420px at 50% -40px, rgba(255, 255, 255, 0.09), transparent 68%),
+    var(--kb-bg-base);
+}
+
+/* --- Topbar ---------------------------------------------------------------- */
+/* Solid surface fill: overhaul.css globally kills backdrop-filter with
+   `* { backdrop-filter: none !important }`, and the doc scrolls inside its own
+   container so nothing ever passes behind the topbar anyway — translucency
+   without blur over a static gradient just reads as a wrong solid color.
+   z-index lifts its ambient shadow above the later-DOM app section. */
+.knowledgebase-page.is-redesign .knowledge-draft-topbar {
+  position: relative;
+  z-index: 3;
+  background: var(--kb-bg-surface);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 6px 16px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* --- Raised side panels --------------------------------------------------- */
+/* Depth = background step + cast shadow: the rail/chat panels sit on
+   --kb-bg-surface while the center doc well is the darker --kb-bg-base, and
+   each panel casts a wide soft shadow into that well. Rail needs
+   position+z-index so its right-cast shadow paints above the later-DOM doc
+   column; the chat sidebar is the last sibling so its shadow already paints
+   on top. Shadows are static (never transitioned) on these large panels. */
+.knowledgebase-page.is-redesign .knowledge-draft-rail {
+  position: relative;
+  z-index: 1;
+  box-shadow:
+    var(--kb-edge-highlight),
+    14px 0 36px -14px rgba(0, 0, 0, 0.7);
+}
+
+.knowledgebase-page.is-redesign .knowledge-agent-chat-sidebar {
+  box-shadow:
+    var(--kb-edge-highlight),
+    -14px 0 36px -14px rgba(0, 0, 0, 0.7);
+}
+
+/* --- Draft document surface ---------------------------------------------- */
+/* Keep the review doc operational: broad, flat, and scannable. This is a
+   workspace artifact, not a marketing/article card. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc {
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 22px 28px 40px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc h1 {
+  max-width: 860px;
+  /* One step down from 24px: titles are now full sentences (the generation
+     cap was removed), so a calmer size reads better. */
+  font-size: 21px;
+  line-height: 1.25;
+  font-weight: 720 !important;
+  letter-spacing: 0 !important;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-meta {
+  margin-top: 10px;
+  padding-bottom: 14px;
+  gap: 7px;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+  font-size: 11.5px;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section {
+  margin: 12px 0 0;
+  padding: 14px 42px 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.055);
+  border-radius: 0;
+  background: transparent;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover {
+  background: transparent;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section h4 {
+  margin-bottom: 7px;
+  padding-right: 0;
+  font-size: 13px;
+  font-weight: 720 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.35;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section p,
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section li {
+  max-width: 860px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance {
+  top: 12px;
+  right: 0;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--kb-text-secondary);
+  font-size: 0;
+  opacity: 0.55;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance::before {
+  content: '';
+  width: 13px;
+  height: 13px;
+  display: block;
+  background: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill='black' d='M4 20h4.8L19.3 9.5a2.1 2.1 0 0 0 0-3L17.5 4.7a2.1 2.1 0 0 0-3 0L4 15.2V20Zm2-2v-2l9.9-9.9 2 2L8 18H6Z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover .knowledge-draft-edit-affordance,
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--kb-text-primary);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc > * {
+  animation: none;
+}
+
+@media (max-width: 720px) {
+  .knowledgebase-page.is-redesign .knowledge-draft-doc {
+    width: 100%;
+    padding: 18px 16px 32px;
+  }
+
+  .knowledgebase-page.is-redesign .knowledge-draft-doc h1 {
+    font-size: 19px;
+  }
+
+  .knowledgebase-page.is-redesign .knowledge-draft-doc-section {
+    padding-right: 36px;
+  }
+}
+
+/* --- Entrance choreography ------------------------------------------------ */
+/* Doc children (title, meta row, sections, disclosures) rise in with a
+   50ms-per-child stagger, capped after the 8th child. The doc <article> is
+   keyed by draft id in the JSX, so picking a different case replays this. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc > * {
+  animation: kb-enter-rise var(--kb-dur-enter) var(--kb-ease-out) backwards;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(2) { animation-delay: 50ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(3) { animation-delay: 100ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(4) { animation-delay: 150ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(5) { animation-delay: 200ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(6) { animation-delay: 250ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(7) { animation-delay: 300ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(8) { animation-delay: 350ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-doc > :nth-child(n + 9) { animation-delay: 400ms; }
+
+/* Rail queue items: one-time mount cascade, 30ms steps, capped after 10.
+   nth-child restarts per .knowledge-draft-rail-list, so each group cascades
+   independently. */
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item {
+  animation: kb-enter-rise 240ms var(--kb-ease-out) backwards;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(2) { animation-delay: 30ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(3) { animation-delay: 60ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(4) { animation-delay: 90ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(5) { animation-delay: 120ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(6) { animation-delay: 150ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(7) { animation-delay: 180ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(8) { animation-delay: 210ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(9) { animation-delay: 240ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(10) { animation-delay: 270ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(n + 11) { animation-delay: 300ms; }
+
+/* Chat sidebar slides in 16px from the right with fade (the inner thread is
+   the scroll container, not this panel, so the one-shot transform is safe). */
+.knowledgebase-page.is-redesign .knowledge-agent-chat-sidebar {
+  animation: kb-enter-slide-left var(--kb-dur-enter) var(--kb-ease-out) 80ms backwards;
+}
+
+/* --- Micro-interactions: queue items -------------------------------------- */
+/* overhaul.css forces transition-timing-function to its spring curve with
+   !important on *; that curve is fine for these lifts, so only
+   duration/properties are declared. */
+.knowledgebase-page.is-redesign .knowledge-draft-queue-item {
+  transition:
+    background var(--kb-dur-fast) ease,
+    transform var(--kb-dur-fast) ease,
+    box-shadow var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-queue-item:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--kb-shadow-1);
+}
+
+/* Selected row sits seated (no lift) with an accent inner glow alongside the
+   existing accent left-edge bar. :focus-visible keeps its earlier !important
+   inset ring. */
+.knowledgebase-page.is-redesign .knowledge-draft-queue-item.is-active,
+.knowledgebase-page.is-redesign .knowledge-draft-queue-item.is-active:hover {
+  transform: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 0 0 1px color-mix(in srgb, var(--kb-accent) 14%, transparent),
+    inset 0 0 22px color-mix(in srgb, var(--kb-accent) 8%, transparent);
+}
+
+/* --- Micro-interactions: buttons ------------------------------------------ */
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn {
+  transition:
+    background var(--kb-dur-fast) ease,
+    color var(--kb-dur-fast) ease,
+    transform var(--kb-dur-fast) ease,
+    box-shadow var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:hover:not(:disabled),
+.knowledgebase-page.is-redesign .knowledge-draft-btn.icon:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:active:not(:disabled),
+.knowledgebase-page.is-redesign .knowledge-draft-btn.icon:active:not(:disabled) {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Primary: subtle vertical gradient + inset top highlight reads as a physical
+   key; hover adds an accent-tinted glow and lift, active presses in. These
+   selectors mirror the earlier base rules exactly so later-in-file order wins. */
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kb-accent) 90%, white),
+    color-mix(in srgb, var(--kb-accent) 88%, black)
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kb-accent-strong) 94%, white),
+    var(--kb-accent)
+  );
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 18px color-mix(in srgb, var(--kb-accent) 32%, transparent);
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-btn.primary:active:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kb-accent) 82%, black),
+    color-mix(in srgb, var(--kb-accent) 90%, black)
+  );
+  transform: translateY(0) scale(0.98);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Chat send button mirrors the primary treatment (it is the chat's primary). */
+.knowledgebase-page.is-redesign .knowledge-agent-send {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kb-accent) 90%, white),
+    color-mix(in srgb, var(--kb-accent) 88%, black)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition:
+    background var(--kb-dur-fast) ease,
+    transform var(--kb-dur-fast) ease,
+    box-shadow var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-agent-send:hover:not(:disabled) {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kb-accent-strong) 94%, white),
+    var(--kb-accent)
+  );
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.25),
+    0 6px 18px color-mix(in srgb, var(--kb-accent) 32%, transparent);
+}
+
+.knowledgebase-page.is-redesign .knowledge-agent-send:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+/* Inline save/cancel mini buttons get a tactile press. */
+.knowledgebase-page.is-redesign .knowledge-draft-mini-btn {
+  transition:
+    background var(--kb-dur-fast) ease,
+    color var(--kb-dur-fast) ease,
+    transform var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-mini-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+/* --- Micro-interactions: document sections -------------------------------- */
+/* Hairline border fades in on hover via an overlay pseudo-element so only
+   opacity animates and the layout never shifts. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 8px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover::before {
+  opacity: 1;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section.is-editing::before {
+  opacity: 0;
+}
+
+/* The section being edited floats above the sheet. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section.is-editing {
+  box-shadow:
+    0 0 0 1px var(--kb-accent-border),
+    0 0 0 4px var(--kb-accent-ring),
+    var(--kb-shadow-2);
+}
+
+/* Edit affordance rises 2px as it fades in. */
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance {
+  transform: translateY(2px);
+  transition:
+    opacity var(--kb-dur-fast) ease,
+    background var(--kb-dur-fast) ease,
+    transform var(--kb-dur-fast) ease;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover .knowledge-draft-edit-affordance,
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance:focus-visible {
+  transform: translateY(0);
+}
+
+/* --- Status-dot pulse (needs-review / busy only) -------------------------- */
+
+.knowledgebase-page.is-redesign .knowledge-draft-status-dot.draft {
+  animation: kb-dot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.knowledgebase-page.is-redesign .knowledge-agent-chat-status.is-busy::before {
+  animation: kb-dot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* --- Reduced motion -------------------------------------------------------- */
+/* Targeted (not blanket) so loading spinners inside the KB scope keep
+   spinning; everything introduced by this layer goes still. */
+@media (prefers-reduced-motion: reduce) {
+  .knowledgebase-page.is-redesign .knowledge-draft-doc > *,
+  .knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item,
+  .knowledgebase-page.is-redesign .knowledge-agent-chat-sidebar,
+  .knowledgebase-page.is-redesign .knowledge-draft-status-dot.draft,
+  .knowledgebase-page.is-redesign .knowledge-agent-chat-status.is-busy::before {
+    animation: none !important;
+  }
+
+  .knowledgebase-page.is-redesign .knowledge-draft-queue-item:hover,
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:hover:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.icon:hover:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.ghost:active:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.icon:active:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.primary:hover:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-btn.primary:active:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-agent-send:hover:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-agent-send:active:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-mini-btn:active:not(:disabled),
+  .knowledgebase-page.is-redesign .knowledge-draft-edit-affordance {
+    transform: none !important;
   }
 }

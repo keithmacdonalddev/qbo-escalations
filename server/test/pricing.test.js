@@ -133,6 +133,20 @@ test('Claude Opus 4.8 priced at $5/$25 per MTok', () => {
   assert.equal(rates.outputNanosPerToken, 25000);
 });
 
+test('Claude Fable 5 priced at $10/$50 per MTok', () => {
+  const rates = getRates('claude-fable-5', null);
+  assert.equal(rates.inputNanosPerToken, 10000);
+  assert.equal(rates.outputNanosPerToken, 50000);
+});
+
+test('Claude Code aliases resolve to their current tier rates', () => {
+  assert.equal(getRates('fable', 'claude').outputNanosPerToken, 50000);
+  assert.equal(getRates('best', 'claude').outputNanosPerToken, 50000);
+  assert.equal(getRates('opus', 'claude').outputNanosPerToken, 25000);
+  assert.equal(getRates('sonnet', 'claude').outputNanosPerToken, 15000);
+  assert.equal(getRates('haiku', 'claude').outputNanosPerToken, 5000);
+});
+
 // --- Regression (batch 3 / Fix #5): current Opus ids must NOT fall back to the
 // generic `claude` provider rate (which equals Sonnet $3/$15) and undercount. ---
 

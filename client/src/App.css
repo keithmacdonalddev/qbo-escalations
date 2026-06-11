@@ -1242,8 +1242,9 @@ a:hover {
 }
 
 .app-content-constrained {
-  max-width: 1060px;
+  width: min(1560px, calc(100vw - 96px));
   margin: 0 auto;
+  padding: 28px 32px 40px;
 }
 
 

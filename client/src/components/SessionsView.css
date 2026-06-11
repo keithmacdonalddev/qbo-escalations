@@ -1,28 +1,143 @@
+/* =============================================================
+   SESSIONS PAGE — design-language restyle (2026-06-10)
+   Scoped token block on .sessions-page, mirroring the approved
+   KB / agents-list design language (prototypes/kb-draft-redesign.html):
+   warm-gray surface ramp, #4a9eff accent family, flat surfaces,
+   1px borders, no decorative shadows, 4px spacing grid.
+
+   Global-override reclaims (overhaul.css / console-density.css /
+   App.css load after or carry !important):
+   - button[class*="btn"] / a[class*="btn"]  (overhaul ~7588, (0,1,1)!)
+   - .stat-card / .stat-card-value / .stat-card-label (overhaul ~7566, (0,1,0)!)
+   - h1-h6 font-weight 600 (overhaul ~351, (0,0,1)!)
+   - input density (overhaul ~7606, (0,1,1)!)
+   - .eyebrow gradient pill (overhaul ~1121/2495/2750, (0,1,0)!)
+   - :focus-visible rings (console-density ~112 (0,1,1)!; overhaul ~111 (0,1,0)!)
+   - header::before fade strip (overhaul ~3868)
+   - a:hover underline (App.css, (0,1,1), no !important)
+   Every reclaim below carries the .sessions-page prefix so its
+   specificity beats the trap at equal !important.
+   ============================================================= */
+
 .sessions-page {
+  --sx-bg: #1c1c1e;
+  --sx-surface: #2c2c2e;
+  --sx-raised: #3a3a3c;
+  --sx-elevated: #48484a;
+  --sx-border: rgba(84, 84, 88, 0.35);
+  --sx-border-strong: rgba(84, 84, 88, 0.5);
+  --sx-row-line: rgba(84, 84, 88, 0.22);
+  --sx-text: #f5f5f7;
+  --sx-text-secondary: #a1a1a6;
+  --sx-text-tertiary: #636366;
+  --sx-accent: #4a9eff;
+  --sx-accent-strong: #6cb0ff;
+  --sx-accent-soft: rgba(74, 158, 255, 0.13);
+  --sx-accent-faint: rgba(74, 158, 255, 0.07);
+  --sx-accent-border: rgba(74, 158, 255, 0.35);
+  --sx-accent-ring: rgba(74, 158, 255, 0.22);
+  --sx-on-accent: #08233f;
+  --sx-success: #30d158;
+  --sx-warning: #f0b232;
+  --sx-warning-soft: rgba(240, 178, 50, 0.13);
+  --sx-error: #ff453a;
   width: min(1560px, calc(100vw - 96px));
   margin: 0 auto;
-  padding: var(--sp-7) var(--sp-8);
+  padding: 16px 32px 40px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
+  gap: 20px;
+  color: var(--sx-text);
 }
+
+/* ----- Viewport lock (list mode only, Escalations-parity) -----
+   The app shell renders this page inside .app-shell-view-region--scroll
+   (height: 100%, overflow-y: auto). Pin the page root to the region's
+   full height so the chrome row stays fixed and only .sessions-grid-wrap
+   scrolls. Scoped to .is-list: the session DETAIL view is a long
+   document and should keep scrolling the region naturally. */
+.sessions-page.is-list {
+  height: 100%;
+  min-height: 0;
+  gap: 12px;
+  padding-bottom: 24px;
+}
+
+/* The shell mounts the route through an anonymous classless <div>
+   between the region and this page, so height:100% above has nothing
+   to resolve against. Give THAT wrapper the region's height — the
+   :has() guard limits the rule to when this page is mounted. */
+.app-shell-view-region--scroll > div:has(> .sessions-page.is-list) {
+  height: 100%;
+}
+
+/* Guard against inherited transparent text-fill from the overhaul
+   gradient-title trap (header [class*="title"]). */
+.sessions-page,
+.sessions-page * {
+  -webkit-text-fill-color: currentColor;
+}
+
+/* ----- Page header / detail hero ----- */
 
 .sessions-header,
 .session-detail-hero {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: var(--sp-6);
+  gap: 24px;
+  position: relative;
 }
 
-.sessions-header h1,
-.session-detail-hero h2 {
-  margin: 2px 0 0;
-  font-size: var(--text-xl);
-  line-height: 1.15;
-  color: var(--ink);
+/* Single compact chrome row (Escalations parity): title + inline stat
+   cluster left, search + primary action right, thin rule below, data
+   immediately after. flex: none so the locked flex column never
+   compresses the chrome. */
+.sessions-header {
+  align-items: center;
+  gap: 16px;
+  flex: none;
+  min-height: 36px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--sx-border);
 }
 
+/* Title and stat cluster share one baseline-aligned line. */
+.sessions-header-text {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
+}
+
+/* overhaul.css ~3868 injects a 20px fade strip under every <header>. */
+.sessions-page .sessions-header::before,
+.sessions-page .session-message header::before {
+  content: none !important;
+}
+
+/* 20px/600 to mirror .escalations-console h1.page-title — the two
+   pages should read as siblings. Beats overhaul h1-h6 (0,0,1)!. */
+.sessions-page .sessions-header h1 {
+  margin: 0;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.3;
+  color: var(--sx-text) !important;
+}
+
+.sessions-page .session-detail-hero h2 {
+  margin: 6px 0 0;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em !important;
+  line-height: 1.2;
+  color: var(--sx-text) !important;
+}
+
+/* Overline labels: reclaim from the overhaul gradient-pill .eyebrow. */
 .sessions-page .eyebrow {
   display: block !important;
   width: fit-content !important;
@@ -30,86 +145,303 @@
   padding: 0 !important;
   border: 0 !important;
   border-radius: 0 !important;
-  background: transparent !important;
-  color: var(--ink-tertiary) !important;
-  letter-spacing: 0 !important;
+  background: none !important;
+  color: var(--sx-text-tertiary) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
   transform: none !important;
+  transition: none !important;
 }
 
 .sessions-page .eyebrow:hover {
   transform: none !important;
-  background: transparent !important;
+  background: none !important;
 }
 
-.sessions-header-copy {
-  max-width: 740px;
-  margin: var(--sp-2) 0 0;
-  color: var(--ink-secondary);
-  font-size: var(--text-sm);
-  line-height: 1.5;
+/* Quiet inline stat cluster sharing the title baseline — no boxes.
+   Sizes mirror .esc-stat / .esc-stat > strong on Escalations. */
+.sessions-stat-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 0;
+  min-width: 0;
+}
+
+.sessions-stat {
+  color: var(--sx-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.sessions-stat strong {
+  margin-right: 2px;
+  color: var(--sx-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.sessions-stat-sep,
+.sessions-stat-loading {
+  color: var(--sx-text-tertiary);
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .sessions-header-actions,
 .session-detail-actions {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 8px;
   flex-wrap: wrap;
 }
 
-.sessions-row-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  white-space: nowrap;
+/* Row-1 controls never wrap inside the row: a shrinkable search in a
+   wrap-enabled container under-measures and wraps with free space left
+   (Escalations toolbar bug). Wrapping is reintroduced deliberately in
+   the narrow-viewport media query at the end of this file. */
+.sessions-header-actions {
+  flex: none;
+  flex-wrap: nowrap;
 }
+
+/* ----- Buttons: reclaim from button[class*="btn"] (overhaul ~7588) ----- */
+
+.sessions-page .btn {
+  min-height: 32px !important;
+  padding: 6px 14px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  line-height: 1.2 !important;
+  letter-spacing: 0;
+  box-shadow: none;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease,
+              box-shadow 150ms ease;
+}
+
+.sessions-page .btn:hover {
+  text-decoration: none;
+}
+
+.sessions-page .btn-primary {
+  background: var(--sx-accent) !important;
+  border: 1px solid transparent !important;
+  color: var(--sx-on-accent) !important;
+  font-weight: 600 !important;
+}
+
+.sessions-page .btn-primary:hover {
+  background: var(--sx-accent-strong) !important;
+  color: var(--sx-on-accent) !important;
+}
+
+.sessions-page .btn-ghost {
+  background: transparent !important;
+  border: 1px solid var(--sx-border) !important;
+  color: var(--sx-text-secondary) !important;
+}
+
+.sessions-page .btn-ghost:hover {
+  background: var(--sx-raised) !important;
+  border-color: var(--sx-border-strong) !important;
+  color: var(--sx-text) !important;
+}
+
+/* ----- Focus: reclaim from console-density (0,1,1)! outline and
+   overhaul (0,1,0)! blue ring; keep keyboard focus clearly visible. ----- */
+
+.sessions-page a:focus-visible,
+.sessions-page button:focus-visible,
+.sessions-page input:focus-visible,
+.sessions-page select:focus-visible,
+.sessions-page [role="tab"]:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+  box-shadow: 0 0 0 3px var(--sx-accent-ring) !important;
+}
+
+/* ----- Surfaces ----- */
 
 .sessions-list-card,
 .session-detail {
-  background: var(--bg-raised);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  background: var(--sx-surface);
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
   overflow: hidden;
+  box-shadow: none;
 }
 
-.sessions-toolbar {
+/* Bounded flex column inside the locked page: flex: 0 1 auto +
+   min-height: 0 lets the card hug a short list but cap at the leftover
+   viewport space, at which point .sessions-grid-wrap scrolls. */
+.sessions-page.is-list .sessions-list-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  padding: var(--sp-4);
-  border-bottom: 1px solid var(--line-subtle);
-  background: var(--bg-sidebar);
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
 }
+
+/* Stat tiles (detail view): reclaim value/label/padding from overhaul ~7566. */
+.sessions-page .stat-card {
+  min-height: 0 !important;
+  padding: 16px !important;
+  text-align: left !important;
+  background: var(--sx-raised) !important;
+  border: 1px solid var(--sx-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.sessions-page .stat-card:hover {
+  background: var(--sx-raised) !important;
+}
+
+.sessions-page .stat-card-value {
+  font-size: 26px !important;
+  font-weight: 700 !important;
+  line-height: 1.15 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--sx-text) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.sessions-page .stat-card-label {
+  margin-top: 6px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase !important;
+  color: var(--sx-text-tertiary) !important;
+}
+
+/* ----- Search (lives in chrome row 1, right cluster) -----
+   Fixed-width, non-shrinkable box: flex: 0 0 <width> so its full width
+   counts toward the row's intrinsic size (never a shrinkable search in
+   a wrap-enabled container). */
 
 .sessions-search {
   position: relative;
-  flex: 1;
-  min-width: 240px;
+  flex: 0 0 300px;
+  width: 300px;
 }
 
+.sessions-search > svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--sx-text-tertiary);
+  pointer-events: none;
+}
+
+/* Input density reclaim (overhaul ~7606): 32px control height to match
+   the Escalations toolbar controls and the .btn reclaim below. */
 .sessions-page .sessions-search input[type="search"] {
-  padding-left: 12px;
-  min-height: 34px;
-  background: var(--bg-elevated);
+  width: 100%;
+  min-height: 32px !important;
+  padding: 5px 12px 5px 32px !important;
+  border: 1px solid var(--sx-border) !important;
+  border-radius: 6px !important;
+  background: var(--sx-bg) !important;
+  color: var(--sx-text) !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
 }
 
-.sessions-count,
-.sessions-muted,
-.sessions-preview,
-.session-id {
-  color: var(--ink-tertiary);
-  font-size: var(--text-xs);
+.sessions-page .sessions-search input[type="search"]::placeholder {
+  color: var(--sx-text-tertiary);
 }
 
-.sessions-table-wrap {
+.sessions-page .sessions-search input[type="search"]:focus-visible {
+  border-color: var(--sx-accent-border) !important;
+}
+
+/* ----- Tables (sessions list + detail tab tables) ----- */
+
+/* Scroll container for the sessions table. Named WITHOUT a "tab"
+   substring: the overhaul.css ~3458 ripple helper forces
+   [class*="tab"]:not([class*="nav-item"]) { overflow: hidden !important }
+   ((0,2,0)!), which clipped the old .sessions-table-wrap and made rows
+   below the viewport cap unreachable. Sized by the flex lock (page root
+   height:100% -> card flex column -> this wrap absorbs the leftover
+   space), replacing the old `max-height: calc(100vh - 248px)` magic
+   constant that drifted whenever the chrome height changed. The sticky
+   .table th headers stick within THIS scroll container. */
+.sessions-grid-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
-  max-height: calc(100vh - 228px);
+  scrollbar-width: thin;
+  scrollbar-color: var(--sx-raised) transparent;
 }
 
 .sessions-table {
   table-layout: fixed;
+}
+
+/* The same ripple trap also forces overflow:hidden on the <table> itself
+   (its class attribute "table sessions-table" contains "tab"). That makes
+   the table the nearest scroll container for the sticky .table th headers,
+   so they silently stop sticking to the scrolling wrap. (0,3,0)!important
+   beats the trap's (0,2,0)!important regardless of source order. */
+.sessions-page .sessions-grid-wrap .sessions-table {
+  overflow: visible !important;
+}
+
+/* Sticky header sticks to the scrolling .sessions-grid-wrap (App.css
+   already declares .table th sticky; re-asserted here so the lock never
+   depends on an unscoped rule surviving). */
+.sessions-page .sessions-grid-wrap .sessions-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+/* Cell density reclaim: overhaul ~7654 forces .table th/td to
+   7px 9px / 12px with !important at (0,1,1). */
+.sessions-page .table th {
+  padding: 12px 16px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sx-text-tertiary);
+  background: var(--sx-surface);
+  border-bottom: 1px solid var(--sx-border);
+}
+
+.sessions-page .table td {
+  padding: 12px 16px !important;
+  font-size: 13px !important;
+  color: var(--sx-text-secondary);
+  border-bottom: 1px solid var(--sx-row-line);
+  vertical-align: middle;
+}
+
+/* List rows are single-line now. The 26px action buttons are the tallest
+   cell content, so 10px vertical padding lands the row at ~47px.
+   Same specificity as the generic rule above; source order (later)
+   decides among equal !important. Detail tab tables keep 12px. */
+.sessions-page .sessions-table td {
+  padding: 10px 16px !important;
+}
+
+/* List header row matches the Escalations grid (9px 16px) so the two
+   consoles share one chrome rhythm; detail tab tables keep 12px. */
+.sessions-page .sessions-table th {
+  padding: 9px 16px !important;
+}
+
+/* Row hover: subtle background shift only. */
+.sessions-page .table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
 }
 
 .sessions-table th,
@@ -117,44 +449,35 @@
   white-space: nowrap;
 }
 
-.sessions-table th {
-  padding: 10px 12px;
-  background: var(--bg-sidebar);
-}
-
-.sessions-table td {
-  padding: 10px 12px;
-  height: 52px;
-}
-
 .sessions-table th:first-child,
 .sessions-table td:first-child {
-  width: 34%;
-  white-space: normal;
+  width: 40%;
 }
 
 .sessions-table th:nth-child(2),
 .sessions-table td:nth-child(2) {
-  width: 20%;
-  white-space: normal;
+  width: 14%;
 }
 
 .sessions-table th:nth-child(3),
 .sessions-table td:nth-child(3) {
-  width: 19%;
-  white-space: normal;
+  width: 11%;
 }
 
 .sessions-table th:nth-child(4),
 .sessions-table td:nth-child(4) {
   width: 12%;
-  white-space: normal;
 }
 
 .sessions-table th:nth-child(5),
 .sessions-table td:nth-child(5) {
   width: 7%;
   text-align: center;
+}
+
+.sessions-table td:nth-child(5),
+.sessions-table td:nth-child(6) {
+  font-variant-numeric: tabular-nums;
 }
 
 .sessions-table th:nth-child(6),
@@ -169,426 +492,366 @@
 }
 
 .sessions-title {
-  font-weight: 700;
-  color: var(--ink);
-  line-height: 1.25;
-  max-width: 520px;
   overflow: hidden;
+  color: var(--sx-text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sessions-preview {
-  margin-top: 3px;
-  max-width: 620px;
+.sessions-empty {
+  padding: 32px;
+  color: var(--sx-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Rename input (overhaul input-density reclaim). */
+.sessions-page .sessions-table input[type="text"] {
+  width: 100%;
+  min-height: 32px !important;
+  padding: 6px 10px !important;
+  border: 1px solid var(--sx-accent-border) !important;
+  border-radius: 6px !important;
+  background: var(--sx-bg) !important;
+  color: var(--sx-text) !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+
+/* ----- Case link / events / provider cells (one line each) -----
+   Color budget: the warning dot + "No case" text is the ONLY colored
+   element in a row; linked case ids render plain muted tabular text. */
+
+.sessions-case-ref {
+  color: var(--sx-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sessions-case-missing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sx-warning);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.sessions-case-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sx-warning);
+}
+
+.sessions-events-count {
+  color: var(--sx-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.sessions-cell-blank {
+  color: var(--sx-text-tertiary);
+  font-size: 12px;
+}
+
+.sessions-provider {
   overflow: hidden;
+  display: block;
+  color: var(--sx-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sessions-case-cell,
-.sessions-pipeline-cell {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  line-height: 1.25;
-}
-
-.sessions-case-label,
-.sessions-pipeline-cell strong {
-  color: var(--ink);
-  font-size: var(--text-sm);
-  font-weight: 800;
-}
-
-.sessions-case-cell.is-unlinked .sessions-case-label {
-  color: var(--warning);
-}
-
-.sessions-case-cell a {
-  color: var(--accent);
-  font-size: var(--text-xs);
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.sessions-case-cell a:hover,
-.sessions-case-cell a:focus-visible {
-  text-decoration: underline;
-  outline: none;
-}
-
-.sessions-pipeline-cell span,
-.sessions-pipeline-cell small {
-  color: var(--ink-tertiary);
-  font-size: var(--text-xs);
-}
+/* ----- Chips ----- */
 
 .session-chip,
 .session-planned-badge {
   display: inline-flex;
   align-items: center;
   min-height: 20px;
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  line-height: 1;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
 }
 
 .session-chip {
-  background: var(--accent-subtle);
-  color: var(--accent);
+  background: var(--sx-accent-soft);
+  color: var(--sx-accent-strong);
 }
 
-.session-provider-logo {
-  width: 30px;
-  height: 30px;
+.session-planned-badge {
+  background: var(--sx-warning-soft);
+  color: var(--sx-warning);
+}
+
+/* ----- Row actions: hidden until the row is hovered or holds keyboard
+   focus (KB edit-affordance precedent). Buttons stay in the tab order;
+   tr:focus-within reveals them for keyboard users. ----- */
+
+.sessions-row-actions {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: var(--sp-2);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
-  color: var(--ink-secondary);
-  font-size: 10px;
-  font-weight: 800;
-  vertical-align: middle;
-}
-
-.session-provider-logo--text {
-  width: auto;
-  max-width: 126px;
-  justify-content: flex-start;
-  padding: 0 8px;
-}
-
-.session-provider-logo img {
-  display: block;
-  max-width: 18px;
-  max-height: 18px;
-  object-fit: contain;
-}
-
-.session-provider-name {
-  overflow: hidden;
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-  font-weight: 800;
-  text-overflow: ellipsis;
+  justify-content: flex-end;
+  gap: 4px;
   white-space: nowrap;
+  opacity: 0;
+  transition: opacity 150ms ease;
 }
 
-.session-action-btn {
-  width: 28px;
-  height: 28px;
+.sessions-table tbody tr:hover .sessions-row-actions,
+.sessions-table tbody tr:focus-within .sessions-row-actions {
+  opacity: 1;
+}
+
+/* Touch devices have no hover — keep row actions always visible. */
+@media (hover: none) {
+  .sessions-row-actions {
+    opacity: 1;
+  }
+}
+
+/* Icon buttons: class contains "btn", so the overhaul button[class*="btn"]
+   trap forces min-height:30px / padding:5px 10px — reclaim both at
+   (0,2,0)! so the buttons are truly 26px square. */
+.sessions-page .session-action-btn {
+  width: 26px;
+  height: 26px;
+  min-height: 26px !important;
+  padding: 0 !important;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
-  color: var(--ink-secondary);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--sx-text-tertiary);
   cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
 .session-action-btn:hover,
 .session-action-btn:focus-visible {
-  background: var(--bg-elevated);
-  border-color: var(--accent-border);
-  color: var(--ink);
-  outline: none;
+  background: var(--sx-raised);
+  border-color: var(--sx-border);
+  color: var(--sx-text);
 }
 
 .session-action-btn--danger:hover,
 .session-action-btn--danger:focus-visible {
-  color: var(--danger);
+  color: var(--sx-error);
 }
 
-.session-planned-badge {
-  background: var(--warning-subtle);
-  color: var(--warning);
-}
-
-.sessions-empty,
-.session-empty-panel {
-  padding: var(--sp-8);
-  color: var(--ink-secondary);
-  font-size: var(--text-sm);
-}
+/* ----- Session detail ----- */
 
 .session-detail {
-  padding: var(--sp-6);
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-6);
+  gap: 20px;
+}
+
+.session-id {
+  margin-top: 6px;
+  color: var(--sx-text-tertiary);
+  font-size: 12px;
+  letter-spacing: 0.01em;
 }
 
 .session-stat-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--sp-4);
+  gap: 12px;
 }
-
-/* Work summary strip: turns raw session telemetry into a clear handoff queue. */
-.sessions-work-strip {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.75fr) minmax(420px, 1fr) auto;
-  gap: var(--sp-4);
-  padding: var(--sp-4);
-  border-bottom: 1px solid var(--line-subtle);
-  background: var(--bg-sunken);
-}
-
-.sessions-work-next {
-  min-width: 0;
-  padding: var(--sp-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-raised) 72%, var(--bg-sunken));
-}
-
-.sessions-work-next strong {
-  display: block;
-  margin-top: var(--sp-1);
-  color: var(--ink);
-  font-size: var(--text-md);
-  line-height: 1.25;
-}
-
-.sessions-work-next p {
-  margin: var(--sp-2) 0 0;
-  color: var(--ink-secondary);
-  font-size: var(--text-sm);
-  line-height: 1.45;
-}
-
-.sessions-work-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
-  gap: var(--sp-3);
-  min-width: 0;
-}
-
-.sessions-work-metric {
-  min-width: 0;
-  padding: var(--sp-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-raised) 76%, var(--bg-sunken));
-}
-
-.sessions-event-stats__per-stage {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-2);
-  flex: 0 0 auto;
-}
-
-.sessions-event-stats__per-stage-label {
-  font-size: var(--text-xs);
-  color: var(--ink-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-right: var(--sp-1);
-}
-
-.sessions-event-stats__pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--line-subtle);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: var(--text-xs);
-  color: var(--ink-secondary);
-  white-space: nowrap;
-}
-
-.sessions-event-stats__pill-label {
-  color: var(--ink-tertiary);
-  font-weight: 600;
-}
-
-.sessions-event-stats__pill-value {
-  color: var(--ink);
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-}
-
-.sessions-event-stats__pill--parser { border-color: rgba(83, 145, 255, 0.45); }
-.sessions-event-stats__pill--inv { border-color: rgba(180, 130, 255, 0.45); }
-.sessions-event-stats__pill--triage { border-color: rgba(255, 180, 90, 0.45); }
-.sessions-event-stats__pill--main { border-color: rgba(82, 198, 138, 0.45); }
 
 .session-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-sunken);
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
+  background: var(--sx-bg);
 }
 
-.session-tab {
+.sessions-page .session-tab {
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   background: transparent;
-  color: var(--ink-secondary);
+  color: var(--sx-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: var(--text-sm);
-  font-weight: 700;
-  min-height: 32px;
-  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  min-height: 30px;
+  padding: 0 12px;
+  transition: background 150ms ease, color 150ms ease;
 }
 
-.session-tab:hover {
-  background: var(--bg-elevated);
-  color: var(--ink);
+.sessions-page .session-tab:hover {
+  background: var(--sx-raised);
+  color: var(--sx-text);
 }
 
-.session-tab.is-active {
-  background: var(--accent-subtle);
-  color: var(--accent);
+.sessions-page .session-tab.is-active {
+  background: var(--sx-accent-soft);
+  color: var(--sx-accent-strong);
+  font-weight: 600;
 }
 
 .session-tab-panel {
   min-height: 260px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
   overflow: auto;
-  background: var(--bg-sidebar);
+  background: transparent;
 }
 
 .session-grid-two {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-5);
-  padding: var(--sp-5);
+  gap: 16px;
+  padding: 16px;
 }
 
 .session-stack {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-5);
-  padding: var(--sp-5);
+  gap: 16px;
+  padding: 16px;
 }
 
 .session-metadata-table {
-  background: var(--bg-raised);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
+  background: transparent;
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
   overflow: hidden;
 }
 
-.session-metadata-table td:first-child {
+.sessions-page .session-metadata-table td:first-child {
   width: 220px;
-  color: var(--ink-tertiary);
-  font-weight: 700;
+  color: var(--sx-text-tertiary);
+  font-weight: 500;
 }
 
 .session-message-list {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
-  padding: var(--sp-5);
+  gap: 12px;
+  padding: 16px;
 }
 
 .session-message {
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  padding: var(--sp-5);
-  background: var(--bg-raised);
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
+  padding: 16px;
+  background: var(--sx-raised);
 }
 
 .session-message header {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  margin-bottom: var(--sp-3);
-  color: var(--ink-tertiary);
-  font-size: var(--text-xs);
+  gap: 12px;
+  margin-bottom: 10px;
+  color: var(--sx-text-tertiary);
+  font-size: 12px;
+  position: relative;
 }
 
 .session-message p {
   margin: 0;
-  color: var(--ink-secondary);
+  color: var(--sx-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 
 .session-code-panel {
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-sunken);
+  border: 1px solid var(--sx-border);
+  border-radius: 8px;
+  background: var(--sx-bg);
   overflow: hidden;
 }
 
 .session-code-title {
-  padding: var(--sp-3) var(--sp-5);
-  border-bottom: 1px solid var(--line-subtle);
-  color: var(--ink-tertiary);
-  font-size: var(--text-xs);
-  font-weight: 700;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--sx-border);
+  color: var(--sx-text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .session-code-panel pre {
   margin: 0;
-  padding: var(--sp-5);
-  color: var(--ink-secondary);
-  font: 12px/1.5 var(--font-mono);
+  padding: 16px;
+  color: var(--sx-text-secondary);
+  font: 12px/1.6 var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   white-space: pre-wrap;
 }
 
 .session-empty-panel {
-  border: 1px dashed var(--line);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  padding: 24px;
+  border: 1px dashed var(--sx-border-strong);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--sx-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .session-empty-panel p {
-  margin: var(--sp-3) 0 0;
-  color: var(--ink-tertiary);
+  margin: 10px 0 0;
+  color: var(--sx-text-tertiary);
+  font-size: 13px;
 }
 
-.session-planned-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--sp-4);
-  padding: var(--sp-5);
-}
+/* ----- Responsive ----- */
 
-.session-planned-item {
-  min-height: 92px;
-  padding: var(--sp-5);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-raised);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-3);
+/* Below ~1100px the single chrome row can run out of room: drop the
+   search + button to their own full-width line, left-aligned under the
+   title — a deliberate, aligned wrap instead of intrinsic-size fallout
+   (mirrors the Escalations 1080px toolbar breakpoint). */
+@media (max-width: 1100px) {
+  .sessions-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .sessions-header-actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .sessions-page .sessions-search {
+    flex: 1 1 220px;
+    width: auto;
+    max-width: 360px;
+    min-width: 160px;
+  }
 }
 
 @media (max-width: 980px) {
   .sessions-page {
     width: 100%;
-    padding: var(--sp-5);
+    padding: 20px;
   }
 
-  .sessions-work-strip {
-    grid-template-columns: 1fr;
-  }
-
-  .sessions-work-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .sessions-page.is-list {
+    padding-top: 16px;
+    padding-bottom: 20px;
   }
 
   .session-stat-grid,
@@ -599,8 +862,7 @@
 
 @media (max-width: 720px) {
   .sessions-header,
-  .session-detail-hero,
-  .sessions-toolbar {
+  .session-detail-hero {
     flex-direction: column;
     align-items: stretch;
   }
@@ -608,6 +870,10 @@
   .sessions-header-actions,
   .session-detail-actions {
     width: 100%;
+  }
+
+  .sessions-page .sessions-search {
+    max-width: none;
   }
 
   .sessions-header-actions .btn,

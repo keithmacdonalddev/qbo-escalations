@@ -4,7 +4,6 @@ import {
   deleteConversation,
   exportConversation,
   getConversation,
-  getEventStats,
   listConversations,
   updateConversation,
 } from '../api/chatApi.js';
@@ -27,20 +26,6 @@ const TABS = [
   { id: 'attachments', label: 'Attachments' },
   { id: 'triage', label: 'Triage' },
   { id: 'audit', label: 'Audit' },
-  { id: 'planned', label: 'Planned' },
-];
-
-const PLANNED_FIELDS = [
-  'Full agent task timeline',
-  'Private reasoning retention policy',
-  'Prompt template versions',
-  'Tool calls and tool results',
-  'Human edits and overrides',
-  'Escalation outcome linkage',
-  'Model comparison branches',
-  'Confidence and validation history',
-  'Replayable event log',
-  'Session ownership and handoff trail',
 ];
 
 function formatDateTime(value) {
@@ -96,16 +81,6 @@ function getTraceTokenTotal(trace) {
   return Number(usage.totalTokens) || (Number(usage.inputTokens) || 0) + (Number(usage.outputTokens) || 0);
 }
 
-function getProviderIconPath(provider) {
-  const value = String(provider || '').toLowerCase();
-  if (value.includes('openai') || value.includes('codex') || value.includes('gpt')) return '/provider-icons/openai-dark.svg';
-  if (value.includes('claude') || value.includes('anthropic')) return '/provider-icons/anthropic.png';
-  if (value.includes('gemini') || value.includes('google')) return '/provider-icons/gemini.svg';
-  if (value.includes('kimi') || value.includes('moonshot')) return '/provider-icons/kimi.ico';
-  if (value.includes('lm-studio')) return '/provider-icons/lm-studio.webp';
-  return '';
-}
-
 function getCaseValue(session, key, fallback = 'Unlinked') {
   const value = session?.escalation?.[key];
   if (typeof value === 'string' && value.trim()) return value.trim();
@@ -133,12 +108,6 @@ function getCaseLabel(session) {
   return 'Needs case link';
 }
 
-function getSessionPreview(session) {
-  const issue = session?.escalation?.attemptingTo || session?.escalation?.actualOutcome || '';
-  const title = getSessionTitle(session);
-  return issue || title;
-}
-
 function getPipelineEventCount(session) {
   const explicit = Number(session?.totalEventCount);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -148,21 +117,6 @@ function getPipelineEventCount(session) {
     if (Number.isFinite(eventCount) && eventCount > 0) return sum + eventCount;
     return sum + (Array.isArray(run?.events) ? run.events.filter((event) => event?.category !== 'ui').length : 0);
   }, 0);
-}
-
-function getPipelineState(session) {
-  if (hasLinkedCase(session)) return 'Linked to case';
-  const intakeStatus = String(session?.caseIntake?.status || '').trim();
-  if (intakeStatus === 'ready' || intakeStatus === 'captured') return 'Case captured';
-  if (getPipelineEventCount(session) > 0) return 'Agent run saved';
-  return 'Chat saved';
-}
-
-function getSessionNextAction(session) {
-  if (!hasLinkedCase(session)) return 'Open and link case';
-  const status = session?.escalation?.status;
-  if (status === 'resolved' || status === 'escalated-further') return 'Review outcome';
-  return 'Continue case';
 }
 
 function PlannedBadge({ children }) {
@@ -181,20 +135,7 @@ export default function SessionsView({ sessionId = null }) {
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
-  // All-time pipeline event totals + moving-average per stage. Surfaces
-  // "Total events" and "Avg events / session" on the list page header and
-  // feeds the same denominator the live workflow uses, so operators can see
-  // where the progress bar's "expected total" comes from.
-  const [eventStats, setEventStats] = useState({ byStage: {}, totals: { allTime: 0, perSession: 0, sessionCount: 0 }, windowSize: 0 });
   const fetchGenRef = useRef(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    getEventStats().then((stats) => {
-      if (!cancelled) setEventStats(stats);
-    }).catch(() => { /* keep zero defaults */ });
-    return () => { cancelled = true; };
-  }, []);
 
   const loadSessions = useCallback(async (searchTerm = search) => {
     const gen = ++fetchGenRef.current;
@@ -333,38 +274,49 @@ export default function SessionsView({ sessionId = null }) {
   }, [toast]);
 
   const displayedDetail = activeSession || selectedListSession;
+  const linkedCount = sessions.filter(hasLinkedCase).length;
+  const needsLinkCount = sessions.length - linkedCount;
 
   return (
-    <div className="sessions-page">
+    <div className={`sessions-page${!sessionId ? ' is-list' : ''}`}>
       <header className="sessions-header">
-        <div>
-          <div className="eyebrow">Conversation Handoff</div>
+        <div className="sessions-header-text">
           <h1>Sessions</h1>
-          <p className="sessions-header-copy">
-            Saved chats, image intake runs, and agent work. Use this page to confirm which conversations became escalation cases.
-          </p>
+          {!sessionId ? (
+            <div className="sessions-stat-line" aria-label="Session summary">
+              {loadingList && sessions.length === 0 ? (
+                <span className="sessions-stat-loading">Loading sessions...</span>
+              ) : (
+                <>
+                  <span className="sessions-stat"><strong>{linkedCount.toLocaleString()}</strong> linked</span>
+                  <span className="sessions-stat-sep" aria-hidden="true">&middot;</span>
+                  <span className="sessions-stat"><strong>{needsLinkCount.toLocaleString()}</strong> need case link</span>
+                  <span className="sessions-stat-sep" aria-hidden="true">&middot;</span>
+                  <span className="sessions-stat"><strong>{sessions.length.toLocaleString()}</strong> sessions</span>
+                </>
+              )}
+            </div>
+          ) : null}
         </div>
         <div className="sessions-header-actions">
-          <a className="btn btn-secondary" href="#/chat">New Session</a>
-          {sessionId ? <a className="btn btn-ghost" href="#/sessions">All Sessions</a> : null}
+          {!sessionId ? (
+            <div className="sessions-search">
+              <IconSearch />
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search sessions..."
+                aria-label="Search sessions by title and content"
+              />
+            </div>
+          ) : null}
+          <a className="btn btn-primary" href="#/chat">New Session</a>
         </div>
       </header>
 
       {!sessionId ? (
         <section className="sessions-list-card">
-          <SessionWorkStrip sessions={sessions} loading={loadingList} stats={eventStats} />
-          <div className="sessions-toolbar">
-            <div className="sessions-search">
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search conversations, case numbers, customers, or issue text..."
-                aria-label="Search sessions by title and content"
-              />
-            </div>
-            <span className="sessions-count">{loadingList ? 'Loading...' : `${sessions.length} session${sessions.length === 1 ? '' : 's'}`}</span>
-          </div>
           <SessionsTable
             sessions={sessions}
             loading={loadingList}
@@ -426,13 +378,13 @@ function SessionsTable({
   }
 
   return (
-    <div className="sessions-table-wrap">
+    <div className="sessions-grid-wrap">
       <table className="table sessions-table">
         <thead>
           <tr>
             <th>Session</th>
             <th>Case Link</th>
-            <th>Pipeline</th>
+            <th>Events</th>
             <th>Provider</th>
             <th>Turns</th>
             <th>Updated</th>
@@ -442,8 +394,6 @@ function SessionsTable({
         <tbody>
           {sessions.map((session) => {
             const linked = hasLinkedCase(session);
-            const linkedEscalationId = getLinkedEscalationId(session);
-            const category = session?.escalation?.category;
             const pipelineEvents = getPipelineEventCount(session);
             return (
               <tr
@@ -466,36 +416,27 @@ function SessionsTable({
                       autoFocus
                     />
                   ) : (
-                    <div>
-                      <div className="sessions-title">{getSessionTitle(session)}</div>
-                      <div className="sessions-preview">{getSessionPreview(session)}</div>
-                    </div>
+                    <div className="sessions-title">{getSessionTitle(session)}</div>
                   )}
                 </td>
                 <td>
-                  <div className={`sessions-case-cell${linked ? ' is-linked' : ' is-unlinked'}`}>
-                    <span className="sessions-case-label">{getCaseLabel(session)}</span>
-                    {category ? (
-                      <span className={`cat-badge cat-${category}`}>{category.replace('-', ' ')}</span>
-                    ) : null}
-                    {linkedEscalationId ? (
-                      <a
-                        href={`#/escalations/${linkedEscalationId}`}
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        Open case
-                      </a>
-                    ) : null}
-                  </div>
+                  {linked ? (
+                    <span className="sessions-case-ref">{getCaseLabel(session)}</span>
+                  ) : (
+                    <span className="sessions-case-missing">
+                      <span className="sessions-case-dot" aria-hidden="true"></span>
+                      No case
+                    </span>
+                  )}
                 </td>
                 <td>
-                  <div className="sessions-pipeline-cell">
-                    <strong>{getPipelineState(session)}</strong>
-                    <span>{getSessionNextAction(session)}</span>
-                    <small>{pipelineEvents.toLocaleString()} event{pipelineEvents === 1 ? '' : 's'}</small>
-                  </div>
+                  {pipelineEvents > 0 ? (
+                    <span className="sessions-events-count">{pipelineEvents.toLocaleString()} event{pipelineEvents === 1 ? '' : 's'}</span>
+                  ) : (
+                    <span className="sessions-cell-blank">&mdash;</span>
+                  )}
                 </td>
-                <td><ProviderLogo provider={session.provider} showLabel /></td>
+                <td><span className="sessions-provider">{getProviderLabel(session.provider || '')}</span></td>
                 <td>{session.messageCount || 0}</td>
                 <td>{formatDateTime(session.updatedAt)}</td>
                 <td>
@@ -520,84 +461,6 @@ function SessionsTable({
   );
 }
 
-function SessionWorkStrip({ sessions, loading, stats }) {
-  const totals = stats?.totals || {};
-  const byStage = stats?.byStage || {};
-  const allTime = Number(totals.allTime) || 0;
-  const linked = sessions.filter(hasLinkedCase).length;
-  const needsLink = sessions.length - linked;
-  const agentRuns = sessions.filter((session) => getPipelineEventCount(session) > 0).length;
-  const windowSize = Number(stats?.windowSize) || 0;
-  const stageLabels = [
-    { key: 'parser', label: 'Image Parser' },
-    { key: 'inv', label: 'INV Search' },
-    { key: 'triage', label: 'Triage' },
-    { key: 'main', label: 'QBO Assistant' },
-  ];
-  const stageHint = windowSize > 0 ? `Moving avg over the last ${windowSize} completed runs.` : 'No completed runs yet.';
-  return (
-    <div className="sessions-work-strip" aria-label="Session work summary">
-      <div className="sessions-work-next">
-        <span className="eyebrow">Next best action</span>
-        <strong>{needsLink > 0 ? 'Link conversations that produced cases' : 'Review recent case conversations'}</strong>
-        <p>
-          {loading
-            ? 'Loading saved sessions...'
-            : needsLink > 0
-              ? `${needsLink} saved conversation${needsLink === 1 ? '' : 's'} still need a clear case link.`
-              : 'Every visible conversation is linked to a case or ready for review.'}
-        </p>
-      </div>
-      <div className="sessions-work-metrics">
-        <div className="sessions-work-metric">
-          <div className="stat-card-value">{linked.toLocaleString()}</div>
-          <div className="stat-card-label">Linked cases</div>
-        </div>
-        <div className="sessions-work-metric">
-          <div className="stat-card-value">{needsLink.toLocaleString()}</div>
-          <div className="stat-card-label">Needs case link</div>
-        </div>
-        <div className="sessions-work-metric">
-          <div className="stat-card-value">{agentRuns.toLocaleString()}</div>
-          <div className="stat-card-label">Agent runs saved</div>
-        </div>
-        <div className="sessions-work-metric">
-          <div className="stat-card-value">{allTime.toLocaleString()}</div>
-          <div className="stat-card-label">Pipeline events</div>
-        </div>
-      </div>
-      <div className="sessions-event-stats__per-stage" title={stageHint}>
-        <span className="sessions-event-stats__per-stage-label">Agent activity:</span>
-        {stageLabels.map(({ key, label }) => {
-          const avg = Number(byStage?.[key]?.avg) || 0;
-          const samples = Number(byStage?.[key]?.samples) || 0;
-          return (
-            <span
-              key={key}
-              className={`sessions-event-stats__pill sessions-event-stats__pill--${key}`}
-              title={samples > 0 ? `${label}: avg ${avg} (n=${samples})` : `${label}: no samples yet`}
-            >
-              <span className="sessions-event-stats__pill-label">{label}</span>
-              <span className="sessions-event-stats__pill-value">{avg}</span>
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ProviderLogo({ provider, showLabel = false }) {
-  const iconPath = getProviderIconPath(provider);
-  const label = getProviderLabel(provider || '');
-  return (
-    <span className={`session-provider-logo${showLabel ? ' session-provider-logo--text' : ''}`} title={label} aria-label={label}>
-      {iconPath ? <img src={iconPath} alt="" /> : <span>{label.slice(0, 2).toUpperCase()}</span>}
-      {showLabel ? <span className="session-provider-name">{label}</span> : null}
-    </span>
-  );
-}
-
 function SessionDetail({ session, traces, summary, loading, activeTab, setActiveTab }) {
   if (loading && !session) {
     return <div className="sessions-empty">Loading session...</div>;
@@ -616,7 +479,7 @@ function SessionDetail({ session, traces, summary, loading, activeTab, setActive
           <div className="session-id mono">{session._id}</div>
         </div>
         <div className="session-detail-actions">
-          <a className="btn btn-secondary" href={`#/chat/${session._id}`}>Open in Chat</a>
+          <a className="btn btn-primary" href={`#/chat/${session._id}`}>Open in Chat</a>
           <a className="btn btn-ghost" href="#/sessions">Back to Sessions</a>
         </div>
       </div>
@@ -663,7 +526,7 @@ function renderTab(tab, session, traces, summary) {
   if (tab === 'attachments') return <AttachmentsTab messages={messages} traces={traces} />;
   if (tab === 'triage') return <TriageTab session={session} traces={traces} />;
   if (tab === 'audit') return <AuditTab session={session} traces={traces} />;
-  return <PlannedTab />;
+  return <OverviewTab session={session} summary={summary} />;
 }
 
 function OverviewTab({ session, summary }) {
@@ -819,8 +682,6 @@ function AgentsTab({ session, traces }) {
   const agentRows = [
     ['Main chat agent', session.provider ? getProviderLabel(session.provider) : 'Tracked as session provider', 'Current'],
     ['Parser agent', traces.some((trace) => trace.service === 'parse') ? 'Trace-backed' : 'No parse trace for this session', traces.some((trace) => trace.service === 'parse') ? 'Current' : 'Planned'],
-    ['Router / copilot agents', 'Per-agent task history not persisted here yet', 'Planned'],
-    ['Room agents', 'Agent-to-agent task events and handoff metadata', 'Planned'],
   ];
   return <MetadataTable rows={agentRows} />;
 }
@@ -898,19 +759,6 @@ function AuditTab({ session, traces }) {
         ['Request IDs', traces.map((trace) => trace.requestId).filter(Boolean).join(', ') || 'None'],
       ]} />
       <EmptyPanel text="User-visible audit history is only partially represented today." planned="Planned audit should include actor, source surface, rename/delete/export actions, policy decisions, and immutable event IDs." />
-    </div>
-  );
-}
-
-function PlannedTab() {
-  return (
-    <div className="session-planned-grid">
-      {PLANNED_FIELDS.map((field) => (
-        <div className="session-planned-item" key={field}>
-          <PlannedBadge>Future planned</PlannedBadge>
-          <strong>{field}</strong>
-        </div>
-      ))}
     </div>
   );
 }

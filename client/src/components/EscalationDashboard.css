@@ -453,611 +453,1161 @@
   color: var(--ink-secondary);
 }
 
-/* ----- Attention Queue ----- */
-.attention-mission-strip {
-  display: grid;
-  grid-template-columns: minmax(190px, 1.4fr) repeat(5, minmax(105px, 1fr)) minmax(180px, auto);
-  gap: var(--sp-3);
-  align-items: stretch;
-  margin-bottom: var(--sp-5);
-  padding: var(--sp-3);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-raised) 92%, white), var(--bg-raised));
+/* ============================================================
+   ESCALATIONS CONSOLE — scoped premium reskin
+   Root: <div class="app-content-constrained escalations-console">
+   Every rule below is scoped under .escalations-console so the
+   global reskins (overhaul.css, console-density.css) lose on
+   specificity wherever both sides use !important.
+   ============================================================ */
+
+.escalations-console {
+  /* Surfaces — flat, Apple warm-dark scale */
+  --ec-bg: #1c1c1e;
+  --ec-surface: #2c2c2e;
+  --ec-raised: #3a3a3c;
+  --ec-elevated: #48484a;
+  --ec-border: rgba(84, 84, 88, 0.35);
+  /* Text */
+  --ec-text: #f5f5f7;
+  --ec-text-2: #a1a1a6;
+  --ec-text-3: #636366;
+  /* Accent family */
+  --ec-accent: #4a9eff;
+  --ec-accent-strong: #6cb0ff;
+  --ec-accent-soft: rgba(74, 158, 255, 0.13);
+  --ec-accent-faint: rgba(74, 158, 255, 0.07);
+  --ec-accent-border: rgba(74, 158, 255, 0.35);
+  --ec-ring: rgba(74, 158, 255, 0.22);
+  --ec-on-accent: #08233f;
+  /* Semantics — only where meaning is carried */
+  --ec-success: #30d158;
+  --ec-warning: #f0b232;
+  --ec-error: #ff453a;
 }
 
-.attention-mission-status,
-.attention-mission-metric,
-.attention-mission-actions {
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-sunken);
+/* ----- Viewport lock (Sessions-parity scroll architecture) -----
+   The app shell renders this page inside .app-shell-view-region--scroll
+   (height: 100%, overflow-y: auto) — that region, not the document, is
+   what scrolls. Pinning the page root to the region's full height and
+   making it a flex column keeps the chrome (header, tabs, filters)
+   fixed; only the data wraps below scroll. Children keep their natural
+   min-height (auto) so chrome never compresses — the data cards alone
+   carry min-height: 0 and absorb the leftover space.
+   App.css gives .app-content-constrained padding 28px 32px 40px; the
+   40px bottom is dead weight in a locked layout, so trim it. Side
+   gutters stay identical to Sessions (32px). */
+.app-content-constrained.escalations-console {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding-top: 16px;
+  padding-bottom: 24px;
 }
 
-.attention-mission-status {
+/* The shell mounts the route through an anonymous classless <div>
+   between the region and this page, so height:100% above has nothing
+   to resolve against. Give THAT wrapper the region's height — the
+   :has() guard limits the rule to when this page is the one mounted,
+   so no other view's wrapper is affected. */
+.app-shell-view-region--scroll > div:has(> .escalations-console) {
+  height: 100%;
+}
+
+/* ----- Chrome row 1: compact title + inline stat cluster + refresh -----
+   One 36px line. Beats console-density `.app-content-constrained
+   .page-header` (0,2,0)!important with (0,3,0)!important. */
+.app-content-constrained.escalations-console .page-header {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  min-width: 0;
-  padding: var(--sp-3);
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  min-height: 36px !important;
+  margin-bottom: 6px !important;
+  padding-bottom: 0 !important;
+  border-bottom: none;
 }
 
-.attention-mission-status span,
-.attention-mission-metric span,
-.attention-rail-heading span {
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0;
-}
-
-.attention-mission-status strong {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-primary);
-  font-size: var(--text-md);
-}
-
-.attention-engine-dot {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--success, #22c55e);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--success, #22c55e) 14%, transparent);
-}
-
-.attention-engine-dot.is-warning {
-  background: var(--warning, #eab308);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning, #eab308) 18%, transparent);
-}
-
-.attention-engine-dot.is-critical {
-  background: var(--danger, #ef4444);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger, #ef4444) 16%, transparent);
-}
-
-.attention-mission-metric {
+/* Title and stat cluster share one baseline-aligned line. */
+.escalations-console .esc-header-text {
   display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
   min-width: 0;
+}
+
+/* (0,2,1)!important beats console-density + overhaul
+   `.app-content-constrained .page-title` (0,2,0)!important
+   and overhaul h1-h6 (0,0,1)!important. */
+.escalations-console h1.page-title {
+  margin: 0 !important;
+  font-size: 20px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+  line-height: 1.3 !important;
+  color: var(--ec-text) !important;
+}
+
+/* ----- Chrome row 2: tab switcher left, per-tab controls right -----
+   One 42px line; tabs stretch to the row so their active indicator
+   lands on the toolbar's bottom rule, controls self-center against
+   them. Below 1080px the controls wrap to a deliberate full-width
+   second line (media query at the end of this file).
+   (Class names here must never contain the substring "tab" — the
+   overhaul [class*="tab"] ripple helper forces overflow:hidden.) */
+.escalations-console .esc-toolbar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 16px;
+  flex: none;
+  min-height: 42px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--ec-border);
+}
+
+.escalations-console .esc-switcher {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+/* Controls stay on ONE line, vertically centered against the tabs.
+   No flex-wrap here: the intrinsic width of a wrappable nested flex
+   container under-measures (a child with flex-shrink contributes only
+   its min size), which used to wrap the results count onto a phantom
+   second line even with hundreds of px free. Wrapping is reintroduced
+   deliberately in the narrow-viewport media query below. */
+.escalations-console .esc-toolbar-controls {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  flex-wrap: nowrap;
+  gap: 10px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.escalations-console .esc-toolbar-controls select {
+  width: auto;
+  min-width: 140px;
+}
+
+/* flex-shrink 0 so the input's full width (not its min-width) counts
+   toward the toolbar group's intrinsic size — see note above. */
+.escalations-console .esc-toolbar-controls input[type="search"] {
+  flex: 0 0 240px;
+  width: 240px;
+}
+
+/* Compact control height inside the toolbar: (0,2,1)!important beats
+   the page-wide 36px reclaim below at (0,1,1)!important. */
+.escalations-console .esc-toolbar-controls select,
+.escalations-console .esc-toolbar-controls input[type="search"] {
+  min-height: 32px !important;
+  padding: 4px 10px !important;
+}
+
+.escalations-console .esc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px !important;
+  margin-bottom: -1px;
+  padding: 0 14px !important;
+  background: none !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  border-radius: 0 !important;
+  color: var(--ec-text-2);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.escalations-console .esc-tab:hover {
+  color: var(--ec-text);
+}
+
+.escalations-console .esc-tab.is-active {
+  border-bottom-color: var(--ec-accent) !important;
+  color: var(--ec-text);
+  font-weight: 600;
+}
+
+.escalations-console .esc-tab-count {
+  min-width: 20px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--ec-raised);
+  color: var(--ec-text-2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.escalations-console .esc-tab-count.is-alert {
+  background: rgba(240, 178, 50, 0.16);
+  color: var(--ec-warning);
+}
+
+.escalations-console .esc-tab-count.is-info {
+  background: var(--ec-accent-soft);
+  color: var(--ec-accent-strong);
+}
+
+/* ----- Buttons -----
+   Metrics beat overhaul `button[class*="btn"]` (0,1,1)!important
+   at (0,2,0)/(0,3,0)!important. Variant colors beat overhaul
+   `.app-content-constrained .btn-*` (0,2,0)!important at (0,3,0). */
+.escalations-console .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px !important;
+  padding: 0 14px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  font-weight: 500;
+  line-height: 1 !important;
+  letter-spacing: 0 !important;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.escalations-console .btn.btn-sm {
+  min-height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 13px !important;
+}
+
+.escalations-console .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.escalations-console .btn.btn-primary {
+  background: var(--ec-accent) !important;
+  border: none !important;
+  color: var(--ec-on-accent) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  letter-spacing: 0 !important;
+  box-shadow: none !important;
+}
+
+.escalations-console .btn.btn-primary:hover:not(:disabled) {
+  background: var(--ec-accent-strong) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.escalations-console .btn.btn-secondary {
+  background: var(--ec-surface) !important;
+  border: 1px solid var(--ec-border) !important;
+  color: var(--ec-text-2) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+  letter-spacing: 0 !important;
+}
+
+.escalations-console .btn.btn-secondary:hover:not(:disabled) {
+  background: var(--ec-raised) !important;
+  border-color: var(--ec-border) !important;
+  color: var(--ec-text) !important;
+}
+
+.escalations-console .btn.btn-ghost {
+  background: transparent !important;
+  border: none !important;
+  color: var(--ec-text-2) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  border-radius: 6px !important;
+}
+
+.escalations-console .btn.btn-ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--ec-text) !important;
+}
+
+/* Quiet ghost action (row-level): 13/500, border appears on hover. */
+.escalations-console .btn.btn-ghost.esc-quiet-action {
+  border: 1px solid transparent !important;
+  color: var(--ec-text-2) !important;
+}
+
+.escalations-console .btn.btn-ghost.esc-quiet-action:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border-color: var(--ec-border) !important;
+  color: var(--ec-text) !important;
+}
+
+/* Delete: hover/focus-revealed, destructive color only on hover. */
+.escalations-console .btn.btn-ghost.esc-row-delete {
+  color: var(--ec-text-3) !important;
+  opacity: 0;
+  transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.escalations-console tr:hover .btn.btn-ghost.esc-row-delete,
+.escalations-console tr:focus-within .btn.btn-ghost.esc-row-delete {
+  opacity: 1;
+}
+
+.escalations-console .btn.btn-ghost.esc-row-delete:hover:not(:disabled) {
+  background: rgba(255, 69, 58, 0.1) !important;
+  color: var(--ec-error) !important;
+}
+
+/* ----- Form controls -----
+   Beats overhaul `select` (0,0,1)! and `input[type=...]` (0,1,1)!
+   plus console-density's 28px min-height. */
+.escalations-console select,
+.escalations-console input[type="search"] {
+  min-height: 36px !important;
+  padding: 6px 12px !important;
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.35 !important;
+  background: var(--ec-surface);
+  border: 1px solid var(--ec-border);
+  color: var(--ec-text);
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.escalations-console select:hover,
+.escalations-console input[type="search"]:hover {
+  border-color: rgba(84, 84, 88, 0.6);
+}
+
+.escalations-console input[type="search"]::placeholder {
+  color: var(--ec-text-3);
+}
+
+.escalations-console input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--ec-accent);
+  cursor: pointer;
+}
+
+/* ----- Inline stat cluster (shares row 1 with the page title) ----- */
+.escalations-console .esc-stat-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+}
+
+.escalations-console .esc-stat {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-3);
+  white-space: nowrap;
+}
+
+.escalations-console .esc-stat > strong {
+  margin-right: 2px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ec-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.escalations-console .esc-stat + .esc-stat::before {
+  content: '\00B7';
+  margin-right: 10px;
+  color: var(--ec-text-3);
+}
+
+/* ----- Stat cards (knowledge tab still renders .stat-card) -----
+   Beats overhaul `.stat-card*` (0,1,0)!important set. */
+.escalations-console .stat-card {
+  display: flex !important;
   flex-direction: column;
   justify-content: center;
+  align-content: start !important;
   gap: 2px;
-  padding: var(--sp-3);
+  min-height: 0 !important;
+  padding: 10px 14px !important;
+  text-align: left !important;
+  background: var(--ec-surface);
+  border: 1px solid var(--ec-border);
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
 
-.attention-mission-metric strong {
-  color: var(--ink-primary);
-  font-size: var(--text-lg);
-  line-height: 1.1;
+.escalations-console .stat-card-value {
+  font-size: 20px !important;
+  font-weight: 700;
+  line-height: 1.1 !important;
+  letter-spacing: -0.01em !important;
+  color: var(--ec-text);
+  font-variant-numeric: tabular-nums;
 }
 
-.attention-mission-metric.tone-critical strong {
-  color: var(--danger, #ef4444);
+.escalations-console .stat-card-label {
+  margin-top: 2px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.3 !important;
+  letter-spacing: 0.05em !important;
+  text-transform: uppercase;
+  color: var(--ec-text-2);
 }
 
-.attention-mission-actions {
+/* Knowledge tab wraps stat cards in filter buttons — keep their
+   hover/focus feedback alive (background is pinned above). */
+.escalations-console button:hover > .stat-card,
+.escalations-console button:focus-visible > .stat-card {
+  background: var(--ec-raised);
+}
+
+/* ----- Cards ----- */
+.escalations-console .card {
+  background: var(--ec-surface);
+  border: 1px solid var(--ec-border);
+  border-radius: 8px !important;
+  box-shadow: none !important;
+  padding: 16px !important;
+}
+
+/* Data cards: bounded flex columns inside the locked page. flex: 0 1 auto
+   + min-height: 0 lets a card hug short content but cap at the leftover
+   viewport space, at which point its inner wrap scrolls. */
+.escalations-console .card.esc-grid-card,
+.escalations-console .card.attention-list-card {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+  padding: 0 !important;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+
+.escalations-console .esc-filter-count {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ----- Table -----
+   Beats overhaul `.table th/.table td` (0,1,1)!important.
+   NOTE: the wrapper class must contain no "tab" substring —
+   overhaul `[class*="tab"]` (line ~3461) forces
+   overflow:hidden !important on any match. */
+.escalations-console .esc-grid-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ec-raised) transparent;
+}
+
+/* The same [class*="tab"] ripple trap also forces overflow:hidden on the
+   <table> ELEMENT itself (class attr "table" contains "tab"), which makes
+   the table the nearest scroll container and silently un-sticks the
+   header. (0,3,0)!important beats the trap's (0,2,0)!important. */
+.escalations-console .esc-grid-wrap .table {
+  overflow: visible !important;
+}
+
+/* Sticky header sticks to the scrolling .esc-grid-wrap (App.css already
+   declares .table th sticky; re-asserted here so the lock never depends
+   on an unscoped rule surviving). */
+.escalations-console .esc-grid-wrap .table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.escalations-console .table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.escalations-console .table th {
+  padding: 9px 16px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: left;
+  color: var(--ec-text-3);
+  background: var(--ec-surface);
+  border-bottom: 1px solid var(--ec-border);
+  white-space: nowrap;
+}
+
+.escalations-console .table td {
+  padding: 12px 16px !important;
+  font-size: 13px !important;
+  color: var(--ec-text);
+  border-bottom: 1px solid var(--ec-border);
+  vertical-align: middle;
+}
+
+.escalations-console .table tbody tr {
+  transition: background 150ms ease;
+}
+
+.escalations-console .table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.escalations-console .table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.escalations-console .table th.esc-cell-actions {
+  width: 150px;
+}
+
+.escalations-console td.esc-cell-agent {
+  max-width: 120px;
+  font-size: 12px !important;
+  color: var(--ec-text-2);
+}
+
+.escalations-console td.esc-cell-issue {
+  max-width: 280px;
+}
+
+.escalations-console td.esc-cell-date {
+  font-size: 12px !important;
+  color: var(--ec-text-3);
+  white-space: nowrap;
+}
+
+.escalations-console td.esc-cell-coid {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.escalations-console .mono {
+  font-size: 12px;
+  color: var(--ec-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- Status: 6px semantic dot + plain text (no pill) ----- */
+.escalations-console .esc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-2);
+  white-space: nowrap;
+}
+
+.escalations-console .esc-status-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ec-text-3);
+}
+
+.escalations-console .esc-status-dot.is-open {
+  background: var(--status-open-text, #f0b232);
+}
+
+.escalations-console .esc-status-dot.is-working {
+  background: var(--status-progress-text, #4a9eff);
+}
+
+.escalations-console .esc-status-dot.is-resolved {
+  background: var(--status-resolved-text, #30d158);
+}
+
+.escalations-console .esc-status-dot.is-escalated {
+  background: var(--status-escalated-text, #ff453a);
+}
+
+/* Category: plain muted text, no chip box. */
+.escalations-console td.esc-cat {
+  font-size: 12px !important;
+  font-weight: 500;
+  color: var(--ec-text-3);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+/* ----- Status + category badges -----
+   Metrics beat overhaul `.badge/.cat-badge` (0,1,0)!important.
+   Status colors stay semantic (badge-open etc. from App.css);
+   category chips are neutralized — the label text carries the
+   information, severity/status keep the color budget. */
+.escalations-console .badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px !important;
+  padding: 2px 10px !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 600;
+  line-height: 1.4 !important;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.escalations-console .cat-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px !important;
+  padding: 2px 8px !important;
+  border-radius: 6px !important;
+  font-size: 11px !important;
+  font-weight: 500;
+  line-height: 1.4 !important;
+  background: transparent !important;
+  border: 1px solid var(--ec-border) !important;
+  color: var(--ec-text-2) !important;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+/* ----- Loading / empty states ----- */
+.escalations-console .esc-loading {
+  padding: 40px;
+  text-align: center;
+}
+
+.escalations-console .empty-state {
+  padding: 48px 24px;
+}
+
+.escalations-console .empty-state-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-bottom: 6px;
+  color: var(--ec-text);
+}
+
+.escalations-console .empty-state-desc {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  max-width: 420px;
+  color: var(--ec-text-3);
+}
+
+/* ============================================================
+   ATTENTION TAB
+   ============================================================ */
+
+/* ----- Engine status: one dot + word, inline in control row 1 ----- */
+.escalations-console .attention-engine-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ec-success);
+  box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.15);
+}
+
+.escalations-console .attention-engine-dot.is-warning {
+  background: var(--ec-warning);
+  box-shadow: 0 0 0 3px rgba(240, 178, 50, 0.15);
+}
+
+.escalations-console .attention-engine-dot.is-critical {
+  background: var(--ec-error);
+  box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.15);
+}
+
+.escalations-console .esc-attn-engine {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-2);
+  white-space: nowrap;
+}
+
+/* Right-aligned group in control row 1: engine status + scan actions. */
+.escalations-console .esc-attn-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+/* Severity counts as plain text — semantic color, no pill boxes. */
+.escalations-console .esc-attn-sev-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.escalations-console .esc-attn-sev-line > span + span::before {
+  content: '\00B7';
+  margin-right: 6px;
+  color: var(--ec-text-3);
+}
+
+.escalations-console .esc-attn-sev-line .sev-critical,
+.escalations-console .attention-meta-sev.sev-critical {
+  color: var(--ec-error);
+}
+
+.escalations-console .esc-attn-sev-line .sev-warning,
+.escalations-console .attention-meta-sev.sev-warning {
+  color: var(--ec-warning);
+}
+
+/* ----- Ops panel: status segments, severity, sort, kind chips -----
+   Fixed chrome in the locked layout — kept tight so the list below
+   gets the viewport budget. */
+.escalations-console .attention-ops-panel {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  background: var(--ec-surface);
+  border: 1px solid var(--ec-border);
+  border-radius: 8px;
+}
+
+.escalations-console .attention-ops-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.escalations-console .attention-ops-row-secondary {
+  padding-top: 10px;
+  border-top: 1px solid var(--ec-border);
+}
+
+/* Segmented status filter (replaces the four big tiles AND the
+   status dropdown — one control, same functionality). */
+.escalations-console .esc-attn-seg-row {
+  display: inline-flex;
+  align-items: stretch;
+  background: var(--ec-bg);
+  border: 1px solid var(--ec-border);
+  border-radius: 6px;
+}
+
+.escalations-console .esc-attn-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px !important;
+  padding: 0 12px !important;
+  background: transparent;
+  border: none;
+  border-right: 1px solid var(--ec-border);
+  color: var(--ec-text-2);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.escalations-console .esc-attn-seg:first-child {
+  border-radius: 5px 0 0 5px;
+}
+
+.escalations-console .esc-attn-seg:last-child {
+  border-right: none;
+  border-radius: 0 5px 5px 0;
+}
+
+.escalations-console .esc-attn-seg > strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ec-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.escalations-console .esc-attn-seg:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ec-text);
+}
+
+.escalations-console .esc-attn-seg.is-active {
+  background: var(--ec-accent-soft);
+  color: var(--ec-accent-strong);
+}
+
+.escalations-console .esc-attn-seg.is-active > strong {
+  color: var(--ec-accent-strong);
+}
+
+/* Kind filter chips */
+.escalations-console .attention-filter-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Quiet chips: transparent, no box at rest; 1px border only on
+   the active chip. Zero-count kinds are not rendered at all. */
+.escalations-console .attention-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px !important;
+  padding: 0 8px !important;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--ec-text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.escalations-console .attention-kind-chip > strong {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ec-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.escalations-console .attention-kind-chip:hover {
+  color: var(--ec-text);
+}
+
+.escalations-console .attention-kind-chip:hover > strong {
+  color: var(--ec-text);
+}
+
+.escalations-console .attention-kind-chip.is-active {
+  border-color: var(--ec-accent-border);
+  color: var(--ec-accent-strong);
+}
+
+.escalations-console .attention-kind-chip.is-active > strong {
+  color: var(--ec-accent-strong);
+}
+
+.escalations-console .attention-result-count {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----- List head + progressive bulk toolbar -----
+   The bulk actions stay hidden until at least one item is
+   selected, then slide in over the head line (opacity/transform
+   only — no layout shift). */
+.escalations-console .attention-list-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ec-border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.escalations-console .attention-select-all {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  color: var(--ec-text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.escalations-console .attention-bulk-zone {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.escalations-console .attention-bulk-toolbar {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--sp-2);
-  padding: var(--sp-3);
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition: opacity 150ms ease, transform 150ms ease;
 }
 
-.attention-command-layout {
+.escalations-console .attention-bulk-toolbar.is-on {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
+.escalations-console .attention-bulk-count {
+  margin-right: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ----- Attention list -----
+   The list (not the card) is the scroller so the select-all / bulk
+   head row stays pinned above it. */
+.escalations-console .attention-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ec-raised) transparent;
+}
+
+/* Severity is carried by a 3px left border + a word in the meta
+   line — no per-row tag boxes. Info rows stay neutral. */
+.escalations-console .attention-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
-  gap: var(--sp-5);
-  align-items: start;
-}
-
-.attention-command-main {
-  min-width: 0;
-}
-
-.attention-command-rail {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  min-width: 0;
-  position: sticky;
-  top: var(--sp-5);
-}
-
-.attention-rail-section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  padding: var(--sp-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-raised);
-}
-
-.attention-rail-heading {
-  display: flex;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: 16px;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
+  padding: 12px 16px 12px 13px;
+  border-bottom: 1px solid var(--ec-border);
+  border-left: 3px solid transparent;
+  transition: background 150ms ease;
 }
 
-.attention-rail-heading strong {
-  color: var(--ink-primary);
-  font-size: var(--text-xs);
+.escalations-console .attention-item.sev-warning {
+  border-left-color: var(--ec-warning);
 }
 
-.attention-workflow-list,
-.attention-recent-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
+.escalations-console .attention-item.sev-critical {
+  border-left-color: var(--ec-error);
 }
 
-.attention-workflow-row,
-.attention-recent-list button {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-3);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-sunken);
-  color: var(--ink);
-  cursor: pointer;
-  text-align: left;
+.escalations-console .attention-item:hover {
+  background: rgba(255, 255, 255, 0.025);
 }
 
-.attention-workflow-row:hover,
-.attention-workflow-row.has-items,
-.attention-recent-list button:hover {
-  border-color: var(--accent);
+.escalations-console .attention-item:last-child {
+  border-bottom: none;
 }
 
-.attention-workflow-row span,
-.attention-recent-list button {
+.escalations-console .attention-item-main {
   min-width: 0;
 }
 
-.attention-workflow-row strong,
-.attention-recent-list strong {
-  display: block;
+.escalations-console .attention-row-select {
+  display: inline-flex;
+  align-self: start;
+  padding-top: 4px;
+}
+
+.escalations-console .attention-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ec-text);
   overflow: hidden;
-  color: var(--ink-primary);
-  font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.attention-workflow-row small,
-.attention-recent-list small {
-  display: block;
-  overflow: hidden;
+.escalations-console .attention-summary {
   margin-top: 2px;
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--ec-text-2);
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.attention-workflow-row em {
-  flex: 0 0 auto;
-  min-width: 34px;
-  padding: 3px var(--sp-2);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
-  color: var(--ink-primary);
-  font-size: var(--text-xs);
-  font-style: normal;
-  font-weight: 700;
-  text-align: center;
-}
-
-.attention-recent-list button {
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-}
-
-.attention-workflow-row.has-items em {
-  background: color-mix(in srgb, var(--warning, #eab308) 18%, var(--bg-raised));
-  color: color-mix(in srgb, var(--warning, #eab308) 88%, var(--ink));
-}
-
-.attention-health-meter {
-  height: 8px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: var(--bg-sunken);
-}
-
-.attention-health-meter span {
+/* One merged meta line: severity · source · match · signals · date */
+.escalations-console .attention-meta {
   display: block;
-  height: 100%;
-  min-width: 4px;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--accent), var(--success, #22c55e));
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ec-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.attention-health-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--sp-2);
+.escalations-console .attention-meta > span + span::before {
+  content: '\00B7';
+  margin: 0 6px;
+  color: var(--ec-text-3);
 }
 
-.attention-health-grid span {
-  min-width: 0;
-  padding: var(--sp-2);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-sunken);
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-  text-align: center;
-}
-
-.attention-focus-grid,
-.attention-resource-links {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-2);
-}
-
-.attention-focus-grid button,
-.attention-resource-links a {
+/* Per-row actions: one quiet action visible; the rest reveal on
+   row hover or keyboard focus within the row. */
+.escalations-console .attention-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 34px;
-  padding: 0 var(--sp-2);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-sunken);
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  text-align: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.escalations-console .attention-actions .esc-reveal {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.escalations-console .attention-item:hover .esc-reveal,
+.escalations-console .attention-item:focus-within .esc-reveal {
+  opacity: 1;
+}
+
+/* Touch devices have no hover — keep all actions visible. */
+@media (hover: none) {
+  .escalations-console .attention-actions .esc-reveal,
+  .escalations-console .btn.btn-ghost.esc-row-delete {
+    opacity: 1;
+  }
+}
+
+/* ----- Related links (smallest-footprint replacement for the
+   old right-rail Resources section) ----- */
+.escalations-console .esc-attn-related {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: none;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
+.escalations-console .esc-attn-related > span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ec-text-3);
+}
+
+.escalations-console .esc-attn-related a {
+  color: var(--ec-text-2);
+  font-weight: 500;
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+.escalations-console .esc-attn-related a:hover {
+  color: var(--ec-accent-strong);
   text-decoration: none;
 }
 
-.attention-focus-grid button {
-  cursor: pointer;
+/* ----- Decorative-effect kills (depth-effects.css) -----
+   The 3px accent bar on stat cards is decorative color; row hover
+   gets a bg shift only, no shadow. */
+.escalations-console .stat-card::before,
+.escalations-console .stat-card::after {
+  content: none !important;
+  display: none !important;
 }
 
-.attention-focus-grid button:hover,
-.attention-resource-links a:hover {
-  border-color: var(--accent);
-  color: var(--ink-primary);
+.escalations-console .table tbody tr:hover {
+  box-shadow: none;
 }
 
-.attention-rail-empty {
-  color: var(--ink-secondary);
-  font-size: var(--text-sm);
+/* Align plain :focus (mouse) glow from depth-effects.css with the
+   scoped accent ring. */
+.escalations-console input:focus,
+.escalations-console select:focus,
+.escalations-console textarea:focus {
+  box-shadow: 0 0 0 3px var(--ec-ring);
 }
 
-.attention-status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: var(--sp-5);
-  margin-bottom: var(--sp-8);
+/* ----- Keyboard focus -----
+   Replaces console-density's (0,1,1)!important blue outline with
+   an accent ring at (0,2,1)+!important. Kept last in the file so
+   it also wins ties against rules above. */
+.escalations-console button:focus-visible,
+.escalations-console a:focus-visible,
+.escalations-console input:focus-visible,
+.escalations-console select:focus-visible,
+.escalations-console textarea:focus-visible,
+.escalations-console .btn.btn-primary:focus-visible,
+.escalations-console .btn.btn-secondary:focus-visible,
+.escalations-console .btn.btn-ghost:focus-visible,
+.escalations-console .btn.btn-ghost.esc-row-delete:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ec-ring) !important;
 }
 
-.attention-status-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--sp-1);
-  min-height: 74px;
-  padding: var(--sp-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-raised);
-  color: var(--ink);
-  cursor: pointer;
-  text-align: left;
-}
+/* ----- Responsive ----- */
 
-.attention-status-tile:hover,
-.attention-status-tile.is-active {
-  border-color: var(--accent);
-  background: var(--bg-sunken);
-}
-
-.attention-status-value {
-  font-size: var(--text-xl);
-  line-height: 1.1;
-  font-weight: 700;
-}
-
-.attention-status-label {
-  font-size: var(--text-xs);
-  color: var(--ink-secondary);
-}
-
-.attention-ops-panel {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-  margin-bottom: var(--sp-5);
-  padding: var(--sp-4);
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius, 8px);
-  background: var(--bg-raised);
-}
-
-.attention-ops-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-4);
-  flex-wrap: wrap;
-}
-
-.attention-ops-row-secondary {
-  padding-top: var(--sp-3);
-  border-top: 1px solid var(--line-subtle);
-}
-
-.attention-filter-group,
-.attention-select-group,
-.attention-severity-summary {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-}
-
-.attention-select-group select {
-  min-width: 150px;
-}
-
-.attention-kind-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-height: 32px;
-  padding: 0 var(--sp-3);
-  border: 1px solid var(--line-subtle);
-  border-radius: 999px;
-  background: var(--bg-sunken);
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.attention-kind-chip strong {
-  color: var(--ink-primary);
-  font-size: var(--text-xs);
-}
-
-.attention-kind-chip:hover,
-.attention-kind-chip.is-active {
-  border-color: var(--accent);
-  color: var(--ink-primary);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-sunken));
-}
-
-.attention-severity-count {
-  display: inline-flex;
-  align-items: center;
-  height: 24px;
-  padding: 0 var(--sp-2);
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  font-size: var(--text-xs);
-  font-weight: 700;
-}
-
-.attention-severity-count.critical {
-  color: var(--danger, #ef4444);
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 50%, var(--line));
-}
-
-.attention-severity-count.warning {
-  color: color-mix(in srgb, var(--warning, #eab308) 85%, var(--ink));
-  border-color: color-mix(in srgb, var(--warning, #eab308) 50%, var(--line));
-}
-
-.attention-severity-count.info {
-  color: var(--ink-secondary);
-}
-
-.attention-result-count {
-  font-size: var(--text-xs);
-  margin-left: auto;
-}
-
-.attention-list-card {
-  padding: 0;
-  overflow: hidden;
-}
-
-.attention-bulk-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  min-height: 52px;
-  padding: var(--sp-3) var(--sp-5);
-  border-bottom: 1px solid var(--line-subtle);
-  background: var(--bg-sunken);
-}
-
-.attention-select-visible,
-.attention-row-select {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-}
-
-.attention-row-select {
-  align-self: start;
-  padding-top: 2px;
-}
-
-.attention-bulk-count {
-  color: var(--ink-secondary);
-  font-size: var(--text-xs);
-}
-
-.attention-bulk-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  margin-left: auto;
-}
-
-.attention-list {
-  display: flex;
-  flex-direction: column;
-}
-
-.attention-item {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  gap: var(--sp-4);
-  align-items: center;
-  padding: var(--sp-5);
-  border-bottom: 1px solid var(--line-subtle);
-}
-
-.attention-item:last-child {
-  border-bottom: 0;
-}
-
-.attention-item-main {
-  min-width: 0;
-}
-
-.attention-item-header,
-.attention-meta,
-.attention-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-}
-
-.attention-title {
-  font-weight: 700;
-  color: var(--ink-primary);
-}
-
-.attention-date {
-  font-size: var(--text-xs);
-  color: var(--ink-tertiary);
-}
-
-.attention-summary {
-  margin-top: var(--sp-2);
-  color: var(--ink);
-  font-size: var(--text-sm);
-}
-
-.attention-meta {
-  margin-top: var(--sp-2);
-  font-size: var(--text-xs);
-  color: var(--ink-secondary);
-}
-
-.attention-meta span {
-  max-width: 340px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.attention-severity {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 54px;
-  height: 22px;
-  padding: 0 var(--sp-2);
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  font-size: var(--text-xs);
-  font-weight: 700;
-  text-transform: uppercase;
-}
-
-.attention-severity-warning {
-  border-color: color-mix(in srgb, var(--warning, #eab308) 60%, var(--line));
-  color: color-mix(in srgb, var(--warning, #eab308) 85%, var(--ink));
-}
-
-.attention-severity-critical {
-  border-color: color-mix(in srgb, var(--danger, #ef4444) 60%, var(--line));
-  color: var(--danger, #ef4444);
-}
-
-.attention-actions {
-  justify-content: flex-end;
-  min-width: 330px;
-}
-
-@media (max-width: 1180px) {
-  .attention-mission-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+/* Below ~1080px the single toolbar line can run out of room: let the
+   controls drop to their own full-width line, left-aligned under the
+   tabs — a deliberate, aligned wrap instead of intrinsic-size fallout. */
+@media (max-width: 1080px) {
+  .escalations-console .esc-toolbar {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding-bottom: 8px;
   }
 
-  .attention-mission-status,
-  .attention-mission-actions {
-    grid-column: span 3;
-  }
-
-  .attention-mission-actions {
+  .escalations-console .esc-toolbar-controls {
+    flex-wrap: wrap;
+    flex-basis: 100%;
     justify-content: flex-start;
+    margin-left: 0;
   }
 
-  .attention-command-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .attention-command-rail {
-    position: static;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .escalations-console .esc-toolbar-controls input[type="search"] {
+    flex: 1 1 180px;
+    width: auto;
+    min-width: 160px;
   }
 }
 
-@media (max-width: 860px) {
-  .attention-mission-strip,
-  .attention-command-rail {
-    grid-template-columns: 1fr;
+@media (max-width: 900px) {
+  .escalations-console .esc-attn-right {
+    margin-left: 0;
   }
 
-  .attention-mission-status,
-  .attention-mission-actions {
-    grid-column: auto;
+  .escalations-console .attention-item {
+    grid-template-columns: 24px minmax(0, 1fr);
   }
 
-  .attention-status-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .attention-item {
-    grid-template-columns: 24px 1fr;
-    align-items: stretch;
-  }
-
-  .attention-actions {
+  .escalations-console .attention-actions {
     grid-column: 2;
-  }
-
-  .attention-actions {
     justify-content: flex-start;
-    min-width: 0;
-  }
-
-  .attention-meta span {
-    max-width: 100%;
   }
 }

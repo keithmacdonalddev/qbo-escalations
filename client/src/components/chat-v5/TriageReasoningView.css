@@ -1,0 +1,154 @@
+/* TriageReasoningView — the pushed "Model reasoning" page inside the
+   evidence dock. Class names avoid the substrings "title" and "btn" to dodge
+   the global overhaul.css / console-density.css traps. */
+
+.v5-reasoning-view {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-sidebar);
+}
+
+.v5-reasoning-head {
+  flex: 0 0 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 6px;
+  border: 1px solid var(--v5-border);
+  background: var(--bg-raised);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+.v5-reasoning-back {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--v5-muted) 84%, transparent);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.v5-reasoning-back:hover,
+.v5-reasoning-back:focus-visible {
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--v5-ink);
+  outline: none;
+}
+
+.v5-reasoning-head-text {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.v5-reasoning-name {
+  color: var(--v5-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.v5-reasoning-source {
+  color: var(--v5-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.v5-reasoning-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  border: 1px solid var(--v5-border);
+  border-top: 0;
+  background: var(--bg-raised);
+}
+
+.v5-reasoning-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 120px;
+  color: var(--v5-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.v5-reasoning-status.is-error {
+  color: var(--v5-red);
+}
+
+.v5-reasoning-spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  border-top-color: var(--v5-blue);
+  border-radius: 50%;
+  animation: v5-reasoning-spin 700ms linear infinite;
+}
+
+@keyframes v5-reasoning-spin {
+  to { transform: rotate(360deg); }
+}
+
+.v5-reasoning-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.v5-reasoning-block {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--v5-border);
+  border-radius: 8px;
+  background: var(--v5-panel-sunken);
+  color: var(--v5-ink);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.v5-reasoning-note {
+  margin: 0;
+  color: var(--v5-dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
+/* Disabled state for the reasoning launcher in the dock header cluster.
+   Scoped to the modifier so the shared .v5-dock-section__tool is untouched. */
+.v5-tool-reasoning:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.v5-tool-reasoning:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--v5-muted) 84%, transparent);
+  transform: none;
+}

@@ -24,6 +24,49 @@ function formatLatency(value) {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
+// Map soft-validation issues (server: card.validationIssues, entries shaped
+// like { code, field, message }) to a per-field message so each affected
+// section can show a small warning icon. Multiple issues on one field are
+// joined into a single tooltip.
+function buildIssueMessageByField(triageCard) {
+  const issues = Array.isArray(triageCard?.validationIssues) ? triageCard.validationIssues : [];
+  const byField = {};
+  for (const issue of issues) {
+    const field = safeText(issue?.field);
+    if (!field) continue;
+    const message = safeText(issue?.message) || 'Soft validation flagged this field.';
+    byField[field] = byField[field] ? `${byField[field]} ${message}` : message;
+  }
+  return byField;
+}
+
+// Small amber warning triangle shown next to a field whose value failed soft
+// validation. Hovering shows the validation message via the native tooltip.
+function FieldIssueIcon({ message }) {
+  if (!message) return null;
+  return (
+    <span
+      title={message}
+      role="img"
+      aria-label={`Validation warning: ${message}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        marginLeft: '4px',
+        cursor: 'help',
+        flexShrink: 0,
+        verticalAlign: 'middle',
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 3 L22 20 H2 Z" fill="rgba(217, 119, 6, 0.16)" stroke="#d97706" strokeWidth="2" strokeLinejoin="round" />
+        <line x1="12" y1="9.5" x2="12" y2="14.5" stroke="#d97706" strokeWidth="2" strokeLinecap="round" />
+        <circle cx="12" cy="17.4" r="1.2" fill="#d97706" />
+      </svg>
+    </span>
+  );
+}
+
 function getGenerationMeta(triageCard, fallbackUsed) {
   const generation = triageCard?.generation && typeof triageCard.generation === 'object'
     ? triageCard.generation
@@ -56,6 +99,7 @@ export default function TriageCard({ triageCard }) {
     ? triageCard.runtime.warning.trim()
     : '';
   const generationMeta = getGenerationMeta(triageCard, fallbackUsed);
+  const issueByField = buildIssueMessageByField(triageCard);
 
   return (
     <motion.div
@@ -97,6 +141,7 @@ export default function TriageCard({ triageCard }) {
         }}>
           {severity}
         </span>
+        <FieldIssueIcon message={issueByField.severity} />
         {confidence && (
           <span style={{
             background: 'rgba(255,255,255,0.06)',
@@ -116,6 +161,7 @@ export default function TriageCard({ triageCard }) {
             {confidence}
           </span>
         )}
+        <FieldIssueIcon message={issueByField.confidence} />
         <span style={{
           fontSize: '12px',
           fontWeight: 600,
@@ -124,6 +170,7 @@ export default function TriageCard({ triageCard }) {
         }}>
           {(triageCard.category || 'unknown').replace(/-/g, ' ')}
         </span>
+        <FieldIssueIcon message={issueByField.category} />
         <span style={{
           marginLeft: 'auto',
           fontSize: '9px',
@@ -200,6 +247,7 @@ export default function TriageCard({ triageCard }) {
           marginBottom: triageCard.action ? '4px' : 0,
         }}>
           {triageCard.read}
+          <FieldIssueIcon message={issueByField.read} />
         </div>
       )}
 
@@ -213,6 +261,7 @@ export default function TriageCard({ triageCard }) {
           paddingTop: '3px',
         }}>
           Immediate next step: {triageCard.action}
+          <FieldIssueIcon message={issueByField.action} />
         </div>
       )}
 
@@ -225,7 +274,7 @@ export default function TriageCard({ triageCard }) {
           marginTop: '4px',
           lineHeight: 1.35,
         }}>
-          <strong style={{ color: '#dbdee1' }}>Missing info:</strong> {missingInfo.join('; ')}
+          <strong style={{ color: '#dbdee1' }}>Missing info:<FieldIssueIcon message={issueByField.missingInfo} /></strong> {missingInfo.join('; ')}
         </div>
       )}
 
@@ -236,7 +285,7 @@ export default function TriageCard({ triageCard }) {
           marginTop: '3px',
           lineHeight: 1.35,
         }}>
-          <strong style={{ color: '#dbdee1' }}>Category check:</strong> {triageCard.categoryCheck}
+          <strong style={{ color: '#dbdee1' }}>Category check:<FieldIssueIcon message={issueByField.categoryCheck} /></strong> {triageCard.categoryCheck}
         </div>
       )}
     </motion.div>

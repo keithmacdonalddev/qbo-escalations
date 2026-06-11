@@ -13,7 +13,22 @@ const {
   getPromptVersionFromText,
   getRenderedAgentPrompt,
 } = require('../lib/agent-prompt-store');
-const { chat: claudeChat } = require('./claude');
+// Draft extraction goes through the shared capture-enabled provider dispatch
+// (the same one triage uses), NOT the legacy pre-harness claude.js subprocess
+// wrapper: every provider call must save its whole response to MongoDB as a
+// ProviderCallPackage, and the agent must read its answer back from the saved
+// package (see runKnowledgeBaseAgentCompletion).
+const {
+  DIRECT_TRIAGE_PROVIDERS,
+  extractTriageTextFromProviderPackage,
+  getEffectiveModel,
+  runDirectTriageProviderCall,
+  waitForProviderPackage,
+} = require('./triage');
+const {
+  KNOWLEDGEBASE_PROVIDER_CALL_SITE,
+  KNOWLEDGEBASE_PROVIDER_OPERATION,
+} = require('./providers/provider-handoff');
 const {
   normalizeKnowledgeCandidate,
   normalizeKnowledgeRecordId,
@@ -585,50 +600,167 @@ function buildKnowledgeBaseAgentSidebarSystemPrompt(basePrompt) {
   ].join('\n');
 }
 
-function runKnowledgeBaseAgentCompletion({
+// HTTP-provider response budget for the draft extraction. The extraction
+// returns a multi-field JSON object, so it needs more room than triage's
+// compact card (the shared dispatch defaults to triage's 1200).
+const KB_DRAFT_MAX_OUTPUT_TOKENS = 4000;
+
+// Flatten the completion messages into the single prompt string the shared
+// provider dispatch sends. The draft extraction passes exactly one user
+// message; multi-message input is flattened with role labels (same convention
+// the claude-cli harness uses for multi-turn stdin prompts).
+function buildUserPromptFromMessages(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (list.length === 0) return '';
+  if (list.length === 1) return safeString(list[0]?.content, '');
+  const lines = list.map((message) => {
+    const role = message?.role === 'assistant' ? 'Assistant' : message?.role === 'system' ? 'System' : 'User';
+    return `${role}: ${safeString(message?.content, '')}`;
+  });
+  lines.push('Assistant:');
+  return lines.join('\n\n');
+}
+
+// Knowledge Base Agent single-shot completion, provider-harness transport.
+//
+// House rule (mirrors the triage reference pattern in runTriage): hand the
+// prompt to the capture-enabled provider dispatch with forceCapture, wait for
+// the ProviderCallPackage to be readable in MongoDB, then build the result by
+// reading the package back — never from the in-memory provider response. The
+// whole provider payload (including any thinking/reasoning events the provider
+// emitted) is persisted in the package.
+//
+// Provider/model/failover come from the agent profile runtime
+// (resolveKbAgentRuntimePolicy — the single source of truth); failover is
+// always on: the configured (or neutral-default) backup is attempted when the
+// primary attempt fails. If BOTH attempts fail, the error propagates so the
+// caller's deterministic draft remains the final resort.
+//
+// Images are carried on the CLI providers (claude/codex, via temp files); the
+// shared dispatch builds text-only bodies for the HTTP providers, exactly as
+// it does for triage — the context text still carries the image references.
+//
+// `directProviderCall` / `waitForPackage` / `runtimePolicy` are injection
+// seams for tests, in the same style as runTriage's injectable options.
+async function runKnowledgeBaseAgentCompletion({
   messages,
   images = [],
   timeoutMs = 120000,
   systemPromptMode = 'sidebar',
+  runtimePolicy = null,
+  // Extra origin metadata stamped onto the captured ProviderCallPackage
+  // (e.g. the escalation that triggered a draft extraction) so the forensic
+  // record links back to its source. Merged into captureOverrides.metadata.
+  captureMetadata = null,
+  directProviderCall = runDirectTriageProviderCall,
+  waitForPackage = waitForProviderPackage,
 } = {}) {
   const prompt = getPromptMetadata();
   const systemPrompt = systemPromptMode === 'draft'
     ? prompt.systemPrompt
     : buildKnowledgeBaseAgentSidebarSystemPrompt(prompt.systemPrompt);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const cleanup = claudeChat({
-      messages,
-      images,
+  const policy = runtimePolicy || await resolveKbAgentRuntimePolicy();
+  const promptTrace = {
+    promptId: KNOWLEDGEBASE_AGENT_ID,
+    promptVersion: prompt.promptVersion || '',
+    promptLength: safeString(systemPrompt, '').length,
+  };
+  const userPrompt = buildUserPromptFromMessages(messages);
+
+  // One full provider attempt: dispatch -> wait for the saved package -> read
+  // the text back from the package. Each attempt produces and reads back its
+  // OWN ProviderCallPackage (the capture pipeline keys off the providerTrace
+  // returned by THIS call), so a backup never reuses the primary's package.
+  async function attemptProviderCompletion(attemptProvider, attemptModel) {
+    const providerResult = await directProviderCall({
+      provider: attemptProvider,
+      model: attemptModel,
       systemPrompt,
-      reasoningEffort: 'medium',
+      userPrompt,
+      images,
+      reasoningEffort: policy.reasoningEffort || 'medium',
+      serviceTier: policy.serviceTier || '',
       timeoutMs,
-      onChunk: () => {},
-      onThinkingChunk: () => {},
-      onDone: (text, usage) => {
-        if (settled) return;
-        settled = true;
-        resolve({ text: safeString(text), usage: usage || null, prompt });
-      },
-      onError: (err) => {
-        if (settled) return;
-        settled = true;
-        reject(err);
+      promptTrace,
+      maxTokens: KB_DRAFT_MAX_OUTPUT_TOKENS,
+      captureOverrides: {
+        callSite: KNOWLEDGEBASE_PROVIDER_CALL_SITE,
+        operation: KNOWLEDGEBASE_PROVIDER_OPERATION,
+        agent: KNOWLEDGEBASE_AGENT_ID,
+        metadata: {
+          sourceAgent: KNOWLEDGEBASE_AGENT_ID,
+          systemPromptMode,
+          ...(captureMetadata && typeof captureMetadata === 'object' ? captureMetadata : {}),
+        },
       },
     });
-    setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { if (typeof cleanup === 'function') cleanup(); } catch { /* ignore */ }
-      const err = new Error('Knowledge Base Agent timed out.');
-      err.code = 'KNOWLEDGE_AGENT_TIMEOUT';
-      err.status = 504;
-      reject(err);
-    }, timeoutMs + 1000).unref?.();
-  });
+    const providerTrace = providerResult?.providerTrace || null;
+    const providerPackage = await waitForPackage(providerTrace);
+    const payload = await extractTriageTextFromProviderPackage(providerPackage, providerTrace);
+    if (!payload.text) {
+      const emptyErr = new Error('Knowledge Base Agent provider package did not contain usable text.');
+      emptyErr.code = 'PROVIDER_PACKAGE_EMPTY_RESPONSE';
+      emptyErr.providerPackageId = providerTrace?.providerPackageId || null;
+      throw emptyErr;
+    }
+    return { providerTrace, providerPackage, payload };
+  }
+
+  const primaryProvider = policy.primaryProvider;
+  const primaryModel = getEffectiveModel(primaryProvider, policy.primaryModel);
+  let provider = primaryProvider;
+  let model = primaryModel;
+  let attempt;
+  try {
+    attempt = await attemptProviderCompletion(primaryProvider, primaryModel);
+  } catch (primaryErr) {
+    // Automatic provider-to-provider failover, consistent with the universal
+    // failover already shipped for chat/image-parser/triage. The backup is the
+    // profile-resolved fallback (resolveKbAgentRuntimePolicy defaults it to the
+    // neutral global alternate via resolveAgentBackup — no use-case reasoning).
+    // Only a DISTINCT, supported provider is attempted; otherwise the primary
+    // failure propagates to the caller's deterministic-draft final resort.
+    const backupProvider = DIRECT_TRIAGE_PROVIDERS.includes(policy.fallbackProvider)
+      ? policy.fallbackProvider
+      : '';
+    if (!backupProvider || backupProvider === primaryProvider) {
+      throw primaryErr;
+    }
+    const backupModel = getEffectiveModel(backupProvider, policy.fallbackModel);
+    console.warn(
+      '[knowledgebase-agent] primary provider %s failed (%s); failing over to %s',
+      primaryProvider,
+      primaryErr?.message || primaryErr?.code || 'unknown error',
+      backupProvider
+    );
+    provider = backupProvider;
+    model = backupModel;
+    attempt = await attemptProviderCompletion(backupProvider, backupModel);
+  }
+
+  return {
+    text: attempt.payload.text,
+    usage: attempt.providerTrace?.usage || null,
+    prompt,
+    providerUsed: provider,
+    modelUsed: attempt.providerTrace?.model || model,
+    reasoningEffort: policy.reasoningEffort || '',
+    providerPackageId: safeString(attempt.providerTrace?.providerPackageId, ''),
+    payloadSourcePath: attempt.payload.sourcePath || '',
+    fallbackUsed: provider !== primaryProvider,
+    fallbackFrom: provider !== primaryProvider ? primaryProvider : '',
+  };
 }
 
-async function runKnowledgeBaseAgentDraftExtraction({ escalation, draftData, candidate = null } = {}) {
+async function runKnowledgeBaseAgentDraftExtraction({
+  escalation,
+  draftData,
+  candidate = null,
+  // Test seams, forwarded to runKnowledgeBaseAgentCompletion.
+  runtimePolicy = null,
+  directProviderCall = undefined,
+  waitForPackage = undefined,
+} = {}) {
   const contextBundle = await buildKnowledgeBaseAgentContext({
     candidate,
     escalation,
@@ -646,11 +778,28 @@ async function runKnowledgeBaseAgentDraftExtraction({ escalation, draftData, can
     images: contextBundle.rawImages,
     timeoutMs: 120000,
     systemPromptMode: 'draft',
+    runtimePolicy,
+    // Forward link: the captured ProviderCallPackage records WHICH escalation
+    // triggered this draft extraction (Mongo _id + human case number). Stamped
+    // per attempt, so a failover backup's package carries the same origin.
+    captureMetadata: {
+      escalationId: escalation?._id ? String(escalation._id) : '',
+      escalationCaseNumber: safeString(escalation?.caseNumber, ''),
+    },
+    ...(directProviderCall ? { directProviderCall } : {}),
+    ...(waitForPackage ? { waitForPackage } : {}),
   });
   return {
     text: completion.text,
     usage: completion.usage,
     contextBundle,
+    providerUsed: completion.providerUsed,
+    modelUsed: completion.modelUsed,
+    reasoningEffort: completion.reasoningEffort,
+    providerPackageId: completion.providerPackageId,
+    payloadSourcePath: completion.payloadSourcePath,
+    fallbackUsed: completion.fallbackUsed,
+    fallbackFrom: completion.fallbackFrom,
   };
 }
 
@@ -716,8 +865,9 @@ async function answerKnowledgeBaseAgentQuestion(recordId, message) {
 
   // Run the dedicated KB tool loop (provider/model/failover from the profile)
   // so the agent can read/search/check completeness and ACTUALLY save edits via
-  // kb.updateDraft. The bare claudeChat path (runKnowledgeBaseAgentCompletion)
-  // is retained only for the draft-extraction flow, which has no tools.
+  // kb.updateDraft. The harness-backed single-shot path
+  // (runKnowledgeBaseAgentCompletion) is retained only for the draft-extraction
+  // flow, which has no tools.
   const candidateId = objectIdString(candidate._id);
   const runtimePolicy = await resolveKbAgentRuntimePolicy();
   const toolHandlers = createKbAgentToolHandlers({ recordId, candidateId });
@@ -799,11 +949,27 @@ async function getKnowledgeBaseAgentRecordContext(recordId) {
   });
   applyKnowledgeBaseAgentSnapshot(candidate, contextBundle);
   await candidate.save({ timestamps: false });
+  // Surface the runtime the agent will ACTUALLY use for this draft so the
+  // sidebar can show provider/model honestly. Same resolver the chat and
+  // draft-extraction calls use (agent profile runtime is the source of truth).
+  let runtime = null;
+  try {
+    const policy = await resolveKbAgentRuntimePolicy();
+    runtime = {
+      provider: policy.primaryProvider || '',
+      providerLabel: policy.providerLabel || '',
+      model: policy.reportedModel || '',
+      reasoningEffort: policy.reasoningEffort || '',
+    };
+  } catch {
+    runtime = null;
+  }
   return {
     context: {
       ...summarizeContextForClient(contextBundle.context),
       workflow: contextBundle.context.workflow,
       attachments: contextBundle.context.attachments,
+      runtime,
     },
     messages: (Array.isArray(candidate.kbAgentMessages) ? candidate.kbAgentMessages : []).map((item) => ({
       role: item.role,

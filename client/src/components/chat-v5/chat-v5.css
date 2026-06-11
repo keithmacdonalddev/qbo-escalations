@@ -959,6 +959,92 @@
   min-width: 0;
 }
 
+.v5-copy-icon-btn.v5-copy-icon-btn {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025));
+  color: color-mix(in srgb, var(--v5-muted, #b8bcc1) 88%, transparent);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 0;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 0 rgba(83, 145, 255, 0);
+  transform: translateY(0) scale(1);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-copy-icon-btn:hover,
+.v5-copy-icon-btn:focus-visible {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(83, 145, 255, 0.22), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.105), rgba(255, 255, 255, 0.04));
+  border-color: rgba(112, 166, 255, 0.46);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 0 0 3px rgba(83, 145, 255, 0.12),
+    0 8px 18px rgba(0, 0, 0, 0.22);
+  color: var(--v5-ink, #e6e8eb);
+  transform: translateY(-1px) scale(1.03);
+  outline: none;
+}
+
+.v5-copy-icon-btn:active {
+  transform: translateY(0) scale(0.96);
+  transition-duration: 80ms;
+}
+
+.v5-copy-icon-btn.is-copied {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(82, 198, 138, 0.28), transparent 70%),
+    linear-gradient(180deg, rgba(82, 198, 138, 0.16), rgba(82, 198, 138, 0.07));
+  border-color: rgba(82, 198, 138, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.13),
+    0 0 0 3px rgba(82, 198, 138, 0.14);
+  color: #6cd9a3;
+  animation: v5-copy-confirm 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-copy-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.02);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+  transform: none;
+}
+
+.v5-copy-icon-btn svg {
+  transition: transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-copy-icon-btn:hover svg,
+.v5-copy-icon-btn:focus-visible svg {
+  transform: translateY(-0.5px);
+}
+
+@keyframes v5-copy-confirm {
+  0% { transform: scale(0.92); }
+  55% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
 .v5-analyst-workbench__reset {
   height: 28px;
   display: inline-flex;
@@ -1074,10 +1160,31 @@
   align-items: flex-end;
 }
 
+.v5-analyst-message__head {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
 .v5-analyst-message__name {
   color: var(--v5-muted);
   font-size: 11px;
   font-weight: 650;
+}
+
+.v5-analyst-message__copy {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+
+.v5-analyst-message:hover .v5-analyst-message__copy,
+.v5-analyst-message__copy:focus-visible,
+.v5-analyst-message__copy.is-copied {
+  opacity: 1;
 }
 
 .v5-analyst-message__bubble {
@@ -1095,6 +1202,31 @@
   background: rgba(52, 120, 246, 0.92);
   border-color: rgba(52, 120, 246, 0.92);
   color: #061225;
+}
+
+/* Image attachments restored into a transcript bubble (true resume). Sized
+   as modest thumbnails so a screenshot doesn't dominate the thread. */
+.v5-analyst-message__images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 6px;
+}
+
+.v5-analyst-message__images:last-child {
+  margin-bottom: 0;
+}
+
+.v5-analyst-message__images img {
+  display: block;
+  max-width: min(320px, 100%);
+  max-height: 220px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--v5-border);
+  border-radius: 6px;
+  background: rgba(8, 14, 26, 0.45);
 }
 
 .v5-analyst-message__bubble p {
@@ -1123,6 +1255,34 @@
   gap: 10px;
   color: var(--v5-muted);
   font-size: 13px;
+}
+
+/* True-resume transcript divider: separates restored saved messages from the
+   live session below. Scoped to the chat thread; name deliberately avoids
+   "title"/"btn" substrings targeted by global override sheets. */
+.v5-analyst-workbench__thread .v5-thread-history-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 2px 0;
+  color: var(--v5-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.v5-analyst-workbench__thread .v5-thread-history-divider::before,
+.v5-analyst-workbench__thread .v5-thread-history-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--v5-border);
+}
+
+.v5-analyst-workbench__thread .v5-thread-history-divider span {
+  flex: none;
+  white-space: nowrap;
 }
 
 .v5-analyst-intake-prompt {
@@ -1264,32 +1424,69 @@
 .v5-dock-section__header-tools {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.018));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 8px 22px rgba(0, 0, 0, 0.18);
   flex: 0 0 auto;
 }
 
 .v5-dock-section__tool,
 .v5-dock-section__chevron-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--v5-muted);
-  border-radius: 4px;
+  color: color-mix(in srgb, var(--v5-muted) 84%, transparent);
+  border-radius: 7px;
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transform: translateY(0) scale(1);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    box-shadow 180ms ease,
+    color 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .v5-dock-section__tool:hover,
 .v5-dock-section__chevron-btn:hover,
 .v5-dock-section__tool:focus-visible,
 .v5-dock-section__chevron-btn:focus-visible {
-  background: rgba(255, 255, 255, 0.06);
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.13), transparent 68%),
+    rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 6px 16px rgba(0, 0, 0, 0.18);
   color: var(--v5-ink);
+  transform: translateY(-1px) scale(1.04);
   outline: none;
+}
+
+.v5-dock-section__tool:active,
+.v5-dock-section__chevron-btn:active {
+  transform: translateY(0) scale(0.94);
+  transition-duration: 80ms;
+}
+
+.v5-dock-section__tool svg,
+.v5-dock-section__chevron-btn svg {
+  transition: transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.v5-dock-section__tool:hover svg,
+.v5-dock-section__tool:focus-visible svg {
+  transform: translateY(-0.5px);
 }
 
 .v5-dock-section.is-collapsed .v5-dock-section__header {
@@ -2452,5 +2649,46 @@
   }
   .v5-workflow-lane.is-shifting {
     transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Evidence dock push navigation (model reasoning page).
+   The dock content lives in .v5-dock-deck; when the reasoning page opens, the
+   deck slides left and dims (iOS push) while .v5-dock-reasoning-layer slides
+   in from the right and covers the panel. Transforms are driven by Framer
+   Motion in ChatV5Container — these rules only provide layout and clipping.
+   NOTE: the genie show/hide animation transitions transform on
+   .v5-evidence-dock itself, so the push transform must live on a child
+   (.v5-dock-deck), never on the aside. */
+
+.v5-evidence-dock {
+  position: relative;
+}
+
+.v5-dock-deck {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  will-change: transform, opacity;
+}
+
+.v5-dock-reasoning-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  background: var(--bg-sidebar);
+  box-shadow: -18px 0 36px rgba(0, 0, 0, 0.4);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .v5-dock-deck,
+  .v5-dock-reasoning-layer {
+    transition: none !important;
   }
 }

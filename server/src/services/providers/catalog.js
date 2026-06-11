@@ -39,6 +39,15 @@ function buildProviderOption(entry) {
     supportsThinking: typeof entry.supportsThinking === 'boolean' ? entry.supportsThinking : null,
     supportsImageInput: typeof entry.supportsImageInput === 'boolean' ? entry.supportsImageInput : null,
     reasoningVisibility: entry.reasoningVisibility || null,
+    reasoningTerminology: entry.reasoningTerminology || null,
+    effortTerminology: entry.effortTerminology || null,
+    thinkingMode: entry.thinkingMode || null,
+    manualThinkingBudget: typeof entry.manualThinkingBudget === 'boolean' ? entry.manualThinkingBudget : null,
+    modelAlias: entry.modelAlias === true,
+    modelAliases: Array.isArray(entry.modelAliases) ? [...entry.modelAliases] : [],
+    featureNotes: Array.isArray(entry.featureNotes) ? [...entry.featureNotes] : [],
+    contextWindowTokens: Number.isFinite(entry.contextWindowTokens) ? entry.contextWindowTokens : null,
+    maxOutputTokens: Number.isFinite(entry.maxOutputTokens) ? entry.maxOutputTokens : null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
   };
 }
@@ -115,6 +124,19 @@ function getProviderCapabilities(providerOrFamily) {
         ? defaultMeta.supportsThinking
         : false,
     reasoningVisibility: meta?.reasoningVisibility || (meta?.supportsThinking ? 'stream' : 'none'),
+    reasoningTerminology: meta?.reasoningTerminology || defaultMeta?.reasoningTerminology || 'reasoning',
+    effortTerminology: meta?.effortTerminology || defaultMeta?.effortTerminology || 'reasoning effort',
+    thinkingMode: meta?.thinkingMode || defaultMeta?.thinkingMode || null,
+    manualThinkingBudget: typeof meta?.manualThinkingBudget === 'boolean'
+      ? meta.manualThinkingBudget
+      : typeof defaultMeta?.manualThinkingBudget === 'boolean'
+        ? defaultMeta.manualThinkingBudget
+        : null,
+    modelAlias: meta?.modelAlias === true,
+    modelAliases: Array.isArray(meta?.modelAliases) ? [...meta.modelAliases] : [],
+    featureNotes: Array.isArray(meta?.featureNotes) ? [...meta.featureNotes] : [],
+    contextWindowTokens: Number.isFinite(meta?.contextWindowTokens) ? meta.contextWindowTokens : null,
+    maxOutputTokens: Number.isFinite(meta?.maxOutputTokens) ? meta.maxOutputTokens : null,
     allowedEfforts,
     alternateProvider: getAlternateProvider(providerOrFamily),
   };

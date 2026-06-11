@@ -19,6 +19,55 @@
   background: var(--agent-bg);
 }
 
+/* =============================================================
+   AGENTS LIST PAGE — design-language tokens (2026-06-10 restyle)
+   Scoped to the agents INDEX page only (.agents-index-page modifier).
+   Values mirror the approved KB design language
+   (prototypes/kb-draft-redesign.html): warm-gray surface ramp,
+   #4a9eff accent family, flat surfaces, 1px borders, no shadows
+   on dark. The legacy --agent-* aliases are re-pointed here so
+   shared descendants (status dots, muted text, borders) resolve
+   to the new palette inside this page without touching any other
+   agent screen.
+   ============================================================= */
+.agent-profiles-page.agents-index-page {
+  --ag-bg: #1c1c1e;
+  --ag-surface: #2c2c2e;
+  --ag-raised: #3a3a3c;
+  --ag-elevated: #48484a;
+  --ag-border: rgba(84, 84, 88, 0.35);
+  --ag-border-strong: rgba(84, 84, 88, 0.5);
+  --ag-text: #f5f5f7;
+  --ag-text-secondary: #a1a1a6;
+  --ag-text-tertiary: #636366;
+  --ag-accent: #4a9eff;
+  --ag-accent-strong: #6cb0ff;
+  --ag-accent-soft: rgba(74, 158, 255, 0.13);
+  --ag-accent-faint: rgba(74, 158, 255, 0.07);
+  --ag-accent-border: rgba(74, 158, 255, 0.35);
+  --ag-accent-ring: rgba(74, 158, 255, 0.22);
+  --ag-on-accent: #08233f;
+  --ag-success: #30d158;
+  --ag-warning: #f0b232;
+  --ag-error: #ff453a;
+  /* legacy alias re-point (list page only) */
+  --agent-bg: var(--ag-bg);
+  --agent-bg-soft: var(--ag-surface);
+  --agent-panel: var(--ag-surface);
+  --agent-panel-strong: var(--ag-raised);
+  --agent-line: var(--ag-border);
+  --agent-line-strong: var(--ag-border-strong);
+  --agent-text: var(--ag-text);
+  --agent-muted: var(--ag-text-secondary);
+  --agent-blue: var(--ag-accent);
+  --agent-green: var(--ag-success);
+  --agent-orange: var(--ag-warning);
+  --agent-red: var(--ag-error);
+  padding: 24px;
+  color: var(--ag-text);
+  background: var(--ag-bg);
+}
+
 .mission-control-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -708,29 +757,55 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 
+/* Primary action — accent fill, dark-navy label (KB button language).
+   Class deliberately avoids the "btn" substring so overhaul.css's
+   `button[class*="btn"]` density force (12px/5x10 !important) never applies. */
 .agent-add-button {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--agent-line);
-  border-radius: 7px;
-  background: transparent;
-  color: var(--agent-muted);
-  font-size: 0.78rem;
-  font-weight: 850;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--ag-accent, #4a9eff);
+  color: var(--ag-on-accent, #08233f);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
   cursor: pointer;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease !important;
 }
 
-.agent-add-button:hover,
+.agent-add-button:hover {
+  background: var(--ag-accent-strong, #6cb0ff);
+  color: var(--ag-on-accent, #08233f);
+}
+
+.agent-add-button:active {
+  background: color-mix(in srgb, var(--ag-accent, #4a9eff) 84%, #000);
+}
+
+.agent-add-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Focus ring reclaim. Cascade math: console-density.css forces
+   `outline: 2px solid rgba(59,130,246,.9) !important` at
+   button:focus-visible = (0,1,1) and overhaul.css forces a blue
+   box-shadow ring at :focus-visible = (0,1,0), both !important.
+   Among !important rules SPECIFICITY decides, so this reclaim is
+   (0,2,0) + !important and wins both. */
 .agent-add-button:focus-visible {
-  border-color: var(--agent-line-strong);
-  color: var(--agent-text);
-  outline: none;
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22)) !important;
 }
 
 .agent-attention-button {
@@ -738,28 +813,41 @@
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: 0 !important;
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent !important;
-  color: var(--agent-muted);
+  color: var(--ag-text-secondary, #a1a1a6);
   cursor: pointer;
   padding: 0;
   box-shadow: none !important;
   outline: none !important;
   outline-offset: 0 !important;
   overflow: visible;
+  transition:
+    background 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease !important;
 }
 
 .agent-attention-button:hover,
 .agent-attention-button.is-open,
-.agent-attention-button:active,
-.agent-attention-button:focus-visible {
-  background: transparent !important;
-  color: var(--agent-text);
+.agent-attention-button:active {
+  background: var(--ag-raised, #3a3a3c) !important;
+  color: var(--ag-text, #f5f5f7);
   box-shadow: none !important;
   outline: none !important;
+}
+
+/* Keyboard focus must stay visible: accent ring instead of the forced
+   2px console-density outline. (0,2,0) !important beats the globals'
+   (0,1,1)/(0,1,0) !important rules on specificity. */
+.agent-attention-button:focus-visible {
+  background: var(--ag-raised, #3a3a3c) !important;
+  color: var(--ag-text, #f5f5f7);
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22)) !important;
 }
 
 .agent-attention-button::after,
@@ -774,85 +862,114 @@
 }
 
 .agent-attention-button.has-items {
-  color: var(--agent-orange);
+  color: var(--ag-warning, #f0b232);
 }
 
 .agent-attention-count {
   position: absolute;
-  top: 1px;
+  top: 0;
   right: 0;
   z-index: 2;
   display: inline-grid;
   place-items: center;
-  min-width: 15px;
-  height: 15px;
+  min-width: 16px;
+  height: 16px;
   padding: 0 4px;
-  border: 1px solid var(--bg, #0a0a0f);
+  border: 1px solid var(--ag-bg, #1c1c1e);
   border-radius: 999px;
-  background: var(--agent-orange);
-  color: #111;
-  font-size: 0.58rem;
-  font-weight: 900;
+  background: var(--ag-warning, #f0b232);
+  color: #1c1c1e;
+  font-size: 10px;
+  font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
 }
 
-.agent-attention-popover {
+/* "flyout", never "popover"/"menu"/"dropdown": overhaul.css substring
+   traps ([class*="popover"] et al) force bg #3a3a3c, radius 14px,
+   frosted glass, box-shadow:none and a competing animation onto any
+   matching class — renamed off the substring entirely.
+   z-index 1200 lifts it above the #root::after grain layer (z 99).
+   Shadow is a literal: the theme zeroes --shadow-xl/--shadow-lg. */
+.agent-attention-flyout {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  z-index: 80;
+  z-index: 1200;
   width: min(360px, calc(100vw - 32px));
   overflow: hidden;
-  border: 1px solid var(--agent-line-strong);
+  border: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-floating, #1f2430) 96%, transparent);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+  background: var(--ag-raised, #3a3a3c);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.45),
+    0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
-.agent-attention-popover header {
+.agent-attention-flyout header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--agent-line);
+  padding: 12px;
+  border-bottom: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
 }
 
-.agent-attention-popover header strong {
-  color: var(--agent-text);
-  font-size: 0.82rem;
+/* Suppress overhaul.css's `header::before` 20px fade strip (forced with
+   !important at (0,0,1)); this (0,1,1) !important reclaim out-ranks it. */
+.agent-attention-flyout header::before {
+  content: none !important;
 }
 
-.agent-attention-popover header span,
+.agent-attention-flyout header strong {
+  color: var(--ag-text, #f5f5f7);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-attention-flyout header span,
 .agent-attention-empty,
 .agent-attention-item small {
-  color: var(--agent-muted);
-  font-size: 0.74rem;
+  color: var(--ag-text-secondary, #a1a1a6);
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .agent-attention-list {
   display: grid;
-  gap: 2px;
-  padding: 6px;
+  gap: 4px;
+  padding: 8px;
 }
 
 .agent-attention-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 9px;
+  gap: 12px;
   align-items: start;
-  padding: 9px;
-  border-radius: 7px;
-  color: var(--agent-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--ag-text, #f5f5f7);
+  text-decoration: none;
+  transition: background 150ms ease !important;
+}
+
+.agent-attention-item:hover {
+  background: var(--ag-elevated, #48484a);
   text-decoration: none;
 }
 
-.agent-attention-item:hover,
+/* (0,2,0) !important beats console-density's a:focus-visible (0,1,1). */
 .agent-attention-item:focus-visible {
-  background: color-mix(in srgb, var(--bg-elevated, #181b24) 86%, transparent);
-  outline: none;
+  background: var(--ag-elevated, #48484a);
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22)) !important;
+  text-decoration: none;
+}
+
+.agent-attention-item strong {
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .agent-attention-item strong,
@@ -864,7 +981,8 @@
 }
 
 .agent-attention-empty {
-  padding: 14px 12px;
+  padding: 16px 12px;
+  font-size: 13px;
 }
 
 .agent-card-grid {
@@ -873,91 +991,135 @@
   gap: 12px;
 }
 
+/* Row card — flat surface step on the page base (#1c1c1e -> #2c2c2e),
+   1px border, no gradient, no shadow. Hover is a background shift only
+   (no translateY lift on row cards). */
 .agent-mission-card {
-  min-height: 260px;
-  padding: 16px;
-  border: 1px solid var(--agent-line);
+  min-height: 56px;
+  padding: 12px 16px;
+  border: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
   border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elevated, #181b24) 90%, transparent),
-    color-mix(in srgb, var(--bg-surface, #12141c) 96%, transparent)
-  );
-  color: var(--agent-text);
+  background: var(--ag-surface, #2c2c2e);
+  color: var(--ag-text, #f5f5f7);
   text-align: left;
   text-decoration: none;
   cursor: pointer;
+  transition:
+    background 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease !important;
 }
 
 .agent-mission-card {
   display: grid;
-  gap: 12px;
+  gap: 16px;
 }
 
+/* text-decoration: none repeats on the state rules because App.css's
+   a:hover underline is (0,1,1) and out-ranks the base (0,1,0) reset. */
 .agent-mission-card:hover {
-  border-color: var(--accent-border, rgba(110, 161, 247, 0.3));
-  background: color-mix(in srgb, var(--bg-floating, #1f2430) 88%, transparent);
+  border-color: var(--ag-border-strong, rgba(84, 84, 88, 0.5));
+  background: #323234;
+  text-decoration: none;
+}
+
+.agent-mission-card:active {
+  background: var(--ag-raised, #3a3a3c);
+  text-decoration: none;
+}
+
+/* Row cards are anchors, so they are keyboard-focusable: accent ring,
+   never the forced 2px console-density outline. (0,2,0) !important
+   beats a:focus-visible (0,1,1) and :focus-visible (0,1,0). */
+.agent-mission-card:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22)) !important;
+  border-color: var(--ag-accent-border, rgba(74, 158, 255, 0.35));
+  text-decoration: none;
 }
 
 .agent-mission-card header {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
 
-.agent-mission-card-title {
+/* Suppress overhaul.css's forced `header::before` fade strip. */
+.agent-mission-card header::before {
+  content: none !important;
+}
+
+.agent-mission-card-name {
   display: block;
   min-width: 0;
   align-items: center;
 }
 
-.agent-mission-card-title strong {
+.agent-mission-card-name strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.agent-mission-card-title strong {
-  color: var(--agent-text);
-  font-size: 1rem;
+.agent-mission-card-name strong {
+  color: var(--ag-text, #f5f5f7);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .agent-mission-card p {
-  color: var(--agent-muted);
+  color: var(--ag-text-secondary, #a1a1a6);
 }
 
 .agent-mission-card p {
-  min-height: 44px;
+  min-height: 0;
   margin: 0;
-  line-height: 1.45;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 .agent-card-chip-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
-.agent-card-metrics {
-  display: grid;
-  grid-template-columns: 0.85fr 1.15fr;
-  gap: 10px;
-  align-items: end;
+/* Chips — neutral by default (raised surface, secondary text, 12px/500).
+   Named "chip" (not "badge"): the live overhaul.css density rule at
+   ~L7624 targets an explicit class list (.badge, .cat-badge, ...) and
+   design-system.css carries a [class*="badge"] border force inside
+   @media (prefers-contrast: more); steering clear of the substring
+   keeps this page out of both, and decouples the list page from the
+   shared .agent-badge used by the detail pages. */
+.agent-chip {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 8px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--ag-raised, #3a3a3c);
+  color: var(--ag-text-secondary, #a1a1a6);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 16px; /* 3+1 border + 16 + 3+1 = 24px tall */
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
-.agent-card-metrics span {
-  display: grid;
-  gap: 5px;
-  color: var(--agent-muted);
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.agent-card-metrics strong {
-  color: var(--agent-text);
-  font-size: 0.95rem;
+/* The provider/model chip is the one distinguishing treatment: it encodes
+   the agent's real runtime identity, so it carries the accent tint. */
+.agent-chip-model {
+  border-color: var(--ag-accent-border, rgba(74, 158, 255, 0.35));
+  background: var(--ag-accent-faint, rgba(74, 158, 255, 0.07));
+  color: var(--ag-accent-strong, #6cb0ff);
 }
 
 .profile-detail-shell {
@@ -4353,16 +4515,46 @@
 }
 
 .agents-index-page .agent-command-toolbar label {
-  font-size: 0.62rem;
-  letter-spacing: 0.06em;
+  font-size: 11px;
+  letter-spacing: 0.05em;
 }
 
 .agents-index-page .agent-command-toolbar input,
 .agents-index-page .agent-command-toolbar select {
   min-height: 32px;
-  padding: 0 10px;
+  padding: 0 12px;
+  border: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
   border-radius: 6px;
-  font-size: 0.8rem;
+  background: var(--ag-surface, #2c2c2e);
+  color: var(--ag-text, #f5f5f7);
+  font-size: 13px;
+  font-weight: 400;
+  text-transform: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    background 150ms ease !important;
+}
+
+.agents-index-page .agent-command-toolbar input::placeholder {
+  color: var(--ag-text-tertiary, #636366);
+}
+
+.agents-index-page .agent-command-toolbar input:hover {
+  border-color: var(--ag-border-strong, rgba(84, 84, 88, 0.5));
+}
+
+.agents-index-page .agent-command-toolbar input:focus,
+.agents-index-page .agent-command-toolbar select:focus {
+  border-color: var(--ag-accent-border, rgba(74, 158, 255, 0.35));
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22));
+}
+
+/* Reclaim from console-density's input:focus-visible (0,1,1) forced 2px
+   outline — (0,3,0) !important wins on specificity among !important rules. */
+.agents-index-page .agent-command-toolbar input:focus-visible {
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--ag-accent-ring, rgba(74, 158, 255, 0.22)) !important;
 }
 
 .agents-index-page .mission-control-layout {
@@ -4370,17 +4562,23 @@
   gap: 0;
 }
 
+/* The list sits directly on the page base — no nested panel chrome. */
 .agents-index-page .agent-grid-panel {
-  border-color: rgba(255, 255, 255, 0.08);
-  background: #18181a;
+  border: 0;
+  border-color: transparent;
+  background: transparent;
   box-shadow: none;
 }
 
 .agents-index-page .rank-pill {
   width: 24px;
   height: 24px;
+  border: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
   border-radius: 6px;
-  font-size: 0.72rem;
+  color: var(--ag-text-secondary, #a1a1a6);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .agents-index-page .avatar-small {
@@ -4400,24 +4598,38 @@
   height: 10px;
 }
 
-.agents-index-page .fit-bars {
-  width: 66px;
-  margin-top: 3px;
+/* Semantic dot glows re-tinted to the page palette (the base rules carry
+   hardcoded glows from the old cool blue-gray theme). */
+.agents-index-page .status-dot-active {
+  box-shadow:
+    0 0 0 1px rgba(48, 209, 88, 0.34),
+    0 0 10px rgba(48, 209, 88, 0.36);
 }
 
-.agents-index-page .fit-bars i {
-  height: 8px;
-  border-radius: 2px;
+.agents-index-page .status-dot-review,
+.agents-index-page .status-dot-degraded {
+  box-shadow:
+    0 0 0 1px rgba(240, 178, 50, 0.36),
+    0 0 10px rgba(240, 178, 50, 0.36);
+}
+
+.agents-index-page .status-dot-idle,
+.agents-index-page .status-dot-disabled {
+  background: #8e8e93;
+  color: #8e8e93;
+  box-shadow:
+    0 0 0 1px rgba(142, 142, 147, 0.26),
+    0 0 8px rgba(142, 142, 147, 0.22);
 }
 
 .agents-index-page .agent-grid-panel {
-  padding: 10px;
+  padding: 0;
 }
 
 .agents-index-page .agent-grid-heading {
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .agents-index-page .agent-grid-heading > div:first-child {
@@ -4425,12 +4637,18 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 8px;
-  padding-left: 6px;
 }
 
+/* Page title — the page's h1-equivalent: 30px/700/-0.02em.
+   font-weight needs !important because overhaul.css forces 600 on all
+   h1-h6 with !important at (0,0,1); this (0,2,1) reclaim out-ranks it. */
 .agents-index-page .agent-grid-heading h2 {
   margin: 0;
-  font-size: 1.1rem;
+  color: var(--ag-text, #f5f5f7);
+  font-size: 30px;
+  font-weight: 700 !important;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
 }
 
 .agents-index-page .agent-grid-count {
@@ -4441,20 +4659,16 @@
 
 .agents-index-page .agent-card-grid {
   grid-template-columns: 1fr;
-  gap: 6px;
-}
-
-.agents-index-page .agent-mission-card {
-  min-height: 56px;
-  padding: 8px 10px;
-  border-radius: 7px;
-  background: #303033;
-}
-
-.agents-index-page .agent-mission-card {
-  grid-template-columns: 72px minmax(170px, 1.1fr) minmax(0, 2fr) minmax(130px, 0.95fr) minmax(132px, 0.95fr);
-  align-items: center;
   gap: 8px;
+}
+
+/* Full-width row layout: [rank + status dot] [name] [headline] [chips].
+   The fabricated Trust / Workflow Fit column is gone — the freed space
+   goes to the real headline and runtime chips. */
+.agents-index-page .agent-mission-card {
+  grid-template-columns: 56px minmax(180px, 1fr) minmax(0, 2fr) minmax(160px, 1.1fr);
+  align-items: center;
+  gap: 16px;
 }
 
 .agents-index-page .agent-mission-card header {
@@ -4463,18 +4677,11 @@
   gap: 12px;
 }
 
-.agents-index-page .agent-mission-card-title strong {
-  font-size: 0.88rem;
-}
-
 .agents-index-page .agent-mission-card p {
   display: -webkit-box;
   min-height: 0;
   margin: 0;
   overflow: hidden;
-  color: #aebed5;
-  font-size: 0.72rem;
-  line-height: 1.25;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 1;
 }
@@ -4482,45 +4689,21 @@
 .agents-index-page .agent-card-chip-row {
   display: flex;
   flex-wrap: nowrap;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 8px;
   min-width: 0;
   overflow: hidden;
 }
 
-.agents-index-page .agent-badge {
-  min-height: 20px;
-  max-width: 100%;
-  padding: 0 6px;
-  overflow: hidden;
-  border-radius: 6px;
-  font-size: 0.66rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* When space runs out, the long provider/model label gives way first;
+   the short tools-count chip stays whole. */
+.agents-index-page .agent-card-chip-row .agent-chip {
+  flex: 0 0 auto;
 }
 
-.agents-index-page .agent-card-metrics {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.agents-index-page .agent-card-metrics span {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  font-size: 0.66rem;
-  white-space: nowrap;
-}
-
-.agents-index-page .agent-card-metrics strong {
-  font-size: 0.8rem;
-}
-
-.agents-index-page .agent-mission-card > .mini-sparkline {
-  display: none;
+.agents-index-page .agent-card-chip-row .agent-chip-model {
+  flex: 0 1 auto;
+  min-width: 48px;
 }
 
 @media (max-width: 900px) {
@@ -4571,7 +4754,7 @@
     grid-template-columns: 1fr;
   }
 
-  .agents-index-page .agent-card-metrics {
+  .agents-index-page .agent-card-chip-row {
     justify-content: flex-start;
     flex-wrap: wrap;
   }
@@ -4876,4 +5059,59 @@
     min-height: 0 !important;
     resize: none;
   }
+}
+
+/* =============================================================
+   AGENTS LIST PAGE — scoped re-tints for shared pieces
+   (alerts, empty state, inline loading). These classes are shared
+   with the detail pages, so the redesign values are page-prefixed
+   instead of edited at the source.
+   ============================================================= */
+.agents-index-page .agent-alert {
+  margin: 0 auto 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(255, 69, 58, 0.35);
+  border-radius: 8px;
+  background: rgba(255, 69, 58, 0.08);
+  color: #ffa8a2;
+  font-size: 13px;
+}
+
+.agents-index-page .agent-info-alert {
+  margin: 0 auto 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--ag-accent-border, rgba(74, 158, 255, 0.35));
+  border-radius: 8px;
+  background: var(--ag-accent-faint, rgba(74, 158, 255, 0.07));
+  color: #9ccaff;
+  font-size: 13px;
+}
+
+.agents-index-page .empty-state {
+  padding: 24px;
+  border: 1px solid var(--ag-border, rgba(84, 84, 88, 0.35));
+  border-radius: 8px;
+  background: var(--ag-surface, #2c2c2e);
+}
+
+.agents-index-page .empty-state strong {
+  color: var(--ag-text, #f5f5f7);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.agents-index-page .empty-state span {
+  color: var(--ag-text-secondary, #a1a1a6);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.agents-index-page .inline-loading {
+  color: var(--ag-text-secondary, #a1a1a6);
+  font-size: 13px;
+}
+
+.agents-index-page .inline-loading span {
+  border-color: var(--ag-border-strong, rgba(84, 84, 88, 0.5));
+  border-top-color: var(--ag-accent, #4a9eff);
 }

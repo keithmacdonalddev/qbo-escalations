@@ -9,7 +9,16 @@ const {
   getProviderStub,
   MissingProviderStubError,
 } = require('../lib/harness-provider-gate');
+const {
+  isProviderCallPackageCaptureEnabled,
+  recordCliProviderCallPackageInBackground,
+} = require('./provider-call-package-recorder');
 const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
+const CLI_CAPTURE_CLOSE_WAIT_MS = 250;
+
+function nowIso() {
+  return new Date().toISOString();
+}
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -191,6 +200,214 @@ async function writeTempImageFile(imageInput, prefix, index) {
   return tmpPath;
 }
 
+function isClaudeSpawnFailure(err) {
+  const code = String(err?.code || '').toUpperCase();
+  const message = String(err?.message || '');
+  return code === 'ENOENT'
+    || code === 'EACCES'
+    || code === 'SPAWN_ERROR'
+    || /spawn .* (ENOENT|EACCES)/i.test(message);
+}
+
+function buildClaudeCliCaptureContext(overrides = {}) {
+  return {
+    providerId: 'claude',
+    providerResearchId: 'anthropic-cli',
+    providerPathType: 'cli',
+    ...overrides,
+    source: {
+      file: 'server/src/services/claude.js',
+      ...(overrides.source || {}),
+    },
+  };
+}
+
+// In-module CLI evidence capture for claude.js spawn sites, mirroring
+// codex.js's createCodexCliCapture so claude packages look like codex CLI
+// packages in the ProviderCallPackage collection. Capture is passive:
+// it only collects what the existing handlers already received and records
+// the package in the background via recordCliProviderCallPackageInBackground.
+// It never touches the streaming callbacks or the subprocess lifecycle.
+function createClaudeCliCapture({
+  captureContext = {},
+  args,
+  getChild,
+  getStdinText,
+  timeoutMs,
+  requestStartedAt = nowIso(),
+  modelRequested,
+  reasoningEffort,
+  expectsJsonl = true,
+}) {
+  const effectiveCaptureEnabled =
+    captureContext.forceCapture === true || isProviderCallPackageCaptureEnabled();
+  let stdoutText = '';
+  let stderrText = '';
+  let firstStdoutAt = null;
+  let firstStderrAt = null;
+  let stdinWrittenAt = null;
+  let stdoutFinalBuffer = '';
+  let cliCaptureQueued = false;
+  let closeObserved = false;
+  let pendingCaptureMeta = null;
+  let captureCloseWaitTimer = null;
+  const stdoutLines = [];
+  const stdoutJsonlEvents = [];
+  const malformedStdoutLines = [];
+  const stdoutChunks = [];
+  const stderrChunks = [];
+
+  function markStdinWritten() {
+    stdinWrittenAt = nowIso();
+  }
+
+  function recordStdoutChunk(chunkText) {
+    if (cliCaptureQueued) return;
+    const receivedAt = nowIso();
+    if (!firstStdoutAt) firstStdoutAt = receivedAt;
+    stdoutChunks.push({ seq: stdoutChunks.length, receivedAt, text: chunkText });
+    stdoutText += chunkText;
+  }
+
+  function recordStdoutLine(line) {
+    if (cliCaptureQueued) return;
+    stdoutLines.push(line);
+    if (!line.trim()) return;
+    try {
+      stdoutJsonlEvents.push(JSON.parse(line));
+    } catch {
+      malformedStdoutLines.push(line);
+    }
+  }
+
+  function recordStderrChunk(chunkText) {
+    if (cliCaptureQueued) return;
+    const receivedAt = nowIso();
+    if (!firstStderrAt) firstStderrAt = receivedAt;
+    stderrChunks.push({ seq: stderrChunks.length, receivedAt, text: chunkText });
+    if (stderrText.length < 10240) stderrText += chunkText;
+  }
+
+  function finalizeStdoutBufferForClose(buffer) {
+    if (cliCaptureQueued) return;
+    stdoutFinalBuffer = buffer || '';
+    if (stdoutFinalBuffer.trim()) recordStdoutLine(stdoutFinalBuffer);
+  }
+
+  function queueCliCapture(meta = {}) {
+    if (!effectiveCaptureEnabled || cliCaptureQueued) return;
+    cliCaptureQueued = true;
+    if (captureCloseWaitTimer) {
+      clearTimeout(captureCloseWaitTimer);
+      captureCloseWaitTimer = null;
+    }
+    const responseCompletedAt = nowIso();
+    const durationMs = Math.max(
+      new Date(responseCompletedAt).getTime() - new Date(requestStartedAt).getTime(),
+      0
+    );
+    const child = typeof getChild === 'function' ? getChild() : null;
+    recordCliProviderCallPackageInBackground({
+      captureContext,
+      command: 'claude',
+      args,
+      spawnOptions: {
+        shell: true,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        envOverrides: {
+          CLAUDECODE: '[unset]',
+          CLAUDE_PROJECT_DIR: '',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+        },
+      },
+      env: {
+        capturedKeys: ['CLAUDECODE', 'CLAUDE_PROJECT_DIR', 'CLAUDE_CODE_DISABLE_AUTO_MEMORY'],
+        notes: ['Claude CLI is spawned in an isolated temp root and app memory is disabled.'],
+      },
+      stdinText: typeof getStdinText === 'function' ? getStdinText() : '',
+      stdoutText,
+      stdoutLines,
+      stdoutJsonlEvents,
+      malformedStdoutLines,
+      stdoutFinalBuffer,
+      stdoutChunks,
+      stderrText,
+      stderrChunks,
+      pid: child?.pid || null,
+      exitCode: Number.isFinite(meta.exitCode) ? meta.exitCode : null,
+      signal: meta.signal || null,
+      spawned: meta.spawned === false ? false : true,
+      closed: Boolean(meta.closed),
+      killed: Boolean(meta.killed),
+      killSignal: meta.killSignal || null,
+      timeout: {
+        timeoutMs,
+        fired: Boolean(meta.timeoutFired),
+      },
+      requestStartedAt,
+      stdinWrittenAt,
+      firstStdoutAt,
+      firstStderrAt,
+      processClosedAt: meta.processClosedAt || (meta.closed ? responseCompletedAt : null),
+      responseCompletedAt,
+      durationMs,
+      error: meta.error || null,
+      outcome: meta.outcome || null,
+      modelRequested,
+      reasoningEffort,
+      expectsJsonl,
+    }, {
+      log: true,
+      force: captureContext.forceCapture === true,
+    });
+  }
+
+  function deferCliCaptureUntilClose(meta = {}) {
+    if (!effectiveCaptureEnabled || cliCaptureQueued) return;
+    pendingCaptureMeta = {
+      ...(pendingCaptureMeta || {}),
+      ...meta,
+    };
+    if (closeObserved) {
+      queueCliCapture(pendingCaptureMeta);
+      pendingCaptureMeta = null;
+      return;
+    }
+    if (!captureCloseWaitTimer) {
+      captureCloseWaitTimer = setTimeout(() => {
+        if (!pendingCaptureMeta || cliCaptureQueued) return;
+        queueCliCapture(pendingCaptureMeta);
+        pendingCaptureMeta = null;
+      }, CLI_CAPTURE_CLOSE_WAIT_MS);
+      if (typeof captureCloseWaitTimer.unref === 'function') {
+        captureCloseWaitTimer.unref();
+      }
+    }
+  }
+
+  function markClosed() {
+    closeObserved = true;
+  }
+
+  function takePendingCaptureMeta() {
+    const meta = pendingCaptureMeta;
+    pendingCaptureMeta = null;
+    return meta;
+  }
+
+  return {
+    markStdinWritten,
+    recordStdoutChunk,
+    recordStdoutLine,
+    recordStderrChunk,
+    finalizeStdoutBufferForClose,
+    queueCliCapture,
+    deferCliCaptureUntilClose,
+    markClosed,
+    takePendingCaptureMeta,
+  };
+}
+
 /**
  * Chat with Claude via CLI subprocess.
  *
@@ -203,11 +420,11 @@ async function writeTempImageFile(imageInput, prefix, index) {
  * @param {function} opts.onError - Called on failure
  * @returns {function} cleanup - Call to kill the subprocess
  */
-function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext, onChunk, onThinkingChunk, onDone, onError }) {
   if (isProvidersStubbed()) {
     const stub = getProviderStub('claude', 'chat');
     if (!stub) throw new MissingProviderStubError('claude', 'chat');
-    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onThinkingChunk, onDone, onError });
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext, onChunk, onThinkingChunk, onDone, onError });
   }
   assertSafeModel(model);
   const prompt = buildPrompt(messages);
@@ -229,12 +446,40 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
   let child = null;
   let timeoutHandle = null;
 
-  function finishWithError(err) {
+  const effectiveModelRequested = model || process.env.CLAUDE_CHAT_MODEL || '';
+  const cliCapture = createClaudeCliCapture({
+    captureContext: buildClaudeCliCaptureContext({
+      callSite: 'claude:chat',
+      operation: 'chat',
+      modelRequested: effectiveModelRequested,
+      reasoningEffort: normalizedEffort || '',
+      ...(captureContext || {}),
+      source: {
+        functionName: 'chat',
+        spawnSite: 'claude.chat',
+        ...(captureContext?.source || {}),
+      },
+    }),
+    args,
+    getChild: () => child,
+    getStdinText: () => stdinPrompt,
+    timeoutMs: effectiveTimeoutMs,
+    modelRequested: effectiveModelRequested,
+    reasoningEffort: normalizedEffort || '',
+  });
+
+  function finishWithError(err, meta = {}, options = {}) {
     if (settled || killed) return;
     settled = true;
     cleanupTempFiles(tempFiles);
     const error = err instanceof Error ? err : new Error(String(err));
     error._usage = capturedUsage || null;
+    const captureMeta = { ...meta, error, outcome: meta.outcome || null };
+    if (options.deferCaptureUntilClose) {
+      cliCapture.deferCliCaptureUntilClose(captureMeta);
+    } else {
+      cliCapture.queueCliCapture(captureMeta);
+    }
     reportServerError({
       message: `CLI chat failed: ${error.message}`,
       detail: `Claude CLI subprocess error during chat. Code: ${error.code || 'N/A'}`,
@@ -245,10 +490,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     onError(error);
   }
 
-  function finishWithSuccess(text) {
+  function finishWithSuccess(text, meta = {}) {
     if (settled || killed) return;
     settled = true;
     cleanupTempFiles(tempFiles);
+    cliCapture.queueCliCapture({ ...meta, outcome: meta.outcome || 'success' });
     onDone(text, capturedUsage || null);
   }
 
@@ -289,6 +535,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     } catch (err) {
       cleanupTempFiles(tempFiles);
       const spawnErr = err instanceof Error ? err : new Error(String(err));
+      cliCapture.queueCliCapture({ outcome: 'spawn_error', spawned: false, error: spawnErr });
       reportServerError({
         message: `CLI spawn error: ${spawnErr.message}`,
         detail: 'Failed to start Claude CLI subprocess for chat.',
@@ -301,6 +548,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     }
     try {
       child.stdin.end(stdinPrompt);
+      cliCapture.markStdinWritten();
     } catch { /* ignore; process error handler will surface if needed */ }
 
     let stdoutBuffer = '';
@@ -316,7 +564,14 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
         try { child.kill('SIGTERM'); } catch { /* ignore */ }
         const timeoutErr = new Error('Claude CLI timed out after ' + effectiveTimeoutMs + 'ms of inactivity');
         timeoutErr.code = 'TIMEOUT';
-        finishWithError(timeoutErr);
+        finishWithError(timeoutErr, {
+          outcome: 'timeout',
+          timeoutFired: true,
+          killed: true,
+          killSignal: 'SIGTERM',
+        }, {
+          deferCaptureUntilClose: true,
+        });
       }, effectiveTimeoutMs);
     }
     resetActivityTimeout();
@@ -324,11 +579,14 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     child.stdout.on('data', (data) => {
       if (settled || killed) return;
       resetActivityTimeout();
-      stdoutBuffer += data.toString();
+      const chunkText = data.toString();
+      cliCapture.recordStdoutChunk(chunkText);
+      stdoutBuffer += chunkText;
       const lines = stdoutBuffer.split('\n');
       stdoutBuffer = lines.pop() || '';
 
       for (const line of lines) {
+        cliCapture.recordStdoutLine(line);
         if (!line.trim()) continue;
         try {
           const msg = JSON.parse(line);
@@ -376,11 +634,26 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       // full inactivity window after the request was done.
       if (settled || killed) return;
       resetActivityTimeout();
-      if (stderrOutput.length < 10240) stderrOutput += data.toString();
+      const chunkText = data.toString();
+      cliCapture.recordStderrChunk(chunkText);
+      if (stderrOutput.length < 10240) stderrOutput += chunkText;
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      cliCapture.markClosed();
+      const processClosedAt = nowIso();
+      cliCapture.finalizeStdoutBufferForClose(stdoutBuffer);
+      const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+      if (pendingCaptureMeta) {
+        cliCapture.queueCliCapture({
+          ...pendingCaptureMeta,
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
+      }
       if (settled || killed) return;
 
       if (stdoutBuffer.trim()) {
@@ -423,18 +696,37 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
       }
 
       if (!didCliExitSuccessfully(code)) {
-        finishWithError(new Error(formatCliFailure(code, stderrOutput, fullResponse)));
+        finishWithError(new Error(formatCliFailure(code, stderrOutput, fullResponse)), {
+          outcome: 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
       } else {
         if (!fullResponse && receivedThinking) {
           console.warn('[claude] Process exited OK but fullResponse is empty despite receiving thinking chunks — possible extraction gap');
         }
-        finishWithSuccess(fullResponse);
+        finishWithSuccess(fullResponse, {
+          outcome: 'success',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
       }
     });
 
     child.on('error', (err) => {
       if (timeoutHandle) clearTimeout(timeoutHandle);
-      if (!killed) finishWithError(err);
+      if (!killed) {
+        finishWithError(err, {
+          outcome: isClaudeSpawnFailure(err) ? 'spawn_error' : 'process_error',
+          spawned: !isClaudeSpawnFailure(err),
+        }, {
+          deferCaptureUntilClose: true,
+        });
+      }
     });
   })().catch((err) => {
     // Safety net: prevent unhandled rejection if an unexpected error escapes
@@ -445,6 +737,13 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
     killed = true;
     if (timeoutHandle) clearTimeout(timeoutHandle);
     try { if (child) child.kill('SIGTERM'); } catch { /* ignore */ }
+    cliCapture.deferCliCaptureUntilClose({
+      outcome: 'aborted',
+      aborted: true,
+      killed: true,
+      killSignal: 'SIGTERM',
+      error: Object.assign(new Error('Claude CLI chat aborted'), { code: 'ABORT_ERR' }),
+    });
     cleanupTempFiles(tempFiles);
     return { usage: capturedUsage || null, partialResponse: fullResponse };
   };
@@ -986,117 +1285,6 @@ function extractFinalText(msg) {
 }
 
 /**
- * Run a single non-streaming Claude prompt and return the text result.
- *
- * @param {string} promptText - The prompt to send
- * @param {Object} [options]
- * @param {string} [options.systemPrompt] - Optional system prompt prepended
- * @param {string} [options.model] - Override model
- * @param {string} [options.reasoningEffort] - Effort level (low/medium/high/xhigh/max)
- * @param {number} [options.timeoutMs] - Timeout in ms (default CHAT_TIMEOUT_MS)
- * @returns {Promise<{text: string, usage: Object|null}>}
- */
-async function prompt(promptText, options = {}) {
-  if (isProvidersStubbed()) {
-    const stub = getProviderStub('claude', 'prompt');
-    if (!stub) throw new MissingProviderStubError('claude', 'prompt');
-    return stub(promptText, options);
-  }
-  assertSafeModel(options.model);
-  const args = ['-p', '--output-format', 'text', '--max-turns', '1'];
-  if (options.model) args.push('--model', options.model);
-  const effort = normalizeClaudeEffort(options.reasoningEffort);
-  if (effort) args.push('--effort', effort);
-
-  let stdinContent = promptText || '';
-  if (options.systemPrompt) {
-    stdinContent = `System instructions:\n${options.systemPrompt}\n\n${stdinContent}`;
-  }
-
-  const timeoutMs = parsePositiveInt(options.timeoutMs, CHAT_TIMEOUT_MS);
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let child;
-    try {
-      child = spawn('claude', args, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true,
-        ...buildClaudeSpawnOptions(),
-      });
-    } catch (err) {
-      reportServerError({
-        message: `CLI spawn error (prompt): ${err.message}`,
-        detail: 'Failed to start Claude CLI subprocess for prompt().',
-        stack: err.stack || '',
-        source: 'claude.js',
-        category: 'runtime-error',
-      });
-      return reject(err);
-    }
-
-    try { child.stdin.end(stdinContent); } catch { /* ignore */ }
-
-    let stdout = '';
-    let stderr = '';
-
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      const err = new Error('Claude CLI prompt timed out after ' + timeoutMs + 'ms');
-      err.code = 'TIMEOUT';
-      reject(err);
-    }, timeoutMs);
-
-    child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
-    child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
-
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (settled) return;
-      settled = true;
-
-      if (!didCliExitSuccessfully(code) && !stdout) {
-        const err = new Error(formatCliFailure(code, stderr, stdout));
-        reportServerError({
-          message: `CLI prompt failed: exit code ${code}`,
-          detail: `stderr: ${(stderr || '').slice(0, 500)}`,
-          source: 'claude.js',
-          category: 'runtime-error',
-        });
-        return reject(err);
-      }
-
-      // Try to extract usage if output is JSON-wrapped
-      let usage = null;
-      let text = stdout;
-      try {
-        const parsed = JSON.parse(stdout);
-        usage = extractClaudeUsage(parsed, { fallbackModel: '' });
-        text = typeof parsed.result === 'string' ? parsed.result : stdout;
-      } catch { /* text output, not JSON — that's fine */ }
-
-      resolve({ text, usage });
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      if (settled) return;
-      settled = true;
-      reportServerError({
-        message: `CLI spawn error (prompt): ${err.message}`,
-        detail: 'Claude CLI process emitted an error event during prompt().',
-        stack: err.stack || '',
-        source: 'claude.js',
-        category: 'runtime-error',
-      });
-      reject(err);
-    });
-  });
-}
-
-/**
  * Fast image transcription — extracts ALL visible text from an image without
  * any structured parsing, triage, or field extraction.
  *
@@ -1175,7 +1363,31 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
 
       addCompatibilityImageAccessArgs(args, [imagePath]);
 
+      const stdinContent = appendImagePathsToPrompt(transcribePrompt, [imagePath]);
+
       let child;
+      const cliCapture = createClaudeCliCapture({
+        captureContext: buildClaudeCliCaptureContext({
+          callSite: 'claude:transcribeImage',
+          operation: 'image-transcribe',
+          modelRequested: modelOverride || '',
+          reasoningEffort: effortOverride || '',
+          ...(options.captureContext || {}),
+          source: {
+            functionName: 'transcribeImage',
+            spawnSite: 'claude.transcribeImage',
+            ...(options.captureContext?.source || {}),
+          },
+        }),
+        args,
+        getChild: () => child,
+        getStdinText: () => stdinContent,
+        timeoutMs,
+        modelRequested: modelOverride || '',
+        reasoningEffort: effortOverride || '',
+        expectsJsonl: false,
+      });
+
       try {
         child = spawn('claude', args, {
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -1183,6 +1395,7 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
           ...buildClaudeSpawnOptions(),
         });
       } catch (err) {
+        cliCapture.queueCliCapture({ outcome: 'spawn_error', spawned: false, error: err });
         reportServerError({
           message: `CLI spawn error (transcribeImage): ${err.message}`,
           detail: 'Failed to start Claude CLI subprocess for transcribeImage.',
@@ -1193,8 +1406,10 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         return reject(err);
       }
 
-      const stdinContent = appendImagePathsToPrompt(transcribePrompt, [imagePath]);
-      try { child.stdin.end(stdinContent); } catch { /* ignore */ }
+      try {
+        child.stdin.end(stdinContent);
+        cliCapture.markStdinWritten();
+      } catch { /* ignore */ }
 
       let stdout = '';
       let stderr = '';
@@ -1205,19 +1420,56 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         try { child.kill('SIGTERM'); } catch { /* ignore */ }
         const err = new Error('Claude CLI transcribeImage timed out after ' + timeoutMs + 'ms');
         err.code = 'TIMEOUT';
+        cliCapture.deferCliCaptureUntilClose({
+          outcome: 'timeout',
+          timeoutFired: true,
+          killed: true,
+          killSignal: 'SIGTERM',
+          error: err,
+        });
         reject(err);
       }, timeoutMs);
 
-      child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
-      child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+      child.stdout.on('data', (d) => {
+        if (settled) return;
+        const chunkText = d.toString();
+        cliCapture.recordStdoutChunk(chunkText);
+        stdout += chunkText;
+      });
+      child.stderr.on('data', (d) => {
+        if (settled) return;
+        const chunkText = d.toString();
+        cliCapture.recordStderrChunk(chunkText);
+        if (stderr.length < 10240) stderr += chunkText;
+      });
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         clearTimeout(timeout);
+        cliCapture.markClosed();
+        const processClosedAt = nowIso();
+        const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+        if (pendingCaptureMeta) {
+          cliCapture.queueCliCapture({
+            ...pendingCaptureMeta,
+            exitCode: code,
+            signal: signal || null,
+            closed: true,
+            processClosedAt,
+          });
+        }
         if (settled) return;
         settled = true;
 
         if (!didCliExitSuccessfully(code) && !stdout) {
           const err = new Error(formatCliFailure(code, stderr, stdout));
+          cliCapture.queueCliCapture({
+            outcome: 'process_error',
+            exitCode: code,
+            signal: signal || null,
+            closed: true,
+            processClosedAt,
+            error: err,
+          });
           reportServerError({
             message: `CLI transcribeImage failed: exit code ${code}`,
             detail: `stderr: ${(stderr || '').slice(0, 500)}`,
@@ -1236,6 +1488,13 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
           text = typeof parsed.result === 'string' ? parsed.result : stdout;
         } catch { /* text output, not JSON — that's fine */ }
 
+        cliCapture.queueCliCapture({
+          outcome: didCliExitSuccessfully(code) ? 'success' : 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
         resolve({ text: text.trim(), usage });
       });
 
@@ -1243,6 +1502,11 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
         clearTimeout(timeout);
         if (settled) return;
         settled = true;
+        cliCapture.deferCliCaptureUntilClose({
+          outcome: isClaudeSpawnFailure(err) ? 'spawn_error' : 'process_error',
+          spawned: !isClaudeSpawnFailure(err),
+          error: err,
+        });
         reportServerError({
           message: `CLI spawn error (transcribeImage): ${err.message}`,
           detail: 'Claude CLI process emitted an error event during transcribeImage.',
@@ -1261,5 +1525,5 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
   }
 }
 
-module.exports = { chat, parseEscalation, warmUp, prompt, transcribeImage };
+module.exports = { chat, parseEscalation, warmUp, transcribeImage };
 module.exports._internal = { parsePositiveInt, didCliExitSuccessfully };

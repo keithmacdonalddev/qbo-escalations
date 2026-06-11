@@ -111,6 +111,16 @@ function textStats(value) {
   };
 }
 
+// Caller-supplied capture metadata (origin/context of the call — sourceAgent,
+// prompt identity, triggering escalation, ...). Harness-level captureInput
+// metadata (input.metadata, already merged with the capture context by the
+// HTTP harnesses) wins over the raw context metadata; absent both, null.
+function resolveCaptureMetadata(input = {}, context = {}) {
+  const metadata = input.metadata || context.metadata || null;
+  if (!metadata || typeof metadata !== 'object') return null;
+  return cloneJsonSafe(metadata);
+}
+
 function normalizeCliLines(stdoutText, lines) {
   if (Array.isArray(lines)) return lines.map((line) => String(line));
   if (!stdoutText) return [];
@@ -188,6 +198,7 @@ function buildCliProviderCallPackage(input = {}) {
     callSite: context.callSite || input.callSite || '',
     operation: context.operation || input.operation || '',
     source: context.source || input.source || null,
+    metadata: resolveCaptureMetadata(input, context),
     request: null,
     response: null,
     cli: {
@@ -504,6 +515,7 @@ function buildLmStudioProviderCallPackage(input = {}) {
     callSite: context.callSite || input.callSite || '',
     operation: context.operation || input.operation || '',
     source: context.source || input.source || null,
+    metadata: resolveCaptureMetadata(input, context),
     request: null,
     response: null,
     cli: null,
@@ -794,6 +806,7 @@ function buildLlmGatewayProviderCallPackage(input = {}) {
     callSite: context.callSite || input.callSite || '',
     operation: context.operation || input.operation || '',
     source: context.source || input.source || null,
+    metadata: resolveCaptureMetadata(input, context),
     request: null,
     response: null,
     cli: null,
@@ -1041,6 +1054,7 @@ function buildGeminiApiProviderCallPackage(input = {}) {
     callSite: context.callSite || input.callSite || '',
     operation: context.operation || input.operation || '',
     source: context.source || input.source || null,
+    metadata: resolveCaptureMetadata(input, context),
     request: null,
     response: null,
     cli: null,
@@ -1116,6 +1130,7 @@ function buildHttpProviderCallPackage(input = {}) {
     callSite: context.callSite || input.callSite || '',
     operation: context.operation || input.operation || '',
     source: context.source || input.source || null,
+    metadata: resolveCaptureMetadata(input, context),
     request: {
       method: input.method || context.method || 'POST',
       url: url.toString(),

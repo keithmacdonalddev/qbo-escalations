@@ -1932,25 +1932,26 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
           aria-label={dotTooltip}
         />
       </header>
-      <div className="agent-mission-card-title">
+      {/* "name" (not "title") keeps this class clear of overhaul.css's
+          `header [class*="title"]` gradient-text trap by construction. */}
+      <div className="agent-mission-card-name">
         <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
       </div>
       <p>{agent.profile?.headline || operation?.promptSummary?.goals}</p>
+      {/* Real data only: provider/model summary (runtime config) and tool
+          count (agent.tools.available). The fabricated Trust score and
+          Workflow Fit bars (AGENT_OPERATION_META) were removed — agent
+          profiles show real data or honest empty states. Rendered as plain
+          `.agent-chip` spans (not the shared `.agent-badge` Badge) so the
+          list page owns its chip styling without "badge" substring risk. */}
       <div className="agent-card-chip-row">
-        <Badge>{operation?.modelLabel}</Badge>
-        <Badge>{operation?.toolSummary}</Badge>
+        {operation?.modelLabel ? (
+          <span className="agent-chip agent-chip-model">{operation.modelLabel}</span>
+        ) : null}
+        {operation?.toolSummary ? (
+          <span className="agent-chip">{operation.toolSummary}</span>
+        ) : null}
       </div>
-      <div className="agent-card-metrics">
-        <span>
-          Trust
-          <strong>{operation?.trustLabel || 'Not scored'}</strong>
-        </span>
-        <span>
-          Workflow Fit
-          <FitBars score={operation?.workflowFit || 0} />
-        </span>
-      </div>
-      <MiniSparkline points={[25, 31, 42, 38, 48, 54, 62]} tone={operation?.status === 'review' ? 'orange' : 'blue'} />
     </a>
   );
 }
@@ -2217,8 +2218,12 @@ function AgentAttentionMenu({
         {count > 0 && <span className="agent-attention-count">{displayCount}</span>}
       </button>
 
+      {/* "flyout" (not "popover"/"menu") — overhaul.css hijacks any class
+          containing those substrings (forced bg/radius/frosted glass/
+          animation, box-shadow:none). role="menu" is fine: the traps match
+          class substrings, not roles. */}
       {open && (
-        <div className="agent-attention-popover" role="menu">
+        <div className="agent-attention-flyout" role="menu">
           <header>
             <strong>Needs Attention</strong>
             <span>{count} {count === 1 ? 'agent' : 'agents'}</span>

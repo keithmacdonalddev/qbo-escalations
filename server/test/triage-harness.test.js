@@ -2,11 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('node:http');
 const mongoose = require('mongoose');
 const mongo = require('./_mongo-helper');
 const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 const TriageResult = require('../src/models/TriageResult');
 const {
+  preflightProvider,
   runTriage,
 } = require('../src/services/triage');
 
@@ -222,4 +224,46 @@ test('runTriage preflight failure short-circuits to fallback before provider han
   assert.ok(savedResult);
   assert.equal(savedResult.status, 'degraded');
   assert.equal(savedResult.fallbackUsed, true);
+});
+
+test('preflightProvider caches successful results but never caches failures', async () => {
+  // Short-lived local server standing in for LM Studio: fails the FIRST
+  // reachability check, succeeds afterwards, and counts every live request so
+  // the test can prove whether the cache or the wire answered.
+  let requestCount = 0;
+  const server = http.createServer((_req, res) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end('{}');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ data: [] }));
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const prevUrl = process.env.LM_STUDIO_API_URL;
+  process.env.LM_STUDIO_API_URL = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const failed = await preflightProvider({ provider: 'lm-studio', model: 'preflight-cache-test' });
+    assert.equal(failed.ok, false);
+    assert.notEqual(failed.cached, true);
+
+    // The failure was NOT cached: the next call must hit the live server again.
+    const live = await preflightProvider({ provider: 'lm-studio', model: 'preflight-cache-test' });
+    assert.equal(live.ok, true);
+    assert.notEqual(live.cached, true);
+    assert.equal(requestCount, 2);
+
+    // The success WAS cached: no third live request, and the result is
+    // honestly marked as served from cache.
+    const cached = await preflightProvider({ provider: 'lm-studio', model: 'preflight-cache-test' });
+    assert.equal(cached.ok, true);
+    assert.equal(cached.cached, true);
+    assert.equal(requestCount, 2);
+  } finally {
+    if (prevUrl === undefined) delete process.env.LM_STUDIO_API_URL;
+    else process.env.LM_STUDIO_API_URL = prevUrl;
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

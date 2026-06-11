@@ -10,10 +10,14 @@ const TriageResult = require('../models/TriageResult');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const {
+  buildCategoryPlausibilityIssue,
   buildFallbackTriageCard,
   buildServerTriageCard,
   buildSoftValidatedTriageCardFromOutput,
   buildTriageAgentPromptInput,
+  buildTriageRepairPromptInput,
+  listRepairableTriageFields,
+  mergeTriageRepairOutput,
 } = require('../lib/chat-triage');
 const { getProviderModelId } = require('./providers/catalog');
 const codex = require('./codex');
@@ -37,6 +41,12 @@ const {
 const { buildOperationalIntelligenceContext } = require('./operational-intelligence-service');
 
 const TRIAGE_AGENT_ID = 'triage-agent';
+// Repair-pass prompt template. It lives beside the other agent prompts with a
+// PROMPT_VERSION marker, but is read directly (not via agent-prompt-store)
+// because it is an internal fixed template, not an operator-editable agent
+// contract registered in the prompt editor.
+const TRIAGE_REPAIR_PROMPT_ID = 'triage-agent-repair';
+const TRIAGE_REPAIR_PROMPT_PATH = path.join(__dirname, '..', '..', '..', 'prompts', 'agents', 'triage-agent-repair.md');
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_READBACK_WAIT_MS = 30_000;
 const DEFAULT_PREFLIGHT_TIMEOUT_MS = 2_000;
@@ -181,6 +191,14 @@ function buildPromptTrace(promptId, promptText) {
   };
 }
 
+function readTriageRepairPromptTemplate() {
+  try {
+    return fs.readFileSync(TRIAGE_REPAIR_PROMPT_PATH, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
 function formatKnowledgeContextRecord(record) {
   const lines = [];
   const trust = safeString(record.trustState, 'unknown').toUpperCase();
@@ -229,15 +247,25 @@ function formatTriageKnowledgeContext(context) {
   ].join('\n');
 }
 
-async function buildTriageKnowledgebaseContext(parserText, { eventBus = null, signal = null } = {}) {
+async function buildTriageKnowledgebaseContext(parserText, { eventBus = null, signal = null, parseFields = null } = {}) {
   try {
     throwIfAborted(signal);
+    // The keyword-classified category from the parsed template is a hint
+    // only (a small relevance boost) — never a hard filter, because the real
+    // category is not reliably known until triage itself runs. 'unknown' is
+    // the classifier's no-match sentinel and is ignored downstream.
+    const categoryHint = safeString(parseFields?.category, '').trim();
     const context = await buildOperationalIntelligenceContext({
       query: parserText,
       allowedUse: 'triage',
       limit: 5,
       includeLegacy: true,
       includeCandidates: false,
+      // Rank by match quality against the escalation text instead of
+      // recency, gate out zero-match records, and cap legacy playbook
+      // chunks — an empty packet is preferred over padded junk.
+      rankByRelevance: true,
+      categoryHint,
     });
     throwIfAborted(signal);
     const records = Array.isArray(context.records) ? context.records : [];
@@ -254,6 +282,9 @@ async function buildTriageKnowledgebaseContext(parserText, { eventBus = null, si
         reusableOutcome: record.reusableOutcome,
         warnings: record.warnings || [],
         operationalClaimCount: Array.isArray(record.operationalClaims) ? record.operationalClaims.length : 0,
+        // Why this record was chosen: match-quality score, distinct query
+        // terms matched, boosts applied, and whether it is a legacy chunk.
+        relevance: record.relevance || null,
       })),
       fallbackUsed: false,
       error: '',
@@ -326,8 +357,12 @@ function buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort,
   return body;
 }
 
-function buildCaptureContext({ provider, model, promptTrace }) {
-  return {
+// `overrides` lets non-triage agents (e.g. the Knowledge Base draft pass) reuse
+// this shared provider dispatch while stamping their OWN call site, operation,
+// and agent identity onto the captured ProviderCallPackage. Without overrides,
+// the context is exactly the original triage capture context.
+function buildCaptureContext({ provider, model, promptTrace, overrides = null }) {
+  const base = {
     providerId: provider,
     callSite: TRIAGE_PROVIDER_CALL_SITE,
     operation: TRIAGE_PROVIDER_OPERATION,
@@ -341,6 +376,15 @@ function buildCaptureContext({ provider, model, promptTrace }) {
       promptVersion: promptTrace.promptVersion,
     },
   };
+  if (!overrides || typeof overrides !== 'object') return base;
+  return {
+    ...base,
+    ...overrides,
+    metadata: {
+      ...base.metadata,
+      ...(overrides.metadata || {}),
+    },
+  };
 }
 
 function runCodexTriageProviderCall({
@@ -348,6 +392,7 @@ function runCodexTriageProviderCall({
   model,
   systemPrompt,
   userPrompt,
+  images,
   reasoningEffort,
   serviceTier,
   timeoutMs,
@@ -387,6 +432,7 @@ function runCodexTriageProviderCall({
       cleanup = codex.chat({
         messages: [{ role: 'user', content: userPrompt }],
         systemPrompt,
+        images: Array.isArray(images) ? images : [],
         model,
         reasoningEffort,
         serviceTier,
@@ -420,19 +466,29 @@ function runCodexTriageProviderCall({
   });
 }
 
+// Shared capture-enabled provider dispatch. Triage is the primary caller, but
+// other single-shot agent calls (e.g. the Knowledge Base draft extraction)
+// reuse it instead of inventing a parallel dispatch:
+//   - `captureOverrides` re-stamps callSite/operation/agent on the package
+//   - `images` are carried on the CLI providers (claude/codex); the HTTP
+//     provider bodies built here are text-only, exactly as for triage
+//   - `maxTokens` widens the HTTP response budget (default keeps triage's 1200)
 async function runDirectTriageProviderCall({
   provider,
   model,
   systemPrompt,
   userPrompt,
+  images = [],
   reasoningEffort,
   serviceTier,
   timeoutMs,
   promptTrace,
+  captureOverrides = null,
+  maxTokens = 1200,
   eventBus,
   signal,
 } = {}) {
-  const captureContext = buildCaptureContext({ provider, model, promptTrace });
+  const captureContext = buildCaptureContext({ provider, model, promptTrace, overrides: captureOverrides });
   const onProviderEvent = (eventType, payload) => eventBus?.emit(eventType, payload);
 
   switch (provider) {
@@ -440,6 +496,7 @@ async function runDirectTriageProviderCall({
       return sendClaudeCliPrompt({
         systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
+        images: Array.isArray(images) ? images : [],
         model,
         reasoningEffort,
         timeoutMs,
@@ -465,6 +522,7 @@ async function runDirectTriageProviderCall({
           model,
           systemPrompt,
           userPrompt,
+          images,
           reasoningEffort,
           serviceTier,
           timeoutMs,
@@ -488,7 +546,7 @@ async function runDirectTriageProviderCall({
     case 'llm-gateway':
       return sendLlmGatewayChatCompletion({
         body: {
-          ...buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort }),
+          ...buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),
           chat_template_kwargs: { enable_thinking: false },
         },
         model,
@@ -507,7 +565,7 @@ async function runDirectTriageProviderCall({
       });
     case 'lm-studio':
       return sendLmStudioChatCompletion({
-        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort }),
+        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),
         model,
         timeoutMs,
         captureContext: {
@@ -522,7 +580,7 @@ async function runDirectTriageProviderCall({
       return sendAnthropicMessages({
         body: {
           model,
-          max_tokens: 1200,
+          max_tokens: maxTokens,
           temperature: 0.1,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }],
@@ -540,7 +598,7 @@ async function runDirectTriageProviderCall({
       });
     case 'openai':
       return sendOpenAiChatCompletion({
-        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort }),
+        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),
         model,
         timeoutMs,
         getApiKey: () => resolveApiKey('openai'),
@@ -561,7 +619,7 @@ async function runDirectTriageProviderCall({
           }],
           generationConfig: {
             temperature: 0.1,
-            maxOutputTokens: 1200,
+            maxOutputTokens: maxTokens,
           },
         },
         model,
@@ -577,7 +635,7 @@ async function runDirectTriageProviderCall({
       });
     case 'kimi':
       return sendKimiChatCompletion({
-        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort }),
+        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),
         model,
         timeoutMs,
         getApiKey: () => resolveApiKey('kimi'),
@@ -638,7 +696,41 @@ function requestJson({ url, headers = {}, timeoutMs = DEFAULT_PREFLIGHT_TIMEOUT_
   });
 }
 
-async function preflightProvider({ provider, model, timeoutMs = DEFAULT_PREFLIGHT_TIMEOUT_MS, signal } = {}) {
+// Pre-flight reachability results are cached briefly so back-to-back triage
+// requests do not pay the live-check latency every time. Only SUCCESSFUL
+// (ok=true) results are cached — a failed pre-flight always re-checks on the
+// next request so recovery is detected immediately. Cache hits are marked
+// `cached: true` so the emitted triage.preflight_checked event never pretends
+// a live check ran.
+const PREFLIGHT_CACHE_TTL_MS = 60_000;
+const preflightResultCache = new Map();
+
+function preflightCacheKey(provider, model) {
+  // Local-server providers are checked against an env-configured base URL, so
+  // the URL is part of what the cached result vouches for.
+  let baseUrl = '';
+  if (provider === 'lm-studio') baseUrl = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
+  if (provider === 'llm-gateway') baseUrl = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
+  return `${safeString(provider, '')}::${safeString(model, '')}::${baseUrl}`;
+}
+
+async function preflightProvider(options = {}) {
+  const { provider, model } = options;
+  const key = preflightCacheKey(provider, model);
+  const entry = preflightResultCache.get(key);
+  if (entry && (Date.now() - entry.at) < PREFLIGHT_CACHE_TTL_MS) {
+    return { ...entry.result, cached: true };
+  }
+  const result = await preflightProviderLive(options);
+  if (result && result.ok) {
+    preflightResultCache.set(key, { at: Date.now(), result });
+  } else {
+    preflightResultCache.delete(key);
+  }
+  return result;
+}
+
+async function preflightProviderLive({ provider, model, timeoutMs = DEFAULT_PREFLIGHT_TIMEOUT_MS, signal } = {}) {
   throwIfAborted(signal);
   if (!DIRECT_TRIAGE_PROVIDERS.includes(provider)) {
     return {
@@ -1161,7 +1253,7 @@ async function runTriage(text, options = {}) {
 
   try {
     const baseSystemPrompt = getRenderedAgentPrompt(TRIAGE_AGENT_ID);
-    const knowledgeContext = await buildTriageKnowledgebaseContext(parserText, { eventBus, signal });
+    const knowledgeContext = await buildTriageKnowledgebaseContext(parserText, { eventBus, signal, parseFields });
     knowledgeContextTrace = knowledgeContext.trace;
     const systemPrompt = [
       baseSystemPrompt,
@@ -1227,7 +1319,12 @@ async function runTriage(text, options = {}) {
     // backup. The capture pipeline keys off the providerTrace returned by THIS
     // call, so each attempt produces and reads back its OWN package; the backup
     // does not reuse the primary's trace. Returns { providerTrace, providerPackage, payload }.
-    async function attemptProviderTriage(attemptProvider, attemptModel) {
+    // `callOverrides` lets the one-shot repair pass reuse this exact machinery
+    // (capture, readback, extraction, events) with its own user prompt and
+    // prompt trace; without overrides the call is the original triage attempt.
+    async function attemptProviderTriage(attemptProvider, attemptModel, callOverrides = {}) {
+      const attemptUserPrompt = safeString(callOverrides.userPrompt, '') || userPrompt;
+      const attemptPromptTrace = callOverrides.promptTrace || promptTrace;
       eventBus?.emit('triage.generation_started', {
         provider: attemptProvider,
         model: attemptModel,
@@ -1245,11 +1342,11 @@ async function runTriage(text, options = {}) {
         provider: attemptProvider,
         model: attemptModel,
         systemPrompt,
-        userPrompt,
+        userPrompt: attemptUserPrompt,
         reasoningEffort: options.reasoningEffort || '',
         serviceTier: options.serviceTier || '',
         timeoutMs,
-        promptTrace,
+        promptTrace: attemptPromptTrace,
         eventBus,
         signal,
       });
@@ -1345,7 +1442,7 @@ async function runTriage(text, options = {}) {
       sourcePath: payload.sourcePath,
       textLength: payload.text.length,
     });
-    const built = buildSoftValidatedTriageCardFromOutput(payload.text, parseFields);
+    let built = buildSoftValidatedTriageCardFromOutput(payload.text, parseFields);
     eventBus?.emit('triage.output_validated', {
       passed: Boolean(built.validation.passed),
       issueCount: built.validation.issues.length,
@@ -1353,6 +1450,87 @@ async function runTriage(text, options = {}) {
       severity: built.severity.displayed || '',
       category: built.category.displayed || '',
     });
+
+    // ONE-SHOT REPAIR PASS: when first-pass validation found missing/invalid
+    // labeled fields, re-ask the SAME provider/model once for only those lines,
+    // merge them in (never overwriting fields that were already valid), and
+    // re-run soft validation on the merged result. A failed repair must never
+    // kill a run that already has a usable first answer: it is caught here and
+    // the run proceeds with the first-pass card (deterministic patches +
+    // degraded status), exactly as before this feature existed.
+    let finalRawOutput = payload.text;
+    let repairNote = null;
+    const repairFields = listRepairableTriageFields(built.validation.issues);
+    if (repairFields.length > 0) {
+      repairNote = { attempted: true, repairedFields: [], packageId: '', passed: false };
+      eventBus?.emit('triage.repair_started', {
+        issueCount: repairFields.length,
+        fields: repairFields,
+        provider,
+        model,
+      });
+      try {
+        const repairTemplate = readTriageRepairPromptTemplate();
+        if (!repairTemplate.trim()) {
+          throw createTriageError('Triage repair prompt template is missing or empty', 'TRIAGE_REPAIR_PROMPT_MISSING');
+        }
+        const repairPromptTrace = buildPromptTrace(TRIAGE_REPAIR_PROMPT_ID, repairTemplate);
+        const repairUserPrompt = buildTriageRepairPromptInput({
+          template: repairTemplate,
+          issues: built.validation.issues,
+          previousOutput: payload.text,
+          parserText,
+          parseFields,
+        });
+        const repairAttempt = await attemptProviderTriage(provider, model, {
+          userPrompt: repairUserPrompt,
+          promptTrace: repairPromptTrace,
+        });
+        repairNote.packageId = safeString(repairAttempt.providerTrace?.providerPackageId, '');
+        const merged = mergeTriageRepairOutput(payload.text, repairAttempt.payload.text, repairFields);
+        if (merged.repairedFields.length === 0) {
+          throw createTriageError('Repair reply contained none of the requested labeled lines', 'TRIAGE_REPAIR_UNUSABLE', {
+            providerPackageId: repairNote.packageId,
+          });
+        }
+        built = buildSoftValidatedTriageCardFromOutput(merged.mergedOutput, parseFields);
+        finalRawOutput = merged.mergedOutput;
+        repairNote.repairedFields = merged.repairedFields;
+        repairNote.passed = Boolean(built.validation.passed);
+        eventBus?.emit('triage.repair_completed', {
+          passed: Boolean(built.validation.passed),
+          remainingIssueCount: built.validation.issues.length,
+          repairedFields: merged.repairedFields,
+          providerPackageId: repairNote.packageId,
+        });
+      } catch (repairErr) {
+        repairNote.failed = true;
+        repairNote.reason = repairErr?.message || 'Triage repair call failed';
+        eventBus?.emit('triage.repair_failed', {
+          reason: repairNote.reason,
+          code: repairErr?.code || 'TRIAGE_REPAIR_FAILED',
+          providerPackageId: safeString(repairErr?.providerTrace?.providerPackageId, '') || repairNote.packageId,
+        });
+      }
+    }
+
+    // CATEGORY PLAUSIBILITY CHECK: advisory cross-check of the model's
+    // validated category against the deterministic rule evidence. It flags
+    // (degraded status + amber Category icon) but NEVER overrides the model's
+    // category, and it never triggers another repair call.
+    const plausibilityIssue = buildCategoryPlausibilityIssue(parseFields, built.category.validated, {
+      categoryCheck: built.card.categoryCheck,
+    });
+    if (plausibilityIssue) {
+      built.validation.issues.push(plausibilityIssue);
+      built.validation.passed = false;
+      eventBus?.emit('triage.category_plausibility_flagged', {
+        ruleCategory: plausibilityIssue.ruleCategory,
+        modelCategory: plausibilityIssue.modelCategory,
+        message: plausibilityIssue.message,
+      });
+    }
+
     const elapsedMs = Date.now() - startedAt;
     const triageMeta = buildTriageMeta({
       source: 'agent',
@@ -1369,13 +1547,22 @@ async function runTriage(text, options = {}) {
       latencyMs: elapsedMs,
       knowledgeContext: knowledgeContextTrace,
     });
+    // Compact, traceable note about the repair pass (or its absence on a clean
+    // first answer) so the persisted result explains how the card was produced.
+    if (repairNote) triageMeta.repair = repairNote;
     const status = built.validation.passed ? 'success' : 'degraded';
+    // Surface soft-validation issues on the card itself so the client can mark
+    // the specific affected fields (per-field degraded indicators). Attached
+    // only when validation flagged something — a clean card stays clean.
+    if (!built.validation.passed && built.validation.issues.length > 0) {
+      built.card.validationIssues = built.validation.issues;
+    }
     const saved = await persistTriageResult({
       runId,
       status,
       severity: built.severity,
       category: built.card.category || '',
-      rawOutput: payload.text,
+      rawOutput: finalRawOutput,
       card: built.card,
       validationIssues: built.validation.issues,
       fallbackUsed: false,
@@ -1396,7 +1583,7 @@ async function runTriage(text, options = {}) {
       ok: true,
       status,
       card: built.card,
-      rawOutput: payload.text,
+      rawOutput: finalRawOutput,
       triageMeta: {
         ...triageMeta,
         resultId: saved?._id ? String(saved._id) : '',
@@ -1447,6 +1634,7 @@ module.exports = {
   TRIAGE_AGENT_ID,
   buildFallbackCard,
   extractTriageTextFromProviderPackage,
+  getEffectiveModel,
   preflightProvider,
   runDirectTriageProviderCall,
   runTriage,

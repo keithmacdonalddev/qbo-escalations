@@ -83,6 +83,7 @@ function createApp() {
   app.use('/api/copilot', require('./routes/copilot'));
   app.use('/api/usage', require('./routes/usage'));
   app.use('/api/traces', require('./routes/traces'));
+  app.use('/api/provider-packages', require('./routes/provider-packages'));
   app.use('/api/agents', require('./routes/agents'));
   app.use('/api/gmail', require('./routes/gmail'));
   app.use('/api/calendar', require('./routes/calendar'));

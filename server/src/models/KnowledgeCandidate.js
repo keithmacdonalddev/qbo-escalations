@@ -134,6 +134,24 @@ const redactionSchema = new mongoose.Schema({
   redactedAt: { type: Date, default: null },
 }, { _id: false });
 
+// Per-record generation provenance: WHO/WHAT actually composed this draft's
+// content at creation (or forced regeneration) time. 'agent' means a real
+// LLM extraction pass ran (provider/model/reasoningEffort are what that call
+// actually used); 'deterministic' means server code composed the draft from
+// escalation fields with no LLM involved. Empty generator = legacy record
+// created before provenance was persisted.
+const generationSchema = new mongoose.Schema({
+  generator: { type: String, enum: ['', 'agent', 'deterministic'], default: '' },
+  agentId: { type: String, default: '' },
+  provider: { type: String, default: '' },
+  model: { type: String, default: '' },
+  reasoningEffort: { type: String, default: '' },
+  // Back link to the forensic ProviderCallPackage of the extraction call that
+  // actually composed this draft (empty for deterministic/legacy records).
+  // The package's metadata carries the matching forward link (escalationId).
+  providerCallPackageId: { type: String, default: '' },
+}, { _id: false });
+
 const kbAgentMessageSchema = new mongoose.Schema({
   role: {
     type: String,
@@ -230,6 +248,7 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   actionRecommendations: { type: [actionRecommendationSchema], default: [] },
   outcomeFeedback: { type: [outcomeFeedbackSchema], default: [] },
   redaction: { type: redactionSchema, default: () => ({}) },
+  generation: { type: generationSchema, default: () => ({}) },
   kbAgent: { type: kbAgentContextSchema, default: () => ({}) },
   kbAgentMessages: { type: [kbAgentMessageSchema], default: [] },
   sourceSnapshot: { type: sourceSnapshotSchema, default: () => ({}) },

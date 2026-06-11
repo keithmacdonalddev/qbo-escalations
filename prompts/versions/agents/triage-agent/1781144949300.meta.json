@@ -1,0 +1,11 @@
+{
+  "ts": 1781144949300,
+  "promptId": "triage-agent",
+  "promptVersion": "triage-agent-v2",
+  "sha256": "c3e4e48428abcb8fe048689fadc92a547e3ac01b351868dbf2d56f6af44767de",
+  "size": 2961,
+  "source": "file-watch",
+  "label": null,
+  "createdAt": "2026-06-11T02:29:09.300Z",
+  "fileModified": "2026-06-11T02:29:09.039Z"
+}

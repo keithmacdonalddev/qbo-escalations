@@ -535,6 +535,20 @@ function normalizeKnowledgeCandidate(candidate) {
     actionRecommendations: normalizeActionRecommendations(source),
     outcomeFeedback: normalizeOutcomeFeedback(source),
     auditEvents: normalizeAuditEvents(source),
+    // Per-record creation provenance (empty generator = legacy record created
+    // before provenance was persisted; the client renders an honest reduced
+    // line for those instead of substituting current agent config).
+    generation: {
+      generator: safeString(source.generation?.generator, ''),
+      agentId: safeString(source.generation?.agentId, ''),
+      provider: safeString(source.generation?.provider, ''),
+      model: safeString(source.generation?.model, ''),
+      reasoningEffort: safeString(source.generation?.reasoningEffort, ''),
+      // Back link to the captured ProviderCallPackage of the extraction call
+      // (empty for deterministic/legacy records) — lets a future UI jump from
+      // a draft to its forensic provider evidence.
+      providerCallPackageId: safeString(source.generation?.providerCallPackageId, ''),
+    },
     kbAgent: {
       promptId: safeString(source.kbAgent?.promptId),
       promptVersion: safeString(source.kbAgent?.promptVersion),
@@ -812,16 +826,203 @@ async function listKnowledgeRecords(options = {}) {
   };
 }
 
+// --- Relevance ranking (opt-in via rankByRelevance) -----------------------
+// Default retrieval orders DB candidates by -updatedAt (recency), which lets
+// recently touched but unrelated records crowd out genuinely relevant ones.
+// When rankByRelevance is set, records are scored against the query terms and
+// selected by match quality instead. Existing consumers that do not pass the
+// flag keep the legacy recency behavior unchanged.
+
+// Heavy fields are the operator-authored diagnostic core; a query term that
+// hits one of these says far more about fit than a hit in snapshot prose.
+const RELEVANCE_HEAVY_WEIGHT = 2;
+const RELEVANCE_LIGHT_WEIGHT = 1;
+const RELEVANCE_CLAIM_BOOST = 1;
+const RELEVANCE_TRUST_BOOST = 1;
+const RELEVANCE_CATEGORY_BOOST = 1;
+// Legacy playbook chunks keep the lexical score computed by the playbook
+// index (~1 point per matched query token plus small bonuses). A chunk that
+// only grazes a single incidental term scores ~1 and is treated as noise.
+const RELEVANCE_LEGACY_MIN_SCORE = 2;
+// At most this many of the returned slots may be legacy-playbook records.
+const RELEVANCE_LEGACY_CAP = 2;
+
+// splitSearchTerms keeps short function words like "not" and "from" that the
+// Mongo filter tolerates but that would poison match-quality scoring (raw
+// substring checks would also let "not" hit "Notes"). Scoring drops them and
+// matches whole tokens instead, like the playbook index does.
+const RELEVANCE_TERM_STOPWORDS = new Set([
+  'about', 'after', 'also', 'are', 'been', 'before', 'being', 'can', 'did',
+  'does', 'from', 'had', 'has', 'have', 'here', 'into', 'its', 'just', 'not',
+  'only', 'onto', 'our', 'than', 'that', 'them', 'then', 'there', 'they',
+  'was', 'were', 'what', 'when', 'which', 'while', 'will', 'would', 'your',
+]);
+
+function relevanceTermsFromQuery(query) {
+  return splitSearchTerms(query, 32).filter((term) => !RELEVANCE_TERM_STOPWORDS.has(term));
+}
+
+function relevanceTokens(values) {
+  const tokens = new Set();
+  for (const value of values) {
+    for (const token of safeString(value, '').toLowerCase().split(/[^a-z0-9]+/)) {
+      if (token.length >= 3) tokens.add(token);
+    }
+  }
+  return tokens;
+}
+
+// Whole-token match, with a prefix allowance so "archive" still matches
+// "archived". Terms under 4 chars (e.g. "cpp") must match a token exactly.
+function termMatchesTokens(term, tokens) {
+  if (tokens.has(term)) return true;
+  if (term.length >= 4) {
+    for (const token of tokens) {
+      if (token.startsWith(term)) return true;
+    }
+  }
+  return false;
+}
+
+function relevanceHaystacks(record) {
+  const heavy = relevanceTokens([
+    record.title,
+    record.symptom,
+    record.exactFix,
+    ...(Array.isArray(record.keySignals) ? record.keySignals : []),
+  ]);
+  const light = relevanceTokens([
+    record.summary,
+    record.rootCause,
+    record.escalationPath,
+    record.customerGoal,
+    record.reportedProblem,
+    record.troubleshootingTried,
+    record.confirmedCause,
+    record.finalOutcome,
+    record.category,
+  ]);
+  return { heavy, light };
+}
+
+function scoreRecordRelevance(record, terms, categoryHint = '') {
+  const legacy = record?.sourceType === 'legacy-playbook';
+  if (legacy) {
+    // Legacy chunks already carry a term-overlap score from the playbook
+    // search index — respect it rather than inventing a parallel scheme.
+    // matchedTerms is recomputed against the chunk text purely so the trace
+    // can show WHY the chunk was kept.
+    const haystack = [record.title, record.exactFix]
+      .map((value) => safeString(value, '')).join('\n').toLowerCase();
+    const matchedTerms = terms.filter((term) => haystack.includes(term)).length;
+    const score = Number(record.lineage?.score) || 0;
+    return {
+      score: Number(score.toFixed(3)),
+      matchedTerms,
+      claimBoost: 0,
+      trustBoost: 0,
+      categoryBoost: 0,
+      legacy: true,
+    };
+  }
+
+  const { heavy, light } = relevanceHaystacks(record);
+  let termScore = 0;
+  let matchedTerms = 0;
+  for (const term of terms) {
+    if (termMatchesTokens(term, heavy)) {
+      termScore += RELEVANCE_HEAVY_WEIGHT;
+      matchedTerms += 1;
+    } else if (termMatchesTokens(term, light)) {
+      termScore += RELEVANCE_LIGHT_WEIGHT;
+      matchedTerms += 1;
+    }
+  }
+  if (matchedTerms === 0) {
+    return { score: 0, matchedTerms: 0, claimBoost: 0, trustBoost: 0, categoryBoost: 0, legacy: false };
+  }
+
+  // Records that contribute vetted operational facts (an exact fix, a root
+  // cause, an escalation path, or key signals — the fields that sync into
+  // operational claims) earn a boost over narrative-only records.
+  const claimBoost = (
+    compactText(record.exactFix)
+    || compactText(record.rootCause)
+    || compactText(record.escalationPath)
+    || (Array.isArray(record.keySignals) && record.keySignals.length > 0)
+  ) ? RELEVANCE_CLAIM_BOOST : 0;
+  const trustBoost = record.trustState === TRUST_STATES.TRUSTED ? RELEVANCE_TRUST_BOOST : 0;
+  // 'unknown' is the classifier sentinel AND the normalized-record default
+  // category — never let unknown==unknown count as a category match.
+  const hint = safeString(categoryHint, '').trim().toLowerCase();
+  const recordCategory = safeString(record.category, '').trim().toLowerCase();
+  const categoryBoost = (hint && hint !== 'unknown' && hint === recordCategory)
+    ? RELEVANCE_CATEGORY_BOOST
+    : 0;
+
+  return {
+    score: termScore + claimBoost + trustBoost + categoryBoost,
+    matchedTerms,
+    claimBoost,
+    trustBoost,
+    categoryBoost,
+    legacy: false,
+  };
+}
+
+function rankKnowledgeRecords(records, { terms = [], limit = 5, categoryHint = '' } = {}) {
+  const scored = [];
+  for (const record of records) {
+    const relevance = scoreRecordRelevance(record, terms, categoryHint);
+    if (relevance.legacy) {
+      // Usefulness gate (legacy): the playbook index score must clear a
+      // minimal bar, otherwise the chunk only grazed incidental terms.
+      if (relevance.score < RELEVANCE_LEGACY_MIN_SCORE) continue;
+    } else if (relevance.matchedTerms === 0) {
+      // Usefulness gate (governed): zero meaningful term matches means the
+      // record only matched masked/snapshot noise — never pad with it.
+      continue;
+    }
+    scored.push({ ...record, relevance });
+  }
+
+  scored.sort((a, b) => {
+    if (b.relevance.score !== a.relevance.score) return b.relevance.score - a.relevance.score;
+    // Equal score: governed records are never displaced by legacy ones.
+    if (a.relevance.legacy !== b.relevance.legacy) return a.relevance.legacy ? 1 : -1;
+    // Final tie-break: recency. Legacy chunks have no updatedAt and sort last.
+    return safeString(b.updatedAt, '').localeCompare(safeString(a.updatedAt, ''));
+  });
+
+  const out = [];
+  const legacyCap = Math.min(RELEVANCE_LEGACY_CAP, limit);
+  let legacyCount = 0;
+  for (const record of scored) {
+    if (out.length >= limit) break;
+    if (record.relevance.legacy) {
+      if (legacyCount >= legacyCap) continue;
+      legacyCount += 1;
+    }
+    out.push(record);
+  }
+  return out;
+}
+
 async function searchKnowledge(options = {}) {
   const limit = parseLimit(options.limit, 10, 50);
   const includeLegacy = parseBoolean(options.includeLegacy, true);
   const includeCandidates = parseBoolean(options.includeCandidates, true);
   const query = safeString(options.query, '').trim();
+  const terms = parseBoolean(options.rankByRelevance, false) ? relevanceTermsFromQuery(query) : [];
+  const ranking = terms.length > 0;
+  // When ranking, pull a wider candidate pool so relevant records that are
+  // not the most recently updated still reach the scorer.
+  const poolLimit = ranking ? Math.max(limit * 5, 25) : limit;
 
   const dbResult = await listKnowledgeRecords({
     ...options,
     query,
-    limit,
+    limit: poolLimit,
     offset: 0,
     includeCandidates,
   });
@@ -829,7 +1030,7 @@ async function searchKnowledge(options = {}) {
   let legacyRecords = [];
   if (includeLegacy && query) {
     legacyRecords = searchPlaybookChunks(query, {
-      topK: limit,
+      topK: ranking ? Math.max(limit * 2, 10) : limit,
       minScore: options.minScore,
       allowedCategories: options.allowedCategories,
       allowedTemplates: options.allowedTemplates,
@@ -843,7 +1044,13 @@ async function searchKnowledge(options = {}) {
       }));
   }
 
-  const records = [...dbResult.records, ...legacyRecords].slice(0, limit);
+  const records = ranking
+    ? rankKnowledgeRecords([...dbResult.records, ...legacyRecords], {
+      terms,
+      limit,
+      categoryHint: safeString(options.categoryHint, ''),
+    })
+    : [...dbResult.records, ...legacyRecords].slice(0, limit);
   return {
     query,
     records,
@@ -884,6 +1091,9 @@ function toAgentContextRecord(record) {
       evidenceStatus: item.evidenceStatus || '',
     })),
     warnings: record.warnings,
+    // Present only when rankByRelevance ranking ran — existing consumers that
+    // do not opt in see an unchanged record shape.
+    ...(record.relevance ? { relevance: record.relevance } : {}),
   };
 }
 
@@ -1034,5 +1244,7 @@ module.exports = {
   parseBoolean,
   parseLimit,
   parseOffset,
+  rankKnowledgeRecords,
+  scoreRecordRelevance,
   searchKnowledge,
 };

@@ -181,6 +181,11 @@ test('recordProviderCallPackage saves redacted package when enabled', async () =
       providerPathType: 'direct-http',
       callSite: 'test:kimi',
       operation: 'chat',
+      metadata: {
+        sourceAgent: 'knowledgebase-agent',
+        escalationId: '64b000000000000000000001',
+        escalationCaseNumber: 'CASE-META-1',
+      },
     },
     response: {
       statusCode: 401,
@@ -203,4 +208,9 @@ test('recordProviderCallPackage saves redacted package when enabled', async () =
   assert.equal(saved.response.headers['set-cookie'], '[REDACTED]');
   assert.equal(saved.response.rawHeaders[1], '[REDACTED]');
   assert.equal(saved.storage.inline, true);
+  // Caller-supplied capture metadata is persisted on the package (the forward
+  // link from a forensic record back to the work that triggered the call).
+  assert.equal(saved.metadata.sourceAgent, 'knowledgebase-agent');
+  assert.equal(saved.metadata.escalationId, '64b000000000000000000001');
+  assert.equal(saved.metadata.escalationCaseNumber, 'CASE-META-1');
 });

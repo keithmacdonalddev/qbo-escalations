@@ -5,6 +5,7 @@ import ImageParserPopup from '../chat/ImageParserPopup.jsx';
 import '../chat/ImageParserPopup.css';
 import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
+import TriageReasoningView from './TriageReasoningView.jsx';
 import WorkflowLogPanel from './WorkflowLogPanel.jsx';
 import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
 import { apiFetch, apiFetchJson } from '../../api/http.js';
@@ -178,6 +179,14 @@ function Icon({ name, size = 18 }) {
           <path d="m9 12 2 2 4-4" />
         </svg>
       );
+    case 'reasoning':
+      return (
+        <svg {...common}>
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+          <path d="M20 3v4" />
+          <path d="M22 5h-4" />
+        </svg>
+      );
     case 'search':
       return (
         <svg {...common}>
@@ -282,6 +291,73 @@ function Icon({ name, size = 18 }) {
   }
 }
 
+function copyTextToClipboard(text) {
+  const value = typeof text === 'string' ? text : '';
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(value);
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return Promise.resolve();
+}
+
+function CopyIconButton({
+  text,
+  label,
+  className = '',
+  onCopied,
+  disabled = false,
+  size = 14,
+}) {
+  const [copied, setCopied] = useState(false);
+  const canCopy = !disabled && cleanValue(text);
+
+  const handleCopy = async (event) => {
+    event?.stopPropagation?.();
+    if (!canCopy) return;
+    try {
+      await copyTextToClipboard(text);
+      setCopied(true);
+      onCopied?.(label);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // The browser may block clipboard access outside a trusted user gesture.
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      className={`v5-copy-icon-btn${copied ? ' is-copied' : ''}${className ? ` ${className}` : ''}`}
+      onClick={handleCopy}
+      disabled={!canCopy}
+      aria-label={copied ? `Copied ${label}` : `Copy ${label}`}
+      title={copied ? 'Copied' : `Copy ${label}`}
+    >
+      {copied ? <Icon name="check" size={size} /> : (
+        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+function formatLabeledLines(rows) {
+  return rows
+    .map((row) => `${row.label}: ${cleanValue(row.value) || 'unknown'}`)
+    .join('\n')
+    .trim();
+}
+
 function formatSeconds(ms) {
   const value = Number(ms);
   if (!Number.isFinite(value) || value < 0) return '';
@@ -307,6 +383,63 @@ function cleanValue(value) {
   if (typeof value === 'string') return value.trim();
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+// Saved Conversation.messages[].images hold either full data URLs or bare
+// base64 payloads (server-side normalizeChatImages accepts both shapes and
+// stores them as-is). <img> needs a data URL, so prefix bare payloads.
+// Returns '' for non-renderable values so callers can fall back to the
+// "[image attached]" placeholder. The image/png subtype on bare payloads is
+// advisory only — browsers sniff the real format when decoding, and the
+// server's image-archive backfill makes the same assumption.
+function toRenderableImageSrc(raw) {
+  if (typeof raw !== 'string') return '';
+  const value = raw.trim();
+  if (!value) return '';
+  if (value.startsWith('data:image/')) return value;
+  if (/^[A-Za-z0-9+/=\s]+$/.test(value)) {
+    return `data:image/png;base64,${value.replace(/\s+/g, '')}`;
+  }
+  return '';
+}
+
+// First renderable image attached to a saved user turn — the original
+// pipeline/upload screenshot for sessions that carried inline images. Used to
+// restore the evidence-dock thumbnail on true resume.
+function firstRenderableSavedImage(savedMessages) {
+  if (!Array.isArray(savedMessages)) return '';
+  for (const msg of savedMessages) {
+    if (!msg || msg.role !== 'user' || !Array.isArray(msg.images)) continue;
+    for (const raw of msg.images) {
+      const src = toRenderableImageSrc(raw);
+      if (src) return src;
+    }
+  }
+  return '';
+}
+
+// Map saved Conversation.messages ({ role: 'user'|'assistant'|'system',
+// content, images, ... }) into the chat-log display shape ({ role:
+// 'operator'|'analyst-stream', text, images }) used by AnalystBubble.
+// Renderable saved images come through as data URLs; the "[image attached]"
+// placeholder remains only for image-only turns whose payloads are not
+// renderable, so the turn isn't invisible.
+function normalizeSavedMessages(savedMessages) {
+  if (!Array.isArray(savedMessages)) return [];
+  const entries = [];
+  for (const msg of savedMessages) {
+    if (!msg || (msg.role !== 'user' && msg.role !== 'assistant')) continue;
+    const text = cleanValue(msg.content);
+    const hasImages = Array.isArray(msg.images) && msg.images.length > 0;
+    if (!text && !hasImages) continue;
+    const images = hasImages ? msg.images.map(toRenderableImageSrc).filter(Boolean) : [];
+    entries.push({
+      role: msg.role === 'user' ? 'operator' : 'analyst-stream',
+      text: text || (images.length > 0 ? '' : '[image attached]'),
+      images,
+    });
+  }
+  return entries;
 }
 
 function toFiniteNumber(value) {
@@ -440,6 +573,14 @@ function buildTemplateRows(caseIntake, parsedFields) {
     label: field.label,
     value: cleanValue(field.value(fields)),
   }));
+}
+
+function buildParserCopyText(caseIntake, parsedFields, fallbackText = '') {
+  const canonical = cleanValue(caseIntake?.canonicalTemplate || fallbackText);
+  if (canonical) return canonical;
+  const rows = buildTemplateRows(caseIntake, parsedFields);
+  if (!rows.some((row) => cleanValue(row.value))) return '';
+  return formatLabeledLines(rows);
 }
 
 function runtimeUpdatesFromSurfaceDefaults(surfaces = {}) {
@@ -623,6 +764,61 @@ function getTriageAction(card) {
 
 function getTriageCategory(card) {
   return cleanValue(card?.category).replace(/-/g, ' ');
+}
+
+function buildTriageCopyText(card) {
+  if (!card) return '';
+  const severity = cleanValue(card.severity) || 'P3';
+  const category = getTriageCategory(card);
+  const confidence = cleanValue(card.confidence) || 'medium';
+  const read = getTriageRead(card);
+  const action = getTriageAction(card);
+  const missingInfo = Array.isArray(card?.missingInfo)
+    ? card.missingInfo.map(cleanValue).filter(Boolean)
+    : [];
+  return [
+    `Severity: ${severity}`,
+    category ? `Category: ${category}` : '',
+    `Confidence: ${confidence}`,
+    read ? `Fast read: ${read}` : '',
+    action ? `Immediate next step: ${action}` : '',
+    missingInfo.length ? `Missing information: ${missingInfo.join('; ')}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function buildInvCopyText(matches) {
+  const list = Array.isArray(matches) ? matches : [];
+  if (list.length === 0) return 'No INV matches were found.';
+  return list.map((match, index) => {
+    const lines = [
+      `Match ${index + 1}: ${cleanValue(match.id) || 'unknown INV'}`,
+      match.similarity != null ? `Similarity: ${match.similarity}%` : '',
+      cleanValue(match.title) ? `Title: ${cleanValue(match.title)}` : '',
+      cleanValue(match.status) ? `Status: ${cleanValue(match.status)}` : '',
+      cleanValue(match.age) ? `Age: ${cleanValue(match.age)}` : '',
+      cleanValue(match.note) ? `Note: ${cleanValue(match.note)}` : '',
+    ].filter(Boolean);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+function formatAnalystRole(role, agentLabel) {
+  if (role === 'operator') return 'User';
+  return agentLabel;
+}
+
+function buildAnalystChatCopyText(messages, agentLabel, testText = '') {
+  const entries = [];
+  if (cleanValue(testText)) entries.push({ role: 'analyst-stream', text: testText });
+  for (const entry of Array.isArray(messages) ? messages : []) {
+    const text = cleanValue(entry?.text);
+    if (!text) continue;
+    entries.push({ role: entry.role, text });
+  }
+  return entries
+    .map((entry) => `${formatAnalystRole(entry.role, agentLabel)}:\n${cleanValue(entry.text)}`)
+    .join('\n\n')
+    .trim();
 }
 
 function isStarted(stageState) {
@@ -1197,7 +1393,7 @@ function WorkflowLane({
   );
 }
 
-function DockSection({ id, icon, title, open, onToggle, onCollapseAll, onSolo, onExpandAll, children, tone, headerAction }) {
+function DockSection({ id, icon, title, open, onToggle, onCollapseAll, onSolo, onExpandAll, children, tone, headerAction, headerTools = null, copyText = '', copyLabel = '' }) {
   return (
     <section className={`v5-dock-section v5-dock-section--${id}${open ? '' : ' is-collapsed'}${tone ? ` is-${tone}` : ''}`}>
       <div className="v5-dock-section__header">
@@ -1206,6 +1402,13 @@ function DockSection({ id, icon, title, open, onToggle, onCollapseAll, onSolo, o
           {title}
         </span>
         <div className="v5-dock-section__header-tools">
+          {headerTools}
+          <CopyIconButton
+            text={copyText}
+            label={copyLabel || title}
+            className="v5-dock-section__copy"
+            size={14}
+          />
           <button
             type="button"
             className="v5-dock-section__tool"
@@ -1670,6 +1873,20 @@ function InvOutput({ stage, invMatches, testRun, onClearTest, agentLabel = 'INV 
   );
 }
 
+// iOS-style push navigation for the evidence dock: the section stack slides
+// left and dims while the reasoning page slides in from the right over it.
+const DOCK_PUSH_TRANSITION = { duration: 0.28, ease: [0.32, 0.72, 0.28, 1] };
+const EMPTY_REASONING_VIEW = {
+  open: false,
+  loading: false,
+  error: '',
+  provider: '',
+  model: '',
+  blocks: [],
+  truncated: false,
+  packageId: '',
+};
+
 function EvidenceDock({
   caseIntake,
   parsedFields,
@@ -1690,6 +1907,75 @@ function EvidenceDock({
     inv: true,
   });
   const card = resolveTriageCard(triageCard, caseIntake);
+  const [reasoningView, setReasoningView] = useState(EMPTY_REASONING_VIEW);
+  // The latest triage run's provider package id — live pipeline first, then
+  // the most recent triage test run. No id means no reasoning capture exists.
+  const triagePackageId = cleanValue(stageState?.triage?.providerPackageId)
+    || cleanValue(testRuns?.triage?.data?.triageMeta?.providerPackageId)
+    || cleanValue(testRuns?.triage?.data?.providerPackageId);
+
+  // Reset the reasoning page whenever the underlying run changes (new
+  // escalation, re-run, cleared test) so a stale capture is never shown.
+  useEffect(() => {
+    setReasoningView((prev) => (
+      prev.packageId && prev.packageId !== triagePackageId ? EMPTY_REASONING_VIEW : prev
+    ));
+  }, [triagePackageId]);
+
+  const closeReasoning = useCallback(() => {
+    setReasoningView((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const openReasoning = useCallback(async () => {
+    if (!triagePackageId) return;
+    setReasoningView({ ...EMPTY_REASONING_VIEW, open: true, loading: true, packageId: triagePackageId });
+    try {
+      const data = await apiFetchJson(
+        `/api/provider-packages/${encodeURIComponent(triagePackageId)}/reasoning`,
+        {},
+        'Could not load the model reasoning for this run.'
+      );
+      setReasoningView((prev) => (
+        prev.open && prev.packageId === triagePackageId
+          ? {
+            ...prev,
+            loading: false,
+            provider: cleanValue(data?.provider),
+            model: cleanValue(data?.model),
+            blocks: Array.isArray(data?.reasoning) ? data.reasoning : [],
+            truncated: Boolean(data?.truncated),
+          }
+          : prev
+      ));
+    } catch (err) {
+      setReasoningView((prev) => (
+        prev.open && prev.packageId === triagePackageId
+          ? { ...prev, loading: false, error: err?.message || 'Could not load the model reasoning for this run.' }
+          : prev
+      ));
+    }
+  }, [triagePackageId]);
+  const parserCopyText = useMemo(() => {
+    const parserDone = testRuns?.parser?.status === 'done' || stageState?.parser?.status === 'done';
+    if (!parserDone) return '';
+    const testCaseIntake = testRuns?.parser?.data?.caseIntake || null;
+    const testFields = testRuns?.parser?.data?.parseFields && typeof testRuns.parser.data.parseFields === 'object'
+      ? objectFieldsToParsedRows(testRuns.parser.data.parseFields)
+      : null;
+    return buildParserCopyText(
+      testCaseIntake || caseIntake,
+      testFields || parsedFields,
+      testRuns?.parser?.data?.text || ''
+    );
+  }, [caseIntake, parsedFields, stageState?.parser?.status, testRuns?.parser]);
+  const triageCopyText = useMemo(() => (
+    buildTriageCopyText(testRuns?.triage?.data?.triageCard || card)
+  ), [card, testRuns?.triage]);
+  const invCopyText = useMemo(() => {
+    const invDone = testRuns?.inv?.status === 'done' || stageState?.inv?.status === 'done';
+    if (!invDone) return '';
+    return buildInvCopyText(Array.isArray(testRuns?.inv?.data?.matches) ? testRuns.inv.data.matches : invMatches);
+  }, [invMatches, stageState?.inv?.status, testRuns?.inv]);
 
   const toggle = (key) => {
     setOpenSections((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -1704,6 +1990,12 @@ function EvidenceDock({
 
   return (
     <aside className="v5-evidence-dock" aria-label="Escalation evidence and agent output">
+      <motion.div
+        className="v5-dock-deck"
+        animate={reasoningView.open ? { x: '-25%', opacity: 0.5 } : { x: '0%', opacity: 1 }}
+        transition={DOCK_PUSH_TRANSITION}
+        aria-hidden={reasoningView.open || undefined}
+      >
       <DockSection
         id="template"
         icon="clipboard"
@@ -1713,6 +2005,8 @@ function EvidenceDock({
         onCollapseAll={collapseAll}
         onSolo={() => solo('template')}
         onExpandAll={expandAll}
+        copyText={parserCopyText}
+        copyLabel={`${stageLabels.parser || 'Image Parser'} output`}
         headerAction={parserThumbnail ? (
           <button
             type="button"
@@ -1745,6 +2039,22 @@ function EvidenceDock({
         onCollapseAll={collapseAll}
         onSolo={() => solo('triage')}
         onExpandAll={expandAll}
+        copyText={triageCopyText}
+        copyLabel={`${stageLabels.triage || 'Triage Agent'} output`}
+        headerTools={(
+          <button
+            type="button"
+            className="v5-dock-section__tool v5-tool-reasoning"
+            onClick={openReasoning}
+            disabled={!triagePackageId}
+            title={triagePackageId
+              ? 'View the model reasoning for the latest triage run'
+              : 'Model reasoning becomes available after a triage run completes'}
+            aria-label="View model reasoning"
+          >
+            <Icon name="reasoning" size={14} />
+          </button>
+        )}
       >
         <TriageOutput
           stage={stageState.triage}
@@ -1765,6 +2075,8 @@ function EvidenceDock({
         onCollapseAll={collapseAll}
         onSolo={() => solo('inv')}
         onExpandAll={expandAll}
+        copyText={invCopyText}
+        copyLabel={`${stageLabels.inv || 'INV Search Agent'} output`}
       >
         <InvOutput
           stage={stageState.inv}
@@ -1774,21 +2086,68 @@ function EvidenceDock({
           agentLabel={stageLabels.inv || 'INV Search Agent'}
         />
       </DockSection>
+      </motion.div>
+      <AnimatePresence>
+        {reasoningView.open && (
+          <motion.div
+            key="triage-reasoning-layer"
+            className="v5-dock-reasoning-layer"
+            initial={{ x: '100%' }}
+            animate={{ x: '0%' }}
+            exit={{ x: '100%' }}
+            transition={DOCK_PUSH_TRANSITION}
+          >
+            <TriageReasoningView
+              loading={reasoningView.loading}
+              error={reasoningView.error}
+              provider={reasoningView.provider}
+              model={reasoningView.model}
+              blocks={reasoningView.blocks}
+              truncated={reasoningView.truncated}
+              onBack={closeReasoning}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </aside>
   );
 }
 
-function AnalystBubble({ role, text, isStreaming, agentLabel = 'QBO Assistant' }) {
+function AnalystBubble({ role, text, isStreaming, agentLabel = 'QBO Assistant', images = [] }) {
   const isOperator = role === 'operator';
-  const lines = cleanValue(text).split('\n');
+  const cleanedText = cleanValue(text);
+  const lines = cleanedText.split('\n');
+  const copyLabel = isOperator ? 'user message' : `${agentLabel} response`;
+  const hasImages = Array.isArray(images) && images.length > 0;
 
   return (
     <article className={`v5-analyst-message${isOperator ? ' is-operator' : ''}`}>
       <div className="v5-analyst-message__avatar">{isOperator ? 'AD' : 'QA'}</div>
       <div className="v5-analyst-message__content">
-        {!isOperator && <span className="v5-analyst-message__name">{agentLabel}</span>}
+        <div className="v5-analyst-message__head">
+          {!isOperator && <span className="v5-analyst-message__name">{agentLabel}</span>}
+          <CopyIconButton
+            text={text}
+            label={copyLabel}
+            className="v5-analyst-message__copy"
+            disabled={isStreaming}
+            size={13}
+          />
+        </div>
         <div className="v5-analyst-message__bubble">
-          {lines.filter((line, index) => line || index === 0).map((line, index) => (
+          {hasImages && (
+            <div className="v5-analyst-message__images">
+              {images.map((src, index) => (
+                <img
+                  key={`bubble-img-${index}`}
+                  src={src}
+                  alt={`Attached image ${index + 1}`}
+                  loading="lazy"
+                />
+              ))}
+            </div>
+          )}
+          {(cleanedText || !hasImages) && lines.filter((line, index) => line || index === 0).map((line, index) => (
             <p key={`${line}-${index}`}>{line || ' '}</p>
           ))}
           {isStreaming && <span className="v5-typing-caret" aria-hidden="true" />}
@@ -1806,6 +2165,7 @@ function AnalystWorkbench({
   stageState,
   analyst,
   chatLog,
+  historyMessages = [],
   onSendOperatorMessage,
   requestError,
   testRun,
@@ -1846,7 +2206,7 @@ function AnalystWorkbench({
   useEffect(() => {
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, testRun?.data?.text, testRun?.status]);
+  }, [messages, historyMessages, testRun?.data?.text, testRun?.status]);
 
   const mainTabActive = activeTabId === 'main';
   const workflowTabActive = activeTabId === 'workflow';
@@ -1855,7 +2215,7 @@ function AnalystWorkbench({
   const activeStageLogStep = stageTabActive
     ? workflowSteps.find((s) => s.key === activeTabId)
     : null;
-  const emptyMainThread = !hasTestRun && !isBusy && messages.length === 0 && !requestError;
+  const emptyMainThread = !hasTestRun && !isBusy && messages.length === 0 && historyMessages.length === 0 && !requestError;
   const imageIntakeReady = mainTabActive
     && emptyMainThread
     && mainStatus === 'pending'
@@ -1865,6 +2225,9 @@ function AnalystWorkbench({
   const workbenchAriaLabel = imageIntakeReady
     ? 'Image intake, drop or paste an escalation image to start'
     : `${mainAgentLabel} response`;
+  const chatCopyText = useMemo(() => (
+    buildAnalystChatCopyText(messages, mainAgentLabel, testDone ? testRun?.data?.text : '')
+  ), [mainAgentLabel, messages, testDone, testRun?.data?.text]);
 
   const send = () => {
     const text = input.trim();
@@ -1991,6 +2354,15 @@ function AnalystWorkbench({
           })}
         </div>
         <div className="v5-analyst-workbench__actions">
+          {mainTabActive && (
+            <CopyIconButton
+              text={chatCopyText}
+              label={`${mainAgentLabel} chat`}
+              className="v5-analyst-workbench__copy"
+              disabled={isBusy}
+              size={15}
+            />
+          )}
           <button
             type="button"
             className="v5-analyst-workbench__reset"
@@ -2010,6 +2382,23 @@ function AnalystWorkbench({
       {mainTabActive ? (
         <>
           <div className="v5-analyst-workbench__thread" ref={threadRef}>
+            {historyMessages.length > 0 && (
+              <>
+                {historyMessages.map((entry, index) => (
+                  <AnalystBubble
+                    key={`history-${entry.role}-${index}`}
+                    role={entry.role}
+                    text={entry.text}
+                    images={entry.images}
+                    isStreaming={false}
+                    agentLabel={mainAgentLabel}
+                  />
+                ))}
+                <div className="v5-thread-history-divider" role="separator" aria-label="Earlier in this session">
+                  <span>Earlier in this session</span>
+                </div>
+              </>
+            )}
             {hasTestRun && (
               <TestBanner run={testRun} agentLabel={mainAgentLabel} onClear={onClearTest} />
             )}
@@ -2094,6 +2483,7 @@ function AnalystWorkbench({
           liveEventCounts={liveEventCounts}
           eventEstimates={eventEstimates}
           stageLabels={stageLabels}
+          onCopyText={(text) => copyTextToClipboard(text)}
         />
       ) : (
         <StageEventLogPanel
@@ -2104,6 +2494,7 @@ function AnalystWorkbench({
           eventCount={liveEventCounts?.[activeStageLogStep?.key || activeTabId] || 0}
           estimatedEvents={eventEstimates?.byStage?.[activeStageLogStep?.key || activeTabId]?.avg || 0}
           stageLabels={stageLabels}
+          onCopyText={(text) => copyTextToClipboard(text)}
         />
       )}
     </section>
@@ -2161,7 +2552,10 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     sendOperatorMessage,
     requestError,
     conversationId,
-  } = useStageOrchestrator();
+    clearResumeTarget,
+    restoreCapturedImage,
+    hydrateFromSavedCaseIntake,
+  } = useStageOrchestrator({ resumeConversationId: conversationIdFromRoute });
   const { workflowSteps, stageLabels } = usePipelineAgentLabels();
   const { openAgentTest } = useAgentTestModal();
   // Moving-average denominator per stage, fetched once on mount and refreshed
@@ -2282,6 +2676,76 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   // caseIntake while a pipeline is active, otherwise the saved past run.
   const effectiveCaseIntake = caseIntake || pastCaseIntake;
 
+  // True resume (Phase 1, transcript only): when the chat is opened at
+  // #/chat/{id} for a saved session, fetch that conversation's saved messages
+  // and render them as history above the live thread. Liveness is read via a
+  // ref so this fires only on route changes: if this session already has live
+  // chat state (a server-assigned conversation id, chat-log entries, or a
+  // captured image mid-pipeline), rehydrating could duplicate or mix
+  // transcripts, so we skip. Navigating away (prop goes null) keeps the
+  // loaded history, matching the always-mounted session-persistence
+  // semantics; the "New" button clears it via startNewWorkflow.
+  const [historyMessages, setHistoryMessages] = useState([]);
+  const historyConversationIdRef = useRef(null);
+  // Generation counter for the history fetch. startNewWorkflow bumps it so a
+  // getConversation already in flight when the user clicks "New" can't
+  // re-populate stale history (or re-restore the dock image) when it resolves.
+  // The effect-level `cancelled` flag only covers route changes/unmount.
+  const historyFetchGenRef = useRef(0);
+  const liveChatStateRef = useRef({ conversationId: null, chatLogLength: 0, imageCaptured: false });
+  useEffect(() => {
+    liveChatStateRef.current = {
+      conversationId,
+      chatLogLength: Array.isArray(chatLog) ? chatLog.length : 0,
+      imageCaptured,
+    };
+  }, [conversationId, chatLog, imageCaptured]);
+  useEffect(() => {
+    let cancelled = false;
+    const routeId = cleanValue(conversationIdFromRoute);
+    if (!routeId) return undefined;
+    if (historyConversationIdRef.current === routeId) return undefined;
+    const live = liveChatStateRef.current;
+    if (live.conversationId || live.chatLogLength > 0 || live.imageCaptured) return undefined;
+    const generation = historyFetchGenRef.current;
+    (async () => {
+      try {
+        const conversation = await getConversation(routeId);
+        if (cancelled || historyFetchGenRef.current !== generation) return;
+        historyConversationIdRef.current = routeId;
+        setHistoryMessages(normalizeSavedMessages(conversation?.messages));
+        // Restore the evidence-dock thumbnail from the saved session's
+        // original upload, when the record carries inline image data.
+        // Pipeline-only sessions route the screenshot through the standalone
+        // image parser (messages[].images stays empty), so this passes ''
+        // and clears any thumbnail left over from a previously resumed
+        // session. Live captures are never touched (guard in the hook).
+        restoreCapturedImage(firstRenderableSavedImage(conversation?.messages));
+        // Hydrate the pipeline surfaces — stage-card outcomes, parsed
+        // template fields, triage card, INV matches — from the saved run so
+        // the evidence dock isn't a wall of "Waiting" placeholders. No-ops
+        // when a live run owns the state (guards in the hook).
+        hydrateFromSavedCaseIntake(conversation?.caseIntake || null);
+      } catch (err) {
+        if (cancelled || historyFetchGenRef.current !== generation) return;
+        historyConversationIdRef.current = routeId;
+        setHistoryMessages([]);
+        // The routed record produced nothing to show — drop any thumbnail or
+        // hydrated pipeline state a previously resumed session left behind
+        // (live captures/runs are untouched, guards in the hook).
+        restoreCapturedImage('');
+        hydrateFromSavedCaseIntake(null);
+        // Poisoned resume id: the routed conversation no longer exists.
+        // Drop the orchestrator's resume target so the next send creates a
+        // fresh conversation instead of failing against the dead id forever.
+        if (err?.status === 404 || err?.code === 'NOT_FOUND') {
+          clearResumeTarget(routeId);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [conversationIdFromRoute, clearResumeTarget, restoreCapturedImage, hydrateFromSavedCaseIntake]);
+
   // Step-1 lifecycle: visible by default; when parser flips to running, kick
   // off the exit transition; after ~520ms unmount the step.
   const [step1Visible, setStep1Visible] = useState(true);
@@ -2380,7 +2844,9 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, [pushLocalStageEvent]);
   const stageHasEvents = useMemo(() => {
     const live = stageEvents || {};
-    const runs = Array.isArray(caseIntake?.runs) ? caseIntake.runs : [];
+    // effectiveCaseIntake: live run first, saved past run otherwise — so a
+    // resumed session's stage cards stay clickable into their saved logs.
+    const runs = Array.isArray(effectiveCaseIntake?.runs) ? effectiveCaseIntake.runs : [];
     const savedPhases = new Set(runs.filter((r) => Array.isArray(r?.events) && r.events.length > 0).map((r) => r.phase));
     const phaseByKey = { parser: 'parse-template', inv: 'known-issue-search', triage: 'triage', main: 'analyst' };
     return {
@@ -2389,16 +2855,18 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
       triage: Boolean(live.triage?.length) || savedPhases.has(phaseByKey.triage),
       main: Boolean(live.main?.length) || savedPhases.has(phaseByKey.main),
     };
-  }, [stageEvents, caseIntake]);
+  }, [stageEvents, effectiveCaseIntake]);
   // Per-stage reasoning buffer derived from llm.thinking events. Live events
   // win while the pipeline is running; once it's saved, the saved run events
   // take over so completed cards still show their reasoning chip on reload.
+  // Reads effectiveCaseIntake (live run first, saved past run otherwise) so a
+  // session resumed from history shows its persisted thinking too.
   // Buffer is capped at THINKING_BUFFER_CHAR_CAP to avoid unbounded memory in
   // long runs.
   const thinkingByStage = useMemo(() => {
     const THINKING_BUFFER_CHAR_CAP = 8192;
     const phaseByKey = { parser: 'parse-template', inv: 'known-issue-search', triage: 'triage', main: 'analyst' };
-    const runs = Array.isArray(caseIntake?.runs) ? caseIntake.runs : [];
+    const runs = Array.isArray(effectiveCaseIntake?.runs) ? effectiveCaseIntake.runs : [];
     const out = {};
     for (const stageKey of ['parser', 'inv', 'triage', 'main']) {
       const liveList = Array.isArray(stageEvents?.[stageKey]) ? stageEvents[stageKey] : [];
@@ -2429,7 +2897,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
       };
     }
     return out;
-  }, [stageEvents, caseIntake]);
+  }, [stageEvents, effectiveCaseIntake]);
   const pipelineRunning = useMemo(() => {
     return Object.values(stageState || {}).some((s) => s?.status === 'running');
   }, [stageState]);
@@ -2753,6 +3221,14 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     closeTransientWorkbenchTabs();
     reset();
     setTestRuns({});
+    // Drop the resumed transcript — "New" means a fresh conversation, even if
+    // the route still points at the old one. The loaded-marker is cleared too
+    // so revisiting the route later can rehydrate again, and the fetch
+    // generation is bumped so an in-flight history fetch can't resolve late
+    // and repopulate the transcript we just cleared.
+    historyFetchGenRef.current += 1;
+    historyConversationIdRef.current = null;
+    setHistoryMessages([]);
   }, [closeTransientWorkbenchTabs, reset]);
 
   const started = isStarted(stageState) || imageCaptured || Object.keys(testRuns).length > 0;
@@ -2792,6 +3268,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           stageState={stageState}
           analyst={analyst}
           chatLog={chatLog}
+          historyMessages={historyMessages}
           onSendOperatorMessage={sendOperatorMessage}
           requestError={requestError}
           testRun={testRuns.main}
@@ -2819,7 +3296,10 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           onClearStageTest={clearStageTest}
           onMarkParserTestResult={markParserTestResult}
           onMarkTriageTestResult={markTriageTestResult}
-          parserThumbnail={!step1Visible && capturedImageSrc ? capturedImageSrc : null}
+          // Live runs keep the original rule (thumb appears once step 1 hands
+          // off, i.e. !step1Visible). A resumed session restores the saved
+          // screenshot with imageCaptured still false — show the thumb then too.
+          parserThumbnail={(!step1Visible || !imageCaptured) && capturedImageSrc ? capturedImageSrc : null}
           onParserThumbnailClick={() => setParserPopupOpen(true)}
         />
       </div>
