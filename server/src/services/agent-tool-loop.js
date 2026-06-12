@@ -30,6 +30,9 @@ async function runAgentToolLoop({
   allowedToolNames = null,
   includeActionParamsInResults = false,
   registerAbort = null,
+  // Optional evidence identity (conversationId/roomId/agentId/...) stamped
+  // onto each captured ProviderCallPackage produced by the loop's chat calls.
+  captureMetadata = null,
 }) {
   const primaryProvider = normalizeProvider(runtimePolicy?.primaryProvider || agent.preferredProvider);
   const policy = resolvePolicy({
@@ -89,6 +92,7 @@ async function runAgentToolLoop({
         autoFailover: policy.autoFailover === true,
         reasoningEffort: runtimePolicy?.reasoningEffort || 'medium',
         serviceTier: runtimePolicy?.serviceTier || '',
+        captureMetadata,
         onThinkingChunk: (thinking, provider) => {
           const chunk = typeof thinking === 'string' ? thinking : '';
           const thinkingProvider = provider || finalProviderUsed || policy.primaryProvider;

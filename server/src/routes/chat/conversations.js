@@ -11,6 +11,7 @@ const {
   getForkTree,
   listConversationStageEvents,
   listConversations,
+  recordConversationTriageResult,
   updateConversation,
 } = require('../../services/chat-conversation-service');
 const { getEventStats } = require('../../services/event-stats-service');
@@ -123,6 +124,19 @@ router.patch('/:id', async (req, res) => {
     return res.json({ ok: true, conversation });
   } catch (err) {
     return sendConversationError(res, err, 'UPDATE_FAILED', 'Failed to update conversation');
+  }
+});
+
+// Standalone Triage Agent result → caseIntake (deferred persist; the client
+// posts after both the triage and analyst legs settle so the chat route's
+// final save cannot clobber it). Closes the gap where the triage harness
+// rebuild left resumed sessions with no saved triage run/card.
+router.post('/:id/triage-result', async (req, res) => {
+  try {
+    const caseIntake = await recordConversationTriageResult(req.params.id, req.body || {});
+    return res.json({ ok: true, caseIntake });
+  } catch (err) {
+    return sendConversationError(res, err, 'TRIAGE_RESULT_FAILED', 'Failed to record triage result');
   }
 });
 

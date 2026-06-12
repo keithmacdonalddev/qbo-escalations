@@ -395,11 +395,11 @@ function buildUsageObject(json, fallbackModel) {
 //                    timeoutMs, onChunk, onDone, onError })
 // Returns:   cleanup()  →  { usage, partialResponse }
 // ---------------------------------------------------------------------------
-function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError }) {
+function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext: callerCaptureContext, onChunk, onDone, onError }) {
   if (isProvidersStubbed()) {
     const stub = getProviderStub('lm-studio', 'chat');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'chat');
-    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, onChunk, onDone, onError });
+    return stub({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext: callerCaptureContext, onChunk, onDone, onError });
   }
   const baseUrl = DEFAULT_API_URL;
   const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
@@ -520,6 +520,11 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
           callSite: 'lm-studio:chat',
           operation: 'chat',
           modelRequested: effectiveModel,
+          // Caller-supplied evidence identity (conversationId/caseNumber/...)
+          // recorded as ProviderCallPackage.metadata.
+          ...(callerCaptureContext?.metadata && typeof callerCaptureContext.metadata === 'object'
+            ? { metadata: callerCaptureContext.metadata }
+            : {}),
           source: {
             file: 'server/src/services/lm-studio.js',
             functionName: 'chat',

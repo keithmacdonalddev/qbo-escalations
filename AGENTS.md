@@ -6,6 +6,21 @@
 
 The user is a self-taught / solo hobbyist developer. Explain clearly, warn about risks, suggest next steps.
 
+### Parallel Sessions And Worktree Awareness
+
+Multiple chat sessions or coding agents may be working in this repository at the same time. Assume the worktree can change while you are working.
+
+Before editing:
+- Check current `git status`.
+- Re-read any file immediately before modifying it.
+- Do not overwrite, revert, or clean up changes you did not make unless the user explicitly asks.
+- If a file has changed unexpectedly, treat it as another session's work and adapt to it.
+- If overlapping edits make the task ambiguous or risky, stop and ask the user before proceeding.
+
+Before reporting:
+- Base factual code-state claims on fresh on-disk checks from the current turn.
+- Mention any relevant concurrent-work risk if it affected the task.
+
 ### Product Framing For Codex
 
 - The current QBO escalation workflow is the first domain module of a broader operational intelligence platform.

@@ -519,7 +519,7 @@ function buildKnowledgeBaseDraftExtractionPrompt(contextBundle) {
     '',
     'Return a raw JSON object only, with these fields:',
     '{',
-    '  "title": "short KB subject",',
+    '  "title": "reusable KB title that follows the Title rules below",',
     '  "category": "QBO area",',
     '  "customerGoal": "formal 1-2 sentence summary of what CS/customer was attempting to do",',
     '  "reportedProblem": "formal 1-3 sentence summary of what went wrong",',
@@ -532,6 +532,11 @@ function buildKnowledgeBaseDraftExtractionPrompt(contextBundle) {
     '  "keySignals": ["retrieval clues for future matching"],',
     '  "summary": "1-2 sentence overview"',
     '}',
+    '',
+    'Title rules:',
+    '- Pattern: symptom + where it appears + product area. Example: "Payroll Tax Center shows negative federal tax balance after overpayment instead of clearing to $0 (QBO Canada Payroll)".',
+    '- Deliberately EXCLUDE case-specific values (dollar amounts, case numbers, COIDs, customer or company names). Other specialists searching future cases with different amounts must still match this title; the case-specific details belong in the evidence fields.',
+    '- One concise sentence or phrase, no trailing period, at most 200 characters.',
     '',
     'Do not invent facts. Do not treat attempted troubleshooting as the final answer.',
   ].join('\n');
@@ -881,6 +886,14 @@ async function answerKnowledgeBaseAgentQuestion(recordId, message) {
     toolHandlers,
     runtimePolicy,
     timeoutMs: 120000,
+    // Evidence identity: the captured ProviderCallPackages for this sidebar
+    // exchange link back to the KB record/candidate being reviewed.
+    captureMetadata: {
+      sourceAgent: KNOWLEDGEBASE_AGENT_ID,
+      recordId: safeString(recordId, ''),
+      candidateId,
+      ...(candidate?.caseNumber ? { caseNumber: safeString(candidate.caseNumber, '') } : {}),
+    },
   });
 
   const appliedChanges = Array.isArray(loopResult.appliedChanges) ? loopResult.appliedChanges : [];

@@ -24,6 +24,7 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
         validation: { passed: true, score: 0.98 },
       },
       elapsedMs: 2400,
+      triageMeta: { providerPackageId: 'pkg-abc123' },
       triageCard: {
         category: 'payroll',
         severity: 'P3',
@@ -59,6 +60,9 @@ test('buildCaseIntakeFromParsedEscalation records parser, triage, and running an
   assert.equal(intake.runs[1].durationMs, 2400);
   assert.equal(intake.runs[1].detail.generation.source, 'agent');
   assert.equal(intake.runs[1].detail.generation.label, 'Agent generated');
+  // Resume path: the intake-time triage run must carry the provider-call
+  // package id so the client can re-enable the reasoning viewer.
+  assert.equal(intake.runs[1].detail.providerPackageId, 'pkg-abc123');
   assert.equal(intake.runs[2].provider, 'gpt-5.5');
   assert.equal(intake.activeRunId, intake.runs[2].id);
 });
@@ -109,6 +113,9 @@ test('buildCaseIntakeFromParsedEscalation records known issue search run when av
   assert.equal(knownIssueRun.durationMs, 850);
   assert.equal(knownIssueRun.detail.matches[0].invNumber, 'INV-151000');
   assert.equal(intake.knownIssueSearchResult.status, 'match');
+  // No triageMeta in this fixture — the package id defaults to empty string.
+  const triageRun = intake.runs.find((run) => run.phase === 'triage');
+  assert.equal(triageRun.detail.providerPackageId, '');
 });
 
 test('completeCaseIntakeAnalystRun closes the active analyst run without losing parse state', () => {

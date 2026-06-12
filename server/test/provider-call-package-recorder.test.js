@@ -24,9 +24,18 @@ test.beforeEach(async () => {
   await ProviderCallPackage.deleteMany({});
 });
 
-test('isProviderCallPackageCaptureEnabled defaults to false', () => {
+test('isProviderCallPackageCaptureEnabled defaults to ON; only an explicit "false" disables it', () => {
+  // Unset → capture enabled (evidence layer is the default).
+  assert.equal(isProviderCallPackageCaptureEnabled(), true);
+  // Explicit opt-out is the only way to disable (case-insensitive).
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
   assert.equal(isProviderCallPackageCaptureEnabled(), false);
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'FALSE';
+  assert.equal(isProviderCallPackageCaptureEnabled(), false);
+  // 'true' and arbitrary values remain enabled.
   process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  assert.equal(isProviderCallPackageCaptureEnabled(), true);
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'anything-else';
   assert.equal(isProviderCallPackageCaptureEnabled(), true);
 });
 
@@ -148,7 +157,8 @@ test('buildHttpProviderCallPackage classifies timeout and aborted outcomes', () 
   assert.equal(abortEnvelope.response.statusCode, 0);
 });
 
-test('recordProviderCallPackage skips when feature flag is disabled', async () => {
+test('recordProviderCallPackage skips when feature flag is explicitly disabled', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
   const envelope = buildHttpProviderCallPackage({
     captureContext: {
       providerId: 'kimi',

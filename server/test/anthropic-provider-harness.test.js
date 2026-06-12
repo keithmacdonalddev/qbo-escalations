@@ -279,8 +279,15 @@ test('parseImage Anthropic direct path extracts only after captured package is r
   process.env.ANTHROPIC_API_KEY = 'sk-ant-parse-test';
 
   await withAnthropicServer((req, res) => {
+    // Thinking-enabled responses lead with a thinking block before the text block;
+    // extraction must skip it and read the text-typed block(s).
+    const response = anthropicResponse();
+    response.content = [
+      { type: 'thinking', thinking: 'Readable reasoning summary.' },
+      ...response.content,
+    ];
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(anthropicResponse()));
+    res.end(JSON.stringify(response));
   }, async () => {
     const result = await parseImage(STARTER_IMAGE, {
       provider: 'anthropic',
@@ -293,7 +300,7 @@ test('parseImage Anthropic direct path extracts only after captured package is r
     assert.equal(result.usage.outputTokens, 17);
     assert.equal(result.providerTrace.outcome, 'success');
     assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
-    assert.equal(result.providerTrace.providerPayload.sourcePath, 'response.parsedJson.content[0].text');
+    assert.equal(result.providerTrace.providerPayload.sourcePath, 'response.parsedJson.content[type=text].text');
 
     const saved = await ProviderCallPackage.findById(result.providerTrace.providerPackageId).lean();
     assert.ok(saved, 'provider package must be readable before parseImage extracts provider content');

@@ -21,6 +21,8 @@ Do not start, stop, or restart servers, dev processes, browsers, or watchers unl
 For risky or cross-cutting work, have the lead trace the pipeline end-to-end before changing it.
 Follow the user's requested method exactly; if it conflicts with a constraint, explain before substituting.
 Write or run tests proportional to risk; avoid over-testing.
+When finished, always commit and push your completed changes unless the user explicitly says not to.
+After completing a substantive task, consider whether there is one unique feature idea that would improve this broader operational-intelligence platform. Search FEATURES.md first, do not repeat existing ideas or add slight variations. If your first idea is already covered, you must come up with a different meaningfully distinct idea instead of claiming duplicate and stopping. Aim for premium, high-leverage product features: capabilities a serious expert-agent platform would charge for because they improve judgment, coordination, evidence quality, governance, automation safety, or decision speed. Avoid thin UI conveniences, renamed existing features, generic dashboards, and implementation chores. Show the idea to the user in chat, then append it to the bottom of FEATURES.md only if it is relevant and useful. When appending, use the exact "New Suggestion Template" format from FEATURES.md. If you append a feature to FEATURES.md, the last thing in your final chat response must be: "Special Feature: concise feature name and 2-3 sentence description".
 If required subagents or tools are unavailable, say you are blocked rather than silently breaking policy.
 
 EOF

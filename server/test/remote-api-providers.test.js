@@ -198,12 +198,43 @@ test('Anthropic request builder sends system separately and parses usage', async
   assert.equal(captured.captureContext.providerResearchId, 'anthropic-api');
   assert.equal(captured.captureContext.providerPathType, 'direct-http');
   assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestAnthropicChat');
+  // Default model is not adaptive-thinking capable — the thinking param must be omitted.
+  assert.equal(captured.body.thinking, undefined);
   assert.equal(result.text, 'Here is the answer.');
   assert.deepStrictEqual(result.usage, {
     model: 'claude-sonnet-4-20250514',
     inputTokens: 21,
     outputTokens: 9,
   });
+
+  // Adaptive-thinking-capable models opt into readable reasoning summaries.
+  let capturedFable = null;
+  const fableRequest = requestAnthropicChat({
+    messages: [{ role: 'user', content: 'Question' }],
+    model: 'claude-fable-5',
+    getApiKeyFn: async () => 'sk-ant-test',
+    requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
+      capturedFable = { body };
+      return {
+        promise: Promise.resolve({
+          statusCode: 200,
+          body: JSON.stringify({
+            model: 'claude-fable-5',
+            content: [
+              { type: 'thinking', thinking: 'Readable summary.' },
+              { type: 'text', text: 'Fable answer.' },
+            ],
+            usage: { input_tokens: 5, output_tokens: 3 },
+          }),
+        }),
+        cancel: () => true,
+      };
+    },
+  });
+  const fableResult = await fableRequest.promise;
+  assert.deepStrictEqual(capturedFable.body.thinking, { type: 'adaptive', display: 'summarized' });
+  // Text extraction must ignore the leading thinking block.
+  assert.equal(fableResult.text, 'Fable answer.');
 });
 
 test('Gemini request builder uses native generateContent payload and parses usage', async () => {

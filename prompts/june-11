@@ -1,0 +1,11 @@
+
+# Verbosity and technical speak
+I often have to ask for clarification and what things mean due to cognitive overload and excessive tech jargon.
+While i understand some coding principles, consider my knowledge a self taught programmer with no real world experience. Self teaching on weekends for the past year or so. more than half of the tech jargon used needs
+clarification. this slows down workflows. be concious when to use verbose framing and when to be very concise.
+While i like to know whats going on, cognitive overload dramatically slows workflows.
+
+# Parallel Sessions
+There is a good chance that multiple different chat sessions and multiple agents are working in the codebase
+at the same time. While all effort is made to separate work scope, there can be overlap. Be aware and ask the user
+if in doubt.

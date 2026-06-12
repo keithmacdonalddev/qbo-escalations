@@ -419,6 +419,58 @@ function parseEnrichmentResponse(text) {
   return null;
 }
 
+// Sanity ceiling for stored KB titles, mirroring inferDraftTitle's
+// word-boundary cap in services/knowledgebase-agent-service.js: titles are
+// short sentences and should read complete, so when the cap applies we cut at
+// the last word break with no ellipsis.
+const KNOWLEDGE_TITLE_MAX_CHARS = 200;
+
+// Wrapping pairs the model sometimes decorates a title with despite the
+// raw-JSON instruction (markdown emphasis, quotes, backticks). Only matched
+// open/close pairs are stripped, so a legitimate trailing apostrophe or an
+// asterisk inside the sentence is left alone.
+const TITLE_WRAP_PAIRS = [
+  ['**', '**'],
+  ['__', '__'],
+  ['*', '*'],
+  ['_', '_'],
+  ['`', '`'],
+  ['"', '"'],
+  ["'", "'"],
+  ['“', '”'],
+  ['‘', '’'],
+];
+
+// Normalize the model-written KB title from the extraction response. The
+// extraction prompt (buildKnowledgeBaseDraftExtractionPrompt) instructs the
+// model to return one concise sentence, no trailing period, max 200 chars;
+// this defends the stored value when it does not comply: collapse whitespace,
+// strip wrapping quotes/markdown, drop trailing periods, and cap at the word
+// boundary. Returns '' when the result is too trivial to be a reusable title,
+// so callers keep the deterministic fallback (inferDraftTitle string-slice).
+function normalizeEnrichedTitle(value) {
+  let title = safeString(value, '').replace(/\s+/g, ' ').trim();
+  let stripped = true;
+  while (stripped) {
+    stripped = false;
+    for (const [open, close] of TITLE_WRAP_PAIRS) {
+      if (title.length > open.length + close.length && title.startsWith(open) && title.endsWith(close)) {
+        title = title.slice(open.length, title.length - close.length).trim();
+        stripped = true;
+      }
+    }
+  }
+  title = title.replace(/[.\s]+$/, '').trim();
+  if (title.length > KNOWLEDGE_TITLE_MAX_CHARS) {
+    const cut = title.slice(0, KNOWLEDGE_TITLE_MAX_CHARS);
+    const lastSpace = cut.lastIndexOf(' ');
+    title = (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).replace(/[.\s]+$/, '').trim();
+  }
+  // Too short to be a searchable symptom+location+area title — treat as omitted.
+  if (title.length < 8) return '';
+  return title;
+}
+
 function validateEnrichmentFields(obj) {
   const result = {};
   const stringFields = [
@@ -441,7 +493,13 @@ function validateEnrichmentFields(obj) {
 
   for (const field of stringFields) {
     if (typeof obj[field] === 'string' && obj[field].trim()) {
-      result[field] = obj[field].trim();
+      // The title is model-authored prose destined for search/matching, so it
+      // gets the dedicated normalizer (cap, quote/markdown stripping, trailing
+      // period). A title that normalizes to empty is treated as omitted and
+      // the deterministic fallback title survives.
+      const cleaned = field === 'title' ? normalizeEnrichedTitle(obj[field]) : obj[field].trim();
+      if (!cleaned) continue;
+      result[field] = cleaned;
       hasContent = true;
     }
   }
@@ -1160,8 +1218,22 @@ async function createKnowledgeDraftForEscalation(escalation, {
           reasoningEffort: aiResult.reasoningEffort || '',
           providerCallPackageId: aiResult.providerPackageId || '',
         };
-        if (aiFields.title && (!draftData.title || draftData.title === 'Reviewed case learning')) {
-          draftData.title = aiFields.title;
+        if (aiFields.title) {
+          // The model authors the reusable KB title under the title-quality
+          // rules in buildKnowledgeBaseDraftExtractionPrompt; the deterministic
+          // draftData.title is only a verbatim string-slice of the case text
+          // (inferDraftTitle), so the model's title supersedes it. Exception:
+          // when force-regenerating an existing draft whose title a human
+          // reviewer or the KB agent has edited — proven by 'record.update'
+          // audit events, the same provenance mechanism the resolution refresh
+          // uses — the editor-owned title is never overwritten. At the audit
+          // cap the proof no longer holds, so the title is conservatively
+          // treated as editor-owned.
+          const provenance = existing ? collectEditorTouchedKnowledgeFields(existing) : null;
+          const editorOwnsTitle = Boolean(
+            provenance && (provenance.capReached || provenance.touched.has('title'))
+          );
+          if (!editorOwnsTitle) draftData.title = aiFields.title;
         }
         // Adopt the agent's category only when the case has none of its own
         // (the deterministic draft seeded 'unknown'/empty). Normalize to a lower

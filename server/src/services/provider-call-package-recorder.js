@@ -15,8 +15,28 @@ const GEMINI_API_CAPTURE_VERSION = 'provider-harness-gemini-api-v0.1';
 const SCHEMA_VERSION = '0.1';
 const inFlightBackgroundRecords = new Set();
 
+// Evidence capture is ON by default: every provider call records its full
+// request/response as a ProviderCallPackage. Set
+// ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=false to explicitly disable; any other
+// value (including unset) leaves capture enabled, so a lost env line can no
+// longer silently kill the evidence layer.
 function isProviderCallPackageCaptureEnabled() {
-  return String(process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE || '').toLowerCase() === 'true';
+  return String(process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE || '').toLowerCase() !== 'false';
+}
+
+// Probe packages — the background provider health monitor and per-request
+// preflight reachability checks (operation 'provider-status', stamped by
+// buildProviderStatusCaptureContext in image-parser.js) — are ~98% of capture
+// volume but carry almost no forensic value once the moment passes. They are
+// still captured (the evidence layer stays complete), but with a short
+// retention instead of the model's default PROVIDER_CALL_PACKAGE_TTL_DAYS.
+// Parsed per call so env changes (and tests) take effect without a restart.
+const PROBE_OPERATION = 'provider-status';
+const DEFAULT_PROBE_TTL_HOURS = 24;
+
+function resolveProbeTtlHours() {
+  const env = Number.parseFloat(process.env.PROVIDER_PACKAGE_PROBE_TTL_HOURS);
+  return Number.isFinite(env) && env > 0 ? env : DEFAULT_PROBE_TTL_HOURS;
 }
 
 function nowIso() {
@@ -1199,6 +1219,13 @@ async function recordProviderCallPackage(envelope, options = {}) {
       fields: options.fields,
       kindByField: options.kindByField,
     });
+
+    // Short-retention stamp for probe packages: override the schema's default
+    // expiresAt (long forensic retention) so health-probe noise self-cleans
+    // via the existing TTL index on expiresAt.
+    if ((prepared.operation || envelope?.operation) === PROBE_OPERATION) {
+      prepared.expiresAt = new Date(Date.now() + resolveProbeTtlHours() * 60 * 60 * 1000);
+    }
 
     const doc = await ProviderCallPackage.create(prepared);
     return { ok: true, id: String(doc._id) };

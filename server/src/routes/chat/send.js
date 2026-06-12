@@ -212,6 +212,20 @@ async function buildMainChatSystemPrompt(basePrompt, enableTools) {
   ].filter(Boolean).join('\n\n');
 }
 
+// Evidence identity for the main-chat ProviderCallPackages: which conversation
+// (and, when parsed, which case/escalation) this provider call belongs to.
+// Without this stamp, chat packages are only matchable to conversations by
+// timestamp.
+function buildConversationCaptureMetadata(conversation) {
+  const caseNumber = safeString(conversation?.caseIntake?.parseFields?.caseNumber, '').trim();
+  return {
+    agentId: CHAT_ACTIVITY_AGENT_ID,
+    conversationId: conversation?._id ? conversation._id.toString() : '',
+    ...(caseNumber ? { caseNumber } : {}),
+    ...(conversation?.escalationId ? { escalationId: String(conversation.escalationId) } : {}),
+  };
+}
+
 function startMainChatExecution({
   useAgentTools,
   policy,
@@ -219,6 +233,9 @@ function startMainChatExecution({
   systemPrompt,
   reasoningEffort,
   timeoutMs,
+  // Evidence identity (conversationId/caseNumber/...) stamped onto every
+  // captured ProviderCallPackage this turn produces, on both execution paths.
+  captureMetadata = null,
   onChunk,
   onThinkingChunk,
   onProviderError,
@@ -241,6 +258,7 @@ function startMainChatExecution({
       images: [],
       reasoningEffort,
       timeoutMs,
+      captureMetadata,
       onChunk,
       onThinkingChunk,
       onProviderError,
@@ -273,6 +291,7 @@ function startMainChatExecution({
       systemPrompt,
       messagesForModel: messages,
       timeoutMs,
+      captureMetadata,
       runtimePolicy: {
         mode: policy.mode,
         primaryProvider: policy.primaryProvider,
@@ -1015,6 +1034,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
+    captureMetadata: buildConversationCaptureMetadata(conversation),
     onChunk: ({ provider: chunkProvider, text }) => {
       recordAiChunk(runtimeOperationId, text, { provider: chunkProvider });
       traceStats.chunkCount += 1;
@@ -2335,6 +2355,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
+    captureMetadata: buildConversationCaptureMetadata(conversation),
     onChunk: ({ provider: chunkProvider, text }) => {
       recordAiChunk(retryRuntimeOperationId, text, { provider: chunkProvider });
       traceStats.chunkCount += 1;

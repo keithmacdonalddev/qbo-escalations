@@ -77,6 +77,32 @@ test('provider package reasoning route suite', async (t) => {
     assert.deepEqual(res.body.reasoning, [{ text: 'partial thought, completed' }]);
   });
 
+  await t.test('extracts anthropic HTTP thinking blocks from response.parsedJson', async () => {
+    const pkg = await ProviderCallPackage.create({
+      providerId: 'anthropic',
+      providerPathType: 'direct-http',
+      callSite: 'image-parser:callAnthropic',
+      operation: 'image-parse',
+      outcome: 'success',
+      request: { modelRequested: 'claude-fable-5' },
+      response: {
+        parsedJson: {
+          content: [
+            { type: 'thinking', thinking: 'Readable reasoning summary.' },
+            { type: 'text', text: 'visible answer' },
+          ],
+        },
+      },
+    });
+
+    const res = await request(app).get(`/api/provider-packages/${pkg._id}/reasoning`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.provider, 'anthropic');
+    assert.equal(res.body.model, 'claude-fable-5');
+    assert.deepEqual(res.body.reasoning, [{ text: 'Readable reasoning summary.' }]);
+  });
+
   await t.test('returns an honest empty result when nothing was captured', async () => {
     const pkg = await ProviderCallPackage.create({
       providerId: 'lm-studio',

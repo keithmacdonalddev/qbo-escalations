@@ -2,3 +2,11 @@ model_reasoning_summary = "detailed"
 hide_agent_reasoning = false
 show_raw_agent_reasoning = false
 model_verbosity = "medium"
+
+[[hooks.UserPromptSubmit]]
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "powershell -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/pm-rules.ps1"
+timeout = 5
+statusMessage = "Codex PM rules loaded"

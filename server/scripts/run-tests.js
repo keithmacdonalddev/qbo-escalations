@@ -46,7 +46,17 @@ function runTestFile(relativePath) {
     const args = ['--test', '--test-isolation=none', relativePath];
     const child = spawn(process.execPath, args, {
       cwd: rootDir,
-      env: { ...process.env, NODE_ENV: process.env.NODE_ENV || 'test' },
+      env: {
+        ...process.env,
+        NODE_ENV: process.env.NODE_ENV || 'test',
+        // Provider-call-package capture defaults to ON in production. Tests
+        // must opt in per-file (most set the flag to 'true' themselves), so
+        // the suite baseline is capture-off to avoid background package
+        // writes from every chat/parse-path test. Tests asserting the
+        // production default delete the variable inside the test.
+        ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE:
+          process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE ?? 'false',
+      },
       detached: process.platform !== 'win32',
       stdio: verbose ? 'inherit' : ['ignore', 'pipe', 'pipe'],
       windowsHide: true,

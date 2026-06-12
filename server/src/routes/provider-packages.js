@@ -20,8 +20,11 @@
 //   type 'thinking', plus stream_event-wrapped content_block_delta events
 //   with delta.type 'thinking_delta'. Mirrors extractThinking() in
 //   services/claude.js.
-// - Other providers (HTTP harnesses have no cli.stdout): honest empty
-//   result — { ok: true, reasoning: [] }.
+// - Direct Anthropic API (HTTP harness): thinking blocks stored verbatim in
+//   response.parsedJson.content (type 'thinking') when the request opted into
+//   readable summaries via thinking: {type:'adaptive', display:'summarized'}.
+// - Other providers (no cli.stdout, no Anthropic-shaped response): honest
+//   empty result — { ok: true, reasoning: [] }.
 
 const express = require('express');
 const fs = require('fs/promises');
@@ -200,6 +203,20 @@ async function loadJsonlEvents(pkg) {
   }
 }
 
+/**
+ * Extract reasoning from an HTTP-harness package whose stored response is an
+ * Anthropic /v1/messages body — thinking blocks precede the text block(s).
+ */
+function extractHttpReasoningBlocks(pkg) {
+  const content = pkg && pkg.response && pkg.response.parsedJson && Array.isArray(pkg.response.parsedJson.content)
+    ? pkg.response.parsedJson.content
+    : null;
+  if (!content) return [];
+  return content
+    .filter((block) => block && block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim())
+    .map((block) => block.thinking.trim());
+}
+
 function capBlocks(blocks) {
   const capped = [];
   let total = 0;
@@ -232,7 +249,7 @@ router.get('/:id/reasoning', async (req, res) => {
   }
 
   const pkg = await ProviderCallPackage.findById(req.params.id)
-    .select('providerId cli.modelRequested cli.stdout.jsonlEvents cli.stdout.jsonlEventsPayloadRef')
+    .select('providerId cli.modelRequested cli.stdout.jsonlEvents cli.stdout.jsonlEventsPayloadRef request.modelRequested response.parsedJson')
     .lean();
   if (!pkg) {
     return res.status(404).json({
@@ -243,12 +260,16 @@ router.get('/:id/reasoning', async (req, res) => {
   }
 
   const events = await loadJsonlEvents(pkg);
-  const { capped, truncated } = capBlocks(extractReasoningBlocks(events));
+  let blocks = extractReasoningBlocks(events);
+  if (blocks.length === 0) {
+    blocks = extractHttpReasoningBlocks(pkg);
+  }
+  const { capped, truncated } = capBlocks(blocks);
 
   res.json({
     ok: true,
     provider: pkg.providerId || '',
-    model: (pkg.cli && pkg.cli.modelRequested) || '',
+    model: (pkg.cli && pkg.cli.modelRequested) || (pkg.request && pkg.request.modelRequested) || '',
     reasoning: capped.map((text) => ({ text })),
     truncated,
   });

@@ -391,6 +391,11 @@ async function runRouterAgent(userMessage, availableAgents, room, { activeCleanu
       primaryProvider: routerDef.preferredProvider,
       messages: [{ role: 'user', content: prompt }],
       systemPrompt: 'You are a routing classifier. Return only valid JSON.',
+      // Evidence identity: link the captured ProviderCallPackage to this room.
+      captureMetadata: {
+        roomId: room?._id ? String(room._id) : '',
+        agentId: '__router',
+      },
       onChunk: ({ text }) => { fullResponse += text; },
       onDone: (data) => {
         // If cancelled during execution, reject early
@@ -1042,6 +1047,12 @@ function startRoomOrchestration({
           systemPrompt: contextResult.systemPrompt,
           messagesForModel: contextResult.messagesForModel,
           runtimePolicy,
+          // Evidence identity: link captured ProviderCallPackages to this
+          // room + responding agent.
+          captureMetadata: {
+            roomId: room?._id ? String(room._id) : '',
+            agentId: agent.id,
+          },
           onActions: (data) => {
             if (cancelled) return;
             onActions?.({ agentId: agent.id, ...data });
@@ -1112,6 +1123,12 @@ function startRoomOrchestration({
           images: [],
           reasoningEffort: runtimePolicy.reasoningEffort || DEFAULT_CHAT_RUNTIME_SETTINGS.providerStrategy.reasoningEffort,
           serviceTier: runtimePolicy.serviceTier || '',
+          // Evidence identity: link the captured ProviderCallPackage to this
+          // room + responding agent.
+          captureMetadata: {
+            roomId: room?._id ? String(room._id) : '',
+            agentId: agent.id,
+          },
           onChunk: ({ provider, text }) => {
             if (cancelled || settled) return;
             fullResponse += text;

@@ -39,6 +39,7 @@ const {
 const ImageParserApiKey = require('../models/ImageParserApiKey');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
+const { buildAnthropicThinkingParam } = require('../lib/anthropic-thinking');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
 const {
@@ -1452,6 +1453,8 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
     model: effectiveModel,
     max_tokens: 4096,
     system: systemPrompt,
+    // Readable reasoning summaries on supported Claude models; omitted for others.
+    ...buildAnthropicThinkingParam(effectiveModel),
     messages: [{
       role: 'user',
       content: [
@@ -2730,10 +2733,16 @@ async function buildAnthropicImageParserResultFromProviderPackage(providerTrace,
   }
 
   const parsed = await loadAnthropicParsedJsonFromPackage(providerPackage);
-  const text = (typeof parsed?.content?.[0]?.text === 'string' ? parsed.content[0].text : '').trim();
+  // With thinking enabled, content starts with a "thinking" block before the "text" block —
+  // join the text-typed blocks instead of assuming content[0] is text.
+  const text = (Array.isArray(parsed?.content) ? parsed.content : [])
+    .map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+    .filter(Boolean)
+    .join('\n')
+    .trim();
   const usage = buildUsageFromAnthropicJson(parsed, providerTrace?.model || model);
   const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
-  const sourcePath = 'response.parsedJson.content[0].text';
+  const sourcePath = 'response.parsedJson.content[type=text].text';
 
   eventBus?.emit('parser.provider_payload_selected', {
     providerPackageId,
@@ -3131,6 +3140,15 @@ async function parseImage(imageBase64, options = {}) {
     if (!canFailOver) {
       throw primaryErr;
     }
+
+    // The primary model was validated at parseImage entry, but the backup model
+    // (request-supplied options.fallbackModel or a profile-resolved backup) has
+    // not been. Apply the SAME allowlist before the backup attempt — for a
+    // Claude-CLI backup this string reaches `--model` in a shell:true spawn, so
+    // skipping it here would be an injection bypass of the entry guard. Lazily
+    // required to avoid load-time coupling, matching the entry-guard require.
+    // eslint-disable-next-line global-require
+    require('./chat-orchestrator').assertModelAllowed(backupModel, 'fallbackModel');
 
     eventBus?.emit('parser.provider_failover', {
       from: provider,

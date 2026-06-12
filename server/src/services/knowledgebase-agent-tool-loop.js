@@ -47,6 +47,9 @@ async function runKnowledgeBaseAgentToolLoop({
   toolHandlers,
   runtimePolicy = null,
   timeoutMs = KB_TOOL_LOOP_TIMEOUT_MS,
+  // Optional evidence identity (candidateId/recordId/caseNumber/...) stamped
+  // onto each captured ProviderCallPackage produced by the loop's chat calls.
+  captureMetadata = null,
 }) {
   const handlers = toolHandlers && typeof toolHandlers === 'object' ? toolHandlers : {};
   const policy = runtimePolicy || {};
@@ -79,6 +82,7 @@ async function runKnowledgeBaseAgentToolLoop({
       autoFailover: policy.autoFailover !== false,
       reasoningEffort: policy.reasoningEffort || 'medium',
       serviceTier: policy.serviceTier || '',
+      captureMetadata,
     });
 
     const result = await collectedChat.promise;

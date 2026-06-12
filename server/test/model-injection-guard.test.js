@@ -19,6 +19,7 @@ const {
 } = require('../src/services/chat-orchestrator');
 const claude = require('../src/services/claude');
 const codex = require('../src/services/codex');
+const { sendClaudeCliPrompt } = require('../src/services/providers/claude-cli-provider-harness');
 
 const MALICIOUS_MODELS = [
   'sonnet & calc',
@@ -187,5 +188,24 @@ test('model injection guard', async (t) => {
         return true;
       }
     );
+  });
+
+  // Spawn-site defense-in-depth (2026-06-10 audit S1): unlike claude.js/codex.js,
+  // the Claude CLI provider HARNESS had no model guard, so any caller that
+  // skipped upstream validation (e.g. the old image-parser failover branch
+  // passing options.fallbackModel) reached `--model <model>` in a shell:true
+  // spawn. The harness must now refuse a malicious model itself, before args
+  // are built, so no future caller can regress this.
+  await t.test('claude-cli-provider-harness refuses a malicious model before spawning', async () => {
+    for (const model of ['sonnet & calc', 'model`whoami`', 'model$(whoami)']) {
+      await assert.rejects(
+        () => sendClaudeCliPrompt({ userPrompt: 'hi', model }),
+        (err) => {
+          assert.equal(err.code, 'INVALID_MODEL');
+          return true;
+        },
+        `expected sendClaudeCliPrompt to reject ${JSON.stringify(model)}`
+      );
+    }
   });
 });

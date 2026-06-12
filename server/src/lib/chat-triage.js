@@ -475,6 +475,55 @@ function splitMissingInfo(value) {
     .slice(0, 6);
 }
 
+// A line that is only a code-fence marker (optionally with a language tag),
+// e.g. "```" or "```text" — produced when the model wraps its answer in a fence.
+const TRIAGE_FENCE_LINE_PATTERN = /^\s*`{3,}[A-Za-z0-9-]*\s*$/;
+
+// Plain labeled line: "Severity: P2".
+const TRIAGE_LABEL_LINE_PATTERN = /^([A-Za-z][A-Za-z\s/-]{1,40}):\s*(.*)$/;
+
+// Emphasis-wrapped label with the colon inside or outside the closing marks:
+// "**Severity:** P2", "**Severity**: P2", "__Severity:__ P2", "*Severity:* P2".
+const TRIAGE_EMPHASIZED_LABEL_PATTERN = /^(\*\*|__|\*|_)([A-Za-z][A-Za-z\s/-]{1,40})(?::\1|\1:)\s*(.*)$/;
+
+// Strips leading markdown decoration (blockquote, heading, list marker) so a
+// formatted label line can still be recognized. Bullet markers must be followed
+// by whitespace, so "**Severity:**" is never mistaken for a "*" bullet.
+function stripLeadingLineDecoration(line) {
+  return safeString(line, '')
+    .replace(/^\s*(?:>\s*)+/, '')
+    .replace(/^\s*#{1,6}\s+/, '')
+    .replace(/^\s*[-*•]\s+/, '');
+}
+
+// Removes bold/italic marks only when they wrap the ENTIRE value ("**P2**" ->
+// "P2"). Inner emphasis ("fix **this** first") is legitimate content and is
+// left untouched, as is any value where the wrapping marker recurs inside.
+function stripWrappingEmphasis(value) {
+  const text = safeString(value, '').trim();
+  const match = text.match(/^(\*{1,2}|_{1,2})([\s\S]+?)\1$/);
+  if (match && !match[2].includes(match[1])) return match[2].trim();
+  return text;
+}
+
+// Extracts { label, value } from a possibly markdown-decorated line, or null.
+// Tolerance never invents matches: the caller still requires the normalized
+// label to be a known fieldMap entry before treating the line as a field.
+function extractTriageLabeledLine(line) {
+  const stripped = stripLeadingLineDecoration(line);
+  const emphasized = stripped.match(TRIAGE_EMPHASIZED_LABEL_PATTERN);
+  if (emphasized) return { label: emphasized[2], value: emphasized[3] };
+  const plain = stripped.match(TRIAGE_LABEL_LINE_PATTERN);
+  if (plain) return { label: plain[1], value: plain[2] };
+  // Whole line wrapped in emphasis, value included: "**Severity: P2**".
+  const unwrapped = stripWrappingEmphasis(stripped);
+  if (unwrapped !== stripped) {
+    const wrappedPlain = unwrapped.match(TRIAGE_LABEL_LINE_PATTERN);
+    if (wrappedPlain) return { label: wrappedPlain[1], value: wrappedPlain[2] };
+  }
+  return null;
+}
+
 function parseLabeledTriageOutput(output) {
   const text = safeString(output, '').trim();
   if (!text) return {};
@@ -506,13 +555,14 @@ function parseLabeledTriageOutput(output) {
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trimEnd();
-    const match = line.match(/^([A-Za-z][A-Za-z\s/-]{1,40}):\s*(.*)$/);
-    if (match) {
-      const label = match[1].trim().toLowerCase().replace(/\s+/g, ' ');
+    if (TRIAGE_FENCE_LINE_PATTERN.test(line)) continue;
+    const labeled = extractTriageLabeledLine(line);
+    if (labeled) {
+      const label = labeled.label.trim().toLowerCase().replace(/\s+/g, ' ');
       const key = fieldMap[label];
       if (key) {
         activeKey = key;
-        result[key] = match[2].trim();
+        result[key] = stripWrappingEmphasis(labeled.value);
         continue;
       }
     }

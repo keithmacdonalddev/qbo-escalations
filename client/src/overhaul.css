@@ -6278,8 +6278,10 @@ body {
   animation: playbook-spin 0.75s linear infinite !important;
 }
 
+/* No `!important` here: CSS drops !important declarations inside @keyframes,
+   which left this frame empty and every `.spinner` in the app frozen. */
 @keyframes playbook-spin {
-  to { transform: rotate(360deg) !important; }
+  to { transform: rotate(360deg); }
 }
 
 

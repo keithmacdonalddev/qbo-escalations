@@ -429,7 +429,10 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
   assertSafeModel(model);
   const prompt = buildPrompt(messages);
   const tempFiles = [];
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  // --thinking-display is an undocumented/hidden flag in Claude CLI 2.1.173 (absent from --help but
+  // registered). It opts thinking blocks into readable summaries; without it fable-5/opus-4.7+ stream
+  // empty thinking text. If thinking goes empty after a CLI upgrade, suspect this flag first.
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--thinking-display', 'summarized'];
   const effectiveTimeoutMs = parsePositiveInt(timeoutMs, CHAT_TIMEOUT_MS);
   if (model) args.push('--model', model);
   const normalizedEffort = normalizeClaudeEffort(reasoningEffort);
@@ -836,7 +839,32 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         if (effortOverride) tArgs.push('--effort', effortOverride);
         addCompatibilityImageAccessArgs(tArgs, [tmpPath]);
 
+        const stdinPromptA = appendImagePathsToPrompt(transcribePrompt, [tmpPath]);
+        const parseModelRequested = modelOverride || process.env.CLAUDE_PARSE_MODEL || '';
+
         let child;
+        const cliCapture = createClaudeCliCapture({
+          captureContext: buildClaudeCliCaptureContext({
+            callSite: 'claude:parseEscalation',
+            operation: 'parse-escalation',
+            modelRequested: parseModelRequested,
+            reasoningEffort: effortOverride || '',
+            ...(options.captureContext || {}),
+            source: {
+              functionName: 'parseEscalation',
+              spawnSite: 'claude.parseEscalation.transcribe',
+              ...(options.captureContext?.source || {}),
+            },
+          }),
+          args: tArgs,
+          getChild: () => child,
+          getStdinText: () => stdinPromptA,
+          timeoutMs: transcribeTimeoutMs,
+          modelRequested: parseModelRequested,
+          reasoningEffort: effortOverride || '',
+          expectsJsonl: false,
+        });
+
         try {
           child = spawn('claude', tArgs, {
             stdio: ['pipe', 'pipe', 'pipe'],
@@ -844,6 +872,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
             ...buildClaudeSpawnOptions(),
           });
         } catch (err) {
+          cliCapture.queueCliCapture({ outcome: 'spawn_error', spawned: false, error: err });
           reportServerError({
             message: `CLI spawn error (transcribe): ${err.message}`,
             detail: 'Failed to start Claude CLI subprocess for image transcription.',
@@ -854,8 +883,10 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           return reject(err);
         }
 
-        const stdinPromptA = appendImagePathsToPrompt(transcribePrompt, [tmpPath]);
-        try { child.stdin.end(stdinPromptA); } catch { /* ignore */ }
+        try {
+          child.stdin.end(stdinPromptA);
+          cliCapture.markStdinWritten();
+        } catch { /* ignore */ }
 
         let stdout = '';
         let stderr = '';
@@ -865,18 +896,55 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           try { child.kill('SIGTERM'); } catch { /* ignore */ }
           const timeoutErr = new Error('Claude CLI transcription timed out after ' + transcribeTimeoutMs + 'ms');
           timeoutErr.code = 'TIMEOUT';
+          cliCapture.deferCliCaptureUntilClose({
+            outcome: 'timeout',
+            timeoutFired: true,
+            killed: true,
+            killSignal: 'SIGTERM',
+            error: timeoutErr,
+          });
           reject(timeoutErr);
         }, transcribeTimeoutMs);
 
-        child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
-        child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+        child.stdout.on('data', (d) => {
+          if (settled) return;
+          const chunkText = d.toString();
+          cliCapture.recordStdoutChunk(chunkText);
+          stdout += chunkText;
+        });
+        child.stderr.on('data', (d) => {
+          if (settled) return;
+          const chunkText = d.toString();
+          cliCapture.recordStderrChunk(chunkText);
+          if (stderr.length < 10240) stderr += chunkText;
+        });
 
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
           clearTimeout(timeout);
+          cliCapture.markClosed();
+          const processClosedAt = nowIso();
+          const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+          if (pendingCaptureMeta) {
+            cliCapture.queueCliCapture({
+              ...pendingCaptureMeta,
+              exitCode: code,
+              signal: signal || null,
+              closed: true,
+              processClosedAt,
+            });
+          }
           if (settled) return;
           settled = true;
           if (code !== 0 && !stdout) {
             const cliErr = new Error(formatCliFailure(code, stderr));
+            cliCapture.queueCliCapture({
+              outcome: 'process_error',
+              exitCode: code,
+              signal: signal || null,
+              closed: true,
+              processClosedAt,
+              error: cliErr,
+            });
             reportServerError({
               message: `CLI transcribe failed: exit code ${code}`,
               detail: `stderr: ${(stderr || '').slice(0, 500)}`,
@@ -885,6 +953,13 @@ async function parseEscalation(imageBase64OrText, options = {}) {
             });
             return reject(cliErr);
           }
+          cliCapture.queueCliCapture({
+            outcome: didCliExitSuccessfully(code) ? 'success' : 'process_error',
+            exitCode: code,
+            signal: signal || null,
+            closed: true,
+            processClosedAt,
+          });
           // Try to extract usage from text output (may be wrapped in JSON)
           let usage = null;
           try {
@@ -902,6 +977,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           clearTimeout(timeout);
           if (settled) return;
           settled = true;
+          cliCapture.deferCliCaptureUntilClose({
+            outcome: isClaudeSpawnFailure(err) ? 'spawn_error' : 'process_error',
+            spawned: !isClaudeSpawnFailure(err),
+            error: err,
+          });
           reportServerError({
             message: `CLI spawn error (transcribe): ${err.message}`,
             detail: 'Claude CLI process emitted an error event during transcription.',
@@ -935,6 +1015,28 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     return new Promise((resolve, reject) => {
       let settled = false;
       let child;
+      const parseModelRequested = modelOverride || process.env.CLAUDE_PARSE_MODEL || '';
+      const cliCapture = createClaudeCliCapture({
+        captureContext: buildClaudeCliCaptureContext({
+          callSite: 'claude:parseEscalation',
+          operation: 'parse-escalation',
+          modelRequested: parseModelRequested,
+          reasoningEffort: effortOverride || '',
+          ...(options.captureContext || {}),
+          source: {
+            functionName: 'parseEscalation',
+            spawnSite: 'claude.parseEscalation.parse',
+            ...(options.captureContext?.source || {}),
+          },
+        }),
+        args: parseArgs,
+        getChild: () => child,
+        getStdinText: () => parsePrompt,
+        timeoutMs: parseTimeoutMs,
+        modelRequested: parseModelRequested,
+        reasoningEffort: effortOverride || '',
+        expectsJsonl: false,
+      });
       try {
         child = spawn('claude', parseArgs, {
           stdio: ['pipe', 'pipe', 'pipe'],
@@ -942,6 +1044,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           ...buildClaudeSpawnOptions(),
         });
       } catch (err) {
+        cliCapture.queueCliCapture({ outcome: 'spawn_error', spawned: false, error: err });
         reportServerError({
           message: `CLI spawn error (parse step B): ${err.message}`,
           detail: 'Failed to start Claude CLI subprocess for parseEscalation step B.',
@@ -952,7 +1055,10 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         err._usage = stepAUsage || null;
         return reject(err);
       }
-      try { child.stdin.end(parsePrompt); } catch { /* ignore */ }
+      try {
+        child.stdin.end(parsePrompt);
+        cliCapture.markStdinWritten();
+      } catch { /* ignore */ }
 
       let stdout = '';
       let stderr = '';
@@ -964,20 +1070,57 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         const timeoutErr = new Error('Claude CLI parse (step B) timed out after ' + parseTimeoutMs + 'ms');
         timeoutErr.code = 'TIMEOUT';
         timeoutErr._usage = combineUsage(stepAUsage, capturedUsage);
+        cliCapture.deferCliCaptureUntilClose({
+          outcome: 'timeout',
+          timeoutFired: true,
+          killed: true,
+          killSignal: 'SIGTERM',
+          error: timeoutErr,
+        });
         reject(timeoutErr);
       }, parseTimeoutMs);
 
-      child.stdout.on('data', (d) => { if (!settled) stdout += d.toString(); });
-      child.stderr.on('data', (d) => { if (!settled && stderr.length < 10240) stderr += d.toString(); });
+      child.stdout.on('data', (d) => {
+        if (settled) return;
+        const chunkText = d.toString();
+        cliCapture.recordStdoutChunk(chunkText);
+        stdout += chunkText;
+      });
+      child.stderr.on('data', (d) => {
+        if (settled) return;
+        const chunkText = d.toString();
+        cliCapture.recordStderrChunk(chunkText);
+        if (stderr.length < 10240) stderr += chunkText;
+      });
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         clearTimeout(timeout);
+        cliCapture.markClosed();
+        const processClosedAt = nowIso();
+        const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+        if (pendingCaptureMeta) {
+          cliCapture.queueCliCapture({
+            ...pendingCaptureMeta,
+            exitCode: code,
+            signal: signal || null,
+            closed: true,
+            processClosedAt,
+          });
+        }
         if (settled) return;
         settled = true;
 
         if (code !== 0 && !stdout) {
           const cliErr = new Error(formatCliFailure(code, stderr, stdout));
           cliErr._usage = combineUsage(stepAUsage, capturedUsage);
+          cliCapture.queueCliCapture({
+            outcome: 'process_error',
+            exitCode: code,
+            signal: signal || null,
+            closed: true,
+            processClosedAt,
+            error: cliErr,
+          });
           reportServerError({
             message: `CLI parse (step B) failed: exit code ${code}`,
             detail: `stderr: ${(stderr || '').slice(0, 500)}`,
@@ -986,6 +1129,14 @@ async function parseEscalation(imageBase64OrText, options = {}) {
           });
           return reject(cliErr);
         }
+
+        cliCapture.queueCliCapture({
+          outcome: didCliExitSuccessfully(code) ? 'success' : 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
 
         try {
           const parsed = JSON.parse(stdout);
@@ -1035,6 +1186,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         clearTimeout(timeout);
         if (settled) return;
         settled = true;
+        cliCapture.deferCliCaptureUntilClose({
+          outcome: isClaudeSpawnFailure(err) ? 'spawn_error' : 'process_error',
+          spawned: !isClaudeSpawnFailure(err),
+          error: err,
+        });
         reportServerError({
           message: `CLI spawn error (parse step B): ${err.message}`,
           detail: 'Claude CLI process emitted an error event during parseEscalation step B.',
@@ -1062,6 +1218,28 @@ async function parseEscalation(imageBase64OrText, options = {}) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let child;
+    const parseModelRequested = modelOverride || process.env.CLAUDE_PARSE_MODEL || '';
+    const cliCapture = createClaudeCliCapture({
+      captureContext: buildClaudeCliCaptureContext({
+        callSite: 'claude:parseEscalation',
+        operation: 'parse-escalation',
+        modelRequested: parseModelRequested,
+        reasoningEffort: effortOverride || '',
+        ...(options.captureContext || {}),
+        source: {
+          functionName: 'parseEscalation',
+          spawnSite: 'claude.parseEscalation.text',
+          ...(options.captureContext?.source || {}),
+        },
+      }),
+      args,
+      getChild: () => child,
+      getStdinText: () => prompt,
+      timeoutMs: effectiveTimeoutMs,
+      modelRequested: parseModelRequested,
+      reasoningEffort: effortOverride || '',
+      expectsJsonl: false,
+    });
     try {
       child = spawn('claude', args, {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -1069,6 +1247,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         ...buildClaudeSpawnOptions(),
       });
     } catch (err) {
+      cliCapture.queueCliCapture({ outcome: 'spawn_error', spawned: false, error: err });
       reportServerError({
         message: `CLI spawn error: ${err.message}`,
         detail: 'Failed to start Claude CLI subprocess for parseEscalation.',
@@ -1081,6 +1260,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
     }
     try {
       child.stdin.end(prompt);
+      cliCapture.markStdinWritten();
     } catch { /* ignore; process error handler will surface if needed */ }
 
     let stdout = '';
@@ -1093,26 +1273,57 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       const timeoutErr = new Error('Claude CLI parse timed out after ' + effectiveTimeoutMs + 'ms');
       timeoutErr.code = 'TIMEOUT';
       timeoutErr._usage = capturedUsage || null;
+      cliCapture.deferCliCaptureUntilClose({
+        outcome: 'timeout',
+        timeoutFired: true,
+        killed: true,
+        killSignal: 'SIGTERM',
+        error: timeoutErr,
+      });
       reject(timeoutErr);
     }, effectiveTimeoutMs);
 
     child.stdout.on('data', (d) => {
       if (settled) return;
-      stdout += d.toString();
+      const chunkText = d.toString();
+      cliCapture.recordStdoutChunk(chunkText);
+      stdout += chunkText;
     });
     child.stderr.on('data', (d) => {
       if (settled) return;
-      if (stderr.length < 10240) stderr += d.toString();
+      const chunkText = d.toString();
+      cliCapture.recordStderrChunk(chunkText);
+      if (stderr.length < 10240) stderr += chunkText;
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       clearTimeout(timeout);
+      cliCapture.markClosed();
+      const processClosedAt = nowIso();
+      const pendingCaptureMeta = cliCapture.takePendingCaptureMeta();
+      if (pendingCaptureMeta) {
+        cliCapture.queueCliCapture({
+          ...pendingCaptureMeta,
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+        });
+      }
       if (settled) return;
       settled = true;
 
       if (code !== 0 && !stdout) {
         const cliErr = new Error(formatCliFailure(code, stderr, stdout));
         cliErr._usage = capturedUsage || null;
+        cliCapture.queueCliCapture({
+          outcome: 'process_error',
+          exitCode: code,
+          signal: signal || null,
+          closed: true,
+          processClosedAt,
+          error: cliErr,
+        });
         reportServerError({
           message: `CLI parse failed: exit code ${code}`,
           detail: `stderr: ${(stderr || '').slice(0, 500)}`,
@@ -1121,6 +1332,14 @@ async function parseEscalation(imageBase64OrText, options = {}) {
         });
         return reject(cliErr);
       }
+
+      cliCapture.queueCliCapture({
+        outcome: didCliExitSuccessfully(code) ? 'success' : 'process_error',
+        exitCode: code,
+        signal: signal || null,
+        closed: true,
+        processClosedAt,
+      });
 
       try {
         const parsed = JSON.parse(stdout);
@@ -1168,6 +1387,11 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       clearTimeout(timeout);
       if (settled) return;
       settled = true;
+      cliCapture.deferCliCaptureUntilClose({
+        outcome: isClaudeSpawnFailure(err) ? 'spawn_error' : 'process_error',
+        spawned: !isClaudeSpawnFailure(err),
+        error: err,
+      });
       reportServerError({
         message: `CLI spawn error (parse): ${err.message}`,
         detail: 'The Claude CLI process emitted an error event during parseEscalation.',

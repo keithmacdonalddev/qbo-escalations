@@ -202,6 +202,7 @@ function runAttempt({
   reasoningEffort,
   serviceTier,
   timeoutMs,
+  captureMetadata,
   onChunk,
   onThinkingChunk,
   onSettled,
@@ -231,6 +232,12 @@ function runAttempt({
       reasoningEffort,
       serviceTier,
       timeoutMs,
+      // Evidence identity: caller-supplied origin metadata (conversationId,
+      // caseNumber, roomId, agentId, ...) stamped onto the captured
+      // ProviderCallPackage so packages are matchable to their conversation.
+      ...(captureMetadata && typeof captureMetadata === 'object'
+        ? { captureContext: { metadata: captureMetadata } }
+        : {}),
       onChunk: (text) => {
         if (settled) return;
         onChunk({
@@ -427,6 +434,10 @@ function startChatOrchestration({
   reasoningEffort,
   serviceTier,
   timeoutMs,
+  // Optional evidence-identity object threaded down to every provider attempt
+  // and recorded as ProviderCallPackage.metadata (e.g. { conversationId,
+  // caseNumber, agentId }). Callers that have no identity simply omit it.
+  captureMetadata = null,
   onChunk,
   onThinkingChunk,
   onProviderError,
@@ -469,6 +480,7 @@ function startChatOrchestration({
         reasoningEffort,
         serviceTier,
         timeoutMs: getEffectiveTimeoutMs(providerId),
+        captureMetadata,
         onChunk: onChunk || (() => {}),
         onThinkingChunk: onThinkingChunk || null,
         onSettled: (result) => {

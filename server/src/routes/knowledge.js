@@ -194,6 +194,12 @@ router.get('/records/:recordId/agent-context', async (req, res) => {
 
 // POST /api/knowledge/records/:recordId/agent-chat
 router.post('/records/:recordId/agent-chat', async (req, res) => {
+  // The KB agent tool loop has a 120s budget (and the client waits 120s);
+  // without this the global 30s response-timeout middleware 504s any answer
+  // that involves real tool work. Same pattern as image-parser/triage routes.
+  if (typeof req.setResponseTimeout === 'function') {
+    req.setResponseTimeout(120_000 + 10_000);
+  }
   try {
     const payload = req.body && typeof req.body === 'object' ? req.body : {};
     const result = await answerKnowledgeBaseAgentQuestion(req.params.recordId, payload.message);

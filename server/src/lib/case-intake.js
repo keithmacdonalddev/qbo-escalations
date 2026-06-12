@@ -299,6 +299,9 @@ function buildCaseIntakeFromParsedEscalation({
         configured: triageMeta?.runtimeConfigured !== false,
         source: safeString(triageMeta?.runtimeSource, ''),
       },
+      // Mirrors applyTriageResultToCaseIntake: persist the provider-call
+      // package id so resumed sessions can enable the reasoning viewer.
+      providerPackageId: safeString(triageMeta?.providerPackageId, ''),
       validation: triageMeta?.validation || null,
     },
   }) : null;
@@ -524,10 +527,96 @@ function applyStageEventsToCaseIntake(existing, stageId, events) {
   };
 }
 
+/**
+ * Merge a standalone Triage Agent result into an existing caseIntake.
+ *
+ * Since the triage harness rebuild, triage runs through POST /api/triage in
+ * parallel with the /api/chat analyst leg, so its result cannot ride the chat
+ * payload (it does not exist yet when the chat request starts) and a
+ * mid-request write would be clobbered by the chat route's final
+ * conversation.save(). The client therefore reports the result AFTER both
+ * legs settle, and this helper grafts it on: sets intake.triageCard and
+ * replaces/creates the phase:'triage' run with the same shape
+ * buildCaseIntakeFromParsedEscalation used to produce in the pre-harness
+ * flow, so resume hydration reads it identically to the other stages.
+ *
+ * Failed runs persist honestly (status 'failed' + error summary). Returns
+ * the intake unchanged when there is nothing to record.
+ */
+function applyTriageResultToCaseIntake(existing, {
+  triageCard,
+  triageMeta,
+  error,
+  events,
+  durationMs,
+  startedAt,
+  completedAt,
+  traceId,
+} = {}) {
+  const intake = normalizeExistingIntake(existing);
+  const card = clonePlain(triageCard, null);
+  const meta = clonePlain(triageMeta, null);
+  const triageError = clonePlain(error, null);
+  if (!card && !meta && !triageError) return intake;
+
+  const now = normalizeDate(completedAt);
+  const failed = Boolean(triageError) && !card;
+  const fallbackUsed = Boolean(card?.fallback?.used || meta?.usedRuleFallback || meta?.fallbackUsed);
+  const fallbackReason = fallbackUsed
+    ? safeString(card?.fallback?.reason || meta?.fallbackReason, 'Triage Agent did not produce a usable card; rule fallback is displayed.')
+    : '';
+  const fallbackFrom = fallbackUsed
+    ? safeString(meta?.fallbackFrom || card?.fallback?.from, '')
+    : '';
+
+  const triageRun = createRun({
+    agentId: 'triage-agent',
+    agentName: 'Triage Agent',
+    phase: 'triage',
+    status: failed ? 'failed' : 'completed',
+    provider: safeString(meta?.providerUsed || card?.runtime?.provider, ''),
+    model: safeString(meta?.model || meta?.modelUsed || card?.runtime?.model, ''),
+    traceId,
+    startedAt: startedAt || now,
+    completedAt: now,
+    durationMs: firstDurationMs(durationMs, getMetaDurationMs(meta)),
+    fallbackUsed,
+    fallbackFrom,
+    fallbackReason,
+    summary: failed
+      ? safeString(triageError.message || triageError.code, 'Triage did not complete.')
+      : fallbackUsed
+        ? fallbackReason
+        : summarizeTriageCard(card),
+    detail: failed ? triageError : {
+      confidence: card?.confidence || '',
+      missingInfo: Array.isArray(card?.missingInfo) ? card.missingInfo : [],
+      source: card?.source || '',
+      generation: clonePlain(card?.generation, null),
+      fallback: clonePlain(card?.fallback, null),
+      runtime: clonePlain(card?.runtime, null),
+      providerPackageId: safeString(meta?.providerPackageId, ''),
+      validation: meta?.validation || null,
+    },
+  });
+
+  let next = {
+    ...intake,
+    triageCard: card || intake.triageCard,
+    runs: replacePhaseRun(intake.runs, triageRun),
+    updatedAt: now,
+  };
+  if (Array.isArray(events) && events.length > 0) {
+    next = applyStageEventsToCaseIntake(next, 'triage', events);
+  }
+  return next;
+}
+
 module.exports = {
   CASE_STATUS,
   appendCaseIntakeFollowUp,
   applyStageEventsToCaseIntake,
+  applyTriageResultToCaseIntake,
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,

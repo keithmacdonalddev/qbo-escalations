@@ -211,6 +211,88 @@ test('image parser does NOT attempt a backup for a bare caller with no failover 
   });
 });
 
+// ─── Security regression: fallbackModel injection guard (2026-06-10 audit S1) ───
+//
+// parseImage validates the PRIMARY model at entry (assertModelAllowed), but the
+// failover branch used to pass a request-supplied options.fallbackModel to the
+// backup dispatch UNVALIDATED. For a Claude-CLI backup that string reaches
+// `--model <model>` in a shell:true spawn — an OS command-injection bypass of
+// the entry guard. These tests pin the fix: a malicious fallbackModel must be
+// rejected with INVALID_MODEL BEFORE the backup is dispatched (no spawn, no
+// failover event), while a legitimate catalog fallbackModel keeps working.
+
+test('image parser failover REJECTS a malicious fallbackModel with INVALID_MODEL and never dispatches the backup', async () => {
+  const MALICIOUS_FALLBACK_MODELS = [
+    'sonnet & calc.exe',
+    'model`whoami`',
+    'model$(whoami); rm -rf /',
+  ];
+  await withHarnessProviders(async () => {
+    const PRIMARY = 'anthropic';
+    const BACKUP = 'claude'; // Claude-CLI backup — the shell:true spawn path the audit flagged
+
+    for (const maliciousModel of MALICIOUS_FALLBACK_MODELS) {
+      const calls = [];
+      let backupRan = false;
+      registerProviderStub(PRIMARY, 'parseImage', failParseStub(PRIMARY, calls));
+      registerProviderStub(BACKUP, 'parseImage', async () => {
+        backupRan = true;
+        return { text: DEFAULT_PARSE_TEXT, usage: {} };
+      });
+
+      const events = [];
+      await assert.rejects(
+        () => parseImage(SAMPLE_IMAGE, {
+          provider: PRIMARY,
+          fallbackProvider: BACKUP,
+          fallbackModel: maliciousModel,
+          timeoutMs: 1000,
+          eventBus: { emit: (type, payload) => events.push({ type, payload }) },
+        }),
+        (err) => {
+          assert.equal(err.code, 'INVALID_MODEL', `expected INVALID_MODEL for ${JSON.stringify(maliciousModel)}`);
+          return true;
+        }
+      );
+
+      assert.deepEqual(calls, [PRIMARY], 'only the primary may run — the backup must never be dispatched with an unvalidated model');
+      assert.equal(backupRan, false, 'the backup stub must not execute');
+      assert.ok(
+        !events.some((e) => e.type === 'parser.provider_failover'),
+        'no failover event may be emitted for a rejected fallbackModel'
+      );
+    }
+  });
+});
+
+test('image parser failover still honors a legitimate catalog fallbackModel (guard does not over-block)', async () => {
+  await withHarnessProviders(async () => {
+    const PRIMARY = 'anthropic';
+    const BACKUP = 'openai';
+    const calls = [];
+    const seenModels = [];
+
+    registerProviderStub(PRIMARY, 'parseImage', failParseStub(PRIMARY, calls));
+    registerProviderStub(BACKUP, 'parseImage', async ({ provider: activeProvider, model }) => {
+      calls.push(activeProvider);
+      seenModels.push(model);
+      return { text: DEFAULT_PARSE_TEXT, usage: { provider: activeProvider, model } };
+    });
+
+    const result = await parseImage(SAMPLE_IMAGE, {
+      provider: PRIMARY,
+      fallbackProvider: BACKUP,
+      fallbackModel: 'gpt-5.4-mini', // catalog id — must pass the allowlist
+      timeoutMs: 1000,
+    });
+
+    assert.deepEqual(calls, [PRIMARY, BACKUP], 'validated fallback still fails over normally');
+    assert.deepEqual(seenModels, ['gpt-5.4-mini'], 'the validated fallbackModel reaches the backup unchanged');
+    assert.equal(result.fallbackUsed, true);
+    assert.equal(result.providerUsed, BACKUP);
+  });
+});
+
 test('image parser success path runs ONLY the primary (backup never invoked)', async () => {
   await withHarnessProviders(async () => {
     const PRIMARY = 'anthropic';

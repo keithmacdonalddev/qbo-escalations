@@ -347,6 +347,7 @@ test('transcribeImage captures non-streaming LM Studio provider package when ena
 });
 
 test('parseEscalation writes no LM Studio package when capture is disabled', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
   queueHttpResponses([
     {
       path: '/api/v1/models',
@@ -934,6 +935,7 @@ test('chat still returns when background LM Studio stream recorder insert fails'
 });
 
 test('chat writes no LM Studio stream package when capture is disabled', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
   queueHttpResponses([
     {
       path: '/api/v1/models',

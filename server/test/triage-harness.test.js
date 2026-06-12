@@ -8,7 +8,9 @@ const mongo = require('./_mongo-helper');
 const ProviderCallPackage = require('../src/models/ProviderCallPackage');
 const TriageResult = require('../src/models/TriageResult');
 const {
+  extractTriageTextFromProviderPackage,
   preflightProvider,
+  runDirectTriageProviderCall,
   runTriage,
 } = require('../src/services/triage');
 
@@ -183,6 +185,79 @@ test('runTriage builds the card from a saved Claude CLI ProviderCallPackage', as
   assert.equal(result.card.severity, 'P3');
   assert.equal(result.triageMeta.providerUsed, 'claude');
   assert.equal(result.triageMeta.providerPayload.sourcePath, 'cli.stdout.jsonlEvents[stream_event.content_block_delta.delta.text]');
+});
+
+test('triage direct Anthropic body gates thinking + temperature by model and extraction skips thinking blocks', async () => {
+  const capturedBodies = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; });
+    req.on('end', () => {
+      capturedBodies.push(JSON.parse(raw));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({
+        id: 'msg_triage_test',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-fable-5',
+        // Thinking-enabled responses lead with a thinking block before the text block.
+        content: [
+          { type: 'thinking', thinking: 'Readable reasoning summary.' },
+          { type: 'text', text: TRIAGE_OUTPUT },
+        ],
+        usage: { input_tokens: 12, output_tokens: 8 },
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const prevUrl = process.env.ANTHROPIC_API_URL;
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_URL = `http://127.0.0.1:${server.address().port}`;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-triage-test';
+
+  try {
+    const promptTrace = { promptId: 'triage-test-prompt', promptVersion: '1' };
+
+    // fable-5: thinking present, temperature OMITTED (sampling params 400 there).
+    const fableResult = await runDirectTriageProviderCall({
+      provider: 'anthropic',
+      model: 'claude-fable-5',
+      systemPrompt: 'Triage instructions',
+      userPrompt: 'Triage this template.',
+      timeoutMs: 1000,
+      promptTrace,
+    });
+    assert.equal(capturedBodies.length, 1);
+    assert.deepEqual(capturedBodies[0].thinking, { type: 'adaptive', display: 'summarized' });
+    assert.equal(capturedBodies[0].temperature, undefined);
+    assert.equal(capturedBodies[0].max_tokens, 1200);
+
+    // Extraction must skip the leading thinking block and return the text block.
+    const savedPackage = await ProviderCallPackage.findById(fableResult.providerTrace.providerPackageId).lean();
+    assert.ok(savedPackage, 'anthropic triage package saved');
+    const payload = await extractTriageTextFromProviderPackage(savedPackage, fableResult.providerTrace);
+    assert.equal(payload.text, TRIAGE_OUTPUT);
+    assert.equal(payload.sourcePath, 'response.parsedJson.content[type=text].text');
+
+    // sonnet-4-6: still accepts temperature AND gets thinking.
+    await runDirectTriageProviderCall({
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-6',
+      systemPrompt: 'Triage instructions',
+      userPrompt: 'Triage this template.',
+      timeoutMs: 1000,
+      promptTrace,
+    });
+    assert.equal(capturedBodies.length, 2);
+    assert.deepEqual(capturedBodies[1].thinking, { type: 'adaptive', display: 'summarized' });
+    assert.equal(capturedBodies[1].temperature, 0.1);
+  } finally {
+    if (prevUrl === undefined) delete process.env.ANTHROPIC_API_URL;
+    else process.env.ANTHROPIC_API_URL = prevUrl;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevKey;
+    await new Promise((resolve) => server.close(resolve));
+  }
 });
 
 test('runTriage preflight failure short-circuits to fallback before provider handoff', async () => {

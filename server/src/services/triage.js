@@ -20,6 +20,7 @@ const {
   mergeTriageRepairOutput,
 } = require('../lib/chat-triage');
 const { getProviderModelId } = require('./providers/catalog');
+const { buildAnthropicThinkingParam, modelRejectsSamplingParams } = require('../lib/anthropic-thinking');
 const codex = require('./codex');
 const { resolveApiKey, validateRemoteProvider } = require('./image-parser');
 const {
@@ -581,8 +582,11 @@ async function runDirectTriageProviderCall({
         body: {
           model,
           max_tokens: maxTokens,
-          temperature: 0.1,
+          // fable-5 / opus-4.7 / opus-4.8 reject sampling params with a 400 — omit there.
+          ...(modelRejectsSamplingParams(model) ? {} : { temperature: 0.1 }),
           system: systemPrompt,
+          // Readable reasoning summaries on supported Claude models; omitted for others.
+          ...buildAnthropicThinkingParam(model),
           messages: [{ role: 'user', content: userPrompt }],
         },
         model,
@@ -1031,8 +1035,15 @@ async function extractTriageTextFromProviderPackage(providerPackage, providerTra
   }
   if (providerId === 'anthropic' || providerPackage?.providerResearchId === 'anthropic-api') {
     parsed = await loadParsedJsonFromResponse(providerPackage?.response || {}, 'Anthropic');
-    sourcePath = 'response.parsedJson.content[0].text';
-    return { text: safeString(parsed?.content?.[0]?.text, '').trim(), parsed, sourcePath };
+    sourcePath = 'response.parsedJson.content[type=text].text';
+    // With thinking enabled, content starts with a "thinking" block before the
+    // "text" block — join the text-typed blocks instead of assuming content[0].
+    const text = (Array.isArray(parsed?.content) ? parsed.content : [])
+      .map((block) => (block && block.type === 'text' ? safeString(block.text, '') : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    return { text, parsed, sourcePath };
   }
   if (providerId === 'gemini' || providerPackage?.providerResearchId === 'gemini-api') {
     parsed = await loadParsedJsonFromResponse(providerPackage?.geminiApi?.response || {}, 'Gemini');

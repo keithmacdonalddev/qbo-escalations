@@ -148,6 +148,12 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
     setPass2Cleanup = () => {},
   } = opts;
   const lockOwnerId = sessionId ? `action-loop:${sessionId}` : `action-loop:${randomUUID()}`;
+  // Evidence identity: link every captured ProviderCallPackage from this loop
+  // back to the workspace session that produced it.
+  const workspaceCaptureMetadata = {
+    sourceAgent: 'workspace-agent',
+    workspaceSessionId: sessionId ? String(sessionId) : '',
+  };
   let actionFlowAbortReason = null;
 
   function requestActionFlowAbort(reason = 'Workspace action loop aborted') {
@@ -197,6 +203,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         timeoutMs,
         reasoningEffort: effectiveReasoningEffort,
         serviceTier: effectiveServiceTier,
+        captureMetadata: workspaceCaptureMetadata,
         onChunk: ({ text }) => {
           markAiSubprocessOutputReceived();
           if (isClientDisconnected()) return;
@@ -317,6 +324,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         fallbackModel: policy.fallbackModel,
         reasoningEffort: effectiveReasoningEffort,
         serviceTier: effectiveServiceTier,
+        captureMetadata: workspaceCaptureMetadata,
         onChunk: (text) => {
           markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, passLabel, text);
@@ -407,6 +415,7 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         fallbackModel: policy.fallbackModel,
         reasoningEffort: effectiveReasoningEffort,
         serviceTier: effectiveServiceTier,
+        captureMetadata: workspaceCaptureMetadata,
         onChunk: (text) => {
           markAiSubprocessOutputReceived();
           recordWorkspaceChunk(sessionId, 'pass1', text);

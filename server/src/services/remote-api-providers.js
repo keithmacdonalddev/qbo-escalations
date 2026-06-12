@@ -15,6 +15,7 @@ const {
   recordGeminiApiProviderCallPackageInBackground,
   recordLlmGatewayProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
+const { buildAnthropicThinkingParam } = require('../lib/anthropic-thinking');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -65,7 +66,7 @@ function getProviderPathType(providerId) {
   return providerId === 'llm-gateway' ? 'gateway-http' : 'direct-http';
 }
 
-function buildRemoteChatCaptureContext(providerId, functionName, modelRequested) {
+function buildRemoteChatCaptureContext(providerId, functionName, modelRequested, metadata = null) {
   return {
     providerId,
     providerResearchId: PROVIDER_RESEARCH_IDS[providerId] || '',
@@ -78,6 +79,9 @@ function buildRemoteChatCaptureContext(providerId, functionName, modelRequested)
       helperName: 'jsonRequestCancelable',
     },
     modelRequested,
+    // Caller-supplied evidence identity (conversationId/caseNumber/roomId/...)
+    // recorded as ProviderCallPackage.metadata.
+    ...(metadata && typeof metadata === 'object' ? { metadata } : {}),
   };
 }
 
@@ -419,6 +423,7 @@ function requestAnthropicChat({
   systemPrompt,
   model,
   timeoutMs,
+  captureMetadata = null,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
 }) {
@@ -436,6 +441,8 @@ function requestAnthropicChat({
       model: effectiveModel,
       max_tokens: DEFAULT_MAX_TOKENS,
       ...(systemPrompt ? { system: systemPrompt } : {}),
+      // Readable reasoning summaries on supported Claude models; omitted for others.
+      ...buildAnthropicThinkingParam(effectiveModel),
       messages: buildAnthropicMessages(messages),
     };
 
@@ -449,7 +456,7 @@ function requestAnthropicChat({
         'anthropic-version': '2023-06-01',
       },
       timeoutMs,
-      buildRemoteChatCaptureContext('anthropic', 'requestAnthropicChat', effectiveModel)
+      buildRemoteChatCaptureContext('anthropic', 'requestAnthropicChat', effectiveModel, captureMetadata)
     );
     setCancel(request.cancel);
 
@@ -553,6 +560,7 @@ function requestLlmGatewayChat({
   model,
   reasoningEffort,
   timeoutMs,
+  captureMetadata = null,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
 }) {
@@ -575,7 +583,8 @@ function requestLlmGatewayChat({
       captureContext: buildRemoteChatCaptureContext(
         'llm-gateway',
         'requestLlmGatewayChat',
-        model || PROVIDER_CONFIG['llm-gateway'].defaultModel
+        model || PROVIDER_CONFIG['llm-gateway'].defaultModel,
+        captureMetadata
       ),
     });
     setCancel(request.cancel);
@@ -589,6 +598,7 @@ function requestOpenAiChat({
   model,
   reasoningEffort,
   timeoutMs,
+  captureMetadata = null,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
 }) {
@@ -614,7 +624,8 @@ function requestOpenAiChat({
       captureContext: buildRemoteChatCaptureContext(
         'openai',
         'requestOpenAiChat',
-        model || PROVIDER_CONFIG.openai.defaultModel
+        model || PROVIDER_CONFIG.openai.defaultModel,
+        captureMetadata
       ),
     });
     setCancel(request.cancel);
@@ -627,6 +638,7 @@ function requestKimiChat({
   systemPrompt,
   model,
   timeoutMs,
+  captureMetadata = null,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
 }) {
@@ -649,7 +661,7 @@ function requestKimiChat({
       model: effectiveModel,
       timeoutMs,
       requestFn,
-      captureContext: buildRemoteChatCaptureContext('kimi', 'requestKimiChat', effectiveModel),
+      captureContext: buildRemoteChatCaptureContext('kimi', 'requestKimiChat', effectiveModel, captureMetadata),
     });
     setCancel(request.cancel);
     return request.promise;
@@ -661,6 +673,7 @@ function requestGeminiChat({
   systemPrompt,
   model,
   timeoutMs,
+  captureMetadata = null,
   requestFn = jsonRequestCancelable,
   getApiKeyFn = getApiKey,
 }) {
@@ -696,7 +709,7 @@ function requestGeminiChat({
         'x-goog-api-key': apiKey,
       },
       timeoutMs,
-      buildRemoteChatCaptureContext('gemini', 'requestGeminiChat', effectiveModel)
+      buildRemoteChatCaptureContext('gemini', 'requestGeminiChat', effectiveModel, captureMetadata)
     );
     setCancel(request.cancel);
 
@@ -740,6 +753,7 @@ function createBufferedChatProvider(providerId, requestHandler) {
       model,
       reasoningEffort,
       timeoutMs,
+      captureContext,
       onChunk,
       onDone,
       onError,
@@ -759,6 +773,11 @@ function createBufferedChatProvider(providerId, requestHandler) {
       model,
       reasoningEffort,
       timeoutMs,
+      // Evidence identity from the orchestrator (conversationId/caseNumber/...),
+      // merged into the captured ProviderCallPackage's metadata.
+      captureMetadata: captureContext?.metadata && typeof captureContext.metadata === 'object'
+        ? captureContext.metadata
+        : null,
     });
     cancelRequest = typeof request?.cancel === 'function' ? request.cancel : null;
 

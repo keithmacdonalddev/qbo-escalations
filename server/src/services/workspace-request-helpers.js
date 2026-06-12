@@ -394,6 +394,9 @@ function startWorkspaceCollectedChat({
   autoFailover = false,
   reasoningEffort = 'high',
   serviceTier = '',
+  // Optional evidence identity (conversationId/roomId/candidateId/...) stamped
+  // onto every captured ProviderCallPackage for this chat.
+  captureMetadata = null,
   onChunk,
   onThinkingChunk,
   onStatus,
@@ -431,6 +434,7 @@ function startWorkspaceCollectedChat({
       timeoutMs,
       reasoningEffort,
       serviceTier,
+      captureMetadata,
       onChunk: ({ text, provider }) => {
         fullText += text;
         try { onChunk?.(text, provider); } catch { /* ignore caller callback errors */ }

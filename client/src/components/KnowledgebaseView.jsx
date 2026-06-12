@@ -42,6 +42,9 @@ import AnthropicMark from './icons/AnthropicMark.jsx';
 // Reused as-is for the KB draft's call-evidence overlay: the same pushed
 // "Model reasoning" page the triage dock shows for a ProviderCallPackage.
 import TriageReasoningView from './chat-v5/TriageReasoningView.jsx';
+// App-standard hover tooltip: portals its bubble to <body>, so the rail's
+// overflow-y: auto cannot clip it (a scoped CSS ::after tooltip would clip).
+import Tooltip from './Tooltip.jsx';
 import { apiFetchJson } from '../api/http.js';
 import { renderMarkdown } from '../utils/markdown.jsx';
 import './KnowledgebaseView.css';
@@ -201,6 +204,18 @@ function formatShortDateTime(value) {
   const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   return `${day} ${time}`;
+}
+
+// Queue-card timestamp: "Jun 11, 8:32 AM" (no year — queue items are recent
+// by nature and the rail is narrow). Returns '' for missing/invalid dates so
+// cards without a timestamp simply omit it instead of rendering "Invalid Date".
+function formatQueueTimestamp(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const day = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day}, ${time}`;
 }
 
 function formatPercent(value) {
@@ -781,6 +796,31 @@ function getRecordCardTask(record = {}) {
   };
 }
 
+// Plain-language meaning of a queue card's status dot — the dot is the only
+// state indicator on unselected cards, so its hover tooltip / aria-label
+// carries the explanation. Composed from the dot bucket plus the same review
+// task the detail view shows (getRecordCardTask); no invented states.
+function getDotStateDescription(record = {}) {
+  const base = {
+    draft: 'Draft',
+    approved: 'Approved',
+    published: 'Published',
+    rejected: 'Rejected',
+  }[getRecordStatusDot(record)] || 'Draft';
+  const task = getRecordCardTask(record);
+  const label = (task?.label || '').trim();
+  // Approved-but-blocked: the label alone does not say WHAT is missing, so
+  // surface the readiness detail ("Approved — blocked: missing root cause").
+  if (record.reviewStatus === 'approved' && task?.tone === 'warning' && task?.detail) {
+    const reason = task.detail.replace(/\.$/, '');
+    return `Approved — blocked: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}`;
+  }
+  if (!label || label.toLowerCase() === base.toLowerCase()) return base;
+  // Labels like "Published for agents" already lead with the state word.
+  if (label.toLowerCase().startsWith(base.toLowerCase())) return label;
+  return `${base} — ${label.charAt(0).toLowerCase()}${label.slice(1)}`;
+}
+
 function getSelectedLessonMove(record = null, draft = null, readiness = null) {
   if (!record || !draft) return null;
   const guidance = getLessonReviewGuidance(record, draft, readiness || getPublishReadiness(record));
@@ -1135,11 +1175,12 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     loadAgentRecordContext(selectedRecord.id);
   }, [loadAgentRecordContext, selectedRecord?.id]);
 
-  const handleSendAgentChatMessage = useCallback(async () => {
-    if (!selectedRecord?.id || agentChatBusy) return;
-    const message = agentChatInput.trim();
-    if (!message) return;
-    setAgentChatInput('');
+  // Core sidebar send path: used by the chat form AND the per-field redo
+  // affordances in the draft document, so a precreated message travels exactly
+  // the same route as a typed one (same optimistic echo, same server call,
+  // same applied-changes refresh).
+  const sendAgentChatMessage = useCallback(async (message, { restoreInputOnError = false } = {}) => {
+    if (!selectedRecord?.id || agentChatBusy || !message) return;
     setAgentChatBusy(true);
     setAgentRecordError('');
     setAgentRecordMessages((current) => [
@@ -1169,11 +1210,36 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     } catch (err) {
       setAgentRecordError(err?.message || 'Knowledge Base Agent did not answer');
       setAgentRecordMessages((current) => current.filter((item) => !item.pending));
-      setAgentChatInput(message);
+      // Typed messages go back into the input box on failure; precreated redo
+      // messages have nothing to restore.
+      if (restoreInputOnError) setAgentChatInput(message);
     } finally {
       setAgentChatBusy(false);
     }
-  }, [agentChatBusy, agentChatInput, loadKnowledge, openRecord, selectedRecord?.id]);
+  }, [agentChatBusy, loadKnowledge, openRecord, selectedRecord?.id]);
+
+  const handleSendAgentChatMessage = useCallback(async () => {
+    if (!selectedRecord?.id || agentChatBusy) return;
+    const message = agentChatInput.trim();
+    if (!message) return;
+    setAgentChatInput('');
+    await sendAgentChatMessage(message, { restoreInputOnError: true });
+  }, [agentChatBusy, agentChatInput, selectedRecord?.id, sendAgentChatMessage]);
+
+  // Per-field "redo" affordance in the draft document: compose a precreated
+  // instruction for the Knowledge Base Agent and send it through the normal
+  // chat path, exactly as if the reviewer typed it. One template, parameterized
+  // by the field's human label.
+  const handleRedoDraftField = useCallback((field) => {
+    const label = KNOWLEDGE_DRAFT_FIELD_LABELS[field] || field;
+    // On stacked (narrow) layouts the chat sidebar sits below the document;
+    // bring it into view so the reviewer sees the agent working. 'nearest' is
+    // a no-op when the sidebar is already visible.
+    document.querySelector('.knowledge-agent-chat-sidebar')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    sendAgentChatMessage(
+      `Please redo the "${label}" field. Re-read the draft and the case evidence, judge what is wrong or missing in the current value, and use your draft-update tool to replace it with an accurate, well-written version. Reply with what you changed and why.`
+    );
+  }, [sendAgentChatMessage]);
 
   // Undo a single field the agent changed: PATCH the record with the field's
   // prior value (reuses the existing update path, which requires review
@@ -1588,13 +1654,14 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
           records={records}
           selectedRecord={selectedRecord}
           loading={loading}
-          total={total}
         />
 
         <KnowledgeRecordDetail
           record={selectedRecord}
           draft={recordDraft}
           busy={recordActionBusy}
+          chatBusy={agentChatBusy || agentRecordLoading}
+          onRedoField={handleRedoDraftField}
           notice={recordNotice}
           operationalIntel={operationalIntel}
           operationalIntelLoading={operationalIntelLoading}
@@ -1696,8 +1763,8 @@ function KnowledgeDraftTopbar({
   const primaryLabel = isPublished
     ? 'Published'
     : canPublish
-      ? 'Publish for agent use'
-      : 'Approve for agent use';
+      ? 'Publish'
+      : 'Approve';
 
   return (
     <header className="knowledge-draft-topbar">
@@ -1717,12 +1784,13 @@ function KnowledgeDraftTopbar({
           const currentIndex = currentStatus === 'published' ? 2 : currentStatus === 'approved' ? 1 : 0;
           const isCurrent = index === currentIndex;
           const isDone = index < currentIndex;
+          const label = status === 'draft' ? 'Draft needs review' : (REVIEW_LABELS[status] || humanizeToken(status));
           return (
             <span className="knowledge-draft-step-wrap" key={status}>
               {index > 0 && <span className="knowledge-draft-step-link" />}
-              <span className={`knowledge-draft-step${isCurrent ? ' is-current' : ''}${isDone ? ' is-done' : ''}`}>
+              <span className={`knowledge-draft-step is-${status}${isCurrent ? ' is-current' : ''}${isDone ? ' is-done' : ''}`}>
                 <span className="knowledge-draft-step-dot" />
-                {REVIEW_LABELS[status] || humanizeToken(status)}
+                {label}
               </span>
             </span>
           );
@@ -1730,30 +1798,36 @@ function KnowledgeDraftTopbar({
       </div>
 
       <div className="knowledge-draft-topbar-actions">
-        <button
-          className="knowledge-draft-btn ghost"
-          type="button"
-          onClick={onSaveCaseHistoryOnly}
-          disabled={!record || busy || isPublished}
-        >
-          Keep as case history
-        </button>
-        <button
-          className="knowledge-draft-btn ghost"
-          type="button"
-          onClick={onReject}
-          disabled={!record || busy || isRejected || isPublished}
-        >
-          Reject draft
-        </button>
-        <button
-          className="knowledge-draft-btn primary"
-          type="button"
-          onClick={canPublish ? onPublish : onApprove}
-          disabled={!record || busy || isRejected || isPublished}
-        >
-          {primaryLabel}
-        </button>
+        <Tooltip text="Keep this as case history only. It remains available for review and audit, but agents cannot reuse it as guidance for future cases." position="bottom">
+          <button
+            className="knowledge-draft-btn ghost"
+            type="button"
+            onClick={onSaveCaseHistoryOnly}
+            disabled={!record || busy || isPublished}
+          >
+            Archive
+          </button>
+        </Tooltip>
+        <Tooltip text="Reject this draft. It stays out of agent guidance because the lesson is wrong, unsafe, too weak, or not useful enough to preserve as reusable knowledge." position="bottom">
+          <button
+            className="knowledge-draft-btn ghost"
+            type="button"
+            onClick={onReject}
+            disabled={!record || busy || isRejected || isPublished}
+          >
+            Reject
+          </button>
+        </Tooltip>
+        <Tooltip text={canPublish ? 'Publish this approved lesson so agents can retrieve and use it during future work.' : 'Approve this lesson for agent use. Agents can treat it as trusted guidance once it passes the review decision.'} position="bottom">
+          <button
+            className="knowledge-draft-btn primary"
+            type="button"
+            onClick={canPublish ? onPublish : onApprove}
+            disabled={!record || busy || isRejected || isPublished}
+          >
+            {primaryLabel}
+          </button>
+        </Tooltip>
         <button
           className="knowledge-draft-btn icon"
           type="button"
@@ -1769,7 +1843,7 @@ function KnowledgeDraftTopbar({
   );
 }
 
-function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading = false, total = 0 }) {
+function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading = false }) {
   const selectedNeedsReview = selectedRecord && isFinalizationQueueRecord(selectedRecord);
   const needsReview = records.filter(isFinalizationQueueRecord);
   const needsReviewRecords = selectedNeedsReview && !needsReview.some((record) => record.id === selectedRecord.id)
@@ -1782,7 +1856,10 @@ function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading
 
   return (
     <aside className="knowledge-draft-rail" aria-label="Draft queue">
-      <div className="knowledge-draft-rail-group-label">Needs review</div>
+      <div className="knowledge-draft-rail-group-label">
+        Needs review
+        {!loading && <span className="knowledge-draft-rail-group-count">{needsReviewRecords.length}</span>}
+      </div>
       <div className="knowledge-draft-rail-list" aria-live="polite">
         {loading ? (
           <div className="knowledge-draft-rail-empty" role="status">
@@ -1805,7 +1882,7 @@ function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading
       <div className="knowledge-draft-rail-group-label">Recent decisions</div>
       <div className="knowledge-draft-rail-list">
         {recentDecisionRecords.length === 0 ? (
-          <div className="knowledge-draft-rail-empty">{loading ? 'Loading decisions' : `${formatCount(total)} records loaded.`}</div>
+          <div className="knowledge-draft-rail-empty">{loading ? 'Loading decisions' : 'No recent decisions.'}</div>
         ) : (
           recentDecisionRecords.map((record) => (
             <KnowledgeDraftQueueItem
@@ -1822,20 +1899,42 @@ function KnowledgeDraftReviewRail({ records = [], selectedRecord = null, loading
 
 function KnowledgeDraftQueueItem({ record, selected = false }) {
   const href = record.id ? `#/knowledge/${encodeURIComponent(record.id)}` : '#/knowledge';
-  const task = getRecordCardTask(record);
-  const needsAttention = !selected && (task.tone === 'warning' || task.tone === 'blocked');
+  // When the draft entered the review queue. lineage.createdAt is the candidate
+  // document's birth (drafts are born in review status), NOT lineage.generatedAt
+  // — content re-generation can stamp generatedAt hours after queue entry.
+  const queuedAt = formatQueueTimestamp(record.lineage?.createdAt || record.lineage?.generatedAt);
+  // The title lives in the hover tooltip now, not the card body. Always
+  // non-empty (falls back for untitled drafts) so every card gets the same
+  // tooltip wrapper and the rail's nth-child enter cascade stays uniform.
+  const hoverTitle = displayRecordTitle(record.title, record.category, 'Untitled KB draft');
+  const category = record.category ? formatCategory(record.category) : '';
+  const dotState = getDotStateDescription(record);
+  // The status dot is a SIBLING of the title-tooltip wrapper (absolutely
+  // positioned over the card's top-right corner), not a child of it: entering
+  // the dot therefore LEAVES the title tooltip's hover region, so the title
+  // bubble closes and only the dot's state bubble shows. Nesting the two
+  // tooltips would display both at once.
   return (
-    <a
-      className={`knowledge-draft-queue-item${selected ? ' is-active' : ''}${needsAttention ? ' needs-attention' : ''}`}
-      href={href}
-      aria-current={selected ? 'page' : undefined}
-    >
-      <span className="knowledge-draft-queue-meta">
-        <span className="knowledge-draft-queue-case">{getRecordCaseQueueLabel(record)}</span>
-        <span className={`knowledge-draft-status-dot ${getRecordStatusDot(record)}`} />
-      </span>
-      <span className="knowledge-draft-queue-title">{displayRecordTitle(record.title, record.category, 'Untitled KB draft')}</span>
-    </a>
+    <span className="knowledge-draft-queue-cell">
+      <Tooltip text={hoverTitle} position="right">
+        <a
+          className={`knowledge-draft-queue-item${selected ? ' is-active' : ''}`}
+          href={href}
+          aria-current={selected ? 'page' : undefined}
+        >
+          <span className="knowledge-draft-queue-meta">
+            <span className="knowledge-draft-queue-case">{getRecordCaseQueueLabel(record)}</span>
+            {queuedAt && <span className="knowledge-draft-queue-time">{queuedAt}</span>}
+          </span>
+          {category && <span className="knowledge-draft-queue-category">{category}</span>}
+        </a>
+      </Tooltip>
+      <Tooltip text={dotState} position="top">
+        <span className="knowledge-draft-queue-dot-zone" role="img" aria-label={dotState}>
+          <span className={`knowledge-draft-status-dot ${getRecordStatusDot(record)}`} />
+        </span>
+      </Tooltip>
+    </span>
   );
 }
 
@@ -2089,6 +2188,11 @@ function KbAgentProviderMark({ provider, providerLabel }) {
   const altLabel = meta?.shortLabel || meta?.label || providerLabel || 'Provider';
 
   const providerText = `${provider || ''} ${meta?.label || ''} ${meta?.family || ''}`.toLowerCase();
+  const markClassName = `knowledge-agent-provider-mark${
+    providerText.includes('openai') || providerText.includes('codex') || providerText.includes('gpt')
+      ? ' is-openai'
+      : ''
+  }`;
   if (providerText.includes('claude') || providerText.includes('anthropic')) {
     return (
       <span className="knowledge-agent-provider-mark" title={altLabel}>
@@ -2099,7 +2203,7 @@ function KbAgentProviderMark({ provider, providerLabel }) {
 
   if (iconSrc && !errored) {
     return (
-      <span className="knowledge-agent-provider-mark" title={altLabel}>
+      <span className={markClassName} title={altLabel}>
         <img
           src={iconSrc}
           alt=""
@@ -2117,6 +2221,57 @@ function KbAgentProviderMark({ provider, providerLabel }) {
     <span className="knowledge-agent-provider-mark is-fallback" title={altLabel} aria-hidden="true">
       {initial}
     </span>
+  );
+}
+
+// m:ss throughout ("0:04", "1:32") — constant shape, no format jump at 60s.
+function formatKbAgentElapsed(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+// Waiting indicator for the KB agent chat. Replaces the global `.spinner`,
+// which rendered frozen here: overhaul.css forces `animation: playbook-spin
+// !important` on `.spinner`, and that keyframe declared `transform ...
+// !important` — CSS drops !important declarations inside @keyframes, leaving
+// the frame empty, so the spinner never moved. This mark owns its own
+// keyframes (an accent satellite orbiting a breathing core, transform/opacity
+// only) and its class names avoid the global trap substrings (btn/title).
+//
+// The component only mounts while the chat is waiting, so the timer starts at
+// 0:00 on send and the interval is cleared on unmount (answer or error).
+// Elapsed time derives from a start timestamp — not an incremented counter —
+// so delayed ticks cannot drift it. KB agent replies can legitimately run
+// ~2 minutes of tool work; the timer keeps that wait honest.
+function KnowledgeAgentThinkingIndicator({ label = 'Thinking', withTimer = false }) {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!withTimer) return undefined;
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    // 500ms tick so the displayed second flips near the real boundary; the
+    // value itself is always recomputed from the timestamp.
+    const intervalId = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 500);
+    return () => clearInterval(intervalId);
+  }, [withTimer]);
+
+  return (
+    <div className="knowledge-agent-thinking" role="status">
+      <span className="knowledge-agent-thinking-mark" aria-hidden="true">
+        <span className="knowledge-agent-thinking-core" />
+        <span className="knowledge-agent-thinking-orbit">
+          <span className="knowledge-agent-thinking-satellite" />
+        </span>
+      </span>
+      <span className="knowledge-agent-thinking-text">{label}</span>
+      {withTimer && (
+        <span className="knowledge-agent-thinking-elapsed">{formatKbAgentElapsed(elapsedSeconds)}</span>
+      )}
+    </div>
   );
 }
 
@@ -2188,10 +2343,7 @@ function KnowledgeBaseAgentSidebar({
 
       <div className="knowledge-agent-chat-thread" role="log" aria-live="polite" aria-busy={loading || busy}>
         {loading ? (
-          <div className="knowledge-agent-chat-empty" role="status">
-            <span className="spinner spinner-sm" />
-            <span>Loading context</span>
-          </div>
+          <KnowledgeAgentThinkingIndicator label="Loading context" />
         ) : !record ? (
           <div className="knowledge-agent-chat-empty">
             <strong>No draft selected</strong>
@@ -2235,12 +2387,7 @@ function KnowledgeBaseAgentSidebar({
             </article>
           ))
         )}
-        {busy && (
-          <div className="knowledge-agent-chat-empty" role="status">
-            <span className="spinner spinner-sm" />
-            <span>Thinking</span>
-          </div>
-        )}
+        {busy && <KnowledgeAgentThinkingIndicator label="Thinking" withTimer />}
       </div>
 
       {error && <div className="knowledge-agent-chat-error">{error}</div>}
@@ -2553,6 +2700,8 @@ function KnowledgeRecordDetail({
   record,
   draft,
   busy,
+  chatBusy = false,
+  onRedoField,
   notice,
   operationalIntel,
   operationalIntelLoading,
@@ -2749,7 +2898,24 @@ function KnowledgeRecordDetail({
       {/* key: remount the document when the operator switches drafts so the
           CSS entrance choreography (kb-enter-rise stagger) replays. */}
       <article className="knowledge-draft-doc" key={record.id}>
-        <h1>{displayRecordTitle(draft.title || record.title, draft.category || record.category, 'Untitled knowledge record')}</h1>
+        {/* Head row: the title plus its agent-redo affordance. The wrapper
+            keeps the affordance out of the h1 (overhaul.css paints gradient
+            text into heading content) and aligned with the section icons. */}
+        <div className="knowledge-draft-doc-headrow">
+          <h1>{displayRecordTitle(draft.title || record.title, draft.category || record.category, 'Untitled knowledge record')}</h1>
+          {record.reviewStatus !== 'published' && (
+            <button
+              className="knowledge-draft-redo-affordance"
+              type="button"
+              onClick={() => onRedoField?.('title')}
+              disabled={busy || chatBusy}
+              title="Ask the Knowledge Base Agent to redo the title"
+              aria-label="Ask the Knowledge Base Agent to redo the Title field"
+            >
+              <IconRefresh size={13} />
+            </button>
+          )}
+        </div>
 
         <div className="knowledge-draft-doc-meta">
           <span>{formatCategory(draft.category || record.category)}</span>
@@ -2769,7 +2935,7 @@ function KnowledgeRecordDetail({
                 {generationPackageId ? (
                   <button
                     type="button"
-                    className="knowledge-draft-meta-evidence-link"
+                    className="knowledge-draft-meta-evidence-link has-reasoning"
                     onClick={openGenerationEvidence}
                     title={`${record.generation.model || 'Model'} — view the call evidence for this draft`}
                   >
@@ -2801,8 +2967,6 @@ function KnowledgeRecordDetail({
               </>
             )}
           </span>
-          <span className="dot-sep">·</span>
-          <span className={`knowledge-draft-meta-status ${getRecordStatusDot(record)}`}>{formatRecordStatus(record)}</span>
         </div>
 
         {notice && <div className="knowledgebase-detail-notice knowledge-draft-notice">{notice}</div>}
@@ -2812,10 +2976,12 @@ function KnowledgeRecordDetail({
             key={section.field}
             section={section}
             busy={busy}
+            chatBusy={chatBusy}
             published={record.reviewStatus === 'published'}
             editing={editingField === section.field}
             editingValue={editingValue}
             onEdit={() => beginEdit(section.field, section.value)}
+            onRedo={() => onRedoField?.(section.field)}
             onEditValueChange={setEditingValue}
             onCancel={cancelEdit}
             onSave={saveEdit}
@@ -2965,10 +3131,12 @@ function KnowledgeRecordDetail({
 function KnowledgeDraftDocumentSection({
   section,
   busy = false,
+  chatBusy = false,
   published = false,
   editing = false,
   editingValue = '',
   onEdit,
+  onRedo,
   onEditValueChange,
   onCancel,
   onSave,
@@ -3001,9 +3169,24 @@ function KnowledgeDraftDocumentSection({
       ) : (
         <>
           {!published && (
-            <button className="knowledge-draft-edit-affordance" type="button" onClick={onEdit} disabled={busy}>
-              {empty ? 'Add' : 'Edit'}
-            </button>
+            <>
+              {/* Agent redo: sends a precreated "redo this field" message to
+                  the Knowledge Base Agent chat. Disabled while the agent is
+                  already answering (mirrors the chat input's busy gate). */}
+              <button
+                className="knowledge-draft-redo-affordance"
+                type="button"
+                onClick={onRedo}
+                disabled={busy || chatBusy}
+                title={`Ask the Knowledge Base Agent to redo ${section.label}`}
+                aria-label={`Ask the Knowledge Base Agent to redo the ${section.label} field`}
+              >
+                <IconRefresh size={13} />
+              </button>
+              <button className="knowledge-draft-edit-affordance" type="button" onClick={onEdit} disabled={busy}>
+                {empty ? 'Add' : 'Edit'}
+              </button>
+            </>
           )}
           {section.list && lines.length > 0 ? (
             <ul>

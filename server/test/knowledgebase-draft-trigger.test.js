@@ -15,6 +15,14 @@
 // The KB-agent model pass is intentionally skipped in tests (NODE_ENV=test and
 // KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS unset), so these tests exercise the
 // deterministic draft path with no CLI subprocess.
+//
+// Exception: the "model-generated title" tests at the bottom opt IN to the
+// model pass (KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS=true) with the extraction
+// stubbed below, to pin the title merge rules: the model's rule-following
+// title supersedes the deterministic string-slice title; blank/omitted/trivial
+// model titles fall back; over-long titles are word-boundary capped; and an
+// editor-owned title (proven by 'record.update' audit events) is never
+// overwritten on force regenerate.
 // ---------------------------------------------------------------------------
 
 const test = require('node:test');
@@ -25,7 +33,19 @@ const Escalation = require('../src/models/Escalation');
 const KnowledgeCandidate = require('../src/models/KnowledgeCandidate');
 const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
 
+// Swappable extraction stub. routes/escalations.js destructures
+// runKnowledgeBaseAgentDraftExtraction from the context service at require
+// time, so the export is patched BEFORE the route module loads. Tests that
+// leave the stub null get the real function (which never runs here anyway —
+// the model pass is env-gated off by default).
+const kbContextService = require('../src/services/knowledgebase-agent-context-service');
+const realDraftExtraction = kbContextService.runKnowledgeBaseAgentDraftExtraction;
+let draftExtractionStub = null;
+kbContextService.runKnowledgeBaseAgentDraftExtraction = (...args) =>
+  (draftExtractionStub || realDraftExtraction)(...args);
+
 const {
+  createKnowledgeDraftForEscalation,
   ensureKnowledgeDraftForEscalation,
   ensureKnowledgeDraftForFinalizedEscalation,
 } = require('../src/routes/escalations');
@@ -61,6 +81,7 @@ test.after(async () => {
 test.beforeEach(async () => {
   process.env.NODE_ENV = 'test';
   delete process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS;
+  draftExtractionStub = null;
   await Escalation.deleteMany({});
   await KnowledgeCandidate.deleteMany({});
   await EscalationAttentionItem.deleteMany({});
@@ -157,4 +178,144 @@ test('fire-and-forget trigger eventually creates a draft for a pipeline escalati
 
   assert.ok(candidate, 'the fire-and-forget trigger should have created a draft');
   assert.equal(candidate.reviewStatus, 'draft');
+});
+
+// ---------------------------------------------------------------------------
+// Model-generated KB draft titles (extraction merge rules)
+// ---------------------------------------------------------------------------
+
+// The deterministic fallback title for makeEscalation()'s case data — the
+// inferDraftTitle string-slice of actualOutcome (capitalized, verbatim).
+const DETERMINISTIC_TITLE = 'The adjustment did not post to the ledger';
+const MODEL_TITLE = 'Payroll adjustment does not post to the ledger after submitting (QBO Payroll)';
+
+function stubExtraction(fields) {
+  draftExtractionStub = async () => ({
+    text: JSON.stringify(fields),
+    usage: null,
+    contextBundle: null,
+    providerUsed: 'stub-provider',
+    modelUsed: 'stub-model',
+    reasoningEffort: 'medium',
+    providerPackageId: '',
+    payloadSourcePath: '',
+    fallbackUsed: false,
+    fallbackFrom: '',
+  });
+}
+
+test('model-extracted title supersedes the deterministic string-slice title', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  stubExtraction({
+    title: MODEL_TITLE,
+    customerGoal: 'Post a payroll adjustment to the ledger.',
+  });
+
+  const escalation = await makeEscalation({ status: 'open' });
+  const result = await createKnowledgeDraftForEscalation(escalation, { enrich: true });
+  assert.equal(result.generated, true);
+  assert.equal(result.enriched, true);
+
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.equal(candidate.title, MODEL_TITLE, 'the model title should replace the string-slice');
+  assert.equal(candidate.customerGoal, 'Post a payroll adjustment to the ledger.');
+});
+
+test('falls back to the deterministic title when the model omits the title', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  stubExtraction({ customerGoal: 'Post a payroll adjustment to the ledger.' });
+
+  const escalation = await makeEscalation({ status: 'open' });
+  const result = await createKnowledgeDraftForEscalation(escalation, { enrich: true });
+  assert.equal(result.enriched, true, 'the other model fields still enrich the draft');
+
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.equal(candidate.title, DETERMINISTIC_TITLE);
+});
+
+test('falls back to the deterministic title when the model title is blank or trivial', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+
+  // Whitespace-only title.
+  stubExtraction({ title: '   ', customerGoal: 'Post a payroll adjustment.' });
+  const blankCase = await makeEscalation({ status: 'open' });
+  await createKnowledgeDraftForEscalation(blankCase, { enrich: true });
+  const blankCandidate = await KnowledgeCandidate.findOne({ escalationId: blankCase._id }).lean();
+  assert.equal(blankCandidate.title, DETERMINISTIC_TITLE, 'whitespace title is treated as omitted');
+
+  // Too-trivial title (under the 8-char floor after normalization).
+  stubExtraction({ title: '"Payroll."', customerGoal: 'Post a payroll adjustment.' });
+  const trivialCase = await makeEscalation({ status: 'open' });
+  await createKnowledgeDraftForEscalation(trivialCase, { enrich: true });
+  const trivialCandidate = await KnowledgeCandidate.findOne({ escalationId: trivialCase._id }).lean();
+  assert.equal(trivialCandidate.title, DETERMINISTIC_TITLE, 'trivial title is treated as omitted');
+});
+
+test('normalizes a decorated model title: strips wrapping quotes and the trailing period', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  stubExtraction({ title: `**"${MODEL_TITLE}."**` });
+
+  const escalation = await makeEscalation({ status: 'open' });
+  await createKnowledgeDraftForEscalation(escalation, { enrich: true });
+
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.equal(candidate.title, MODEL_TITLE, 'markdown/quote wrapping and trailing period are stripped');
+});
+
+test('caps an over-long model title at the 200-char word boundary', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  const longTitle = `Payroll adjustment does not post to the ledger ${'because the submitted totals keep recalculating '.repeat(6)}(QBO Payroll)`;
+  assert.ok(longTitle.length > 200, 'fixture must exceed the cap');
+  stubExtraction({ title: longTitle });
+
+  const escalation = await makeEscalation({ status: 'open' });
+  await createKnowledgeDraftForEscalation(escalation, { enrich: true });
+
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.ok(candidate.title.length <= 200, 'stored title respects the 200-char ceiling');
+  assert.ok(longTitle.startsWith(candidate.title), 'capped title is a prefix of the model title');
+  assert.equal(longTitle[candidate.title.length], ' ', 'cap lands on a word boundary, not mid-word');
+});
+
+test('force regenerate adopts a fresher model title when no editor has touched it', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  const escalation = await makeEscalation({ status: 'open' });
+  // Machine-only draft first (deterministic title, no audit edit events).
+  await createKnowledgeDraftForEscalation(escalation, { enrich: false });
+
+  stubExtraction({ title: MODEL_TITLE });
+  await createKnowledgeDraftForEscalation(escalation, { force: true, enrich: true });
+
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.equal(candidate.title, MODEL_TITLE, 'machine-owned title is upgraded to the model title');
+});
+
+test('force regenerate NEVER overwrites an editor-owned title', async () => {
+  process.env.KNOWLEDGEBASE_AGENT_MODEL_IN_TESTS = 'true';
+  const escalation = await makeEscalation({ status: 'open' });
+  await createKnowledgeDraftForEscalation(escalation, { enrich: false });
+
+  // A human reviewer (or the KB agent on their behalf) edits the title via
+  // updateKnowledgeRecord, which records a 'record.update' audit event naming
+  // the fields written — the provenance proof the merge consults.
+  const humanTitle = 'Reviewer-curated payroll ledger posting failure title';
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  candidate.title = humanTitle;
+  candidate.auditEvents.push({
+    eventId: 'evt-test-title-edit',
+    action: 'record.update',
+    actor: 'reviewer',
+    role: 'reviewer',
+    summary: 'Edited the title.',
+    metadata: { fields: ['title'] },
+    createdAt: new Date(),
+  });
+  await candidate.save();
+
+  stubExtraction({ title: MODEL_TITLE, customerGoal: 'Post a payroll adjustment.' });
+  await createKnowledgeDraftForEscalation(escalation, { force: true, enrich: true });
+
+  const after = await KnowledgeCandidate.findOne({ escalationId: escalation._id }).lean();
+  assert.equal(after.title, humanTitle, 'editor-owned title survives the model pass');
+  assert.equal(after.customerGoal, 'Post a payroll adjustment.', 'non-title model fields still apply');
 });

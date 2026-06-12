@@ -172,3 +172,17 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Section-Level Authorship Blame for Knowledge Records - Track which actor last touched each section of a KB record — the operator, or a specific agent+model call (linked to its provider call package) — and show it inline during review, like git blame for governed memory. Today a draft shows only who created it; after agent edits and human edits interleave, a reviewer can't tell which claims are human-validated versus AI-authored, and this makes that visible at the exact granularity where trust decisions happen.
+
+Date: 2026-06-11
+Time: 09:01 AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: medium
+Special Feature: Duplicate Draft Coalescing - When the pipeline creates multiple knowledge drafts for the same case (already happening in live data: one case has three queued drafts created hours apart), detect the collision, group them as one queue entry, and show the operator a side-by-side diff of what each draft claims differently. The operator picks or merges a canonical draft and the others are marked superseded with lineage links preserved, so review effort isn't wasted on near-identical drafts and the governed KB never ingests conflicting records for the same case.
+
+Date: 2026-06-11
+Time: 09:26 AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: high
+Special Feature: Prompt-Change Regression Replay - Before any agent prompt or model change goes live, replay the proposed configuration against the corpus of operator-approved real cases and show field-level diffs of old-vs-new outputs, with a pass/fail gate the operator approves before the change ships. This is regression testing for agent behavior built entirely on real, approved evidence — catching silent extraction or triage regressions at change time instead of discovering them in live escalations.

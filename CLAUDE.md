@@ -60,6 +60,21 @@ npm start            # Production server
 
 The user owns local runtime control — never start, stop, restart, or replace the app server, client dev server, MongoDB, or any long-running local service unless the user explicitly asks in the current conversation (a PreToolUse hook also enforces this). Allowed without asking: checking ports/process owners, reading logs, calling health endpoints. If a change requires a restart, make the change and say exactly what to restart. On `EADDRINUSE`, identify the port owner and ask before killing a healthy instance. Short-lived test servers inside test runners are fine, but leave nothing running after verification.
 
+## Parallel Sessions And Worktree Awareness
+
+Multiple chat sessions or coding agents may be working in this repository at the same time. Assume the worktree can change while you are working.
+
+Before editing:
+- Check current `git status`.
+- Re-read any file immediately before modifying it.
+- Do not overwrite, revert, or clean up changes you did not make unless the user explicitly asks.
+- If a file has changed unexpectedly, treat it as another session's work and adapt to it.
+- If overlapping edits make the task ambiguous or risky, stop and ask the user before proceeding.
+
+Before reporting:
+- Base factual code-state claims on fresh on-disk checks from the current turn.
+- Mention any relevant concurrent-work risk if it affected the task.
+
 ## Key Files
 
 | File                            | Purpose                                            |

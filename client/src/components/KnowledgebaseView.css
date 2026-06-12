@@ -3529,11 +3529,12 @@
 }
 
 .knowledge-draft-topbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--kb-rail-w) minmax(0, 1fr) var(--kb-chat-w);
   min-width: 0;
   align-items: center;
-  gap: 24px;
-  padding: 0 24px;
+  gap: 0;
+  padding: 0;
   border-bottom: 1px solid var(--kb-border);
   background: var(--kb-bg-surface);
 }
@@ -3558,9 +3559,11 @@
 
 .knowledge-draft-breadcrumb {
   display: flex;
+  grid-column: 1;
   min-width: 0;
   align-items: center;
   gap: 8px;
+  padding: 0 24px;
   color: var(--kb-text-secondary);
   font-size: 12px;
   font-weight: 500;
@@ -3580,15 +3583,17 @@
 }
 
 .knowledge-draft-topbar-spacer {
-  flex: 1 1 auto;
-  min-width: 16px;
+  display: none;
 }
 
 .knowledge-draft-stepper {
   display: flex;
-  flex: 0 0 auto;
+  grid-column: 2;
   align-items: center;
+  justify-content: center;
   gap: 8px;
+  min-width: 0;
+  padding: 0 24px;
 }
 
 .knowledge-draft-step-wrap {
@@ -3598,20 +3603,41 @@
 }
 
 .knowledge-draft-step {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  min-height: 28px;
+  padding: 5px 12px;
+  border: 1px solid transparent;
   border-radius: 999px;
   color: var(--kb-text-muted);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .knowledge-draft-step.is-current {
-  background: var(--kb-accent-soft);
-  color: var(--kb-accent-strong);
-  font-weight: 600;
+  border-color: color-mix(in srgb, var(--kb-accent) 24%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.025)),
+    color-mix(in srgb, var(--kb-accent) 10%, var(--kb-bg-raised));
+  color: var(--kb-text-primary);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 22px rgba(0, 0, 0, 0.22);
+}
+
+.knowledge-draft-step.is-draft.is-current {
+  border-color: color-mix(in srgb, var(--kb-warning) 30%, transparent);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075), rgba(255, 255, 255, 0.025)),
+    color-mix(in srgb, var(--kb-warning) 9%, var(--kb-bg-raised));
+  color: color-mix(in srgb, var(--kb-warning) 78%, #ffffff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    0 0 0 1px rgba(255, 255, 255, 0.025),
+    0 10px 26px rgba(0, 0, 0, 0.26);
 }
 
 .knowledge-draft-step.is-done {
@@ -3630,6 +3656,11 @@
   background: var(--kb-accent);
 }
 
+.knowledge-draft-step.is-draft.is-current .knowledge-draft-step-dot {
+  background: var(--kb-warning);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--kb-warning) 60%, transparent);
+}
+
 .knowledge-draft-step.is-done .knowledge-draft-step-dot {
   background: var(--kb-success);
 }
@@ -3642,9 +3673,12 @@
 
 .knowledge-draft-topbar-actions {
   display: flex;
-  flex: 0 0 auto;
+  grid-column: 3;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+  min-width: 0;
+  padding: 0 24px;
 }
 
 /* `!important` reclaims box metrics from overhaul.css
@@ -3744,7 +3778,10 @@
 
 .knowledge-draft-rail-group-label {
   padding: 8px 16px 6px;
-  color: var(--kb-text-muted);
+  /* Primary ink (not muted): the group label is the section anchor for the
+     queue, so it must out-rank the resting card titles (text-secondary). At
+     11px uppercase the near-white reads as emphasis, not glare. */
+  color: var(--kb-text-primary);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -3756,6 +3793,22 @@
    queue/decisions boundary still reads as a section break. */
 .knowledge-draft-rail-list + .knowledge-draft-rail-group-label {
   padding-top: 16px;
+}
+
+/* Queue-size pill beside the group label. A clear emphasis step BELOW the
+   near-white label: raised-surface chip, secondary ink, small numeral. */
+.knowledge-draft-rail-group-count {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--kb-bg-raised);
+  color: var(--kb-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  vertical-align: 1px;
 }
 
 .knowledge-draft-rail-list {
@@ -3795,16 +3848,9 @@
   box-shadow: inset 0 0 0 3px var(--kb-accent-ring) !important;
 }
 
-.knowledge-draft-queue-item.needs-attention {
-  border-left-color: var(--kb-accent);
-  background: var(--kb-bg-raised);
-}
-
-.knowledge-draft-queue-item.needs-attention:hover,
-.knowledge-draft-queue-item.needs-attention:focus-visible {
-  background: var(--kb-bg-elevated);
-}
-
+/* Unselected cards are deliberately uniform at rest: the status dot is the
+   ONLY state indicator (its hover tooltip explains the state). Only the
+   selected card keeps the blue border + tinted treatment below. */
 .knowledge-draft-queue-item.is-active,
 .knowledge-draft-queue-item.is-active:hover,
 .knowledge-draft-queue-item.is-active:focus-visible {
@@ -3818,14 +3864,19 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 2px;
+  /* Reserve the top-right corner for the absolutely positioned status dot
+     (the dot lives outside this row now, in its own tooltip overlay). */
+  padding-right: 14px;
 }
 
+/* Primary line of the card (the title moved to a hover tooltip): carries the
+   emphasis the title used to — secondary ink at rest, accent when active. */
 .knowledge-draft-queue-case {
   min-width: 0;
   overflow: hidden;
-  color: var(--kb-text-muted);
-  font-size: 12px;
-  font-weight: 500;
+  color: var(--kb-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3833,6 +3884,17 @@
 
 .knowledge-draft-queue-item.is-active .knowledge-draft-queue-case {
   color: var(--kb-accent-strong);
+}
+
+/* When the draft entered the review queue. Fixed-width companion to the case
+   number: the case label (min-width: 0 + ellipsis) absorbs any squeeze, so
+   long case numbers truncate instead of wrapping the time. */
+.knowledge-draft-queue-time {
+  flex: 0 0 auto;
+  color: var(--kb-text-muted);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .knowledge-draft-status-dot {
@@ -3860,20 +3922,60 @@
   background: var(--kb-error);
 }
 
-.knowledge-draft-queue-title {
+/* Secondary line in the old title slot: the case's category. Deliberately
+   quiet — the loud full-sentence title now lives in the hover tooltip. */
+.knowledge-draft-queue-category {
   display: block;
   min-width: 0;
   overflow: hidden;
-  color: var(--kb-text-secondary);
-  font-size: 13px;
+  color: var(--kb-text-muted);
+  font-size: 11px;
   font-weight: 500;
+  letter-spacing: 0.02em;
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.knowledge-draft-queue-item:is(.needs-attention, .is-active) .knowledge-draft-queue-title {
-  color: var(--kb-text-primary);
+/* Card cell: the rail list's grid child. Holds two SIBLING tooltip regions —
+   the full-card title tooltip and the status-dot state tooltip — so hovering
+   the dot leaves the title region (only one bubble can show at a time). */
+.knowledge-draft-queue-cell {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* The card's title-tooltip wrapper: grid/flow would let the tip-anchor's
+   inline-flex shrink-wrap the card — force block so the card keeps its
+   full-bleed row width and hover surface. */
+.knowledge-draft-queue-cell > .tip-anchor:first-child {
+  display: block;
+  min-width: 0;
+}
+
+/* Dot overlay: pinned over the card's top-right corner, where the dot sat
+   when it lived inside the meta row (card padding 12px + half the 18px meta
+   row, minus half the 16px hit zone). */
+.knowledge-draft-queue-cell > :last-child {
+  position: absolute;
+  top: 13px;
+  right: 11px;
+}
+
+/* Invisible 16x16 hover/hit zone around the 6px dot — the dot itself is too
+   small a target. The dot keeps its visual size, centered inside. */
+.knowledge-draft-queue-dot-zone {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
+.knowledge-draft-queue-dot-zone .knowledge-draft-status-dot {
+  margin-left: 0;
 }
 
 .knowledge-draft-rail-empty {
@@ -3948,6 +4050,11 @@
   height: 12px;
 }
 
+.knowledge-draft-meta-by .knowledge-agent-provider-mark.is-openai img {
+  filter: brightness(0) invert(1);
+  opacity: 0.9;
+}
+
 /* [mark + model] token as a real button when the draft carries a back link to
    its ProviderCallPackage. Class deliberately avoids the "btn" substring and
    the metrics are pinned with !important to defeat the global button traps
@@ -3972,13 +4079,26 @@
   cursor: pointer;
 }
 
+.knowledge-draft-meta-by .knowledge-draft-meta-evidence-link.has-reasoning .knowledge-draft-meta-evidence-model {
+  background: linear-gradient(105deg, #f8fafc 0%, #7dd3fc 34%, #a78bfa 66%, #f0abfc 100%);
+  background-size: 180% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  text-shadow:
+    0 0 10px rgba(125, 211, 252, 0.35),
+    0 0 18px rgba(167, 139, 250, 0.22);
+  animation: kb-reasoning-gradient 5.5s ease-in-out infinite;
+}
+
 .knowledge-draft-meta-by .knowledge-draft-meta-evidence-link:focus {
   outline: none !important;
 }
 
 .knowledge-draft-meta-by .knowledge-draft-meta-evidence-link:hover .knowledge-draft-meta-evidence-model,
 .knowledge-draft-meta-by .knowledge-draft-meta-evidence-link:focus-visible .knowledge-draft-meta-evidence-model {
-  color: var(--kb-text-primary, var(--ink));
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -4015,32 +4135,6 @@
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
-}
-
-.knowledge-draft-meta-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.knowledge-draft-meta-status::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--kb-warning);
-}
-
-.knowledge-draft-meta-status.approved::before {
-  background: var(--kb-success);
-}
-
-.knowledge-draft-meta-status.published::before {
-  background: var(--kb-text-muted);
-}
-
-.knowledge-draft-meta-status.rejected::before {
-  background: var(--kb-error);
 }
 
 .knowledge-draft-notice {
@@ -4127,6 +4221,56 @@
 .knowledge-draft-edit-affordance:disabled {
   cursor: not-allowed;
   opacity: 0;
+}
+
+/* Agent redo affordance: sibling icon button to the Edit affordance that
+   sends a precreated "redo this field" message to the Knowledge Base Agent
+   chat. Class name deliberately avoids "btn"/"title" substrings (overhaul.css
+   and console-density.css global traps key on those). */
+.knowledge-draft-redo-affordance {
+  position: absolute !important;
+  z-index: 1;
+  top: 12px;
+  right: 64px;
+  /* !important: console-density.css `.app-content-constrained button` (0,1,1)
+     sets min-height: 28px and outranks this (0,1,0) rule's plain value. */
+  min-height: 0 !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--kb-accent-faint);
+  color: var(--kb-accent);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+
+.knowledge-draft-doc-section:hover .knowledge-draft-redo-affordance,
+.knowledge-draft-doc-headrow:hover .knowledge-draft-redo-affordance,
+.knowledge-draft-redo-affordance:focus-visible {
+  opacity: 1;
+}
+
+.knowledge-draft-redo-affordance:hover:not(:disabled) {
+  background: var(--kb-accent-soft);
+}
+
+.knowledge-draft-redo-affordance:disabled {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
+/* Title head row: hosts the document h1 plus its own redo affordance. */
+.knowledge-draft-doc-headrow {
+  position: relative;
+}
+
+.knowledge-draft-doc-headrow .knowledge-draft-redo-affordance {
+  top: 4px;
+  right: 0;
 }
 
 .knowledge-draft-doc-section.is-editing {
@@ -4502,6 +4646,129 @@
   font-weight: 500;
 }
 
+/* --- KB chat thinking indicator -------------------------------------------
+   Replaces the global `.spinner` in the chat thread (it rendered frozen:
+   overhaul.css's `playbook-spin` keyframe used `!important`, which CSS drops
+   inside @keyframes, leaving nothing to animate). The mark is a breathing
+   accent core with a satellite dot riding a faint orbit ring — transform and
+   opacity only, so it stays on the compositor. Class names deliberately avoid
+   the global trap substrings (`btn`, `title`, `spinner`). */
+.knowledge-agent-thinking {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  font-size: 12px;
+}
+
+.knowledge-agent-thinking-mark {
+  position: relative;
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: none;
+}
+
+/* Static orbit ring the satellite travels on. */
+.knowledge-agent-thinking-mark::before {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border: 1px solid var(--kb-accent-border);
+  border-radius: 50%;
+  opacity: 0.45;
+}
+
+.knowledge-agent-thinking-core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 50%;
+  background: var(--kb-accent);
+  box-shadow: 0 0 8px var(--kb-accent-ring);
+  opacity: 0.85;
+  animation: kb-think-breathe 2s ease-in-out infinite;
+}
+
+.knowledge-agent-thinking-orbit {
+  position: absolute;
+  inset: 0;
+  animation: kb-think-orbit 1.6s linear infinite;
+}
+
+.knowledge-agent-thinking-satellite {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  margin-left: -2px;
+  border-radius: 50%;
+  background: var(--kb-accent-strong);
+  box-shadow: 0 0 6px var(--kb-accent-ring);
+}
+
+.knowledge-agent-thinking-text {
+  color: var(--kb-text-secondary);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* Live elapsed readout: tabular numerals so the chip never jitters as digits
+   change; quiet pill so it reads as telemetry, not decoration. */
+.knowledge-agent-thinking-elapsed {
+  padding: 1px 7px;
+  border: 1px solid var(--kb-border);
+  border-radius: 999px;
+  background: var(--kb-bg-surface);
+  color: var(--kb-text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
+@keyframes kb-think-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes kb-think-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+
+  50% {
+    transform: scale(1.4);
+    opacity: 1;
+  }
+}
+
+/* Reduced motion: dignified static state — orbit stops, satellite hides, the
+   core holds a calm glow. (App.css also blanket-freezes animations under this
+   media query, so an explicit static state beats a slow-pulse fallback here.)
+   The elapsed timer is information, not decoration, and keeps ticking. */
+@media (prefers-reduced-motion: reduce) {
+  .knowledge-agent-thinking-orbit,
+  .knowledge-agent-thinking-core {
+    animation: none;
+  }
+
+  .knowledge-agent-thinking-satellite {
+    display: none;
+  }
+
+  .knowledge-agent-thinking-core {
+    opacity: 0.85;
+  }
+}
+
 .knowledge-agent-chat-message p,
 .knowledge-agent-chat-markdown {
   margin: 0;
@@ -4698,6 +4965,7 @@
   .knowledge-draft-btn,
   .knowledge-draft-mini-btn,
   .knowledge-draft-edit-affordance,
+  .knowledge-draft-redo-affordance,
   .knowledge-agent-send,
   .knowledge-agent-change-undo,
   .knowledge-agent-chat-status button
@@ -4742,12 +5010,21 @@
   }
 
   .knowledge-draft-topbar {
-    gap: 12px;
-    padding: 0 16px;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .knowledge-draft-stepper {
     display: none;
+  }
+
+  .knowledge-draft-breadcrumb {
+    grid-column: 1;
+    padding: 0 16px;
+  }
+
+  .knowledge-draft-topbar-actions {
+    grid-column: 2;
+    padding: 0 16px;
   }
 }
 
@@ -4788,10 +5065,16 @@
 
 @media (max-width: 720px) {
   .knowledge-draft-topbar {
+    grid-template-columns: 1fr;
     min-height: var(--kb-topbar-h);
-    flex-wrap: wrap;
     height: auto;
     padding: 8px 12px;
+  }
+
+  .knowledge-draft-breadcrumb,
+  .knowledge-draft-topbar-actions {
+    grid-column: 1;
+    padding: 0;
   }
 
   .knowledge-draft-topbar-actions {
@@ -5003,6 +5286,46 @@
   color: var(--kb-text-primary);
 }
 
+/* Agent redo affordance: same 28px icon-button language as the edit pencil,
+   sitting just left of it in each section header. */
+.knowledgebase-page.is-redesign .knowledge-draft-redo-affordance {
+  top: 12px;
+  right: 34px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--kb-text-secondary);
+  opacity: 0.55;
+}
+
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover .knowledge-draft-redo-affordance:not(:disabled),
+.knowledgebase-page.is-redesign .knowledge-draft-doc-headrow:hover .knowledge-draft-redo-affordance:not(:disabled),
+.knowledgebase-page.is-redesign .knowledge-draft-redo-affordance:focus-visible {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--kb-text-primary);
+}
+
+/* While the agent is answering the redo buttons stay visible but read as
+   unavailable (the chat input is disabled the same way). */
+.knowledgebase-page.is-redesign .knowledge-draft-redo-affordance:disabled {
+  cursor: not-allowed;
+  opacity: 0.3;
+}
+
+/* The title's redo affordance aligns with the section pencils' column. */
+.knowledgebase-page.is-redesign .knowledge-draft-doc-headrow .knowledge-draft-redo-affordance {
+  top: 0;
+  right: 0;
+}
+
 .knowledgebase-page.is-redesign .knowledge-draft-doc > * {
   animation: none;
 }
@@ -5046,16 +5369,18 @@
   animation: kb-enter-rise 240ms var(--kb-ease-out) backwards;
 }
 
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(2) { animation-delay: 30ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(3) { animation-delay: 60ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(4) { animation-delay: 90ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(5) { animation-delay: 120ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(6) { animation-delay: 150ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(7) { animation-delay: 180ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(8) { animation-delay: 210ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(9) { animation-delay: 240ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(10) { animation-delay: 270ms; }
-.knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item:nth-child(n + 11) { animation-delay: 300ms; }
+/* Delays key on the list's direct children (the cards' Tooltip wrappers, since
+   the title moved into a hover tooltip), not on the card class itself. */
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(2) .knowledge-draft-queue-item { animation-delay: 30ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(3) .knowledge-draft-queue-item { animation-delay: 60ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(4) .knowledge-draft-queue-item { animation-delay: 90ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(5) .knowledge-draft-queue-item { animation-delay: 120ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(6) .knowledge-draft-queue-item { animation-delay: 150ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(7) .knowledge-draft-queue-item { animation-delay: 180ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(8) .knowledge-draft-queue-item { animation-delay: 210ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(9) .knowledge-draft-queue-item { animation-delay: 240ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(10) .knowledge-draft-queue-item { animation-delay: 270ms; }
+.knowledgebase-page.is-redesign .knowledge-draft-rail-list > :nth-child(n + 11) .knowledge-draft-queue-item { animation-delay: 300ms; }
 
 /* Chat sidebar slides in 16px from the right with fade (the inner thread is
    the scroll container, not this panel, so the one-shot transform is safe). */
@@ -5221,8 +5546,9 @@
     var(--kb-shadow-2);
 }
 
-/* Edit affordance rises 2px as it fades in. */
-.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance {
+/* Edit + agent-redo affordances rise 2px as they fade in. */
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance,
+.knowledgebase-page.is-redesign .knowledge-draft-redo-affordance {
   transform: translateY(2px);
   transition:
     opacity var(--kb-dur-fast) ease,
@@ -5231,7 +5557,10 @@
 }
 
 .knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover .knowledge-draft-edit-affordance,
-.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance:focus-visible {
+.knowledgebase-page.is-redesign .knowledge-draft-edit-affordance:focus-visible,
+.knowledgebase-page.is-redesign .knowledge-draft-doc-section:hover .knowledge-draft-redo-affordance,
+.knowledgebase-page.is-redesign .knowledge-draft-doc-headrow:hover .knowledge-draft-redo-affordance,
+.knowledgebase-page.is-redesign .knowledge-draft-redo-affordance:focus-visible {
   transform: translateY(0);
 }
 
@@ -5245,6 +5574,17 @@
   animation: kb-dot-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes kb-reasoning-gradient {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
 /* --- Reduced motion -------------------------------------------------------- */
 /* Targeted (not blanket) so loading spinners inside the KB scope keep
    spinning; everything introduced by this layer goes still. */
@@ -5253,7 +5593,8 @@
   .knowledgebase-page.is-redesign .knowledge-draft-rail-list .knowledge-draft-queue-item,
   .knowledgebase-page.is-redesign .knowledge-agent-chat-sidebar,
   .knowledgebase-page.is-redesign .knowledge-draft-status-dot.draft,
-  .knowledgebase-page.is-redesign .knowledge-agent-chat-status.is-busy::before {
+  .knowledgebase-page.is-redesign .knowledge-agent-chat-status.is-busy::before,
+  .knowledge-draft-meta-by .knowledge-draft-meta-evidence-link.has-reasoning .knowledge-draft-meta-evidence-model {
     animation: none !important;
   }
 
@@ -5267,7 +5608,8 @@
   .knowledgebase-page.is-redesign .knowledge-agent-send:hover:not(:disabled),
   .knowledgebase-page.is-redesign .knowledge-agent-send:active:not(:disabled),
   .knowledgebase-page.is-redesign .knowledge-draft-mini-btn:active:not(:disabled),
-  .knowledgebase-page.is-redesign .knowledge-draft-edit-affordance {
+  .knowledgebase-page.is-redesign .knowledge-draft-edit-affordance,
+  .knowledgebase-page.is-redesign .knowledge-draft-redo-affordance {
     transform: none !important;
   }
 }

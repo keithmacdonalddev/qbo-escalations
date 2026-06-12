@@ -327,7 +327,7 @@ test('codex transcribeImage writes one background CLI package record on success'
 });
 
 test('codex transcribeImage returns normally and writes no record when capture is disabled', async () => {
-  delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
   const spawnCalls = installSpawnMock();
   const codex = requireFresh('../src/services/codex');
 
@@ -477,6 +477,8 @@ test('claude CLI harness force-captures the CLI package and confirms readback', 
   assert.ok(args.includes('stream-json'));
   assert.ok(args.includes('--model'));
   assert.ok(args.includes('claude-opus-4-8'));
+  // Regression: hidden CLI flag that opts thinking into readable summaries must stay in the argv.
+  assert.equal(args[args.indexOf('--thinking-display') + 1], 'summarized');
   emitStdoutLines(child, [
     JSON.stringify({
       type: 'stream_event',

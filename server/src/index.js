@@ -142,6 +142,17 @@ async function start(options = {}) {
     const requestedPort = options.port ?? process.env.PORT ?? 4000;
     const startupControls = resolveStartupControls(process.env, options.startupControls);
 
+    // Evidence layer guard: provider-call-package capture is ON by default and
+    // should only ever be off as a deliberate operator choice. Make a disabled
+    // evidence layer impossible to miss in the startup log.
+    const { isProviderCallPackageCaptureEnabled } = require('./services/provider-call-package-recorder');
+    if (!isProviderCallPackageCaptureEnabled()) {
+      console.warn(
+        '[startup] *** PROVIDER CALL PACKAGE CAPTURE IS DISABLED (ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=false) — '
+        + 'no provider request/response evidence will be recorded. ***'
+      );
+    }
+
     updateBackgroundService('mongodb-connection', {
       state: 'starting',
       meta: { connected: false },

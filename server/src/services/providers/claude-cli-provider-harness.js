@@ -48,6 +48,17 @@ function normalizeClaudeEffort(value) {
   return CLAUDE_ALLOWED_EFFORTS.has(normalized) ? normalized : '';
 }
 
+// Last-line OS command-injection guard, mirroring claude.js. Because the CLI is
+// spawned with shell:true, the model string is re-parsed by the OS shell and
+// must never contain shell metacharacters. Lazily require the shared validator
+// to avoid a load-time circular dependency with the chat orchestrator.
+function assertSafeModel(model, label = 'model') {
+  if (model === undefined || model === null || model === '') return;
+  // eslint-disable-next-line global-require
+  const { assertModelAllowed } = require('../chat-orchestrator');
+  assertModelAllowed(model, label);
+}
+
 function ensureIsolatedClaudeRoot() {
   fs.mkdirSync(CLAUDE_ISOLATED_ROOT, { recursive: true });
   return CLAUDE_ISOLATED_ROOT;
@@ -296,6 +307,8 @@ async function sendClaudeCliPrompt({
   signal,
 } = {}) {
   const effectiveModel = model || captureContext.modelRequested || process.env.CLAUDE_CHAT_MODEL || 'claude-opus-4-8';
+  // Guard BEFORE the model can reach the spawn args below (shell:true).
+  assertSafeModel(effectiveModel, 'model');
   const effectiveReasoningEffort = normalizeClaudeEffort(reasoningEffort || captureContext.reasoningEffort);
   const effectiveTimeoutMs = parsePositiveInt(timeoutMs, DEFAULT_TIMEOUT_MS);
   const effectiveCaptureContext = buildClaudeCliCaptureContext({
@@ -310,7 +323,10 @@ async function sendClaudeCliPrompt({
   const packageId = captureEnabled ? new mongoose.Types.ObjectId() : null;
   const requestStartedAt = nowIso();
   const tempFiles = [];
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
+  // --thinking-display is an undocumented/hidden flag in Claude CLI 2.1.173 (absent from --help but
+  // registered). It opts thinking blocks into readable summaries; without it fable-5/opus-4.7+ stream
+  // empty thinking text. If thinking goes empty after a CLI upgrade, suspect this flag first.
+  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--thinking-display', 'summarized'];
   if (effectiveModel) args.push('--model', effectiveModel);
   if (effectiveReasoningEffort) args.push('--effort', effectiveReasoningEffort);
 

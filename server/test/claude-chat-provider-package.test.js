@@ -159,6 +159,10 @@ test('claude CLI provider package capture', async (t) => {
     assert.equal(pkg.outcome, 'success');
     assert.equal(pkg.cli.command, 'claude');
     assert.ok(pkg.cli.args.includes('stream-json'), 'argv recorded');
+    // Regression: hidden CLI flag that opts thinking into readable summaries must stay in the argv.
+    const displayFlagIndex = pkg.cli.args.indexOf('--thinking-display');
+    assert.notEqual(displayFlagIndex, -1, '--thinking-display flag present');
+    assert.equal(pkg.cli.args[displayFlagIndex + 1], 'summarized');
     assert.ok(pkg.cli.stdin.text.includes('hello evidence layer'), 'stdin prompt recorded');
     assert.ok(pkg.cli.stdin.text.includes('System instructions:'), 'system prompt recorded');
     assert.equal(pkg.cli.stdout.jsonlEvents.length, 4);
@@ -231,8 +235,8 @@ test('claude CLI provider package capture', async (t) => {
     }
   });
 
-  await t.test('capture disabled (flag off, no forceCapture): no package, chat still works', async () => {
-    delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
+  await t.test('capture disabled (flag explicitly off, no forceCapture): no package, chat still works', async () => {
+    process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'false';
     const fakeChild = createFakeChild();
     childProcess.spawn = () => fakeChild;
     const claude = requireFresh('../src/services/claude');

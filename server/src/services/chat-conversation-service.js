@@ -8,6 +8,7 @@ const {
   getProviderLabel,
 } = require('./providers/registry');
 const { sumCaseIntakeEvents } = require('./event-stats-service');
+const { applyTriageResultToCaseIntake } = require('../lib/case-intake');
 
 const PHASE_BY_STAGE = {
   parser: 'parse-template',
@@ -252,6 +253,50 @@ async function updateConversation(id, { title, escalationId }) {
   return conversation;
 }
 
+// Persist a standalone Triage Agent result onto a conversation's caseIntake.
+// Called by the client AFTER both the /api/triage and /api/chat legs settle —
+// the chat route saves the conversation before emitting its `done` event, so
+// this deferred write cannot be clobbered by the pipeline's own save. Only
+// real pipeline runs hit this path; the operator test harness never has a
+// conversationId. Capped events array; rejects when nothing to record.
+async function recordConversationTriageResult(id, {
+  triageCard,
+  triageMeta,
+  error,
+  events,
+  durationMs,
+  startedAt,
+  completedAt,
+  traceId,
+} = {}) {
+  const hasCard = triageCard && typeof triageCard === 'object';
+  const hasMeta = triageMeta && typeof triageMeta === 'object';
+  const hasError = error && typeof error === 'object';
+  if (!hasCard && !hasMeta && !hasError) {
+    throw createServiceError('TRIAGE_RESULT_EMPTY', 'triageCard, triageMeta, or error is required', 400);
+  }
+
+  const conversation = await Conversation.findById(id);
+  if (!conversation) {
+    throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
+  }
+
+  conversation.caseIntake = applyTriageResultToCaseIntake(conversation.caseIntake, {
+    triageCard: hasCard ? triageCard : null,
+    triageMeta: hasMeta ? triageMeta : null,
+    error: hasError ? error : null,
+    events: Array.isArray(events) ? events.slice(0, 200) : [],
+    durationMs,
+    startedAt,
+    completedAt,
+    traceId: safeString(traceId, ''),
+  });
+  conversation.markModified('caseIntake');
+  await conversation.save();
+
+  return conversation.caseIntake;
+}
+
 async function exportConversation(id) {
   const conversation = await Conversation.findById(id).lean();
   if (!conversation) {
@@ -431,5 +476,6 @@ module.exports = {
   getForkTree,
   listConversationStageEvents,
   listConversations,
+  recordConversationTriageResult,
   updateConversation,
 };
