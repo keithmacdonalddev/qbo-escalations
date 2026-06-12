@@ -186,3 +186,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: high
 Special Feature: Prompt-Change Regression Replay - Before any agent prompt or model change goes live, replay the proposed configuration against the corpus of operator-approved real cases and show field-level diffs of old-vs-new outputs, with a pass/fail gate the operator approves before the change ships. This is regression testing for agent behavior built entirely on real, approved evidence — catching silent extraction or triage regressions at change time instead of discovering them in live escalations.
+
+Date: 2026-06-12
+Time: Unknown AST
+Model: Claude Opus 4.8
+Is duplicate?: no
+Complexity: medium
+Special Feature: Provenance Drift Sentinel - For any governed artifact that quotes a value derived from a live source of truth (a design token, a config value, a model id, a playbook claim, an extraction-prompt assumption), store a machine-checkable pointer to that source and periodically re-read it in the background, flagging when the quoted value has drifted from the live value. This turns silent staleness — like a prompt file that hard-codes design tokens as prose and rots when the theme changes — into an explicit, reviewable alert, improving evidence quality and governance across prompts, KB records, and config.
