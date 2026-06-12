@@ -200,3 +200,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Completion Claim Verifier - When an agent or a planning document marks a work item "done," attach a machine-checkable proof (a string that must exist or be absent in a named file, a test that must pass, a commit hash) and have the platform run those checks, badging items as verified-done versus claimed-done-but-unproven. Discovered need: a TODOS audit found a hardening item documented as complete while the code still contained the old behavior — a false completion report that sat unnoticed for weeks. Distinct from Provenance Drift Sentinel (values rotting over time): this catches done-claims that were never true at the moment they were made.
+
+Date: 2026-06-12
+Time: 13:21 AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: high
+Special Feature: Published-Knowledge Performance Ledger - Today a knowledge record's governed life ends at "Published for agents" with nothing measuring what happens after; this ledger instruments the afterlife by logging every time a pipeline agent retrieves or cites a published KB record in a live escalation — the record, the case, and the eventual case outcome — so each record accrues a help/neutral/harm performance score over time. Records that are never cited, or that correlate with bad outcomes, get flagged in the review queue for refresh or retirement, closing the knowledge lifecycle loop: earn-in governs entry, this governs continued tenure. Reviewers see "this record helped resolve 14 cases, last cited 3 days ago" right on the draft page, turning approval from a one-time gate into a managed portfolio. Distinct from Knowledge Earn-In / Claim Graduation (pre-publish entry), Provenance Drift Sentinel (source drift), and Section-Level Authorship Blame (who wrote what).
