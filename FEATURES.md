@@ -193,3 +193,10 @@ Model: Claude Opus 4.8
 Is duplicate?: no
 Complexity: medium
 Special Feature: Provenance Drift Sentinel - For any governed artifact that quotes a value derived from a live source of truth (a design token, a config value, a model id, a playbook claim, an extraction-prompt assumption), store a machine-checkable pointer to that source and periodically re-read it in the background, flagging when the quoted value has drifted from the live value. This turns silent staleness — like a prompt file that hard-codes design tokens as prose and rots when the theme changes — into an explicit, reviewable alert, improving evidence quality and governance across prompts, KB records, and config.
+
+Date: 2026-06-12
+Time: Unknown AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: medium
+Special Feature: Completion Claim Verifier - When an agent or a planning document marks a work item "done," attach a machine-checkable proof (a string that must exist or be absent in a named file, a test that must pass, a commit hash) and have the platform run those checks, badging items as verified-done versus claimed-done-but-unproven. Discovered need: a TODOS audit found a hardening item documented as complete while the code still contained the old behavior — a false completion report that sat unnoticed for weeks. Distinct from Provenance Drift Sentinel (values rotting over time): this catches done-claims that were never true at the moment they were made.
