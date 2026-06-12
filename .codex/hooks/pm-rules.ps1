@@ -33,4 +33,9 @@ When finished, always commit and push your completed changes unless the user exp
 After completing a substantive task, consider whether one unique feature idea would improve this broader operational-intelligence platform. Search FEATURES.md first, do not repeat existing ideas or slight variations. If your first idea is already covered, you must come up with a different meaningfully distinct idea instead of claiming duplicate and stopping. Aim for premium, high-leverage product features: capabilities a serious expert-agent platform would charge for because they improve judgment, coordination, evidence quality, governance, automation safety, or decision speed. Avoid thin UI conveniences, renamed existing features, generic dashboards, and implementation chores. Show the idea to the user in chat, then append it to the bottom of FEATURES.md only if relevant and useful. If you append a feature to FEATURES.md, the last thing in your final chat response must be the same: "Special Feature: concise feature name and 2-3 sentence description".
 If required tools are unavailable, say you are blocked rather than silently breaking policy.
 
+---------- USER COMMUNICATION PREFERENCES ----------
+My technical level: Self-taught programmer, ~1 year of weekend learning, no professional experience. I know some coding basics but need most tech jargon explained.
+What slows me down: Excessive jargon and verbose framing cause cognitive overload. Assume I'll need to clarify more than half of unfamiliar terms.
+What I want from you: Define jargon inline. Be concise by default; expand only when the detail matters. I like knowing what's going on - just keep it digestible.
+
 '@
