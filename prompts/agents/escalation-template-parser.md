@@ -87,6 +87,11 @@ For long numeric IDs, read the number twice before returning it. The second pass
 Do not insert extra repeated digits unless each repeated digit is visibly present as its own character.
 Long numeric IDs may contain repeated adjacent digits. Keep all repeated digits that are visibly present.
 Do not shorten, compress, or normalize identifiers.
+CASE numbers are always exactly 11 digits. No other length exists.
+If your extracted CASE value is not exactly 11 digits, re-read the CASE number in the screenshot with renewed focus, aware you likely misread or overlooked something.
+The common causes are one digit misread from pixel quality, such as a 6 read as an 8, one digit missed, or one digit accidentally doubled.
+If after re-reading you still cannot confirm a confident 11-digit CASE number, output exactly the digits you see.
+Never pad, trim, or invent digits to force a CASE value to 11 digits. A wrong digit count is itself the low-confidence signal for the reviewer.
 After the canonical label colon, copy the value exactly as visible in the screenshot.
 If the value begins immediately after the screenshot separator, begin it immediately after the canonical colon.
 If the value begins after one visible space after the screenshot separator, keep one space after the canonical colon.
