@@ -41,6 +41,7 @@ const WORKFLOW_STEPS = [
   { key: 'main', number: 5, label: 'QBO Assistant', runtimeId: 'chat', agentId: 'chat' },
 ];
 const WORKFLOW_NAME = 'QBO Escalation Workflow';
+const WORKFLOW_CARD_LABEL = 'QBO escalation';
 const WORKFLOW_REVEAL = Object.freeze({
   PREFLIGHT: 'preflight',
   REVEALING: 'revealing',
@@ -848,7 +849,7 @@ function isStarted(stageState) {
 function workflowCardStackVariants(index) {
   return {
     stacked: {
-      x: -192 - index * 9,
+      x: -226 - index * 9,
       y: index % 2 === 0 ? 2 : -2,
       scale: 0.92 - index * 0.015,
       opacity: 0,
@@ -1024,7 +1025,7 @@ function useLeftSidebarExpanded() {
   return expanded;
 }
 
-function ImageUploadCard({ imageCaptured, capturedSrc, onCapture }) {
+function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, showWorkflowIdentity = false }) {
   const [dragOver, setDragOver] = useState(false);
   const [showWebcam, setShowWebcam] = useState(false);
   const fileInputRef = useRef(null);
@@ -1089,10 +1090,13 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture }) {
       aria-label="Upload escalation screenshot"
     >
       <div className="v5-step-index">1</div>
+      {showWorkflowIdentity && (
+        <div className="v5-upload-card__workflow">{WORKFLOW_CARD_LABEL}</div>
+      )}
       <div className="v5-upload-card__icon">
         {imageCaptured && capturedSrc ? <Icon name="check" size={22} /> : <Icon name="upload" size={23} />}
       </div>
-      <div className="v5-upload-card__title">{imageCaptured ? 'Image captured' : 'Upload image'}</div>
+      <div className="v5-upload-card__title">{imageCaptured ? 'Screenshot captured' : 'Upload screenshot'}</div>
       {!imageCaptured && (
         <div className="v5-upload-card__hint">Drop, paste, or click</div>
       )}
@@ -1464,14 +1468,11 @@ function WorkflowLane({
         className="v5-workflow-lane__upload"
         transition={reduceMotion ? { duration: 0 } : WORKFLOW_LANE_TRANSITION}
       >
-        <div className="v5-workflow-identity" aria-hidden={!preflight ? true : undefined}>
-          <span className="v5-workflow-identity__name">{WORKFLOW_NAME}</span>
-          <span className="v5-workflow-identity__meta">Screenshot intake</span>
-        </div>
         <ImageUploadCard
           imageCaptured={imageCaptured}
           capturedSrc={capturedImageSrc}
           onCapture={onCapture}
+          showWorkflowIdentity={preflight}
         />
       </motion.div>
       <PipelineConnector
