@@ -40,6 +40,7 @@ const WORKFLOW_STEPS = [
   { key: 'triage', number: 4, label: 'Triage Agent', runtimeId: 'triage-agent', agentId: 'triage-agent' },
   { key: 'main', number: 5, label: 'QBO Assistant', runtimeId: 'chat', agentId: 'chat' },
 ];
+const WORKFLOW_NAME = 'QBO Escalation Workflow';
 const WORKFLOW_REVEAL = Object.freeze({
   PREFLIGHT: 'preflight',
   REVEALING: 'revealing',
@@ -1455,7 +1456,7 @@ function WorkflowLane({
     <motion.div
       layout
       className={laneClassName}
-      aria-label={preflight ? 'Image intake' : 'Escalation workflow'}
+      aria-label={preflight ? `${WORKFLOW_NAME} image intake` : WORKFLOW_NAME}
       transition={reduceMotion ? { duration: 0 } : WORKFLOW_LANE_TRANSITION}
     >
       <motion.div
@@ -1463,6 +1464,10 @@ function WorkflowLane({
         className="v5-workflow-lane__upload"
         transition={reduceMotion ? { duration: 0 } : WORKFLOW_LANE_TRANSITION}
       >
+        <div className="v5-workflow-identity" aria-hidden={!preflight ? true : undefined}>
+          <span className="v5-workflow-identity__name">{WORKFLOW_NAME}</span>
+          <span className="v5-workflow-identity__meta">Screenshot intake</span>
+        </div>
         <ImageUploadCard
           imageCaptured={imageCaptured}
           capturedSrc={capturedImageSrc}
