@@ -87,7 +87,20 @@
   min-width: 0;
   min-height: 104px;
   overflow-x: auto;
-  transition: transform 480ms cubic-bezier(0.5, 0, 0.75, 0), gap 320ms cubic-bezier(0.32, 0.72, 0.3, 1);
+  overflow-y: visible;
+  isolation: isolate;
+  transition: gap 320ms cubic-bezier(0.32, 0.72, 0.3, 1);
+}
+
+.v5-workflow-lane.is-preflight {
+  justify-content: flex-start;
+  overflow-x: hidden;
+  padding-left: clamp(62px, 7vw, 124px);
+}
+
+.v5-workflow-lane.is-revealing,
+.v5-workflow-lane.is-revealed {
+  justify-content: center;
 }
 
 .v5-workflow-lane__group {
@@ -96,6 +109,31 @@
   gap: 14px;
   min-width: 0;
   flex: 0 0 auto;
+}
+
+.v5-workflow-lane__upload {
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 10;
+}
+
+.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::before,
+.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::after {
+  content: '';
+  position: absolute;
+  inset: 9px -11px 7px 17px;
+  border: 1px solid color-mix(in srgb, var(--v5-border) 72%, transparent);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
+  opacity: 0.46;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::after {
+  inset: 15px -20px 13px 31px;
+  opacity: 0.24;
 }
 
 .v5-upload-card,
@@ -123,6 +161,25 @@
   text-align: center;
   color: var(--v5-muted);
   transition: border-color 160ms var(--ease-standard), background 160ms var(--ease-standard), color 160ms var(--ease-standard), transform 160ms var(--ease-standard);
+}
+
+.v5-workflow-lane.is-preflight .v5-upload-card {
+  z-index: 2;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 18px 42px rgba(0, 0, 0, 0.34),
+    18px 10px 36px rgba(0, 0, 0, 0.22);
+}
+
+.v5-workflow-lane.is-revealing .v5-upload-card {
+  border-color: color-mix(in srgb, var(--v5-blue) 68%, white);
+  background:
+    radial-gradient(circle at 50% 14%, color-mix(in srgb, var(--v5-blue) 18%, transparent), transparent 42%),
+    var(--bg);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 1px color-mix(in srgb, var(--v5-blue) 28%, transparent),
+    0 18px 42px rgba(0, 0, 0, 0.32);
 }
 
 .v5-upload-card:hover,
@@ -218,6 +275,21 @@
   max-width: 178px;
   padding: 0;
   display: block;
+}
+
+.v5-workflow-lane.is-preflight .v5-workflow-lane__group {
+  pointer-events: none;
+}
+
+.v5-workflow-lane.is-preflight .v5-workflow-card {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.03) inset,
+    0 16px 34px rgba(0, 0, 0, 0.26);
+}
+
+.v5-workflow-lane.is-revealing .v5-workflow-card,
+.v5-workflow-lane.is-revealed .v5-workflow-card {
+  pointer-events: auto;
 }
 
 .v5-workflow-card--running {
@@ -868,6 +940,7 @@
   display: grid;
   place-items: center;
   color: var(--v5-dim);
+  transform-origin: left center;
 }
 
 .v5-workflow-connector.is-active {
@@ -2183,6 +2256,11 @@
     padding-bottom: 8px;
   }
 
+  .v5-workflow-lane.is-preflight {
+    overflow-x: hidden;
+    padding-left: clamp(40px, 6vw, 84px);
+  }
+
   .v5-workflow-lane__group {
     gap: 10px;
     flex: 0 0 auto;
@@ -2239,6 +2317,13 @@
     align-items: stretch;
     overflow-x: auto;
     padding-bottom: 8px;
+  }
+
+  .v5-workflow-lane.is-preflight {
+    min-height: 104px;
+    align-items: center;
+    overflow-x: hidden;
+    padding-left: 18px;
   }
 
   .v5-upload-card,
@@ -2541,36 +2626,34 @@
   }
 }
 
-/* ---- State 4 (both sidebars open) — tighten pipeline while step 1 is present ----
+/* ---- State 4 (both sidebars open) — tighten pipeline while upload step is present ----
    Real width reductions (not transform:scale) so layout reclaims space and the row
    actually fits. Targets a typical state-4 viewport (~1400px) with both sidebars open:
    lane is roughly 832px wide there. Budget math:
      upload(156) + 4·card(144) + 5·gap(10) + 4·connector(14) = 156+576+50+56 = 838 ≈ 832
    The few-pixel overflow at exactly 832 is absorbed by the lane's overflow-x:auto. */
-.v5-shell.is-state-4 .v5-workflow-lane.has-step-1 {
+.v5-shell.is-state-4 .v5-workflow-lane {
   gap: 8px;
 }
 
-.v5-shell.is-state-4 .v5-workflow-lane.has-step-1 .v5-workflow-card {
+.v5-shell.is-state-4 .v5-workflow-lane .v5-workflow-card {
   width: 140px;
   flex: 0 0 140px;
   min-width: 140px;
   max-width: 140px;
 }
 
-.v5-shell.is-state-4 .v5-workflow-lane.has-step-1 .v5-upload-card {
+.v5-shell.is-state-4 .v5-workflow-lane .v5-upload-card {
   width: 152px;
   flex: 0 0 152px;
 }
 
-.v5-shell.is-state-4 .v5-workflow-lane.has-step-1 .v5-workflow-connector {
+.v5-shell.is-state-4 .v5-workflow-lane .v5-workflow-connector {
   flex: 0 0 12px;
   width: 12px;
 }
 
-/* Smoothly transition the size swap so the spring-back when step 1 leaves
-   is animated rather than snapping. (Lane's own transform/gap transition
-   stays on the base .v5-workflow-lane rule above — don't repeat it here.) */
+/* Smoothly transition state-4 size changes without snapping. */
 .v5-workflow-lane .v5-workflow-card,
 .v5-workflow-lane .v5-upload-card,
 .v5-workflow-lane .v5-workflow-connector {
@@ -2579,20 +2662,6 @@
     min-width 320ms cubic-bezier(0.32, 0.72, 0.3, 1),
     max-width 320ms cubic-bezier(0.32, 0.72, 0.3, 1),
     flex-basis 320ms cubic-bezier(0.32, 0.72, 0.3, 1);
-}
-
-/* Step-1 exit — accelerate off the left edge while shrinking. */
-.v5-upload-card.is-exiting {
-  transform: translateX(-120%) scale(0.6);
-  opacity: 0;
-  pointer-events: none;
-  transition: transform 480ms cubic-bezier(0.5, 0, 0.75, 0), opacity 320ms ease-in 80ms;
-}
-
-/* While step 1 is leaving, shift the whole lane left by approximately the
-   upload card width + gap so the remaining cards slide in unison. */
-.v5-workflow-lane.is-shifting {
-  transform: translateX(-92px);
 }
 
 /* Thumbnail beside the IMAGE PARSER title in the right dock section header.
@@ -2638,17 +2707,18 @@
 
 @media (prefers-reduced-motion: reduce) {
   .v5-workflow-lane,
+  .v5-workflow-lane__group,
+  .v5-workflow-lane__upload,
+  .v5-workflow-connector,
   .v5-workflow-card,
   .v5-upload-card,
   .v5-dock-section__thumb {
     transition: none !important;
+    animation: none !important;
   }
-  .v5-upload-card.is-exiting {
-    transform: none;
-    opacity: 0;
-  }
-  .v5-workflow-lane.is-shifting {
-    transform: none;
+
+  .v5-workflow-lane.is-revealing .v5-upload-card {
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 12px 30px rgba(0, 0, 0, 0.24);
   }
 }
 

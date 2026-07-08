@@ -214,3 +214,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Test-Run Quarantine / Synthetic Evidence Tagging - Let the operator mark any pipeline run as a test/drill before sending it, tagging every artifact it produces (escalation, drafts, provider call packages, stats) as synthetic so it is fully captured for harness evaluation but excluded from the governed KB queue, pattern detection, and operational metrics. Discovered need: three test submissions of one template created three real KB review drafts, polluting the governed queue with synthetic cases indistinguishable from live work. Distinct from Duplicate Draft Coalescing (which handles collisions between real cases) — this keeps rehearsal evidence out of governed memory entirely while preserving it for evaluation.
+
+Date: 2026-07-07
+Time: 22:55 AST
+Model: Codex GPT-5
+Is duplicate?: no
+Complexity: medium
+Special Feature: Workflow Readiness Gate - Before an expert-agent workflow starts, check whether the required evidence, provider health, privacy mode, and routing assumptions are ready, then show a short readiness verdict for each agent. This keeps the operator from starting a coordinated workflow with missing evidence or unsafe routing, and turns "why did that agent not run correctly?" into a visible preflight decision instead of an after-the-fact mystery.

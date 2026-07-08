@@ -1,4 +1,4 @@
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ImageParserPopup from '../chat/ImageParserPopup.jsx';
@@ -40,6 +40,25 @@ const WORKFLOW_STEPS = [
   { key: 'triage', number: 4, label: 'Triage Agent', runtimeId: 'triage-agent', agentId: 'triage-agent' },
   { key: 'main', number: 5, label: 'QBO Assistant', runtimeId: 'chat', agentId: 'chat' },
 ];
+const WORKFLOW_REVEAL = Object.freeze({
+  PREFLIGHT: 'preflight',
+  REVEALING: 'revealing',
+  REVEALED: 'revealed',
+});
+const WORKFLOW_REVEAL_SETTLE_MS = 760;
+const WORKFLOW_LANE_TRANSITION = {
+  type: 'spring',
+  stiffness: 320,
+  damping: 34,
+  mass: 0.86,
+};
+const WORKFLOW_CARD_REVEAL_TRANSITION = {
+  type: 'spring',
+  stiffness: 360,
+  damping: 34,
+  mass: 0.82,
+};
+const WORKFLOW_REVEAL_DELAYS = [0, 0.07, 0.115, 0.16];
 const WORKFLOW_AGENT_IDS = new Set(WORKFLOW_STEPS.map((step) => step.agentId));
 const LINKED_CASE_BADGE_CLASS = {
   open: 'badge-open',
@@ -825,6 +844,46 @@ function isStarted(stageState) {
   return Object.values(stageState || {}).some((stage) => stage?.status && stage.status !== 'pending');
 }
 
+function workflowCardStackVariants(index) {
+  return {
+    stacked: {
+      x: -192 - index * 9,
+      y: index % 2 === 0 ? 2 : -2,
+      scale: 0.92 - index * 0.015,
+      opacity: 0,
+      filter: 'blur(2px)',
+      zIndex: 4 - index,
+      pointerEvents: 'none',
+    },
+    row: {
+      x: 0,
+      y: 0,
+      scale: 1,
+      opacity: 1,
+      filter: 'blur(0px)',
+      zIndex: 1,
+      pointerEvents: 'auto',
+    },
+  };
+}
+
+function workflowCardTransition(index, reduceMotion) {
+  if (reduceMotion) return { duration: 0 };
+  return {
+    ...WORKFLOW_CARD_REVEAL_TRANSITION,
+    delay: WORKFLOW_REVEAL_DELAYS[index] || 0,
+  };
+}
+
+function workflowConnectorTransition(index, reduceMotion) {
+  if (reduceMotion) return { duration: 0 };
+  return {
+    duration: 0.22,
+    ease: [0.16, 1, 0.3, 1],
+    delay: 0.11 + index * 0.045,
+  };
+}
+
 function StatusGlyph({ stage }) {
   const status = stage?.status || 'pending';
   if (status === 'running') return <span className="v5-status-spin" aria-hidden="true" />;
@@ -833,11 +892,22 @@ function StatusGlyph({ stage }) {
   return null;
 }
 
-function PipelineConnector({ active }) {
+function PipelineConnector({ active, hidden = false, revealIndex = 0, reduceMotion = false }) {
   return (
-    <div className={`v5-workflow-connector${active ? ' is-active' : ''}`} aria-hidden="true">
+    <motion.div
+      layout
+      className={`v5-workflow-connector${active ? ' is-active' : ''}`}
+      aria-hidden="true"
+      initial={false}
+      animate={hidden ? 'hidden' : 'visible'}
+      variants={{
+        hidden: { opacity: 0, scaleX: 0.42 },
+        visible: { opacity: 1, scaleX: 1 },
+      }}
+      transition={workflowConnectorTransition(revealIndex, reduceMotion)}
+    >
       <Icon name="chevron" size={20} />
-    </div>
+    </motion.div>
   );
 }
 
@@ -953,7 +1023,7 @@ function useLeftSidebarExpanded() {
   return expanded;
 }
 
-function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
+function ImageUploadCard({ imageCaptured, capturedSrc, onCapture }) {
   const [dragOver, setDragOver] = useState(false);
   const [showWebcam, setShowWebcam] = useState(false);
   const fileInputRef = useRef(null);
@@ -998,7 +1068,7 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
 
   return (
     <section
-      className={`v5-upload-card${dragOver ? ' is-over' : ''}${imageCaptured ? ' is-captured' : ''}${exiting ? ' is-exiting' : ''}`}
+      className={`v5-upload-card${dragOver ? ' is-over' : ''}${imageCaptured ? ' is-captured' : ''}`}
       onDrop={onDrop}
       onDragOver={(event) => {
         event.preventDefault();
@@ -1065,10 +1135,14 @@ function ImageUploadCard({ imageCaptured, capturedSrc, onCapture, exiting }) {
   );
 }
 
-function WorkflowCardMenu({ step, health, testRun, testRunning, pipelineRunning, onRunTest, onCancelPipeline }) {
+function WorkflowCardMenu({ step, health, testRun, testRunning, pipelineRunning, onRunTest, onCancelPipeline, interactive = true }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const healthIndicator = getHealthIndicatorState(health, testRun);
+
+  useEffect(() => {
+    if (!interactive) setOpen(false);
+  }, [interactive]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -1095,11 +1169,15 @@ function WorkflowCardMenu({ step, health, testRun, testRunning, pipelineRunning,
       <button
         type="button"
         className="v5-workflow-card__test"
-        onClick={() => setOpen((v) => !v)}
-        disabled={testRunning}
+        onClick={() => {
+          if (interactive) setOpen((v) => !v);
+        }}
+        disabled={testRunning || !interactive}
+        tabIndex={interactive ? 0 : -1}
+        aria-hidden={!interactive ? true : undefined}
         aria-label={`${step.label} actions. ${healthIndicator.label}`}
         aria-haspopup="menu"
-        aria-expanded={open}
+        aria-expanded={interactive ? open : undefined}
         title={`${step.label} actions - ${healthIndicator.label}`}
       >
         <StatusKebabDots health={health} testRun={testRun} />
@@ -1137,7 +1215,22 @@ function WorkflowCardMenu({ step, health, testRun, testRunning, pipelineRunning,
   );
 }
 
-function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pipelineRunning, onCancelPipeline, onOpenLog, hasEvents, thinking, eventCount = 0, estimatedEvents = 0 }) {
+function WorkflowCard({
+  step,
+  stage,
+  runtimeInfo,
+  health,
+  testRun,
+  onRunTest,
+  pipelineRunning,
+  onCancelPipeline,
+  onOpenLog,
+  hasEvents,
+  thinking,
+  eventCount = 0,
+  estimatedEvents = 0,
+  interactive = true,
+}) {
   const status = stage?.status || 'pending';
   const runningTime = useRunningTimer(stage?.startedAt, status === 'running', stage?.finishedAt);
   const statusText = status === 'running' ? runningTime : stageLabel(stage);
@@ -1197,7 +1290,7 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
   // events arriving, persisted events on a prior run, or the stage itself
   // having moved past 'pending'. Keeps the affordance from appearing on the
   // initial empty pipeline before a user uploads anything.
-  const clickable = Boolean(onOpenLog && (hasEvents || (status && status !== 'pending')));
+  const clickable = interactive && Boolean(onOpenLog && (hasEvents || (status && status !== 'pending')));
 
   const isNestedControl = (target) => (
     target
@@ -1206,14 +1299,14 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
   );
 
   const handleCardClick = (event) => {
-    if (!clickable) return;
+    if (!interactive || !clickable) return;
     // Don't hijack clicks meant for the profile link, kebab menu, or its popover.
     if (isNestedControl(event.target)) return;
     onOpenLog(step.key);
   };
 
   const handleCardKey = (event) => {
-    if (!clickable) return;
+    if (!interactive || !clickable) return;
     if (isNestedControl(event.target)) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
@@ -1225,9 +1318,11 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
     <section
       ref={cardRef}
       data-stage-card={step.key}
+      inert={!interactive ? '' : undefined}
+      aria-hidden={!interactive ? true : undefined}
       className={`v5-workflow-card v5-workflow-card--${status}${clickable ? ' is-clickable' : ''}`}
       role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
+      tabIndex={clickable ? 0 : -1}
       aria-label={clickable ? `Open ${step.label} event log` : undefined}
       onClick={handleCardClick}
       onKeyDown={handleCardKey}
@@ -1238,6 +1333,9 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
           <a
             className="v5-workflow-card__profile-link"
             href={getAgentProfileHref(step.agentId)}
+            tabIndex={interactive ? 0 : -1}
+            aria-hidden={!interactive ? true : undefined}
+            onClick={!interactive ? (event) => event.preventDefault() : undefined}
             title={`Open ${step.label} profile`}
           >
             {step.label}
@@ -1252,6 +1350,7 @@ function WorkflowCard({ step, stage, runtimeInfo, health, testRun, onRunTest, pi
         pipelineRunning={pipelineRunning}
         onRunTest={onRunTest}
         onCancelPipeline={onCancelPipeline}
+        interactive={interactive}
       />
       <div className="v5-workflow-card__runtime">
         <ProviderMark runtime={runtimeInfo} />
@@ -1331,8 +1430,8 @@ function WorkflowLane({
   healthByStage,
   testRuns,
   onRunStageTest,
-  step1Visible,
-  step1Exiting,
+  revealState = WORKFLOW_REVEAL.REVEALED,
+  reduceMotion = false,
   pipelineRunning,
   onCancelPipeline,
   onOpenStageLog,
@@ -1344,25 +1443,51 @@ function WorkflowLane({
   const parserDone = stageState.parser.status === 'done';
   const invDone = stageState.inv.status === 'done';
   const triageDone = stageState.triage.status === 'done' || stageState.triage.status === 'failed';
+  const preflight = revealState === WORKFLOW_REVEAL.PREFLIGHT;
+  const cardsInteractive = !preflight;
+  const laneClassName = [
+    'v5-workflow-lane',
+    `is-${revealState}`,
+    preflight ? 'is-stacked' : '',
+  ].filter(Boolean).join(' ');
 
   return (
-    <div
-      className={`v5-workflow-lane${step1Exiting ? ' is-shifting' : ''}${step1Visible ? ' has-step-1' : ''}`}
-      aria-label="Escalation workflow"
+    <motion.div
+      layout
+      className={laneClassName}
+      aria-label={preflight ? 'Image intake' : 'Escalation workflow'}
+      transition={reduceMotion ? { duration: 0 } : WORKFLOW_LANE_TRANSITION}
     >
-      {step1Visible && (
-        <>
-          <ImageUploadCard
-            imageCaptured={imageCaptured}
-            capturedSrc={capturedImageSrc}
-            onCapture={onCapture}
-            exiting={step1Exiting}
-          />
-          <PipelineConnector active={imageCaptured} />
-        </>
-      )}
+      <motion.div
+        layout
+        className="v5-workflow-lane__upload"
+        transition={reduceMotion ? { duration: 0 } : WORKFLOW_LANE_TRANSITION}
+      >
+        <ImageUploadCard
+          imageCaptured={imageCaptured}
+          capturedSrc={capturedImageSrc}
+          onCapture={onCapture}
+        />
+      </motion.div>
+      <PipelineConnector
+        active={imageCaptured}
+        hidden={preflight}
+        revealIndex={0}
+        reduceMotion={reduceMotion}
+      />
       {workflowSteps.map((step, index) => (
-        <div className="v5-workflow-lane__group" key={step.key}>
+        <motion.div
+          layout
+          className="v5-workflow-lane__group"
+          data-reveal-index={index + 1}
+          key={step.key}
+          inert={!cardsInteractive ? '' : undefined}
+          aria-hidden={!cardsInteractive ? true : undefined}
+          initial={false}
+          animate={preflight ? 'stacked' : 'row'}
+          variants={workflowCardStackVariants(index)}
+          transition={workflowCardTransition(index, reduceMotion)}
+        >
           <WorkflowCard
             step={step}
             stage={testStageFromRun(testRuns?.[step.key], stageState[step.key])}
@@ -1377,9 +1502,13 @@ function WorkflowLane({
             thinking={thinkingByStage?.[step.key] || null}
             eventCount={liveEventCounts?.[step.key] || 0}
             estimatedEvents={eventEstimates?.byStage?.[step.key]?.avg || 0}
+            interactive={cardsInteractive}
           />
           {index < workflowSteps.length - 1 && (
             <PipelineConnector
+              hidden={preflight}
+              revealIndex={index + 1}
+              reduceMotion={reduceMotion}
               active={
                 (step.key === 'parser' && parserDone)
                 || (step.key === 'inv' && invDone)
@@ -1387,9 +1516,9 @@ function WorkflowLane({
               }
             />
           )}
-        </div>
+        </motion.div>
       ))}
-    </div>
+    </motion.div>
   );
 }
 
@@ -2533,6 +2662,7 @@ function LinkedCaseLifecycleBanner({ escalation, knowledge }) {
 }
 
 export default function ChatV5Container({ isActive = true, conversationIdFromRoute = null }) {
+  const shouldReduceMotion = useReducedMotion();
   const {
     imageCaptured,
     captureImage,
@@ -2599,7 +2729,16 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
   const leftExpanded = useLeftSidebarExpanded();
   const isState4 = leftExpanded && !dockCollapsed;
-  const effectiveConversationId = cleanValue(conversationIdFromRoute || conversationId);
+  const resumeRouteId = cleanValue(conversationIdFromRoute);
+  const [suppressedResumeRouteId, setSuppressedResumeRouteId] = useState(null);
+  const routeResumeActive = Boolean(resumeRouteId && suppressedResumeRouteId !== resumeRouteId);
+  useEffect(() => {
+    if (!resumeRouteId || (suppressedResumeRouteId && suppressedResumeRouteId !== resumeRouteId)) {
+      setSuppressedResumeRouteId(null);
+    }
+  }, [resumeRouteId, suppressedResumeRouteId]);
+
+  const effectiveConversationId = cleanValue((routeResumeActive ? resumeRouteId : null) || conversationId);
   const [linkedEscalation, setLinkedEscalation] = useState(null);
   const [linkedKnowledge, setLinkedKnowledge] = useState(null);
   // Saved caseIntake for a PAST run opened from history. On mount the
@@ -2608,9 +2747,11 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   // pipeline events to show until we pull the full conversation here. Only used
   // as a fallback — a live run's own caseIntake always takes precedence.
   const [pastCaseIntake, setPastCaseIntake] = useState(null);
+  const linkedCaseFetchGenRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
+    const generation = linkedCaseFetchGenRef.current;
 
     async function loadLinkedEscalation() {
       if (!effectiveConversationId) {
@@ -2621,7 +2762,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
       try {
         const conversation = await getConversationMeta(effectiveConversationId);
-        if (cancelled) return;
+        if (cancelled || linkedCaseFetchGenRef.current !== generation) return;
         if (!conversation?.escalationId) {
           setLinkedEscalation(null);
           setLinkedKnowledge(null);
@@ -2631,12 +2772,12 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           getEscalation(conversation.escalationId),
           getEscalationKnowledge(conversation.escalationId).catch(() => null),
         ]);
-        if (!cancelled) {
+        if (!cancelled && linkedCaseFetchGenRef.current === generation) {
           setLinkedEscalation(escalation);
           setLinkedKnowledge(knowledge);
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && linkedCaseFetchGenRef.current === generation) {
           setLinkedEscalation(null);
           setLinkedKnowledge(null);
         }
@@ -2654,23 +2795,28 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   // own caseIntake we drop the past copy so we never show stale saved events
   // over a fresh run.
   const hasLiveCaseIntake = Boolean(caseIntake);
+  const pastCaseFetchGenRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
-    const routeId = cleanValue(conversationIdFromRoute);
-    if (!routeId || hasLiveCaseIntake) {
+    if (!routeResumeActive || hasLiveCaseIntake) {
       setPastCaseIntake(null);
       return () => { cancelled = true; };
     }
+    const generation = pastCaseFetchGenRef.current;
     (async () => {
       try {
-        const conversation = await getConversation(routeId);
-        if (!cancelled) setPastCaseIntake(conversation?.caseIntake || null);
+        const conversation = await getConversation(resumeRouteId);
+        if (!cancelled && pastCaseFetchGenRef.current === generation) {
+          setPastCaseIntake(conversation?.caseIntake || null);
+        }
       } catch {
-        if (!cancelled) setPastCaseIntake(null);
+        if (!cancelled && pastCaseFetchGenRef.current === generation) {
+          setPastCaseIntake(null);
+        }
       }
     })();
     return () => { cancelled = true; };
-  }, [conversationIdFromRoute, hasLiveCaseIntake]);
+  }, [hasLiveCaseIntake, resumeRouteId, routeResumeActive]);
 
   // What the Workflow Log and evidence surfaces should read: the live run's
   // caseIntake while a pipeline is active, otherwise the saved past run.
@@ -2702,8 +2848,8 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, [conversationId, chatLog, imageCaptured]);
   useEffect(() => {
     let cancelled = false;
-    const routeId = cleanValue(conversationIdFromRoute);
-    if (!routeId) return undefined;
+    const routeId = resumeRouteId;
+    if (!routeResumeActive) return undefined;
     if (historyConversationIdRef.current === routeId) return undefined;
     const live = liveChatStateRef.current;
     if (live.conversationId || live.chatLogLength > 0 || live.imageCaptured) return undefined;
@@ -2744,46 +2890,50 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
       }
     })();
     return () => { cancelled = true; };
-  }, [conversationIdFromRoute, clearResumeTarget, restoreCapturedImage, hydrateFromSavedCaseIntake]);
+  }, [clearResumeTarget, hydrateFromSavedCaseIntake, restoreCapturedImage, resumeRouteId, routeResumeActive]);
 
-  // Step-1 lifecycle: visible by default; when parser flips to running, kick
-  // off the exit transition; after ~520ms unmount the step.
-  const [step1Visible, setStep1Visible] = useState(true);
-  const [step1Exiting, setStep1Exiting] = useState(false);
-  const parserStatus = stageState.parser.status;
-  const prevParserStatusRef = useRef(parserStatus);
-  const step1TimerRef = useRef(null);
-  // Read isState4 via ref so the effect below only fires on parserStatus
-  // transitions — toggling sidebars mid-exit shouldn't re-trigger or cancel.
-  const isState4Ref = useRef(isState4);
-  useEffect(() => { isState4Ref.current = isState4; }, [isState4]);
-  useEffect(() => {
-    const prev = prevParserStatusRef.current;
-    prevParserStatusRef.current = parserStatus;
-    // Only run the exit/shift/unmount choreography when both sidebars are
-    // open (state 4) at the moment parser starts. States 1/2/3 leave step 1
-    // in the pipeline as a normal stage card.
-    if (prev !== 'running' && parserStatus === 'running' && isState4Ref.current) {
-      setStep1Exiting(true);
-      if (step1TimerRef.current) clearTimeout(step1TimerRef.current);
-      step1TimerRef.current = setTimeout(() => {
-        setStep1Visible(false);
-        setStep1Exiting(false);
-        step1TimerRef.current = null;
-      }, 520);
+  const [workflowReveal, setWorkflowReveal] = useState(() => (
+    resumeRouteId ? WORKFLOW_REVEAL.REVEALED : WORKFLOW_REVEAL.PREFLIGHT
+  ));
+  const workflowRevealForLane = routeResumeActive ? WORKFLOW_REVEAL.REVEALED : workflowReveal;
+  const revealSettleTimerRef = useRef(null);
+  const clearRevealSettleTimer = useCallback(() => {
+    if (revealSettleTimerRef.current) {
+      clearTimeout(revealSettleTimerRef.current);
+      revealSettleTimerRef.current = null;
     }
-    if (parserStatus === 'pending' && prev !== 'pending') {
-      if (step1TimerRef.current) {
-        clearTimeout(step1TimerRef.current);
-        step1TimerRef.current = null;
-      }
-      setStep1Visible(true);
-      setStep1Exiting(false);
-    }
-  }, [parserStatus]);
-  useEffect(() => () => {
-    if (step1TimerRef.current) clearTimeout(step1TimerRef.current);
   }, []);
+  const resetWorkflowReveal = useCallback(() => {
+    clearRevealSettleTimer();
+    setWorkflowReveal(WORKFLOW_REVEAL.PREFLIGHT);
+  }, [clearRevealSettleTimer]);
+  useEffect(() => {
+    if (routeResumeActive) {
+      clearRevealSettleTimer();
+      setWorkflowReveal(WORKFLOW_REVEAL.REVEALED);
+    }
+  }, [clearRevealSettleTimer, routeResumeActive]);
+  const revealWorkflow = useCallback(() => {
+    setWorkflowReveal((current) => {
+      if (current !== WORKFLOW_REVEAL.PREFLIGHT) return current;
+      return shouldReduceMotion ? WORKFLOW_REVEAL.REVEALED : WORKFLOW_REVEAL.REVEALING;
+    });
+  }, [shouldReduceMotion]);
+  const handleCaptureImage = useCallback((imageDataUrl, fileMeta) => {
+    if (!imageDataUrl) return;
+    revealWorkflow();
+    captureImage(imageDataUrl, fileMeta);
+  }, [captureImage, revealWorkflow]);
+  useEffect(() => {
+    if (workflowReveal !== WORKFLOW_REVEAL.REVEALING) return undefined;
+    clearRevealSettleTimer();
+    revealSettleTimerRef.current = setTimeout(() => {
+      revealSettleTimerRef.current = null;
+      setWorkflowReveal(WORKFLOW_REVEAL.REVEALED);
+    }, shouldReduceMotion ? 0 : WORKFLOW_REVEAL_SETTLE_MS);
+    return clearRevealSettleTimer;
+  }, [clearRevealSettleTimer, shouldReduceMotion, workflowReveal]);
+  useEffect(() => clearRevealSettleTimer, [clearRevealSettleTimer]);
 
   // Image preview/parser utility popup opened from the dock thumbnail. Agent
   // test runs now use the shared AgentTestModal instead of this live-image tool.
@@ -2804,6 +2954,17 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     setOpenStageTabs([]);
     setActiveTabId('main');
   }, []);
+  const clearSavedWorkflowResume = useCallback(() => {
+    pastCaseFetchGenRef.current += 1;
+    linkedCaseFetchGenRef.current += 1;
+    historyFetchGenRef.current += 1;
+    historyConversationIdRef.current = null;
+    setPastCaseIntake(null);
+    setLinkedEscalation(null);
+    setLinkedKnowledge(null);
+    setHistoryMessages([]);
+    setSuppressedResumeRouteId(resumeRouteId || null);
+  }, [resumeRouteId]);
   const handleStageCardClick = useCallback((stageKey) => {
     if (!stageKey || stageKey === 'main') return;
     setOpenStageTabs((prev) => {
@@ -2909,11 +3070,12 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   const confirmCancelPipeline = useCallback(() => {
     setCancelConfirmOpen(false);
     closeTransientWorkbenchTabs();
+    clearSavedWorkflowResume();
+    resetWorkflowReveal();
     // reset() aborts the SSE stream and clears stage/case/triage/inv/analyst
-    // state back to INITIAL_STAGE_STATE. The step-1 effect re-fires on the
-    // parser pending transition and restores the upload card cleanly.
+    // state back to INITIAL_STAGE_STATE.
     try { reset(); } catch { /* noop */ }
-  }, [closeTransientWorkbenchTabs, reset]);
+  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, reset, resetWorkflowReveal]);
 
   // Global Esc-to-cancel — only mounted while a stage is running. Skip if
   // focus is in an editable element so chat composers keep their normal Esc.
@@ -3165,6 +3327,8 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
     if (status === 'pass') {
       closeTransientWorkbenchTabs();
+      clearSavedWorkflowResume();
+      resetWorkflowReveal();
       reset();
       setTestRuns({});
       return;
@@ -3183,7 +3347,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           }
         : prev.parser,
     }));
-  }, [closeTransientWorkbenchTabs, reset]);
+  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, reset, resetWorkflowReveal]);
 
   // Mirror of markParserTestResult but targeting the triage test result
   // collection. PATCH succeeds, then we replace testRuns.triage.data with
@@ -3219,19 +3383,22 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
   const startNewWorkflow = useCallback(() => {
     closeTransientWorkbenchTabs();
+    clearSavedWorkflowResume();
+    resetWorkflowReveal();
     reset();
     setTestRuns({});
-    // Drop the resumed transcript — "New" means a fresh conversation, even if
-    // the route still points at the old one. The loaded-marker is cleared too
-    // so revisiting the route later can rehydrate again, and the fetch
-    // generation is bumped so an in-flight history fetch can't resolve late
-    // and repopulate the transcript we just cleared.
-    historyFetchGenRef.current += 1;
-    historyConversationIdRef.current = null;
-    setHistoryMessages([]);
-  }, [closeTransientWorkbenchTabs, reset]);
+    // clearSavedWorkflowResume() also invalidates any in-flight resumed
+    // transcript/case fetch so late responses cannot repopulate this fresh run.
+  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, reset, resetWorkflowReveal]);
 
   const started = isStarted(stageState) || imageCaptured || Object.keys(testRuns).length > 0;
+  const workflowHasActivity = started || Boolean(effectiveCaseIntake) || Boolean(pastCaseIntake);
+  useEffect(() => {
+    if (!workflowHasActivity) return;
+    setWorkflowReveal((current) => (
+      current === WORKFLOW_REVEAL.PREFLIGHT ? WORKFLOW_REVEAL.REVEALED : current
+    ));
+  }, [workflowHasActivity]);
 
   return (
     <div className={`v5-shell${started ? ' is-started' : ''}${dockCollapsed ? ' is-dock-collapsed' : ''}${isState4 ? ' is-state-4' : ''}`}>
@@ -3244,14 +3411,14 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           workflowSteps={workflowSteps}
           imageCaptured={imageCaptured}
           capturedImageSrc={capturedImageSrc}
-          onCapture={captureImage}
+          onCapture={handleCaptureImage}
           stageState={stageState}
           runtimeByStage={runtimeByStage}
           healthByStage={healthByStage}
           testRuns={testRuns}
           onRunStageTest={runStageTest}
-          step1Visible={step1Visible}
-          step1Exiting={step1Exiting}
+          revealState={workflowRevealForLane}
+          reduceMotion={shouldReduceMotion}
           pipelineRunning={pipelineRunning}
           onCancelPipeline={requestCancelPipeline}
           onOpenStageLog={handleStageCardClick}
@@ -3264,7 +3431,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           workflowSteps={workflowSteps}
           stageLabels={stageLabels}
           imageCaptured={imageCaptured}
-          onCaptureImage={captureImage}
+          onCaptureImage={handleCaptureImage}
           stageState={stageState}
           analyst={analyst}
           chatLog={chatLog}
@@ -3296,10 +3463,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           onClearStageTest={clearStageTest}
           onMarkParserTestResult={markParserTestResult}
           onMarkTriageTestResult={markTriageTestResult}
-          // Live runs keep the original rule (thumb appears once step 1 hands
-          // off, i.e. !step1Visible). A resumed session restores the saved
-          // screenshot with imageCaptured still false — show the thumb then too.
-          parserThumbnail={(!step1Visible || !imageCaptured) && capturedImageSrc ? capturedImageSrc : null}
+          parserThumbnail={(workflowRevealForLane !== WORKFLOW_REVEAL.PREFLIGHT || !imageCaptured) && capturedImageSrc ? capturedImageSrc : null}
           onParserThumbnailClick={() => setParserPopupOpen(true)}
         />
       </div>
