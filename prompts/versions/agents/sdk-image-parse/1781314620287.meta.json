@@ -1,0 +1,11 @@
+{
+  "ts": 1781314620287,
+  "promptId": "sdk-image-parse",
+  "promptVersion": "P35",
+  "sha256": "c4457e76ca1b8ed06980c788cca7370278654cf0beee6c0be29dfcfaf6dd0709",
+  "size": 7635,
+  "source": "runtime-read",
+  "label": null,
+  "createdAt": "2026-06-13T01:37:00.287Z",
+  "fileModified": "2026-06-13T01:36:22.961Z"
+}

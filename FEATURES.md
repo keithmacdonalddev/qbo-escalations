@@ -207,3 +207,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: high
 Special Feature: Published-Knowledge Performance Ledger - Today a knowledge record's governed life ends at "Published for agents" with nothing measuring what happens after; this ledger instruments the afterlife by logging every time a pipeline agent retrieves or cites a published KB record in a live escalation — the record, the case, and the eventual case outcome — so each record accrues a help/neutral/harm performance score over time. Records that are never cited, or that correlate with bad outcomes, get flagged in the review queue for refresh or retirement, closing the knowledge lifecycle loop: earn-in governs entry, this governs continued tenure. Reviewers see "this record helped resolve 14 cases, last cited 3 days ago" right on the draft page, turning approval from a one-time gate into a managed portfolio. Distinct from Knowledge Earn-In / Claim Graduation (pre-publish entry), Provenance Drift Sentinel (source drift), and Section-Level Authorship Blame (who wrote what).
+
+Date: 2026-06-12
+Time: 13:31 AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: medium
+Special Feature: Test-Run Quarantine / Synthetic Evidence Tagging - Let the operator mark any pipeline run as a test/drill before sending it, tagging every artifact it produces (escalation, drafts, provider call packages, stats) as synthetic so it is fully captured for harness evaluation but excluded from the governed KB queue, pattern detection, and operational metrics. Discovered need: three test submissions of one template created three real KB review drafts, polluting the governed queue with synthetic cases indistinguishable from live work. Distinct from Duplicate Draft Coalescing (which handles collisions between real cases) — this keeps rehearsal evidence out of governed memory entirely while preserving it for evaluation.
