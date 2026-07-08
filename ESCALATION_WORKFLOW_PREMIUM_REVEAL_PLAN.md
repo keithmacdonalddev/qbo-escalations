@@ -8,6 +8,16 @@ The product workflow is the QBO escalation workflow: screenshot intake starts th
 
 This plan is intentionally UI-first. It does not change parser behavior, provider runtime selection, evidence persistence, server routes, agent prompts, or the QBO business logic. It only changes how the existing workflow widgets are staged, revealed, and verified.
 
+## Product Value And Priority
+
+This change is worthwhile if it stays tightly scoped to premium workflow polish. The value is not the animation itself; the value is reducing visual noise so the operator sees one clear first action: upload the QBO screenshot.
+
+In the broader operational-intelligence platform, the reveal should communicate a product idea: evidence comes in first, then the coordinated expert-agent team assembles around it. The Image Parser, INV Search Agent, Triage Agent, and QBO Assistant should feel activated by the case evidence, not like unrelated dashboard boxes that happen to sit near an upload control.
+
+This should be treated as a UI staging improvement, not a core capability project. Parser accuracy, evidence handling, agent output quality, and trust/validation remain higher priority if they are unreliable. If those foundations are working well enough, this reveal is a good premium pass because it makes the workflow feel more intentional without changing the underlying case logic.
+
+Implementation guardrail: do not widen the scope. Do not change parser behavior, prompts, server routes, saved case behavior, provider selection, or QBO business rules as part of this work. The implementation should stay in `chat-v5` UI code unless a narrow verification need proves otherwise.
+
 ## Current Code State Verified
 
 Verified in the current checkout on 2026-07-07:
