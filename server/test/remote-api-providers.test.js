@@ -165,6 +165,7 @@ test('Anthropic request builder sends system separately and parses usage', async
       { role: 'user', content: 'Second question' },
     ],
     systemPrompt: 'Act like an analyst.',
+    reasoningEffort: 'xhigh',
     getApiKeyFn: async () => 'sk-ant-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
       captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
@@ -172,7 +173,7 @@ test('Anthropic request builder sends system separately and parses usage', async
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-5',
             content: [{ type: 'text', text: 'Here is the answer.' }],
             usage: { input_tokens: 21, output_tokens: 9 },
           }),
@@ -198,11 +199,12 @@ test('Anthropic request builder sends system separately and parses usage', async
   assert.equal(captured.captureContext.providerResearchId, 'anthropic-api');
   assert.equal(captured.captureContext.providerPathType, 'direct-http');
   assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestAnthropicChat');
-  // Default model is not adaptive-thinking capable — the thinking param must be omitted.
-  assert.equal(captured.body.thinking, undefined);
+  assert.equal(captured.body.model, 'claude-sonnet-5');
+  assert.deepStrictEqual(captured.body.thinking, { type: 'adaptive', display: 'summarized' });
+  assert.deepStrictEqual(captured.body.output_config, { effort: 'xhigh' });
   assert.equal(result.text, 'Here is the answer.');
   assert.deepStrictEqual(result.usage, {
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     inputTokens: 21,
     outputTokens: 9,
   });
@@ -212,6 +214,7 @@ test('Anthropic request builder sends system separately and parses usage', async
   const fableRequest = requestAnthropicChat({
     messages: [{ role: 'user', content: 'Question' }],
     model: 'claude-fable-5',
+    reasoningEffort: 'max',
     getApiKeyFn: async () => 'sk-ant-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
       capturedFable = { body };
@@ -233,6 +236,7 @@ test('Anthropic request builder sends system separately and parses usage', async
   });
   const fableResult = await fableRequest.promise;
   assert.deepStrictEqual(capturedFable.body.thinking, { type: 'adaptive', display: 'summarized' });
+  assert.deepStrictEqual(capturedFable.body.output_config, { effort: 'max' });
   // Text extraction must ignore the leading thinking block.
   assert.equal(fableResult.text, 'Fable answer.');
 });
@@ -245,7 +249,8 @@ test('Gemini request builder uses native generateContent payload and parses usag
       { role: 'assistant', content: 'Here is the draft answer.' },
     ],
     systemPrompt: 'Be precise.',
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3.5-flash',
+    reasoningEffort: 'medium',
     getApiKeyFn: async () => 'AIza-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
       captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
@@ -253,7 +258,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            modelVersion: 'gemini-3-flash-preview',
+            modelVersion: 'gemini-3.5-flash',
             candidates: [{ content: { parts: [{ text: 'Gemini reply' }] } }],
             usageMetadata: { promptTokenCount: 19, candidatesTokenCount: 6, totalTokenCount: 25 },
           }),
@@ -267,20 +272,21 @@ test('Gemini request builder uses native generateContent payload and parses usag
 
   assert.equal(captured.method, 'POST');
   assert.equal(captured.baseUrl, 'https://generativelanguage.googleapis.com');
-  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3-flash-preview:generateContent$/);
+  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3\.5-flash:generateContent$/);
   assert.equal(captured.headers['x-goog-api-key'], 'AIza-test');
   assert.equal(captured.body.system_instruction.parts[0].text, 'Be precise.');
   assert.equal(captured.body.contents[0].role, 'user');
   assert.equal(captured.body.contents[0].parts[0].text, 'What happened?');
   assert.equal(captured.body.contents[1].role, 'model');
   assert.equal(captured.body.contents[1].parts[0].text, 'Here is the draft answer.');
+  assert.deepStrictEqual(captured.body.generationConfig.thinkingConfig, { thinkingLevel: 'medium' });
   assert.equal(captured.captureContext.providerId, 'gemini');
   assert.equal(captured.captureContext.providerResearchId, 'gemini-api');
   assert.equal(captured.captureContext.providerPathType, 'direct-http');
   assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestGeminiChat');
   assert.equal(result.text, 'Gemini reply');
   assert.deepStrictEqual(result.usage, {
-    model: 'gemini-3-flash-preview',
+    model: 'gemini-3.5-flash',
     inputTokens: 19,
     outputTokens: 6,
   });

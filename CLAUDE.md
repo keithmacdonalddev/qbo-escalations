@@ -13,6 +13,15 @@ This repo ships QBO escalation support, but the product direction is broader: an
 
 When explaining or building features, separate the user goal, product workflow, agent-team responsibility, evidence/memory/validation need, and implementation detail. Implementation machinery is not why the user comes to the app.
 
+## Plain-Language Communication
+
+- Give the practical answer first; add technical detail after it.
+- Technical jargon is useful for learning only when every unfamiliar term is immediately defined in everyday language.
+- Do not stack labels such as `runtime`, `P0`, `policy gate`, `schema`, `durable memory`, `tracked`, or `session` without translating them.
+- Explain each important finding as: what it means, why it matters here, and whether the user needs to act now.
+- Prefer “plain wording (technical term)” and separate what exists now from what is missing or optional.
+- Avoid metaphor-based feature names when a direct behavioral name is clearer.
+
 ## Architecture
 
 ```

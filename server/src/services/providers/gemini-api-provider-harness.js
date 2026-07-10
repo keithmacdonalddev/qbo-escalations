@@ -18,7 +18,7 @@ const {
 } = require('./provider-handoff');
 
 const DEFAULT_GEMINI_API_URL = 'https://generativelanguage.googleapis.com';
-const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 const GEMINI_API_GENERATE_CONTENT_CALL_SITE = 'gemini-api-provider-harness:generateContent';
 const GEMINI_API_SOURCE_FILE = 'server/src/services/providers/gemini-api-provider-harness.js';
 

@@ -15,7 +15,7 @@ function getParsePrompt() {
   return getRenderedAgentPrompt('escalation-template-parser');
 }
 
-const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high']);
+const CLAUDE_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max']);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -71,7 +71,6 @@ function decodeBase64Input(input) {
 
 function normalizeEffort(value) {
   const normalized = String(value || '').trim().toLowerCase();
-  if (normalized === 'xhigh') return 'high';
   return CLAUDE_ALLOWED_EFFORTS.has(normalized) ? normalized : undefined;
 }
 
@@ -88,7 +87,7 @@ function normalizeEffort(value) {
  * @param {Object} [options]
  * @param {number} [options.timeoutMs=120000] - Abort after this many ms
  * @param {string} [options.model] - Model override
- * @param {string} [options.reasoningEffort] - low | medium | high
+ * @param {string} [options.reasoningEffort] - low | medium | high | xhigh | max
  * @returns {Promise<{text: string, usage: Object|null}|null>}
  *   Model answer text + usage, or null on failure. The caller decides how to
  *   surface failure; this adapter does not silently change parser contracts.

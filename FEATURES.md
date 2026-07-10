@@ -227,7 +227,7 @@ Time: 23:56 AST
 Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
-Special Feature: Action Authority Envelopes - Before an agent can change email, calendar, knowledge, or any external system, the user grants a visible, time-limited envelope defining allowed tools, accounts, scope, consequence tier, and approval mode. Every attempted action is checked against that envelope and recorded as allowed, blocked, or confirmation-required, creating one consistent safety contract across all domains instead of relying on prompt wording.
+Special Feature: Agent Action Permissions - Before an agent can change email, calendar, knowledge, or any external system, the app shows and enforces exactly what it may change, which account or items it may touch, how long that permission lasts, and whether it must ask first. Every attempted action is recorded as allowed, blocked, or waiting for confirmation. This creates one clear set of hard safety rules in code instead of relying on instructions written in an AI prompt.
 
 Date: 2026-07-09
 Time: Unknown AST

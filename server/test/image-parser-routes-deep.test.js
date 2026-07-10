@@ -631,7 +631,7 @@ test('POST /keys/test deep tests', async (t) => {
     let res = makeRes();
     await handler(makeReq({ provider: 'anthropic', key: 'sk-test' }), res);
     let body = JSON.parse(_lastCapturedBody);
-    assert.equal(body.model, 'claude-sonnet-4-20250514');
+    assert.equal(body.model, 'claude-sonnet-5');
     restoreHttps();
 
     // OpenAI
@@ -639,7 +639,7 @@ test('POST /keys/test deep tests', async (t) => {
     res = makeRes();
     await handler(makeReq({ provider: 'openai', key: 'sk-test' }), res);
     body = JSON.parse(_lastCapturedBody);
-    assert.equal(body.model, 'gpt-5.4-mini');
+    assert.equal(body.model, 'gpt-5.6-terra');
     restoreHttps();
 
     // Kimi

@@ -189,8 +189,8 @@ test('Provider request body: OpenAI', async (t) => {
       assert.equal(capture.options.headers['Content-Type'], 'application/json');
     });
 
-    await t.test('body contains model gpt-5.4-mini by default', () => {
-      assert.equal(capture.body.model, 'gpt-5.4-mini');
+    await t.test('body contains model gpt-5.6-terra by default', () => {
+      assert.equal(capture.body.model, 'gpt-5.6-terra');
     });
 
     await t.test('body omits temperature for GPT-5-family default', () => {
@@ -240,7 +240,7 @@ test('Provider request body: Anthropic', async (t) => {
   try {
     mockHttpsRequest(200, {
       content: [{ type: 'text', text: 'CASE: CS-001' }],
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-5',
       usage: { input_tokens: 60, output_tokens: 30 },
     });
 
@@ -281,8 +281,8 @@ test('Provider request body: Anthropic', async (t) => {
       assert.equal(capture.body.messages.length, 1);
     });
 
-    await t.test('body contains model claude-sonnet-4-20250514 by default', () => {
-      assert.equal(capture.body.model, 'claude-sonnet-4-20250514');
+    await t.test('body contains model claude-sonnet-5 by default', () => {
+      assert.equal(capture.body.model, 'claude-sonnet-5');
     });
 
     await t.test('body does NOT contain temperature (Anthropic default)', () => {
@@ -298,7 +298,7 @@ test('Provider request body: Anthropic', async (t) => {
       clearAllMocks();
       mockHttpsRequest(200, {
         content: [{ type: 'text', text: 'test' }],
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-5',
         usage: { input_tokens: 100, output_tokens: 50 },
       });
       const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });

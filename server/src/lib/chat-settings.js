@@ -5,7 +5,7 @@ const KNOWLEDGE_MODES = new Set(['full-playbook', 'hybrid', 'retrieval-only']);
 const MEMORY_POLICIES = new Set(['recent-only', 'summary-recent', 'full-history']);
 const BUDGET_ACTIONS = new Set(['warn', 'fallback', 'block']);
 const PROVIDER_MODES = new Set(['single', 'fallback', 'parallel']);
-const REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const DEFAULT_CHAT_RUNTIME_SETTINGS = Object.freeze({
   context: Object.freeze({

@@ -224,11 +224,13 @@ test('triage direct Anthropic body gates thinking + temperature by model and ext
       model: 'claude-fable-5',
       systemPrompt: 'Triage instructions',
       userPrompt: 'Triage this template.',
+      reasoningEffort: 'xhigh',
       timeoutMs: 1000,
       promptTrace,
     });
     assert.equal(capturedBodies.length, 1);
     assert.deepEqual(capturedBodies[0].thinking, { type: 'adaptive', display: 'summarized' });
+    assert.deepEqual(capturedBodies[0].output_config, { effort: 'xhigh' });
     assert.equal(capturedBodies[0].temperature, undefined);
     assert.equal(capturedBodies[0].max_tokens, 1200);
 
@@ -239,18 +241,20 @@ test('triage direct Anthropic body gates thinking + temperature by model and ext
     assert.equal(payload.text, TRIAGE_OUTPUT);
     assert.equal(payload.sourcePath, 'response.parsedJson.content[type=text].text');
 
-    // sonnet-4-6: still accepts temperature AND gets thinking.
+    // Sonnet 5: adaptive thinking, selected effort, and no sampling parameter.
     await runDirectTriageProviderCall({
       provider: 'anthropic',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-5',
       systemPrompt: 'Triage instructions',
       userPrompt: 'Triage this template.',
+      reasoningEffort: 'max',
       timeoutMs: 1000,
       promptTrace,
     });
     assert.equal(capturedBodies.length, 2);
     assert.deepEqual(capturedBodies[1].thinking, { type: 'adaptive', display: 'summarized' });
-    assert.equal(capturedBodies[1].temperature, 0.1);
+    assert.deepEqual(capturedBodies[1].output_config, { effort: 'max' });
+    assert.equal(capturedBodies[1].temperature, undefined);
   } finally {
     if (prevUrl === undefined) delete process.env.ANTHROPIC_API_URL;
     else process.env.ANTHROPIC_API_URL = prevUrl;

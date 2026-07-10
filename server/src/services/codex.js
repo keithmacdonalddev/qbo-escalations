@@ -18,9 +18,9 @@ const {
   setPackageCapturePromise,
 } = require('./providers/provider-handoff');
 
-const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.5';
+const DEFAULT_MODEL = process.env.CODEX_CHAT_MODEL || 'gpt-5.6-sol';
 const DEFAULT_REASONING_EFFORT = process.env.CODEX_REASONING_EFFORT || 'high';
-const CODEX_ALLOWED_EFFORTS = new Set(['low', 'medium', 'high', 'xhigh']);
+const CODEX_ALLOWED_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 const DEFAULT_SERVICE_TIER = process.env.CODEX_SERVICE_TIER || 'fast';
 const CODEX_ALLOWED_SERVICE_TIERS = new Set(['fast', 'priority', 'flex']);
 function parsePositiveInt(value, fallback) {

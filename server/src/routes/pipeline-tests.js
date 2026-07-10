@@ -93,10 +93,10 @@ const IMAGE_PROVIDER_LABELS = Object.freeze({
 const IMAGE_DEFAULT_MODELS = Object.freeze({
   'llm-gateway': 'auto',
   'lm-studio': 'local',
-  anthropic: 'claude-sonnet-4-20250514',
-  openai: 'gpt-5.4-mini',
+  anthropic: 'claude-sonnet-5',
+  openai: 'gpt-5.6-terra',
   kimi: 'kimi-k2.5',
-  gemini: 'gemini-3-flash-preview',
+  gemini: 'gemini-3.5-flash',
   ...CODEX_IMAGE_DEFAULT_MODELS,
 });
 

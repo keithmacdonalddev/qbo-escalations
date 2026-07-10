@@ -1272,7 +1272,7 @@ test('parseImage fails Gemini when required provider package capture cannot save
   };
   const httpsMock = mockHttpsRequest(200, {
     responseId: 'gemini-capture-failure-response-id',
-    modelVersion: 'gemini-3-flash-preview',
+    modelVersion: 'gemini-3.5-flash',
     candidates: [
       {
         content: { parts: [{ text: 'COID/MID: FAIL\nCASE: CS-GEM-CAPTURE' }] },
@@ -1441,7 +1441,7 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
     }).lean();
 
     assert.equal(result.available, true);
-    assert.equal(result.model, 'gemini-3-flash-preview');
+    assert.equal(result.model, 'gemini-3.5-flash');
     assert.ok(saved);
     assert.equal(saved.providerId, 'gemini');
     assert.equal(saved.operation, 'provider-status');
@@ -1450,7 +1450,7 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
     assert.equal(saved.geminiApi.response.responseId, 'gemini-status-response-id');
     assert.equal(saved.geminiApi.providerStatus.ok, true);
     assert.equal(saved.geminiApi.providerStatus.authenticated, true);
-    assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3-flash-preview');
+    assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3.5-flash');
   } finally {
     httpsMock.restore();
     if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
@@ -2046,7 +2046,7 @@ test('validateRemoteProvider uses a viable OpenAI GPT-5 health probe budget', as
     assert.equal(result.available, true);
     assert.equal(captured.options.hostname, 'api.openai.com');
     assert.equal(captured.options.path, '/v1/chat/completions');
-    assert.equal(captured.body.model, 'gpt-5.4-mini');
+    assert.equal(captured.body.model, 'gpt-5.6-terra');
     assert.equal(captured.body.max_tokens, undefined);
     assert.equal(captured.body.max_completion_tokens, 64);
     assert.equal(captured.body.reasoning_effort, 'low');
@@ -2577,7 +2577,7 @@ test('provider request body validation', async (t) => {
       // Body shape
       const body = captured.body;
       assert.equal(body.temperature, undefined, 'OpenAI GPT-5-family requests omit temperature');
-      assert.equal(body.model, 'gpt-5.4-mini', 'default model must be gpt-5.4-mini');
+      assert.equal(body.model, 'gpt-5.6-terra', 'default model must be gpt-5.6-terra');
       assert.equal(body.max_tokens, undefined);
       assert.equal(body.max_completion_tokens, 4096);
 
@@ -2622,7 +2622,7 @@ test('provider request body validation', async (t) => {
 
       // Body shape — Anthropic uses system as top-level field, not in messages
       const body = captured.body;
-      assert.equal(body.model, 'claude-sonnet-4-20250514', 'default model must be claude-sonnet-4-20250514');
+      assert.equal(body.model, 'claude-sonnet-5', 'default model must be claude-sonnet-5');
       assert.equal(body.max_tokens, 4096);
       assert.equal(typeof body.system, 'string', 'Anthropic uses top-level system field');
       assert.ok(body.system.length > 0);
@@ -2720,7 +2720,7 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'openai', model: 'gpt-4-turbo-custom' });
-      assert.equal(captured.body.model, 'gpt-4-turbo-custom', 'custom model must override default gpt-5.4-mini');
+      assert.equal(captured.body.model, 'gpt-4-turbo-custom', 'custom model must override default gpt-5.6-terra');
     } finally {
       captured._restore();
       fs.readFileSync = origRead;

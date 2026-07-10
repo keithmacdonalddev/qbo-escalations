@@ -33,7 +33,7 @@ const { randomUUID } = require('node:crypto');
 // They use focused prompts for specific tasks rather than general chat.
 router.use(createRateLimiter({ name: 'copilot', limit: 18, windowMs: 60_000 }));
 const COPILOT_DEFAULT_PROVIDER = getDefaultProvider();
-const COPILOT_ALLOWED_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+const COPILOT_ALLOWED_REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 function getCopilotSystemPrompt() {
   const basePrompt = getSystemPrompt();

@@ -58,6 +58,7 @@ export const DEFAULT_REASONING_EFFORT = 'high';
 export const DEFAULT_CODEX_SERVICE_TIER = 'fast';
 export const REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'none', label: 'None' },
+  { value: 'minimal', label: 'Minimal' },
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
@@ -73,31 +74,36 @@ const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
   claude: Object.freeze([
     { value: 'claude-fable-5', label: 'Claude Fable 5' },
     { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
-    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
     { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
   ]),
   codex: Object.freeze([
-    { value: 'gpt-5.5', label: 'GPT-5.5' },
-    { value: 'gpt-5.4', label: 'GPT-5.4' },
-    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol - flagship' },
+    { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra - balanced' },
+    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna - fastest' },
   ]),
   'llm-gateway': Object.freeze([
     { value: 'auto', label: 'Auto-detect' },
   ]),
   anthropic: Object.freeze([
-    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
-    { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku' },
+    { value: 'claude-fable-5', label: 'Claude Fable 5 - most capable' },
+    { value: 'claude-opus-4-8', label: 'Claude Opus 4.8 - complex agent work' },
+    { value: 'claude-sonnet-5', label: 'Claude Sonnet 5 - everyday balance' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 - fastest' },
   ]),
   openai: Object.freeze([
-    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini - high-volume parser' },
-    { value: 'gpt-5.5', label: 'GPT-5.5 - hardest screenshots' },
-    { value: 'gpt-5.4', label: 'GPT-5.4 - balanced frontier' },
-    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano - cheapest extraction' },
+    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol - flagship' },
+    { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra - balanced' },
+    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna - fastest' },
+    { value: 'gpt-5.5', label: 'GPT-5.5 - generally available flagship' },
+    { value: 'gpt-5.4', label: 'GPT-5.4 - generally available balanced' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini - lower cost' },
+    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano - lowest cost extraction' },
   ]),
   gemini: Object.freeze([
-    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
-    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
+    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash - stable default' },
+    { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite - stable low cost' },
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro - preview' },
   ]),
   kimi: Object.freeze([
     { value: 'kimi-k2.5', label: 'Kimi K2.5' },
@@ -228,7 +234,10 @@ export function getProviderModelSuggestions(provider) {
   const normalizedProvider = normalizeProvider(provider);
   const family = getProviderFamily(normalizedProvider);
   const options = PROVIDER_CATALOG
-    .filter((entry) => entry.model && entry.selectable === false && (entry.id === normalizedProvider || entry.family === family))
+    .filter((entry) => entry.model
+      && entry.selectable === false
+      && entry.showAsModelSuggestion !== false
+      && (entry.id === normalizedProvider || entry.family === family))
     .map((entry) => ({
       value: entry.model,
       label: entry.label,

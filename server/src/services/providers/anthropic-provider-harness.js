@@ -18,7 +18,7 @@ const {
 } = require('./provider-handoff');
 
 const DEFAULT_ANTHROPIC_API_URL = 'https://api.anthropic.com';
-const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
+const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5';
 const ANTHROPIC_MESSAGES_CALL_SITE = 'anthropic-provider-harness:sendMessages';
 const ANTHROPIC_SOURCE_FILE = 'server/src/services/providers/anthropic-provider-harness.js';
 

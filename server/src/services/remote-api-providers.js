@@ -15,11 +15,14 @@ const {
   recordGeminiApiProviderCallPackageInBackground,
   recordLlmGatewayProviderCallPackageInBackground,
 } = require('./provider-call-package-recorder');
-const { buildAnthropicThinkingParam } = require('../lib/anthropic-thinking');
+const {
+  buildAnthropicEffortParam,
+  buildAnthropicThinkingParam,
+} = require('../lib/anthropic-thinking');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
-const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
+const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const PROVIDER_CONFIG = Object.freeze({
   'llm-gateway': Object.freeze({
@@ -29,19 +32,19 @@ const PROVIDER_CONFIG = Object.freeze({
     displayName: 'LLM Gateway API',
   }),
   anthropic: Object.freeze({
-    defaultModel: 'claude-sonnet-4-20250514',
+    defaultModel: 'claude-sonnet-5',
     baseUrl: 'https://api.anthropic.com',
     envKey: 'ANTHROPIC_API_KEY',
     displayName: 'Anthropic API',
   }),
   openai: Object.freeze({
-    defaultModel: 'gpt-5.4-mini',
+    defaultModel: 'gpt-5.6-terra',
     baseUrl: 'https://api.openai.com',
     envKey: 'OPENAI_API_KEY',
     displayName: 'OpenAI API',
   }),
   gemini: Object.freeze({
-    defaultModel: 'gemini-3-flash-preview',
+    defaultModel: 'gemini-3.5-flash',
     baseUrl: 'https://generativelanguage.googleapis.com',
     envKey: 'GEMINI_API_KEY',
     displayName: 'Gemini API',
@@ -88,6 +91,14 @@ function buildRemoteChatCaptureContext(providerId, functionName, modelRequested,
 function normalizeOpenAiReasoningEffort(value) {
   const requested = typeof value === 'string' ? value.trim().toLowerCase() : '';
   return OPENAI_REASONING_EFFORTS.has(requested) ? requested : '';
+}
+
+function normalizeGeminiThinkingLevel(model, value) {
+  const requested = String(value || '').trim().toLowerCase();
+  const normalized = requested === 'none' ? 'minimal' : requested;
+  if (!['minimal', 'low', 'medium', 'high'].includes(normalized)) return '';
+  if (normalized === 'minimal' && /^gemini-3\.1-pro/i.test(String(model || ''))) return '';
+  return normalized;
 }
 
 function isOpenAiReasoningModel(model) {
@@ -422,6 +433,7 @@ function requestAnthropicChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   captureMetadata = null,
   requestFn = jsonRequestCancelable,
@@ -443,6 +455,7 @@ function requestAnthropicChat({
       ...(systemPrompt ? { system: systemPrompt } : {}),
       // Readable reasoning summaries on supported Claude models; omitted for others.
       ...buildAnthropicThinkingParam(effectiveModel),
+      ...buildAnthropicEffortParam(effectiveModel, reasoningEffort),
       messages: buildAnthropicMessages(messages),
     };
 
@@ -672,6 +685,7 @@ function requestGeminiChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   captureMetadata = null,
   requestFn = jsonRequestCancelable,
@@ -687,6 +701,7 @@ function requestGeminiChat({
     }
 
     const effectiveModel = model || PROVIDER_CONFIG.gemini.defaultModel;
+    const thinkingLevel = normalizeGeminiThinkingLevel(effectiveModel, reasoningEffort);
     const body = {
       ...(systemPrompt ? {
         system_instruction: {
@@ -697,6 +712,7 @@ function requestGeminiChat({
       generationConfig: {
         maxOutputTokens: DEFAULT_MAX_TOKENS,
         responseMimeType: 'text/plain',
+        ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
       },
     };
 

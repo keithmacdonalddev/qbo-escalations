@@ -194,6 +194,21 @@ test('Gemini 3.5 Flash priced at $1.50/$9 per MTok', () => {
   assert.equal(rates.outputNanosPerToken, 9000);
 });
 
+test('GPT-5.6 family uses the published Sol, Terra, and Luna rates', () => {
+  assert.deepEqual(getRates('gpt-5.6-sol', null), {
+    inputNanosPerToken: 5000,
+    outputNanosPerToken: 30000,
+  });
+  assert.deepEqual(getRates('gpt-5.6-terra', null), {
+    inputNanosPerToken: 2500,
+    outputNanosPerToken: 15000,
+  });
+  assert.deepEqual(getRates('gpt-5.6-luna', null), {
+    inputNanosPerToken: 1000,
+    outputNanosPerToken: 6000,
+  });
+});
+
 test('Gemini 3 Flash Preview priced at $0.50/$3 per MTok', () => {
   const rates = getRates('gemini-3-flash-preview', null);
   assert.equal(rates.inputNanosPerToken, 500);

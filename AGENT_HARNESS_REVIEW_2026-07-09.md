@@ -2,8 +2,25 @@
 
 **Project:** `qbo-escalations`
 **Review date:** 2026-07-09
+**Plain-language and model-catalog update:** 2026-07-10
 **Scope:** Claude Code and Codex instructions, settings, hooks, skills, custom agents, memory, research documents, runtime provider harnesses, product-agent prompts, model policy, evidence capture, and action safety
 **Purpose:** Provide a reusable review framework for this project and other agentic projects
+
+## Plain-English guide to the key findings
+
+This section translates the review's shorthand. The detailed evidence and recommendations remain below it.
+
+1. **P0, P1, and P2 are priority labels, not model names.** `P0` means an urgent safety or trust problem. `P1` means an important reliability problem. `P2` means useful cleanup or maintenance. The number says how soon to address the finding; it does not assign blame.
+2. **“Prompt-led authorization” means the AI is being told in words that it may act, and the server trusts the action it prints.** A server-enforced permission check (technical term: policy gate) is ordinary code that independently decides “allow,” “ask the user,” or “block” before email, calendar, or other data is changed. The project needs one central check instead of relying mainly on prompt wording.
+3. **`bypassPermissions` means “do not pause to ask before using tools.”** The tracked file `.claude/settings.local.json` turns that on broadly. That conflicts with the written rules saying agents must not start or stop the user's services or discard another session's work. The current guard catches some dangerous commands, but errors can let a command continue.
+4. **“Runtime” means what happens while software is running.** In this report, a coding-agent runtime is the environment in which Claude Code or Codex reads and edits this repository. A product-agent runtime is the environment in which an agent inside this app helps with QBO, email, or calendar work. A “Claude runtime version” means the installed Claude Code program. It has nothing to do with exercise. “Developer coding agents” simply means Claude Code and Codex when they are helping develop this repository.
+5. **The repeated PM rules are the text printed by `.claude/hooks/pm-rules.sh` and `.codex/hooks/pm-rules.ps1` after every user prompt.** They repeat product framing, delegation guidance, verification expectations, service-control rules, test expectations, commit/push instructions, feature-idea instructions, and communication preferences. Most belong in the root instruction file once.
+6. **Durable memory means saved notes that remain available in later chats.** `.claude/memory/project-overview.md` says implementation should always be delegated and tests should never be written. Current root policy says Codex normally works in the main session and testing should match the risk. Those directions contradict each other.
+7. **A session is one Claude chat/work period.** Thirty-three historical session files were committed to Git, so Git continues copying them into every clone; that is what “tracked” means. `.gitignore` now tells Git not to add new files from that folder, but ignore rules do not remove files already committed. Git is therefore tracking old files while ignoring new untracked ones. Before removing or rewriting history, the files need a private-data and secret review.
+8. **The model catalog really was inconsistent, and the active catalog was corrected on 2026-07-10.** The app now lists the current Claude choices—Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5—and the GPT-5.6 Sol, Terra, and Luna choices. Direct Anthropic requests now receive the selected effort. Gemini's stable default is 3.5 Flash; Kimi remains K2.5 because Moonshot's current official material still identifies K2.5 as its current multimodal API model. Gateway stays on automatic routing, and LM Studio uses whichever local model the user has loaded. GPT-5.6 is still a limited preview, so the OpenAI account used by the app must have access.
+9. **“Claude Code and the Agent SDK are behind” means the installed software packages are older than the current published packages.** At review time, Claude Code was `2.1.176` while `2.1.206` was published, and the project's Claude Agent SDK was `0.2.74` while `0.3.206` was published. This does not mean the app is currently broken. It means upgrading should be treated as a separate compatibility job with tests because the SDK version jump may change behavior.
+10. **A native JSON schema is an enforced fill-in form for an AI response.** Prompt-only formatting asks the AI to “please return these JSON fields.” A schema makes the provider reject or flag a response when a required field is missing or has the wrong type. Strict-output agents such as parsers benefit because malformed answers are caught immediately.
+11. **“Action Authority Envelopes” was an unclear feature name and has been renamed “Agent Action Permissions.”** No physical envelope and no legal contract are involved. The feature would show and enforce what an agent may change, which account or records it may touch, how long permission lasts, and when it must ask. “Safety contract” in the earlier wording meant hard safety rules enforced by code; the user does not sign anything.
 
 ## Executive judgment
 
@@ -175,7 +192,7 @@ Recommendation:
 
 Anthropic recommends combining permissions with OS-level sandboxing because prompt-level behavior can be bypassed. See [Configure permissions](https://code.claude.com/docs/en/permissions) and [Sandboxing](https://code.claude.com/docs/en/sandboxing).
 
-### P0-3: Coding-agent runtime and product-agent runtime are not fully separated
+### P0-3: Repository coding tools and in-app agents are not fully separated while running
 
 The project has two fundamentally different uses of Claude and Codex:
 
@@ -260,28 +277,31 @@ Recommendation:
 
 ### P1-4: Current model and effort controls are inconsistent across transports
 
-As of this review:
+Status update, 2026-07-10: the immediate catalog and request-building problems in this finding were corrected.
 
-- OpenAI's current family is GPT-5.6 Sol, Terra, and Luna. The repository still defaults Codex CLI to GPT-5.5 and the direct OpenAI API catalog to GPT-5.4 Mini.
-- Anthropic's current general lineup includes Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5. The repository contains Fable 5 and Opus 4.8 but not Sonnet 5; the direct Anthropic API default is still `claude-sonnet-4-20250514`.
-- The direct Anthropic request builder enables adaptive thinking summaries for allowlisted models but does not send `output_config.effort`, so a selected effort is not actually applied on that path.
-- OpenAI effort allowlists stop at `xhigh`; GPT-5.6 also supports `max`.
-- `sdk-image-parse.js` accepts only low/medium/high even though current supported Claude models expose additional levels.
-- Catalog metadata says some models support effort levels that their current API does not accept or will silently map down.
+The correction:
 
-Recommendation:
+- Adds the current Claude model choices: Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5.
+- Adds GPT-5.6 Sol, Terra, and Luna to both Codex and direct OpenAI model choices while preserving older GPT entries only for compatibility with saved settings.
+- Uses Sonnet 5 for the direct Anthropic default, GPT-5.6 Sol for the Codex CLI default, and Gemini 3.5 Flash for Gemini.
+- Sends the selected Anthropic effort as `output_config.effort` only when that model accepts the selected level.
+- Adds OpenAI `max`, current Claude `xhigh`/`max`, and Gemini `minimal`/`low`/`medium`/`high` validation where supported.
+- Sends Gemini's current `thinkingLevel` field and removes the no-longer-recommended Gemini 3 sampling setting from the triage request.
+- Updates current-model pricing entries and focused request-builder/catalog tests.
+
+Important availability note: GPT-5.6 is a limited preview. Listing a model does not grant access to it. The OpenAI API organization or Codex workspace used by the app must already be approved, and failures must remain visible so the configured fallback can take over.
+
+Remaining recommendation:
 
 - Define one model-capability registry used by UI, validation, request builders, tests, and documentation.
 - Store capability by transport and model, not merely provider family.
-- Add Sonnet 5 and GPT-5.6 only after representative evaluations.
-- Thread Anthropic effort through `output_config: { effort }` on supported models.
-- Support `max` only where the installed CLI/API and model accept it.
+- Run representative QBO parsing, triage, workspace, and chat evaluations before changing every saved agent profile to a new model.
 - Record requested effort, effective effort, fallback, and model version in the provider evidence package.
 - Fail visibly on unsupported combinations instead of silently substituting when the user expects a particular evaluation.
 
 Official sources: [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model configuration](https://code.claude.com/docs/en/model-config), [Anthropic effort API](https://platform.claude.com/docs/en/build-with-claude/effort), and [Claude Sonnet 5 release notes](https://platform.claude.com/docs/en/release-notes/overview).
 
-### P1-5: The installed Claude tooling is behind the documentation being used
+### P1-5: The installed Claude Code program and Agent SDK packages are older than the current releases
 
 Fresh local checks found:
 
@@ -595,7 +615,7 @@ Use this sequence when creating or repairing any agent harness:
 3. **Keep always-on instructions small.** Include only surprising constraints, authoritative commands, risk boundaries, and verification.
 4. **Route detail on demand.** Use path rules, skills, and normal documentation instead of one monolithic prompt.
 5. **Enforce non-negotiable rules mechanically.** Permissions, sandboxes, schemas, policy services, and tests beat prose reminders.
-6. **Give every agent an authority envelope.** Define what it may read, decide, propose, mutate, and never do.
+6. **Give every agent explicit action permissions.** Define what it may read, decide, propose, change, and never do.
 7. **Use governed memory.** Record source, confidence, scope, owner, last verification, retention, and deletion.
 8. **Capture evidence, not private thought.** Store inputs, tool results, claims, decisions, validation, and outcomes.
 9. **Evaluate by workflow and model.** Compare model/effort/prompt changes against representative tasks.
@@ -622,11 +642,12 @@ Use this sequence when creating or repairing any agent harness:
 
 ### Phase 2: Modernize models through evaluation
 
-1. Add GPT-5.6 Sol/Terra/Luna and Claude Sonnet 5 as candidates, not immediate universal defaults.
-2. Add Anthropic `output_config.effort` and GPT-5.6 `max` support where appropriate.
-3. Add structured-output schemas.
-4. Upgrade Claude Code and the Agent SDK through a compatibility branch and focused tests.
-5. Remove the hidden thinking flag dependency or isolate it behind a tested compatibility adapter.
+1. **Completed 2026-07-10:** add GPT-5.6 Sol/Terra/Luna, Claude Fable 5, and Claude Sonnet 5 to the relevant choices without rewriting every saved agent profile.
+2. **Completed 2026-07-10:** add Anthropic `output_config.effort`, GPT-5.6 `max`, and Gemini 3 thinking-level support where accepted.
+3. Run representative workflow evaluations before broader default/profile migrations.
+4. Add structured-output schemas.
+5. Upgrade Claude Code and the Agent SDK through a compatibility branch and focused tests.
+6. Remove the hidden thinking flag dependency or isolate it behind a tested compatibility adapter.
 
 ### Phase 3: Create a maintained harness discipline
 
@@ -682,6 +703,15 @@ Use this sequence when creating or repairing any agent harness:
 - [Prompt caching lessons from Claude Code](https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything)
 - [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
 
+### Other provider model sources used for the 2026-07-10 correction
+
+- [OpenAI GPT-5.6 preview availability and pricing](https://help.openai.com/en/articles/20001325-a-preview-of-gpt-5-6-sol-terra-and-luna)
+- [Anthropic current model IDs](https://platform.claude.com/docs/en/about-claude/models/overview)
+- [Gemini current models](https://ai.google.dev/gemini-api/docs/models)
+- [Gemini 3.5 Flash migration and thinking levels](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
+- [Moonshot Kimi API prompt guide identifying K2.5](https://platform.moonshot.ai/docs/guide/prompt-best-practice)
+- [LM Studio dynamic local model listing](https://lmstudio.ai/docs/developer/openai-compat/models)
+
 ## Final recommendation
 
-Do not add more agents, hooks, or memory until the authority, instruction, and source-of-truth layers are simplified. The next investment should be a small shared operating contract, server-enforced action permissions, isolated provider runtimes, current capability metadata, and evaluation gates. Once those are trustworthy, new specialist agents and reusable skills will add leverage instead of adding another layer of contradictory context.
+Do not add more agents, hooks, or memory until the permission rules, instructions, and sources of truth are simplified. The next investment should be a small shared set of operating rules, action permissions enforced by server code, isolated environments for in-app provider calls, current capability metadata, and test gates. Once those are trustworthy, new specialist agents and reusable skills will add leverage instead of adding another layer of contradictory context.

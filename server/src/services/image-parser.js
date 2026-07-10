@@ -39,7 +39,10 @@ const {
 const ImageParserApiKey = require('../models/ImageParserApiKey');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
-const { buildAnthropicThinkingParam } = require('../lib/anthropic-thinking');
+const {
+  buildAnthropicEffortParam,
+  buildAnthropicThinkingParam,
+} = require('../lib/anthropic-thinking');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
 const {
@@ -104,7 +107,7 @@ try {
 // ---------------------------------------------------------------------------
 const LM_STUDIO_API_URL = process.env.LM_STUDIO_API_URL || 'http://127.0.0.1:1234';
 const LLM_GATEWAY_API_URL = process.env.LLM_GATEWAY_API_URL || 'http://127.0.0.1:4100';
-const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.4-mini';
+const OPENAI_DEFAULT_IMAGE_MODEL = process.env.OPENAI_IMAGE_PARSE_MODEL || process.env.OPENAI_PARSE_MODEL || 'gpt-5.6-terra';
 const OPENAI_PROVIDER_TEST_MAX_TOKENS = 64;
 const DEFAULT_TIMEOUT_MS = 120000;
 const KEYS_FILE = path.join(__dirname, '..', '..', 'data', 'image-parser-keys.json');
@@ -139,7 +142,7 @@ const VALID_IMAGE_PARSER_PROVIDERS = Object.freeze([
   ...CLAUDE_IMAGE_PARSER_PROVIDER_IDS,
   ...CODEX_IMAGE_PARSER_PROVIDER_IDS,
 ]);
-const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
+const OPENAI_REASONING_EFFORTS = new Set(['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 const IMAGE_PARSE_PROMPT_IDS = new Set([
   'escalation-template-parser',
   'follow-up-chat-parser',
@@ -238,6 +241,14 @@ function normalizeOpenAiReasoningEffort(value) {
   return OPENAI_REASONING_EFFORTS.has(requested) ? requested : '';
 }
 
+function normalizeGeminiThinkingLevel(model, value) {
+  const requested = String(value || '').trim().toLowerCase();
+  const normalized = requested === 'none' ? 'minimal' : requested;
+  if (!['minimal', 'low', 'medium', 'high'].includes(normalized)) return '';
+  if (normalized === 'minimal' && /^gemini-3\.1-pro/i.test(String(model || ''))) return '';
+  return normalized;
+}
+
 function isOpenAiReasoningModel(model) {
   const normalized = String(model || '').trim().toLowerCase();
   return /^gpt-5(?:[.\-\w]*)?$/.test(normalized) || /^o\d/.test(normalized);
@@ -302,7 +313,7 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   anthropic: {
     hostname: 'api.anthropic.com',
     path: '/v1/messages',
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-sonnet-5',
     buildBody: (model) => JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] }),
     buildHeaders: (key) => ({
       'x-api-key': key,
@@ -335,8 +346,8 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   },
   gemini: {
     hostname: 'generativelanguage.googleapis.com',
-    path: '/v1beta/models/gemini-3-flash-preview:generateContent',
-    model: 'gemini-3-flash-preview',
+    path: '/v1beta/models/gemini-3.5-flash:generateContent',
+    model: 'gemini-3.5-flash',
     buildBody: () => JSON.stringify({
       contents: [{ parts: [{ text: 'hi' }] }],
       generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' },
@@ -1445,9 +1456,9 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
 /**
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
-async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null, signal = null) {
+async function callAnthropic(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
   throwIfAborted(signal);
-  const effectiveModel = model || 'claude-sonnet-4-20250514';
+  const effectiveModel = model || 'claude-sonnet-5';
 
   const body = {
     model: effectiveModel,
@@ -1455,6 +1466,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, timeoutM
     system: systemPrompt,
     // Readable reasoning summaries on supported Claude models; omitted for others.
     ...buildAnthropicThinkingParam(effectiveModel),
+    ...buildAnthropicEffortParam(effectiveModel, reasoningEffort),
     messages: [{
       role: 'user',
       content: [
@@ -1669,9 +1681,10 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
 /**
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
-async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, eventBus = null, signal = null) {
+async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
   throwIfAborted(signal);
-  const effectiveModel = model || 'gemini-3-flash-preview';
+  const effectiveModel = model || 'gemini-3.5-flash';
+  const thinkingLevel = normalizeGeminiThinkingLevel(effectiveModel, reasoningEffort);
   const body = {
     system_instruction: {
       parts: [{ text: systemPrompt }],
@@ -1691,6 +1704,7 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs, 
     generationConfig: {
       maxOutputTokens: 4096,
       responseMimeType: 'text/plain',
+      ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
     },
   };
 
@@ -3066,14 +3080,14 @@ async function parseImage(imageBase64, options = {}) {
             provider,
             reason: 'direct_anthropic_provider_harness_default',
           });
-          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
+          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal);
         }
         break;
       case 'openai':
         result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal);
         break;
       case 'gemini':
-        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
+        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal);
         break;
       case 'kimi':
         result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs, eventBus, signal);

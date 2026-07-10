@@ -348,7 +348,7 @@ test('parseImage routes OpenAI through Mongo provider package handoff and preser
       bodyText: JSON.stringify({
         id: 'chatcmpl-openai-parser',
         object: 'chat.completion',
-        model: 'gpt-5.4-mini',
+        model: 'gpt-5.6-terra',
         choices: [{ message: { role: 'assistant', content: 'COID/MID: 789\nCASE: 101112' } }],
         usage: { prompt_tokens: 31, completion_tokens: 9, total_tokens: 40 },
       }),
@@ -366,7 +366,7 @@ test('parseImage routes OpenAI through Mongo provider package handoff and preser
     const saved = await ProviderCallPackage.findOne({ callSite: 'image-parser:callOpenAI' }).lean();
 
     assert.equal(result.text, 'COID/MID: 789\nCASE: 101112');
-    assert.equal(result.usage.model, 'gpt-5.4-mini');
+    assert.equal(result.usage.model, 'gpt-5.6-terra');
     assert.equal(result.usage.inputTokens, 31);
     assert.equal(result.usage.outputTokens, 9);
     assert.equal(result.providerTrace.providerHarness, 'openai-api');
@@ -374,7 +374,7 @@ test('parseImage routes OpenAI through Mongo provider package handoff and preser
     assert.ok(result.providerTrace.providerPayload);
     assert.ok(saved);
     assert.equal(result.providerTrace.providerPackageId, String(saved._id));
-    assert.equal(capturedBody.model, 'gpt-5.4-mini');
+    assert.equal(capturedBody.model, 'gpt-5.6-terra');
     assert.equal(capturedBody.max_completion_tokens, 4096);
     assert.equal(capturedBody.reasoning_effort, 'low');
     assert.equal(Object.prototype.hasOwnProperty.call(capturedBody, 'max_tokens'), false);

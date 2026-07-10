@@ -6,6 +6,16 @@
 
 The user is a self-taught / solo hobbyist developer. Explain clearly, warn about risks, suggest next steps.
 
+### Plain-Language Communication
+
+- Give the practical answer first. Then add technical detail only when it helps the user decide or act.
+- Technical terms are welcome for learning, but define each unfamiliar term immediately in everyday language the first time it appears.
+- Never stack unexplained labels such as `runtime`, `P0`, `policy gate`, `schema`, `durable memory`, `tracked`, or `session` and expect the user to translate them.
+- For every important finding, explain three things: what it means, why it matters in this project, and whether the user needs to do anything now.
+- Prefer a plain term followed by the technical term in parentheses. Example: “saved notes that remain available in later chats (durable memory).”
+- Distinguish what exists now, what is a problem now, and what is only a future recommendation.
+- Do not use metaphors as feature names when the metaphor hides the behavior. Use direct names such as “Agent Action Permissions.”
+
 ### Parallel Sessions And Worktree Awareness
 
 Multiple chat sessions or coding agents may be working in this repository at the same time. Assume the worktree can change while you are working.

@@ -20,7 +20,11 @@ const {
   mergeTriageRepairOutput,
 } = require('../lib/chat-triage');
 const { getProviderModelId } = require('./providers/catalog');
-const { buildAnthropicThinkingParam, modelRejectsSamplingParams } = require('../lib/anthropic-thinking');
+const {
+  buildAnthropicEffortParam,
+  buildAnthropicThinkingParam,
+  modelRejectsSamplingParams,
+} = require('../lib/anthropic-thinking');
 const codex = require('./codex');
 const { resolveApiKey, validateRemoteProvider } = require('./image-parser');
 const {
@@ -350,7 +354,7 @@ function buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort,
   if (isReasoningModel) {
     body.max_completion_tokens = maxTokens;
     const effort = safeString(reasoningEffort, '').trim().toLowerCase();
-    if (['none', 'low', 'medium', 'high', 'xhigh'].includes(effort)) body.reasoning_effort = effort;
+    if (['none', 'low', 'medium', 'high', 'xhigh', 'max'].includes(effort)) body.reasoning_effort = effort;
   } else {
     body.max_tokens = maxTokens;
     body.temperature = 0.1;
@@ -587,6 +591,7 @@ async function runDirectTriageProviderCall({
           system: systemPrompt,
           // Readable reasoning summaries on supported Claude models; omitted for others.
           ...buildAnthropicThinkingParam(model),
+          ...buildAnthropicEffortParam(model, reasoningEffort),
           messages: [{ role: 'user', content: userPrompt }],
         },
         model,
@@ -615,28 +620,36 @@ async function runDirectTriageProviderCall({
         signal,
       });
     case 'gemini':
-      return sendGeminiGenerateContent({
-        body: {
-          contents: [{
-            role: 'user',
-            parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
-          }],
-          generationConfig: {
-            temperature: 0.1,
-            maxOutputTokens: maxTokens,
+      {
+        const requestedLevel = safeString(reasoningEffort, '').trim().toLowerCase();
+        const normalizedLevel = requestedLevel === 'none' ? 'minimal' : requestedLevel;
+        const thinkingLevel = ['minimal', 'low', 'medium', 'high'].includes(normalizedLevel)
+          && !(normalizedLevel === 'minimal' && /^gemini-3\.1-pro/i.test(model))
+          ? normalizedLevel
+          : '';
+        return sendGeminiGenerateContent({
+          body: {
+            contents: [{
+              role: 'user',
+              parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
+            }],
+            generationConfig: {
+              maxOutputTokens: maxTokens,
+              ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
+            },
           },
-        },
-        model,
-        timeoutMs,
-        getApiKey: () => resolveApiKey('gemini'),
-        captureContext: {
-          ...captureContext,
-          providerResearchId: 'gemini-api',
-          providerPathType: 'direct-http',
-        },
-        onProviderEvent,
-        signal,
-      });
+          model,
+          timeoutMs,
+          getApiKey: () => resolveApiKey('gemini'),
+          captureContext: {
+            ...captureContext,
+            providerResearchId: 'gemini-api',
+            providerPathType: 'direct-http',
+          },
+          onProviderEvent,
+          signal,
+        });
+      }
     case 'kimi':
       return sendKimiChatCompletion({
         body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),

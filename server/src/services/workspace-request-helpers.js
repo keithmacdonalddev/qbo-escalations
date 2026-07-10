@@ -27,7 +27,7 @@ const WORKSPACE_CHAT_TIMEOUT_MS = Math.min(
 );
 const WORKSPACE_PRIMARY_PROVIDER = getDefaultProvider();
 const WORKSPACE_FALLBACK_PROVIDER = getAlternateProvider(WORKSPACE_PRIMARY_PROVIDER);
-const WORKSPACE_ALLOWED_REASONING = new Set(['low', 'medium', 'high', 'xhigh']);
+const WORKSPACE_ALLOWED_REASONING = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
 
 const VERIFICATION_HANDLERS = {
   'calendar.createEvent': async (params, result) => {
