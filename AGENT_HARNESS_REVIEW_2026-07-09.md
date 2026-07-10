@@ -19,7 +19,7 @@ This section translates the review's shorthand. The detailed evidence and recomm
 7. **A session is one Claude chat/work period.** Thirty-three historical session files were checked for recognizable credential patterns, removed from Git's current tracking, and retained locally on 2026-07-10. Old Git history still contains earlier copies; removing those would require a separate history rewrite.
 8. **The model catalog really was inconsistent, and the active catalog was corrected on 2026-07-10.** The app now lists the current Claude choices—Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5—and the GPT-5.6 Sol, Terra, and Luna choices. Direct Anthropic requests now receive the selected effort. Gemini's stable default is 3.5 Flash. Kimi now includes K2.7 Code, its faster K2.7 Code Highspeed variant, K2.6, and K2.5. K2.6 remains the QBO app's general-purpose default; the K2.7 choices are coding-focused and always use thinking mode. Gateway stays on automatic routing, and LM Studio uses whichever local model the user has loaded.
 9. **Claude Code and Codex are current, and the app's Claude Agent SDK has now been upgraded.** Fresh checks on 2026-07-10 found Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`, matching their published package versions at the time of the check.
-10. **Native JSON schemas are for in-app AI replies that must fit an exact data shape.** Imagine the image parser returning information to application code, not text for a person to read. A schema lets the app require boxes such as `caseNumber` and `severity` before accepting the reply. It catches missing or wrongly shaped data, but it cannot tell whether the AI read the screenshot correctly. It is not a form the user fills out, and this repository already uses a schema in one SDK image-parsing path; the recommendation is to use the same protection consistently in other strict parsing paths.
+10. **Native JSON schemas are for in-app AI replies that must fit an exact data shape.** Imagine the parser returning information to application code, not text for a person to read. A schema lets the app require boxes such as `caseNumber` and `severity` before accepting the reply. It catches missing or wrongly shaped data, but it cannot tell whether the AI read the source correctly. It is not a form the user fills out. This repository already uses Claude CLI's `--json-schema` for escalation parsing, but the protection is not applied consistently across every strict direct-provider and triage path.
 11. **“Agent Action Permissions” is mainly for in-app agents.** It would control whether the AI inside the application may send email, alter calendars, or change stored records. Claude Code and Codex use a separate developer-tool permission system. No physical envelope and no legal contract are involved; “safety contract” was only unclear shorthand for safety rules enforced by application code.
 
 ## Executive judgment
@@ -950,8 +950,8 @@ guessing what the AI meant.
 
 This does **not** prove that the value is factually correct. It only proves that the reply has the required
 shape. It applies to in-app parsing and triage responses, not to normal chat answers and not to forms the user
-must complete. One SDK image-parser path already uses a schema; the recommendation is to apply this protection
-consistently to other strict-output paths.
+must complete. The Claude CLI escalation parser already uses a schema. The recommendation is to apply the same
+protection consistently to other strict direct-provider and triage paths.
 
 11. “Action authority envelopes” and “safety contract”
 
