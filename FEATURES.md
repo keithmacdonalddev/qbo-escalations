@@ -221,3 +221,10 @@ Model: Codex GPT-5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Workflow Readiness Gate - Before an expert-agent workflow starts, check whether the required evidence, provider health, privacy mode, and routing assumptions are ready, then show a short readiness verdict for each agent. This keeps the operator from starting a coordinated workflow with missing evidence or unsafe routing, and turns "why did that agent not run correctly?" into a visible preflight decision instead of an after-the-fact mystery.
+
+Date: 2026-07-09
+Time: 23:56 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Action Authority Envelopes - Before an agent can change email, calendar, knowledge, or any external system, the user grants a visible, time-limited envelope defining allowed tools, accounts, scope, consequence tier, and approval mode. Every attempted action is checked against that envelope and recorded as allowed, blocked, or confirmation-required, creating one consistent safety contract across all domains instead of relying on prompt wording.
