@@ -1,0 +1,221 @@
+# Observability Review
+
+Static review of `C:\Projects\qbo-escalations` completed 2026-07-09. The evidence collector ran in read-only mode on 2026-07-10 UTC. No application server, client server, gateway, model server, database process, or other long-running service was started or changed.
+
+## 1. Plain-English summary
+
+The app can already prove a useful amount about chat and image-parser work. It stores AI traces with a request ID, provider and model, success or failure, fallback attempts, timing, image metadata, validation results, and usage/cost fields when the provider supplies them. It also stores provider-call evidence, usage records, image-parse history, and provider-health history. The user can see much of this through Usage > AI Traces, Sessions, Image Parser history, the request waterfall, workflow log panels, and health banners.
+
+The app cannot yet prove, in one reliable place:
+
+- who changed a setting, API key, connected account, or most prompt/configuration values;
+- that one browser action can always be followed from the client through the server into the exact provider-call package;
+- the exact full assembled prompt and response for every model call, with a clear reason when capture is unavailable;
+- what client and server errors happened after the process restarted; or
+- what the whole local runtime layout looked like at a past moment, including orphan processes and separate gateway/model-server state.
+
+Definitions: a durable log survives after the terminal closes; an audit trail is a durable record of who did what and when; a request ID is one label used to find the evidence for a single request; a provider is the outside AI service, CLI, gateway, or local model server that handled a model call.
+
+The most important next fix is to make the existing evidence joinable and durable: carry one trace/request identity into provider-call records, then add durable audit and error records that the client can display. This is a hardening and product-surface task, not a greenfield logging rebuild.
+
+## 2. What logs exist today
+
+| Area | Current evidence | Where found | Durable or temporary | What it proves |
+| --- | --- | --- | --- | --- |
+| Server startup and route errors | Many `console.log`, `console.warn`, and `console.error` calls; Express error handler reports errors to the server error pipeline | `server/src/index.js`, `server/src/app.js`, route/service files | Mostly temporary terminal output | What a running process printed, plus the current in-memory server error buffer |
+| Request tracking | Every Express request receives or generates `req.requestId`; the response includes `X-Request-ID` | `server/src/middleware/request-id.js:4-13`, `server/src/app.js:32-35` | Request ID itself is durable only when copied into another record | A server-side label for following a request |
+| AI chat and parse traces | Mongo-backed `AiTrace` records include request ID, route, status, prompt preview, providers/models, attempts, fallbacks, timings, usage, outcomes, and stage events | `server/src/models/AiTrace.js:134-169`, `server/src/services/ai-traces.js:216-247`, `server/src/routes/traces.js` | Durable MongoDB records | What the app believes happened during chat and parse operations |
+| Provider-call evidence | Provider-specific request/response, CLI stdout/stderr/events, errors, timing, gateway request ID, and redaction metadata can be captured | `server/src/models/ProviderCallPackage.js:462-507`, `server/src/services/provider-call-package-recorder.js:1201-1240` | Durable MongoDB plus possible files under `server/data/provider-call-packages`; default Mongo retention is 30 days | Detailed forensic evidence for captured provider calls |
+| Usage and cost | Provider, model, request ID, attempt, tokens, calculated cost, status, and latency | `server/src/models/UsageLog.js:17-68`, `server/src/lib/usage-writer.js` | Durable MongoDB with a default 365-day TTL | Usage and cost accounting when usage/rates are available |
+| Image-parser history | Provider/model, requested model, fallback, prompt ID, image sizes, parse output, validation, errors, provider trace/package reference, and source image metadata | `server/src/models/ImageParseResult.js:14-87`, `server/src/routes/image-parser.js:503-662` | Durable MongoDB with a default 90-day TTL; source images are archived separately | Why a stored image parse succeeded, failed, or used a fallback |
+| Provider-health history | Provider readiness/canary snapshots, status, diagnostics, latency, usage, fallback attempts, and provider errors | `server/src/lib/provider-health-log-store.js:10-143`, `server/src/routes/agent-identities.js:292-317` | JSONL file, path controlled by `PROVIDER_HEALTH_LOG_PATH` | Historical provider-health checks |
+| Knowledge governance history | Knowledge-candidate audit events for publish, unpublish, edits, and related governance actions | `server/src/services/knowledgebase-management-service.js:256-268` and its audit-event call sites | Durable inside the knowledge record | Governance history for the knowledge feature, not a platform-wide audit trail |
+| Prompt history | Prompt versions and some agent history exist; prompt restore/edit actions record `actor: 'user'` in agent history | `server/src/routes/agent-prompts.js`, `server/src/lib/agent-prompt-store.js`, `server/src/services/agent-identity-service.js` | Durable files/history, but not a unified audit record | Some prompt version history and a limited action description |
+
+## 3. What logs are only temporary terminal output
+
+- Most server diagnostics are direct console output. This includes Gmail OAuth errors, provider warm-up messages, scheduler messages, CLI availability messages, route-specific failures, and many service errors.
+- `server/src/lib/server-error-pipeline.js` keeps only the latest 50 server errors in memory and broadcasts them to subscribers. It is not a durable error store.
+- `client/src/lib/devTelemetry.js` keeps only the latest 50 browser breadcrumbs in memory.
+- `client/src/hooks/useErrorCapture.js` can collect browser errors and unhandled promise rejections, but the current repository search found no component mounting the hook. There is therefore no confirmed active path from browser error capture to storage or a server endpoint.
+- Active request and AI-operation status in `request-runtime.js` and `ai-runtime.js` disappears when the process ends.
+- Provider health state in `server/src/services/provider-health.js` is an in-memory current snapshot. The separate provider-health JSONL writer provides history only when that health flow writes a snapshot.
+
+## 4. What durable logs or audit records exist
+
+The strongest durable records are `AiTrace`, `ProviderCallPackage`, `UsageLog`, `ImageParseResult`, provider-health JSONL, saved conversation/session data, workflow/case-intake activity, knowledge-candidate audit events, and prompt version history.
+
+Important retention limits:
+
+- `UsageLog` defaults to 365 days through `USAGE_LOG_TTL_DAYS`.
+- `ImageParseResult` defaults to 90 days through `IMAGE_PARSE_RESULT_TTL_DAYS`.
+- `ProviderCallPackage` defaults to 30 days through `PROVIDER_CALL_PACKAGE_TTL_DAYS`.
+- Large provider payloads can be externalized to disk. The provider-package model explicitly notes that MongoDB TTL does not delete those external files, so an on-disk cleanup job is still missing.
+- The server-error ring buffer and client breadcrumbs are not durable at all.
+
+There is no single platform-wide event record that consistently answers: actor, action, target, old value, new value, request ID, trace ID, result, and reason.
+
+## 5. What auth events are tracked
+
+This repository does not contain a general application login/password/session-authentication system. The word “auth” mostly refers to connected Gmail OAuth and provider/API-key availability.
+
+| Event | Current behavior | What is missing |
+| --- | --- | --- |
+| Gmail OAuth status/connect | Routes exist for status, consent URL, callback, and disconnect. Success/failure is printed to the console; OAuth tokens are stored in `GmailAuth` with secret fields excluded from normal reads | Durable actor, timestamped action, account target, result, reason, and request ID in a central audit trail |
+| Gmail account switch/disconnect | Account operations exist and errors are printed | Durable “who changed what” event and before/after account state |
+| Image-parser API-key save/test | Keys are stored in MongoDB with secret fields excluded by default; provider tests return a result | Key-change audit event, actor, reason, and safe old/new fingerprint |
+| Preferences/configuration | Preferences and AI settings can be updated | Central audit event showing actor, changed fields, previous values, and result |
+| Prompt edit/restore | Version history exists; restore/edit agent history uses an actor label | Consistent request ID, authenticated identity, old/new fingerprints, and a shared audit view |
+| Knowledge governance | Knowledge records have bounded audit-event history | This is scoped to knowledge records and does not cover the rest of the application |
+
+## 6. What model activity is tracked
+
+The app is materially ahead of the original note here.
+
+It can usually record:
+
+- provider and model requested and actually used;
+- primary, fallback, and parallel attempts;
+- success, error, timeout, or abort status;
+- provider error code/message and validation issues;
+- total latency, first-thinking/first-chunk timing, and parser timing;
+- image dimensions/size/preparation statistics;
+- input/output/total token counts when returned;
+- calculated cost when the provider/model rate is recognized; and
+- gateway request ID when the gateway returns one.
+
+`AiTrace` exposes summaries, model trends, recent traces, conversation traces, and full trace detail through `/api/traces`. The client renders these through Usage > AI Traces and session detail. Provider packages can retain the detailed HTTP or CLI request/response evidence and selected reasoning/event data, while image-parser results retain the parse result and provider-package reference.
+
+The main limitations are:
+
+- `AiTrace` stores a prompt preview and response character count, not necessarily the full assembled system prompt, context, and response.
+- Provider-call capture is configurable and can be skipped when MongoDB is unavailable or capture is disabled.
+- Provider packages have short retention and large external payloads need cleanup.
+- Provider packages carry conversation/case metadata in many chat paths, but the model schema does not provide one uniform top-level link to the app’s `AiTrace` request ID.
+- Token and cost values are legitimately absent when the provider does not return usage or the rate is not recognized.
+
+## 7. What health checks exist
+
+The server exposes:
+
+- `/api/health` for basic process health;
+- `/api/runtime/health` for active requests, active AI work, uptime, process ID, and Node version;
+- `/api/health/providers` for current provider failure state;
+- `/api/agent-identities/health` and `/api/agent-identities/health/stream` for agent/provider reachability;
+- `/api/agent-identities/provider-strategy/health` for provider heartbeat/readiness/canary checks; and
+- `/api/agent-identities/provider-strategy/health/logs` for stored provider-health snapshots.
+
+The client already shows request health in the top health banner, agent health in the agent banner, provider status in agent/provider areas, and runtime/request information in the request waterfall and workflow panels.
+
+These checks prove current or recently recorded health. They do not provide a complete historical snapshot of all processes on the machine, such as whether a separate gateway or LM Studio process was running, which process owned a port, or whether an orphan process was safe to preserve.
+
+## 8. What client-side errors are captured
+
+The client has several useful temporary surfaces:
+
+- request waterfall state tracks pending, streaming, complete, error, aborted, duration, status, and replay information for the current browser session (`client/src/components/RequestWaterfall.jsx`);
+- `HealthBanner` and `HealthToast` show current request/provider problems;
+- `ErrorFallback` provides a React failure surface;
+- `devTelemetry` records the latest 50 navigation, user-action, data, chat, provider, and performance breadcrumbs; and
+- `useErrorCapture` contains browser `error` and `unhandledrejection` capture logic.
+
+The gap is durability and wiring. The review found no active `useErrorCapture(...)` mount and no confirmed API/storage path for sending client errors to the server. Browser errors therefore cannot be reliably recovered after reload or matched to a server/provider record.
+
+## 9. What server-side errors are captured
+
+The Express error handler normalizes errors, prints them, and reports them to the in-memory server-error pipeline. Process-level uncaught exceptions and unhandled promise rejections also report there before shutdown. Domain-health code can use recent pipeline errors when calculating recent Gmail, calendar, or escalation problems.
+
+This is useful while the process is alive, but it is not a durable Error Log. The current pipeline retains at most 50 entries in memory, with deduplication over a short window. There is no confirmed client route that lists the raw pipeline entries for a user to inspect later.
+
+## 10. What request IDs or trace IDs exist
+
+- The server middleware reuses a client-sent `X-Request-ID` when present or generates a UUID, then returns it in the response header.
+- Chat and parse routes pass the server request ID into `AiTrace` and usage records.
+- The client receives trace IDs in chat/parse responses and can open trace details.
+- Gateway calls may have a separate provider/gateway request ID returned by the gateway.
+- Provider packages can include conversation, case, agent, and gateway metadata, but there is not yet a guaranteed single identity that links browser request, Express request, `AiTrace`, `UsageLog`, provider package, and provider response across every path.
+- The client-side HTTP layer does not show a general `X-Request-ID` generator/propagation path in the reviewed source, so ordinary browser actions are not consistently client-originated trace roots.
+
+## 11. What questions the app can answer now
+
+| Question | Answer | Evidence | Where the user would look |
+| --- | --- | --- | --- |
+| Which provider/model handled this recorded chat or parse trace? | Usually yes | `AiTrace` outcome, attempts, triage, and post-parse fields | Usage > AI Traces or Sessions |
+| Did the app use a fallback provider? | Yes for recorded AI traces and image-parse results | `fallbackUsed`, `fallbackFrom`, attempts, and provider trace fields | Usage > AI Traces, Sessions, Image Parser history |
+| How long did the AI stages take? | Yes for recorded traces | Outcome, stage latency, first chunk/thinking timing, and events | Usage > AI Traces or workflow logs |
+| Did image parsing validate its output? | Yes for stored image-parse results | Parse fields, validation flags, issues, source image metadata, and provider-package ID | Image Parser history / session triage |
+| What token/cost data was available? | Yes when provider usage and pricing are recognized | `AiTrace.usage` and `UsageLog` | Usage dashboard and trace detail |
+| What is the current server/provider health? | Yes at check time | Health, runtime, agent-health, and provider-health endpoints | Health banners, Agents/provider strategy, request waterfall |
+| What was the exact detailed provider exchange for a captured call? | Often, within retention and capture limits | `ProviderCallPackage` request/response/CLI fields | Image Parser trace details or provider-package-backed detail surfaces |
+| What knowledge record changed and why? | For knowledge governance actions | Candidate audit events | Knowledge view |
+
+## 12. What questions the app cannot answer now
+
+Each gap below has a repair path. “Minimum fix” means the smallest useful improvement; “better fix” means the durable product capability worth aiming for.
+
+| Question the user may ask | Why the app cannot answer now | Missing evidence | Minimum fix | Better fix | Likely files to edit | Verification steps |
+| --- | --- | --- | --- | --- | --- | --- |
+| Who changed this setting, API key, Gmail connection, or agent configuration? | There is no shared actor-aware audit writer for these actions; most routes only print errors or rely on document timestamps | Actor identity, action, target, old/new safe values, timestamp, request ID, result, reason | Add server-side audit writes to preferences, key, Gmail, agent, and prompt mutation routes | Add one Audit Trail model/service and a client screen with filters and safe before/after summaries | `server/src/routes/preferences.js`, `server/src/routes/gmail.js`, `server/src/routes/image-parser.js`, `server/src/routes/agent-prompts.js`, new audit service/model, `client/src/components/Settings.jsx` | Perform each change, restart the process, verify the audit event remains and identifies the action safely |
+| Can one browser action be followed into the exact provider call? | The server has request IDs and AI traces, but provider packages do not have one guaranteed uniform `AiTrace`/request link across every provider path; client request-root propagation is incomplete | Shared trace ID, provider package ID, gateway request ID, parent/child relationships | Pass `requestId`/`traceId` in provider capture metadata and persist the provider package ID on the trace | Build a Request Trace view that joins client, server, AI, provider, gateway, fallback, and UI events | `server/src/middleware/request-id.js`, `server/src/routes/chat/send.js`, `server/src/routes/chat/parse.js`, `server/src/services/chat-orchestrator.js`, provider harnesses, `server/src/models/AiTrace.js`, `server/src/models/ProviderCallPackage.js`, `client/src/components/TraceDashboard.jsx` | Run chat, parse, fallback, and gateway requests; confirm one ID chain opens every related record |
+| What exact full prompt and response was sent for every model call? | `AiTrace` stores a preview/count, while provider-package capture can be disabled, skipped, redacted, externalized, or expired | Full assembled prompt/context, response, capture status/reason, prompt version, safe hashes, retention state | Record a safe prompt/response summary plus capture status and a stable hash for every attempt | Add governed full-evidence capture with redaction, retention controls, export, and explicit “not captured because...” explanations | `server/src/services/ai-traces.js`, provider recorder/redaction/payload store, provider harnesses, prompt store, trace routes/UI | Compare the captured evidence with the actual provider payload for chat, image parse, fallback, and capture-disabled cases |
+| What client and server errors happened after a restart or reload? | Server errors are a 50-entry memory ring; client breadcrumbs are a 50-entry memory ring; browser error capture is not confirmed wired | Durable error event, client/server side, stack/detail, request/trace ID, timestamps, retention, UI visibility | Persist normalized server errors and wire `useErrorCapture` to a safe client-error endpoint | Add Settings > Diagnostics > Logs with filters, request-trace links, export, retention, and privacy controls | `server/src/lib/server-error-pipeline.js`, `server/src/app.js`, new error model/service/route, `client/src/hooks/useErrorCapture.js`, `client/src/lib/devTelemetry.js`, `client/src/components/Settings.jsx` | Trigger client and server failures, reload/restart, and verify both events remain searchable and linked |
+| What was the complete local runtime layout when the failure occurred? | Current health checks do not preserve port owners, process ancestry, gateway state, LM Studio state, or orphan-process decisions | Runtime snapshot, process/port ownership, dependency status, timestamps, and preserve/restart recommendation | Add an on-demand diagnostic snapshot that records known app dependencies and status | Create the broader `qbo-runtime-doctor` skill to inspect the live layout read-only and attach its report to a request/runtime incident | `server/src/app.js`, runtime/health services, `server/src/services/provider-health.js`, separate Codex skill outside this repo | Run with QBO backend, client, gateway, and model server in different states; verify the report distinguishes each failure layer without killing processes |
+| Are externalized provider payload files cleaned up when their database records expire? | Provider-package TTL removes Mongo documents but the model comments explicitly say it does not remove external payload files | Cleanup result, orphan-file count, retention policy, and deletion audit | Add a scheduled/on-demand cleanup job scoped to the provider-payload root | Add retention metrics, dry-run cleanup, failure alerts, and an operator-visible storage report | `server/src/models/ProviderCallPackage.js`, `server/src/services/provider-call-package-payload-store.js`, startup/background runtime | Create expired test fixtures, run cleanup, verify only in-scope files are removed and metrics record the result |
+
+## 13. Recommended client-visible paths
+
+Existing paths worth keeping and strengthening:
+
+- Usage > AI Traces: model/provider, status, latency, tokens/cost, filters, trends, and trace detail.
+- Sessions > workflow logs: saved conversation, pipeline stages, reasoning/latency where available, and triage evidence.
+- Image Parser > History/Trace Details: source image, parse result, validation, provider/model, fallback, and package reference.
+- Top health banner and request waterfall: current request failures, slow work, status codes, and active requests.
+- Agents > provider strategy/health: agent reachability and provider readiness/canary history.
+- Knowledge: governance history for knowledge records.
+
+Recommended missing or incomplete paths:
+
+- Settings > Audit Trail: who changed what, when, why, and safe before/after values.
+- Settings > Diagnostics > Logs: durable client/server errors with filters, severity, and request links.
+- Settings > Runtime: current dependency status plus the latest saved runtime snapshot.
+- Settings > Model Activity: one searchable list of AI traces, provider packages, usage/cost, retries, and capture state.
+- Trace detail > Request Path: browser action -> server request -> AI trace -> provider package -> gateway/provider response -> persisted outcome.
+- Settings > Provider Health: current status, last successes/failures, latency, key/configuration state without secrets, and retention/export controls.
+
+## 14. Prioritized fix plan
+
+1. **P0 — Make the existing evidence joinable.** Carry a consistent request/trace identity through the client, server, `AiTrace`, usage record, provider package, and gateway response. This closes the most important “what actually happened?” question.
+2. **P0 — Add durable audit events for user-controlled changes.** Start with preferences, provider/API keys, Gmail account actions, agent runtime settings, and prompt changes. Do not store secrets; store safe fingerprints or field summaries.
+3. **P0 — Persist and display errors.** Turn the current server ring buffer and client capture plan into a durable, client-visible Diagnostics/Logs path. Wire the existing client capture hook before adding more client logging.
+4. **P1 — Make prompt/response capture explicit.** Record capture enabled/skipped/expired/redacted status and prompt/version hashes for every AI attempt. Decide deliberately which full payloads may be retained.
+5. **P1 — Finish provider-package storage cleanup.** Remove externalized payloads according to the same retention policy as their Mongo record, with dry-run and failure reporting.
+6. **P1 — Add the runtime-doctor workflow.** Keep the app’s health endpoints focused on app health; use a read-only diagnostic skill to inspect the multi-process local layout and preserve healthy instances by default.
+7. **P2 — Improve visual QA of diagnostic surfaces.** Verify that traces, errors, runtime state, and audit information are understandable and useful in the UI, rather than merely exposing raw JSON.
+
+## 15. Verification checklist
+
+- Trigger a normal chat request and confirm the request/trace ID appears in the client, server response, `AiTrace`, usage record, provider package, and gateway response where applicable.
+- Trigger an image parse with a primary-provider failure and confirm the primary error, fallback attempt, final provider/model, validation result, parse result, and provider package all join together.
+- Trigger a controlled server error and confirm the user-visible diagnostic and durable error record match after reload/restart.
+- Trigger a browser error and unhandled promise rejection and confirm capture, safe redaction, storage, request linkage, and UI visibility.
+- Connect/disconnect or switch a Gmail account and verify the audit trail includes actor, account target, timestamp, result, and reason without exposing tokens.
+- Change an image-parser key, preference, agent runtime setting, and prompt; verify each has an audit event with safe before/after information.
+- Trigger a provider health failure and recovery; confirm current health, stored health history, provider/model, latency, and error reason.
+- Verify usage and cost fields when a provider returns usage, and verify the UI clearly says when usage or pricing is unavailable.
+- Close the terminal or restart the app and confirm durable traces, usage, parse history, audit events, and errors remain according to retention policy.
+- Create an expired external provider payload fixture and verify cleanup removes only the intended file and records what happened.
+- Run the report scanner again after fixes and move each resolved question from “cannot answer now” to “can answer now.”
+
+## 16. Relation to the pasted note
+
+The note remains useful as a roadmap, but several conclusions are now stale for this repository:
+
+- `repo-observability-reviewer` is directly applicable and has now produced this baseline report.
+- `qbo-image-parser-regression-auditor` remains highly relevant because the repository already stores image-parse history, validation, provider traces, and package references; the next step is to make regression comparisons easier and more complete.
+- `qbo-runtime-doctor` remains relevant, but it should complement the app’s existing health endpoints rather than replace them.
+- `frontend-visual-qa` remains useful for checking whether the existing diagnostic surfaces are understandable and not cluttered.
+- `provider-impact-auditor` is relevant across this repo and `llm-gateway`, but it is a cross-project/provider-governance skill, not a QBO-only feature.
+- `plain-english-technical-explainer` and `recent-session-skill-miner` are personal Codex workflow skills, not QBO application features.
+- `windows-assistant-phase-contract` belongs to `C:\Projects\windows-ai-assistant`, not this repository.
+- The note’s recommendation to begin by adding basic structured logs is no longer the right first move here. The higher-value work is correlation, durable audit/error history, retention safety, and user-facing evidence.
+- The note’s recommendation to start with `C:\Projects\llm-gateway` is still reasonable for gateway-specific auth/model logging, but it is a different repository and was not reviewed in this run.

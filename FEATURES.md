@@ -228,3 +228,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
 Special Feature: Action Authority Envelopes - Before an agent can change email, calendar, knowledge, or any external system, the user grants a visible, time-limited envelope defining allowed tools, accounts, scope, consequence tier, and approval mode. Every attempted action is checked against that envelope and recorded as allowed, blocked, or confirmation-required, creating one consistent safety contract across all domains instead of relying on prompt wording.
+
+Date: 2026-07-09
+Time: Unknown AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Evidence-Preserving Incident Capsule - When a serious failure occurs, automatically freeze the related trace IDs, provider evidence, health snapshot, configuration and prompt versions, and a plain-English “can/cannot prove” explanation into one reviewable incident package with a retention hold. This turns scattered diagnostics into a trustworthy handoff for human review and future agents, distinct from Evidence Completeness Check because it preserves and explains a cross-system incident after failure rather than checking whether one workflow saved its artifacts.
