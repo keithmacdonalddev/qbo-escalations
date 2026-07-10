@@ -12,15 +12,15 @@ This section translates the review's shorthand. The detailed evidence and recomm
 
 1. **P0, P1, and P2 are priority labels, not model names.** `P0` means an urgent safety or trust problem. `P1` means an important reliability problem. `P2` means useful cleanup or maintenance. The number says how soon to address the finding; it does not assign blame.
 2. **“Prompt-led authorization” means the AI is being told in words that it may act, and the server trusts the action it prints.** A server-enforced permission check (technical term: policy gate) is ordinary code that independently decides “allow,” “ask the user,” or “block” before email, calendar, or other data is changed. The project needs one central check instead of relying mainly on prompt wording.
-3. **`bypassPermissions` means “do not pause to ask before using tools.”** The tracked file `.claude/settings.local.json` turns that on broadly. That conflicts with the written rules saying agents must not start or stop the user's services or discard another session's work. The current guard catches some dangerous commands, but errors can let a command continue.
-4. **“Runtime” means what happens while software is running.** In this report, a coding-agent runtime is the environment in which Claude Code or Codex reads and edits this repository. A product-agent runtime is the environment in which an agent inside this app helps with QBO, email, or calendar work. A “Claude runtime version” means the installed Claude Code program. It has nothing to do with exercise. “Developer coding agents” simply means Claude Code and Codex when they are helping develop this repository.
-5. **The repeated PM rules are the text printed by `.claude/hooks/pm-rules.sh` and `.codex/hooks/pm-rules.ps1` after every user prompt.** They repeat product framing, delegation guidance, verification expectations, service-control rules, test expectations, commit/push instructions, feature-idea instructions, and communication preferences. Most belong in the root instruction file once.
-6. **Durable memory means saved notes that remain available in later chats.** `.claude/memory/project-overview.md` says implementation should always be delegated and tests should never be written. Current root policy says Codex normally works in the main session and testing should match the risk. Those directions contradict each other.
-7. **A session is one Claude chat/work period.** Thirty-three historical session files were committed to Git, so Git continues copying them into every clone; that is what “tracked” means. `.gitignore` now tells Git not to add new files from that folder, but ignore rules do not remove files already committed. Git is therefore tracking old files while ignoring new untracked ones. Before removing or rewriting history, the files need a private-data and secret review.
-8. **The model catalog really was inconsistent, and the active catalog was corrected on 2026-07-10.** The app now lists the current Claude choices—Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5—and the GPT-5.6 Sol, Terra, and Luna choices. Direct Anthropic requests now receive the selected effort. Gemini's stable default is 3.5 Flash; Kimi remains K2.5 because Moonshot's current official material still identifies K2.5 as its current multimodal API model. Gateway stays on automatic routing, and LM Studio uses whichever local model the user has loaded. GPT-5.6 is still a limited preview, so the OpenAI account used by the app must have access.
-9. **“Claude Code and the Agent SDK are behind” means the installed software packages are older than the current published packages.** At review time, Claude Code was `2.1.176` while `2.1.206` was published, and the project's Claude Agent SDK was `0.2.74` while `0.3.206` was published. This does not mean the app is currently broken. It means upgrading should be treated as a separate compatibility job with tests because the SDK version jump may change behavior.
-10. **A native JSON schema is an enforced fill-in form for an AI response.** Prompt-only formatting asks the AI to “please return these JSON fields.” A schema makes the provider reject or flag a response when a required field is missing or has the wrong type. Strict-output agents such as parsers benefit because malformed answers are caught immediately.
-11. **“Action Authority Envelopes” was an unclear feature name and has been renamed “Agent Action Permissions.”** No physical envelope and no legal contract are involved. The feature would show and enforce what an agent may change, which account or records it may touch, how long permission lasts, and when it must ask. “Safety contract” in the earlier wording meant hard safety rules enforced by code; the user does not sign anything.
+3. **`bypassPermissions` means “do not pause to ask before using tools.”** The user confirmed on 2026-07-10 that this is intentional for the current local-development workflow. It remains a known, accepted risk—not an accidental misconfiguration—and this review no longer recommends changing it now.
+4. **“Runtime” means what happens while software is running.** A coding-agent environment is Claude Code or Codex working on the repository. An in-app agent environment is the AI inside this application helping with QBO, email, or calendar. Keeping those environments more separate is a future hardening idea, not a current priority.
+5. **The repeated PM rules are the text printed by `.claude/hooks/pm-rules.sh` and `.codex/hooks/pm-rules.ps1` after every user prompt.** They cover product framing, delegation, verification, service control, tests, commit/push, feature ideas, and communication. The user reports that this repetition fixed serious non-compliance, so the hooks should stay. Cleanup should remove contradictions and stale wording without weakening the repeated enforcement.
+6. **Durable memory means saved notes that remain available in later chats.** The stale Claude memory and worker instructions said to always delegate and never test. Those statements were removed on 2026-07-10. The replacement allows sensible delegation, risk-based testing, and a complete premium outcome without unrelated scope expansion.
+7. **A session is one Claude chat/work period.** Thirty-three historical session files were checked for recognizable credential patterns, removed from Git's current tracking, and retained locally on 2026-07-10. Old Git history still contains earlier copies; removing those would require a separate history rewrite.
+8. **The model catalog really was inconsistent, and the active catalog was corrected on 2026-07-10.** The app now lists the current Claude choices—Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5—and the GPT-5.6 Sol, Terra, and Luna choices. Direct Anthropic requests now receive the selected effort. Gemini's stable default is 3.5 Flash. Kimi now includes K2.7 Code, its faster K2.7 Code Highspeed variant, K2.6, and K2.5. K2.6 remains the QBO app's general-purpose default; the K2.7 choices are coding-focused and always use thinking mode. Gateway stays on automatic routing, and LM Studio uses whichever local model the user has loaded.
+9. **Claude Code and Codex are current, and the app's Claude Agent SDK has now been upgraded.** Fresh checks on 2026-07-10 found Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`, matching their published package versions at the time of the check.
+10. **Native JSON schemas are for in-app AI replies that must fit an exact data shape.** Imagine the image parser returning information to application code, not text for a person to read. A schema lets the app require boxes such as `caseNumber` and `severity` before accepting the reply. It catches missing or wrongly shaped data, but it cannot tell whether the AI read the screenshot correctly. It is not a form the user fills out, and this repository already uses a schema in one SDK image-parsing path; the recommendation is to use the same protection consistently in other strict parsing paths.
+11. **“Agent Action Permissions” is mainly for in-app agents.** It would control whether the AI inside the application may send email, alter calendars, or change stored records. Claude Code and Codex use a separate developer-tool permission system. No physical envelope and no legal contract are involved; “safety contract” was only unclear shorthand for safety rules enforced by application code.
 
 ## Executive judgment
 
@@ -36,17 +36,17 @@ For the broader operational-intelligence platform, the desired loop is: understa
 
 ### Overall assessment
 
-| Area | Assessment | Short explanation |
-| --- | --- | --- |
-| Product framing | Strong | `PRODUCT_NORTH_STAR.md`, `AGENTS.md`, and `CLAUDE.md` correctly frame QBO as the first domain module. |
-| Always-on coding-agent instructions | Needs simplification | Root guidance is reasonable, but PM hooks repeat and sometimes contradict it. |
-| Claude customization | Capable but risky | Good use of rules, agents, skills, and hooks; unsafe local settings and stale guidance reduce reliability. |
-| Codex customization | Underdeveloped | Good root instructions and one hook, but duplicate skill installation, no project agents, no project memory policy, and no enforcement hook for runtime ownership. |
-| Product-agent prompts | Uneven | Evidence-aware QBO prompts are good; the workspace action prompt is extremely long and over-authorizes action. |
-| Provider harnesses | Strong observability, incomplete isolation | Capture and provenance are thoughtful, but CLI settings, hidden flags, model drift, schemas, and permission boundaries need work. |
-| Memory | Fragmented | Curated indexes are small, raw history is large, and an old memory directly conflicts with current testing/delegation policy. |
-| Evaluation | Partial | Many useful tests exist, but there is no single cross-model harness evaluation contract or release gate. |
-| Security and authorization | Highest-priority gap | Prompt-level autonomy exceeds the server-enforced approval model in the workspace action loop. |
+| Area                                | Assessment                                 | Short explanation                                                                                                                                                  |
+| ----------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Product framing                     | Strong                                     | `PRODUCT_NORTH_STAR.md`, `AGENTS.md`, and `CLAUDE.md` correctly frame QBO as the first domain module.                                                              |
+| Always-on coding-agent instructions | Intentional enforcement; review periodically | PM-hook repetition is intentional because it materially improved agent compliance. Remove contradictions without discarding the enforcement layer.                 |
+| Claude customization                | Capable with an accepted local risk        | Good use of rules, agents, skills, and hooks; broad permission bypass is an intentional current choice, while stale guidance has been corrected.                    |
+| Codex customization                 | Underdeveloped                             | Good root instructions and one hook, but duplicate skill installation, no project agents, no project memory policy, and no enforcement hook for runtime ownership. |
+| Product-agent prompts               | Uneven                                     | Evidence-aware QBO prompts are good; the workspace action prompt is extremely long and over-authorizes action.                                                     |
+| Provider harnesses                  | Strong observability, incomplete isolation | Capture and provenance are thoughtful, but CLI settings, hidden flags, model drift, schemas, and permission boundaries need work.                                  |
+| Memory                              | Improved; continue curation                | Stale delegation/testing instructions were corrected, and raw Claude session files are no longer tracked in current Git state.                                     |
+| Evaluation                          | Partial                                    | Many useful tests exist, but there is no single cross-model harness evaluation contract or release gate.                                                           |
+| Security and authorization          | Highest-priority gap                       | Prompt-level autonomy exceeds the server-enforced approval model in the workspace action loop.                                                                     |
 
 ## Reasoning-level recommendation for this review
 
@@ -73,32 +73,32 @@ No application server, client server, browser, database, or persistent process w
 
 ### Coding-agent configuration
 
-| Surface | Current repository state |
-| --- | --- |
-| Codex root instructions | `AGENTS.md`, 89 lines |
-| Claude root instructions | `CLAUDE.md`, 109 lines |
-| Claude project rules | `.claude/rules/client.md`, `.claude/rules/server.md` |
-| Claude custom agents | `researcher`, `worker`, `implementation-reviewer` |
-| Claude project skills | `implementation-plan`, `cto-review`, `skill-audit` |
-| Claude active project hooks | runtime guard, PM-rule injection, configuration freshness |
-| Claude present but not project-wired hooks | observation capture, context injection, session finalization, folder-context generation |
-| Claude memory | small curated index, 33 tracked session files totaling about 1.85 MB, plus ignored per-agent memory |
-| Codex project config | `.codex/config.toml` with reasoning display and one `UserPromptSubmit` hook |
-| Codex project skills | duplicate `agent-browser` copies under `.agents/skills` and `.codex/skills` |
-| Codex custom project agents | None |
+| Surface                                    | Current repository state                                                                            |
+| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| Codex root instructions                    | `AGENTS.md`, 89 lines                                                                               |
+| Claude root instructions                   | `CLAUDE.md`, 109 lines                                                                              |
+| Claude project rules                       | `.claude/rules/client.md`, `.claude/rules/server.md`                                                |
+| Claude custom agents                       | `researcher`, `worker`, `implementation-reviewer`                                                   |
+| Claude project skills                      | `implementation-plan`, `cto-review`, `skill-audit`                                                  |
+| Claude active project hooks                | runtime guard, PM-rule injection, configuration freshness                                           |
+| Claude present but not project-wired hooks | observation capture, context injection, session finalization, folder-context generation             |
+| Claude memory                              | small curated index; 33 local session files are ignored and no longer tracked in current Git state |
+| Codex project config                       | `.codex/config.toml` with reasoning display and one `UserPromptSubmit` hook                         |
+| Codex project skills                       | duplicate `agent-browser` copies under `.agents/skills` and `.codex/skills`                         |
+| Codex custom project agents                | None                                                                                                |
 
 ### Product-agent and provider surfaces
 
-| Surface | Current repository state |
-| --- | --- |
-| Active product prompts | 12 agent prompt files plus their README, about 66 KB total |
-| Largest active prompt | `workspace-action.md`, about 33 KB and 307 lines |
-| QBO playbook system prompt | about 21 KB and 216 lines |
-| Provider catalog | Claude CLI/API, Codex CLI/OpenAI API, gateway, Gemini, Kimi, and LM Studio entries |
-| CLI adapters | `claude.js`, `codex.js`, and a separate Claude CLI provider harness |
-| Direct provider adapters | Anthropic Messages API and OpenAI-compatible Chat Completions paths |
-| Evidence layer | Provider-call package recorder, payload store, redaction, health logging, and user-visible events |
-| Product memory | Workspace and room memory services plus governed QBO knowledge flows |
+| Surface                    | Current repository state                                                                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------- |
+| Active product prompts     | 12 agent prompt files plus their README, about 66 KB total                                        |
+| Largest active prompt      | `workspace-action.md`, about 33 KB and 307 lines                                                  |
+| QBO playbook system prompt | about 21 KB and 216 lines                                                                         |
+| Provider catalog           | Claude CLI/API, Codex CLI/OpenAI API, gateway, Gemini, Kimi, and LM Studio entries                |
+| CLI adapters               | `claude.js`, `codex.js`, and a separate Claude CLI provider harness                               |
+| Direct provider adapters   | Anthropic Messages API and OpenAI-compatible Chat Completions paths                               |
+| Evidence layer             | Provider-call package recorder, payload store, redaction, health logging, and user-visible events |
+| Product memory             | Workspace and room memory services plus governed QBO knowledge flows                              |
 
 ## What is already good
 
@@ -160,15 +160,17 @@ Recommendation:
 
 Suggested tiers:
 
-| Tier | Examples | Required control |
-| --- | --- | --- |
-| Observe | Search, list, read metadata | Allowed within scoped account and data policy |
-| Suggest | Draft reply, propose calendar change, recommend rule | No mutation; show evidence and preview |
-| Reversible low-risk | Apply label, archive a small explicit set | Pre-approved rule or one-turn confirmation; provide undo |
-| High-impact | Send mail, trash, bulk mutation, create silent automation, delete event | Exact preview plus explicit confirmation |
-| Forbidden to autonomous agents | Credential changes, permission grants, hidden persistence, scope expansion | Human-only path |
+| Tier                           | Examples                                                                   | Required control                                         |
+| ------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Observe                        | Search, list, read metadata                                                | Allowed within scoped account and data policy            |
+| Suggest                        | Draft reply, propose calendar change, recommend rule                       | No mutation; show evidence and preview                   |
+| Reversible low-risk            | Apply label, archive a small explicit set                                  | Pre-approved rule or one-turn confirmation; provide undo |
+| High-impact                    | Send mail, trash, bulk mutation, create silent automation, delete event    | Exact preview plus explicit confirmation                 |
+| Forbidden to autonomous agents | Credential changes, permission grants, hidden persistence, scope expansion | Human-only path                                          |
 
-### P0-2: Claude project settings grant broad authority and rely on a fail-open hook to recover safety
+### Accepted local-development decision: Claude project settings grant broad authority
+
+**Decision update, 2026-07-10:** The user intentionally keeps `bypassPermissions` enabled because interruption-free Claude behavior is currently more valuable in this local workflow. Do not change it as part of this review.
 
 Evidence:
 
@@ -181,18 +183,18 @@ Why it matters:
 
 This is “allow broadly, then try to detect a subset of danger.” The stronger pattern is least privilege: deny or sandbox by default, add narrow permissions, and use hooks as another layer.
 
-Recommendation:
+Current recommendation:
 
-- Move shareable hooks and safe defaults into `.claude/settings.json`.
-- Untrack `.claude/settings.local.json`; reserve it for personal UI and permission preferences.
-- Remove `bypassPermissions` as the project default.
-- Enable sandboxing and explicit deny rules where available.
-- Keep the runtime hook as defense in depth, add fixtures/tests, and make an intentional decision about failure behavior for protected operations.
-- Add the same deterministic runtime-ownership protection for Codex `PreToolUse`; prose alone is weaker than enforcement.
+- Preserve `bypassPermissions` and the active guard while this remains an explicitly accepted user choice.
+- Document the choice as local-development-only and revisit it before multi-user or hosted deployment.
+- Keep the guard tested and visible; broad permission plus a guard is still a larger trust boundary than least-privilege permissions.
+- Do not describe this accepted choice as an accidental or unresolved configuration error.
 
 Anthropic recommends combining permissions with OS-level sandboxing because prompt-level behavior can be bypassed. See [Configure permissions](https://code.claude.com/docs/en/permissions) and [Sandboxing](https://code.claude.com/docs/en/sandboxing).
 
-### P0-3: Repository coding tools and in-app agents are not fully separated while running
+### Deferred P2 hardening: Repository coding tools and in-app agents are not fully separated while running
+
+**Decision update, 2026-07-10:** This distinction is valid but is not a current priority. Revisit it before hosted deployment or before in-app agents receive materially broader tools.
 
 The project has two fundamentally different uses of Claude and Codex:
 
@@ -217,49 +219,53 @@ Recommendation:
 - Pass product instructions through supported system-prompt mechanisms instead of prefixing user text with `System instructions:` where possible.
 - Long-term, treat CLI subscription transports as local-development adapters. Use direct APIs or a governed gateway for web deployment, stable service authentication, concurrency control, and formal retention guarantees.
 
-### P1-1: Stable PM instructions are reinjected on every user prompt
+### P1-1: Repeated PM instructions must stay consistent
 
 Both Claude and Codex have `UserPromptSubmit` hooks that print hundreds of words of stable operating rules on every turn.
 
-Problems:
+Tradeoffs:
 
-- The same rules already exist in root instructions or higher-priority session policy.
-- Repetition consumes context and makes conflict resolution less predictable.
-- Dynamic insertion after the prompt prefix works against prompt-cache stability.
+- The same rules also exist in root instructions, so contradictions can arise if only one copy is updated.
+- Repetition consumes context and may reduce prompt-cache efficiency.
 - The Claude version says substantive work should default to delegated teams and the coordinator should not inspect files directly. Current project policy for Codex says the opposite, and Anthropic's own agent-team docs say teams are expensive, experimental, and best for independent parallel work.
-- The hook content has become a second policy source that is harder to see than `CLAUDE.md` or `AGENTS.md`.
+- The user reports that the repeated hooks changed agent behavior from unreliable to consistently strong. That observed benefit outweighs theoretical prompt-minimization benefits for now.
 
 Recommendation:
 
-- Put durable project behavior in the root instruction file once.
-- Use `UserPromptSubmit` only for truly dynamic context or deterministic validation.
-- Remove “always delegate” from the Claude PM rules. Default to one main session; use a subagent when isolation is valuable and a team only when workers must coordinate independently.
+- Keep both PM hooks active.
+- Mirror every critical rule in the visible root instructions so the hook is reinforcement, not the only source.
+- Review the duplicated copies together and remove only stale, contradictory, or ambiguous wording.
+- Preserve the Claude delegation behavior that has worked well; remove the separate stale memory claim that implementation must *always* be delegated.
 - Keep logs free of prompt content and document exactly what every hook injects.
 
 OpenAI's GPT-5.6 guidance reports better internal evaluation scores and substantially lower token use after replacing long accumulated prompts with smaller prompts focused on behavior the model does not already perform. See [Using GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model#prompting-best-practices). Anthropic similarly recommends a concise, specific `CLAUDE.md`, generally under 200 lines. See [Write effective instructions](https://code.claude.com/docs/en/memory#write-effective-instructions).
 
-### P1-2: Durable instructions and memory contradict each other
+### Resolved P1-2: Durable instructions and memory contradicted each other
 
-Examples:
+**Resolved 2026-07-10:** `.claude/memory/project-overview.md` and `.claude/agents/worker.md` now allow proportionate tests, no longer require delegation for all implementation, and define a complete premium outcome without unrelated scope expansion. Claude's active custom agents also now require plain-language lead summaries.
 
-- `.claude/memory/project-overview.md` says to always delegate implementation and never write tests.
-- `.claude/agents/worker.md` says never write or run tests and also says to “exceed the user intent.”
+Original evidence before the correction:
+
+- `.claude/memory/project-overview.md` said to always delegate implementation and never write tests.
+- `.claude/agents/worker.md` said never to write or run tests and also said to “exceed the user intent.”
 - Root policy says tests should be proportional to risk, and current Codex policy says to work primarily in the main thread.
-- The worker restriction can create untested implementation handoffs, while “exceed intent” encourages scope creep.
+- The old worker restriction could create untested implementation handoffs, while the old “exceed intent” wording could encourage scope creep.
 
-Recommendation:
+Completed correction and ongoing recommendation:
 
-- Delete the stale delegation/testing memory or replace it with a dated pointer to the authoritative root rules.
-- Change the worker contract to “complete the requested scope; do not expand it without authorization.”
-- Give workers permission to write and run focused tests when required by acceptance criteria.
-- Add `last_verified`, `source`, and `supersedes` metadata to curated memory topics.
+- The stale memory was replaced with dated guidance pointing to the authoritative root rules.
+- The worker now aims for the complete premium outcome while explicitly blocking unrelated scope.
+- Workers may write and run focused tests when useful for risk or acceptance criteria.
+- Continue adding `last_verified`, `source`, and `supersedes` metadata to curated memory topics.
 - Make memory helpful recall, never the only source for mandatory policy.
 
 Both OpenAI and Anthropic explicitly say durable team rules belong in checked-in instruction files, while memory is a recall layer that must be inspectable and curated. See [Codex memories](https://learn.chatgpt.com/docs/customization/memories) and [Claude memory](https://code.claude.com/docs/en/memory).
 
-### P1-3: Historical session memory remains tracked despite the ignore rule
+### Resolved for current Git state P1-3: Historical session memory was tracked despite the ignore rule
 
-The repository contains 33 tracked `.claude/memory/sessions/*.md` files totaling about 1.85 MB. `.gitignore` now lists the directory, but ignore rules do not remove files already committed.
+**Resolved 2026-07-10:** A targeted scan found no recognizable private-key, API-key, or quoted credential-assignment patterns. The 33 files were removed from Git's current tracking with local copies preserved. Earlier commits still contain the files; no disruptive history rewrite was performed.
+
+The repository previously contained 33 tracked `.claude/memory/sessions/*.md` files totaling about 1.85 MB. They were removed from current Git tracking on 2026-07-10 while local copies were retained under the existing ignore rule.
 
 Risks:
 
@@ -284,6 +290,7 @@ The correction:
 - Adds the current Claude model choices: Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5.
 - Adds GPT-5.6 Sol, Terra, and Luna to both Codex and direct OpenAI model choices while preserving older GPT entries only for compatibility with saved settings.
 - Uses Sonnet 5 for the direct Anthropic default, GPT-5.6 Sol for the Codex CLI default, and Gemini 3.5 Flash for Gemini.
+- Adds Kimi K2.7 Code and K2.7 Code Highspeed, keeps K2.6 as this app's general-purpose default, and retains K2.5 as a previous model. The image parser omits the incompatible “disable thinking” setting for K2.7 because Kimi requires thinking mode for those models.
 - Sends the selected Anthropic effort as `output_config.effort` only when that model accepts the selected level.
 - Adds OpenAI `max`, current Claude `xhigh`/`max`, and Gemini `minimal`/`low`/`medium`/`high` validation where supported.
 - Sends Gemini's current `thinkingLevel` field and removes the no-longer-recommended Gemini 3 sampling setting from the triage request.
@@ -299,26 +306,25 @@ Remaining recommendation:
 - Record requested effort, effective effort, fallback, and model version in the provider evidence package.
 - Fail visibly on unsupported combinations instead of silently substituting when the user expects a particular evaluation.
 
-Official sources: [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model configuration](https://code.claude.com/docs/en/model-config), [Anthropic effort API](https://platform.claude.com/docs/en/build-with-claude/effort), and [Claude Sonnet 5 release notes](https://platform.claude.com/docs/en/release-notes/overview).
+Official sources: [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model configuration](https://code.claude.com/docs/en/model-config), [Anthropic effort API](https://platform.claude.com/docs/en/build-with-claude/effort), [Claude Sonnet 5 release notes](https://platform.claude.com/docs/en/release-notes/overview), [Kimi model list](https://platform.kimi.com/docs/models), and [Kimi K2.7 Code quickstart](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart).
 
-### P1-5: The installed Claude Code program and Agent SDK packages are older than the current releases
+### Resolved P1-5: Claude Code, Codex, and the Claude Agent SDK are current
 
 Fresh local checks found:
 
-- Claude Code installed: `2.1.176`
-- Current published Claude Code package: `2.1.206`
-- Project Claude Agent SDK: `0.2.74`
-- Current SDK: `0.3.206`
+- Claude Code installed and published: `2.1.206`
+- Project Claude Agent SDK installed and published: `0.3.206` (upgraded from `0.2.74` on 2026-07-10)
 - Codex CLI installed and current: `0.144.1`
+- Server dependency audit after the upgrade: 0 known vulnerabilities (down from 8 before the non-breaking security refresh)
 
 The repository's Claude CLI capture also depends on undocumented `--thinking-display summarized`, which is not shown in local `claude --help`.
 
-Recommendation:
+Ongoing recommendation:
 
 - Add a supported-version policy and an upgrade checklist.
 - Replace hidden flags with supported output contracts where possible.
 - Pin and test a known-good Claude Code range instead of relying on the latest global binary implicitly.
-- Treat the SDK major upgrade as a migration with contract tests, not a package bump.
+- Keep focused contract tests around the SDK image-parser path when upgrading.
 - Verify every documented hook field against the minimum supported CLI version.
 
 ### P1-6: Product prompts are too large and too negative for current models
@@ -427,30 +433,30 @@ Recommendation: make the configured command itself Git-root aware and use the Wi
 
 ### Codex
 
-| Official current guidance | Repository state | Recommendation |
-| --- | --- | --- |
-| Put durable repo conventions in root/nested `AGENTS.md`. | Good root file; no nested Codex instructions. | Keep root short; add nested overrides only if client/server conflicts actually occur. |
-| Put reusable repo skills in `.agents/skills`. | Same skill duplicated in `.agents` and `.codex`. | Keep `.agents` canonical. |
-| Use custom agents for different model/tool/sandbox roles. | None. | Add at most two read-only roles after the core cleanup. |
-| Hooks are deterministic lifecycle enforcement and require trust. | One large prompt-injection hook. | Use hooks for validation/enforcement, not stable prose repetition. |
-| Memory is generated local state, not the source of mandatory team rules. | No explicit project policy. | Document whether memory is enabled and disable generation from sensitive external-context runs. |
-| GPT-5.6 benefits from shorter prompts, deliberate effort, planning, progress tracking, and verification. | Strong planning/verification language but duplicated and long. | Remove repetition, keep task completion and evidence gates. |
-| Multi-agent work is for cleanly separable tasks. | Repo policy appropriately says rare for Codex. | Preserve that default. |
+| Official current guidance                                                                                | Repository state                                               | Recommendation                                                                                  |
+| -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Put durable repo conventions in root/nested `AGENTS.md`.                                                 | Good root file; no nested Codex instructions.                  | Keep root short; add nested overrides only if client/server conflicts actually occur.           |
+| Put reusable repo skills in `.agents/skills`.                                                            | Same skill duplicated in `.agents` and `.codex`.               | Keep `.agents` canonical.                                                                       |
+| Use custom agents for different model/tool/sandbox roles.                                                | None.                                                          | Add at most two read-only roles after the core cleanup.                                         |
+| Hooks are deterministic lifecycle enforcement and require trust.                                         | One large prompt-injection hook.                               | Use hooks for validation/enforcement, not stable prose repetition.                              |
+| Memory is generated local state, not the source of mandatory team rules.                                 | No explicit project policy.                                    | Document whether memory is enabled and disable generation from sensitive external-context runs. |
+| GPT-5.6 benefits from shorter prompts, deliberate effort, planning, progress tracking, and verification. | Strong planning/verification language but duplicated and long. | Remove repetition, keep task completion and evidence gates.                                     |
+| Multi-agent work is for cleanly separable tasks.                                                         | Repo policy appropriately says rare for Codex.                 | Preserve that default.                                                                          |
 
 Sources: [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md), [Customization and skills](https://learn.chatgpt.com/docs/customization/overview), [Hooks](https://learn.chatgpt.com/docs/hooks), [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), [Memories](https://learn.chatgpt.com/docs/customization/memories), and [Models](https://learn.chatgpt.com/docs/models).
 
 ### Claude Code
 
-| Official current guidance | Repository state | Recommendation |
-| --- | --- | --- |
-| Keep `CLAUDE.md` concise, specific, consistent, and generally under 200 lines. | 109 lines, but duplicated by prompt hooks and memory. | Make it a thin Claude-specific layer over shared guidance. |
-| Use `.claude/rules` for path-specific instructions. | Correctly implemented. | Preserve and add only proven rules. |
-| `.claude/settings.local.json` is personal and normally ignored. | Tracked with broad permission rules. | Split shared and personal settings; untrack local settings. |
-| Use skills for on-demand workflows and agents for isolated roles. | Three of each, generally well-structured. | Shorten bodies, constrain tools, fix contradictions. |
-| Agent teams are experimental, expensive, and best for independent parallel work. | Experimental flag is enabled in tracked project-local settings; PM rules default to teams. | Make opt-in and personal; use subagents first. |
-| Verification is the single highest-leverage practice. | Strong in root rules and review skill; worker forbids tests. | Let workers verify and require evidence before completion. |
-| Permissions plus sandboxing provide defense in depth. | Default bypass permissions, some fail-open hook enforcement. | Reverse the default. |
-| Current models use adaptive reasoning and effort controls. | Partial current-model support and inconsistent transport handling. | Centralize capability data and evaluate by role. |
+| Official current guidance                                                        | Repository state                                                                           | Recommendation                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Keep `CLAUDE.md` concise, specific, consistent, and generally under 200 lines.   | 109 lines, but duplicated by prompt hooks and memory.                                      | Make it a thin Claude-specific layer over shared guidance.  |
+| Use `.claude/rules` for path-specific instructions.                              | Correctly implemented.                                                                     | Preserve and add only proven rules.                         |
+| `.claude/settings.local.json` is personal and normally ignored.                  | Tracked with broad permission rules.                                                       | Split shared and personal settings; untrack local settings. |
+| Use skills for on-demand workflows and agents for isolated roles.                | Three of each, generally well-structured.                                                  | Shorten bodies, constrain tools, fix contradictions.        |
+| Agent teams are experimental, expensive, and best for independent parallel work. | Experimental flag is enabled in tracked project-local settings; PM rules default to teams. | Make opt-in and personal; use subagents first.              |
+| Verification is the single highest-leverage practice.                            | Strong in root rules and review skill; worker forbids tests.                               | Let workers verify and require evidence before completion.  |
+| Permissions plus sandboxing provide defense in depth.                            | Default bypass permissions, some fail-open hook enforcement.                               | Reverse the default.                                        |
+| Current models use adaptive reasoning and effort controls.                       | Partial current-model support and inconsistent transport handling.                         | Centralize capability data and evaluate by role.            |
 
 Sources: [Claude memory and instructions](https://code.claude.com/docs/en/memory), [Custom subagents](https://code.claude.com/docs/en/sub-agents), [Skills](https://code.claude.com/docs/en/slash-commands), [Hooks](https://code.claude.com/docs/en/hooks), [Agent teams](https://code.claude.com/docs/en/agent-teams), [Permissions](https://code.claude.com/docs/en/permissions), and [Claude Code power-user tips](https://support.claude.com/en/articles/14554000-claude-code-power-user-tips).
 
@@ -460,11 +466,11 @@ Do not write a separate giant prompt for every model. Maintain one small agent c
 
 ### OpenAI/Codex
 
-| Model | Best fit in this platform | Starting effort | Harness direction |
-| --- | --- | --- | --- |
-| GPT-5.6 Sol | Architecture, complex reviews, ambiguous research, cross-domain synthesis, difficult UI/computer work | `high` | Short contract, explicit success criteria, progress plan, strong verification. Test `xhigh` only for measured hard cases and `max` only for frontier cases. |
-| GPT-5.6 Terra | Everyday implementation, routine reviews, cost-sensitive specialist agents | `medium` or `high` | Use the same core prompt; compare one effort level lower than the current baseline. |
-| GPT-5.6 Luna | High-volume classification, simple extraction, routing, formatting | `low` or `medium` | Use strict schemas, narrow tools, short prompts, deterministic validators. Escalate rather than over-prompting. |
+| Model         | Best fit in this platform                                                                             | Starting effort    | Harness direction                                                                                                                                           |
+| ------------- | ----------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GPT-5.6 Sol   | Architecture, complex reviews, ambiguous research, cross-domain synthesis, difficult UI/computer work | `high`             | Short contract, explicit success criteria, progress plan, strong verification. Test `xhigh` only for measured hard cases and `max` only for frontier cases. |
+| GPT-5.6 Terra | Everyday implementation, routine reviews, cost-sensitive specialist agents                            | `medium` or `high` | Use the same core prompt; compare one effort level lower than the current baseline.                                                                         |
+| GPT-5.6 Luna  | High-volume classification, simple extraction, routing, formatting                                    | `low` or `medium`  | Use strict schemas, narrow tools, short prompts, deterministic validators. Escalate rather than over-prompting.                                             |
 
 GPT-5.6-specific implications:
 
@@ -478,12 +484,12 @@ Source: [Using GPT-5.6](https://developers.openai.com/api/docs/guides/latest-mod
 
 ### Anthropic/Claude
 
-| Model | Best fit in this platform | Starting effort | Harness direction |
-| --- | --- | --- | --- |
-| Claude Fable 5 | Long-horizon, highly ambiguous coordination, hardest review/debugging, sustained multi-agent orchestration | `high`; `xhigh` for genuinely long hard work | Remove old over-prescription, require evidence-backed progress claims, use governed memory, and handle safety refusals explicitly. |
-| Claude Opus 4.8 | High-quality architecture, agentic coding, review, and complex reasoning | `high` or `xhigh` | Use adaptive thinking plus `output_config.effort`; keep subagent scope explicit. |
-| Claude Sonnet 5 | Recommended everyday worker/researcher candidate; near-Opus agentic performance at lower cost | `high`; evaluate `medium` | Adaptive thinking is on by default; leave output-token headroom, use positive style examples, and raise effort before adding prompt complexity. |
-| Claude Haiku 4.5 | Fast, narrow, low-risk classification or summarization | Model default | Do not assign broad autonomy. Use schemas, validators, and escalation thresholds. |
+| Model            | Best fit in this platform                                                                                  | Starting effort                              | Harness direction                                                                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Claude Fable 5   | Long-horizon, highly ambiguous coordination, hardest review/debugging, sustained multi-agent orchestration | `high`; `xhigh` for genuinely long hard work | Remove old over-prescription, require evidence-backed progress claims, use governed memory, and handle safety refusals explicitly.              |
+| Claude Opus 4.8  | High-quality architecture, agentic coding, review, and complex reasoning                                   | `high` or `xhigh`                            | Use adaptive thinking plus `output_config.effort`; keep subagent scope explicit.                                                                |
+| Claude Sonnet 5  | Recommended everyday worker/researcher candidate; near-Opus agentic performance at lower cost              | `high`; evaluate `medium`                    | Adaptive thinking is on by default; leave output-token headroom, use positive style examples, and raise effort before adding prompt complexity. |
+| Claude Haiku 4.5 | Fast, narrow, low-risk classification or summarization                                                     | Model default                                | Do not assign broad autonomy. Use schemas, validators, and escalation thresholds.                                                               |
 
 Claude model implications:
 
@@ -534,27 +540,27 @@ docs/agent-harness/snapshots/          Dated research snapshots, never operating
 
 ### File-by-file changes
 
-| File or area | Recommended change | Acceptance check |
-| --- | --- | --- |
-| `AGENTS.md` | Remove the “Codex only” framing. Make it the shared contract: product hierarchy, concurrency, runtime ownership, key commands, verification, and scope boundaries. Remove facts easily discoverable from package files. | Claude imports it; Codex reads it directly; no conflicting shared rule remains. |
-| `CLAUDE.md` | Start with `@AGENTS.md`. Keep only Claude-specific rules, source routing, and links to path rules. Move detailed architecture to normal docs. | Under roughly 60–100 focused lines after the import; `/memory` shows expected sources. |
-| `.claude/settings.json` | Add shareable safe hooks, permission denies, and sandbox policy. | Fresh Claude session shows the settings and hooks as trusted/active. |
-| `.claude/settings.local.json` | Untrack; keep only personal model/UI preferences and narrowly approved local permissions. | `git ls-files` no longer returns it; `.gitignore` covers it. |
-| `.claude/rules/*.md` | Preserve; reconcile the server rule that says no API keys in server code with the actual direct-provider API architecture. | Rules describe the real architecture and do not contradict root docs. |
-| `.claude/agents/worker.md` | Remove “never test” and “exceed intent”; add bounded scope, focused verification, and conflict handling. | Worker can meet a task's acceptance criteria without expanding scope. |
-| `.claude/agents/researcher.md` | Replace “include unreliable sources anyway” and “every detail” with a source hierarchy, evidence table, and bounded output. | Official and primary sources are clearly separated from practitioner opinion. |
-| `.claude/agents/implementation-reviewer.md` | Restrict to read/search and safe verification tools; choose high-capability model/effort only when explicitly invoked. | Review cannot edit and reports producer/consumer contract evidence. |
-| `.claude/skills/*` | Shorten `SKILL.md` bodies; move rubrics/examples into references; add supported-version metadata and lightweight evals. | Skill descriptions trigger distinctly; selected skill reads only needed references. |
-| `.claude/hooks/*` | Maintain a registry, archive inactive experiments, test active hooks with JSON fixtures, and remove stable PM prose injection. | Each active hook has owner, event, failure behavior, version floor, and tests. |
-| `.codex/config.toml` | Fix Git-root hook resolution; consider enabling project memory only with explicit privacy settings; keep raw reasoning hidden. | Starting Codex from `server/` still finds the hook; no duplicate stable prompt is injected. |
-| `.agents/skills` / `.codex/skills` | Keep one canonical repo skill location. | One `agent-browser` entry is discoverable. |
-| `.claude/memory` | Untrack raw sessions; rewrite curated overview; add provenance and last-verified dates. | No mandatory policy exists only in memory; no contradiction with root docs. |
-| `.claude/research` | Convert to dated snapshots and mark stale material. | Every snapshot has retrieval date, source list, status, and successor. |
-| `prompts/agents` | Add a small contract header: mission, evidence inputs, authority, output schema, refusal/escalation, validation. Reduce accumulated negative rules. | Each prompt has a named owner, version, eval set, and allowed action class. |
-| `workspace-action.md` | Replace prompt-granted authority with policy references; delete broad “act on all” and silent-rule examples. | Model cannot execute a high-impact action without a server-issued authorization token. |
-| `server/src/routes/workspace/ai.js` | Remove dead embedded prompt constant after confirming no consumer. | One live source of truth for workspace role instructions. |
-| Provider catalog | Add current models only through a capability registry and evaluation result. | UI, validators, request bodies, and evidence agree on supported effort/features. |
-| Provider harness docs | Clearly mark CLI transports local-only and APIs/gateway web-deployable. | Deployment check fails visibly when a local-only transport is selected in web mode. |
+| File or area                                | Recommended change                                                                                                                                                                                                      | Acceptance check                                                                            |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `AGENTS.md`                                 | Remove the “Codex only” framing. Make it the shared contract: product hierarchy, concurrency, runtime ownership, key commands, verification, and scope boundaries. Remove facts easily discoverable from package files. | Claude imports it; Codex reads it directly; no conflicting shared rule remains.             |
+| `CLAUDE.md`                                 | Start with `@AGENTS.md`. Keep only Claude-specific rules, source routing, and links to path rules. Move detailed architecture to normal docs.                                                                           | Under roughly 60–100 focused lines after the import; `/memory` shows expected sources.      |
+| `.claude/settings.json`                     | Add shareable safe hooks, permission denies, and sandbox policy.                                                                                                                                                        | Fresh Claude session shows the settings and hooks as trusted/active.                        |
+| `.claude/settings.local.json`               | Untrack; keep only personal model/UI preferences and narrowly approved local permissions.                                                                                                                               | `git ls-files` no longer returns it; `.gitignore` covers it.                                |
+| `.claude/rules/*.md`                        | Preserve; reconcile the server rule that says no API keys in server code with the actual direct-provider API architecture.                                                                                              | Rules describe the real architecture and do not contradict root docs.                       |
+| `.claude/agents/worker.md`                  | Remove “never test” and “exceed intent”; add bounded scope, focused verification, and conflict handling.                                                                                                                | Worker can meet a task's acceptance criteria without expanding scope.                       |
+| `.claude/agents/researcher.md`              | Replace “include unreliable sources anyway” and “every detail” with a source hierarchy, evidence table, and bounded output.                                                                                             | Official and primary sources are clearly separated from practitioner opinion.               |
+| `.claude/agents/implementation-reviewer.md` | Restrict to read/search and safe verification tools; choose high-capability model/effort only when explicitly invoked.                                                                                                  | Review cannot edit and reports producer/consumer contract evidence.                         |
+| `.claude/skills/*`                          | Shorten `SKILL.md` bodies; move rubrics/examples into references; add supported-version metadata and lightweight evals.                                                                                                 | Skill descriptions trigger distinctly; selected skill reads only needed references.         |
+| `.claude/hooks/*`                           | Maintain a registry, archive inactive experiments, test active hooks with JSON fixtures, and remove stable PM prose injection.                                                                                          | Each active hook has owner, event, failure behavior, version floor, and tests.              |
+| `.codex/config.toml`                        | Fix Git-root hook resolution; consider enabling project memory only with explicit privacy settings; keep raw reasoning hidden.                                                                                          | Starting Codex from `server/` still finds the hook; no duplicate stable prompt is injected. |
+| `.agents/skills` / `.codex/skills`          | Keep one canonical repo skill location.                                                                                                                                                                                 | One `agent-browser` entry is discoverable.                                                  |
+| `.claude/memory`                            | Untrack raw sessions; rewrite curated overview; add provenance and last-verified dates.                                                                                                                                 | No mandatory policy exists only in memory; no contradiction with root docs.                 |
+| `.claude/research`                          | Convert to dated snapshots and mark stale material.                                                                                                                                                                     | Every snapshot has retrieval date, source list, status, and successor.                      |
+| `prompts/agents`                            | Add a small contract header: mission, evidence inputs, authority, output schema, refusal/escalation, validation. Reduce accumulated negative rules.                                                                     | Each prompt has a named owner, version, eval set, and allowed action class.                 |
+| `workspace-action.md`                       | Replace prompt-granted authority with policy references; delete broad “act on all” and silent-rule examples.                                                                                                            | Model cannot execute a high-impact action without a server-issued authorization token.      |
+| `server/src/routes/workspace/ai.js`         | Remove dead embedded prompt constant after confirming no consumer.                                                                                                                                                      | One live source of truth for workspace role instructions.                                   |
+| Provider catalog                            | Add current models only through a capability registry and evaluation result.                                                                                                                                            | UI, validators, request bodies, and evidence agree on supported effort/features.            |
+| Provider harness docs                       | Clearly mark CLI transports local-only and APIs/gateway web-deployable.                                                                                                                                                 | Deployment check fails visibly when a local-only transport is selected in web mode.         |
 
 ## Evaluation and release gates
 
@@ -629,14 +635,14 @@ Use this sequence when creating or repairing any agent harness:
 
 1. Add a server-side action policy and exact approval tokens to the workspace action loop.
 2. Remove prompt language that creates silent or broad authority.
-3. Split tracked shared Claude settings from personal local settings and remove project-wide bypass mode.
-4. Isolate Codex product CLI calls and make both CLI transports ephemeral and least-privileged.
+3. **Accepted for now:** retain Claude `bypassPermissions` for the current local workflow; revisit before hosted or multi-user deployment.
+4. **Deferred:** isolate Codex product CLI calls and make both CLI transports ephemeral and least-privileged before broader in-app autonomy or hosted deployment.
 
 ### Phase 1: Establish one source of truth
 
-1. Make `AGENTS.md` the shared contract and import it from `CLAUDE.md`.
-2. Remove per-prompt PM rule duplication.
-3. Fix stale memory and untrack raw sessions.
+1. Keep `AGENTS.md` and `CLAUDE.md` aligned as the visible contracts for their respective coding agents.
+2. Keep the proven PM hooks; review hook and root copies together so repeated enforcement remains consistent.
+3. **Completed 2026-07-10:** fix stale Claude memory/worker rules and stop tracking raw sessions while retaining local copies.
 4. Remove the dead embedded workspace prompt after verification.
 5. Consolidate model capabilities, effort validation, and provider request construction.
 
@@ -646,7 +652,7 @@ Use this sequence when creating or repairing any agent harness:
 2. **Completed 2026-07-10:** add Anthropic `output_config.effort`, GPT-5.6 `max`, and Gemini 3 thinking-level support where accepted.
 3. Run representative workflow evaluations before broader default/profile migrations.
 4. Add structured-output schemas.
-5. Upgrade Claude Code and the Agent SDK through a compatibility branch and focused tests.
+5. **Completed 2026-07-10:** update Claude Code and the Agent SDK to `2.1.206` and `0.3.206`, respectively, with focused compatibility checks.
 6. Remove the hidden thinking flag dependency or isolate it behind a tested compatibility adapter.
 
 ### Phase 3: Create a maintained harness discipline
@@ -665,6 +671,8 @@ Use this sequence when creating or repairing any agent harness:
 - Traced Claude CLI, Codex CLI, Anthropic API, OpenAI API, workspace action, effort selection, provider capture, and prompt-store paths.
 - Verified current installed CLI versions using local help/version commands.
 - Verified current published package versions using the package registry.
+- Rechecked versions on 2026-07-10: Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`.
+- Checked 33 historical Claude session files for recognizable credential patterns, stopped tracking them, and confirmed all 33 local copies remain.
 - Compared the repository with current official OpenAI and Anthropic documentation retrieved on 2026-07-09.
 - Reviewed practitioner sources from OpenAI, Anthropic, HumanLayer, Addy Osmani, and Simon Willison, plus one recent preprint.
 
@@ -672,7 +680,7 @@ Use this sequence when creating or repairing any agent harness:
 
 - Current vendor documentation changes rapidly. Every model/version claim in this report is dated 2026-07-09 and should be refreshed before implementation.
 - This was a documentation and code-path review. It did not invoke live provider models, mutate email/calendar data, or test production credentials.
-- A full credential/PII history audit requires a dedicated secret scanner and a careful rotation/history-rewrite plan. This review only identified the tracked raw-history risk and performed a limited filename-only pattern scan.
+- A full credential/PII history audit still requires a dedicated scanner and a careful rotation/history-rewrite plan. The 2026-07-10 cleanup used targeted content-pattern checks but did not rewrite old Git history.
 - Model recommendations are starting hypotheses until this project's own evaluation sets produce results.
 
 ## Primary source list
@@ -709,9 +717,270 @@ Use this sequence when creating or repairing any agent harness:
 - [Anthropic current model IDs](https://platform.claude.com/docs/en/about-claude/models/overview)
 - [Gemini current models](https://ai.google.dev/gemini-api/docs/models)
 - [Gemini 3.5 Flash migration and thinking levels](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
-- [Moonshot Kimi API prompt guide identifying K2.5](https://platform.moonshot.ai/docs/guide/prompt-best-practice)
+- [Kimi current API models](https://platform.kimi.com/docs/models)
+- [Kimi K2.7 Code API quickstart](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart)
+- [Kimi K2.6 API quickstart](https://platform.kimi.com/docs/guide/kimi-k2-6-quickstart)
 - [LM Studio dynamic local model listing](https://lmstudio.ai/docs/developer/openai-compat/models)
 
 ## Final recommendation
 
-Do not add more agents, hooks, or memory until the permission rules, instructions, and sources of truth are simplified. The next investment should be a small shared set of operating rules, action permissions enforced by server code, isolated environments for in-app provider calls, current capability metadata, and test gates. Once those are trustworthy, new specialist agents and reusable skills will add leverage instead of adding another layer of contradictory context.
+Preserve the PM hooks because they have delivered a clear behavior improvement. Future instruction work should keep those guardrails while removing contradictions and testing wording changes before adopting them. The next high-value product investment remains server-enforced permissions for in-app agents; model capability metadata and evaluation gates follow, while coding-agent/in-app-agent isolation can wait until hosted deployment or broader autonomy makes it more important.
+
+---
+
+### Plain-English decision record updated after the review
+
+## Plain-English answers
+
+1. “Prioritized findings from P0 through P2”
+
+These are priority labels:
+
+- P0 means urgent: a safety or trust problem that should be addressed before giving agents more
+  independence.
+
+- P1 means important: a problem affecting reliability or maintainability.
+- P2 means improvement: useful cleanup that is less urgent.
+
+They are not model names, error codes, or a judgment about you.
+
+2. “Workspace actions are authorized through prompt wording”
+
+The workspace AI prompt tells the agent when it may act immediately, and the server reads the ACTION:
+instructions produced by the AI.
+
+The problem is that the AI is being trusted to help decide its own permission. Before email, calendar, or
+other information is changed, ordinary server code should independently decide:
+
+- Allowed.
+- Must ask Keith first.
+- Blocked.
+
+That central permission check is what I previously called a “policy gate.” The plain name is a server-
+enforced permission check.
+
+This underlying problem is documented but not yet fixed.
+
+3. Claude settings enable bypassPermissions
+
+bypassPermissions means “use tools without pausing to ask for approval.”
+
+The committed file .claude/settings.local.json turns this on broadly. This gives Claude more freedom than
+the written protections alone would provide.
+
+- Do not start or stop Keith’s servers without permission.
+- Do not discard another coding session’s work.
+- Do not run dangerous Git commands without permission.
+
+A safety hook catches some prohibited commands, but it is not guaranteed to block them if the hook itself
+fails. The user confirmed on 2026-07-10 that this tradeoff is intentional for now. Keep the setting and
+revisit it before hosted or multi-user deployment.
+
+4. “Runtime” and “developer coding agents”
+
+In software, runtime means “while the program is running.” It has nothing to do with your daily run.
+
+The report used it in several different ways, which was part of the communication failure:
+
+- A coding-agent environment means Claude Code or Codex working on this repository.
+- An in-app agent environment means the agents inside your application helping with QBO, email, calendar,
+  and similar work.
+
+- A Claude Code version means the installed Claude Code program.
+
+“Developer coding agents” simply means Claude Code and Codex when they are reading or changing the project’s
+source code.
+
+The isolation finding means an agent answering an in-app QBO request should not accidentally inherit
+permission to read or modify the application’s source code. Those two jobs should run in separate folders
+with separate tools and permissions.
+
+That separation is a valid future hardening idea, but the user has deferred it because it is not a current
+priority.
+
+5. Which PM rules are repeatedly added?
+
+These come from:
+
+- .claude/hooks/pm-rules.sh
+- .codex/hooks/pm-rules.ps1
+
+They repeat these instructions after every user message:
+
+- How to describe the broader product.
+- When to delegate work to another agent.
+- How to verify changes.
+- Who controls running servers.
+- When tests are required.
+- When to commit and push.
+- When to add a feature suggestion.
+- How to communicate with you.
+
+The user reports that this repetition fixed repeated, damaging instruction failures and that agent behavior
+has been excellent since the hooks were introduced. Keep the hooks. Review the hook and root copies together,
+and remove only contradictions or stale wording without weakening the enforcement.
+
+6. “Durable memory contradicts current policies”
+
+Durable memory means saved notes that remain available in later chats.
+
+The specific contradiction is:
+
+- .claude/memory/project-overview.md says implementation should always be delegated and tests should never
+  be written.
+
+- Current project rules say Codex normally works in the main session and testing should match the risk of
+  the change.
+
+- .claude/agents/worker.md also tells workers not to test and to “exceed user intent,” which could encourage
+  untested work and unwanted extra changes.
+
+Those old instructions were corrected on 2026-07-10. Tests are now allowed in proportion to risk, delegation
+is no longer mandatory in saved memory, and “exceed intent” now means delivering a complete polished result
+while avoiding unrelated scope.
+
+7. Historical Claude sessions are “tracked despite being ignored”
+
+A session means one Claude chat/work period.
+
+“Tracked” means 33 historical session files were previously committed to Git. Git therefore continues
+copying them into every clone of the repository.
+
+“Ignored” means .gitignore now tells the Git program not to add new files from that folder. No person is
+ignoring them. The important detail is that .gitignore does not remove files that were already committed.
+
+Raw session records normally should not be committed because they can contain:
+
+- Local file paths.
+- Commands.
+- Investigation notes.
+- Personal information.
+- Old instructions that are no longer correct.
+
+They were checked for recognizable credential patterns and removed from current Git tracking on 2026-07-10.
+All 33 local files remain on this computer. Rewriting old Git history is larger and potentially disruptive,
+so it was not done automatically.
+
+8. Missing and outdated models
+
+This was corrected.
+
+The app now includes:
+
+- Claude Fable 5
+- Claude Opus 4.8
+- Claude Sonnet 5
+- Claude Haiku 4.5
+- GPT‑5.6 Sol
+- GPT‑5.6 Terra
+- GPT‑5.6 Luna
+- GPT‑5.5, GPT‑5.4, GPT‑5.4 Mini, and GPT‑5.4 Nano as existing generally available alternatives
+- Gemini 3.5 Flash
+- Gemini 3.1 Flash-Lite
+- Gemini 3.1 Pro Preview
+- Kimi K2.7 Code and K2.7 Code Highspeed for coding-focused work
+- Kimi K2.6 as the general-purpose default, with K2.5 retained as a previous selectable model
+- LLM Gateway automatic routing
+- LM Studio’s currently loaded local model
+
+The relevant defaults are now:
+
+- Codex CLI: GPT‑5.6 Sol
+- Direct Anthropic API: Claude Sonnet 5
+- Direct OpenAI API: GPT‑5.6 Terra
+- Gemini API: Gemini 3.5 Flash
+- Kimi API: Kimi K2.6
+- Gateway: automatic model selection
+- LM Studio: whichever local model is loaded
+
+The selected Anthropic effort is now actually sent to Anthropic. Gemini now receives its current thinking-
+level setting. GPT‑5.6 max effort is supported where appropriate.
+
+One important limitation: GPT‑5.6 is still a limited preview. Your Codex workspace or OpenAI API
+organization must have access. Having this Codex chat set to GPT‑5.6 Sol does not necessarily prove that a
+separate OpenAI API key has access. GPT‑5.5 remains available in the app if the API organization does not
+have preview access. OpenAI GPT‑5.6 availability
+(https://help.openai.com/en/articles/20001325-a-preview-of-gpt-5-6-sol-terra-and-luna), OpenAI GPT‑5.6 model
+details (https://developers.openai.com/api/docs/models/gpt-5.6-sol)
+
+Anthropic’s current general lineup is Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5. Anthropic model overview
+(https://platform.claude.com/docs/en/about-claude/models/overview)
+
+Gemini 3.5 Flash is now the stable Gemini default, replacing Gemini 3 Flash Preview. Gemini 3.5 Flash
+migration guide (https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
+
+Kimi’s official API documentation identifies K2.7 Code as its strongest coding model and K2.6 as the
+general-purpose multimodal model. K2.7 cannot disable thinking mode, so the app now omits that incompatible
+setting when a K2.7 model is selected. Kimi model list
+(https://platform.kimi.com/docs/models)
+
+9. “Claude runtime and Agent SDK are behind”
+
+The plain wording is: check whether the installed Claude software matches the newest published software.
+
+Fresh checks on 2026-07-10 found:
+
+- Claude Code program: 2.1.206 installed and published
+- Project Claude Agent SDK package: 0.3.206 installed and published
+- Codex program: 0.144.1 installed and published
+
+The user’s Claude Code update worked. The project SDK was still old, so it was upgraded from 0.2.74 to
+0.3.206 and checked with the focused parser tests.
+
+10. “Use native JSON schemas”
+
+A JSON schema is an exact data-shape check for an AI response that application code must read.
+
+Prompt-only formatting means telling the model:
+
+> Please return a case number, category, and severity in JSON.
+
+The model can still forget a field, misspell one, or return the wrong kind of value.
+
+A native schema tells the provider:
+
+- caseNumber must be text.
+- category must be one of the allowed categories.
+- severity must be one of the allowed severity values.
+- All three fields are required.
+
+This is like requiring the AI to hand the program a completed digital form instead of a paragraph. If a box
+is missing or contains the wrong kind of value, the app can reject that response immediately instead of
+guessing what the AI meant.
+
+This does **not** prove that the value is factually correct. It only proves that the reply has the required
+shape. It applies to in-app parsing and triage responses, not to normal chat answers and not to forms the user
+must complete. One SDK image-parser path already uses a schema; the recommendation is to apply this protection
+consistently to other strict-output paths.
+
+11. “Action authority envelopes” and “safety contract”
+
+Those names were unclear metaphors. No envelope exists, and there is no legal contract for you to sign.
+
+I renamed the feature to Agent Action Permissions. It is mainly for the agents inside this application, not
+Claude Code or Codex while they edit the repository.
+
+It means the application would show and enforce:
+
+- What the agent may change.
+- Which account or records it may touch.
+- How long that permission lasts.
+- Whether it must ask before acting.
+- Which actions are completely prohibited.
+
+“Safety contract” meant hard safety rules enforced by code. I replaced that phrase with “hard safety rules
+in code.”
+
+The feature entry has been renamed, but the actual central permission system has not yet been built.
+
+## What changed
+
+- Updated this review to record the user's accepted and deferred decisions instead of presenting them as unresolved demands.
+- Preserved the PM hooks and added the premium-outcome rule without weakening scope protection.
+- Corrected stale Claude project memory and worker testing/delegation rules.
+- Added plain-language reporting requirements to Claude's worker, researcher, reviewer, root instructions, and active hook.
+- Stopped tracking 33 historical Claude session files while preserving all local copies.
+- Added Kimi K2.7 Code, K2.7 Code Highspeed, and K2.6; retained K2.5 as a previous option and handled K2.7's mandatory thinking mode.
+- Confirmed Claude Code and Codex are current, upgraded the Claude Agent SDK to `0.3.206`, and applied non-breaking dependency security patches until `npm audit` reported zero known vulnerabilities.
+
+---

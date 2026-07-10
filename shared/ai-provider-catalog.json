@@ -297,7 +297,7 @@
     "iconPath": "/provider-icons/kimi.ico",
     "iconSourceUrl": "https://www.kimi.com/",
     "transport": "kimi",
-    "model": "kimi-k2.5",
+    "model": "kimi-k2.6",
     "selectable": true,
     "order": 47,
     "allowedEfforts": ["low", "medium", "high"],

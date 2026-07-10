@@ -34,7 +34,7 @@ function kimiResponse(overrides = {}) {
   return {
     id: overrides.id || 'chatcmpl-kimi-test',
     object: 'chat.completion',
-    model: overrides.model || 'kimi-k2.5',
+    model: overrides.model || 'kimi-k2.6',
     choices: [
       {
         index: 0,
@@ -146,13 +146,13 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
     assert.equal(saved.providerResearchId, 'kimi-api');
     assert.equal(saved.outcome, 'success');
     assert.equal(saved.request.bodyJson.model, 'moonshot-v1-8k');
-    assert.equal(saved.request.bodyJson.temperature, undefined);
+    assert.equal(saved.request.bodyJson.temperature, 1);
     assert.deepEqual(saved.request.bodyJson.thinking, { type: 'disabled' });
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
     assert.equal(saved.response.parsedJson.usage.prompt_tokens, 11);
 
     const requestBody = JSON.parse(server.requests[0].body);
-    assert.equal(requestBody.temperature, undefined);
+    assert.equal(requestBody.temperature, 1);
     assert.deepEqual(requestBody.thinking, { type: 'disabled' });
     assert.equal(server.requests[0].req.headers.authorization, 'Bearer mk-test-kimi-key');
     assert.ok(events.some((event) => event.type === 'provider.package_capture_confirmed'));
@@ -170,7 +170,7 @@ test('Kimi image-parser path ignores reasoning_content as parser output', async 
         content: '',
         usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
         id: 'chatcmpl-kimi-reasoning-only',
-        model: 'kimi-k2.5',
+        model: 'kimi-k2.6',
       }),
       choices: [{
         index: 0,

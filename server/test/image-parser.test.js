@@ -623,7 +623,7 @@ test('parseImage routes to kimi and returns parsed result', async () => {
           process.nextTick(() => {
             res.emit('data', JSON.stringify({
               choices: [{ message: { content: 'COID/MID: 456\nCASE: CS-002' } }],
-              model: 'kimi-k2.5',
+              model: 'kimi-k2.6',
               usage: { prompt_tokens: 80, completion_tokens: 40 },
             }));
             res.emit('end');
@@ -690,7 +690,7 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
           process.nextTick(() => {
             res.emit('data', JSON.stringify({
               choices: [{ message: { content: 'COID/MID: 456\nCASE: CS-002' } }],
-              model: 'kimi-k2.5',
+              model: 'kimi-k2.6',
               usage: { prompt_tokens: 80, completion_tokens: 40 },
             }));
             res.emit('end');
@@ -714,10 +714,10 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
     assert.equal(saved.providerPathType, 'direct-http');
     assert.equal(saved.operation, 'image-parse');
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
-    assert.equal(saved.request.modelRequested, 'kimi-k2.5');
+    assert.equal(saved.request.modelRequested, 'kimi-k2.6');
     assert.equal(saved.response.statusCode, 200);
     assert.equal(saved.response.headers['x-request-id'], 'kimi-image-test');
-    assert.equal(saved.response.parsedJson.model, 'kimi-k2.5');
+    assert.equal(saved.response.parsedJson.model, 'kimi-k2.6');
   } finally {
     https.request = origHttps;
     fs.readFileSync = origRead;
@@ -1832,18 +1832,19 @@ test('parseImage with kimi throws PROVIDER_ERROR on invalid JSON', async () => {
   }
 });
 
-test('parseImage with kimi uses model override', async () => {
+test('parseImage with Kimi K2.7 Code uses model override without disabling required thinking', async () => {
   const cleanupKey = setupProviderKey('MOONSHOT_API_KEY', 'mk-test');
   const httpsMock = mockHttpsRequest(200, {
     choices: [{ message: { content: 'test' } }],
-    model: 'kimi-latest',
+    model: 'kimi-k2.7-code',
     usage: { prompt_tokens: 1, completion_tokens: 1 },
   });
 
   try {
-    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'kimi-latest' });
+    await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'kimi-k2.7-code' });
     const body = httpsMock.getCapturedBody();
-    assert.equal(body.model, 'kimi-latest');
+    assert.equal(body.model, 'kimi-k2.7-code');
+    assert.equal(body.thinking, undefined);
   } finally {
     httpsMock.restore();
     cleanupKey();
@@ -2530,7 +2531,7 @@ test('provider request body validation', async (t) => {
       // Body shape
       const body = captured.body;
       assert.equal(body.temperature, 1, 'Kimi MUST send temperature: 1 (not 0.1 — Kimi rejects other values)');
-      assert.equal(body.model, 'kimi-k2.5', 'default model must be kimi-k2.5');
+      assert.equal(body.model, 'kimi-k2.6', 'default model must be kimi-k2.6');
       assert.equal(body.max_tokens, 4096);
 
       // Messages structure
@@ -2699,7 +2700,7 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'my-custom-model' });
-      assert.equal(captured.body.model, 'my-custom-model', 'custom model must override default kimi-k2.5');
+      assert.equal(captured.body.model, 'my-custom-model', 'custom model must override default kimi-k2.6');
     } finally {
       captured._restore();
       fs.readFileSync = origRead;

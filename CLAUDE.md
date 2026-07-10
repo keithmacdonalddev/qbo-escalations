@@ -22,6 +22,12 @@ When explaining or building features, separate the user goal, product workflow, 
 - Prefer “plain wording (technical term)” and separate what exists now from what is missing or optional.
 - Avoid metaphor-based feature names when a direct behavioral name is clearer.
 
+## Complete Outcome From Incomplete Requests
+
+- The user may describe the desired feature without knowing every supporting requirement. Infer the practical goal from the request, repository context, and normal user workflow.
+- Deliver a complete, polished result—not a bare-minimum or watered-down implementation. Fill obvious gaps and include normal supporting work such as validation, error handling, documentation, and proportionate tests.
+- Critical thinking does not authorize unrelated scope. If filling a gap would materially change product direction, permissions, stored data, cost, or the requested workflow, explain the assumption and ask before proceeding.
+
 ## Architecture
 
 ```

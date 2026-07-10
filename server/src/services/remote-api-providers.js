@@ -50,7 +50,7 @@ const PROVIDER_CONFIG = Object.freeze({
     displayName: 'Gemini API',
   }),
   kimi: Object.freeze({
-    defaultModel: 'kimi-k2.5',
+    defaultModel: 'kimi-k2.6',
     baseUrl: 'https://api.moonshot.ai',
     envKey: 'MOONSHOT_API_KEY',
     displayName: 'Kimi API',

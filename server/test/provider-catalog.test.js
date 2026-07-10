@@ -29,7 +29,7 @@ test('current direct-provider and Codex defaults match the July 2026 catalog', (
   assert.equal(getProviderModelId('codex'), 'gpt-5.6-sol');
   assert.equal(getProviderModelId('openai'), 'gpt-5.6-terra');
   assert.equal(getProviderModelId('gemini'), 'gemini-3.5-flash');
-  assert.equal(getProviderModelId('kimi'), 'kimi-k2.5');
+  assert.equal(getProviderModelId('kimi'), 'kimi-k2.6');
   assert.equal(getProviderModelId('llm-gateway'), 'auto');
   assert.equal(getProviderModelId('lm-studio'), 'local');
 

@@ -13,7 +13,8 @@
 - Research label: `kimi-api` (maps to app id/transport `kimi`).
 - Aliases / catalog ids: Single catalog entry `id: "kimi"`, `family: "kimi"`, `transport: "kimi"`. No additional aliases.
 - UI labels: `label: "Kimi API"`, `shortLabel: "Kimi"`. `getRemoteProviderLabel('kimi')` returns `"Moonshot"` (server-side logs/errors).
-- Default model: `kimi-k2.5` (defined in catalog at `shared/ai-provider-catalog.json:156`, in `image-parser.js:212`, in `image-parser.js:1268`, and in `remote-api-providers.js:42`).
+- Default model: `kimi-k2.6` (updated 2026-07-10 from K2.5 after verification against Kimi's current API model documentation).
+- Current selectable flagship models: `kimi-k2.7-code`, `kimi-k2.7-code-highspeed`, `kimi-k2.6`, and `kimi-k2.5`. K2.7 Code is coding-focused and always uses thinking mode; the image-parser request builder therefore does not send `thinking: disabled` for K2.7.
 - Environment variables:
   - `MOONSHOT_API_KEY` (auth; mapped in `image-parser.js:169` and `remote-api-providers.js:44`).
   - `KIMI_TRANSCRIBE_TIMEOUT_MS` / `MOONSHOT_TRANSCRIBE_TIMEOUT_MS`
@@ -37,7 +38,7 @@ Two application model paths plus one key-validation probe send real HTTPS reques
    - Evidence: `server/src/services/remote-api-providers.js:380-441,508-538,683-685`; `server/src/services/providers/registry.js:54-55`.
 
 3. Key-validation probe — `server/src/services/image-parser.js:209-218` `REMOTE_PROVIDER_TEST_CONFIGS.kimi`, invoked through `validateRemoteProvider('kimi', kimiKey)` at `image-parser.js:1748-1749`.
-   - What it does: Issues a minimal `POST /v1/chat/completions` with `{ model: 'kimi-k2.5', max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }` and `Authorization: Bearer <key>` to verify the key works. The probe is a real Moonshot HTTPS request. It uses the inline `testRemoteProviderKey()` request wrapper, not `jsonRequest`; that wrapper buffers the response into `{ statusCode, body, model: cfg.model }` and then `validateRemoteProvider()` uses it only to compute an availability boolean.
+   - What it does: Issues a minimal `POST /v1/chat/completions` with `{ model: 'kimi-k2.6', max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }` and `Authorization: Bearer <key>` to verify the key works. The probe is a real Moonshot HTTPS request. It uses the inline `testRemoteProviderKey()` request wrapper, not `jsonRequest`; that wrapper buffers the response into `{ statusCode, body, model: cfg.model }` and then `validateRemoteProvider()` uses it only to compute an availability boolean.
 
 ## Request Package Sent Today
 
@@ -47,7 +48,7 @@ Two application model paths plus one key-validation probe send real HTTPS reques
 - Auth mechanism: HTTP `Authorization: Bearer <MOONSHOT_API_KEY>` header.
 - Headers (set by `jsonRequest` in `image-parser.js:754`): `Content-Type: application/json`, `Accept: application/json`, `Content-Length`, plus the `Authorization` header.
 - Request body (JSON):
-  - `model`: `"kimi-k2.5"` (or override)
+  - `model`: `"kimi-k2.6"` (or override)
   - `max_tokens`: `4096`
   - `temperature`: `1`
   - `messages`: `[ { role: "system", content: <systemPrompt> }, { role: "user", content: [ { type: "text", text: "Parse this image." }, { type: "image_url", image_url: { url: "data:<mediaType>;base64,<...>" } } ] } ]`
@@ -60,7 +61,7 @@ Two application model paths plus one key-validation probe send real HTTPS reques
 - Endpoint: `POST https://api.moonshot.ai/v1/chat/completions`
 - Auth mechanism: `Authorization: Bearer <MOONSHOT_API_KEY>`.
 - Request body (built by `requestOpenAiLikeChat`):
-  - `model`: `"kimi-k2.5"` (or override)
+  - `model`: `"kimi-k2.6"` (or override)
   - `messages`: system prepended, then normalized user/assistant turns (string content only).
   - `max_tokens`: `4096`
   - `temperature`: `0.2`
@@ -72,18 +73,19 @@ Two application model paths plus one key-validation probe send real HTTPS reques
 
 - Endpoint: `POST https://api.moonshot.ai/v1/chat/completions`
 - Auth mechanism: `Authorization: Bearer <MOONSHOT_API_KEY>`.
-- Request body (JSON): `{ "model": "kimi-k2.5", "max_tokens": 1, "temperature": 1, "messages": [{ "role": "user", "content": "hi" }] }`.
+- Request body (JSON): `{ "model": "kimi-k2.6", "max_tokens": 1, "temperature": 1, "messages": [{ "role": "user", "content": "hi" }] }`.
 - Streaming flag: Not set.
 - Evidence: `server/src/services/image-parser.js:209-218,470-514,1748-1749`.
 
 ## Official Response Package
 
 Sources (all confirmed via WebFetch on the dates this document was written):
-- `https://platform.kimi.ai/docs/api/chat` (canonical; `https://platform.moonshot.ai/docs/api/chat` returns 301 to this host)
-- `https://platform.kimi.ai/docs/api/overview`
-- `https://platform.kimi.ai/docs/api/errors`
-- `https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model`
-- `https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api`
+- `https://platform.kimi.com/docs/models`
+- `https://platform.kimi.com/docs/api/chat`
+- `https://platform.kimi.com/docs/api/overview`
+- `https://platform.kimi.com/docs/api/errors`
+- `https://platform.kimi.com/docs/api/models-overview`
+- `https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart`
 
 Base URL (overview doc): `https://api.moonshot.ai`; full chat path `https://api.moonshot.ai/v1/chat/completions`. OpenAI Chat Completions compatible.
 
@@ -159,7 +161,7 @@ Required fields:
   - `method`: `"POST"`
   - `headersSent`: object with `Content-Type`, `Accept`, `Content-Length` (do NOT store `Authorization`; record `authScheme: "bearer"` and `authKeyEnv: "MOONSHOT_API_KEY"` instead).
   - `bodyJson`: the exact request body object (`model`, `messages`, `max_tokens`, `temperature`, plus any future fields).
-  - `modelRequested`: e.g. `"kimi-k2.5"`.
+  - `modelRequested`: e.g. `"kimi-k2.6"`.
   - `timeoutMs`: number passed to `jsonRequest`.
   - `leg`: `"image-parse" | "chat" | "validate"` (which call site).
 - `response`:
@@ -218,10 +220,11 @@ Storage notes:
   - `server/src/models/ImageParseResult.js:1-55` (no raw-package fields today).
   - `server/.env.example:37` (`MOONSHOT_API_KEY`).
 - Official docs:
-  - `https://platform.kimi.ai/docs/api/chat`
-  - `https://platform.kimi.ai/docs/api/overview`
-  - `https://platform.kimi.ai/docs/api/errors`
-  - `https://platform.kimi.ai/docs/guide/use-kimi-k2-thinking-model`
-  - `https://platform.kimi.ai/docs/guide/utilize-the-streaming-output-feature-of-kimi-api`
-  - `https://platform.moonshot.ai/docs/api/chat` (returns 301 to the kimi.ai host above)
+  - `https://platform.kimi.com/docs/models`
+  - `https://platform.kimi.com/docs/api/chat`
+  - `https://platform.kimi.com/docs/api/overview`
+  - `https://platform.kimi.com/docs/api/errors`
+  - `https://platform.kimi.com/docs/api/models-overview`
+  - `https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart`
+  - `https://platform.kimi.com/docs/guide/kimi-k2-6-quickstart`
 - Command outputs: `rg -n "kimi|moonshot" server/src` (case-insensitive sweep) returned only the call sites listed under Source references above — no other production source files reference the provider.

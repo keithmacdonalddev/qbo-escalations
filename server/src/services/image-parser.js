@@ -337,7 +337,7 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   kimi: {
     hostname: 'api.moonshot.ai',
     path: '/v1/chat/completions',
-    model: 'kimi-k2.5',
+    model: 'kimi-k2.6',
     buildBody: (model) => JSON.stringify({ model, max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }),
     buildHeaders: (key) => ({
       'Authorization': `Bearer ${key}`,
@@ -1760,12 +1760,13 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEf
  */
 async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus = null, signal = null) {
   throwIfAborted(signal);
-  const effectiveModel = model || 'kimi-k2.5';
+  const effectiveModel = model || 'kimi-k2.6';
+  const requiresThinking = /^kimi-k2\.7-code(?:-highspeed)?$/i.test(effectiveModel);
   const body = {
     model: effectiveModel,
     max_tokens: 4096,
     temperature: 1,
-    thinking: { type: 'disabled' },
+    ...(requiresThinking ? {} : { thinking: { type: 'disabled' } }),
     messages: [
       { role: 'system', content: systemPrompt },
       {

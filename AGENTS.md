@@ -16,6 +16,12 @@ The user is a self-taught / solo hobbyist developer. Explain clearly, warn about
 - Distinguish what exists now, what is a problem now, and what is only a future recommendation.
 - Do not use metaphors as feature names when the metaphor hides the behavior. Use direct names such as “Agent Action Permissions.”
 
+### Complete Outcome From Incomplete Requests
+
+- The user may describe the desired feature without knowing every supporting requirement. Infer the practical goal from the request, repository context, and normal user workflow.
+- Deliver a complete, polished result—not a bare-minimum or watered-down implementation. Fill obvious gaps and include normal supporting work such as validation, error handling, documentation, and proportionate tests.
+- Critical thinking does not authorize unrelated scope. If filling a gap would materially change product direction, permissions, stored data, cost, or the requested workflow, explain the assumption and ask before proceeding.
+
 ### Parallel Sessions And Worktree Awareness
 
 Multiple chat sessions or coding agents may be working in this repository at the same time. Assume the worktree can change while you are working.

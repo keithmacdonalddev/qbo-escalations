@@ -647,7 +647,7 @@ test('POST /keys/test deep tests', async (t) => {
     res = makeRes();
     await handler(makeReq({ provider: 'kimi', key: 'mk-test' }), res);
     body = JSON.parse(_lastCapturedBody);
-    assert.equal(body.model, 'kimi-k2.5');
+    assert.equal(body.model, 'kimi-k2.6');
     restoreHttps();
   });
 });

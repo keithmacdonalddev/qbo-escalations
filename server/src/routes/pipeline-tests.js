@@ -95,7 +95,7 @@ const IMAGE_DEFAULT_MODELS = Object.freeze({
   'lm-studio': 'local',
   anthropic: 'claude-sonnet-5',
   openai: 'gpt-5.6-terra',
-  kimi: 'kimi-k2.5',
+  kimi: 'kimi-k2.6',
   gemini: 'gemini-3.5-flash',
   ...CODEX_IMAGE_DEFAULT_MODELS,
 });
