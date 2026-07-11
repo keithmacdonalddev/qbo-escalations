@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="An interactive comparison of MVP, solid user-ready, and state-of-the-art enterprise issue tracking capabilities."
+    />
+    <title>Signal Desk — Product Maturity Map</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="Signal Desk home">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+        <span>Signal Desk</span>
+      </a>
+      <nav class="header-nav" aria-label="Page navigation">
+        <a href="#compare">Compare</a>
+        <a href="#features">Feature map</a>
+        <a href="#principle">Product principle</a>
+      </nav>
+      <span class="prototype-label">Concept prototype</span>
+    </header>
+
+    <main id="top">
+      <section class="hero shell">
+        <div class="eyebrow"><span></span> Cross-project work intelligence</div>
+        <h1>From captured signal<br />to <em>verified outcome.</em></h1>
+        <p class="hero-copy">
+          A visual scope map for one shared system that remembers every bug, feature,
+          decision, incident, task, idea, and agent-discovered problem—then keeps it moving.
+        </p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#compare">Explore the levels</a>
+          <a class="button button-quiet" href="#features">Browse every feature <span>↓</span></a>
+        </div>
+
+        <div class="hero-orbit" aria-label="The complete work loop">
+          <div class="orbit-track" aria-hidden="true"></div>
+          <div class="orbit-center">
+            <span class="pulse-dot"></span>
+            <strong>One trusted<br />work loop</strong>
+          </div>
+          <span class="orbit-item orbit-capture">Capture</span>
+          <span class="orbit-item orbit-decide">Decide</span>
+          <span class="orbit-item orbit-own">Own</span>
+          <span class="orbit-item orbit-verify">Verify</span>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Product promise">
+        <div class="shell signal-strip-inner">
+          <span>Nothing important disappears</span>
+          <span>Every active item has an owner</span>
+          <span>Done requires proof</span>
+          <span>Agents assist, humans govern</span>
+        </div>
+      </section>
+
+      <section class="comparison shell section" id="compare">
+        <div class="section-heading">
+          <div>
+            <span class="section-number">01</span>
+            <p class="kicker">Choose the destination</p>
+            <h2>Three levels. One accumulating system.</h2>
+          </div>
+          <p>
+            Each level includes everything before it. Select a level to see what the
+            product can reliably accomplish—not just how many features it contains.
+          </p>
+        </div>
+
+        <div class="level-selector" role="tablist" aria-label="Product maturity levels">
+          <button class="level-card is-active" type="button" role="tab" aria-selected="true" data-level="mvp">
+            <span class="level-index">01</span>
+            <span class="level-title">MVP foundation</span>
+            <span class="level-purpose">Capture it. Find it. Assign it.</span>
+            <span class="level-foot"><b data-count="mvp">0</b> core capabilities <i>→</i></span>
+          </button>
+          <button class="level-card" type="button" role="tab" aria-selected="false" data-level="ready">
+            <span class="level-index">02</span>
+            <span class="level-title">Solid user-ready</span>
+            <span class="level-purpose">Drive work through a complete loop.</span>
+            <span class="level-foot"><b data-count="ready">0</b> total capabilities <i>→</i></span>
+          </button>
+          <button class="level-card" type="button" role="tab" aria-selected="false" data-level="enterprise">
+            <span class="level-index">03</span>
+            <span class="level-title">State-of-the-art enterprise</span>
+            <span class="level-purpose">Govern intelligence at scale.</span>
+            <span class="level-foot"><b data-count="enterprise">0</b> total capabilities <i>→</i></span>
+          </button>
+        </div>
+
+        <div class="level-story" aria-live="polite">
+          <div class="story-main">
+            <div class="story-label" id="storyLabel">MVP outcome</div>
+            <h3 id="storyTitle">A dependable memory for work.</h3>
+            <p id="storyDescription"></p>
+          </div>
+          <div class="story-metrics" id="storyMetrics"></div>
+          <div class="story-boundary">
+            <span>Deliberate boundary</span>
+            <p id="storyBoundary"></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="feature-section section" id="features">
+        <div class="shell">
+          <div class="section-heading feature-heading">
+            <div>
+              <span class="section-number">02</span>
+              <p class="kicker">Complete capability map</p>
+              <h2>See exactly what each level adds.</h2>
+            </div>
+            <div class="feature-total">
+              <strong id="visibleFeatureCount">0</strong>
+              <span>capabilities shown</span>
+            </div>
+          </div>
+
+          <div class="feature-toolbar" aria-label="Feature filters">
+            <label class="search-field">
+              <span class="search-icon" aria-hidden="true"></span>
+              <span class="sr-only">Search features</span>
+              <input id="featureSearch" type="search" placeholder="Search capabilities…" autocomplete="off" />
+              <kbd>/</kbd>
+            </label>
+            <label class="select-field">
+              <span>Category</span>
+              <select id="categoryFilter">
+                <option value="all">All categories</option>
+              </select>
+            </label>
+            <label class="toggle-field">
+              <input id="newOnlyToggle" type="checkbox" />
+              <span class="toggle-track"><span></span></span>
+              <span>Only what this level adds</span>
+            </label>
+          </div>
+
+          <div class="legend" aria-label="Feature level legend">
+            <span><i class="dot dot-mvp"></i> MVP foundation</span>
+            <span><i class="dot dot-ready"></i> User-ready addition</span>
+            <span><i class="dot dot-enterprise"></i> Enterprise addition</span>
+          </div>
+
+          <div id="featureGrid" class="feature-grid"></div>
+          <div id="emptyState" class="empty-state" hidden>
+            <span>⌕</span>
+            <h3>No matching capabilities</h3>
+            <p>Try a broader search or choose another category.</p>
+            <button id="clearFilters" class="button button-primary" type="button">Clear filters</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="customer-report shell section">
+        <div class="section-heading">
+          <div>
+            <span class="section-number">03</span>
+            <p class="kicker">The customer-facing moment</p>
+            <h2>Three choices. One easy conversation.</h2>
+          </div>
+          <p>
+            Customers explain the experience. The connected project quietly supplies
+            useful context—with consent and a preview before sensitive details are sent.
+          </p>
+        </div>
+
+        <div class="report-demo">
+          <div class="report-window">
+            <div class="window-bar">
+              <span></span><span></span><span></span>
+              <small>Feedback</small>
+            </div>
+            <div class="report-content">
+              <p class="report-overline">How can we help?</p>
+              <h3>Tell us what you noticed.</h3>
+              <div class="report-options">
+                <button type="button"><i>!</i><span><b>Report a problem</b><small>Something didn’t work as expected</small></span><em>→</em></button>
+                <button type="button"><i>+</i><span><b>Request a feature</b><small>There’s something you want to do</small></span><em>→</em></button>
+                <button type="button"><i>✦</i><span><b>Share feedback</b><small>Tell us what’s working—or isn’t</small></span><em>→</em></button>
+              </div>
+            </div>
+          </div>
+          <div class="context-stack">
+            <div class="context-card context-card-main">
+              <span class="context-icon">◎</span>
+              <div><small>Automatically attached</small><strong>Useful context, already filled in</strong></div>
+              <span class="status-pill">12 fields</span>
+            </div>
+            <div class="context-list">
+              <span><i></i> Project + module</span>
+              <span><i></i> Page URL + title</span>
+              <span><i></i> Date, time + timezone</span>
+              <span><i></i> Signed-in user identity</span>
+              <span><i></i> App + release version</span>
+              <span><i></i> Browser + device</span>
+              <span><i></i> Request + session IDs</span>
+              <span><i></i> Permitted diagnostics</span>
+            </div>
+            <div class="privacy-note">
+              <span>◈</span>
+              <p><b>Privacy by default.</b> Customers preview sensitive attachments and choose whether to include diagnostics.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="principle-section section" id="principle">
+        <div class="shell principle-grid">
+          <div>
+            <span class="section-number">04</span>
+            <p class="kicker">The governing principle</p>
+            <h2>If it needs future action, it needs a tracked item.</h2>
+          </div>
+          <div class="loop-path" aria-label="The resolution loop">
+            <div class="loop-line" aria-hidden="true"></div>
+            <span><i>01</i> Capture</span>
+            <span><i>02</i> Review</span>
+            <span><i>03</i> Decide</span>
+            <span><i>04</i> Assign</span>
+            <span><i>05</i> Act</span>
+            <span><i>06</i> Verify</span>
+            <span><i>07</i> Learn</span>
+          </div>
+          <div class="principle-copy">
+            <p>
+              Chats, notes, code reviews, customers, and agents can all create signals.
+              The shared tracker turns the important ones into accountable work and
+              preserves the evidence behind every decision.
+            </p>
+            <div class="principle-rule">
+              <span>Human control</span>
+              <strong>Agents propose and progress.<br />You validate priority, risk, and truth.</strong>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer shell">
+      <div class="brand footer-brand">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span>Signal Desk</span>
+      </div>
+      <p>Product scope prototype · MVP → User-ready → Enterprise</p>
+      <a href="#top">Back to top ↑</a>
+    </footer>
+
+    <script src="./script.js"></script>
+  </body>
+</html>
