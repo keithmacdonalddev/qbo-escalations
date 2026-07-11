@@ -6,6 +6,10 @@ const http = require('http');
 const https = require('https');
 const fs = require('fs');
 const { EventEmitter } = require('events');
+const mongo = require('./_mongo-helper');
+const {
+  __waitForProviderPackageRecorderSettled,
+} = require('../src/services/provider-call-package-recorder');
 
 // ---------------------------------------------------------------------------
 // Save originals
@@ -62,12 +66,33 @@ function snapshotHttpCapture() {
   };
 }
 
-// Patch https.request to capture options and body
-https.request = function patchedHttpsRequest(options, callback) {
-  _lastHttpsRequestOptions = options;
+function normalizeCapturedRequestOptions(args) {
+  const requestUrl = args[0] instanceof URL ? args[0] : null;
+  const suppliedOptions = requestUrl && args[1] && typeof args[1] === 'object'
+    ? args[1]
+    : args[0];
+
+  if (!requestUrl) return suppliedOptions;
+
+  return {
+    ...suppliedOptions,
+    protocol: requestUrl.protocol,
+    hostname: requestUrl.hostname,
+    port: requestUrl.port || undefined,
+    path: `${requestUrl.pathname}${requestUrl.search}`,
+    href: requestUrl.href,
+  };
+}
+
+// Patch https.request to capture options and body. Node supports both
+// request(options, callback) and request(url, options, callback); provider
+// harnesses use the latter form.
+https.request = function patchedHttpsRequest(...args) {
+  const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
+  _lastHttpsRequestOptions = normalizeCapturedRequestOptions(args);
   _lastHttpsRequestBody = '';
 
-  if (!_httpsIntercept) return _origHttpsRequest.apply(https, arguments);
+  if (!_httpsIntercept) return _origHttpsRequest.apply(https, args);
 
   const { statusCode, body, delay } = _httpsIntercept;
   const req = new EventEmitter();
@@ -93,7 +118,7 @@ https.request = function patchedHttpsRequest(options, callback) {
 
 // Patch http.request to capture options and body
 http.request = function patchedHttpRequest(...args) {
-  let options = args[0];
+  const options = normalizeCapturedRequestOptions(args);
   let callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
 
   _lastHttpRequestOptions = options;
@@ -142,6 +167,13 @@ const {
 test.beforeEach(() => {
   clearProviderAvailabilityCache();
   clearAllMocks();
+});
+
+test.before(async () => {
+  // Image parsing requires its provider evidence package to be saved before a
+  // successful result can be returned. Use the shared in-memory test database
+  // so these transport tests exercise that production requirement.
+  await mongo.connect();
 });
 
 const TINY_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
@@ -832,7 +864,7 @@ test('Error response chain: provider HTTP errors', async (t) => {
     }
   });
 
-  await t.test('provider timeout triggers TIMEOUT error code', async () => {
+  await t.test('provider timeout triggers PROVIDER_TIMEOUT error code', async () => {
     const origPatch = http.request;
     http.request = function timeoutSimulation() {
       const req = new EventEmitter();
@@ -845,7 +877,7 @@ test('Error response chain: provider HTTP errors', async (t) => {
       await assert.rejects(
         () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'test', timeoutMs: 100 }),
         (err) => {
-          assert.equal(err.code, 'TIMEOUT');
+          assert.equal(err.code, 'PROVIDER_TIMEOUT');
           assert.match(err.message, /timed out/i);
           return true;
         }
@@ -975,7 +1007,7 @@ test('Usage extraction per provider', async (t) => {
     };
     mockHttpsRequest(200, {
       choices: [{ message: { content: 'test' } }],
-      model: 'kimi-k2.5',
+      model: 'kimi-k2.6',
       usage: { prompt_tokens: 150, completion_tokens: 75 },
     });
     try {
@@ -1165,7 +1197,8 @@ test('Concurrent parseImage calls return independent results', async () => {
   let callCount = 0;
   const origPatch = http.request;
 
-  http.request = function concurrentSimulation(options, callback) {
+  http.request = function concurrentSimulation(...args) {
+    const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
     const thisCall = ++callCount;
     const req = new EventEmitter();
     req.write = () => {};
@@ -1212,7 +1245,8 @@ test('Concurrent parseImage calls return independent results', async () => {
 test('Multi-chunk HTTP response is correctly reconstructed', async (t) => {
   await t.test('LM Studio response split across multiple data chunks', async () => {
     const origPatch = http.request;
-    http.request = function multiChunkSimulation(options, callback) {
+    http.request = function multiChunkSimulation(...args) {
+      const callback = typeof args[args.length - 1] === 'function' ? args[args.length - 1] : null;
       const req = new EventEmitter();
       req.write = () => {};
       req.end = () => {
@@ -1479,7 +1513,7 @@ test('Anthropic full response parsing with HTTPS mock', async (t) => {
     }
   });
 
-  await t.test('Anthropic response with multiple content blocks → uses first text block', async () => {
+  await t.test('Anthropic response with multiple content blocks → combines text blocks', async () => {
     const origEnv = process.env.ANTHROPIC_API_KEY;
     process.env.ANTHROPIC_API_KEY = 'sk-ant-multi';
     fs.readFileSync = function mockRead(f) {
@@ -1496,8 +1530,7 @@ test('Anthropic full response parsing with HTTPS mock', async (t) => {
     });
     try {
       const result = await parseImage(TINY_PNG_BASE64, { provider: 'anthropic', structured: false });
-      // parsed.content?.[0]?.text gets the FIRST content block
-      assert.equal(result.text, 'First block text');
+      assert.equal(result.text, 'First block text\nSecond block text');
     } finally {
       clearAllMocks();
       fs.readFileSync = origRead;
@@ -1593,7 +1626,7 @@ test('req.destroy() is called when timeout fires', async (t) => {
     try {
       await assert.rejects(
         () => parseImage(TINY_PNG_BASE64, { provider: 'lm-studio', model: 'test', timeoutMs: 100 }),
-        (err) => { assert.equal(err.code, 'TIMEOUT'); return true; }
+        (err) => { assert.equal(err.code, 'PROVIDER_TIMEOUT'); return true; }
       );
       assert.equal(destroyCalled, true, 'req.destroy() must be called when timeout fires');
     } finally {
@@ -1622,7 +1655,7 @@ test('req.destroy() is called when timeout fires', async (t) => {
     try {
       await assert.rejects(
         () => parseImage(TINY_PNG_BASE64, { provider: 'openai', timeoutMs: 100 }),
-        (err) => { assert.equal(err.code, 'TIMEOUT'); return true; }
+        (err) => { assert.equal(err.code, 'PROVIDER_TIMEOUT'); return true; }
       );
       assert.equal(destroyCalled, true, 'req.destroy() must be called on HTTPS timeout');
     } finally {
@@ -1684,9 +1717,11 @@ test('checkProviderAvailability LM Studio timeout', async (t) => {
 // ---------------------------------------------------------------------------
 // Restore all mocks on teardown
 // ---------------------------------------------------------------------------
-test.after(() => {
+test.after(async () => {
   http.request = _origHttpRequest;
   http.get = _origHttpGet;
   https.request = _origHttpsRequest;
   fs.readFileSync = _origReadFileSync;
+  await __waitForProviderPackageRecorderSettled();
+  await mongo.disconnect();
 });

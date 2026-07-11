@@ -109,7 +109,6 @@ const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
     { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code - strongest coding model' },
     { value: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code Highspeed - same model, faster' },
     { value: 'kimi-k2.6', label: 'Kimi K2.6 - current default' },
-    { value: 'kimi-k2.5', label: 'Kimi K2.5 - previous model' },
   ]),
 });
 

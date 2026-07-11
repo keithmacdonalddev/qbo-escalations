@@ -31,7 +31,7 @@ function testCaptureContext(callSite) {
       functionName: 'jsonRequestCancelable',
       helperName: 'jsonRequestCancelable',
     },
-    modelRequested: 'kimi-k2.5',
+    modelRequested: 'kimi-k2.6',
   };
 }
 
@@ -296,7 +296,7 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
   let captured = null;
   const request = requestKimiChat({
     messages: [{ role: 'user', content: 'Say hello' }],
-    model: 'kimi-k2.5',
+    model: 'kimi-k2.6',
     getApiKeyFn: async () => 'sk-moonshot',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
       captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
@@ -304,7 +304,7 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            model: 'kimi-k2.5',
+            model: 'kimi-k2.6',
             choices: [{ message: { content: 'Hello from Kimi' } }],
             usage: { prompt_tokens: 5, completion_tokens: 4 },
           }),
@@ -319,7 +319,7 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
   assert.equal(captured.baseUrl, 'https://api.moonshot.ai');
   assert.equal(captured.urlPath, '/v1/chat/completions');
   assert.equal(captured.headers.Authorization, 'Bearer sk-moonshot');
-  assert.equal(captured.body.model, 'kimi-k2.5');
+  assert.equal(captured.body.model, 'kimi-k2.6');
   assert.equal(captured.body.temperature, undefined);
   assert.deepEqual(captured.body.thinking, { type: 'disabled' });
   assert.deepEqual(captured.captureContext, {
@@ -333,11 +333,11 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
       functionName: 'requestKimiChat',
       helperName: 'jsonRequestCancelable',
     },
-    modelRequested: 'kimi-k2.5',
+    modelRequested: 'kimi-k2.6',
   });
   assert.equal(result.text, 'Hello from Kimi');
   assert.deepStrictEqual(result.usage, {
-    model: 'kimi-k2.5',
+    model: 'kimi-k2.6',
     inputTokens: 5,
     outputTokens: 4,
   });
@@ -359,7 +359,7 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
       res.setHeader('content-type', 'application/json');
       res.setHeader('x-request-id', 'req-kimi-test');
       res.end(JSON.stringify({
-        model: 'kimi-k2.5',
+        model: 'kimi-k2.6',
         choices: [{ message: { content: 'captured' } }],
       }));
     });
@@ -371,7 +371,7 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
       'POST',
       `http://127.0.0.1:${port}`,
       '/v1/chat/completions',
-      { model: 'kimi-k2.5', accessToken: 'secret-token' },
+      { model: 'kimi-k2.6', accessToken: 'secret-token' },
       { Authorization: 'Bearer sk-test' },
       5000,
       {
@@ -385,7 +385,7 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
           functionName: 'requestKimiChat',
           helperName: 'jsonRequestCancelable',
         },
-        modelRequested: 'kimi-k2.5',
+        modelRequested: 'kimi-k2.6',
       }
     );
 
@@ -405,7 +405,7 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
     assert.equal(saved.request.bodyJson.accessToken, '[REDACTED]');
     assert.equal(saved.request.bodyText.includes('secret-token'), false);
     assert.equal(saved.response.statusCode, 200);
-    assert.equal(saved.response.parsedJson.model, 'kimi-k2.5');
+    assert.equal(saved.response.parsedJson.model, 'kimi-k2.6');
     assert.equal(saved.response.bodyChunks.length, 1);
     assert.equal(saved.storage.inline, true);
   } finally {
@@ -665,7 +665,7 @@ test('jsonRequestCancelable captures network_error outcome when enabled', async 
         'POST',
         'http://127.0.0.1:65530',
         '/v1/chat/completions',
-        { model: 'kimi-k2.5' },
+        { model: 'kimi-k2.6' },
         {},
         5000,
         testCaptureContext('remote-api-providers:network-error-test')
@@ -696,7 +696,7 @@ test('jsonRequestCancelable captures timeout outcome when enabled', async () => 
         'POST',
         'http://127.0.0.1:65530',
         '/v1/chat/completions',
-        { model: 'kimi-k2.5' },
+        { model: 'kimi-k2.6' },
         {},
         25,
         testCaptureContext('remote-api-providers:timeout-test')
@@ -726,7 +726,7 @@ test('jsonRequestCancelable captures aborted outcome when enabled', async () => 
         'POST',
         'http://127.0.0.1:65530',
         '/v1/chat/completions',
-        { model: 'kimi-k2.5' },
+        { model: 'kimi-k2.6' },
         {},
         5000,
         testCaptureContext('remote-api-providers:aborted-test')

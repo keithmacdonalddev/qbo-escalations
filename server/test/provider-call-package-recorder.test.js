@@ -44,7 +44,7 @@ test('buildHttpProviderCallPackage builds request, response, timing, and outcome
     method: 'POST',
     baseUrl: 'https://api.moonshot.ai',
     urlPath: '/v1/chat/completions',
-    body: { model: 'kimi-k2.5', messages: [{ role: 'user', content: 'hello' }] },
+    body: { model: 'kimi-k2.6', messages: [{ role: 'user', content: 'hello' }] },
     headers: { Authorization: 'Bearer sk-test' },
     timeoutMs: 1234,
     requestStartedAt: '2026-05-20T12:00:00.000Z',
@@ -60,7 +60,7 @@ test('buildHttpProviderCallPackage builds request, response, timing, and outcome
         functionName: 'requestKimiChat',
         helperName: 'jsonRequestCancelable',
       },
-      modelRequested: 'kimi-k2.5',
+      modelRequested: 'kimi-k2.6',
     },
     response: {
       statusCode: 200,
@@ -68,7 +68,7 @@ test('buildHttpProviderCallPackage builds request, response, timing, and outcome
       httpVersion: '1.1',
       headers: { 'content-type': 'application/json' },
       rawHeaders: ['content-type', 'application/json'],
-      bodyText: '{"model":"kimi-k2.5","choices":[]}',
+      bodyText: '{"model":"kimi-k2.6","choices":[]}',
     },
   });
 
@@ -79,10 +79,10 @@ test('buildHttpProviderCallPackage builds request, response, timing, and outcome
   assert.equal(envelope.operation, 'chat');
   assert.equal(envelope.request.url, 'https://api.moonshot.ai/v1/chat/completions');
   assert.equal(envelope.request.bodyKind, 'json');
-  assert.equal(envelope.request.bodyJson.model, 'kimi-k2.5');
-  assert.equal(envelope.request.modelRequested, 'kimi-k2.5');
+  assert.equal(envelope.request.bodyJson.model, 'kimi-k2.6');
+  assert.equal(envelope.request.modelRequested, 'kimi-k2.6');
   assert.equal(envelope.response.statusCode, 200);
-  assert.equal(envelope.response.parsedJson.model, 'kimi-k2.5');
+  assert.equal(envelope.response.parsedJson.model, 'kimi-k2.6');
   assert.equal(envelope.timing.durationMs, 1250);
   assert.equal(envelope.outcome, 'success');
 });
@@ -95,7 +95,7 @@ test('buildHttpProviderCallPackage emits full response shape for no-response err
     method: 'POST',
     baseUrl: 'https://api.moonshot.ai',
     urlPath: '/v1/chat/completions',
-    body: { model: 'kimi-k2.5' },
+    body: { model: 'kimi-k2.6' },
     headers: { Authorization: 'Bearer sk-test' },
     captureContext: {
       providerId: 'kimi',
@@ -183,7 +183,7 @@ test('recordProviderCallPackage saves redacted package when enabled', async () =
     method: 'POST',
     baseUrl: 'https://api.moonshot.ai',
     urlPath: '/v1/chat/completions',
-    body: { model: 'kimi-k2.5', accessToken: 'secret-token' },
+    body: { model: 'kimi-k2.6', accessToken: 'secret-token' },
     headers: { Authorization: 'Bearer sk-test' },
     captureContext: {
       providerId: 'kimi',

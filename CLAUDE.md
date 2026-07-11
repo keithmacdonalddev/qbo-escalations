@@ -28,6 +28,12 @@ When explaining or building features, separate the user goal, product workflow, 
 - Deliver a complete, polished result—not a bare-minimum or watered-down implementation. Fill obvious gaps and include normal supporting work such as validation, error handling, documentation, and proportionate tests.
 - Critical thinking does not authorize unrelated scope. If filling a gap would materially change product direction, permissions, stored data, cost, or the requested workflow, explain the assumption and ask before proceeding.
 
+## Provider Model Currency
+
+- Use the most recent appropriate release in each provider model line. Do not keep an older model selectable merely because a new release might regress.
+- The deterministic in-app agent harness is the quality authority. Preserve old model results as historical evidence, but use current-model results and continuous monitoring to expose any regression quickly.
+- When a provider releases a replacement, update the catalog, defaults, request compatibility, documentation, and focused tests together.
+
 ## Architecture
 
 ```

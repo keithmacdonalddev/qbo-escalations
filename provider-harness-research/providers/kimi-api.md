@@ -14,7 +14,7 @@
 - Aliases / catalog ids: Single catalog entry `id: "kimi"`, `family: "kimi"`, `transport: "kimi"`. No additional aliases.
 - UI labels: `label: "Kimi API"`, `shortLabel: "Kimi"`. `getRemoteProviderLabel('kimi')` returns `"Moonshot"` (server-side logs/errors).
 - Default model: `kimi-k2.6` (updated 2026-07-10 from K2.5 after verification against Kimi's current API model documentation).
-- Current selectable flagship models: `kimi-k2.7-code`, `kimi-k2.7-code-highspeed`, `kimi-k2.6`, and `kimi-k2.5`. K2.7 Code is coding-focused and always uses thinking mode; the image-parser request builder therefore does not send `thinking: disabled` for K2.7.
+- Current selectable flagship models: `kimi-k2.7-code`, `kimi-k2.7-code-highspeed`, and `kimi-k2.6`. K2.5 may remain in historical test evidence but is not a current choice. K2.7 Code is coding-focused and always uses thinking mode; the image-parser request builder therefore does not send `thinking: disabled` for K2.7.
 - Environment variables:
   - `MOONSHOT_API_KEY` (auth; mapped in `image-parser.js:169` and `remote-api-providers.js:44`).
   - `KIMI_TRANSCRIBE_TIMEOUT_MS` / `MOONSHOT_TRANSCRIBE_TIMEOUT_MS`

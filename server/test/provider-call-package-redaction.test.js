@@ -42,12 +42,12 @@ test('redactProviderCallPackage redacts headers and secret-like body fields with
     request: {
       headers: { Authorization: 'Bearer sk-test' },
       bodyText: JSON.stringify({
-        model: 'kimi-k2.5',
+        model: 'kimi-k2.6',
         messages: [{ role: 'user', content: 'keep prompt text' }],
         accessToken: 'secret-token',
       }),
       bodyJson: {
-        model: 'kimi-k2.5',
+        model: 'kimi-k2.6',
         messages: [{ role: 'user', content: 'keep prompt text' }],
         accessToken: 'secret-token',
         nested: { credential: 'secret-credential' },

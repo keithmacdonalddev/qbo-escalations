@@ -227,7 +227,7 @@ Time: 23:56 AST
 Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
-Special Feature: Agent Action Permissions - Before an agent can change email, calendar, knowledge, or any external system, the app shows and enforces exactly what it may change, which account or items it may touch, how long that permission lasts, and whether it must ask first. Every attempted action is recorded as allowed, blocked, or waiting for confirmation. This creates one clear set of hard safety rules in code instead of relying on instructions written in an AI prompt.
+Special Feature: Agent Action Permissions - **Deferred pending the Workspace keep/remove decision; do not implement against the current inactive Workspace.** If a first-principles Workspace redesign introduces real write actions, the app should show and enforce exactly what an agent may change, which account or items it may touch, how long permission lasts, and whether it must ask first. Every attempted action would then be recorded as allowed, blocked, or waiting for confirmation.
 
 Date: 2026-07-09
 Time: Unknown AST

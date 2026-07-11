@@ -2,7 +2,7 @@
 
 **Project:** `qbo-escalations`
 **Review date:** 2026-07-09
-**Plain-language and model-catalog update:** 2026-07-10
+**Plain-language and model-policy update:** 2026-07-11
 **Scope:** Claude Code and Codex instructions, settings, hooks, skills, custom agents, memory, research documents, runtime provider harnesses, product-agent prompts, model policy, evidence capture, and action safety
 **Purpose:** Provide a reusable review framework for this project and other agentic projects
 
@@ -11,22 +11,22 @@
 This section translates the review's shorthand. The detailed evidence and recommendations remain below it.
 
 1. **P0, P1, and P2 are priority labels, not model names.** `P0` means an urgent safety or trust problem. `P1` means an important reliability problem. `P2` means useful cleanup or maintenance. The number says how soon to address the finding; it does not assign blame.
-2. **“Prompt-led authorization” means the AI is being told in words that it may act, and the server trusts the action it prints.** A server-enforced permission check (technical term: policy gate) is ordinary code that independently decides “allow,” “ask the user,” or “block” before email, calendar, or other data is changed. The project needs one central check instead of relying mainly on prompt wording.
+2. **Workspace action permissions are conditional future work, not a current build priority.** Workspace is inactive, has no connected Google account, and is being reconsidered. If Workspace is removed, delete the action surface. If it is rebuilt, design permissions from first principles when real write actions are introduced.
 3. **`bypassPermissions` means “do not pause to ask before using tools.”** The user confirmed on 2026-07-10 that this is intentional for the current local-development workflow. It remains a known, accepted risk—not an accidental misconfiguration—and this review no longer recommends changing it now.
 4. **“Runtime” means what happens while software is running.** A coding-agent environment is Claude Code or Codex working on the repository. An in-app agent environment is the AI inside this application helping with QBO, email, or calendar. Keeping those environments more separate is a future hardening idea, not a current priority.
 5. **The repeated PM rules are the text printed by `.claude/hooks/pm-rules.sh` and `.codex/hooks/pm-rules.ps1` after every user prompt.** They cover product framing, delegation, verification, service control, tests, commit/push, feature ideas, and communication. The user reports that this repetition fixed serious non-compliance, so the hooks should stay. Cleanup should remove contradictions and stale wording without weakening the repeated enforcement.
 6. **Durable memory means saved notes that remain available in later chats.** The stale Claude memory and worker instructions said to always delegate and never test. Those statements were removed on 2026-07-10. The replacement allows sensible delegation, risk-based testing, and a complete premium outcome without unrelated scope expansion.
-7. **A session is one Claude chat/work period.** Thirty-three historical session files were checked for recognizable credential patterns, removed from Git's current tracking, and retained locally on 2026-07-10. Old Git history still contains earlier copies; removing those would require a separate history rewrite.
-8. **The model catalog really was inconsistent, and the active catalog was corrected on 2026-07-10.** The app now lists the current Claude choices—Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5—and the GPT-5.6 Sol, Terra, and Luna choices. Direct Anthropic requests now receive the selected effort. Gemini's stable default is 3.5 Flash. Kimi now includes K2.7 Code, its faster K2.7 Code Highspeed variant, K2.6, and K2.5. K2.6 remains the QBO app's general-purpose default; the K2.7 choices are coding-focused and always use thinking mode. Gateway stays on automatic routing, and LM Studio uses whichever local model the user has loaded.
+7. **A session is one Claude chat/work period.** Thirty-three historical session files were checked for recognizable credential patterns, removed from current Git tracking, and retained locally. The 2026-07-11 decision is not to rewrite old Git commits: no credential exposure was found, and the disruption of rewriting shared history outweighs the remaining archival risk.
+8. **Use the newest appropriate model release and let the deterministic harness expose regressions.** Do not retain Kimi K2.5 as a selectable fallback. Kimi now offers K2.7 Code, K2.7 Code Highspeed, and K2.6; K2.6 is the current general-purpose line and K2.7 is the coding-focused line. Historical K2.5 test records remain evidence, not a current model choice.
 9. **Claude Code and Codex are current, and the app's Claude Agent SDK has now been upgraded.** Fresh checks on 2026-07-10 found Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`, matching their published package versions at the time of the check.
-10. **Native JSON schemas are for in-app AI replies that must fit an exact data shape.** Imagine the parser returning information to application code, not text for a person to read. A schema lets the app require boxes such as `caseNumber` and `severity` before accepting the reply. It catches missing or wrongly shaped data, but it cannot tell whether the AI read the source correctly. It is not a form the user fills out. This repository already uses Claude CLI's `--json-schema` for escalation parsing, but the protection is not applied consistently across every strict direct-provider and triage path.
-11. **“Agent Action Permissions” is mainly for in-app agents.** It would control whether the AI inside the application may send email, alter calendars, or change stored records. Claude Code and Codex use a separate developer-tool permission system. No physical envelope and no legal contract are involved; “safety contract” was only unclear shorthand for safety rules enforced by application code.
+10. **The deterministic escalation-image harness—not a schema—is the quality authority.** The app saves provider/model/prompt identity, real-image results, operator grades, exact approved baselines, pass rates, latency, and provider evidence. A schema can only reject a wrongly shaped response; it cannot prove transcription accuracy. Add or change schemas only for a demonstrated formatting failure, and treat that change as another harness change that must preserve the required accuracy and speed.
+11. **“Agent Action Permissions” is deferred with Workspace.** Do not build it for the inactive current implementation. It becomes relevant only if the Workspace redesign introduces real write actions such as sending email or changing calendar records.
 
 ## Executive judgment
 
 This repository has a stronger agent foundation than most hobby projects. It has explicit product framing, concurrent-work protections, path-scoped Claude rules, custom agents and skills, provider evidence capture, redaction code, prompt versioning, and focused harness tests.
 
-The main problem is not a lack of agent machinery. It is that the machinery has grown into overlapping control layers that no longer agree. Some instructions are repeated on every turn, some durable memory contradicts current policy, several safety hooks are present but inactive, project-local Claude settings grant broad permission before a fail-open hook tries to take some of it back, and product-agent action authority is still substantially controlled by prompt wording.
+The main problem is not a lack of agent machinery. It is keeping overlapping control layers consistent as the project evolves. The PM-hook repetition and broad local Claude permissions are intentional current choices; stale memory has been corrected. Workspace action authority remains a conditional design concern only if that inactive feature survives its upcoming keep/remove review.
 
 The most important conclusion is:
 
@@ -45,8 +45,16 @@ For the broader operational-intelligence platform, the desired loop is: understa
 | Product-agent prompts               | Uneven                                     | Evidence-aware QBO prompts are good; the workspace action prompt is extremely long and over-authorizes action.                                                     |
 | Provider harnesses                  | Strong observability, incomplete isolation | Capture and provenance are thoughtful, but CLI settings, hidden flags, model drift, schemas, and permission boundaries need work.                                  |
 | Memory                              | Improved; continue curation                | Stale delegation/testing instructions were corrected, and raw Claude session files are no longer tracked in current Git state.                                     |
-| Evaluation                          | Partial                                    | Many useful tests exist, but there is no single cross-model harness evaluation contract or release gate.                                                           |
-| Security and authorization          | Highest-priority gap                       | Prompt-level autonomy exceeds the server-enforced approval model in the workspace action loop.                                                                     |
+| Evaluation                          | Strong for escalation image agents         | The app saves real-image runs, operator-approved baselines, provider/model pass rates, prompt identity, speed, and evidence; other product workflows are less mature. |
+| Security and authorization          | Deferred with Workspace                    | Workspace is inactive and under keep/remove redesign review. Build action permissions only if a new Workspace design introduces real write actions.                  |
+
+### Escalation-image harness authority verified 2026-07-11
+
+The escalation image agents already have the strict evaluation system this review initially described too weakly. The application persists provider, model, prompt identity, real-image fixture, operator pass/fail grade, canonical and semantic checks, exact approved baselines, latency, cost, and provider evidence. The Agents UI reports reliability by provider, model, and fixture, and triage tests use operator-approved parser outputs rather than fake cases.
+
+A read-only database check confirmed the active image parser remains the user-selected `gemini-3.5-flash` with `claude-opus-4-8` fallback. Permanent approved fixture baselines currently include Gemini 3.5 Flash, Kimi K2.5, and GPT-5.5 results. Older-model baselines remain historical evidence; they do not justify retaining an old model as a current choice.
+
+Project policy is therefore: use the newest appropriate model release, require the deterministic response contract at all times, and rely on saved harness evidence plus continuous monitoring to expose a regression immediately. A schema is at most one formatting control inside that larger system.
 
 ## Reasoning-level recommendation for this review
 
@@ -136,7 +144,9 @@ The provider-call package layer records source, call site, requested/effective m
 
 Severity means implementation priority, not blame. `P0` is a safety or trust boundary that should be addressed before increasing autonomy. `P1` materially affects reliability or maintainability. `P2` is important hardening.
 
-### P0-1: Workspace action authorization is prompt-led instead of policy-led
+### Deferred conditional finding: Workspace action authorization is prompt-led
+
+**Decision update, 2026-07-11:** Do not invest in Agent Action Permissions against the current Workspace implementation. Workspace is inactive, has no connected Google account, and may be removed or rebuilt from first principles.
 
 Evidence:
 
@@ -149,9 +159,9 @@ Why it matters:
 
 The model is being asked to interpret ambiguous human language and also decide how much authority that language grants. Prompt injection, mistaken scope, broad searches, or an over-eager newer model can turn a minor preference into bulk external changes.
 
-Recommendation:
+Recommendation if Workspace is retained and rebuilt:
 
-1. Introduce one server-side action-policy service used by every workspace tool call.
+1. Begin the new design read-only and introduce a server-side action-policy service only when real write actions are added.
 2. Classify actions by consequence, reversibility, scope, and audience.
 3. Require an explicit preview and confirmation token for destructive, bulk, external-message, permanent-rule, and calendar-delete actions.
 4. Allow pre-approved low-risk actions only through stored, inspectable policy records—not through a prompt saying “act immediately.”
@@ -263,7 +273,7 @@ Both OpenAI and Anthropic explicitly say durable team rules belong in checked-in
 
 ### Resolved for current Git state P1-3: Historical session memory was tracked despite the ignore rule
 
-**Resolved 2026-07-10:** A targeted scan found no recognizable private-key, API-key, or quoted credential-assignment patterns. The 33 files were removed from Git's current tracking with local copies preserved. Earlier commits still contain the files; no disruptive history rewrite was performed.
+**Resolved 2026-07-10; history decision 2026-07-11:** A targeted scan found no recognizable private-key, API-key, or quoted credential-assignment patterns. The 33 files were removed from Git's current tracking with local copies preserved. Do not rewrite old commits: without a detected secret, the disruption to every checkout outweighs the archival benefit.
 
 The repository previously contained 33 tracked `.claude/memory/sessions/*.md` files totaling about 1.85 MB. They were removed from current Git tracking on 2026-07-10 while local copies were retained under the existing ignore rule.
 
@@ -273,15 +283,15 @@ Risks:
 - Raw observations create noise and stale behavioral cues.
 - “Generated memory” is being mixed with shared project documentation.
 
-Recommendation:
+Completed actions and continuing policy:
 
-1. Run a dedicated secret/PII review before changing history.
-2. Stop tracking the files with `git rm --cached` while retaining any local copies the user wants.
-3. Rotate any exposed credentials before considering history rewriting.
+1. A targeted credential-pattern review was completed; use a deeper scanner only if a concrete privacy concern appears.
+2. The files are no longer tracked, and local copies remain available.
+3. Rewrite history only if a real secret or sensitive record is later discovered; rotate exposed credentials first.
 4. Keep only a small reviewed memory index in version control.
 5. Store raw local sessions outside the repository with retention and deletion controls.
 
-### P1-4: Current model and effort controls are inconsistent across transports
+### P1-4: Current model and effort controls must stay aligned across transports
 
 Status update, 2026-07-10: the immediate catalog and request-building problems in this finding were corrected.
 
@@ -290,7 +300,7 @@ The correction:
 - Adds the current Claude model choices: Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5.
 - Adds GPT-5.6 Sol, Terra, and Luna to both Codex and direct OpenAI model choices while preserving older GPT entries only for compatibility with saved settings.
 - Uses Sonnet 5 for the direct Anthropic default, GPT-5.6 Sol for the Codex CLI default, and Gemini 3.5 Flash for Gemini.
-- Adds Kimi K2.7 Code and K2.7 Code Highspeed, keeps K2.6 as this app's general-purpose default, and retains K2.5 as a previous model. The image parser omits the incompatible “disable thinking” setting for K2.7 because Kimi requires thinking mode for those models.
+- Adds Kimi K2.7 Code and K2.7 Code Highspeed and keeps K2.6 as the current general-purpose default. K2.5 is historical evidence only, not a selectable model. The image parser omits the incompatible “disable thinking” setting for K2.7 because Kimi requires thinking mode for those models.
 - Sends the selected Anthropic effort as `output_config.effort` only when that model accepts the selected level.
 - Adds OpenAI `max`, current Claude `xhigh`/`max`, and Gemini `minimal`/`low`/`medium`/`high` validation where supported.
 - Sends Gemini's current `thinkingLevel` field and removes the no-longer-recommended Gemini 3 sampling setting from the triage request.
@@ -302,7 +312,7 @@ Remaining recommendation:
 
 - Define one model-capability registry used by UI, validation, request builders, tests, and documentation.
 - Store capability by transport and model, not merely provider family.
-- Run representative QBO parsing, triage, workspace, and chat evaluations before changing every saved agent profile to a new model.
+- Move to the newest appropriate release rather than keeping an old version out of fear of regression. Use the deterministic harness and continuous monitoring to surface any real regression quickly.
 - Record requested effort, effective effort, fallback, and model version in the provider evidence package.
 - Fail visibly on unsupported combinations instead of silently substituting when the user expects a particular evaluation.
 
@@ -327,7 +337,9 @@ Ongoing recommendation:
 - Keep focused contract tests around the SDK image-parser path when upgrading.
 - Verify every documented hook field against the minimum supported CLI version.
 
-### P1-6: Product prompts are too large and too negative for current models
+### Deferred with Workspace P1-6: The current Workspace prompt is too large and too negative
+
+Do not refactor this prompt while Workspace may be removed. Use this finding only as an input if a first-principles replacement is approved.
 
 `workspace-action.md` contains about 41 all-caps steering words and roughly 58 negative “do not/never” rules. It repeats tool descriptions, authorization behavior, memory policy, operational examples, and safety guidance. The active prompt is about 33 KB.
 
@@ -343,7 +355,7 @@ Recommendation:
 
 Claude Sonnet 5 guidance specifically favors positive examples over long negative steering for style and advises raising effort rather than prompting around under-thinking. See [Prompting Claude Sonnet 5](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5).
 
-### P1-7: Structured-output capabilities are underused
+### Conditional P1-7: Structured output may help specific demonstrated formatting failures
 
 Extraction and triage prompts often request exact JSON or labeled output, but the CLI harnesses do not consistently use the supported schema flags:
 
@@ -353,10 +365,10 @@ Extraction and triage prompts often request exact JSON or labeled output, but th
 
 Recommendation:
 
-- Use native schemas for strict parsers, classification, triage, known-issue matching, and tool-call envelopes.
+- Do not add schemas merely because they are a general best practice. Use one only when a measured formatting failure justifies it.
 - Keep semantic validation after schema validation; a syntactically valid answer can still be factually wrong.
 - Version schemas with prompts and store the schema version in evidence packages.
-- Keep a repair pass only for recoverable formatting failures, not as a substitute for a contract.
+- Re-run the deterministic image-agent harness after any schema change; accuracy and speed must not regress.
 
 ### P1-8: Evidence capture needs a stricter privacy and reasoning policy
 
@@ -451,11 +463,11 @@ Sources: [AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-m
 | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
 | Keep `CLAUDE.md` concise, specific, consistent, and generally under 200 lines.   | 109 lines, but duplicated by prompt hooks and memory.                                      | Make it a thin Claude-specific layer over shared guidance.  |
 | Use `.claude/rules` for path-specific instructions.                              | Correctly implemented.                                                                     | Preserve and add only proven rules.                         |
-| `.claude/settings.local.json` is personal and normally ignored.                  | Tracked with broad permission rules.                                                       | Split shared and personal settings; untrack local settings. |
+| `.claude/settings.local.json` is personal and normally ignored.                  | Tracked with broad permission rules by intentional user choice.                            | Preserve for now; revisit before hosted or multi-user use.  |
 | Use skills for on-demand workflows and agents for isolated roles.                | Three of each, generally well-structured.                                                  | Shorten bodies, constrain tools, fix contradictions.        |
 | Agent teams are experimental, expensive, and best for independent parallel work. | Experimental flag is enabled in tracked project-local settings; PM rules default to teams. | Make opt-in and personal; use subagents first.              |
 | Verification is the single highest-leverage practice.                            | Strong in root rules and review skill; worker forbids tests.                               | Let workers verify and require evidence before completion.  |
-| Permissions plus sandboxing provide defense in depth.                            | Default bypass permissions, some fail-open hook enforcement.                               | Reverse the default.                                        |
+| Permissions plus sandboxing provide defense in depth.                            | Default bypass permissions is an accepted local-development choice.                        | Preserve for now and keep deterministic guards visible.     |
 | Current models use adaptive reasoning and effort controls.                       | Partial current-model support and inconsistent transport handling.                         | Centralize capability data and evaluate by role.            |
 
 Sources: [Claude memory and instructions](https://code.claude.com/docs/en/memory), [Custom subagents](https://code.claude.com/docs/en/sub-agents), [Skills](https://code.claude.com/docs/en/slash-commands), [Hooks](https://code.claude.com/docs/en/hooks), [Agent teams](https://code.claude.com/docs/en/agent-teams), [Permissions](https://code.claude.com/docs/en/permissions), and [Claude Code power-user tips](https://support.claude.com/en/articles/14554000-claude-code-power-user-tips).
@@ -544,8 +556,8 @@ docs/agent-harness/snapshots/          Dated research snapshots, never operating
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | `AGENTS.md`                                 | Remove the “Codex only” framing. Make it the shared contract: product hierarchy, concurrency, runtime ownership, key commands, verification, and scope boundaries. Remove facts easily discoverable from package files. | Claude imports it; Codex reads it directly; no conflicting shared rule remains.             |
 | `CLAUDE.md`                                 | Start with `@AGENTS.md`. Keep only Claude-specific rules, source routing, and links to path rules. Move detailed architecture to normal docs.                                                                           | Under roughly 60–100 focused lines after the import; `/memory` shows expected sources.      |
-| `.claude/settings.json`                     | Add shareable safe hooks, permission denies, and sandbox policy.                                                                                                                                                        | Fresh Claude session shows the settings and hooks as trusted/active.                        |
-| `.claude/settings.local.json`               | Untrack; keep only personal model/UI preferences and narrowly approved local permissions.                                                                                                                               | `git ls-files` no longer returns it; `.gitignore` covers it.                                |
+| `.claude/settings.json`                     | Keep shareable hooks and deterministic protections documented.                                                                                                                                                          | Fresh Claude session shows the intended hooks as trusted/active.                            |
+| `.claude/settings.local.json`               | Preserve the intentional broad local permission choice for now.                                                                                                                                                         | Revisit before hosted or multi-user deployment, not during normal local cleanup.            |
 | `.claude/rules/*.md`                        | Preserve; reconcile the server rule that says no API keys in server code with the actual direct-provider API architecture.                                                                                              | Rules describe the real architecture and do not contradict root docs.                       |
 | `.claude/agents/worker.md`                  | Remove “never test” and “exceed intent”; add bounded scope, focused verification, and conflict handling.                                                                                                                | Worker can meet a task's acceptance criteria without expanding scope.                       |
 | `.claude/agents/researcher.md`              | Replace “include unreliable sources anyway” and “every detail” with a source hierarchy, evidence table, and bounded output.                                                                                             | Official and primary sources are clearly separated from practitioner opinion.               |
@@ -559,7 +571,7 @@ docs/agent-harness/snapshots/          Dated research snapshots, never operating
 | `prompts/agents`                            | Add a small contract header: mission, evidence inputs, authority, output schema, refusal/escalation, validation. Reduce accumulated negative rules.                                                                     | Each prompt has a named owner, version, eval set, and allowed action class.                 |
 | `workspace-action.md`                       | Replace prompt-granted authority with policy references; delete broad “act on all” and silent-rule examples.                                                                                                            | Model cannot execute a high-impact action without a server-issued authorization token.      |
 | `server/src/routes/workspace/ai.js`         | Remove dead embedded prompt constant after confirming no consumer.                                                                                                                                                      | One live source of truth for workspace role instructions.                                   |
-| Provider catalog                            | Add current models only through a capability registry and evaluation result.                                                                                                                                            | UI, validators, request bodies, and evidence agree on supported effort/features.            |
+| Provider catalog                            | Move to the newest appropriate model line, remove superseded choices, and update capability metadata and request compatibility together.                                                                                 | UI, validators, request bodies, evidence, and current vendor support agree.                  |
 | Provider harness docs                       | Clearly mark CLI transports local-only and APIs/gateway web-deployable.                                                                                                                                                 | Deployment check fails visibly when a local-only transport is selected in web mode.         |
 
 ## Evaluation and release gates
@@ -568,7 +580,7 @@ Model and prompt changes should be treated like code changes.
 
 ### Minimum evaluation sets
 
-1. **Strict transcription:** fixed screenshot corpus, byte-level field comparison, ambiguity cases, corrupted/low-resolution images.
+1. **Strict transcription:** the existing saved escalation-image harness with real fixtures, operator-approved outputs, provider/model pass rates, exact comparisons, latency, and continuous monitoring.
 2. **Triage:** known categories, severity boundary cases, missing deadlines, misleading INV candidates, unsafe next steps.
 3. **Known-issue match:** positive, negative, and near-match cases with evidence-for/evidence-against grading.
 4. **Knowledge draft:** proven versus unknown cause, draft/published policy boundaries, redaction, contradiction handling.
@@ -590,7 +602,7 @@ Model and prompt changes should be treated like code changes.
 
 ### Release rule
 
-No model alias, effort default, prompt, tool permission, or fallback change should become the default solely because it is newer. It must meet or beat the current baseline on the relevant evaluation set and preserve all safety gates.
+Use the newest appropriate provider model rather than retaining an older version in anticipation of regression. Run the deterministic harness immediately after the change and continue monitoring. A measured failure must be visible and acted on quickly; vendor recency never relaxes the zero-error agent contract.
 
 ## Practitioner guidance: what to adopt and what to treat cautiously
 
@@ -633,8 +645,8 @@ Use this sequence when creating or repairing any agent harness:
 
 ### Phase 0: Stop authority drift
 
-1. Add a server-side action policy and exact approval tokens to the workspace action loop.
-2. Remove prompt language that creates silent or broad authority.
+1. **Deferred pending product decision:** remove Workspace completely or redesign it from first principles.
+2. If retained, begin read-only and add server-enforced action permissions only when the new design introduces write actions.
 3. **Accepted for now:** retain Claude `bypassPermissions` for the current local workflow; revisit before hosted or multi-user deployment.
 4. **Deferred:** isolate Codex product CLI calls and make both CLI transports ephemeral and least-privileged before broader in-app autonomy or hosted deployment.
 
@@ -650,15 +662,15 @@ Use this sequence when creating or repairing any agent harness:
 
 1. **Completed 2026-07-10:** add GPT-5.6 Sol/Terra/Luna, Claude Fable 5, and Claude Sonnet 5 to the relevant choices without rewriting every saved agent profile.
 2. **Completed 2026-07-10:** add Anthropic `output_config.effort`, GPT-5.6 `max`, and Gemini 3 thinking-level support where accepted.
-3. Run representative workflow evaluations before broader default/profile migrations.
-4. Add structured-output schemas.
+3. Move active model lines to current releases and run the existing deterministic harness immediately after each change.
+4. Add structured-output schemas only for a demonstrated formatting failure and re-run the same harness afterward.
 5. **Completed 2026-07-10:** update Claude Code and the Agent SDK to `2.1.206` and `0.3.206`, respectively, with focused compatibility checks.
 6. Remove the hidden thinking flag dependency or isolate it behind a tested compatibility adapter.
 
 ### Phase 3: Create a maintained harness discipline
 
 1. Add the proposed `docs/agent-harness` set.
-2. Build cross-model evaluations and release gates.
+2. Preserve the existing escalation-image evaluation gate and build equivalent evidence only for product workflows that do not yet have it.
 3. Add hook and skill fixtures.
 4. Add privacy/retention enforcement for provider payloads and product memory.
 5. Add at most two bounded Codex agent roles and recalibrate Claude roles.
@@ -673,6 +685,7 @@ Use this sequence when creating or repairing any agent harness:
 - Verified current published package versions using the package registry.
 - Rechecked versions on 2026-07-10: Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`.
 - Checked 33 historical Claude session files for recognizable credential patterns, stopped tracking them, and confirmed all 33 local copies remain.
+- Performed a read-only 2026-07-11 database check of the active image-parser runtime and permanent approved fixture baselines; no provider request was made.
 - Compared the repository with current official OpenAI and Anthropic documentation retrieved on 2026-07-09.
 - Reviewed practitioner sources from OpenAI, Anthropic, HumanLayer, Addy Osmani, and Simon Willison, plus one recent preprint.
 
@@ -680,8 +693,8 @@ Use this sequence when creating or repairing any agent harness:
 
 - Current vendor documentation changes rapidly. Every model/version claim in this report is dated 2026-07-09 and should be refreshed before implementation.
 - This was a documentation and code-path review. It did not invoke live provider models, mutate email/calendar data, or test production credentials.
-- A full credential/PII history audit still requires a dedicated scanner and a careful rotation/history-rewrite plan. The 2026-07-10 cleanup used targeted content-pattern checks but did not rewrite old Git history.
-- Model recommendations are starting hypotheses until this project's own evaluation sets produce results.
+- A full credential/PII history audit would require a dedicated scanner. The targeted scan found no reason to accept the disruption of rewriting old Git history; revisit only if a concrete sensitive record is discovered.
+- Current-model behavior is governed by the application's saved deterministic harness evidence and continuous monitoring, not by vendor claims or this report alone.
 
 ## Primary source list
 
@@ -724,7 +737,7 @@ Use this sequence when creating or repairing any agent harness:
 
 ## Final recommendation
 
-Preserve the PM hooks because they have delivered a clear behavior improvement. Future instruction work should keep those guardrails while removing contradictions and testing wording changes before adopting them. The next high-value product investment remains server-enforced permissions for in-app agents; model capability metadata and evaluation gates follow, while coding-agent/in-app-agent isolation can wait until hosted deployment or broader autonomy makes it more important.
+Preserve the PM hooks and keep their duplicated rules aligned because they have delivered a clear behavior improvement. Treat the deterministic escalation-image harness as the authority for accuracy, speed, and model behavior while moving to current provider releases. Do not invest in the inactive Workspace or Agent Action Permissions until the keep/remove redesign decision is made; if Workspace survives, rebuild its action safety from first principles.
 
 ---
 
@@ -759,7 +772,7 @@ other information is changed, ordinary server code should independently decide:
 That central permission check is what I previously called a “policy gate.” The plain name is a server-
 enforced permission check.
 
-This underlying problem is documented but not yet fixed.
+This is intentionally deferred because Workspace is inactive and may be removed. Build the protection only as part of an approved first-principles replacement that includes real write actions.
 
 3. Claude settings enable bypassPermissions
 
@@ -879,7 +892,7 @@ The app now includes:
 - Gemini 3.1 Flash-Lite
 - Gemini 3.1 Pro Preview
 - Kimi K2.7 Code and K2.7 Code Highspeed for coding-focused work
-- Kimi K2.6 as the general-purpose default, with K2.5 retained as a previous selectable model
+- Kimi K2.6 as the current general-purpose default; K2.5 remains only in historical test evidence
 - LLM Gateway automatic routing
 - LM Studio’s currently loaded local model
 
@@ -950,8 +963,8 @@ guessing what the AI meant.
 
 This does **not** prove that the value is factually correct. It only proves that the reply has the required
 shape. It applies to in-app parsing and triage responses, not to normal chat answers and not to forms the user
-must complete. The Claude CLI escalation parser already uses a schema. The recommendation is to apply the same
-protection consistently to other strict direct-provider and triage paths.
+must complete. The Claude CLI escalation parser already uses a schema. Do not expand schema use without a
+demonstrated formatting failure; any change must preserve the deterministic harness's required accuracy and speed.
 
 11. “Action authority envelopes” and “safety contract”
 
@@ -971,7 +984,7 @@ It means the application would show and enforce:
 “Safety contract” meant hard safety rules enforced by code. I replaced that phrase with “hard safety rules
 in code.”
 
-The feature entry has been renamed, but the actual central permission system has not yet been built.
+The feature is deferred. Do not build it against the current inactive Workspace. If Workspace is removed, delete the action surface; if Workspace is redesigned with write actions, design permissions as part of that new foundation.
 
 ## What changed
 
@@ -980,7 +993,8 @@ The feature entry has been renamed, but the actual central permission system has
 - Corrected stale Claude project memory and worker testing/delegation rules.
 - Added plain-language reporting requirements to Claude's worker, researcher, reviewer, root instructions, and active hook.
 - Stopped tracking 33 historical Claude session files while preserving all local copies.
-- Added Kimi K2.7 Code, K2.7 Code Highspeed, and K2.6; retained K2.5 as a previous option and handled K2.7's mandatory thinking mode.
+- Added Kimi K2.7 Code, K2.7 Code Highspeed, and K2.6; removed K2.5 from current choices while preserving historical test evidence, and handled K2.7's mandatory thinking mode.
 - Confirmed Claude Code and Codex are current, upgraded the Claude Agent SDK to `0.3.206`, and applied non-breaking dependency security patches until `npm audit` reported zero known vulnerabilities.
+- Repaired the formerly hanging `image-parser-deep.test.js` network mocks, added required temporary evidence-database setup and cleanup, and updated stale current-contract expectations. The full combined parser verification now exits normally with 225 passing tests.
 
 ---

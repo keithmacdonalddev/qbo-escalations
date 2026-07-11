@@ -56,7 +56,7 @@ test('externalizeProviderCallPackagePayloads writes large payloads to sidecar st
 
 test('externalizeProviderCallPackagePayloads does not duplicate equivalent large request body JSON', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'provider-call-packages-'));
-  const bodyJson = { model: 'kimi-k2.5', image: 'x'.repeat(64) };
+  const bodyJson = { model: 'kimi-k2.6', image: 'x'.repeat(64) };
   const bodyText = JSON.stringify(bodyJson);
   const envelope = {
     request: {

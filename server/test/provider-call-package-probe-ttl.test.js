@@ -44,7 +44,7 @@ function buildChatEnvelope() {
     method: 'POST',
     baseUrl: 'https://api.moonshot.ai',
     urlPath: '/v1/chat/completions',
-    body: { model: 'kimi-k2.5', messages: [{ role: 'user', content: 'hello' }] },
+    body: { model: 'kimi-k2.6', messages: [{ role: 'user', content: 'hello' }] },
     captureContext: {
       providerId: 'kimi',
       providerResearchId: 'kimi-api',
