@@ -97,6 +97,7 @@ function createApp() {
   app.use('/api/live-call-assist', require('./routes/live-call-assist'));
   app.use('/api/test-runner', require('./routes/test-runner'));
   app.use('/api/rooms', require('./routes/room'));
+  app.use('/api/ticket-snitch', require('./routes/ticket-snitch'));
 
   // Catch-all for unmatched /api routes. Without this, an unknown /api path falls
   // through to Express's default finalizer and returns an HTML 404, which breaks
