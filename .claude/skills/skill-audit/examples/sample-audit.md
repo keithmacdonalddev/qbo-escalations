@@ -43,12 +43,12 @@ First-review average: 5.8 | Latest-review average: 7.2 | Delta: +1.4.
 
 Error-message specificity was first flagged in `cto-review-email-change-flow-2026-01-22-1045.md` (finding F1, High) and again in reviews of six other features across three months.
 
-Plans written AFTER these reviews (notification-prefs, bulk-user-import v1) do not mention error-message specificity in their "exceeds bar" section. The implementation-plan skill's Step 2 is reading `temp-reviews/` but not surfacing this pattern effectively during the planning dialogue.
+Plans written AFTER these reviews (notification-prefs, bulk-user-import v1) do not mention error-message specificity in their "complete outcome and polish" section. The implementation-plan skill's Step 2 is reading `temp-reviews/` but not surfacing this pattern effectively during the planning dialogue.
 
 Evidence:
 - `temp-reviews/cto-review-password-reset-2026-02-03-1122.md` finding F2: generic "something went wrong" across all failure modes.
 - `temp-reviews/cto-review-two-factor-auth-2026-02-15-0945.md` finding F1: errors don't distinguish token expired from invalid.
-- `.claude/plans/bulk-user-import.md` written 2026-03-10 after both above. "Exceeds bar" reads: "Good UX on errors, loading states, accessibility." No concrete items.
+- `.claude/plans/bulk-user-import.md` written 2026-03-10 after both above. "Complete outcome and polish" reads: "Good UX on errors, loading states, accessibility." No concrete items.
 
 ### Finding specificity — **drifting**
 
@@ -161,12 +161,12 @@ User reviews these and either accepts (rule gets added to checklist with its ID 
 
 **Effort:** Small.
 
-### 2. HIGH (corpus) — Add recurring categories to default exceeds-bar prompts
+### 2. HIGH (corpus) — Add recurring categories to default completeness prompts
 
 **Evidence:** See recommendation 1.
 
 **Proposed edit:**
-- File: `implementation-plan/SKILL.md`, Step 3 "Exceeds bar" dialogue.
+- File: `implementation-plan/SKILL.md`, Step 3 "Complete outcome and polish" dialogue.
 - Add default prompts about error messages and audit-log failure handling.
 
 **Effort:** Small.

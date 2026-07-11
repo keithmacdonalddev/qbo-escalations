@@ -2,6 +2,8 @@
 name: worker
 description: Implementation agent for QBO Escalations. Handles feature development, bug fixes, and code changes across server and client. Use for any task that requires modifying files. Also handles browser automation tasks using agent-browser for UI testing, screenshots, and interaction.
 model: inherit
+skills:
+  - qbo-escalations-project
 memory: project
 ---
 

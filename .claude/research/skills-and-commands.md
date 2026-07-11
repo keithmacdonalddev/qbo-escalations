@@ -1,3 +1,11 @@
+---
+status: historical-snapshot
+retrieved_at: 2026-02-28
+authority: none; use current official skill documentation
+---
+
+> Historical research snapshot. Re-verify security, feature, version, and ecosystem claims before use.
+
 # Claude Code Skills: Complete Research Reference
 
 > **2800+ lines** | 54 sections | Sources: Official Anthropic docs, API platform docs, engineering blog, 5 security audits (Snyk ToxicSkills, Flatt Security CVE-2025-66032, Cato Networks incident, CVE-2025-59536/CVE-2026-21852/CVE-2026-24887), 15+ production repos, 3 academic papers, 30+ GitHub issues (area:skills), social media (HN/X/Reddit/Medium), and hands-on experimentation.

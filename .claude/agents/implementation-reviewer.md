@@ -2,7 +2,9 @@
 name: implementation-reviewer
 description: Senior implementation reviewer that cross-references frontend and backend code to catch contract mismatches, error path conflation, data shape bugs, and state lifecycle issues. Use after implementation work to verify correctness before commit.
 model: inherit
-disallowedTools: Write, Edit
+disallowedTools: Write, Edit, MultiEdit
+skills:
+  - qbo-escalations-project
 memory: project
 ---
 

@@ -1,6 +1,6 @@
 # Plan schema
 
-Every plan produced by this skill follows this structure. The schema is the contract between planning and review: the cto-review skill expects these sections in roughly this shape.
+Every plan produced by this skill follows this structure. This is the shared checklist format used by planning and review.
 
 ## Required sections
 
@@ -53,9 +53,9 @@ At least three. Each should include:
 - **What happens if it does** — user impact, data impact, security impact.
 - **How the implementation will handle it** — the plan's response.
 
-### 6. Exceeds bar
+### 6. Complete outcome and polish
 
-What would make this implementation exceed, not just meet, the ask?
+What obvious supporting behavior makes the implementation complete and polished without adding unrelated scope?
 
 Concrete examples:
 
@@ -64,7 +64,7 @@ Concrete examples:
 - Structured logging with correlation IDs threaded through the request.
 - Code organized to make the next related feature easier to add.
 
-This section feeds directly into the cto-review skill's Exceeds Expectations assessment.
+This section feeds directly into the cto-review skill's practical-completeness assessment.
 
 ## Optional sections
 

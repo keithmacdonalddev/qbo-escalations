@@ -91,7 +91,7 @@ User submits new email in Settings form
 *What happens:* User clicks a link after 1 hour, or a token that was already consumed.
 *How we handle it:* Confirm handler returns distinct error codes — `TOKEN_EXPIRED`, `TOKEN_USED`, `TOKEN_INVALID` — each mapped to a specific user-facing message per acceptance criterion 8.
 
-## 6. Exceeds bar
+## 6. Complete outcome and polish
 
 - Every backend error code maps to a specific, actionable user-facing message. No generic "something went wrong." Users with expired tokens see "This confirmation link has expired. Please request a new email change from Settings."
 - Settings page shows pending email change state with a "cancel" action. Users can see and abort a request in flight.

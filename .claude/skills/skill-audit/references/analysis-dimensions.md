@@ -1,5 +1,18 @@
 # Analysis dimensions
 
+## Contents
+
+- A. Finding specificity
+- B. Severity calibration
+- C. Finding recurrence across features
+- D. Feedback-loop health
+- E. Plan-schema coverage
+- F. Plan-version trajectory
+- G. Review trajectory within a feature
+- H. Plan-to-review match
+- I. Iteration cost
+- Applying these dimensions
+
 The specific things the audit looks for. Each dimension has: what to measure, what signal it produces, and what kind of recommendation it might generate.
 
 ## A. Finding specificity (cto-review quality)
@@ -23,8 +36,8 @@ The specific things the audit looks for. Each dimension has: what to measure, wh
 **Signal:**
 - Findings cluster at MEDIUM with few HIGH/CRITICAL = underrating bias despite the calibration check.
 - Scores cluster at 5-7 = regression to mean; the rubric isn't producing real discrimination.
-- Intent gate never triggers across many features = too soft.
-- Intent gate triggers every time = too harsh, or the "exceeds bar" threshold is unrealistic.
+- Completeness cap never triggers across many incomplete features = too soft.
+- Completeness cap triggers every time = too harsh or based on subjective extras rather than clear practical gaps.
 
 **Recommendation pattern:** Tighten or loosen the calibration section. Adjust wording of the "QA can reproduce in 60 seconds" test if it's being ignored.
 
@@ -52,7 +65,7 @@ The specific things the audit looks for. Each dimension has: what to measure, wh
 
 Thin indicators:
 - "Risks" with only 1-2 items (schema expects at least 3).
-- "Exceeds bar" with generic items ("handle errors well", "make it fast") rather than concrete ones.
+- "Complete outcome and polish" with generic items ("handle errors well", "make it fast") rather than concrete ones.
 - "Out of scope" empty or trivial.
 - "Deferred" never used (users don't think in terms of deferrals).
 
@@ -65,7 +78,7 @@ Thin indicators:
 **What to measure:** For features with multiple plan versions, compare v1 vs latest.
 
 **Signal:**
-- Later versions have more acceptance criteria, more risks, more concrete exceeds-bar items = dialogue helps on iteration.
+- Later versions have more acceptance criteria, more risks, and more concrete completeness items = dialogue helps on iteration.
 - Later versions identical to earlier (just timestamped) = dialogue not adding value on iteration.
 - Specific categories of content consistently added in v2 that should have been in v1 = systematic blind spot.
 

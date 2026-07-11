@@ -4,6 +4,8 @@
 
 ## Project Agent Rules
 
+The complete coding-agent layer map, memory boundaries, active hooks, and skill catalog are documented in `AGENT_HARNESS.md` and `docs/agent-harness/`.
+
 The user is a self-taught / solo hobbyist developer. Explain clearly, warn about risks, suggest next steps.
 
 ### Plain-Language Communication

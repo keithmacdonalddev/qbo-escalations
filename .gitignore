@@ -9,6 +9,8 @@ server/uploads/
 server/data/
 tmp/
 .claude/memory/sessions/
+.claude/memory/.consolidation-*
+.claude/memory/.memory-agent.pid
 .playwright-mcp/
 server/.playwright-mcp/
 review-screenshots/

@@ -9,7 +9,7 @@ This is a reference example showing the expected structure, tone, and depth of a
 - **Gate Decision: FAIL** — 1 Critical, 4 High findings unresolved. **Do not ship.**
 - **Overall score:** 4/10 (minimum of section scores; intent gate also fails but minimum dominates)
 - **Findings:** Critical: 1 | High: 4 | Medium: 2 | Low: 1
-- **Intent Gate:** FAIL — implementation does not exceed user intent (score would be capped at 7 regardless)
+- **Completeness:** FAIL — clear security and workflow requirements are missing (score capped at 7)
 - **Next step:** Address the 5 non-negotiable items in section 10, then re-run `/cto-review email-change-flow`. A new timestamped report will generate; the gate will re-evaluate against the fresh state.
 
 ## 2. Scope
@@ -165,19 +165,19 @@ No findings.
 - Reproduction: Create user, request email change to `foo@example.com`, delete account. Attempt to register new user with email `foo@example.com` after uniqueness fix is applied. Potential conflict.
 - Fix: Clear pending fields on account deletion, or scope the uniqueness index to active users only.
 
-## 6. Exceeds Expectations Assessment
+## 6. Practical Completeness And Polish Assessment
 
 1. Would a senior engineer be impressed by this code? **No.** The happy path works but security, error handling, and plan fidelity are all below the bar.
 2. Are error messages actionable? **No.** Single generic message for every failure mode.
 3. Is defensive programming comprehensive? **No.** No race-condition handling, no audit rollback, no token invalidation.
 4. Does the architecture make future changes easier? **Neutral.** The service extraction is fine. The single-field token storage on User will hurt when adding other verification flows.
-5. If shown to the user right now, would they say "this exceeds what I asked for"? **No.** The plan was followed partially, and a critical security hole was introduced.
+5. Would this feel complete, polished, and ready for the intended workflow? **No.** The plan was followed partially, and a critical security hole was introduced.
 
-**Intent gate: FAIL.** Score would be capped at 7 regardless of section scores. Actual minimum is 4.
+**Completeness: FAIL.** Clear planned and safety-critical behavior is missing, so the score is capped at 7. Actual minimum is 4.
 
-## 7. Recommendations to Exceed Intent
+## 7. Recommendations For A Complete Premium Outcome
 
-| Gap | Current | Exceeding | Recommendation | Effort |
+| Gap | Current | Complete outcome | Recommendation | Effort |
 | --- | ------- | --------- | -------------- | ------ |
 | Single error message for all failure modes | "Something went wrong" | Each error code maps to a specific, actionable user message | Use existing error codes; add a `errorMessages.js` map on the client | 1 hour |
 | Pending change state tied to a single User field | `pendingToken` on User | Child collection `pending_email_changes` with created/expired/used lifecycle | Refactor now; reuse for future verification flows (phone, 2FA reset) | 4 hours |

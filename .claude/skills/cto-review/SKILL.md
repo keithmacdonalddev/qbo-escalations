@@ -1,13 +1,13 @@
 ---
 name: cto-review
-description: Single-pass CTO production gate review of implemented features. Audits code for correctness, risk, plan fidelity, and whether the implementation exceeds user intent. Use when reviewing implemented code before shipping, running a production approval gate, or auditing a feature after implementation.
+description: Single-pass CTO production-readiness review of implemented features. Audits correctness, risk, plan fidelity, and whether the result delivers the complete practical outcome without unrelated scope. Use before shipping or when auditing an implementation.
 argument-hint: '[plan-path-or-feature-name]'
 allowed-tools: Read, Grep, Glob, Bash, Write
 context: fork
 agent: general-purpose
 ---
 
-<!-- Version: 0.6 — last edited 2026-06-09 -->
+<!-- Version: 0.7 — last edited 2026-07-11 -->
 
 # CTO Production Gate Review
 
@@ -15,7 +15,7 @@ Risk-focused audit of an implemented feature. No praise, no filler. Evaluate onl
 
 **This is a production blocker gate.** The review returns a binary Gate Decision — PASS or FAIL — alongside the scored analysis. A FAIL verdict means the feature has unresolved Critical or High findings and should not ship until they are addressed. The user can knowingly override a FAIL decision, but the purpose of the gate is to make that choice explicit rather than implicit.
 
-The primary evaluation standard remains: **does this implementation exceed user intent?** Technical correctness is necessary but not sufficient. Code that "works" but does not exceed what the user envisioned is a finding.
+The primary evaluation standard is: **does this implementation deliver the complete practical outcome behind the request?** Technical correctness is necessary but not sufficient. A technically minimal result is a finding when it omits an obvious user-facing requirement, safety need, recovery path, or acceptance criterion. Do not demand unrelated features or a materially different product decision.
 
 If repository policy in `CLAUDE.md` or `.claude/rules/` conflicts with this skill, follow repository policy.
 
@@ -127,7 +127,7 @@ If the complete execution path cannot be traced, downgrade from HIGH/CRITICAL to
 
 **Severity calibration:** Before marking any finding MEDIUM, answer: "Can a QA engineer reproduce this in under 60 seconds?" If yes, it is HIGH, not MEDIUM.
 
-## Step 7: Exceeds expectations assessment
+## Step 7: Practical completeness and polish assessment
 
 This is the primary evaluation criterion, not an optional section.
 
@@ -137,25 +137,25 @@ Answer:
 2. Are error messages actionable? Would a user know what went wrong and what to do?
 3. Is defensive programming comprehensive — every edge case, not just the happy path?
 4. Does the architecture make future changes easier, not harder?
-5. If you showed this to the user right now, would they say "this exceeds what I asked for"?
+5. If you showed this to the user right now, would the result feel complete, polished, and ready for its intended workflow?
 
-If the answer to #5 is "no," that is a HIGH-severity finding, regardless of technical correctness.
+If the answer to #5 is "no," identify the specific missing behavior. Assign severity from its actual user or safety impact; do not create a High finding solely from a subjective feeling.
 
-**What "exceeds" means:**
+**What complete and polished means:**
 
 - Error messages that tell users what to do, not just what went wrong.
 - Edge cases handled that the plan did not mention but a user would hit.
 - Code structured so the next feature is easier to add.
 - Loading, empty, and error states all handled gracefully.
 
-Include a "Recommendations to Exceed Intent" table in the report:
+Include a "Recommendations for a Complete Premium Outcome" table in the report:
 
-| Gap | Current | Exceeding | Recommendation | Effort |
+| Gap | Current | Complete outcome | Recommendation | Effort |
 | --- | ------- | --------- | -------------- | ------ |
 
 ## Step 8: Self-check before writing the report
 
-Before writing, confirm the report satisfies the contract: every finding carries `file:line`, a reproduction scenario, and a code-level fix; the cross-boundary trace is documented; the Plan Fidelity table covers every plan item; all eight framework sections are addressed; the overall score is the minimum of the section scores; and the intent gate is applied. Fix any gap before writing.
+Before writing, confirm the report satisfies these review requirements: every finding carries `file:line`, a reproduction scenario, and a code-level fix; the cross-boundary trace is documented; the Plan Fidelity table covers every plan item; all framework sections are addressed; the overall score is the minimum of the section scores; and the completeness check is applied. Fix any gap before writing.
 
 ## Step 9: Gate Decision, score, and write the report
 
@@ -176,14 +176,14 @@ Score each framework section 1–10. The **overall score is the minimum** of all
 
 | Score | Meaning                                                         |
 | ----- | --------------------------------------------------------------- |
-| 10    | No findings above Medium. Exceeds user intent and expectations. |
+| 10    | No findings above Medium. Complete, polished, and ready.        |
 | 8–9   | High findings with clear fixes, no Criticals.                   |
 | 6–7   | Criticals exist but contained to this feature.                  |
 | 4–5   | Multiple Criticals or architectural issues. Targeted rework.    |
 | 2–3   | Fundamental design flaws. Significant rethinking needed.        |
 | 1     | Non-functional or dangerous. Full rewrite.                      |
 
-**Intent gate:** If the exceeds-expectations assessment concludes the implementation does not exceed user intent, the overall score cannot exceed 7. (This is separate from and does not override the Gate Decision — a score can be capped at 7 while still passing the gate, if no Critical/High findings exist.)
+**Completeness check:** If a clear acceptance criterion or obvious practical requirement is missing, the overall score cannot exceed 7. A purely subjective desire for extra features does not trigger this cap.
 
 ### Write the report
 
@@ -203,13 +203,13 @@ The timestamp preserves history across re-reviews of the same feature — critic
 
 Report structure (mirrors `examples/sample-review.md`):
 
-1. Summary — **Gate Decision (PASS/FAIL)** prominently, score, finding counts, intent gate result, next step.
+1. Summary — **Gate Decision (PASS/FAIL)** prominently, score, finding counts, completeness result, next step.
 2. Scope — files reviewed, planned vs unplanned.
 3. Plan Fidelity table.
 4. Cross-boundary data flow trace.
 5. Findings by framework section.
-6. Exceeds expectations assessment.
-7. Recommendations to exceed intent.
+6. Practical completeness and polish assessment.
+7. Recommendations for a complete premium outcome.
 8. What breaks first — most likely production failure mode.
 9. Production verdict.
 10. Non-negotiable fixes — all Critical and High findings as an action list.
@@ -222,7 +222,7 @@ Report structure (mirrors `examples/sample-review.md`):
 CTO Review: <feature name> — PASS ✓
 Score: <n>/10
 Critical: 0 | High: 0 | Medium: <n> | Low: <n>
-Intent Gate: <PASS | CAPPED AT 7>
+Completeness: <PASS | CAPPED AT 7>
 Report: temp-reviews/cto-review-<feature-slug>-<timestamp>.md
 
 Ready to ship.
@@ -277,7 +277,7 @@ A feature is genuinely done when: the most recent review PASSES and the user has
 
 This skill works alone but is designed to pair with two others:
 
-- **implementation-plan**: produces plan files in `.claude/plans/` that this skill reads for the Plan Fidelity check. If a feature has no plan and you want to establish a contract before implementation, run `/implementation-plan` first — a good plan makes for a cleaner review.
+- **implementation-plan**: produces plan files in `.claude/plans/` that this skill reads for the Plan Fidelity check. If a feature has no plan and you want an approved checklist before implementation, run `/implementation-plan` first.
 - **skill-audit**: after several reviews have accumulated in `temp-reviews/`, the audit skill can find patterns across your reviews and recommend tuning to this skill. See `/skill-audit`.
 
 Each skill works standalone; the others are optional.

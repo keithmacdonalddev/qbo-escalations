@@ -3,6 +3,7 @@ name: Project Overview
 description: qbo-escalations architecture, stack, and current working-policy summary
 type: project
 last_verified: 2026-07-10
+supersedes: stale always-delegate and never-test guidance removed 2026-07-10
 authority: CLAUDE.md and AGENTS.md
 ---
 

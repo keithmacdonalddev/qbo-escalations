@@ -1,3 +1,11 @@
+---
+status: historical-experiment
+retrieved_at: 2026-02-28
+authority: none; re-test against the installed Claude Code version
+---
+
+> Historical experiment record. Results may not describe current Claude Code behavior.
+
 # Hooks Lab — Experimental Trials & Findings
 
 Real-world testing of Claude Code hooks. What works, what doesn't, what the docs don't tell you.

@@ -4,6 +4,16 @@ The canonical rules applied by the static audit. Each rule has an ID, a descript
 
 When research mode proposes a new rule or a reworded rule, it ends up here after the user reviews and accepts the change.
 
+## Contents
+
+- Frontmatter rules
+- Body rules
+- Reference-file rules
+- Sample-file rules
+- Script rules
+- Cross-skill consistency rules
+- How to add new rules
+
 ---
 
 ## Frontmatter rules

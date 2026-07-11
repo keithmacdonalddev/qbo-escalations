@@ -7,7 +7,7 @@ context: fork
 agent: general-purpose
 ---
 
-<!-- Version: 0.3 — last edited 2026-06-09 -->
+<!-- Version: 0.4 — last edited 2026-07-11 -->
 
 # Skill Audit
 

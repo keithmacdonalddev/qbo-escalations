@@ -2,11 +2,21 @@ model_reasoning_summary = "detailed"
 hide_agent_reasoning = false
 show_raw_agent_reasoning = false
 model_verbosity = "medium"
+project_doc_max_bytes = 65536
 
 [[hooks.UserPromptSubmit]]
 
 [[hooks.UserPromptSubmit.hooks]]
 type = "command"
-command = "powershell -NoProfile -ExecutionPolicy Bypass -File .codex/hooks/pm-rules.ps1"
+command = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path (git rev-parse --show-toplevel) '.codex/hooks/pm-rules.ps1')\""
 timeout = 5
 statusMessage = "Codex PM rules loaded"
+
+[features]
+multi_agent = true
+
+[agents.implementation_reviewer]
+description = "Read-only, high-rigor reviewer for frontend/backend contracts, state lifecycles, regressions, tests, and plan fidelity."
+
+[agents.harness_auditor]
+description = "Read-only auditor for coding-agent instructions, memory, hooks, skills, provider prompts, evidence capture, and deterministic evaluations."

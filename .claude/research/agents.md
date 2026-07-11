@@ -1,3 +1,11 @@
+---
+status: historical-snapshot
+retrieved_at: 2026-02-28
+authority: none; re-verify against current official documentation
+---
+
+> Historical research snapshot. Do not treat version, feature, terminology, or limitation claims as current without re-verification.
+
 # Claude Code Agents: Comprehensive Research Paper
 
 **Date:** 2026-02-28

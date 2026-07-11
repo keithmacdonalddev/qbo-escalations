@@ -1,3 +1,11 @@
+---
+status: historical-snapshot
+retrieved_at: 2026-02-28
+authority: none; use current official hook documentation
+---
+
+> Historical research snapshot. Event counts, schemas, and limitations may be obsolete.
+
 # Claude Code Hooks: Complete Reference
 
 ## 1. All Hook Event Types (17 Total)

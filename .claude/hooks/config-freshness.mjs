@@ -7,7 +7,7 @@
  * Silent when everything matches.
  */
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,6 +15,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(join(__dirname, '..', '..'));
 const CLAUDE_MD = join(PROJECT_ROOT, 'CLAUDE.md');
 const MODELS_DIR = join(PROJECT_ROOT, 'server', 'src', 'models');
+const REQUIRED_HARNESS_FILES = [
+  'AGENTS.md',
+  'CLAUDE.md',
+  'AGENT_HARNESS.md',
+  '.claude/hooks/pm-rules.sh',
+  '.claude/hooks/runtime-guard.mjs',
+  '.claude/hooks/workspace-guard.mjs',
+  '.claude/memory/MEMORY.md',
+  '.claude/memory/project-overview.md',
+  '.codex/config.toml',
+  '.codex/hooks/pm-rules.ps1',
+  '.codex/memory/PROJECT_MEMORY.md',
+  '.codex/memory/AGENT_HANDOFF.md',
+  'docs/agent-harness/HOOK_REGISTRY.md',
+  'docs/agent-harness/MEMORY_POLICY.md',
+  'docs/agent-harness/SKILL_CATALOG.md',
+];
 
 // Dirs to ignore when scanning disk
 const IGNORED_DIRS = new Set([
@@ -70,6 +87,7 @@ try {
   const documentedDirs = parseDocumentedDirs(claudeMd);
   const actualDirs = getActualDirs();
   const modelCount = countModelFiles();
+  const missingHarness = REQUIRED_HARNESS_FILES.filter((relativePath) => !existsSync(join(PROJECT_ROOT, relativePath)));
 
   const documentedSet = new Set(documentedDirs);
   const actualSet = new Set(actualDirs);
@@ -84,6 +102,21 @@ try {
   }
   if (missingDirs.length > 0) {
     parts.push(`-${missingDirs.length} missing dir${missingDirs.length > 1 ? 's' : ''} (${missingDirs.join(', ')})`);
+  }
+  if (missingHarness.length > 0) {
+    parts.push(`missing harness files: ${missingHarness.join(', ')}`);
+  }
+
+  const overviewPath = join(PROJECT_ROOT, '.claude', 'memory', 'project-overview.md');
+  if (existsSync(overviewPath)) {
+    const overview = readFileSync(overviewPath, 'utf-8');
+    const verified = overview.match(/^last_verified:\s*(\d{4}-\d{2}-\d{2})\s*$/m)?.[1];
+    if (!verified) {
+      parts.push('project memory missing last_verified metadata');
+    } else {
+      const ageDays = Math.floor((Date.now() - Date.parse(`${verified}T00:00:00Z`)) / 86400000);
+      if (ageDays > 90) parts.push(`project memory is ${ageDays} days old`);
+    }
   }
 
   if (parts.length > 0) {

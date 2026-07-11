@@ -5,19 +5,19 @@ argument-hint: '[feature-name]'
 allowed-tools: Read, Grep, Glob, Bash, Write
 ---
 
-<!-- Version: 0.3 — last edited 2026-06-09 -->
+<!-- Version: 0.4 — last edited 2026-07-11 -->
 
 # Implementation Plan
 
 Produce a structured plan before writing code. The goal is not paperwork — it is to surface decisions that are cheap to make now and expensive to revisit after implementation.
 
-**The plan is a contract.** Every acceptance criterion you write here becomes a Plan Fidelity check during `cto-review` — a production blocker gate the implementation must pass before shipping. Acceptance criteria that are vague or not objectively verifiable will be flagged as Missing or Partial findings (High severity), which will FAIL the gate. Write criteria with that downstream check in mind: each one should be something a reviewer can answer yes-or-no about, without interpretation.
+**The approved plan is the implementation checklist.** Every acceptance criterion becomes a Plan Fidelity check during `cto-review`, the final readiness review before shipping. Vague criteria will be flagged as Missing or Partial because a reviewer cannot prove they were completed. Write each criterion so it can be answered yes or no from code or behavior without guesswork.
 
 The plan format is designed to pair with the `cto-review` skill:
 
 - **Acceptance criteria** become plan-fidelity items during review.
 - **Files to create/modify** become the baseline for detecting unplanned changes.
-- **Exceeds bar** feeds the review's Exceeds Expectations assessment.
+- **Complete outcome and polish** feeds the review's practical-completeness assessment.
 - **Risks and edge cases** become review checkpoints for defensive programming.
 
 If repository policy in `CLAUDE.md` or `.claude/rules/` conflicts with this skill, follow repository policy.
@@ -93,9 +93,10 @@ If a criterion fails the test, rewrite it.
 - What assumptions are being made about the system's state?
 - **Raise patterns from Step 2.** If recent reviews flagged "missing rate limits," ask directly: "Does this feature need rate limiting? If so, add it to scope now."
 
-### Exceeds bar
+### Complete outcome and polish
 
-- What would make this exceed what was asked, not just meet it?
+- What obvious supporting behavior is needed so the result feels complete and polished rather than technically minimal?
+- Which additions would cross into unrelated scope or a materially different product decision and therefore require separate approval?
 - Concrete examples: actionable error messages for each failure mode, loading/empty/error states on all UI, structured logging, code organized so the next feature is easier to add.
 
 ### Dependencies and sequencing
@@ -116,7 +117,7 @@ Quality bar:
 
 - Every acceptance criterion must be testable. "Works correctly" is not a criterion.
 - File lists must be specific — actual paths, not "some route handler."
-- The exceeds bar must be concrete. "Make it good" fails this check.
+- The completeness and polish items must be concrete. "Make it good" fails this check.
 - Deferred items are called out explicitly with a `[deferred]` tag, not left implicit.
 
 Show the draft to the user. Ask: "Does this capture what we discussed? Anything to add, remove, or sharpen?"
@@ -146,17 +147,17 @@ Deferred items: <n>
 Plan: .claude/plans/<feature-slug>.md
 
 Before shipping, run: /cto-review <feature-slug>
-The review is a pass/fail blocker gate — ship only when it returns PASS.
+The review is a pass/fail readiness check — ship only when it returns PASS or the user knowingly accepts a documented exception.
 Most features take multiple review cycles to reach PASS. That is normal.
 ```
 
-The last three lines set expectations. The plan you wrote is the contract; the review is the gate; iteration is expected. Users who understand this going in produce better plans and don't feel blindsided when the first review returns FAIL.
+The last three lines set expectations. The approved plan is the checklist, the review verifies readiness, and iteration is expected.
 
 ## Related skills
 
 This skill works alone but is designed to pair with two others:
 
-- **cto-review**: the production blocker gate that checks the implementation against this plan's acceptance criteria. Plans produced here become the contract cto-review enforces. Run `/cto-review <feature-slug>` after implementation.
+- **cto-review**: the production-readiness review that checks the implementation against this plan's acceptance criteria. Run `/cto-review <feature-slug>` after implementation.
 - **skill-audit**: after several plans and reviews have accumulated, the audit skill can find patterns across your work and recommend tuning to this skill. See `/skill-audit`.
 
 Each skill works standalone; the others are optional.

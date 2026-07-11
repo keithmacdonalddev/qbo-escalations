@@ -249,3 +249,10 @@ Model: Codex GPT-5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Commitment Admission Gate - Before new work is accepted into the active portfolio, compare it with current human and agent capacity, existing promises, blocked dependencies, and higher-value unfinished work, then require an explicit choice about what will be delayed, delegated, or stopped. This prevents quiet overcommitment from creating artificial stalls and preserves the evidence behind each tradeoff without turning raw activity into a performance score.
+
+Date: 2026-07-11
+Time: 08:51 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: medium
+Special Feature: Agent Harness Health Check - Provide a read-only project health view that shows which coding-agent instructions, hooks, skills, specialist agents, and memory files are active, then flags stale memory, broken skill references, duplicate rules, or disabled guards in plain English. This prevents silent configuration drift and false confidence without turning the product into a developer dashboard.

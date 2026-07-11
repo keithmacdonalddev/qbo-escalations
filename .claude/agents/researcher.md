@@ -2,7 +2,9 @@
 name: researcher
 description: Deep research agent for thorough investigation of topics, technologies, and codebase exploration. Returns comprehensive findings with sources. Use for research tasks that need web search, doc reading, and multi-source analysis.
 model: inherit
-disallowedTools: Write, Edit, Task
+disallowedTools: Write, Edit, MultiEdit, Agent
+skills:
+  - qbo-escalations-project
 ---
 
 # Research Agent

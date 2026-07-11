@@ -88,12 +88,12 @@ No application server, client server, browser, database, or persistent process w
 | Claude project rules                       | `.claude/rules/client.md`, `.claude/rules/server.md`                                                |
 | Claude custom agents                       | `researcher`, `worker`, `implementation-reviewer`                                                   |
 | Claude project skills                      | `implementation-plan`, `cto-review`, `skill-audit`                                                  |
-| Claude active project hooks                | runtime guard, PM-rule injection, configuration freshness                                           |
-| Claude present but not project-wired hooks | observation capture, context injection, session finalization, folder-context generation             |
+| Claude active project hooks                | runtime guard, workspace guard, PM-rule injection, configuration and harness freshness               |
+| Claude present but not project-wired hooks | None; unused memory and folder-context experiments were removed 2026-07-11                           |
 | Claude memory                              | small curated index; 33 local session files are ignored and no longer tracked in current Git state |
 | Codex project config                       | `.codex/config.toml` with reasoning display and one `UserPromptSubmit` hook                         |
-| Codex project skills                       | duplicate `agent-browser` copies under `.agents/skills` and `.codex/skills`                         |
-| Codex custom project agents                | None                                                                                                |
+| Codex project skills                       | canonical skills under `.agents/skills` for project routing, browser work, and harness audit        |
+| Codex custom project agents                | optional bounded `implementation_reviewer` and `harness_auditor` roles                              |
 
 ### Product-agent and provider surfaces
 
@@ -385,11 +385,15 @@ Recommendation:
 
 ### P2-1: Codex customization is split across duplicate skill locations
 
+**Resolved 2026-07-11:** the duplicate `.codex/skills/agent-browser` copy was removed. `.agents/skills/agent-browser` is now the canonical repository copy.
+
 The same `agent-browser` skill exists under `.agents/skills` and `.codex/skills`, and both appear in the current skill catalog. Current Codex guidance recommends `.agents/skills` for repository skills.
 
 Recommendation: keep one canonical `.agents/skills/agent-browser` copy or install it as a plugin; remove the duplicate and make `skills-lock.json` the update record.
 
 ### P2-2: Codex has no project-scoped custom agents
+
+**Resolved 2026-07-11:** `.codex/config.toml` now exposes two bounded optional roles: `implementation_reviewer` and `harness_auditor`. The main Codex conversation remains the default.
 
 This is not automatically a defect. The main Codex thread is the right default for most work. Still, two bounded project roles would improve isolation when explicitly used:
 
@@ -399,6 +403,8 @@ This is not automatically a defect. The main Codex thread is the right default f
 Do not create many personas. A custom agent should exist only when it needs a materially different tool, model, sandbox, or context boundary. See [Codex subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents).
 
 ### P2-3: Several Claude hooks exist but are not active
+
+**Resolved 2026-07-11:** unused observation capture, background memory, session finalization, folder-context generation, and obsolete AI-summary installation files were removed. `AGENT_HARNESS.md` and `docs/agent-harness/HOOK_REGISTRY.md` now document the active hooks and their side effects.
 
 Observation capture, context injection, session finalization, and automatic folder-context generation are present but not wired in project settings. The installation note implies some may have been intended for user-level configuration.
 
@@ -415,6 +421,8 @@ Recommendation:
 - Do not auto-promote observation frequency into instructions. Generate review candidates and require human acceptance.
 
 ### P2-4: Research snapshots look like current operating truth
+
+**Mitigated 2026-07-11:** every research snapshot now carries historical-status metadata and a visible warning. `.claude/research/README.md` explains that current official documentation and maintained project instructions outrank these files.
 
 The four `.claude/research/*.md` files total roughly 328 KB. They contain valuable experiments, but also time-bound statements such as “latest version 2.1.69,” old `Task` terminology, cost claims, marketplace counts, and February/March limitations that may now be fixed.
 
@@ -436,6 +444,8 @@ Recommendation:
 - Add adversarial tests for quotes, metacharacters, spaces, Unicode, and Windows paths.
 
 ### P2-6: The Codex hook command is fragile when launched from a subdirectory
+
+**Resolved 2026-07-11:** the configured command now resolves the Git root before locating the PowerShell hook, and a subdirectory execution fixture passes.
 
 The hook script changes to the Git root after it starts, but `.codex/config.toml` invokes the script through a relative path. Codex documentation warns that project hooks may run with a subdirectory as the session working directory and recommends resolving from the Git root.
 
@@ -839,13 +849,13 @@ Durable memory means saved notes that remain available in later chats.
 
 The specific contradiction is:
 
-- .claude/memory/project-overview.md says implementation should always be delegated and tests should never
+- .claude/memory/project-overview.md formerly said implementation should always be delegated and tests should never
   be written.
 
 - Current project rules say Codex normally works in the main session and testing should match the risk of
   the change.
 
-- .claude/agents/worker.md also tells workers not to test and to “exceed user intent,” which could encourage
+- .claude/agents/worker.md formerly told workers not to test and to “exceed user intent,” which could encourage
   untested work and unwanted extra changes.
 
 Those old instructions were corrected on 2026-07-10. Tests are now allowed in proportion to risk, delegation
