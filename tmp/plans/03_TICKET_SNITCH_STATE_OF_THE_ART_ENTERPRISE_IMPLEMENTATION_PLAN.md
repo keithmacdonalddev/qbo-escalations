@@ -1,6 +1,8 @@
-# Central Tracking Platform — State-of-the-Art Enterprise Implementation Plan
+# Ticket Snitch — State-of-the-Art Enterprise Implementation Plan
 
 - **Plan level:** 3 of 3
+- **Official product name:** Ticket Snitch
+- **Working tagline:** Tell Ticket Snitch. We’ll put ’em away for good.
 - **Status:** Long-term future implementation plan; no implementation has started
 - **Product state at completion:** A governed, globally resilient operational-intelligence platform for many organizations
 - **Required predecessor:** The solid user-ready plan must be fully implemented, tested, deployed, and accepted

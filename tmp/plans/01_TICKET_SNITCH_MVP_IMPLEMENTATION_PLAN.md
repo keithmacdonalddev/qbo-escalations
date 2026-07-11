@@ -1,6 +1,8 @@
-# Central Tracking Platform — MVP Implementation Plan
+# Ticket Snitch — MVP Implementation Plan
 
 - **Plan level:** 1 of 3
+- **Official product name:** Ticket Snitch
+- **Working tagline:** Tell Ticket Snitch. We’ll put ’em away for good.
 - **Status:** Ready for implementation review; no implementation has started
 - **Product state at completion:** A complete, polished, independently deployable base product
 - **Required predecessor:** None
@@ -47,10 +49,12 @@ Every important status change, decision, attachment, assignment, and completion 
 
 ## 2. Confirmed product decisions
 
-1. Create a **new central application**, not a complete tracker inside every existing project.
-2. Treat QBO Escalations as the first connected project, not the definition of the whole product.
-3. Use one central API with project-scoped credentials rather than a different API implementation in every project.
-4. Track all of these work types from the beginning:
+1. Use **Ticket Snitch** as the official product name.
+2. Trial the tagline **“Tell Ticket Snitch. We’ll put ’em away for good.”** and validate it during MVP design work.
+3. Create a **new central application**, not a complete tracker inside every existing project.
+4. Treat QBO Escalations as the first connected project, not the definition of the whole product.
+5. Use one central API with project-scoped credentials rather than a different API implementation in every project.
+6. Track all of these work types from the beginning:
    - problem report;
    - confirmed bug;
    - feature request;
@@ -62,20 +66,20 @@ Every important status change, decision, attachment, assignment, and completion 
    - decision;
    - question;
    - agent-discovered problem.
-5. Keep severity and priority separate.
-6. Preserve the reporter's original wording even when an agent creates a cleaner summary.
-7. Make one system the official source for work status and decisions. Repositories may own code-specific execution links, but they must not maintain a competing product status.
-8. Make premium design and usability an MVP requirement.
-9. Use additive, versioned contracts so Plans 2 and 3 can arrive much later without invalidating MVP data.
+7. Keep severity and priority separate.
+8. Preserve the reporter's original wording even when an agent creates a cleaner summary.
+9. Make one system the official source for work status and decisions. Repositories may own code-specific execution links, but they must not maintain a competing product status.
+10. Make premium design and usability an MVP requirement.
+11. Use additive, versioned contracts so Plans 2 and 3 can arrive much later without invalidating MVP data.
 
 ## 3. Recommended product and repository boundary
 
-Create a separate repository for the central product. A working name may be used until the product name is chosen.
+Create a separate repository named `ticket-snitch` for the central product.
 
 Recommended initial structure:
 
 ```text
-central-tracking-platform/
+ticket-snitch/
   apps/
     web/                 # React user interface
     api/                 # Express API and background coordination
@@ -897,13 +901,12 @@ Do not implement Plan 2 behavior early behind hidden production code. Preserve e
 
 These do not block writing the plan. They must be decided before their affected phase begins:
 
-1. Final product and repository name.
-2. Deployment target and file-storage service.
-3. Human identity provider.
-4. Notification channel for the owner.
-5. Whether MVP ships light, dark, or both visual themes.
-6. Maximum attachment size and allowed file types.
-7. Backup frequency and acceptable data-loss window.
-8. Which current notes/chats are included in the first reviewed import.
+1. Deployment target and file-storage service.
+2. Human identity provider.
+3. Notification channel for the owner.
+4. Whether MVP ships light, dark, or both visual themes.
+5. Maximum attachment size and allowed file types.
+6. Backup frequency and acceptable data-loss window.
+7. Which current notes/chats are included in the first reviewed import.
 
 Default recommendation: choose the simplest hosted services that meet the security and restore requirements, record the choice, and keep vendor-specific code behind small adapters.

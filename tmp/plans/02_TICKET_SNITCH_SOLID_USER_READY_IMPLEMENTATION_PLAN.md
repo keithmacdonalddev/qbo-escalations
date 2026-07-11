@@ -1,6 +1,8 @@
-# Central Tracking Platform — Solid User-Ready Implementation Plan
+# Ticket Snitch — Solid User-Ready Implementation Plan
 
 - **Plan level:** 2 of 3
+- **Official product name:** Ticket Snitch
+- **Working tagline:** Tell Ticket Snitch. We’ll put ’em away for good.
 - **Status:** Future implementation plan; no implementation has started
 - **Product state at completion:** A polished customer- and agent-ready product that completes the accountability loop
 - **Required predecessor:** The MVP plan must be fully implemented, tested, deployed, and accepted

@@ -202,6 +202,13 @@ a {
   font-weight: 400;
 }
 
+.hero h1 .hero-tagline {
+  display: inline-block;
+  font-size: 0.56em;
+  letter-spacing: -0.045em;
+  line-height: 1.08;
+}
+
 .hero-copy {
   max-width: 590px;
   margin: 0;
