@@ -242,3 +242,10 @@ Model: Codex GPT-5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Stall Recovery Contract - Require every active work item to retain a named owner, a concrete next action, and a review date; when meaningful progress stops, the coordinator opens a visible intervention that classifies the cause as blocked, abandoned, waiting, or unclear and requires the responsible human or agent to acknowledge the recovery action. This creates accountability without measuring shallow activity, prevents “in progress” from becoming permanent storage, and gives the operator a trustworthy queue of work that genuinely needs a decision or handoff.
+
+Date: 2026-07-11
+Time: 07:25 AST
+Model: Codex GPT-5
+Is duplicate?: no
+Complexity: medium
+Special Feature: Commitment Admission Gate - Before new work is accepted into the active portfolio, compare it with current human and agent capacity, existing promises, blocked dependencies, and higher-value unfinished work, then require an explicit choice about what will be delayed, delegated, or stopped. This prevents quiet overcommitment from creating artificial stalls and preserves the evidence behind each tradeoff without turning raw activity into a performance score.
