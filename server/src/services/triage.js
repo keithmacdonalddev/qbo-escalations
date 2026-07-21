@@ -25,6 +25,7 @@ const {
   buildAnthropicThinkingParam,
   modelRejectsSamplingParams,
 } = require('../lib/anthropic-thinking');
+const { applyKimiGenerationOptions } = require('../lib/kimi-model-options');
 const codex = require('./codex');
 const { resolveApiKey, validateRemoteProvider } = require('./image-parser');
 const {
@@ -362,6 +363,16 @@ function buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort,
   return body;
 }
 
+function buildKimiBody(options) {
+  const body = buildOpenAiLikeBody(options);
+  return applyKimiGenerationOptions(
+    body,
+    options.model,
+    options.reasoningEffort,
+    options.maxTokens ?? 1200
+  );
+}
+
 // `overrides` lets non-triage agents (e.g. the Knowledge Base draft pass) reuse
 // this shared provider dispatch while stamping their OWN call site, operation,
 // and agent identity onto the captured ProviderCallPackage. Without overrides,
@@ -652,19 +663,22 @@ async function runDirectTriageProviderCall({
         });
       }
     case 'kimi':
-      return sendKimiChatCompletion({
-        body: buildOpenAiLikeBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens }),
-        model,
-        timeoutMs,
-        getApiKey: () => resolveApiKey('kimi'),
-        captureContext: {
-          ...captureContext,
-          providerResearchId: 'kimi-api',
-          providerPathType: 'direct-http',
-        },
-        onProviderEvent,
-        signal,
-      });
+      {
+        const body = buildKimiBody({ model, systemPrompt, userPrompt, reasoningEffort, maxTokens });
+        return sendKimiChatCompletion({
+          body,
+          model,
+          timeoutMs,
+          getApiKey: () => resolveApiKey('kimi'),
+          captureContext: {
+            ...captureContext,
+            providerResearchId: 'kimi-api',
+            providerPathType: 'direct-http',
+          },
+          onProviderEvent,
+          signal,
+        });
+      }
     default:
       throw createTriageError(`Unsupported direct triage provider: ${provider}`, 'INVALID_PROVIDER');
   }
@@ -1665,6 +1679,7 @@ module.exports = {
   runTriage,
   waitForProviderPackage,
   __internals: {
+    buildKimiBody,
     buildOpenAiLikeBody,
     buildPromptTrace,
     loadParsedJsonFromResponse,

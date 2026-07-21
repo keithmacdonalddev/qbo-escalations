@@ -1,6 +1,21 @@
 # gemini-api Provider Harness Contract
 
-## Summary
+## Current-state correction — 2026-07-21
+
+This section is the current Gemini contract. The older research snapshot below is retained as historical evidence and its old model IDs, line numbers, request shapes, and “current” wording are superseded by this section.
+
+- Current default: `gemini-3.6-flash`. Other current choices: `gemini-3.5-flash-lite` and `gemini-3.1-pro-preview`.
+- Gemini 3.6 Flash replaces Gemini 3.5 Flash in the Flash line. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite.
+- The app still uses the supported `generateContent` REST surface. Chat, image parsing, triage, and the key-validation probe now use the current default where a model is not explicitly selected.
+- Current Gemini reasoning control is `generationConfig.thinkingConfig.thinkingLevel`. The app normalizes its shared effort selection to supported Gemini levels and does not send `minimal` to Gemini 3.1 Pro Preview.
+- Beginning with Gemini 3.6 Flash and Gemini 3.5 Flash-Lite, `temperature`, `topP`, and `topK` are deprecated and may produce errors. All current app Gemini paths omit those fields.
+- Current catalog metadata records a 1,048,576-token input context and 65,536-token maximum output for these choices. Pricing records use the 2026-07-21 paid-tier rates: Gemini 3.6 Flash at $1.50 input / $7.50 output per million tokens, and Gemini 3.5 Flash-Lite at $0.30 / $2.50.
+
+Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), and [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
+
+## Historical research snapshot (superseded by the correction above)
+
+### Original summary
 
 - **Provider path type**: direct Google Gemini Developer API path over HTTPS, authenticated by API key in an `x-goog-api-key` request header. No SDK; raw `https.request` from Node.
 - **Current implementation status**: this app exposes the runtime provider id `gemini` (catalog id, transport id, registry id all `gemini`). The research file id `gemini-api` is only this document's workstream label, not a runtime provider id.
@@ -21,7 +36,7 @@
 - **Env var**: `GEMINI_API_KEY`. Declared at `server/.env.example:38`; mapped in `server/src/services/image-parser.js:170` and `server/src/services/remote-api-providers.js:38`.
 - **Per-kind timeout env vars**: `GEMINI_TRANSCRIBE_TIMEOUT_MS`, `GEMINI_PARSE_TIMEOUT_MS`, `GEMINI_CHAT_TIMEOUT_MS` (`server/src/services/providers/registry.js:90-95`). None set in `.env.example`.
 - **Optional feature flag**: `ENABLE_GEMINI_IMAGE_PARSER` is listed among env vars tracked by the harness test-runner at `server/src/services/test-runner.js:78`.
-- **Default model**: `gemini-3-flash-preview` — set in three places: catalog (`shared/ai-provider-catalog.json:142`), image-parser default (`server/src/services/image-parser.js:222, 1192`), and `PROVIDER_CONFIG.gemini.defaultModel` (`server/src/services/remote-api-providers.js:36`). The validation probe (`image-parser.js:221`) also hardcodes this model into the URL path.
+- **Default model**: `gemini-3.6-flash` in the provider catalog, image parser, chat adapter, provider harness, pipeline tests, and validation probe.
 - **Base URL constant**: `https://generativelanguage.googleapis.com` at `server/src/services/remote-api-providers.js:37`.
 
 There is no `gemini-api` id in the catalog. The transport string in the registry is also `gemini` (`server/src/services/providers/registry.js:52-53`).
@@ -32,7 +47,7 @@ All facts; line numbers verified against the current `master` HEAD.
 
 ### 1. Image-parser direct path
 
-- `server/src/services/image-parser.js:1184-1256` — `async function callGemini(systemPrompt, rawBase64, mediaType, model, timeoutMs)`.
+- `server/src/services/image-parser.js` — `async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs)`.
   - Resolves the API key via `resolveApiKey('gemini')` (`image-parser.js:1185`), which checks `data/image-parser-keys.json` first, then `process.env.GEMINI_API_KEY`, then a Mongo `ImageParserApiKey` doc (`image-parser.js:239-266`).
   - Builds a single-turn body with `system_instruction.parts[0].text` and a single `contents[0]` user message whose `parts` array contains a `{ text: 'Parse this image.' }` part plus an `{ inline_data: { mime_type, data } }` part.
   - Sends `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` via the in-module `jsonRequest()` helper (`image-parser.js:754-784`). Path uses `encodeURIComponent(effectiveModel)`. Auth header `x-goog-api-key`.
@@ -55,7 +70,7 @@ All facts; line numbers verified against the current `master` HEAD.
   - Non-200 → throws `PROVIDER_ERROR` via `toStatusError('gemini', ...)` (line 584-586).
   - On success, `extractGeminiText(parsed)` (line 215-220) joins every `candidates[0].content.parts[].text` value; usage object same shape as the image-parser path (line 595-606).
   - Returns `{ text, usage }`. Same dropping of raw body/headers/statusCode as path #1.
-  - `reasoningEffort` is accepted in the chat wrapper's args (`createBufferedChatProvider` line 622) but **ignored** in `requestGeminiChat` — no `thinkingConfig` is set in the body. The catalog entry advertises `supportsThinking: false`.
+  - `reasoningEffort` is normalized to Gemini's supported `thinkingLevel` values and sent as `generationConfig.thinkingConfig`. The catalog advertises thinking support.
 
 - `server/src/services/remote-api-providers.js:679-680` — exports `gemini = { chat: createBufferedChatProvider('gemini', requestGeminiChat) }`.
 - `createBufferedChatProvider` (line 611-665) wraps the promise and surfaces results via `onChunk`/`onDone`/`onError` callbacks. There is no actual streaming — `onChunk` is called once with the full text right before `onDone`. Buffer-then-fire, not real SSE.
@@ -65,7 +80,7 @@ All facts; line numbers verified against the current `master` HEAD.
 
 - `server/src/services/image-parser.js:219-231` — `REMOTE_PROVIDER_TEST_CONFIGS.gemini`:
   - hostname `generativelanguage.googleapis.com`
-  - path `/v1beta/models/gemini-3-flash-preview:generateContent` (model hardcoded in URL)
+  - path `/v1beta/models/gemini-3.6-flash:generateContent` (current default hardcoded in the validation URL)
   - body `{ contents: [{ parts: [{ text: 'hi' }] }], generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' } }`
   - headers `x-goog-api-key`, `Content-Type: application/json`
 - `server/src/services/image-parser.js:470-514` — `testRemoteProviderKey(provider, apiKey)` constructs the minimal request and POSTs it, accumulating the body string and resolving `{ statusCode, body, model }`.
@@ -82,7 +97,7 @@ Inferred from current app code at the call sites above. All three paths share:
 
 - **Method**: `POST`
 - **Scheme/host**: `https://generativelanguage.googleapis.com`
-- **Path**: `/v1beta/models/{model}:generateContent` (path includes the model id, URL-encoded in the production paths; hardcoded `gemini-3-flash-preview` in the probe).
+- **Path**: `/v1beta/models/{model}:generateContent` (path includes the model id, URL-encoded in the production paths; current default `gemini-3.6-flash` in the probe).
 - **Auth header**: `x-goog-api-key: <GEMINI_API_KEY>` (env var name only; no secret values quoted). Note: Google also supports `?key=...` query-string auth; this app uses the header form.
 - **Content type**: `Content-Type: application/json` (probe and image-parser paths set this explicitly; chat path's `jsonRequestCancelable` sets `Accept: application/json` + `Content-Type: application/json` by default).
 - **Content-Length**: computed from `Buffer.byteLength(payload)` (`image-parser.js:767`, `remote-api-providers.js:104-106`).
@@ -91,7 +106,7 @@ Inferred from current app code at the call sites above. All three paths share:
   - Chat-leg default `DEFAULT_TIMEOUT_MS = 120_000` (`remote-api-providers.js:12`); per-kind overrides via env vars `GEMINI_CHAT_TIMEOUT_MS`, `GEMINI_PARSE_TIMEOUT_MS`, `GEMINI_TRANSCRIBE_TIMEOUT_MS` (`registry.js:90-95`).
   - Validation probe hardcoded to `10_000` ms (`image-parser.js:498`).
 - **No streaming.** None of the request URLs use `:streamGenerateContent` and none append `?alt=sse`.
-- **No tools, no `responseSchema`, no `thinkingConfig`, no `safetySettings`, no `cachedContent`, no `tools`/`toolConfig`, no `temperature`, no `topP`, no `topK`.** The bodies are minimal; Gemini uses its own defaults.
+- **No tools, no `responseSchema`, no `safetySettings`, no `cachedContent`, no `temperature`, no `topP`, no `topK`.** `thinkingConfig.thinkingLevel` is included only when the selected app effort maps to a supported Gemini level.
 
 Mode A — Image-parser (vision, `callGemini`):
 
@@ -107,7 +122,8 @@ body = {
   }],
   generationConfig: {
     maxOutputTokens: 4096,
-    responseMimeType: 'text/plain'
+    responseMimeType: 'text/plain',
+    thinkingConfig: { thinkingLevel: <normalized level> } // when valid
   }
 }
 ```
@@ -128,14 +144,15 @@ body = {
   ],
   generationConfig: {
     maxOutputTokens: 4096,
-    responseMimeType: 'text/plain'
+    responseMimeType: 'text/plain',
+    thinkingConfig: { thinkingLevel: <normalized level> } // when valid
   }
 }
 ```
 
 Notes:
 - All content blocks are coerced down to strings — image blocks would be discarded if passed in. Consistent with the catalog entry (no `supportsImageInput: true`).
-- `reasoningEffort` argument is silently ignored.
+- `reasoningEffort` is normalized and sent as `thinkingLevel` when valid.
 
 Mode C — Validation probe:
 
@@ -260,7 +277,7 @@ Final response reconstruction: concatenate each chunk's `candidates[i].content.p
 Notes:
 
 - The `createBufferedChatProvider` wrapper (`remote-api-providers.js:611-665`) simulates a "stream" for downstream callers by emitting one `onChunk` with the full text right before `onDone`. This is buffer-then-fire, not a real SSE stream. The wire request is non-streaming.
-- The catalog entry advertises no streaming-related capability (`reasoningVisibility` is absent; `supportsThinking: false`).
+- The catalog advertises thinking support. The current buffered transport reports reasoning activity but does not stream Gemini thought text to the UI.
 - Because the app does not use streaming today, no ordered stream events are captured. Gemini streaming is provider-capability reference only in this document.
 
 ## Raw Package That Reaches This Server Today
@@ -327,7 +344,7 @@ Goal: preserve the full HTTPS response package for the direct `POST /v1beta/mode
 - `request`:
   - `method` — `"POST"`.
   - `url` — full URL string: `https://generativelanguage.googleapis.com/v1beta/models/{encodedModel}:generateContent`.
-  - `model` — the unencoded model id used to build the URL (e.g. `"gemini-3-flash-preview"`).
+  - `model` — the unencoded model id used to build the URL (e.g. `"gemini-3.6-flash"`).
   - `headersSent` — object map. **Must redact `x-goog-api-key`** (store `"<redacted>"` or `null`); store everything else verbatim.
   - `body` — the exact JSON object posted, stored as a Mongo subdocument. Includes `system_instruction`, `contents`, `generationConfig`, and any provider request fields the app sends.
   - `bodyByteLength` — `Buffer.byteLength(JSON.stringify(body))`.
@@ -398,7 +415,7 @@ Everything in "Proposed Mongo Storage Shape" is a preservation-field proposal, n
 
 ### Unconfirmed / could not verify
 
-1. `gemini-3-flash-preview` model availability. Today is 2026-05-20 and the app hardcodes `gemini-3-flash-preview` as the default model in three places. I did not independently verify this model id exists in the current Gemini Developer API catalog.
+1. Current model availability is governed by dynamic discovery plus the dated official-document review recorded at the top of this file. A discovered ID remains disabled until validated.
 
 2. Correlation header. Gemini docs reference `responseId` in the response body but do not publicly guarantee any specific HTTP correlation header. The Mongo shape stores all headers verbatim so any present header is preserved.
 

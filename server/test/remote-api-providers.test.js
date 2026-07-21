@@ -249,7 +249,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
       { role: 'assistant', content: 'Here is the draft answer.' },
     ],
     systemPrompt: 'Be precise.',
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.6-flash',
     reasoningEffort: 'medium',
     getApiKeyFn: async () => 'AIza-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
@@ -258,7 +258,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            modelVersion: 'gemini-3.5-flash',
+            modelVersion: 'gemini-3.6-flash',
             candidates: [{ content: { parts: [{ text: 'Gemini reply' }] } }],
             usageMetadata: { promptTokenCount: 19, candidatesTokenCount: 6, totalTokenCount: 25 },
           }),
@@ -272,7 +272,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
 
   assert.equal(captured.method, 'POST');
   assert.equal(captured.baseUrl, 'https://generativelanguage.googleapis.com');
-  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3\.5-flash:generateContent$/);
+  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3\.6-flash:generateContent$/);
   assert.equal(captured.headers['x-goog-api-key'], 'AIza-test');
   assert.equal(captured.body.system_instruction.parts[0].text, 'Be precise.');
   assert.equal(captured.body.contents[0].role, 'user');
@@ -280,23 +280,27 @@ test('Gemini request builder uses native generateContent payload and parses usag
   assert.equal(captured.body.contents[1].role, 'model');
   assert.equal(captured.body.contents[1].parts[0].text, 'Here is the draft answer.');
   assert.deepStrictEqual(captured.body.generationConfig.thinkingConfig, { thinkingLevel: 'medium' });
+  assert.equal(captured.body.generationConfig.temperature, undefined);
+  assert.equal(captured.body.generationConfig.topP, undefined);
+  assert.equal(captured.body.generationConfig.topK, undefined);
   assert.equal(captured.captureContext.providerId, 'gemini');
   assert.equal(captured.captureContext.providerResearchId, 'gemini-api');
   assert.equal(captured.captureContext.providerPathType, 'direct-http');
   assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestGeminiChat');
   assert.equal(result.text, 'Gemini reply');
   assert.deepStrictEqual(result.usage, {
-    model: 'gemini-3.5-flash',
+    model: 'gemini-3.6-flash',
     inputTokens: 19,
     outputTokens: 6,
   });
 });
 
-test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async () => {
+test('Kimi K3 request builder uses the current always-reasoning request shape', async () => {
   let captured = null;
   const request = requestKimiChat({
     messages: [{ role: 'user', content: 'Say hello' }],
-    model: 'kimi-k2.6',
+    model: 'kimi-k3',
+    reasoningEffort: 'max',
     getApiKeyFn: async () => 'sk-moonshot',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
       captured = { method, baseUrl, urlPath, body, headers, timeoutMs, captureContext };
@@ -304,7 +308,7 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            model: 'kimi-k2.6',
+            model: 'kimi-k3',
             choices: [{ message: { content: 'Hello from Kimi' } }],
             usage: { prompt_tokens: 5, completion_tokens: 4 },
           }),
@@ -319,9 +323,12 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
   assert.equal(captured.baseUrl, 'https://api.moonshot.ai');
   assert.equal(captured.urlPath, '/v1/chat/completions');
   assert.equal(captured.headers.Authorization, 'Bearer sk-moonshot');
-  assert.equal(captured.body.model, 'kimi-k2.6');
+  assert.equal(captured.body.model, 'kimi-k3');
+  assert.equal(captured.body.max_completion_tokens, 4096);
+  assert.equal(captured.body.max_tokens, undefined);
+  assert.equal(captured.body.reasoning_effort, 'max');
   assert.equal(captured.body.temperature, undefined);
-  assert.deepEqual(captured.body.thinking, { type: 'disabled' });
+  assert.equal(captured.body.thinking, undefined);
   assert.deepEqual(captured.captureContext, {
     providerId: 'kimi',
     providerResearchId: 'kimi-api',
@@ -333,11 +340,11 @@ test('Kimi request builder targets Moonshot OpenAI-compatible endpoint', async (
       functionName: 'requestKimiChat',
       helperName: 'jsonRequestCancelable',
     },
-    modelRequested: 'kimi-k2.6',
+    modelRequested: 'kimi-k3',
   });
   assert.equal(result.text, 'Hello from Kimi');
   assert.deepStrictEqual(result.usage, {
-    model: 'kimi-k2.6',
+    model: 'kimi-k3',
     inputTokens: 5,
     outputTokens: 4,
   });

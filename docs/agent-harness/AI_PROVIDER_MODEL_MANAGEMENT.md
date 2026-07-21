@@ -10,6 +10,21 @@ AI Management is the system-wide source of truth for which AI providers and mode
 
 Changing the catalog never silently rewrites an agent profile. This preserves intentional agent-specific choices and makes any affected profile visible for review.
 
+## Current verified model baseline (2026-07-21)
+
+The Gemini and Kimi entries were rechecked against the providers' current official documentation, not only their model-list endpoints.
+
+| Provider | Current default | Other current approved choices | Request compatibility enforced by the app |
+| --- | --- | --- | --- |
+| Gemini | `gemini-3.6-flash` | `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
+| Kimi Open Platform | `kimi-k3` | `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` | K3 is always-reasoning and uses `reasoning_effort` plus `max_completion_tokens`; K2.7 Code keeps thinking on and does not receive `reasoning_effort`; fixed sampling fields are omitted |
+
+Gemini 3.6 Flash replaces Gemini 3.5 Flash in the current Flash line. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite. Kimi K3 replaces K2.6 as the current general-purpose default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
+
+Kimi Open Platform and the separate Kimi Code membership API are not interchangeable. This app's `kimi` provider uses `https://api.moonshot.ai/v1` and Open Platform model IDs such as `kimi-k3`. It must not send Kimi Code membership IDs such as `k3` or `kimi-for-coding` unless a separate provider, base URL, and credential type are deliberately added.
+
+Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart), [Kimi model parameter reference](https://platform.kimi.ai/docs/api/models-overview), and [Kimi model-list API](https://platform.kimi.ai/docs/api/list-models).
+
 ## Sources of truth
 
 | Layer | Location | Responsibility |
@@ -37,9 +52,11 @@ If an existing policy file is malformed, server startup fails with its exact pat
 | LM Studio | OpenAI-compatible `GET /v1/models` | Represents models visible to the local LM Studio server |
 | Claude CLI and Codex CLI | Manual catalog update | API-key access does not prove that the local subscription/workspace can use a CLI model |
 
-Official endpoint references: [OpenAI Models API](https://developers.openai.com/api/reference/resources/models/methods/list), [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list), [Gemini models.list](https://ai.google.dev/api/models), [Kimi List Models](https://platform.kimi.com/docs/api/list-models), and [LM Studio List Models](https://lmstudio.ai/docs/developer/openai-compat/models).
+Official endpoint references: [OpenAI Models API](https://developers.openai.com/api/reference/resources/models/methods/list), [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list), [Gemini models.list](https://ai.google.dev/api/models), [Kimi List Models](https://platform.kimi.ai/docs/api/list-models), and [LM Studio List Models](https://lmstudio.ai/docs/developer/openai-compat/models).
 
 Unknown discovered models enter the catalog as **Needs review**, disabled. They do not appear as selectable live models until the release procedure below is complete.
+
+A model-list response proves only that the account can see an ID. It often does not fully describe replacement status, deprecated request fields, reasoning requirements, fixed sampling parameters, pricing, or whether similarly named products use different credentials and base URLs. Every discovery therefore still requires the official-document and request-builder review below.
 
 ## Required new-model release procedure
 
@@ -62,6 +79,8 @@ The **Approved models only** switch controls old custom model IDs that predate A
 - On (strict mode): every live model ID must be approved and enabled in AI Management.
 
 A newly discovered candidate also remains runnable only if an older profile already names it while migration mode is off. Discovery therefore cannot break a legacy assignment merely by recognizing its ID. The model still stays out of every picker until it passes review, and strict mode blocks it until approval.
+
+Catalog reconciliation is automatic. If discovery saved a model as an untouched candidate before it was officially reviewed, adding that ID to the curated catalog promotes it to an approved current choice. If an earlier curated model is removed, an old auto-approved discovery record is demoted to a disabled candidate so it cannot linger in every picker. A separately validated custom approval with recorded evidence is preserved.
 
 Before turning strict mode on, review existing agent profiles and approve or replace intentional custom IDs. Do not silently normalize them to a different model.
 

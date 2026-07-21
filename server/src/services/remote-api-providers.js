@@ -19,6 +19,7 @@ const {
   buildAnthropicEffortParam,
   buildAnthropicThinkingParam,
 } = require('../lib/anthropic-thinking');
+const { applyKimiGenerationOptions } = require('../lib/kimi-model-options');
 const { assertProviderModelAllowed } = require('./ai-management');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -45,13 +46,13 @@ const PROVIDER_CONFIG = Object.freeze({
     displayName: 'OpenAI API',
   }),
   gemini: Object.freeze({
-    defaultModel: 'gemini-3.5-flash',
+    defaultModel: 'gemini-3.6-flash',
     baseUrl: 'https://generativelanguage.googleapis.com',
     envKey: 'GEMINI_API_KEY',
     displayName: 'Gemini API',
   }),
   kimi: Object.freeze({
-    defaultModel: 'kimi-k2.6',
+    defaultModel: 'kimi-k3',
     baseUrl: 'https://api.moonshot.ai',
     envKey: 'MOONSHOT_API_KEY',
     displayName: 'Kimi API',
@@ -523,8 +524,7 @@ function requestOpenAiLikeChat({
     if (providerId === 'openai') {
       applyOpenAiGenerationOptions(body, effectiveModel, reasoningEffort);
     } else if (providerId === 'kimi') {
-      body.max_tokens = DEFAULT_MAX_TOKENS;
-      body.thinking = { type: 'disabled' };
+      applyKimiGenerationOptions(body, effectiveModel, reasoningEffort, DEFAULT_MAX_TOKENS);
     } else {
       body.max_tokens = DEFAULT_MAX_TOKENS;
       body.temperature = 0.2;
@@ -651,6 +651,7 @@ function requestKimiChat({
   messages,
   systemPrompt,
   model,
+  reasoningEffort,
   timeoutMs,
   captureMetadata = null,
   requestFn = jsonRequestCancelable,
@@ -673,6 +674,7 @@ function requestKimiChat({
       messages,
       systemPrompt,
       model: effectiveModel,
+      reasoningEffort,
       timeoutMs,
       requestFn,
       captureContext: buildRemoteChatCaptureContext('kimi', 'requestKimiChat', effectiveModel, captureMetadata),

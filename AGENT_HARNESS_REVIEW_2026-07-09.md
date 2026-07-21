@@ -52,7 +52,7 @@ For the broader operational-intelligence platform, the desired loop is: understa
 
 The escalation image agents already have the strict evaluation system this review initially described too weakly. The application persists provider, model, prompt identity, real-image fixture, operator pass/fail grade, canonical and semantic checks, exact approved baselines, latency, cost, and provider evidence. The Agents UI reports reliability by provider, model, and fixture, and triage tests use operator-approved parser outputs rather than fake cases.
 
-A read-only database check confirmed the active image parser remains the user-selected `gemini-3.5-flash` with `claude-opus-4-8` fallback. Permanent approved fixture baselines currently include Gemini 3.5 Flash, Kimi K2.5, and GPT-5.5 results. Older-model baselines remain historical evidence; they do not justify retaining an old model as a current choice.
+Historical configuration snapshot from 2026-07-09: a read-only database check found the active image parser user-selected as `gemini-3.5-flash` with `claude-opus-4-8` fallback. Permanent approved fixture baselines included Gemini 3.5 Flash, Kimi K2.5, and GPT-5.5 results. That saved assignment and those older-model baselines remain historical evidence; they do not describe the current governed inventory or justify retaining an old model as a current choice.
 
 Project policy is therefore: use the newest appropriate model release, require the deterministic response contract at all times, and rely on saved harness evidence plus continuous monitoring to expose a regression immediately. A schema is at most one formatting control inside that larger system.
 
@@ -293,17 +293,19 @@ Completed actions and continuing policy:
 
 ### P1-4: Current model and effort controls must stay aligned across transports
 
-Status update, 2026-07-10: the immediate catalog and request-building problems in this finding were corrected.
+Status update, refreshed 2026-07-21: the provider catalog and request-building rules were rechecked against current official Gemini and Kimi documentation and corrected again after new releases.
 
 The correction:
 
 - Adds the current Claude model choices: Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5.
 - Adds GPT-5.6 Sol, Terra, and Luna to both Codex and direct OpenAI model choices while preserving older GPT entries only for compatibility with saved settings.
-- Uses Sonnet 5 for the direct Anthropic default, GPT-5.6 Sol for the Codex CLI default, and Gemini 3.5 Flash for Gemini.
-- Adds Kimi K2.7 Code and K2.7 Code Highspeed and keeps K2.6 as the current general-purpose default. K2.5 is historical evidence only, not a selectable model. The image parser omits the incompatible “disable thinking” setting for K2.7 because Kimi requires thinking mode for those models.
+- Uses Sonnet 5 for the direct Anthropic default, GPT-5.6 Sol for the Codex CLI default, and Gemini 3.6 Flash for Gemini. Gemini 3.5 Flash-Lite replaces 3.1 Flash-Lite; Gemini 3.1 Pro Preview remains available.
+- Uses Kimi K3 as the current general-purpose default and retains Kimi K2.7 Code and K2.7 Code Highspeed for coding-focused assignments. K2.6 and K2.5 are historical/legacy evidence, not current choices.
+- Centralizes Kimi request compatibility: K3 uses always-on reasoning with `reasoning_effort` and `max_completion_tokens`; K2.7 keeps thinking on without `reasoning_effort`; every current Kimi model omits fixed sampling fields.
+- Validates Kimi credentials through read-only `GET /v1/models` instead of spending a chat completion.
 - Sends the selected Anthropic effort as `output_config.effort` only when that model accepts the selected level.
 - Adds OpenAI `max`, current Claude `xhigh`/`max`, and Gemini `minimal`/`low`/`medium`/`high` validation where supported.
-- Sends Gemini's current `thinkingLevel` field and removes the no-longer-recommended Gemini 3 sampling setting from the triage request.
+- Sends Gemini's current `thinkingLevel` field and omits sampling settings that Gemini 3.6 Flash and 3.5 Flash-Lite deprecate across every Gemini request path.
 - Updates current-model pricing entries and focused request-builder/catalog tests.
 
 Important availability note: GPT-5.6 is a limited preview. Listing a model does not grant access to it. The OpenAI API organization or Codex workspace used by the app must already be approved, and failures must remain visible so the configured fallback can take over.
@@ -316,7 +318,7 @@ Remaining recommendation:
 - Record requested effort, effective effort, fallback, and model version in the provider evidence package.
 - Fail visibly on unsupported combinations instead of silently substituting when the user expects a particular evaluation.
 
-Official sources: [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model configuration](https://code.claude.com/docs/en/model-config), [Anthropic effort API](https://platform.claude.com/docs/en/build-with-claude/effort), [Claude Sonnet 5 release notes](https://platform.claude.com/docs/en/release-notes/overview), [Kimi model list](https://platform.kimi.com/docs/models), and [Kimi K2.7 Code quickstart](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart).
+Official sources: [OpenAI GPT-5.6 model guidance](https://developers.openai.com/api/docs/guides/latest-model), [Anthropic model configuration](https://code.claude.com/docs/en/model-config), [Anthropic effort API](https://platform.claude.com/docs/en/build-with-claude/effort), [Claude Sonnet 5 release notes](https://platform.claude.com/docs/en/release-notes/overview), [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), [Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart), and [Kimi model parameters](https://platform.kimi.ai/docs/api/models-overview).
 
 ### Resolved P1-5: Claude Code, Codex, and the Claude Agent SDK are current
 
@@ -672,7 +674,7 @@ Use this sequence when creating or repairing any agent harness:
 
 1. **Completed 2026-07-10:** add GPT-5.6 Sol/Terra/Luna, Claude Fable 5, and Claude Sonnet 5 to the relevant choices without rewriting every saved agent profile.
 2. **Completed 2026-07-10:** add Anthropic `output_config.effort`, GPT-5.6 `max`, and Gemini 3 thinking-level support where accepted.
-3. Move active model lines to current releases and run the existing deterministic harness immediately after each change.
+3. **Completed for the 2026-07-21 Gemini/Kimi release check:** moved active Gemini and Kimi lines to their current releases, centralized Kimi compatibility, and added focused deterministic request tests. Continue running role fixtures before reassigning saved agent profiles.
 4. Add structured-output schemas only for a demonstrated formatting failure and re-run the same harness afterward.
 5. **Completed 2026-07-10:** update Claude Code and the Agent SDK to `2.1.206` and `0.3.206`, respectively, with focused compatibility checks.
 6. Remove the hidden thinking flag dependency or isolate it behind a tested compatibility adapter.
@@ -734,15 +736,16 @@ Use this sequence when creating or repairing any agent harness:
 - [Prompt caching lessons from Claude Code](https://claude.com/blog/lessons-from-building-claude-code-prompt-caching-is-everything)
 - [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
 
-### Other provider model sources used for the 2026-07-10 correction
+### Other provider model sources used for the 2026-07-10 and 2026-07-21 corrections
 
 - [OpenAI GPT-5.6 preview availability and pricing](https://help.openai.com/en/articles/20001325-a-preview-of-gpt-5-6-sol-terra-and-luna)
 - [Anthropic current model IDs](https://platform.claude.com/docs/en/about-claude/models/overview)
-- [Gemini current models](https://ai.google.dev/gemini-api/docs/models)
-- [Gemini 3.5 Flash migration and thinking levels](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
-- [Kimi current API models](https://platform.kimi.com/docs/models)
-- [Kimi K2.7 Code API quickstart](https://platform.kimi.com/docs/guide/kimi-k2-7-code-quickstart)
-- [Kimi K2.6 API quickstart](https://platform.kimi.com/docs/guide/kimi-k2-6-quickstart)
+- [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model)
+- [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations)
+- [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing)
+- [Kimi K3 API quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart)
+- [Kimi model parameter reference](https://platform.kimi.ai/docs/api/models-overview)
+- [Kimi model-list API](https://platform.kimi.ai/docs/api/list-models)
 - [LM Studio dynamic local model listing](https://lmstudio.ai/docs/developer/openai-compat/models)
 
 ## Final recommendation
@@ -898,11 +901,11 @@ The app now includes:
 - GPT‑5.6 Terra
 - GPT‑5.6 Luna
 - GPT‑5.5, GPT‑5.4, GPT‑5.4 Mini, and GPT‑5.4 Nano as existing generally available alternatives
-- Gemini 3.5 Flash
-- Gemini 3.1 Flash-Lite
+- Gemini 3.6 Flash
+- Gemini 3.5 Flash-Lite
 - Gemini 3.1 Pro Preview
+- Kimi K3 as the current general-purpose default
 - Kimi K2.7 Code and K2.7 Code Highspeed for coding-focused work
-- Kimi K2.6 as the current general-purpose default; K2.5 remains only in historical test evidence
 - LLM Gateway automatic routing
 - LM Studio’s currently loaded local model
 
@@ -911,13 +914,12 @@ The relevant defaults are now:
 - Codex CLI: GPT‑5.6 Sol
 - Direct Anthropic API: Claude Sonnet 5
 - Direct OpenAI API: GPT‑5.6 Terra
-- Gemini API: Gemini 3.5 Flash
-- Kimi API: Kimi K2.6
+- Gemini API: Gemini 3.6 Flash
+- Kimi API: Kimi K3
 - Gateway: automatic model selection
 - LM Studio: whichever local model is loaded
 
-The selected Anthropic effort is now actually sent to Anthropic. Gemini now receives its current thinking-
-level setting. GPT‑5.6 max effort is supported where appropriate.
+The selected Anthropic effort is sent to Anthropic. Gemini receives its current thinking-level setting while omitting deprecated sampling controls. Kimi K3 receives a normalized `low`, `high`, or `max` reasoning effort, while K2.7 never receives an unsupported effort field. GPT‑5.6 max effort is supported where appropriate.
 
 One important limitation: GPT‑5.6 is still a limited preview. Your Codex workspace or OpenAI API
 organization must have access. Having this Codex chat set to GPT‑5.6 Sol does not necessarily prove that a
@@ -929,13 +931,9 @@ details (https://developers.openai.com/api/docs/models/gpt-5.6-sol)
 Anthropic’s current general lineup is Fable 5, Opus 4.8, Sonnet 5, and Haiku 4.5. Anthropic model overview
 (https://platform.claude.com/docs/en/about-claude/models/overview)
 
-Gemini 3.5 Flash is now the stable Gemini default, replacing Gemini 3 Flash Preview. Gemini 3.5 Flash
-migration guide (https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
+Gemini 3.6 Flash is the current stable Gemini default, and Gemini 3.5 Flash-Lite is the current lower-cost Flash-Lite choice. Both deprecate sampling controls that older Gemini lines accepted. Gemini latest-model guide (https://ai.google.dev/gemini-api/docs/generate-content/latest-model)
 
-Kimi’s official API documentation identifies K2.7 Code as its strongest coding model and K2.6 as the
-general-purpose multimodal model. K2.7 cannot disable thinking mode, so the app now omits that incompatible
-setting when a K2.7 model is selected. Kimi model list
-(https://platform.kimi.com/docs/models)
+Kimi K3 is the current general-purpose flagship on Kimi Open Platform. It is always-reasoning and uses a different request contract from K2.7 Code and older K2 models, so all three app call sites now use the same compatibility helper. Kimi K3 quickstart (https://platform.kimi.ai/docs/guide/kimi-k3-quickstart)
 
 9. “Claude runtime and Agent SDK are behind”
 
@@ -1003,7 +1001,7 @@ The feature is deferred. Do not build it against the current inactive Workspace.
 - Corrected stale Claude project memory and worker testing/delegation rules.
 - Added plain-language reporting requirements to Claude's worker, researcher, reviewer, root instructions, and active hook.
 - Stopped tracking 33 historical Claude session files while preserving all local copies.
-- Added Kimi K2.7 Code, K2.7 Code Highspeed, and K2.6; removed K2.5 from current choices while preserving historical test evidence, and handled K2.7's mandatory thinking mode.
+- Refreshed Gemini and Kimi again on 2026-07-21: added Gemini 3.6 Flash, Gemini 3.5 Flash-Lite, and Kimi K3; removed superseded current choices without rewriting saved profiles; centralized K3/K2.7/legacy K2 request compatibility; and changed Kimi key validation to read-only model discovery.
 - Confirmed Claude Code and Codex are current, upgraded the Claude Agent SDK to `0.3.206`, and applied non-breaking dependency security patches until `npm audit` reported zero known vulnerabilities.
 - Repaired the formerly hanging `image-parser-deep.test.js` network mocks, added required temporary evidence-database setup and cleanup, and updated stale current-contract expectations. The full combined parser verification now exits normally with 225 passing tests.
 

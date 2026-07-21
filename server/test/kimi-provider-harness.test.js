@@ -34,7 +34,7 @@ function kimiResponse(overrides = {}) {
   return {
     id: overrides.id || 'chatcmpl-kimi-test',
     object: 'chat.completion',
-    model: overrides.model || 'kimi-k2.6',
+    model: overrides.model || 'kimi-k3',
     choices: [
       {
         index: 0,
@@ -123,17 +123,18 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
   const { events, eventBus } = createEventBus();
   const server = await startProviderServer(({ res }) => {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(kimiResponse({ model: 'moonshot-v1-8k' })));
+    res.end(JSON.stringify(kimiResponse({ model: 'kimi-k3' })));
   });
 
   try {
     const result = await parseWithServer(server, {
-      model: 'moonshot-v1-8k',
+      model: 'kimi-k3',
+      reasoningEffort: 'high',
       eventBus,
     });
 
     assert.match(result.text, /Kimi package handoff verified/);
-    assert.equal(result.usage.model, 'moonshot-v1-8k');
+    assert.equal(result.usage.model, 'kimi-k3');
     assert.equal(result.usage.inputTokens, 11);
     assert.equal(result.usage.outputTokens, 7);
     assert.equal(result.providerTrace.providerHarness, 'kimi-api');
@@ -145,15 +146,20 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
     assert.equal(saved.providerId, 'kimi');
     assert.equal(saved.providerResearchId, 'kimi-api');
     assert.equal(saved.outcome, 'success');
-    assert.equal(saved.request.bodyJson.model, 'moonshot-v1-8k');
-    assert.equal(saved.request.bodyJson.temperature, 1);
-    assert.deepEqual(saved.request.bodyJson.thinking, { type: 'disabled' });
+    assert.equal(saved.request.bodyJson.model, 'kimi-k3');
+    assert.equal(saved.request.bodyJson.max_completion_tokens, 4096);
+    assert.equal(saved.request.bodyJson.reasoning_effort, 'high');
+    assert.equal(saved.request.bodyJson.max_tokens, undefined);
+    assert.equal(saved.request.bodyJson.temperature, undefined);
+    assert.equal(saved.request.bodyJson.thinking, undefined);
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
     assert.equal(saved.response.parsedJson.usage.prompt_tokens, 11);
 
     const requestBody = JSON.parse(server.requests[0].body);
-    assert.equal(requestBody.temperature, 1);
-    assert.deepEqual(requestBody.thinking, { type: 'disabled' });
+    assert.equal(requestBody.max_completion_tokens, 4096);
+    assert.equal(requestBody.reasoning_effort, 'high');
+    assert.equal(requestBody.temperature, undefined);
+    assert.equal(requestBody.thinking, undefined);
     assert.equal(server.requests[0].req.headers.authorization, 'Bearer mk-test-kimi-key');
     assert.ok(events.some((event) => event.type === 'provider.package_capture_confirmed'));
     assert.ok(events.some((event) => event.type === 'parser.provider_payload_selected'));

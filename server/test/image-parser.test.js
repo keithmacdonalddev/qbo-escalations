@@ -623,7 +623,7 @@ test('parseImage routes to kimi and returns parsed result', async () => {
           process.nextTick(() => {
             res.emit('data', JSON.stringify({
               choices: [{ message: { content: 'COID/MID: 456\nCASE: CS-002' } }],
-              model: 'kimi-k2.6',
+              model: 'kimi-k3',
               usage: { prompt_tokens: 80, completion_tokens: 40 },
             }));
             res.emit('end');
@@ -644,10 +644,15 @@ test('parseImage routes to kimi and returns parsed result', async () => {
     assert.equal(result.usage.inputTokens, 80);
     assert.equal(result.usage.outputTokens, 40);
 
-    // Verify callKimi sends temperature: 1 in the request body
+    // Verify callKimi sends the current K3 always-reasoning request body.
     assert.ok(capturedBody, 'HTTP request body should have been captured');
     const parsed = JSON.parse(capturedBody);
-    assert.equal(parsed.temperature, 1, 'Kimi request must include temperature: 1');
+    assert.equal(parsed.model, 'kimi-k3');
+    assert.equal(parsed.max_completion_tokens, 4096);
+    assert.equal(parsed.reasoning_effort, undefined);
+    assert.equal(parsed.max_tokens, undefined);
+    assert.equal(parsed.temperature, undefined);
+    assert.equal(parsed.thinking, undefined);
   } finally {
     https.request = origHttps;
     fs.readFileSync = origRead;
@@ -690,7 +695,7 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
           process.nextTick(() => {
             res.emit('data', JSON.stringify({
               choices: [{ message: { content: 'COID/MID: 456\nCASE: CS-002' } }],
-              model: 'kimi-k2.6',
+              model: 'kimi-k3',
               usage: { prompt_tokens: 80, completion_tokens: 40 },
             }));
             res.emit('end');
@@ -714,10 +719,10 @@ test('parseImage captures Kimi provider package when capture flag is enabled', a
     assert.equal(saved.providerPathType, 'direct-http');
     assert.equal(saved.operation, 'image-parse');
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
-    assert.equal(saved.request.modelRequested, 'kimi-k2.6');
+    assert.equal(saved.request.modelRequested, 'kimi-k3');
     assert.equal(saved.response.statusCode, 200);
     assert.equal(saved.response.headers['x-request-id'], 'kimi-image-test');
-    assert.equal(saved.response.parsedJson.model, 'kimi-k2.6');
+    assert.equal(saved.response.parsedJson.model, 'kimi-k3');
   } finally {
     https.request = origHttps;
     fs.readFileSync = origRead;
@@ -969,7 +974,7 @@ test('parseImage captures Gemini image-parser package in Gemini-specific shape e
   const cleanupKey = setupProviderKey('GEMINI_API_KEY', 'AIza-gemini-test-key');
   const httpsMock = mockHttpsRequest(200, {
     responseId: 'gemini-image-response-id',
-    modelVersion: 'gemini-3-flash-preview',
+    modelVersion: 'gemini-3.6-flash',
     candidates: [
       {
         content: {
@@ -991,7 +996,7 @@ test('parseImage captures Gemini image-parser package in Gemini-specific shape e
     const eventBus = { emit: (type, payload) => events.push({ type, payload }) };
     const result = await parseImage(TINY_PNG_BASE64, {
       provider: 'gemini',
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-3.6-flash',
       eventBus,
     });
     await __waitForProviderPackageRecorderSettled();
@@ -999,14 +1004,14 @@ test('parseImage captures Gemini image-parser package in Gemini-specific shape e
 
     assert.ok(saved);
     assert.equal(result.text, 'COID/MID: 321\nCASE: CS-GEM-001');
-    assert.equal(result.usage.model, 'gemini-3-flash-preview');
+    assert.equal(result.usage.model, 'gemini-3.6-flash');
     assert.equal(result.usage.inputTokens, 33);
     assert.equal(result.usage.outputTokens, 11);
     assert.equal(result.usage.totalTokens, 44);
     assert.equal(result.providerTrace?.providerHarness, 'gemini-api');
     assert.equal(result.providerTrace?.providerPackageId, String(saved._id));
     assert.equal(result.providerTrace?.responseId, 'gemini-image-response-id');
-    assert.equal(result.providerTrace?.modelVersion, 'gemini-3-flash-preview');
+    assert.equal(result.providerTrace?.modelVersion, 'gemini-3.6-flash');
     assert.equal(result.providerTrace?.packageCaptureQueued, true);
     assert.equal(saved.providerId, 'gemini');
     assert.equal(saved.providerResearchId, 'gemini-api');
@@ -1015,13 +1020,13 @@ test('parseImage captures Gemini image-parser package in Gemini-specific shape e
     assert.equal(saved.request, null);
     assert.equal(saved.response, null);
     assert.equal(saved.llmGateway, null);
-    assert.equal(saved.geminiApi.request.modelRequested, 'gemini-3-flash-preview');
+    assert.equal(saved.geminiApi.request.modelRequested, 'gemini-3.6-flash');
     assert.equal(saved.geminiApi.request.hasImages, true);
     assert.equal(saved.geminiApi.request.images[0].mediaType, 'image/png');
     assert.equal(saved.geminiApi.request.headers['x-goog-api-key'], '[REDACTED]');
     assert.equal(saved.geminiApi.response.statusCode, 200);
     assert.equal(saved.geminiApi.response.responseId, 'gemini-image-response-id');
-    assert.equal(saved.geminiApi.response.modelVersion, 'gemini-3-flash-preview');
+    assert.equal(saved.geminiApi.response.modelVersion, 'gemini-3.6-flash');
     assert.equal(saved.geminiApi.response.usageMetadata.totalTokenCount, 44);
     assert.equal(saved.outcome, 'success');
     assert.ok(events.some((event) => event.type === 'provider.harness_request_started'));
@@ -1441,7 +1446,7 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
     }).lean();
 
     assert.equal(result.available, true);
-    assert.equal(result.model, 'gemini-3.5-flash');
+    assert.equal(result.model, 'gemini-3.6-flash');
     assert.ok(saved);
     assert.equal(saved.providerId, 'gemini');
     assert.equal(saved.operation, 'provider-status');
@@ -1450,7 +1455,7 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
     assert.equal(saved.geminiApi.response.responseId, 'gemini-status-response-id');
     assert.equal(saved.geminiApi.providerStatus.ok, true);
     assert.equal(saved.geminiApi.providerStatus.authenticated, true);
-    assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3.5-flash');
+    assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3.6-flash');
   } finally {
     httpsMock.restore();
     if (previousFlag === undefined) delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
@@ -2386,8 +2391,8 @@ test('getStoredApiKey / getApiKey', async (t) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Provider request body validation — catches bugs like the Kimi temperature
-// incident where temperature: 0.1 was sent but Kimi only accepts 1
+// Provider request body validation — catches provider-specific compatibility
+// regressions such as sending sampling fields that current Kimi models reject.
 // ═══════════════════════════════════════════════════════════════════════════
 
 /**
@@ -2507,9 +2512,9 @@ const MINIMAL_ANTHROPIC_RESPONSE = {
 test('provider request body validation', async (t) => {
 
   // ---------------------------------------------------------------------------
-  // 1. Kimi request body shape
+  // 1. Kimi K3 request body shape
   // ---------------------------------------------------------------------------
-  await t.test('kimi: sends correct request body shape (temperature 1, model, image format, auth)', async () => {
+  await t.test('kimi: sends current K3 reasoning fields, image format, and auth', async () => {
     const origKey = process.env.MOONSHOT_API_KEY;
     const origRead = fs.readFileSync;
     process.env.MOONSHOT_API_KEY = 'mk-test-body-check';
@@ -2530,9 +2535,11 @@ test('provider request body validation', async (t) => {
 
       // Body shape
       const body = captured.body;
-      assert.equal(body.temperature, 1, 'Kimi MUST send temperature: 1 (not 0.1 — Kimi rejects other values)');
-      assert.equal(body.model, 'kimi-k2.6', 'default model must be kimi-k2.6');
-      assert.equal(body.max_tokens, 4096);
+      assert.equal(body.model, 'kimi-k3', 'default model must be kimi-k3');
+      assert.equal(body.max_completion_tokens, 4096);
+      assert.equal(body.max_tokens, undefined);
+      assert.equal(body.temperature, undefined);
+      assert.equal(body.thinking, undefined);
 
       // Messages structure
       assert.equal(body.messages[0].role, 'system');
@@ -2700,7 +2707,7 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi', model: 'my-custom-model' });
-      assert.equal(captured.body.model, 'my-custom-model', 'custom model must override default kimi-k2.6');
+      assert.equal(captured.body.model, 'my-custom-model', 'custom model must override default kimi-k3');
     } finally {
       captured._restore();
       fs.readFileSync = origRead;
@@ -2830,9 +2837,9 @@ test('provider request body validation', async (t) => {
   });
 
   // ---------------------------------------------------------------------------
-  // 8. Kimi temperature regression guard — explicit check that temp is NOT 0.1
+  // 8. Kimi fixed-sampling regression guard
   // ---------------------------------------------------------------------------
-  await t.test('kimi: temperature must NOT be 0.1 (regression guard for production incident)', async () => {
+  await t.test('kimi: current models must omit temperature entirely', async () => {
     const origKey = process.env.MOONSHOT_API_KEY;
     const origRead = fs.readFileSync;
     process.env.MOONSHOT_API_KEY = 'mk-test-temp-regression';
@@ -2844,9 +2851,9 @@ test('provider request body validation', async (t) => {
     const captured = mockHttpsCapture(MINIMAL_OPENAI_RESPONSE);
     try {
       await parseImageWithProviderPackageStore(TINY_PNG_BASE64, { provider: 'kimi' });
-      assert.notEqual(captured.body.temperature, 0.1,
-        'REGRESSION: Kimi rejects temperature !== 1. This was the actual production bug.');
-      assert.equal(captured.body.temperature, 1);
+      assert.equal(captured.body.temperature, undefined,
+        'REGRESSION: current Kimi models use fixed sampling and require temperature to be omitted.');
+      assert.equal(captured.body.max_completion_tokens, 4096);
     } finally {
       captured._restore();
       fs.readFileSync = origRead;

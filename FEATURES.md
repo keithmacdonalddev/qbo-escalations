@@ -256,3 +256,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: medium
 Special Feature: Agent Harness Health Check - Provide a read-only project health view that shows which coding-agent instructions, hooks, skills, specialist agents, and memory files are active, then flags stale memory, broken skill references, duplicate rules, or disabled guards in plain English. This prevents silent configuration drift and false confidence without turning the product into a developer dashboard.
+
+Date: 2026-07-21
+Time: 20:26 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: medium
+Special Feature: Provider Contract Change Watch - Extend model discovery beyond “a new ID exists” by creating a review packet when a provider changes a model line: replacement/deprecation status, reasoning and sampling rules, endpoint or credential differences, context/output limits, pricing, affected agent assignments, and the exact harness tests that must pass. It would never auto-enable the model; it would turn fast-moving vendor changes into one governed release decision and prevent the catalog, request builders, saved policy, documentation, and pickers from drifting apart.

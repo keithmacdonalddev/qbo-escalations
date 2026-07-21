@@ -941,7 +941,7 @@ function buildGeminiNoResponsePackage() {
 
 function normalizeGeminiRequest(input, context) {
   const baseUrl = input.baseUrl || context.baseUrl || 'https://generativelanguage.googleapis.com';
-  const urlPath = input.urlPath || input.path || '/v1beta/models/gemini-3.5-flash:generateContent';
+  const urlPath = input.urlPath || input.path || '/v1beta/models/gemini-3.6-flash:generateContent';
   const url = new URL(urlPath, baseUrl);
   const serializedBody = serializeBody(input.body);
   const bodyJson = serializedBody.bodyJson;

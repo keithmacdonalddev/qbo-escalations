@@ -19,6 +19,7 @@ const {
   updateProviderPolicy,
   updateSettings,
 } = require('../src/services/ai-management');
+const { mergeModel, reconcileModelPolicy } = require('../src/services/ai-management')._internal;
 const { createApp } = require('../src/app');
 const { evaluateProactiveAction } = require('../src/services/workspace-proactive');
 const { getProvider } = require('../src/services/providers/registry');
@@ -55,6 +56,49 @@ test('provider defaults and CLI model presets cannot drift from the governed mod
     const models = modelCatalog.providers?.[preset.transport]?.models || [];
     assert.ok(models.some((model) => model.id === preset.model), `${preset.id} preset is missing from ${preset.transport}`);
   }
+});
+
+test('catalog refresh promotes newly curated discoveries and demotes superseded auto-approvals', () => {
+  const newlyCurated = mergeModel(
+    'gemini',
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', releaseChannel: 'stable' },
+    {
+      id: 'gemini-3.6-flash',
+      label: 'Gemini 3.6 Flash from discovery',
+      approval: 'candidate',
+      enabled: false,
+      validationStatus: 'not-run',
+      source: 'provider-discovery',
+      availability: 'available',
+    }
+  );
+  assert.equal(newlyCurated.approval, 'approved');
+  assert.equal(newlyCurated.enabled, true);
+  assert.equal(newlyCurated.validationStatus, 'catalogued');
+  assert.equal(newlyCurated.source, 'curated-catalog');
+  assert.equal(newlyCurated.label, 'Gemini 3.6 Flash');
+
+  assert.deepEqual(reconcileModelPolicy(null, {
+    id: 'gemini-3.5-flash',
+    approval: 'approved',
+    enabled: true,
+    validationStatus: 'catalogued',
+    source: 'provider-discovery',
+  }), {
+    approval: 'candidate',
+    enabled: false,
+    validationStatus: 'not-run',
+    source: 'provider-discovery',
+  });
+
+  assert.deepEqual(reconcileModelPolicy(null, {
+    id: 'custom-validated-model',
+    approval: 'approved',
+    enabled: true,
+    validationStatus: 'passed',
+    validationEvidence: 'harness-run-123',
+    source: 'provider-discovery',
+  }), {});
 });
 
 test('provider and approved-model switches are enforced at the server boundary', () => {

@@ -52,17 +52,17 @@
     "gemini": {
       "discovery": "api",
       "models": [
-        { "id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true }
+        { "id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
+        { "id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
+        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 }
       ]
     },
     "kimi": {
       "discovery": "api",
       "models": [
-        { "id": "kimi-k2.7-code", "label": "Kimi K2.7 Code", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "kimi-k2.7-code-highspeed", "label": "Kimi K2.7 Code Highspeed", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "kimi-k2.6", "label": "Kimi K2.6", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
+        { "id": "kimi-k3", "label": "Kimi K3", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 1048576 },
+        { "id": "kimi-k2.7-code", "label": "Kimi K2.7 Code", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 262144 },
+        { "id": "kimi-k2.7-code-highspeed", "label": "Kimi K2.7 Code Highspeed", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 262144 }
       ]
     },
     "lm-studio": {

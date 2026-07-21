@@ -194,6 +194,17 @@ test('Gemini 3.5 Flash priced at $1.50/$9 per MTok', () => {
   assert.equal(rates.outputNanosPerToken, 9000);
 });
 
+test('current Gemini Flash models use the July 2026 published rates', () => {
+  assert.deepEqual(getRates('gemini-3.6-flash', null), {
+    inputNanosPerToken: 1500,
+    outputNanosPerToken: 7500,
+  });
+  assert.deepEqual(getRates('gemini-3.5-flash-lite', null), {
+    inputNanosPerToken: 300,
+    outputNanosPerToken: 2500,
+  });
+});
+
 test('GPT-5.6 family uses the published Sol, Terra, and Luna rates', () => {
   assert.deepEqual(getRates('gpt-5.6-sol', null), {
     inputNanosPerToken: 5000,
@@ -231,6 +242,7 @@ test('nanosToUsd formats correctly', () => {
 
 test('PRICING_VERSION is a date string', () => {
   assert.match(PRICING_VERSION, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(PRICING_VERSION, '2026-07-21');
 });
 
 test('corrupted rate entry returns zero cost and rateFound false', () => {

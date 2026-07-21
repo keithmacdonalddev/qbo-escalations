@@ -74,19 +74,63 @@ function providerModelDefaults(providerId) {
   return Array.isArray(definition?.models) ? definition.models : [];
 }
 
+function reconcileModelPolicy(baseModel, modelState = {}) {
+  const isCurated = Boolean(baseModel?.id);
+  const source = String(modelState.source || '');
+  const approval = String(modelState.approval || '');
+  const validationStatus = String(modelState.validationStatus || '');
+  const hasValidationEvidence = Boolean(String(modelState.validationEvidence || '').trim());
+
+  // A discovery can see a model before the reviewed catalog is updated. Once
+  // that same ID becomes curated, promote only the untouched discovery state.
+  if (isCurated
+    && source === 'provider-discovery'
+    && approval === 'candidate'
+    && modelState.enabled === false
+    && validationStatus === 'not-run'
+    && !hasValidationEvidence) {
+    return {
+      approval: 'approved',
+      enabled: true,
+      validationStatus: 'catalogued',
+      source: 'curated-catalog',
+    };
+  }
+
+  // Conversely, a model removed from the reviewed catalog must not remain in
+  // every picker merely because an earlier discovery saved its former
+  // auto-approved state. Migration mode still lets an existing profile run it.
+  if (!isCurated
+    && (source === 'provider-discovery' || source === 'curated-catalog')
+    && approval === 'approved'
+    && validationStatus === 'catalogued'
+    && !hasValidationEvidence) {
+    return {
+      approval: 'candidate',
+      enabled: false,
+      validationStatus: 'not-run',
+      source: 'provider-discovery',
+    };
+  }
+
+  return {};
+}
+
 function mergeModel(providerId, baseModel, modelState = {}) {
   const id = String(baseModel?.id || modelState?.id || '').trim();
   const isCurated = Boolean(baseModel?.id);
+  const reconciledPolicy = reconcileModelPolicy(baseModel, modelState);
+  const effectiveState = { ...(modelState || {}), ...reconciledPolicy };
   return {
-    ...(baseModel || {}),
     ...(modelState || {}),
+    ...(baseModel || {}),
     id,
-    label: modelState.label || baseModel?.label || id,
-    approval: modelState.approval || (isCurated ? 'approved' : 'candidate'),
-    enabled: typeof modelState.enabled === 'boolean' ? modelState.enabled : isCurated,
-    source: modelState.source || (isCurated ? 'curated-catalog' : 'provider-discovery'),
-    availability: modelState.availability || (isCurated ? 'catalogued' : 'discovered'),
-    validationStatus: modelState.validationStatus || (isCurated ? 'catalogued' : 'not-run'),
+    label: baseModel?.label || modelState.label || id,
+    approval: effectiveState.approval || (isCurated ? 'approved' : 'candidate'),
+    enabled: typeof effectiveState.enabled === 'boolean' ? effectiveState.enabled : isCurated,
+    source: effectiveState.source || (isCurated ? 'curated-catalog' : 'provider-discovery'),
+    availability: effectiveState.availability || (isCurated ? 'catalogued' : 'discovered'),
+    validationStatus: effectiveState.validationStatus || (isCurated ? 'catalogued' : 'not-run'),
   };
 }
 
@@ -398,8 +442,9 @@ function mergeDiscoveryResult(providerId, result) {
 
   for (const discovered of result.models || []) {
     const currentModel = isPlainObject(models[discovered.id]) ? models[discovered.id] : {};
-    const isCurated = providerModelDefaults(providerId).some((model) => model.id === discovered.id);
-    models[discovered.id] = {
+    const curatedModel = providerModelDefaults(providerId).find((model) => model.id === discovered.id) || null;
+    const isCurated = Boolean(curatedModel);
+    const mergedModel = {
       ...currentModel,
       ...Object.fromEntries(Object.entries(discovered).filter(([, value]) => value !== null && value !== '')),
       approval: currentModel.approval || (isCurated ? 'approved' : 'candidate'),
@@ -409,6 +454,10 @@ function mergeDiscoveryResult(providerId, result) {
       availability: 'available',
       discoveredAt: currentModel.discoveredAt || checkedAt,
       lastSeenAt: checkedAt,
+    };
+    models[discovered.id] = {
+      ...mergedModel,
+      ...reconcileModelPolicy(curatedModel, mergedModel),
     };
   }
 
@@ -558,4 +607,9 @@ module.exports = {
   updateModelPolicy,
   updateProviderPolicy,
   updateSettings,
+};
+
+module.exports._internal = {
+  mergeModel,
+  reconcileModelPolicy,
 };

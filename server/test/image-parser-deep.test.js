@@ -357,7 +357,7 @@ test('Provider request body: Kimi', async (t) => {
   try {
     mockHttpsRequest(200, {
       choices: [{ message: { content: 'CASE: CS-002' } }],
-      model: 'kimi-k2.6',
+      model: 'kimi-k3',
       usage: { prompt_tokens: 40, completion_tokens: 20 },
     });
 
@@ -376,13 +376,15 @@ test('Provider request body: Kimi', async (t) => {
       assert.equal(capture.options.headers['Authorization'], 'Bearer mk-test-kimi-key');
     });
 
-    await t.test('body disables Kimi thinking and uses required temperature 1', () => {
-      assert.equal(capture.body.temperature, 1);
-      assert.deepEqual(capture.body.thinking, { type: 'disabled' });
+    await t.test('body uses Kimi K3 always-on reasoning fields without sampling controls', () => {
+      assert.equal(capture.body.temperature, undefined);
+      assert.equal(capture.body.thinking, undefined);
+      assert.equal(capture.body.max_tokens, undefined);
+      assert.equal(capture.body.max_completion_tokens, 4096);
     });
 
-    await t.test('body contains model kimi-k2.6 by default', () => {
-      assert.equal(capture.body.model, 'kimi-k2.6');
+    await t.test('body contains model kimi-k3 by default', () => {
+      assert.equal(capture.body.model, 'kimi-k3');
     });
 
     await t.test('body uses image_url format (same as OpenAI)', () => {

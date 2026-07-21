@@ -43,6 +43,7 @@ const {
   buildAnthropicEffortParam,
   buildAnthropicThinkingParam,
 } = require('../lib/anthropic-thinking');
+const { applyKimiGenerationOptions } = require('../lib/kimi-model-options');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { buildServerTriageCard } = require('../lib/chat-triage');
 const {
@@ -336,18 +337,19 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   },
   kimi: {
     hostname: 'api.moonshot.ai',
-    path: '/v1/chat/completions',
-    model: 'kimi-k2.6',
-    buildBody: (model) => JSON.stringify({ model, max_tokens: 1, temperature: 1, messages: [{ role: 'user', content: 'hi' }] }),
+    path: '/v1/models',
+    method: 'GET',
+    model: 'kimi-k3',
+    buildBody: () => null,
     buildHeaders: (key) => ({
       'Authorization': `Bearer ${key}`,
-      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     }),
   },
   gemini: {
     hostname: 'generativelanguage.googleapis.com',
-    path: '/v1beta/models/gemini-3.5-flash:generateContent',
-    model: 'gemini-3.5-flash',
+    path: '/v1beta/models/gemini-3.6-flash:generateContent',
+    model: 'gemini-3.6-flash',
     buildBody: () => JSON.stringify({
       contents: [{ parts: [{ text: 'hi' }] }],
       generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' },
@@ -1683,7 +1685,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
  */
 async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
   throwIfAborted(signal);
-  const effectiveModel = model || 'gemini-3.5-flash';
+  const effectiveModel = model || 'gemini-3.6-flash';
   const thinkingLevel = normalizeGeminiThinkingLevel(effectiveModel, reasoningEffort);
   const body = {
     system_instruction: {
@@ -1758,15 +1760,11 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEf
 /**
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
-async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus = null, signal = null) {
+async function callKimi(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
   throwIfAborted(signal);
-  const effectiveModel = model || 'kimi-k2.6';
-  const requiresThinking = /^kimi-k2\.7-code(?:-highspeed)?$/i.test(effectiveModel);
+  const effectiveModel = model || 'kimi-k3';
   const body = {
     model: effectiveModel,
-    max_tokens: 4096,
-    temperature: 1,
-    ...(requiresThinking ? {} : { thinking: { type: 'disabled' } }),
     messages: [
       { role: 'system', content: systemPrompt },
       {
@@ -1778,12 +1776,14 @@ async function callKimi(systemPrompt, imageDataUrl, model, timeoutMs, eventBus =
       },
     ],
   };
+  applyKimiGenerationOptions(body, effectiveModel, reasoningEffort, 4096);
 
   verboseLog('[image-parser-debug] callKimi request:', {
     url: 'https://api.moonshot.ai/v1/chat/completions',
     model: effectiveModel,
     max_tokens: body.max_tokens,
-    temperature: body.temperature,
+    max_completion_tokens: body.max_completion_tokens,
+    reasoning_effort: body.reasoning_effort,
     systemPromptLength: systemPrompt.length,
     imageDataUrlLength: imageDataUrl.length,
     messageStructure: JSON.stringify(body.messages.map(m => ({
@@ -3094,7 +3094,7 @@ async function parseImage(imageBase64, options = {}) {
         result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal);
         break;
       case 'kimi':
-        result = await callKimi(systemPrompt, normalized.dataUrl, model, timeoutMs, eventBus, signal);
+        result = await callKimi(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal);
         break;
       default: {
         const err = new Error(`Invalid provider: ${provider}. Must be one of: ${VALID_IMAGE_PARSER_PROVIDERS.join(', ')}`);

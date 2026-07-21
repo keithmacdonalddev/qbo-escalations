@@ -12,6 +12,7 @@ const {
   preflightProvider,
   runDirectTriageProviderCall,
   runTriage,
+  __internals,
 } = require('../src/services/triage');
 
 const PARSER_TEXT = [
@@ -262,6 +263,35 @@ test('triage direct Anthropic body gates thinking + temperature by model and ext
     else process.env.ANTHROPIC_API_KEY = prevKey;
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('triage Kimi bodies follow K3 and K2.7 model-specific compatibility', () => {
+  const common = {
+    systemPrompt: 'Triage instructions',
+    userPrompt: 'Triage this template.',
+    maxTokens: 1200,
+  };
+  const k3Body = __internals.buildKimiBody({
+    ...common,
+    model: 'kimi-k3',
+    reasoningEffort: 'max',
+  });
+  assert.equal(k3Body.max_completion_tokens, 1200);
+  assert.equal(k3Body.reasoning_effort, 'max');
+  assert.equal(k3Body.max_tokens, undefined);
+  assert.equal(k3Body.temperature, undefined);
+  assert.equal(k3Body.thinking, undefined);
+
+  const k27Body = __internals.buildKimiBody({
+    ...common,
+    model: 'kimi-k2.7-code',
+    reasoningEffort: 'high',
+  });
+  assert.equal(k27Body.max_tokens, 1200);
+  assert.equal(k27Body.max_completion_tokens, undefined);
+  assert.equal(k27Body.reasoning_effort, undefined);
+  assert.equal(k27Body.temperature, undefined);
+  assert.equal(k27Body.thinking, undefined);
 });
 
 test('runTriage preflight failure short-circuits to fallback before provider handoff', async () => {

@@ -10,7 +10,7 @@ const path = require('path');
  * To convert from vendor pricing ($/MTok): rate_nanos = price_per_MTok * 1000
  * Example: $3/MTok input = 3000 nanos/token
  *
- * PRICING_VERSION: 2026-07-10
+ * PRICING_VERSION: 2026-07-21
  * Sources:
  *   Anthropic: https://docs.anthropic.com/en/docs/about-claude/pricing
  *   OpenAI:    https://openai.com/api/pricing/
@@ -63,12 +63,15 @@ const DEFAULT_PRICING = {
   'o3':                           { inputNanosPerToken: 2000,  outputNanosPerToken: 8000   }, // $2/$8 per MTok
   'o3-mini':                      { inputNanosPerToken: 1100,  outputNanosPerToken: 4400   }, // $1.10/$4.40 per MTok
 
-  // Google Gemini API — standard paid-tier pricing as of 2026-05-25
+  // Google Gemini API — standard paid-tier pricing as of 2026-07-21.
+  'gemini-3.6-flash':             { inputNanosPerToken: 1500,  outputNanosPerToken: 7500   }, // $1.50/$7.50 per MTok
+  'gemini-3.5-flash-lite':        { inputNanosPerToken: 300,   outputNanosPerToken: 2500   }, // $0.30/$2.50 per MTok
+  // Historical rates remain for cost attribution on older saved runs.
   'gemini-3.5-flash':             { inputNanosPerToken: 1500,  outputNanosPerToken: 9000   }, // $1.50/$9 per MTok
   'gemini-3-flash-preview':       { inputNanosPerToken: 500,   outputNanosPerToken: 3000   }, // $0.50/$3 per MTok
 };
 
-const PRICING_VERSION = '2026-07-10';
+const PRICING_VERSION = '2026-07-21';
 
 /**
  * Provider-level fallback rates (nanodollars) when the exact model is unknown.

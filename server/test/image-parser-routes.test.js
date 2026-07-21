@@ -796,20 +796,19 @@ test('POST /keys/test', async (t) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Kimi test config — verify temperature: 1 in the test body
+// Kimi key validation — verify it uses the read-only models endpoint
 // ═══════════════════════════════════════════════════════════════════════════
-test('Kimi test config includes temperature: 1', () => {
+test('Kimi test config uses GET /v1/models without a completion body', () => {
   const serviceSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'services', 'image-parser.js'),
     'utf8'
   );
 
-  const kimiSection = serviceSource.match(/kimi:\s*\{[\s\S]*?buildBody:[^}]+\}/);
+  const kimiSection = serviceSource.match(/kimi:\s*\{[\s\S]*?buildHeaders:[\s\S]*?\n\s*\},/);
   assert.ok(kimiSection, 'Kimi section exists in REMOTE_PROVIDER_TEST_CONFIGS');
-  assert.ok(
-    kimiSection[0].includes('temperature: 1'),
-    'Kimi test config buildBody includes temperature: 1'
-  );
+  assert.ok(kimiSection[0].includes("path: '/v1/models'"));
+  assert.ok(kimiSection[0].includes("method: 'GET'"));
+  assert.ok(kimiSection[0].includes('buildBody: () => null'));
 
   const anthropicSection = serviceSource.match(/anthropic:\s*\{[\s\S]*?buildBody:[^}]+\}/);
   assert.ok(anthropicSection, 'Anthropic section exists in REMOTE_PROVIDER_TEST_CONFIGS');

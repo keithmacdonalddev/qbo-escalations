@@ -476,19 +476,18 @@ test('POST /keys/test deep tests', async (t) => {
     }
   });
 
-  await t.test('valid Kimi key → ok true, verifies endpoint and temperature: 1', async () => {
-    mockHttpsForKeyTest(200, { choices: [{ message: { content: 'hi' } }] });
+  await t.test('valid Kimi key → ok true through the read-only model-list endpoint', async () => {
+    mockHttpsForKeyTest(200, { data: [{ id: 'kimi-k3' }] });
     const res = makeRes();
     try {
       await handler(makeReq({ provider: 'kimi', key: 'mk-kimi-valid' }), res);
       assert.equal(res.payload.ok, true);
       assert.equal(res.payload.provider, 'kimi');
       assert.equal(_lastCapturedOptions.hostname, 'api.moonshot.ai');
-      assert.equal(_lastCapturedOptions.path, '/v1/chat/completions');
+      assert.equal(_lastCapturedOptions.path, '/v1/models');
+      assert.equal(_lastCapturedOptions.method, 'GET');
       assert.equal(_lastCapturedOptions.headers['Authorization'], 'Bearer mk-kimi-valid');
-      // Verify temperature: 1 in the test body (critical Kimi constraint)
-      const body = JSON.parse(_lastCapturedBody);
-      assert.equal(body.temperature, 1);
+      assert.equal(_lastCapturedBody, '');
     } finally {
       restoreHttps();
     }
@@ -642,12 +641,13 @@ test('POST /keys/test deep tests', async (t) => {
     assert.equal(body.model, 'gpt-5.6-terra');
     restoreHttps();
 
-    // Kimi
-    mockHttpsForKeyTest(200, { choices: [] });
+    // Kimi validates auth without issuing a billable model request.
+    mockHttpsForKeyTest(200, { data: [{ id: 'kimi-k3' }] });
     res = makeRes();
     await handler(makeReq({ provider: 'kimi', key: 'mk-test' }), res);
-    body = JSON.parse(_lastCapturedBody);
-    assert.equal(body.model, 'kimi-k2.6');
+    assert.equal(_lastCapturedOptions.path, '/v1/models');
+    assert.equal(_lastCapturedOptions.method, 'GET');
+    assert.equal(_lastCapturedBody, '');
     restoreHttps();
   });
 });

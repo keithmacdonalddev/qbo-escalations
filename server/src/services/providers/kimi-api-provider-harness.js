@@ -18,7 +18,7 @@ const {
 } = require('./provider-handoff');
 
 const DEFAULT_KIMI_API_URL = process.env.KIMI_API_URL || 'https://api.moonshot.ai';
-const DEFAULT_KIMI_MODEL = 'kimi-k2.6';
+const DEFAULT_KIMI_MODEL = 'kimi-k3';
 const KIMI_API_CHAT_COMPLETION_CALL_SITE = 'kimi-api-provider-harness:sendChatCompletion';
 const KIMI_API_SOURCE_FILE = 'server/src/services/providers/kimi-api-provider-harness.js';
 

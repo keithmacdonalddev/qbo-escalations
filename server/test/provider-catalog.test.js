@@ -28,8 +28,8 @@ test('current direct-provider and Codex defaults match the July 2026 catalog', (
   assert.equal(getProviderModelId('anthropic'), 'claude-sonnet-5');
   assert.equal(getProviderModelId('codex'), 'gpt-5.6-sol');
   assert.equal(getProviderModelId('openai'), 'gpt-5.6-terra');
-  assert.equal(getProviderModelId('gemini'), 'gemini-3.5-flash');
-  assert.equal(getProviderModelId('kimi'), 'kimi-k2.6');
+  assert.equal(getProviderModelId('gemini'), 'gemini-3.6-flash');
+  assert.equal(getProviderModelId('kimi'), 'kimi-k3');
   assert.equal(getProviderModelId('llm-gateway'), 'auto');
   assert.equal(getProviderModelId('lm-studio'), 'local');
 
@@ -64,4 +64,13 @@ test('Claude CLI default advertises all current Claude Code aliases', () => {
     capabilities.featureNotes.some((note) => note.includes('manual thinking budgets are not supported')),
     'feature notes should warn about adaptive reasoning instead of manual thinking budgets'
   );
+});
+
+test('Kimi K3 capability metadata exposes its always-on reasoning contract', () => {
+  const capabilities = getProviderCapabilities('kimi');
+
+  assert.equal(capabilities.supportsThinking, true);
+  assert.equal(capabilities.thinkingMode, 'always-on');
+  assert.equal(capabilities.reasoningVisibility, 'activity');
+  assert.deepEqual(capabilities.allowedEfforts, ['low', 'high', 'max']);
 });
