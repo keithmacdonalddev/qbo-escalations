@@ -6,9 +6,13 @@ Paste this entire file into Claude Code from the repository root **only after Ph
 
 Extend the Evidence Completeness Check with safe, user-controlled recovery. When the app proves that expected workflow evidence is missing, help the user recover it without duplicating successful work, hiding the original failure, unexpectedly spending money, or overwriting valid evidence.
 
+The result must also improve the user's quality of life: recommend the safest action in plain language, reuse information the app already has, avoid trapping the user on a waiting screen, preserve progress across navigation, and return the user to their interrupted work with a clear explanation of what changed.
+
 ## User goal
 
-A regular user who sees “Evidence incomplete” should not be left at a dead end. The app should explain what can be recovered, what the recovery will do, what it may cost, what could be affected, and whether human review is still required.
+A regular user who sees “Evidence incomplete” should not be left at a dead end or forced to understand technical recovery strategies. The app should recommend what to do, explain why it is safest, reuse trustworthy information already collected, disclose time and cost, and ask only for genuinely missing input.
+
+The user must be able to postpone recovery, leave and return after a confirmed recovery starts, compare a newly generated result when it differs, and finish with a simple answer to: “Is my work safe now, and where do I continue?”
 
 This supports the broader platform by helping the expert-agent team restore a trustworthy shared record. It deliberately does **not** introduce invisible automatic retries, unrestricted workflow replay, or permission to repeat external actions without confirmation.
 
@@ -45,6 +49,10 @@ Start by delegating a **read-only recovery-safety audit** to Codex. Give it `C:\
 - which recovery can reuse an already-produced result without another AI call;
 - which recovery requires rerunning one AI stage;
 - provider cost, duplicate-write, overwrite, race, and stale-downstream-result risks;
+- user re-entry burden, provider-readiness checks, duration estimates, and cancellation boundaries;
+- how recovery progress can survive refresh, navigation, and session reopening after the user confirms it;
+- when a rerun result must be compared and accepted instead of silently replacing workflow evidence;
+- how multiple missing items should be grouped and ordered without overwhelming the user;
 - how existing trace, run, attempt, and provider-evidence records can preserve the original failure and link the recovery;
 - which cases must remain manual review because a safe recovery path cannot be proved.
 
@@ -80,13 +88,20 @@ Before performing recovery, produce a deterministic recovery plan using the exis
 - conversation and pipeline-run IDs;
 - missing-evidence code being addressed;
 - recovery strategy: `repersist`, `rebuild`, `rerun-stage`, or `manual-review`;
+- whether this is the recommended strategy and a plain-language reason;
 - affected stage and artifact;
 - exact input source and whether it is complete;
+- which trusted inputs will be reused and which genuinely missing inputs require the user;
 - expected writes;
 - whether an AI/provider call is required;
 - provider/model and estimated or clearly unknown cost when applicable;
+- provider readiness and capability-check result when a provider call is required;
+- estimated or clearly unknown duration;
+- whether the user may safely leave while it runs;
+- the cancellation boundary, including whether cost may already be incurred;
 - downstream artifacts that may become stale;
 - confirmation requirement and plain-language risk explanation;
+- comparison or acceptance requirement if a rerun may produce a meaningfully different result;
 - idempotency key;
 - plan status and timestamps.
 
@@ -109,6 +124,17 @@ Use the established project conventions rather than forcing these exact property
 13. A failed recovery must remain visible and retryable only when another attempt is still safe.
 14. Run the Phase 1 evidence-completeness check again after recovery settles. The final state must truthfully become `complete`, remain `incomplete`, or become `unknown` with an explanation.
 15. Legacy `unknown` sessions do not receive a recovery button unless the app can first prove a specific missing artifact and safe recovery path.
+16. Recommend the safest applicable strategy from the recovery priority order. Do not make the user choose between unexplained technical options. If no strategy is safely recommendable, recommend human review.
+17. Reuse trustworthy screenshots, parsed fields, case details, stage inputs, and other existing evidence. Ask the user only for input that is genuinely missing, explain why it is needed, and do not make them re-enter information merely because it lives in another existing record.
+18. Before a provider rerun is confirmed, perform a no-cost readiness check using existing health and capability signals when available. Do not start a call that is already known to be unavailable or incompatible, and do not silently switch provider or model.
+19. Show an honest expected duration based on existing evidence when possible; otherwise say it is unknown. Never invent precision.
+20. State the cancellation boundary before confirmation. Cancelling before the provider request begins must prevent the call. After the request begins, explain that cancellation may not prevent provider cost or completion.
+21. Once the user confirms a recovery, persist the recovery operation and its progress so refresh, route navigation, or reopening the session does not create a duplicate or erase its state. A confirmed operation may continue server-side after navigation, but no new recovery may start invisibly.
+22. Do not force the user to remain on a waiting screen. If the current architecture cannot safely continue after navigation, say so before confirmation and protect against accidental navigation rather than pretending the work will continue.
+23. Treat newly generated output as a recovery candidate until its effect is understood. If it differs meaningfully from a previously visible result or from evidence used downstream, show a plain-language comparison and require acceptance before replacing the active workflow result.
+24. Let the user choose **Recover later** without losing the plan. Keep the session visibly unresolved and make the pending recovery easy to find again.
+25. When multiple artifacts are missing, show one grouped recovery summary and recommend a safe order. Do not present a stack of unrelated dialogs or automatically cascade through stages.
+26. After recovery, explain what changed, what is now trustworthy, what remains unresolved or stale, and where the user should continue. Return them to the affected workflow context rather than leaving them in technical recovery details.
 
 ## First production slice
 
@@ -118,6 +144,11 @@ At minimum, support:
 
 - retrying persistence of an already-produced triage result when its trustworthy output remains available;
 - rerunning only the triage stage when its original output is unavailable, its saved input is complete, and the user confirms the provider call;
+- automatically reusing trustworthy saved input without asking the user to re-enter it;
+- checking provider readiness and showing cost, duration, and cancellation information before a rerun;
+- persisting a confirmed recovery operation so its status survives refresh and session reopening without duplicate calls;
+- staging and comparing a meaningfully different rerun result before it becomes the active result;
+- allowing **Recover later** while keeping the unresolved session easy to find;
 - rechecking evidence completeness after either action;
 - refusing recovery with a clear reason when required input is absent or downstream safety cannot be determined.
 
@@ -125,21 +156,109 @@ If source inspection proves a different artifact is substantially safer for the 
 
 ## Minimum user experience
 
-From an incomplete evidence finding, provide a clear recovery action such as **Review recovery options**. Do not reduce recovery to an unexplained “Retry” button.
+From an incomplete evidence finding, provide a clear recovery action such as **Review recovery options**. Do not reduce recovery to an unexplained “Retry” button or lead with a list of technical strategies.
 
 Before confirmation, show:
 
 - what is missing;
+- one clearly recommended action and why it is safest;
 - why the app believes it can or cannot recover it;
 - whether it will reuse an existing result or call an AI provider again;
+- which existing information will be reused and whether the user must supply anything;
+- whether the selected provider is currently ready and compatible;
 - provider/model and possible cost when a new call is needed;
+- expected or unknown duration;
+- when cancellation stops being guaranteed and when cost may begin;
 - what saved data will change;
 - whether any later agent result could become stale;
+- whether the user may safely leave and return while recovery runs;
 - what will remain for human review.
 
-While recovery runs, disable duplicate submission and show honest progress. Afterward, show `Recovered`, `Recovery failed`, or `Human review required`, with a plain-language explanation and trace/request links where safe.
+Offer **Start recovery** and **Recover later**. Use a separate advanced-details area for alternate strategies when they are genuinely safe and useful.
+
+While recovery runs, disable duplicate submission and show honest progress. The user must be able to reopen the session and see the same operation rather than accidentally starting another one. Provide an in-app completion notice when a confirmed recovery finishes after the user navigates elsewhere.
+
+Afterward, show `Recovered`, `Recovery failed`, or `Human review required`, with a plain-language explanation and trace/request links where safe. Explain what changed, what the user can trust now, and where to continue.
 
 Keep complete-run status quiet. Do not show recovery controls for complete findings or unproven legacy gaps.
+
+## Quality-of-life requirements
+
+The recovery experience must reduce interruption, repeated entry, uncertainty, and decision fatigue—not merely expose a safe recovery endpoint.
+
+### 1. Recommend the safest action first
+
+Lead with one plain-language recommendation derived from the deterministic recovery plan, for example:
+
+> Recommended: Save the existing triage result. This will not call the AI again, will not cost anything, and should take only a few seconds.
+
+If the recommendation is a provider rerun, state that just as plainly. Keep strategy names such as `repersist` or `rerun-stage` behind technical details.
+
+### 2. Reuse information and minimize questions
+
+Pre-fill the recovery from trustworthy saved evidence. Do not ask the user to upload the same screenshot, paste the same case text, choose the same provider, or re-enter known case details unless reuse would be unsafe.
+
+When input is genuinely missing, ask only for that input, explain why it is required, and preserve the user's entry if they close and reopen the recovery view.
+
+### 3. Prevent predictable failed attempts
+
+Before presenting the final confirmation for a provider rerun:
+
+- check current provider readiness and required model capabilities using existing app signals;
+- show provider/model, possible cost, and expected or unknown duration;
+- identify the last safe point to cancel;
+- block a known-impossible attempt with a useful explanation;
+- never switch provider or model without explicit approval.
+
+### 4. Let the user leave and return
+
+After explicit confirmation, recovery progress should belong to the saved session rather than only the open browser view. The user should be able to navigate elsewhere and later see `Waiting`, `Running`, `Comparison needed`, `Recovered`, `Failed`, or `Human review required` without starting over.
+
+Show an in-app notice when recovery completes while the user is elsewhere. Do not start an unconfirmed recovery merely because the user reopened the session.
+
+### 5. Compare changed results before adoption
+
+When a rerun produces a meaningfully different triage result or other agent output:
+
+- show the previous visible or downstream-used result beside the recovery candidate when available;
+- summarize important changes in plain language;
+- identify downstream work that may be affected;
+- let the user accept the recovered result or keep it as an unaccepted candidate for review;
+- never erase either version or the original failure evidence.
+
+Do not force the user to compare raw JSON or technical trace payloads.
+
+### 6. Support “Recover later” and multiple gaps
+
+The user may postpone recovery without dismissing the problem. Keep a durable unresolved marker and make pending recoveries findable from Sessions.
+
+When several artifacts are missing, present one summary that distinguishes:
+
+- what can be restored without cost;
+- what requires a provider call;
+- what must remain human review;
+- the recommended safe order.
+
+The first production slice may execute only supported isolated recoveries, but it must not make the overall situation harder to understand.
+
+### 7. Return the user to useful work
+
+After recovery settles, show a short completion summary such as:
+
+> Recovery succeeded. The triage result is now saved, all expected evidence is complete, and your analyst response remains unchanged.
+
+If recovery is partial or changes downstream trust, say so. Provide a clear **Return to triage**, **Review comparison**, or equivalent action that takes the user back to the affected workflow context.
+
+### 8. Use progressive detail
+
+Lead with:
+
+1. What does the app recommend?
+2. Will this cost anything or change existing work?
+3. How long might it take, and may I leave?
+4. What will be trustworthy afterward?
+
+Keep internal strategy codes, idempotency keys, trace IDs, request IDs, provider-package IDs, and raw error detail behind an expandable **Technical details** section.
 
 ## Required verification
 
@@ -158,7 +277,18 @@ Add focused, deterministic tests for at least:
 11. Partial recovery leaves the remaining missing items visible.
 12. Legacy `unknown` sessions do not receive an unsafe recovery action.
 13. The UI explains no-cost persistence retry, possible-cost provider rerun, failure, and manual-review states.
-14. Existing Phase 1, case-intake, triage, stage-event, trace, and session tests remain passing.
+14. The safest applicable strategy is recommended first, with plain-language reasoning, while technical alternatives remain secondary.
+15. Existing trustworthy inputs are reused and the user is asked only for genuinely missing information.
+16. A known-unavailable or incompatible provider is caught before confirmation and no provider call is made.
+17. Cost, expected or unknown duration, and the cancellation boundary are shown before a provider rerun.
+18. Cancelling before the provider-call boundary prevents the call; cancelling afterward reports the honest cost/completion limitation.
+19. Refreshing, navigating away, and reopening the session resumes the same confirmed recovery status without a duplicate call.
+20. A confirmed recovery that finishes while the user is elsewhere produces an in-app completion notice without starting any new operation.
+21. A meaningfully different rerun result remains a candidate, displays an understandable comparison, and does not replace active workflow evidence until accepted.
+22. **Recover later** preserves the unresolved marker and returns the user to the same recovery plan later.
+23. Multiple missing artifacts produce one ordered summary rather than repeated dialogs or an automatic cascade.
+24. Successful, partial, failed, and manual-review outcomes explain what changed, what is trustworthy, and where the user should continue.
+25. Existing Phase 1, case-intake, triage, stage-event, trace, and session tests remain passing.
 
 Use the repository's existing test style. Run focused tests first, then the appropriate client build or static check and any wider verification justified by the changed files. Do not launch persistent services.
 
@@ -175,7 +305,14 @@ Use the repository's existing test style. Run focused tests first, then the appr
 9. Update directly relevant documentation if the supported recovery behavior changed. Do not add a duplicate feature entry.
 10. Report:
     - which missing evidence regular users can recover;
+    - how the app recommends the safest action without requiring technical knowledge;
+    - which existing inputs are reused and when the user must provide new information;
     - when recovery reuses an existing result versus making a provider call;
+    - how readiness, duration, cost, and cancellation are communicated;
+    - how recovery survives navigation or session reopening;
+    - how changed rerun results are compared and accepted;
+    - how **Recover later** and multiple missing artifacts are handled;
+    - how the user is returned to useful work after recovery;
     - every confirmation and overwrite protection;
     - how original failures and recovery attempts remain reviewable;
     - how downstream stale results are handled;
@@ -187,4 +324,4 @@ Use the repository's existing test style. Run focused tests first, then the appr
 
 ## Definition of done
 
-Phase 2 is done only when a regular user can review and confirm at least one genuinely safe recovery path, the app prevents duplicate or destructive recovery, provider cost is disclosed before a new call, the original failure remains visible, affected downstream evidence is handled honestly, and the Phase 1 check proves whether recovery actually restored completeness.
+Phase 2 is done only when a regular user receives one understandable recommended recovery, does not re-enter trustworthy information the app already has, sees readiness/time/cost/cancellation information before a provider call, can leave and return without losing or duplicating a confirmed operation, can compare a meaningfully changed rerun before accepting it, and finishes with a clear explanation of what is trustworthy and where to continue. The app must still prevent duplicate or destructive recovery, preserve the original failure, handle downstream evidence honestly, and use the Phase 1 check to prove whether recovery actually restored completeness.
